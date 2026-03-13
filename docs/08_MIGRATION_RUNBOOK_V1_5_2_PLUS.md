@@ -209,6 +209,11 @@ Compatibility rule:
 - external-disabled fallback path
 - repair loop 核心檔是否超出允許變更範圍
 
+Recommended role:
+
+- 作為 phase gatekeeper
+- 在每次進入 P / D / R / A 前先檢查狀態完整性與遺留相容
+
 ## External Research Integration Rules
 
 ### Phase 1: mock only
@@ -314,6 +319,11 @@ Success criteria:
 - external tasks quality improves
 - time / token overhead remains acceptable
 - Felo 失敗時 fallback 正常
+
+Performance guardrail:
+
+- internal-only path 的 token / latency overhead，原則上不應超過舊版基準 20%
+- 若超出，需在驗收與回報中標記原因
 
 ## JSON and TOON Policy
 

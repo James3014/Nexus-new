@@ -16,6 +16,14 @@
 2. External second
    - 等 internal path 穩定後，再接 `research_pack.json` 與 Felo / external routing
 
+Execution priority:
+
+1. migration safety validator
+2. state contracts
+3. skills router prototype
+4. Context Hub + repair integration
+5. external routing
+
 ## Phase 1: State Contracts First
 
 Deliverables:
@@ -38,6 +46,11 @@ Why first:
 
 - 沒有 contract，就沒有穩定 orchestration
 - 沒有 state，就很難做 war room、回放、handoff
+- 沒有 contract，也無法讓 gatekeeper validator 穩定驗證
+
+Phase gate:
+
+- 進入後續 phase 前，`migration_safety_validator.py --mode gatekeeper` 應先通過
 
 ## Phase 2: Extract Context Hub
 
@@ -122,12 +135,19 @@ Rule:
 - 不把 skill 行為硬寫進 system prompt
 - 由 phase + task type + state 決定 skill 啟用
 - skills 輸出必須回寫 `.muse_state`，讓 phase 腳本只吃 contract
+- 第一版先用 decision tree + scorecard prototype，不急著做自動調權
 
 ## Compatibility Rules
 
 - schema 升級盡量 append fields，不改既有 key 語義
 - 舊 trace / 舊 task 在 viz 中必須能 `.get(..., default)` 安全讀取
 - 第一輪可先讓新欄位只對新任務出現，legacy task best-effort 顯示
+
+## Performance Guardrails
+
+- internal-only path 的 token overhead 目標小於舊版基準 `1.2x`
+- migration slice latency 應保留 baseline 與對照值
+- 若超過 20% overhead，需在驗收與回報中明確標記原因
 
 ## Recommended Implementation Order
 

@@ -51,6 +51,9 @@
 15. [15_MIGRATION_SAFETY_VALIDATOR_PLAN.md](./15_MIGRATION_SAFETY_VALIDATOR_PLAN.md)
     自修改與半升級風險的獨立驗證腳本規劃。
 
+16. [16_EXECUTION_TIMELINE.md](./16_EXECUTION_TIMELINE.md)
+    以 4 週節奏規劃 migration 的實作順序、責任分工、量化門檻與每週 exit criteria。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。

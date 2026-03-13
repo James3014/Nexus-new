@@ -46,6 +46,7 @@ Muse-Nexus/
 - [Acceptance Checklist](./docs/13_ACCEPTANCE_CHECKLIST.md)
 - [Skills Router Decision Spec](./docs/14_SKILLS_ROUTER_DECISION_SPEC.md)
 - [Migration Safety Validator Plan](./docs/15_MIGRATION_SAFETY_VALIDATOR_PLAN.md)
+- [Execution Timeline](./docs/16_EXECUTION_TIMELINE.md)
 
 ## Current Position
 
