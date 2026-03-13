@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # 🛡️ Codex-Verified: Codex-Auth-Lvl13-Final (2026-03-03)
+import sys
 import json
 import subprocess
 import re
@@ -7,7 +8,7 @@ import os
 import random
 from datetime import datetime
 
-SEARCH_BIN = "/Users/jameschen/Downloads/Muse-Nexus/scripts/brain_search_v2.py"
+SEARCH_BIN = "/Users/jameschen/Downloads/obsidian/知識庫/01_Operations/scripts/brain_search_v2.py"
 OPENCLAW_BIN = "/Users/jameschen/.npm-global/bin/openclaw"
 OUTPUT_DIR = "/Users/jameschen/Downloads/obsidian/知識庫/06_Synthesized_Insights"
 
@@ -17,31 +18,19 @@ DOMAINS = [
     "AI代理與系統架構",
     "投資交易與風險管理",
     "裝修設計與空間規劃",
-    "教育心理學與教案設計",
+    "教育心理學與教案設計"
 ]
-
 
 def get_domain_knowledge(domain):
     print(f"🔍 檢索領域知識：{domain}")
     try:
         cmd = [
-            "/Users/jameschen/.local/bin/uv",
-            "run",
-            "--with",
-            "lancedb",
-            "--with",
-            "pandas",
-            "--with",
-            "requests",
-            SEARCH_BIN,
-            domain,
-            "--limit",
-            "3",
-            "--json",
+            "/Users/jameschen/.local/bin/uv", "run", "--with", "lancedb", "--with", "pandas", "--with", "requests",
+            SEARCH_BIN, domain, "--limit", "3", "--json"
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         results = json.loads(res.stdout)
-
+        
         context = ""
         for res in results:
             text = res.get("text", "")
@@ -52,19 +41,18 @@ def get_domain_knowledge(domain):
         print(f"❌ 檢索失敗 ({domain}): {e}")
         return ""
 
-
 def synthesize():
     print("🧬 啟動 Muse-Core 背景合成者模式...")
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-
+        
     # 隨機挑選兩個不重複的領域
     domain_a, domain_b = random.sample(DOMAINS, 2)
     print(f"🧪 今日雜交主題：【{domain_a}】 ✕ 【{domain_b}】")
-
+    
     knowledge_a = get_domain_knowledge(domain_a)
     knowledge_b = get_domain_knowledge(domain_b)
-
+    
     if not knowledge_a or not knowledge_b:
         print("⚠️ 知識萃取不足，無法進行合成。")
         return
@@ -90,7 +78,7 @@ CONTENT:
 ---
 title: "你的標題"
 date: {datetime.now().strftime("%Y-%m-%d")}
-tags: [System/Synthesis, {domain_a.split("與")[0]}, {domain_b.split("與")[0]}]
+tags: [System/Synthesis, {domain_a.split('與')[0]}, {domain_b.split('與')[0]}]
 type: synthesized-insight
 ---
 
@@ -113,52 +101,44 @@ type: synthesized-insight
 
     print("🧠 正在呼叫 LLM 進行大腦蒸餾與雜交...")
     try:
-        cmd = [OPENCLAW_BIN, "agent", "--agent", "main", "--message", prompt, "--json"]
+        cmd = [OPENCLAW_BIN, 'agent', '--agent', 'main', '--message', prompt, '--json']
         process = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-
-        match = re.search(r"\{.*\}", process.stdout, re.DOTALL)
+        
+        match = re.search(r'\{.*\}', process.stdout, re.DOTALL)
         if match:
             data = json.loads(match.group(0))
-            output_text = (
-                data.get("result", {}).get("payloads") or data.get("payloads", [])
-            )[0].get("text", "")
-
+            output_text = (data.get('result', {}).get('payloads') or data.get('payloads', []))[0].get('text', '')
+            
             if "TITLE:" in output_text and "CONTENT:" in output_text:
                 parts = output_text.split("CONTENT:", 1)
                 title = parts[0].replace("TITLE:", "").strip()
                 # 清理標題不能當作檔名的字元
                 safe_title = re.sub(r'[\/*?:"<>|]', "", title)
                 content = parts[1].strip()
-
+                
                 # 寫入檔案
-                filepath = os.path.join(
-                    OUTPUT_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_{safe_title}.md"
-                )
-
+                filepath = os.path.join(OUTPUT_DIR, f"{datetime.now().strftime('%Y-%m-%d')}_{safe_title}.md")
+                
                 # 確保我們寫入的是當前執行環境下的相對路徑 (相容分身與主幹)
                 local_output_dir = os.path.join(os.getcwd(), "06_Synthesized_Insights")
                 if os.path.exists(os.path.join(os.getcwd(), "01_Operations")):
-                    os.makedirs(local_output_dir, exist_ok=True)
-                    filepath = os.path.join(
-                        local_output_dir,
-                        f"{datetime.now().strftime('%Y-%m-%d')}_{safe_title}.md",
-                    )
+                     os.makedirs(local_output_dir, exist_ok=True)
+                     filepath = os.path.join(local_output_dir, f"{datetime.now().strftime('%Y-%m-%d')}_{safe_title}.md")
                 else:
-                    os.makedirs(OUTPUT_DIR, exist_ok=True)
+                     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
                 with open(filepath, "w", encoding="utf-8") as f:
                     f.write(content)
-
+                    
                 print(f"✨ 合成筆記已產出：{filepath}")
             else:
                 print("⚠️ LLM 回應格式錯誤，未能解析出 TITLE 與 CONTENT。")
                 print(output_text)
         else:
             print("⚠️ 無法解析 LLM 結構化輸出。")
-
+            
     except Exception as e:
         print(f"❌ 合成過程崩潰: {e}")
-
 
 if __name__ == "__main__":
     synthesize()
