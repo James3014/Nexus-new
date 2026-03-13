@@ -6,6 +6,33 @@ Implement the next internal slice of the **new Nexus runtime** using the current
 
 This task pack is designed to be pasted directly to another agent.
 
+## Preflight Safety (Mandatory)
+
+Do not edit the active working copy directly.
+
+Run these steps before implementation:
+
+1. Create an isolated branch:
+
+```bash
+git switch -c feat/nexus-1.5.2-<agent>-<date>
+```
+
+2. Freeze baseline for rollback/audit:
+
+```bash
+git tag -f nexus-pre-1.5.2-baseline-<date>
+git rev-parse HEAD
+```
+
+3. Optional but recommended: use a separate worktree:
+
+```bash
+git worktree add ../Muse-Nexus-1.5.2 feat/nexus-1.5.2-<agent>-<date>
+```
+
+Only start code changes after these steps are completed.
+
 ## Read First (Strict Order)
 
 1. `docs/00_PROJECT_INDEX.md`
