@@ -35,6 +35,8 @@
 - [ ] 由 phase + metadata 做 selection
 - [ ] skill 結果有明確 write-back target
 - [ ] 第一波沒有硬接大量真 skill execution
+- [ ] router decision 可輸出 reason / score / threshold
+- [ ] 至少有一組 decision tree 或 scorecard prototype 驗證案例
 
 ## Repair / Diag Checks
 
@@ -50,6 +52,8 @@
 - [ ] 現有 core import 沒被破壞
 - [ ] 不相關腳本未被大範圍重構
 - [ ] dashboard / memory engine 未被誤改
+- [ ] half-upgraded state simulation 通過
+- [ ] legacy 任務資料可 best-effort 顯示 / 執行
 
 ## Scope Checks
 
@@ -63,6 +67,22 @@
 - [ ] 至少做了 import/smoke verification
 - [ ] touched files 有基本執行或讀寫驗證
 - [ ] 回報包含 changed files、未完成項目、風險
+- [ ] 至少有一條 end-to-end smoke path
+- [ ] 有 token / 執行時間 / migration 成本的基準記錄或 TODO
+- [ ] 若有 migration safety validator，已執行或列為必跑項
+
+## Performance / Migration Baseline Checks
+
+- [ ] 記錄 first-cut smoke run 時間
+- [ ] 記錄是否新增明顯 token 成本來源
+- [ ] 記錄 external path 尚未啟用時的 internal-only 成本
+- [ ] 至少保留一份 baseline 與實作後對照
+
+## Self-Modification Safety Checks
+
+- [ ] risky slice 前已凍結 baseline commit / sample state
+- [ ] repair core loop 的改動有人工 review
+- [ ] self-upgrade 沒有超出 allowlist 範圍
 
 ## Merge Decision
 

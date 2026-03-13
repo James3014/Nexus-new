@@ -45,6 +45,12 @@
 13. [13_ACCEPTANCE_CHECKLIST.md](./13_ACCEPTANCE_CHECKLIST.md)
     驗收第一波 implementation 的 checklist，避免超範圍施工或破壞既有流程。
 
+14. [14_SKILLS_ROUTER_DECISION_SPEC.md](./14_SKILLS_ROUTER_DECISION_SPEC.md)
+    Skills Router 第一版的 decision tree / scorecard prototype 與輸出要求。
+
+15. [15_MIGRATION_SAFETY_VALIDATOR_PLAN.md](./15_MIGRATION_SAFETY_VALIDATOR_PLAN.md)
+    自修改與半升級風險的獨立驗證腳本規劃。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。

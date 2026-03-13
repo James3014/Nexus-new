@@ -168,6 +168,47 @@ Compatibility rule:
 - 一次打通一條最小完整 path
 - 例如：Reflection write -> Context Hub read -> Crystal read
 
+### Freeze a baseline before each self-upgrade slice
+
+每次進入新的 phase implementation 前，應先凍結基準狀態：
+
+- 記錄當前 commit SHA
+- 記錄當前 `.muse_state` sample shape
+- 記錄 smoke command / target tests / expected outputs
+- 記錄當前 import graph 或至少核心入口依賴
+
+目的：
+
+- 讓後續 regression 與半升級失敗可以回放
+- 避免 agent 在不知基準的情況下重寫核心流程
+
+### Simulate half-upgraded state deliberately
+
+在第一輪 migration 中，應主動驗證至少兩種半升級狀態：
+
+1. contract 已新增欄位，但 phase 尚未全面讀取
+2. Context Hub 已產生新 pack，但舊 task 缺少新欄位
+
+驗證目標：
+
+- 不 crash
+- 缺欄位時 fallback 正常
+- legacy task 仍可 best-effort 執行 / 顯示
+
+### Add a dedicated migration safety validator
+
+建議新增獨立驗證腳本，例如：
+
+- `scripts/core/migration_safety_validator.py`
+
+第一版至少檢查：
+
+- contract default completeness
+- legacy-safe JSON read path
+- half-upgraded state simulation
+- external-disabled fallback path
+- repair loop 核心檔是否超出允許變更範圍
+
 ## External Research Integration Rules
 
 ### Phase 1: mock only
@@ -214,6 +255,22 @@ Outputs:
 - input refs
 - output paths
 
+Selection rule:
+
+- 第一版不要用主觀語感選 skill
+- 先用簡單 decision tree / scorecard prototype
+- 等有實際任務資料後，再微調權重
+
+Suggested scoring dimensions:
+
+- `phase_weight`
+- `language_match`
+- `task_scale_weight`
+- `new_feature_weight`
+- `refactor_weight`
+- `stacktrace_match_weight`
+- `external_dependency_weight`
+
 Write-back rule:
 
 - 所有 skill 結果統一寫入 `.muse_state` 對應 JSON / 檔案
@@ -237,6 +294,12 @@ Not included yet:
 - Felo
 - full `research_pack` production path
 
+Validation targets:
+
+- internal-only path 可完整執行
+- half-upgraded state 不 crash
+- state write-back 一致
+
 ### Round 2: External World Path
 
 Scope:
@@ -250,6 +313,7 @@ Success criteria:
 
 - external tasks quality improves
 - time / token overhead remains acceptable
+- Felo 失敗時 fallback 正常
 
 ## JSON and TOON Policy
 

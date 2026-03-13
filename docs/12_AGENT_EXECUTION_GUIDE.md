@@ -53,6 +53,10 @@ Agent 的任務不是「自由發揮重構」，而是：
    - 不清 historical snapshot
    - 不碰 memory engine 核心
 
+6. Freeze baseline before risky edits
+   - 進入 repair core 或 contract migration 前，先記錄 baseline state
+   - 若有 half-upgrade risk，先模擬 legacy / partial state
+
 ## Allowed First-Cut Scope
 
 Agent 第一波只允許處理：
@@ -103,6 +107,8 @@ Agent 必須先讀：
 - JSON read/write path 正常
 - legacy 欄位缺失時不爆
 - touched files 有基本 smoke pass
+- 若涉及 contract / repair loop，需做 half-upgraded state 驗證
+- 若有 router logic，需輸出 decision reason / score breakdown
 
 ### Step 5. Report
 
@@ -113,6 +119,7 @@ Agent 回報時必須包含：
 - what was not implemented
 - verification performed
 - residual risks
+- baseline freeze / compatibility assumptions
 
 ## Anti-Patterns
 
@@ -123,6 +130,8 @@ Agent 回報時必須包含：
 - 把 TOON 當成 state format
 - 為了讓新設計漂亮而大量搬目錄
 - 沒有契約就先寫 phase 行為
+- 沒做 baseline freeze 就重寫 repair core
+- 沒有 decision reason 就讓 skills router 自動選 skill
 
 ## Suggested Task Prompt Template
 

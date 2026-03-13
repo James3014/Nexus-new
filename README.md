@@ -44,6 +44,8 @@ Muse-Nexus/
 - [First-Cut File Plan](./docs/11_FIRST_CUT_FILE_PLAN.md)
 - [Agent Execution Guide](./docs/12_AGENT_EXECUTION_GUIDE.md)
 - [Acceptance Checklist](./docs/13_ACCEPTANCE_CHECKLIST.md)
+- [Skills Router Decision Spec](./docs/14_SKILLS_ROUTER_DECISION_SPEC.md)
+- [Migration Safety Validator Plan](./docs/15_MIGRATION_SAFETY_VALIDATOR_PLAN.md)
 
 ## Current Position
 
