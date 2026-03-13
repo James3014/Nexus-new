@@ -5,11 +5,15 @@ import json
 import time
 import re
 from datetime import datetime
+from dotenv import load_dotenv
 
 # 核心配置 (Jina Embedding v3)
+load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
+load_dotenv(os.path.expanduser("~/.openclaw/.env"))
 JINA_KEY = os.environ.get("JINA_API_KEY", "MISSING_KEY")
 DB_PATH = os.path.expanduser("~/.openclaw/memory/lancedb-pro")
-ROOT_DIR = "/Users/jameschen/Downloads/obsidian/知識庫"
+ROOT_DIR = os.environ.get("MUSE_VAULT_ROOT", "/Users/jameschen/Downloads/obsidian/知識庫")
+TABLE_NAME = os.environ.get("MUSE_SEARCH_TABLE", "agent_main")
 
 
 def get_embeddings(texts):
@@ -52,10 +56,12 @@ def main():
     if not os.path.exists(ROOT_DIR):
         print(f"❌ ROOT_DIR {ROOT_DIR} not found!")
         return
+    if JINA_KEY == "MISSING_KEY":
+        print("❌ 錯誤：未設定環境變數 JINA_API_KEY")
+        return
 
     db = lancedb.connect(DB_PATH)
-    table_name = "agent_main"
-    db.drop_table(table_name, ignore_missing=True)
+    db.drop_table(TABLE_NAME, ignore_missing=True)
     print("🧹 Table Dropped. Starting FLASH Ingest (Batch: 5)...")
 
     all_docs = []
@@ -102,7 +108,7 @@ def main():
                     for t, v, m in zip(batch_texts, vectors, batch_metadata)
                 ]
                 if table is None:
-                    table = db.create_table(table_name, data=data)
+                    table = db.create_table(TABLE_NAME, data=data)
                 else:
                     table.add(data)
                 success_count += len(data)

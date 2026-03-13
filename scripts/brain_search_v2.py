@@ -5,6 +5,7 @@ import lancedb
 import requests
 import json
 import argparse
+import re
 from dotenv import load_dotenv
 
 # 載入環境變數
@@ -13,7 +14,8 @@ load_dotenv(os.path.expanduser("~/.openclaw/.env"))
 
 JINA_KEY = os.environ.get("JINA_API_KEY", "MISSING_KEY")
 DB_PATH = os.path.expanduser("~/.openclaw/memory/lancedb-pro")
-TABLE_NAME = "memories"
+PRIMARY_TABLE = os.environ.get("MUSE_SEARCH_TABLE", "agent_main")
+TABLE_FALLBACKS = ["agent_main", "memories_v2", "memories"]
 
 
 def _table_names(db):
@@ -50,22 +52,84 @@ def get_embedding(text):
         return None
 
 
+def _pick_table(db):
+    names = _table_names(db)
+    if PRIMARY_TABLE in names:
+        return PRIMARY_TABLE
+    for t in TABLE_FALLBACKS:
+        if t in names:
+            return t
+    return None
+
+
+def _normalize(s):
+    return re.sub(r"[^a-z0-9_]+", "", (s or "").lower())
+
+
+def _metadata_of(row):
+    meta = row.get("metadata", {})
+    if isinstance(meta, str):
+        try:
+            return json.loads(meta)
+        except Exception:
+            return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _rerank(results, query):
+    q = _normalize(query)
+    reranked = []
+    for row in results:
+        meta = _metadata_of(row)
+        source = str(meta.get("source", ""))
+        basename = source.split("/")[-1]
+        title = str(row.get("note_id", ""))
+        # LanceDB distance: lower is better, so we subtract bonus.
+        bonus = 0.0
+        n_source = _normalize(source)
+        n_base = _normalize(basename)
+        n_title = _normalize(title)
+        if q and n_base == f"{q}md":
+            bonus += 0.9
+        if q and q in n_base:
+            bonus += 0.5
+        if q and q in n_source:
+            bonus += 0.25
+        if q and q in n_title:
+            bonus += 0.15
+        score = float(row.get("_distance", 9999.0)) - bonus
+        reranked.append((score, row))
+    reranked.sort(key=lambda x: x[0])
+    return [r for _, r in reranked]
+
+
+def _strip_heavy_fields(results):
+    cleaned = []
+    for row in results:
+        item = dict(row)
+        item.pop("vector", None)
+        cleaned.append(item)
+    return cleaned
+
+
 def search_brain(query, limit=3):
     if not os.path.exists(DB_PATH):
         print(f"❌ 找不到資料庫：{DB_PATH}")
         return []
 
     db = lancedb.connect(DB_PATH)
-    if TABLE_NAME not in _table_names(db):
-        print(f"❌ 找不到資料表：{TABLE_NAME}")
+    table_name = _pick_table(db)
+    if not table_name:
+        print(f"❌ 找不到可用資料表：{TABLE_FALLBACKS}")
         return []
 
-    table = db.open_table(TABLE_NAME)
+    table = db.open_table(table_name)
     vector = get_embedding(query)
 
     if vector:
         results = table.search(vector).limit(limit).to_list()
-        return results
+        results = _rerank(results, query)
+        return _strip_heavy_fields(results)
     return []
 
 
