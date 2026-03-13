@@ -14,19 +14,37 @@ Required runtime loop:
 
 ```text
 Gemini edits
-  -> scripts/codex-loop.sh review
+  -> milestone scripts/codex-loop.sh review
     -> /tmp/codex_next_action.json
       -> scripts/core/gemini_handoff.py prompt
         -> Gemini next round
 ```
 
-At minimum, each iteration must execute:
+At minimum, each milestone must execute:
 
 ```bash
 scripts/codex-loop.sh --mode audit <files...> --emit-gemini-handoff
 ```
 
 Do not bypass Nexus gate/review when implementing this task pack.
+
+## Quota-Aware Gate Policy (Mandatory)
+
+Given limited Codex quota, use milestone gates instead of per-edit gates.
+
+Rules:
+
+1. Max Codex gates per slice: `2` during implementation + `1` final pre-commit gate.
+2. Do not run Codex gate after every small edit.
+3. Trigger a gate only when one of these is true:
+   - a test set turns from red to green
+   - a module boundary is completed
+   - before commit
+4. If two gates fail with the same failure signature:
+   - follow `next_action` from `/tmp/codex_next_action.json`
+   - continue Gemini repairs without immediate extra Codex gate
+   - run next gate only at the next milestone
+5. Reserve at least one final gate for merge/commit quality.
 
 ## Preflight Safety (Mandatory)
 

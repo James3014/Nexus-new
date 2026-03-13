@@ -75,11 +75,28 @@ If input is missing, the script exits with code `2` and prints a clear error.
 
 ```text
 Gemini edits
-  -> codex-loop review
+  -> milestone codex-loop review
      -> next_action JSON
         -> gemini_handoff prompt
            -> Gemini next round
 ```
+
+## Quota-Saver Mode
+
+When Codex quota is low, run Codex as a milestone gate instead of every edit.
+
+Recommended cadence:
+
+1. Gemini performs a focused batch of edits.
+2. Run tests for touched scope.
+3. Run one Codex gate:
+
+```bash
+scripts/codex-loop.sh --mode audit <files...> --emit-gemini-handoff
+```
+
+4. If gate fails, read `/tmp/codex_next_action.json` and continue with Gemini.
+5. Run next Codex gate only after the next milestone, not after each micro edit.
 
 ## Agent Rules
 
