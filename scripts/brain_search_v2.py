@@ -5,11 +5,30 @@ import lancedb
 import requests
 import json
 import argparse
+from dotenv import load_dotenv
 
-# 核心配置 - 從環境變數讀取以確保安全性
+# 載入環境變數
+load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
+load_dotenv(os.path.expanduser("~/.openclaw/.env"))
+
 JINA_KEY = os.environ.get("JINA_API_KEY", "MISSING_KEY")
 DB_PATH = os.path.expanduser("~/.openclaw/memory/lancedb-pro")
-TABLE_NAME = "agent_main"
+TABLE_NAME = "memories"
+
+
+def _table_names(db):
+    """Normalize table names across LanceDB client versions."""
+    tables = db.list_tables()
+    if isinstance(tables, (list, tuple)):
+        names = list(tables)
+    elif hasattr(tables, "tables"):
+        names = list(getattr(tables, "tables"))
+    else:
+        names = []
+    normalized = []
+    for t in names:
+        normalized.append(t[0] if isinstance(t, tuple) else t)
+    return normalized
 
 
 def get_embedding(text):
@@ -37,7 +56,7 @@ def search_brain(query, limit=3):
         return []
 
     db = lancedb.connect(DB_PATH)
-    if TABLE_NAME not in db.table_names():
+    if TABLE_NAME not in _table_names(db):
         print(f"❌ 找不到資料表：{TABLE_NAME}")
         return []
 
