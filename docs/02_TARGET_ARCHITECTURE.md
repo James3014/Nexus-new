@@ -10,6 +10,8 @@
 - `.muse_state` state snapshot
 - trace ledger
 - skills router
+- external research gating
+- reflection memory
 
 ## High-Level Shape
 
@@ -63,6 +65,45 @@ Key outputs:
 - `repair_context_pack.json`
 - `audit_context_pack.json`
 
+Context Hub also decides:
+
+- 是否需要 external research
+- 是否需要呼叫 skills router
+- 哪些 large arrays 要在 prompt 端做壓縮視圖
+
+### Skills Router
+
+Role:
+
+- 在每個 phase 執行前，根據 phase 與 task metadata 決定是否啟用 skill
+- 將 skill 輸出寫回 `.muse_state` 對應檔案
+- 讓 phase 腳本只讀 state，不直接硬呼叫 skills
+
+Typical inputs:
+
+- `phase`
+- `task_metadata`
+- `failure_signature`
+- `language`
+- `is_new_feature`
+- `is_large_refactor`
+- `stacktrace_pattern`
+
+Typical outputs:
+
+- `skills_used`
+- `skill_invocations`
+- `plan.json.spec_context.*`
+- `diag_context_pack.json.hotspots`
+- `repair_context_pack.json.code_quality_report`
+- `audit_context_pack.json.code_quality`
+
+Routing principle:
+
+- `Skill != Phase`
+- phase 決定工作流
+- skill 是 phase 的工具箱，由 router 表驅動
+
 ### P-D-X-R-A-C
 
 #### P: Plan
@@ -76,24 +117,28 @@ Key outputs:
 
 - 跑 test / smoke / command
 - 由 diagnosis engine 產出 `diagnosis.json`
-- 視需要請求 X
+- 視需要設定 `needs_research`
+- 可輸出 `diag_context_pack.json`
 
 #### X: External Research
 
 - 僅在外部依賴或高不確定時啟動
 - 產出 `research_pack.json`
+- Felo / 外部工具失敗時必須可安全退回 internal-only mode
 
 #### R: Repair
 
 - 多輪 patch / test / reflect loop
 - round-by-round 記錄 progress
 - 產出 `repair_final.json`
+- 寫入 reflection rounds / recent failures / skills_used
 
 #### A: Audit
 
 - deterministic gates
 - reviewer verdicts
 - 產出 `audit_result.json`
+- 僅在 reviewer 明示或 protocol/security 需求時才考慮再進 X
 
 #### C: Crystal
 
@@ -108,13 +153,59 @@ Key outputs:
 ├── diag_context_pack.json
 ├── diagnosis.json
 ├── research_pack.json
+├── reflection.jsonl
 ├── repair_context_pack.json
 ├── repair_rounds.jsonl
 ├── repair_final.json
 ├── audit_context_pack.json
 ├── audit_result.json
+├── skills_used.json
 └── trace_log.jsonl
 ```
+
+## Contract Evolution Rules
+
+- JSON 是唯一權威 state 格式
+- schema 演進以 append-only mental model 為主
+- 新欄位應提供合理 default，避免 legacy task 讀取失敗
+- 舊欄位語義不任意改名或重定義，尤其是 `repair_final` 與 `audit_result`
+
+Recommended new state fields:
+
+- `schema_version`
+- `current_phase`
+- `current_step_id`
+- `steps_history`
+- `external_needed`
+- `external_used`
+- `skills_used`
+- `research_pack`
+- `reflection.rounds`
+
+## Context Hub Token Policy
+
+### Authority Format
+
+- `.muse_state` 與所有 phase contract 檔案一律使用 JSON
+- `state_contracts.py` 只驗證 JSON schema
+- TOON 不作為 state write format，也不作為跨工具交換格式
+
+### Prompt Compression
+
+為了降低 prompt token 成本，Context Hub 可以在「組 prompt」時，針對特定平坦陣列採用 TOON 視圖，但只限於 LLM consumption layer。
+
+適合用 TOON 的欄位：
+
+- `reflection.rounds` 摘要
+- `research_pack.sources`
+- `skills_used`
+- `external_used`
+
+Rules:
+
+- JSON state -> 裁剪 / 摘要 -> TOON prompt view
+- TOON 不寫回 `.muse_state`
+- 若 agent / 環境不支援 TOON，必須 fallback 成壓縮 JSON
 
 ## Architectural Principle
 

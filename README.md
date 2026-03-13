@@ -21,7 +21,10 @@ Muse-Nexus/
 │   ├── 02_TARGET_ARCHITECTURE.md
 │   ├── 03_GAP_ANALYSIS.md
 │   ├── 04_REFACTOR_ROADMAP.md
-│   └── 05_BACKLOG.md
+│   ├── 05_BACKLOG.md
+│   ├── 06_REPO_CLEANUP_PLAN.md
+│   ├── 07_SCRIPT_OWNERSHIP_MAP.md
+│   └── 08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md
 └── scripts/
 ```
 
@@ -35,6 +38,8 @@ Muse-Nexus/
 - [Backlog](./docs/05_BACKLOG.md)
 - [Repo Cleanup Plan](./docs/06_REPO_CLEANUP_PLAN.md)
 - [Script Ownership Map](./docs/07_SCRIPT_OWNERSHIP_MAP.md)
+- [Migration Runbook v1.5.2+](./docs/08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md)
+- [State Contract Draft](./docs/09_STATE_CONTRACT_DRAFT.md)
 
 ## Current Position
 

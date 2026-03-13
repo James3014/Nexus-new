@@ -27,6 +27,12 @@
 7. [07_SCRIPT_OWNERSHIP_MAP.md](./07_SCRIPT_OWNERSHIP_MAP.md)
    root-level scripts 與 `scripts/core/` 的 ownership 暫行判定與 duplicate map。
 
+8. [08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md](./08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md)
+   從舊 Nexus 遷移到 Commander / Context Hub / Skills Router / X / Reflection 架構的升級作戰手冊。
+
+9. [09_STATE_CONTRACT_DRAFT.md](./09_STATE_CONTRACT_DRAFT.md)
+   `reflection / research_pack / skills_used / external_used / steps_history` 等新增欄位的 JSON contract 草案。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。
