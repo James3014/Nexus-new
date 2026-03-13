@@ -5,6 +5,7 @@ import json
 import hashlib
 import subprocess
 import shutil
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -17,6 +18,11 @@ from core.reporter import Reporter
 from core.workspace_manager import WorkspaceManager
 from core.escalation_policy import EscalationPolicy, derive_task_metadata
 from core.action_brief import build_action_brief
+from core.skills_router import SkillsRouter
+from core.commander import Commander
+from core.context_hub import ContextHub
+from core.state_io import StateIO
+from core.state_contracts import NexusState, StepRecord
 
 # 配置
 BRAIN_SEARCH_BIN = os.getenv("MUSE_CORE_BRAIN_SEARCH", "/usr/local/bin/brain_search")
@@ -77,6 +83,10 @@ class CodexLoopV2:
         self.reporter = Reporter()
         self.workspace_manager = WorkspaceManager(self.git.project_root)
         self.escalation_policy = EscalationPolicy()
+        self.skills_router = SkillsRouter()
+        self.commander = Commander(self.git.project_root)
+        self.context_hub = ContextHub(self.git.project_root)
+        self.state_io = StateIO(self.git.project_root)
 
         # 🛡️ Global Retry Circuit Breaker (Lvl 19)
         self._check_global_retry_limit(repo_id)
@@ -492,6 +502,28 @@ class CodexLoopV2:
                 self.history_hashes.add(suggestions_hash)
 
                 if data.get("status") == "FAIL":
+                    # 🚀 [v5 Phase 3] 使用 Commander 決定下一步
+                    action = self.commander.next_step()
+                    print(f"🎮 [Commander] Orchestrated action: {action}")
+                    
+                    if action.startswith("RUN_SKILL:"):
+                        skill_id = action.split(":")[1]
+                        skill_path = self.skills_router.route(data.get("current_phase", "P"), data)
+                        self._run_v5_p_stage(skill_path, data)
+                        
+                        # 💾 持久化狀態轉移 (Phase 4 核心)
+                        state = self.state_io.load_global_state()
+                        state.current_phase = data.get("current_phase", "P")
+                        state.steps_history.append(StepRecord(
+                            phase=state.current_phase,
+                            step_id=f"auto_{int(time.time())}",
+                            status="completed",
+                            started_at=datetime.now(),
+                            ended_at=datetime.now(),
+                            summary=data.get("summary")
+                        ))
+                        self.state_io.save_global_state(state)
+
                     task = derive_task_metadata(files if not manual_files else manual_files, diff_text)
                     decision = self.escalation_policy.decide(
                         attempt=strike,
@@ -535,6 +567,37 @@ class CodexLoopV2:
             if self.total_tokens > 0:
                 print(f"\n📊 [Usage] Total Session Tokens: {self.total_tokens:,}")
             os.chdir(original_cwd)
+
+    def _run_v5_p_stage(self, skill_path: str, context: dict):
+        """
+        🚀 v5 Pilot: P-stage (Plan Generation)
+        模擬呼叫 v5 Skill 並生成 plan.json (符合 v1.5.2 合同)
+        """
+        print(f"🧬 [v5 P-stage] Initializing plan generation using {skill_path}...")
+        
+        # 這裡模擬生成符合 scripts/core/state_contracts.py 定義的 plan.json
+        plan_data = {
+            "plan_id": f"nexus-pilot-{int(time.time())}",
+            "goal": context.get("summary", "Fix detected violations"),
+            "steps": [
+                {
+                    "step_id": 1,
+                    "action": "writing-plans",
+                    "target": "v5-pilot",
+                    "description": "Generated via v5 skills_router",
+                    "depends_on": []
+                }
+            ],
+            "metadata": {
+                "skill_used": "writing-plans",
+                "contract_version": "1.5.2"
+            }
+        }
+        
+        plan_file = Path(self.git.project_root) / "plan.json"
+        with open(plan_file, "w", encoding="utf-8") as f:
+            json.dump(plan_data, f, indent=4)
+        print(f"📝 [v5 Pilot] plan.json has been crystallized at {plan_file}")
 
 
 if __name__ == "__main__":

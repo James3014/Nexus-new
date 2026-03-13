@@ -118,6 +118,7 @@ Suggested canonical side:
 
 - 優先把 `scripts/core/*.py` 視為 library canonical
 - root-level 同名檔案視為待確認 duplicate
+- 已執行 (2026-03-14): 將 root-level 同名檔案 (`git_manager.py`, `workspace_manager.py`, `linter.py`, `patcher.py`, `llm_client.py`, `reporter.py`) 遷移至 `scripts/legacy/`。
 
 ### 2. Files likely to remain root-level entrypoints
 

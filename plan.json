@@ -1,0 +1,17 @@
+{
+    "plan_id": "nexus-pilot-1773443846",
+    "goal": "codex returned non-schema output: Expecting value: line 1 column 1 (char 0)",
+    "steps": [
+        {
+            "step_id": 1,
+            "action": "writing-plans",
+            "target": "v5-pilot",
+            "description": "Generated via v5 skills_router",
+            "depends_on": []
+        }
+    ],
+    "metadata": {
+        "skill_used": "writing-plans",
+        "contract_version": "1.5.2"
+    }
+}
