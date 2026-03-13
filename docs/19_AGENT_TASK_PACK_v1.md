@@ -6,6 +6,28 @@ Implement the next internal slice of the **new Nexus runtime** using the current
 
 This task pack is designed to be pasted directly to another agent.
 
+## Execution Mode (Mandatory)
+
+Implementation must run through the **current Nexus system**, not an ad-hoc standalone workflow.
+
+Required runtime loop:
+
+```text
+Gemini edits
+  -> scripts/codex-loop.sh review
+    -> /tmp/codex_next_action.json
+      -> scripts/core/gemini_handoff.py prompt
+        -> Gemini next round
+```
+
+At minimum, each iteration must execute:
+
+```bash
+scripts/codex-loop.sh --mode audit <files...> --emit-gemini-handoff
+```
+
+Do not bypass Nexus gate/review when implementing this task pack.
+
 ## Preflight Safety (Mandatory)
 
 Do not edit the active working copy directly.
