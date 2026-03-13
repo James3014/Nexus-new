@@ -17,11 +17,31 @@ from typing import List, Dict, Any, Optional
 
 
 def resolve_vault_root() -> Path:
-    env_root = os.getenv("VAULT_ROOT")
-    if env_root:
-        p = Path(env_root).expanduser().resolve()
+    # 1) Explicit env override
+    for key in ("VAULT_ROOT", "MUSE_VAULT_ROOT"):
+        env_root = os.getenv(key)
+        if env_root:
+            p = Path(env_root).expanduser().resolve()
+            if p.exists():
+                # Allow either vault root (.../知識庫) or parent (.../obsidian)
+                if (p / "00_System_Knowledge").exists():
+                    return p
+                if (p / "知識庫" / "00_System_Knowledge").exists():
+                    return (p / "知識庫").resolve()
+
+    # 2) Common local defaults
+    defaults = [
+        Path("/Users/jameschen/Downloads/obsidian/知識庫"),
+        Path("/Users/jameschen/Downloads/obsidian"),
+    ]
+    for p in defaults:
         if p.exists():
-            return p
+            if (p / "00_System_Knowledge").exists():
+                return p.resolve()
+            if (p / "知識庫" / "00_System_Knowledge").exists():
+                return (p / "知識庫").resolve()
+
+    # 3) Repo-relative discovery
     script_path = Path(__file__).resolve()
     for parent in [script_path.parent, *script_path.parents]:
         if (parent / "00_System_Knowledge").exists() and (parent / "01_Operations").exists():
@@ -29,8 +49,20 @@ def resolve_vault_root() -> Path:
     return script_path.parents[1]
 
 
+def resolve_subconscious_file(vault_root: Path) -> Path:
+    candidates = [
+        vault_root / "00_System_Knowledge" / "01_Operations" / "04_Subconscious_Memory.md",
+        vault_root / "01_Operations" / "04_Subconscious_Memory.md",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    # Default write target (if file does not exist yet)
+    return candidates[0]
+
+
 TRANSCRIPTS_DIR = Path.home() / ".muse_transcripts"
-SUBCONSCIOUS_FILE = resolve_vault_root() / "00_System_Knowledge" / "01_Operations" / "04_Subconscious_Memory.md"
+SUBCONSCIOUS_FILE = resolve_subconscious_file(resolve_vault_root())
 
 
 def list_transcript_files() -> List[str]:
@@ -92,31 +124,47 @@ def build_prompt(history: List[Dict[str, Any]]) -> str:
     return prompt
 
 
-def run_reflection(prompt: str) -> Optional[str]:
-    try:
-        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp:
-            tmp.write(prompt)
-            tmp_path = tmp.name
+def fallback_reflection(history: List[Dict[str, Any]]) -> str:
+    """Offline-safe fallback when codex is unavailable."""
+    fail_reports = "\n".join(
+        [str(h.get("report", "")) for h in history if h.get("status") == "FAIL"]
+    ).lower()
+    tips = []
+    if "network" in fail_reports or "websocket" in fail_reports or "lookup address" in fail_reports:
+        tips.append("- 網路依賴工具需設置 fail-open/fallback；不可把外部連線失敗當成邏輯失敗。")
+    if "json" in fail_reports or "schema" in fail_reports or "parse" in fail_reports:
+        tips.append("- LLM 輸出需做容錯解析與欄位驗證，避免硬性精確比對造成誤判。")
+    if "lock" in fail_reports or "/tmp/" in fail_reports:
+        tips.append("- 鎖檔與狀態檔必須按專案隔離，避免跨 repo 互相阻塞。")
+    if not tips:
+        tips.append("- 提交前先做最小可驗證檢查（語法、路徑、關鍵流程），再進入審查迴圈。")
+        tips.append("- 對外部服務的失敗要分類（網路/權限/邏輯），並提供可重試策略。")
+    return "\n".join(tips[:3])
 
+
+def run_reflection(prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
+    try:
         # 使用 shutil 動態尋找 codex 執行檔路徑以維持移植性
         codex_bin = shutil.which("codex") or "codex"
-        
-        # 使用 -ic 確保載入 .zshrc 中的環境變數與 PATH，以應對非交互式環境中的執行失敗
         result = subprocess.run(
-            ["zsh", "-ic", f"'{codex_bin}' exec - < '{tmp_path}'"],
+            [codex_bin, "exec", "-"],
+            input=prompt,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=120,
         )
-        os.remove(tmp_path)
-        
-        reflection = result.stdout.strip()
+
+        raw = result.stdout.strip()
+        # 僅保留符合規範的條列教訓，避免把工具雜訊寫入記憶檔
+        bullet_lines = [ln.strip() for ln in raw.splitlines() if ln.strip().startswith("- ")]
+        reflection = "\n".join(bullet_lines[:3]).strip()
         if result.returncode != 0 or not reflection:
-            print(f"❌ 呼叫 LLM 失敗：{result.stderr}")
-            return None
+            print("⚠️ codex 反思不可用，改用離線 fallback 規則產出教訓。")
+            return fallback_reflection(history)
         return reflection
     except Exception as e:
-        print(f"❌ 執行 Subprocess 發生錯誤: {e}")
-        return None
+        print(f"⚠️ 反思子程序異常，改用離線 fallback：{e}")
+        return fallback_reflection(history)
 
 
 def write_subconscious(reflection: str) -> bool:
@@ -167,7 +215,7 @@ def process_transcripts() -> None:
         return
 
     prompt = build_prompt(history)
-    reflection = run_reflection(prompt)
+    reflection = run_reflection(prompt, history)
     if not reflection:
         print("⚠️ 反思產生失敗，保留原始碎片以避免資料遺失。")
         return
