@@ -6,6 +6,9 @@ import requests
 import json
 import argparse
 import re
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from dotenv import load_dotenv
 
 # 載入環境變數
@@ -16,6 +19,8 @@ JINA_KEY = os.environ.get("JINA_API_KEY", "MISSING_KEY")
 DB_PATH = os.path.expanduser("~/.openclaw/memory/lancedb-pro")
 PRIMARY_TABLE = os.environ.get("MUSE_SEARCH_TABLE", "agent_main")
 TABLE_FALLBACKS = ["agent_main", "memories_v2", "memories"]
+USAGE_LOG_PATH = Path.home() / ".muse_logs" / "brain_search_usage.jsonl"
+USAGE_LOG_ENABLED = os.environ.get("MUSE_SEARCH_LOG", "1") == "1"
 
 
 def _table_names(db):
@@ -76,6 +81,33 @@ def _metadata_of(row):
     return meta if isinstance(meta, dict) else {}
 
 
+def _append_usage_log(query, table_name, results, elapsed_ms, status):
+    if not USAGE_LOG_ENABLED:
+        return
+    try:
+        USAGE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        sources = []
+        for r in results[:5]:
+            meta = _metadata_of(r)
+            src = meta.get("source")
+            if src:
+                sources.append(src)
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "query": query,
+            "table": table_name,
+            "elapsed_ms": round(elapsed_ms, 2),
+            "result_count": len(results),
+            "top_sources": sources,
+            "status": status,
+        }
+        with USAGE_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        # logging failure must never break search flow
+        pass
+
+
 def _rerank(results, query):
     q = _normalize(query)
     reranked = []
@@ -113,14 +145,17 @@ def _strip_heavy_fields(results):
 
 
 def search_brain(query, limit=3):
+    started = time.perf_counter()
     if not os.path.exists(DB_PATH):
         print(f"❌ 找不到資料庫：{DB_PATH}")
+        _append_usage_log(query, "", [], (time.perf_counter() - started) * 1000, "db_missing")
         return []
 
     db = lancedb.connect(DB_PATH)
     table_name = _pick_table(db)
     if not table_name:
         print(f"❌ 找不到可用資料表：{TABLE_FALLBACKS}")
+        _append_usage_log(query, "", [], (time.perf_counter() - started) * 1000, "table_missing")
         return []
 
     table = db.open_table(table_name)
@@ -129,7 +164,16 @@ def search_brain(query, limit=3):
     if vector:
         results = table.search(vector).limit(limit).to_list()
         results = _rerank(results, query)
-        return _strip_heavy_fields(results)
+        cleaned = _strip_heavy_fields(results)
+        _append_usage_log(
+            query,
+            table_name,
+            cleaned,
+            (time.perf_counter() - started) * 1000,
+            "ok",
+        )
+        return cleaned
+    _append_usage_log(query, table_name, [], (time.perf_counter() - started) * 1000, "embedding_failed")
     return []
 
 
