@@ -146,8 +146,21 @@ def run_reflection(prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
         # 使用 Gemini CLI（預設 gemini-3-flash-preview）
         gemini_bin = shutil.which("gemini") or "gemini"
         model = os.getenv("SUBCONSCIOUS_MODEL", "gemini-3-flash-preview")
+        include_dirs = [str(Path.home())]
+        guard_prompt = (
+            "你只能輸出以下格式，且不可輸出其他文字：\n"
+            "BEGIN_REFLECTION\n"
+            "- 教訓1\n"
+            "- 教訓2\n"
+            "- 教訓3\n"
+            "END_REFLECTION"
+        )
+        cmd = [gemini_bin, "-m", model]
+        for d in include_dirs:
+            cmd.extend(["--include-directories", d])
+        cmd.extend(["-p", guard_prompt])
         result = subprocess.run(
-            [gemini_bin, "-m", model, "-p", "請依輸入規則輸出，僅回傳 Markdown 條列。"],
+            cmd,
             input=prompt,
             capture_output=True,
             text=True,
@@ -155,8 +168,47 @@ def run_reflection(prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
         )
 
         raw = result.stdout.strip()
-        # 僅保留符合規範的條列教訓，避免把工具雜訊寫入記憶檔
-        bullet_lines = [ln.strip() for ln in raw.splitlines() if ln.strip().startswith("- ")]
+        # 先嘗試解析標記區塊，降低 CLI 雜訊污染機率
+        body = raw
+        start = raw.find("BEGIN_REFLECTION")
+        end = raw.find("END_REFLECTION")
+        if start != -1 and end != -1 and end > start:
+            body = raw[start + len("BEGIN_REFLECTION"):end]
+
+        # 僅保留條列教訓，並排除常見 CLI 雜訊
+        noise_markers = (
+            "loaded cached credentials",
+            "warning:",
+            "task start protocol",
+            "mission start protocol",
+            "大腦同步協議",
+            "任務啟動協議",
+        )
+        bullet_lines = []
+        for ln in body.splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            lower = s.lower()
+            if any(n in lower for n in noise_markers):
+                continue
+            if s.startswith("- "):
+                bullet_lines.append(s)
+            elif s.startswith("* "):
+                bullet_lines.append("- " + s[2:].strip())
+
+        if not bullet_lines and raw:
+            first = next(
+                (
+                    ln.strip()
+                    for ln in raw.splitlines()
+                    if ln.strip()
+                    and not any(n in ln.strip().lower() for n in noise_markers)
+                ),
+                "",
+            )
+            if first:
+                bullet_lines = [f"- {first}"]
         reflection = "\n".join(bullet_lines[:3]).strip()
         if result.returncode != 0 or not reflection:
             print("⚠️ gemini 反思不可用，改用離線 fallback 規則產出教訓。")
