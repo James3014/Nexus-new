@@ -1,0 +1,103 @@
+# Agent Task Pack v1 (Direct-Use)
+
+## Goal
+
+Implement the next internal slice of the **new Nexus runtime** using the current upgraded Nexus base.
+
+This task pack is designed to be pasted directly to another agent.
+
+## Read First (Strict Order)
+
+1. `docs/00_PROJECT_INDEX.md`
+2. `docs/12_AGENT_EXECUTION_GUIDE.md`
+3. `docs/17_GEMINI_CODEX_HANDOFF_USAGE.md`
+4. `docs/18_REFACTOR_PROGRESS_BOARD.md`
+5. `docs/11_FIRST_CUT_FILE_PLAN.md`
+6. `docs/13_ACCEPTANCE_CHECKLIST.md`
+
+## Scope (Allowed)
+
+Only touch files required for this slice. Prefer additive changes.
+
+Primary targets:
+
+- `scripts/core/state_contracts.py` (create if missing)
+- `scripts/core/state_io.py` (create if missing)
+- `scripts/core/context_hub.py` (create if missing)
+- `scripts/core/skills_router.py` (create if missing)
+- `scripts/codex_loop_brain.py` (minimal integration only)
+- `scripts/drclaw_diagnosis.py` (minimal integration only)
+
+## Scope (Forbidden)
+
+- No large repo restructuring.
+- No unrelated dashboard/memory engine refactor.
+- No TOON in state contracts.
+- No broad rewrite of `codex_loop_brain.py`.
+- No destructive git operations.
+
+## Runtime Contract Rules
+
+1. JSON/JSONL is the only authority format.
+2. Reads must be compatibility-safe for missing keys.
+3. New fields must be additive.
+4. Side effects must be explicit and minimal.
+
+## Implementation Strategy (Small Steps)
+
+1. Create/extend contracts and defaults.
+2. Add state read/write helpers.
+3. Add context_hub skeleton for D/R/A packs.
+4. Add skills_router skeleton with explainable output:
+   - `reason`
+   - `score`
+   - `threshold`
+5. Integrate minimally into repair/diag entry points.
+
+## Required Tests (TDD)
+
+At minimum add/update tests for:
+
+- contract default loading
+- legacy missing-key fallback
+- context pack assembly shape
+- router decision determinism for sample metadata
+
+Run:
+
+```bash
+python3 -m pytest -q
+```
+
+If full suite is too broad, run targeted tests and report exactly what was run.
+
+## Required Runtime Checks
+
+1. Smoke check imports for touched modules.
+2. Verify one end-to-end internal path does not crash.
+3. Verify `codex_next_action` and handoff flow still works.
+
+## Handoff Commands (Current Runtime)
+
+```bash
+scripts/codex-loop.sh --mode audit <files...> --emit-gemini-handoff
+scripts/codex-loop.sh --handoff-only --emit-gemini-handoff --handoff-output /tmp/gemini_task.txt
+```
+
+## Output Format (Must Follow)
+
+Report in this exact structure:
+
+1. `Changed Files`
+2. `What Implemented`
+3. `What Not Implemented`
+4. `Tests/Checks Run`
+5. `Residual Risks`
+
+## Definition of Done
+
+- Code compiles/imports.
+- TDD coverage exists for new logic.
+- No unrelated files changed.
+- Acceptance checklist items for this slice are satisfied.
+- Changes are small, modular, and decoupled.

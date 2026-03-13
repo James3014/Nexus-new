@@ -49,6 +49,7 @@ Muse-Nexus/
 - [Execution Timeline](./docs/16_EXECUTION_TIMELINE.md)
 - [Gemini + Codex Handoff Usage](./docs/17_GEMINI_CODEX_HANDOFF_USAGE.md)
 - [Refactor Progress Board](./docs/18_REFACTOR_PROGRESS_BOARD.md)
+- [Agent Task Pack v1](./docs/19_AGENT_TASK_PACK_v1.md)
 
 ## Current Position
 

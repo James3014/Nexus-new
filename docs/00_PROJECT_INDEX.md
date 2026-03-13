@@ -60,6 +60,9 @@
 18. [18_REFACTOR_PROGRESS_BOARD.md](./18_REFACTOR_PROGRESS_BOARD.md)
     改版完成/未完成項目的可視化盤點，供 agent 開工前快速對焦範圍與依賴關係。
 
+19. [19_AGENT_TASK_PACK_v1.md](./19_AGENT_TASK_PACK_v1.md)
+    可直接貼給其他 agent 的單一施工任務包，包含讀檔順序、施工邊界、必跑測試與回報格式。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。
