@@ -33,6 +33,8 @@ Muse-Nexus/
 - [Gap Analysis](./docs/03_GAP_ANALYSIS.md)
 - [Refactor Roadmap](./docs/04_REFACTOR_ROADMAP.md)
 - [Backlog](./docs/05_BACKLOG.md)
+- [Repo Cleanup Plan](./docs/06_REPO_CLEANUP_PLAN.md)
+- [Script Ownership Map](./docs/07_SCRIPT_OWNERSHIP_MAP.md)
 
 ## Current Position
 

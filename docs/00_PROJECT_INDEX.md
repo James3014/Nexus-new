@@ -21,6 +21,12 @@
 5. [05_BACKLOG.md](./05_BACKLOG.md)
    可執行的專案管理清單，方便分階段落地。
 
+6. [06_REPO_CLEANUP_PLAN.md](./06_REPO_CLEANUP_PLAN.md)
+   repo 清理與目錄收斂策略，處理 duplicate、historical snapshot 與 generated artifacts。
+
+7. [07_SCRIPT_OWNERSHIP_MAP.md](./07_SCRIPT_OWNERSHIP_MAP.md)
+   root-level scripts 與 `scripts/core/` 的 ownership 暫行判定與 duplicate map。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。
