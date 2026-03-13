@@ -41,6 +41,9 @@ Muse-Nexus/
 - [Migration Runbook v1.5.2+](./docs/08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md)
 - [State Contract Draft](./docs/09_STATE_CONTRACT_DRAFT.md)
 - [Implementation Sequence](./docs/10_IMPLEMENTATION_SEQUENCE.md)
+- [First-Cut File Plan](./docs/11_FIRST_CUT_FILE_PLAN.md)
+- [Agent Execution Guide](./docs/12_AGENT_EXECUTION_GUIDE.md)
+- [Acceptance Checklist](./docs/13_ACCEPTANCE_CHECKLIST.md)
 
 ## Current Position
 

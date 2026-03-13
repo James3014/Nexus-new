@@ -36,6 +36,15 @@
 10. [10_IMPLEMENTATION_SEQUENCE.md](./10_IMPLEMENTATION_SEQUENCE.md)
     從文件進入實作時的順序表，說明哪些先做、哪些延後、哪些步驟需人工 review。
 
+11. [11_FIRST_CUT_FILE_PLAN.md](./11_FIRST_CUT_FILE_PLAN.md)
+    第一波 implementation 真正要碰的檔案、落地模組與禁止擴張的範圍。
+
+12. [12_AGENT_EXECUTION_GUIDE.md](./12_AGENT_EXECUTION_GUIDE.md)
+    交給 agent 施工時的閱讀順序、施工規則、允許/禁止範圍與回報要求。
+
+13. [13_ACCEPTANCE_CHECKLIST.md](./13_ACCEPTANCE_CHECKLIST.md)
+    驗收第一波 implementation 的 checklist，避免超範圍施工或破壞既有流程。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。
