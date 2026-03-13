@@ -15,6 +15,8 @@ from core.linter import Linter
 from core.patcher import SafePatcher
 from core.reporter import Reporter
 from core.workspace_manager import WorkspaceManager
+from core.escalation_policy import EscalationPolicy, derive_task_metadata
+from core.action_brief import build_action_brief
 
 # 配置
 BRAIN_SEARCH_BIN = os.getenv("MUSE_CORE_BRAIN_SEARCH", "/usr/local/bin/brain_search")
@@ -74,6 +76,7 @@ class CodexLoopV2:
         self.patcher = SafePatcher(lock_dir=self.git.git_dir or "/tmp")
         self.reporter = Reporter()
         self.workspace_manager = WorkspaceManager(self.git.project_root)
+        self.escalation_policy = EscalationPolicy()
 
         # 🛡️ Global Retry Circuit Breaker (Lvl 19)
         self._check_global_retry_limit(repo_id)
@@ -90,6 +93,20 @@ class CodexLoopV2:
         self.patch_file = Path(f"/tmp/codex_auto_{repo_id}.patch")
         self.transcripts_dir = Path(f"/tmp/codex_transcripts_{repo_id}")
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
+
+    def _print_escalation_decision(self, decision):
+        print(
+            f"🧭 [Escalation] next_action={decision.action} actor={decision.actor} reasons={','.join(decision.reason_codes)}"
+        )
+
+    def _print_action_brief(self, brief):
+        print(f"📝 [Action Brief] {brief.title}")
+        print(f"   actor={brief.actor}")
+        print(f"   instructions={brief.instructions}")
+        if brief.context:
+            for key, value in brief.context.items():
+                if value:
+                    print(f"   {key}={value}")
 
     def _apply_persona_profile(self, mode):
         """實作 README 中承諾的三種進階玩家模式。"""
@@ -360,6 +377,7 @@ class CodexLoopV2:
                         for f in manual_files
                         if Path(f).is_file()
                     ]
+                    files = code_files
                     diff_text = "Manual Review Mode"
                 else:
                     effective_scope = self.scope
@@ -441,8 +459,6 @@ class CodexLoopV2:
                 if strike == self.max_strikes and self.max_strikes > 1:
                     full_prompt += "\n⚠️ [CRITICAL] FINAL STRIKE: This is your last chance. You MUST provide a definitive, compile-ready patch (Unified Diff) for all remaining violations. No more advice. Fix everything NOW.\n"
                     full_prompt += "\n[MANDATORY FORMATTING] DO NOT use Markdown wrappers (```json). DO NOT include explanatory text like '**Findings**'. OUTPUT ONLY VALID JSON DATA.\n"
-                    # 強制在 Strike 3 開啟自動套用，不讓 Agent 陷入解讀翻譯的迴圈
-                    self.apply_patch = True
 
                 print(f"🧠 Calling LLM for Cognitive Review (Strike {strike})...")
                 data, raw_output = self.llm.ask(full_prompt, diff_text)
@@ -471,10 +487,35 @@ class CodexLoopV2:
                 self.history_hashes.add(suggestions_hash)
 
                 if data.get("status") == "FAIL":
+                    task = derive_task_metadata(files if not manual_files else manual_files, diff_text)
+                    decision = self.escalation_policy.decide(
+                        attempt=strike,
+                        task=task,
+                        failure_summary=data.get("summary", ""),
+                        repeated_failure=strike > 1,
+                    )
+                    brief = build_action_brief(
+                        decision=decision,
+                        task=task,
+                        failure_summary=data.get("summary", ""),
+                        files=files if not manual_files else manual_files,
+                        violations=data.get("violations", []),
+                    )
+                    data["next_action"] = decision.action
+                    data["next_actor"] = decision.actor
+                    data["escalation_reasons"] = decision.reason_codes
+                    data["action_brief"] = {
+                        "title": brief.title,
+                        "instructions": brief.instructions,
+                        "context": brief.context,
+                    }
+                    self._print_escalation_decision(decision)
+                    self._print_action_brief(brief)
                     print(self.reporter.render_ansi_table(data.get("violations", [])))
                     self._export_report(data)
 
-                    if self.apply_patch:
+                    allow_codex_patch = self.apply_patch or decision.allow_codex_patch
+                    if allow_codex_patch:
                         print("🛠️ Applying auto-patches...")
                         self.patcher.apply(data.get("violations", []))
                         # 繼續下一輪循環
