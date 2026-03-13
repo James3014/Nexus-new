@@ -1,8 +1,45 @@
+import json
 from pathlib import Path
 
 
 class Reporter:
     """負責結果的呈現與持久化報告。"""
+
+    @staticmethod
+    def _build_next_step_lines(data):
+        next_action = data.get("next_action")
+        next_actor = data.get("next_actor")
+        reason_codes = data.get("escalation_reasons", [])
+        action_brief = data.get("action_brief") or {}
+        brief_context = action_brief.get("context") or {}
+
+        if not any([next_action, next_actor, reason_codes, action_brief]):
+            return []
+
+        lines = ["## Next Step\n"]
+
+        if next_action:
+            lines.append(f"- **Action**: `{next_action}`")
+        if next_actor:
+            lines.append(f"- **Actor**: `{next_actor}`")
+        if reason_codes:
+            formatted_reasons = ", ".join(f"`{reason}`" for reason in reason_codes)
+            lines.append(f"- **Reasons**: {formatted_reasons}")
+
+        brief_title = action_brief.get("title")
+        brief_instructions = action_brief.get("instructions")
+        if brief_title:
+            lines.append("")
+            lines.append(f"### {brief_title}")
+        if brief_instructions:
+            lines.append(f"- **Instructions**: {brief_instructions}")
+
+        for key, value in brief_context.items():
+            if value:
+                lines.append(f"- **{key}**: {value}")
+
+        lines.append("")
+        return lines
 
     @staticmethod
     def render_ansi_table(violations):
@@ -35,6 +72,7 @@ class Reporter:
             f"**Status**: {data.get('status', 'N/A')}",
             f"**Total Tokens**: {total_tokens:,}" if total_tokens else "",
             f"**Summary**: {data.get('summary', 'No summary provided.')}\n",
+            *Reporter._build_next_step_lines(data),
             "## Violations\n",
         ]
 
@@ -49,3 +87,18 @@ class Reporter:
                 lines.append("```diff\n" + v.get("patch") + "\n```\n")
 
         Path(report_path).write_text("\n".join(lines), encoding="utf-8")
+
+    @staticmethod
+    def write_action_sidecar(action_path, data):
+        payload = {
+            "status": data.get("status", "N/A"),
+            "summary": data.get("summary", ""),
+            "next_action": data.get("next_action"),
+            "next_actor": data.get("next_actor"),
+            "escalation_reasons": data.get("escalation_reasons", []),
+            "action_brief": data.get("action_brief") or {},
+        }
+        Path(action_path).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )

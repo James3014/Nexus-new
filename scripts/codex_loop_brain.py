@@ -90,6 +90,7 @@ class CodexLoopV2:
 
         # 報告與補丁路徑 (符合 P16 Sandbox 定義)
         self.report_file = Path(f"/tmp/codex_loop_report_{repo_id}.md")
+        self.action_file = Path(f"/tmp/codex_next_action_{repo_id}.json")
         self.patch_file = Path(f"/tmp/codex_auto_{repo_id}.patch")
         self.transcripts_dir = Path(f"/tmp/codex_transcripts_{repo_id}")
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
@@ -306,9 +307,13 @@ class CodexLoopV2:
             self.reporter.write_markdown_report(
                 self.report_file, data, total_tokens=self.total_tokens
             )
+            self.reporter.write_action_sidecar(self.action_file, data)
             # 同步全域報告 (供 UI)
             Path("/tmp/codex_loop_report.md").write_text(
                 self.report_file.read_text(), encoding="utf-8"
+            )
+            Path("/tmp/codex_next_action.json").write_text(
+                self.action_file.read_text(), encoding="utf-8"
             )
         except Exception as e:
             print(f"⚠️ [Report Error] {e}")
