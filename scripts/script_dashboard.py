@@ -223,71 +223,145 @@ async def run_script(script_name: str) -> dict:
 # --- Helpers ---
 
 
+# --- Tool Metadata Registry (High-Quality Chinese Labels) ---
+TOOL_METADATA = {
+    "brain_search_v2.py": {
+        "display_name": "🧠 語義大腦搜索器 v2",
+        "category": "記憶與知識",
+        "summary": "基於 LanceDB 的多模態語義搜索，精準喚醒長短期記憶。",
+        "tags": ["RAG", "Search", "V2"],
+        "risk_level": "安全",
+        "inputs": "自然語言查詢 / 檔案 UUID",
+        "outputs": "相關段落 / 語義評分",
+    },
+    "flash_ingest_v2.py": {
+        "display_name": "⚡ 知識閃速結晶器",
+        "category": "記憶與知識",
+        "summary": "將原始 Markdown 或檔案快速向量化，自動抽取標籤與關聯。",
+        "tags": ["Ingest", "Crystallize"],
+        "risk_level": "注意",
+        "inputs": "檔案路徑 / 資料夾",
+        "outputs": "LanceDB 向量條目",
+    },
+    "parallel_fix.py": {
+        "display_name": "🛠️ 平行時空修復機",
+        "category": "修復與維護",
+        "summary": "在隔離 Worktree 中執行併發修復，不干擾主幹開發。",
+        "tags": ["Repair", "Worktree"],
+        "risk_level": "高風險",
+        "inputs": "任務計畫 JSON",
+        "outputs": "修復 Patch / 驗證報告",
+    },
+    "state_reconstructor.py": {
+        "display_name": "🌀 任務狀態再構築器",
+        "category": "修復與維護",
+        "summary": "重建中斷任務的上下文，恢復 Agent 的執行連續性。",
+        "tags": ["State", "Reconstruct"],
+        "risk_level": "注意",
+        "inputs": "Muse State 目錄",
+        "outputs": "可恢復的任務快照",
+    },
+    "quality_stamper.py": {
+        "display_name": "🛡️ 品質印章與核准器",
+        "category": "品質與稽核",
+        "summary": "對修復成果執行多維度評分，不達標者強制攔截。",
+        "tags": ["Audit", "Score"],
+        "risk_level": "安全",
+        "inputs": "Trace Log / Code Diff",
+        "outputs": "品質印章 / 治理報告",
+    },
+    "content_agent.py": {
+        "display_name": "📧 數位管家 (Content Agent)",
+        "category": "啟動與日常",
+        "summary": "自動彙整戰情日誌與新聞，生成每日早報與收工彙報。",
+        "tags": ["Daily", "Summarize"],
+        "risk_level": "安全",
+        "inputs": "Daily Log / Feed",
+        "outputs": "Markdown 簡報 / 語音通報",
+    },
+}
+
+
 def get_category(name: str) -> str:
     name_lower = name.lower()
+    # 優先從硬編碼映射中取得
+    if name in TOOL_METADATA:
+        return f"📂 {TOOL_METADATA[name]['category']}"
+
+    if any(k in name_lower for k in ["core", "__init__"]):
+        return "⚙️ 開發核心 (Internal)"
+    if any(
+        k in name_lower
+        for k in ["brain", "memory", "ingest", "search", "prune", "crystallize"]
+    ):
+        return "🧠 記憶與知識"
+    if any(
+        k in name_lower
+        for k in ["fix", "repair", "reconstruct", "heal", "purge", "cleanup"]
+    ):
+        return "🛠️ 修復與維護"
+    if any(
+        k in name_lower
+        for k in ["audit", "quality", "check", "verify", "score", "stamper", "guard"]
+    ):
+        return "🛡️ 品質與稽核"
     if any(
         k in name_lower
         for k in [
-            "sweep",
-            "actuator",
-            "swarm",
-            "dispatch",
-            "conflict",
-            "intel_bridge",
-            "pipeline",
+            "agent",
+            "spawner",
+            "orchestrator",
+            "daemon",
+            "steward",
+            "loop",
+            "planner",
         ]
     ):
-        return "👔 幕僚長戰略管線"
+        return "🤖 代理與編排"
     if any(
         k in name_lower
-        for k in [
-            "brain",
-            "memory",
-            "crystallize",
-            "prune",
-            "repair",
-            "synthesize",
-            "ingest",
-            "search",
-        ]
+        for k in ["content", "morning", "wrap_up", "curate", "email", "broadcast"]
     ):
-        return "🧠 記憶與知識庫管理"
-    if any(k in name_lower for k in ["ski", "tagger", "diagnosis"]):
-        return "⛷️ 滑雪與物理領域"
-    if any(
-        k in name_lower
-        for k in ["email", "content", "curate", "morning", "wrap_up", "broadcast"]
-    ):
-        return "📧 內容與日常操作"
-    if any(
-        k in name_lower
-        for k in ["codex", "quality", "checker", "audit", "guard", "verify"]
-    ):
-        return "🛡️ 品質與驗證系統"
-    if any(
-        k in name_lower
-        for k in ["persona", "soul", "agent", "router", "spawner", "bridge"]
-    ):
-        return "🤖 代理與人格核心"
-    if any(k in name_lower for k in ["skill", "tool"]):
-        return "🛠️ 技能與工具管理"
-    return "⚙️ 其他系統腳本"
+        return "✨ 啟動與日常"
+    return "⚙️ 開發核心"
 
 
 def parse_python_file(path: Path) -> dict:
+    filename = path.name
     info = {
         "status": "✅ 正常",
+        "display_name": filename,
         "desc": "無描述",
+        "tags": ["Python"],
+        "risk": "安全",
+        "inputs": "無特定輸入",
+        "outputs": "標準輸出",
         "details": [],
         "allowed": True,
         "is_locked": False,
     }
+
+    # 從硬編碼映射中覆蓋
+    if filename in TOOL_METADATA:
+        m = TOOL_METADATA[filename]
+        info["display_name"] = m.get("display_name", filename)
+        info["desc"] = m.get("summary", "無描述")
+        info["tags"] = m.get("tags", ["Python"])
+        info["risk"] = m.get("risk_level", "安全")
+        info["inputs"] = m.get("inputs", "無特定輸入")
+        info["outputs"] = m.get("outputs", "標準輸出")
+
     try:
         content = path.read_text(encoding="utf-8")
         tree = ast.parse(content)
         doc = ast.get_docstring(tree)
-        if doc:
+        if doc and info["desc"] == "無描述":
             info["desc"] = doc.strip().splitlines()[0]
+
+        # 如果依然無描述，且不是核心內部檔，給予預設占位符
+        if info["desc"] == "無描述" and not filename.startswith("_"):
+            info["desc"] = f"提供 {filename} 相關的高級自動化機能。"
+
         funcs = [
             n.name
             for n in tree.body

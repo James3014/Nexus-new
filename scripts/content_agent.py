@@ -92,15 +92,17 @@ def get_input_text(source=None):
 # ---------------------------------------------------------------------------
 
 
-def ask_llm(prompt, text, role, model_name="gemini-2.5-pro"):
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        console.print(
-            "[red]錯誤: 找不到 GEMINI_API_KEY 環境變數。請在環境中設定它。[/red]"
-        )
-        sys.exit(1)
 
-    client = genai.Client(api_key=api_key)
+def ask_llm(prompt, text, role, model_name="gemini-2.0-flash"):
+    api_key = os.environ.get("GEMINI_API_KEY")
+    
+    if not api_key:
+        from google import genai
+        # 不設 project，SDK 會自動讀取 gcloud 的預設配置
+        client = genai.Client(vertexai=True)
+    else:
+        client = genai.Client(api_key=api_key)
+
 
     full_prompt = (
         f"{role}\n\n任務指令：\n{prompt}\n\n=== 輸入內容 ===\n{text}\n=== 輸入結束 ==="

@@ -247,6 +247,42 @@ class CodexLoopV2:
             print(f"⚠️ [Intent Guard Warning] Skip check due to error: {e}")
             return True
 
+    def _is_reviewable(self, file_path):
+        """🛡️ Lvl 19 Cognitive Filter: Determine if a file warrants a deep cognitive review."""
+        if file_path.endswith(".py"):
+            return True
+        if not file_path.endswith(".md"):
+            return False
+
+        # Markdown brain-gate
+        brain_prefixes = [
+            "00_System_Knowledge/",
+            "01_Operations/",
+            "02_Arsenal/",
+            "知識庫/00_System_Knowledge/",
+            "知識庫/01_Operations/",
+            "知識庫/02_Arsenal/",
+        ]
+        brain_files = {
+            "AGENT_RULES.md",
+            "WORKFLOW.md",
+            "MANIFESTO.md",
+            ".codex_lessons.md",
+            "SWARM_SYNC.md",
+            "SPEC_STRUCTURED_MEMORY.md",
+        }
+
+        # If it's a code repo (no '知識庫' folder), review all .md as they are likely specs/guides
+        kb_marker = os.path.join(self.git.project_root, "知識庫")
+        if not os.path.isdir(kb_marker):
+            return True
+
+        # For KB repos, only review "Heart" files
+        is_heart = any(file_path.startswith(p) for p in brain_prefixes) or \
+                   Path(file_path).name in brain_files
+        
+        return is_heart
+
     def _export_report(self, data):
         """導出雜湊隔離的報告。"""
         try:
@@ -350,6 +386,18 @@ class CodexLoopV2:
                             )
 
                     code_files = [f for f in files if f.endswith(".py")]
+                    
+                    # 🛡️ Lvl 19: Narrow Review Scope (Skip non-brain .md files)
+                    reviewable_files = [f for f in files if self._is_reviewable(f)]
+                    if len(reviewable_files) < len(files):
+                        print(f"🧹 [Filter] Narrowing scope from {len(files)} to {len(reviewable_files)} brain-affecting files.")
+                        files = reviewable_files
+                        # Re-fetch diff for only reviewable files
+                        if files:
+                            diff_args = ["diff", "--cached"] if effective_scope == "staged" else ["diff"]
+                            diff_text = subprocess.check_output(["git", "-C", self.git.project_root] + diff_args + ["--"] + files).decode()
+                        else:
+                            diff_text = ""
 
                 # 🛡️ Lvl 18 Phase 2: 在第一次 Strike 前執行肌肉自癒 (Pre-emptive Heal)
                 if strike == 1 and code_files:
