@@ -18,6 +18,11 @@
 - 簡單 scorecard
 - 可輸出 decision reason
 
+Priority:
+
+- 先做可驗證的計分原型
+- `phase_weight` 必須是最高優先訊號
+
 ## Inputs
 
 最低限度輸入：
@@ -173,6 +178,65 @@ Selection rule:
 - simple internal bugfix
 
 每個 case 都應有人類期望答案，與 router output 對照。
+
+## Prototype Evaluation Plan
+
+第一版 router 不應只靠主觀觀察，應做最小樣本驗證。
+
+Suggested sample set:
+
+- P phase fuzzy request
+- D phase large stacktrace
+- R phase python new feature
+- R phase large refactor
+- A phase static quality review
+
+For each sample, record:
+
+- expected selected skills
+- actual selected skills
+- rejected candidates
+- score breakdown
+
+Suggested metrics:
+
+- top-1 correctness
+- top-k coverage
+- false positive rate
+- false negative rate
+
+Prototype target:
+
+- 5 個樣本任務的 `top-1 correctness > 80%`
+
+## Early Weight Guidance
+
+第一版可先用保守權重，後續再調。
+
+Example priority:
+
+- `phase_weight`: highest priority
+- `language_match`: high
+- `stacktrace_match_weight`: high
+- `task_scale_weight`: medium
+- `new_feature_weight`: medium
+- `refactor_weight`: medium
+- `external_dependency_weight`: medium
+
+Suggested calibration note:
+
+- 對 D phase 而言，`stacktrace_match_weight` 可優先視為高信號
+- 若未來有相似度分數，可先以 `> 0.8` 當 strong match prototype threshold
+
+## Decision Review Rule
+
+若 router 與人工期望偏差過大，先調 decision tree，再調權重。
+
+優先順序：
+
+1. 修 decision rule
+2. 修 threshold
+3. 最後才修細部權重
 
 ## Practical Conclusion
 

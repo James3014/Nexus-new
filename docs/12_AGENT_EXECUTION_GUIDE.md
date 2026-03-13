@@ -57,6 +57,10 @@ Agent 的任務不是「自由發揮重構」，而是：
    - 進入 repair core 或 contract migration 前，先記錄 baseline state
    - 若有 half-upgrade risk，先模擬 legacy / partial state
 
+7. Human owns logic review
+   - agent 建骨架與 prototype
+   - human 審 schema naming、router logic、gatekeeper semantics
+
 ## Allowed First-Cut Scope
 
 Agent 第一波只允許處理：
@@ -109,6 +113,8 @@ Agent 必須先讀：
 - touched files 有基本 smoke pass
 - 若涉及 contract / repair loop，需做 half-upgraded state 驗證
 - 若有 router logic，需輸出 decision reason / score breakdown
+- 若有 validator，需說明 gatekeeper mode 是否已跑
+- 若有 baseline，需回報 token / 延遲變化
 
 ### Step 5. Report
 
@@ -132,6 +138,7 @@ Agent 回報時必須包含：
 - 沒有契約就先寫 phase 行為
 - 沒做 baseline freeze 就重寫 repair core
 - 沒有 decision reason 就讓 skills router 自動選 skill
+- 沒做 repo hygiene 檢查就引入新的 local artifact / cache noise
 
 ## Suggested Task Prompt Template
 

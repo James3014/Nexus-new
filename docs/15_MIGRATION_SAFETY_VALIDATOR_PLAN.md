@@ -8,6 +8,11 @@
 
 - `scripts/core/migration_safety_validator.py`
 
+## Priority
+
+- 直接從 validator POC 起步
+- 先有 CLI prototype，再擴充其他 phase integration
+
 ## Why It Exists
 
 單靠人工 review 很難穩定發現：
@@ -21,6 +26,30 @@
 因此需要一個專門的 migration safety check。
 
 ## First-Cut Responsibilities
+
+### 0. Phase gatekeeper mode
+
+Validator 應優先被定位成每個 phase 前的 gatekeeper，而不是事後補查工具。
+
+Gate rule:
+
+- P / D / R / A 每次進入前先跑 validator
+- 若 state 不完整或相容性不成立，phase 不應繼續
+
+Suggested invocation pattern:
+
+```text
+python3 scripts/core/migration_safety_validator.py --phase R --mode gatekeeper
+```
+
+Minimum gatekeeper checks:
+
+- required state files present
+- JSON shape readable
+- legacy-safe defaults available
+- current phase transition合法
+- external-disabled fallback 可用
+- touched files 未超出 first-cut allowlist
 
 ### 1. Baseline freeze check
 
@@ -73,6 +102,10 @@ First-cut allowlist:
 - `scripts/codex_loop_brain.py`
 - `scripts/drclaw_diagnosis.py`
 
+Rule:
+
+- gatekeeper mode 第一版只接受這 7 個核心檔案為允許修改範圍
+
 ## Suggested CLI
 
 ```text
@@ -81,9 +114,16 @@ python3 scripts/core/migration_safety_validator.py --mode first-cut
 
 Optional modes:
 
+- `--mode gatekeeper`
 - `--mode first-cut`
 - `--mode legacy-compat`
 - `--mode half-upgrade`
+
+Suggested flags:
+
+- `--phase P|D|R|A|C`
+- `--state-root .muse_state`
+- `--baseline-file path`
 
 ## Suggested Output
 
@@ -106,6 +146,7 @@ Optional modes:
 
 ## When To Run
 
+- 在每個 phase 開始前先跑 gatekeeper mode
 - 在每個 first-cut implementation slice 之後
 - 在 merge 前
 - 在修改 repair core loop 後必跑

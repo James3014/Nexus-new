@@ -77,12 +77,17 @@
 - [ ] 記錄是否新增明顯 token 成本來源
 - [ ] 記錄 external path 尚未啟用時的 internal-only 成本
 - [ ] 至少保留一份 baseline 與實作後對照
+- [ ] 記錄 internal-path token baseline
+- [ ] 記錄 migration slice 延遲 baseline
+- [ ] internal path overhead 未超過舊版基準的 20%，或已明確解釋偏差原因
 
 ## Self-Modification Safety Checks
 
 - [ ] risky slice 前已凍結 baseline commit / sample state
 - [ ] repair core loop 的改動有人工 review
 - [ ] self-upgrade 沒有超出 allowlist 範圍
+- [ ] half-upgraded state 無 crash
+- [ ] repo hygiene 未被新的 local artifact 再次污染
 
 ## Merge Decision
 

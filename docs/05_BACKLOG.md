@@ -3,6 +3,8 @@
 ## Now
 
 - [ ] 確認 `scripts/` 中哪些檔案是現役、哪些是歷史殘留
+- [ ] 先完成 `migration_safety_validator.py` 第一版 gatekeeper
+- [ ] 先做 validator CLI POC
 - [ ] 定義 `.muse_state` 最小 schema
 - [ ] 定義 `schema_version` 與向後相容策略
 - [ ] 決定 Commander v1 的 CLI 入口
@@ -21,6 +23,9 @@
 - [ ] 將分散 audit 腳本整理成單一 Audit engine
 - [ ] 在 Diag / Repair / Audit 加入 `needs_research` / `external_needed` hook
 - [ ] 建立 `skills_router.py` skeleton 與 routing table draft
+- [ ] 建立 skills router sample cases 與 scorecard 驗證表
+- [ ] 定義 token baseline / latency baseline 記錄方式
+- [ ] 確認 repo hygiene 不再被 local artifact 反覆污染
 
 ## Later
 
@@ -30,6 +35,7 @@
 - [ ] 導入 crystal lesson 與任務結果的對齊流程
 - [ ] 導入 Felo / external routing fallback policy
 - [ ] 導入 Context Hub 的 TOON prompt compression policy
+- [ ] 將 internal-only overhead 納入固定回歸追蹤
 
 ## Repo Hygiene
 
@@ -46,3 +52,5 @@
 - 如果未來由不同人實作，先以 contract 與 docs 對齊，不先爭論實作細節
 - 先 internal path，再 external path
 - JSON 永遠是權威 state；TOON 只限 prompt 視圖
+- 先驗證器，再合約，再路由，再整合
+- 先 POC validator，再擴到 phase gatekeeper
