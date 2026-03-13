@@ -40,6 +40,7 @@ Muse-Nexus/
 - [Script Ownership Map](./docs/07_SCRIPT_OWNERSHIP_MAP.md)
 - [Migration Runbook v1.5.2+](./docs/08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md)
 - [State Contract Draft](./docs/09_STATE_CONTRACT_DRAFT.md)
+- [Implementation Sequence](./docs/10_IMPLEMENTATION_SEQUENCE.md)
 
 ## Current Position
 

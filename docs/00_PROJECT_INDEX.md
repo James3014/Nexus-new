@@ -33,6 +33,9 @@
 9. [09_STATE_CONTRACT_DRAFT.md](./09_STATE_CONTRACT_DRAFT.md)
    `reflection / research_pack / skills_used / external_used / steps_history` 等新增欄位的 JSON contract 草案。
 
+10. [10_IMPLEMENTATION_SEQUENCE.md](./10_IMPLEMENTATION_SEQUENCE.md)
+    從文件進入實作時的順序表，說明哪些先做、哪些延後、哪些步驟需人工 review。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。
