@@ -19,6 +19,11 @@ JINA_KEY = os.environ.get("JINA_API_KEY", "MISSING_KEY")
 DB_PATH = os.path.expanduser("~/.openclaw/memory/lancedb-pro")
 PRIMARY_TABLE = os.environ.get("MUSE_SEARCH_TABLE", "agent_main")
 TABLE_FALLBACKS = ["agent_main", "memories_v2", "memories"]
+HOT_TABLE_NAME = os.environ.get("MUSE_HOT_TABLE", "agent_hot")
+HOT_DISTANCE_THRESHOLD = float(os.environ.get("MUSE_HOT_MAX_DISTANCE", "1.5"))
+ENABLE_CACHE = os.environ.get("MUSE_SEARCH_ENABLE_CACHE", "1") == "1"
+CACHE_TTL_SEC = int(os.environ.get("MUSE_SEARCH_CACHE_TTL_SEC", "180"))
+CACHE_PATH = Path.home() / ".muse_logs" / "brain_search_cache_v2.json"
 USAGE_LOG_PATH = Path.home() / ".muse_logs" / "brain_search_usage.jsonl"
 USAGE_LOG_ENABLED = os.environ.get("MUSE_SEARCH_LOG", "1") == "1"
 
@@ -108,6 +113,51 @@ def _append_usage_log(query, table_name, results, elapsed_ms, status):
         pass
 
 
+def _cache_key(query, limit):
+    return f"{_normalize(query)}|{limit}"
+
+
+def _load_cache():
+    if not ENABLE_CACHE or not CACHE_PATH.exists():
+        return {}
+    try:
+        with CACHE_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_cache(cache):
+    if not ENABLE_CACHE:
+        return
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with CACHE_PATH.open("w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _get_cached(query, limit):
+    cache = _load_cache()
+    item = cache.get(_cache_key(query, limit))
+    if not item:
+        return None
+    ts = item.get("ts", 0)
+    if not isinstance(ts, (int, float)):
+        return None
+    if time.time() - ts > CACHE_TTL_SEC:
+        return None
+    return item.get("results")
+
+
+def _put_cache(query, limit, results):
+    cache = _load_cache()
+    cache[_cache_key(query, limit)] = {"ts": time.time(), "results": results}
+    _save_cache(cache)
+
+
 def _rerank(results, query):
     q = _normalize(query)
     reranked = []
@@ -146,6 +196,18 @@ def _strip_heavy_fields(results):
 
 def search_brain(query, limit=3):
     started = time.perf_counter()
+    if ENABLE_CACHE:
+        cached = _get_cached(query, limit)
+        if cached is not None:
+            _append_usage_log(
+                query,
+                "cache",
+                cached,
+                (time.perf_counter() - started) * 1000,
+                "cache_hit",
+            )
+            return cached
+
     if not os.path.exists(DB_PATH):
         print(f"❌ 找不到資料庫：{DB_PATH}")
         _append_usage_log(query, "", [], (time.perf_counter() - started) * 1000, "db_missing")
@@ -158,13 +220,31 @@ def search_brain(query, limit=3):
         _append_usage_log(query, "", [], (time.perf_counter() - started) * 1000, "table_missing")
         return []
 
-    table = db.open_table(table_name)
     vector = get_embedding(query)
 
     if vector:
+        table_names = _table_names(db)
+        if HOT_TABLE_NAME in table_names:
+            hot_table = db.open_table(HOT_TABLE_NAME)
+            hot_results = hot_table.search(vector).limit(limit).to_list()
+            hot_results = _rerank(hot_results, query)
+            if hot_results and float(hot_results[0].get("_distance", 9999.0)) <= HOT_DISTANCE_THRESHOLD:
+                hot_cleaned = _strip_heavy_fields(hot_results)
+                _put_cache(query, limit, hot_cleaned)
+                _append_usage_log(
+                    query,
+                    HOT_TABLE_NAME,
+                    hot_cleaned,
+                    (time.perf_counter() - started) * 1000,
+                    "ok_hot",
+                )
+                return hot_cleaned
+
+        table = db.open_table(table_name)
         results = table.search(vector).limit(limit).to_list()
         results = _rerank(results, query)
         cleaned = _strip_heavy_fields(results)
+        _put_cache(query, limit, cleaned)
         _append_usage_log(
             query,
             table_name,
