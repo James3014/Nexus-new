@@ -47,6 +47,8 @@ Muse-Nexus/
 - [Skills Router Decision Spec](./docs/14_SKILLS_ROUTER_DECISION_SPEC.md)
 - [Migration Safety Validator Plan](./docs/15_MIGRATION_SAFETY_VALIDATOR_PLAN.md)
 - [Execution Timeline](./docs/16_EXECUTION_TIMELINE.md)
+- [Gemini + Codex Handoff Usage](./docs/17_GEMINI_CODEX_HANDOFF_USAGE.md)
+- [Refactor Progress Board](./docs/18_REFACTOR_PROGRESS_BOARD.md)
 
 ## Current Position
 

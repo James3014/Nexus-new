@@ -30,6 +30,11 @@ Agent 的任務不是「自由發揮重構」，而是：
 9. `docs/06_REPO_CLEANUP_PLAN.md`
 10. `docs/07_SCRIPT_OWNERSHIP_MAP.md`
 
+若要跑現版 Gemini + Codex 施工流程，再加讀：
+
+11. `docs/17_GEMINI_CODEX_HANDOFF_USAGE.md`
+12. `docs/18_REFACTOR_PROGRESS_BOARD.md`
+
 ## Non-Negotiable Rules
 
 1. JSON is the source of truth
@@ -191,3 +196,22 @@ Rules:
 把 implementation 交給 agent 時，最重要的不是 prompt 越長越好，而是：
 
 > 文件讀取順序、允許碰的檔案、禁止碰的範圍、以及回報格式要先鎖死。
+
+## Current Runtime Handoff (Gemini + Codex)
+
+現版可執行工作流：
+
+```text
+Gemini edits
+  -> codex-loop review
+    -> /tmp/codex_next_action.json
+      -> gemini_handoff prompt
+        -> Gemini next round
+```
+
+常用命令：
+
+```bash
+scripts/codex-loop.sh --mode audit <files...> --emit-gemini-handoff
+scripts/codex-loop.sh --handoff-only --emit-gemini-handoff --handoff-output /tmp/gemini_task.txt
+```

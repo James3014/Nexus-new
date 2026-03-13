@@ -54,6 +54,12 @@
 16. [16_EXECUTION_TIMELINE.md](./16_EXECUTION_TIMELINE.md)
     以 4 週節奏規劃 migration 的實作順序、責任分工、量化門檻與每週 exit criteria。
 
+17. [17_GEMINI_CODEX_HANDOFF_USAGE.md](./17_GEMINI_CODEX_HANDOFF_USAGE.md)
+    現版 Nexus 的可執行雙模型工作流手冊，包含 `codex-loop.sh` handoff 旗標與 Gemini prompt 交接方式。
+
+18. [18_REFACTOR_PROGRESS_BOARD.md](./18_REFACTOR_PROGRESS_BOARD.md)
+    改版完成/未完成項目的可視化盤點，供 agent 開工前快速對焦範圍與依賴關係。
+
 ## Working Rule
 
 - 先以文件澄清系統邊界與 contract，再做大規模重構。
