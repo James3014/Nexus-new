@@ -9,7 +9,6 @@ import os
 import json
 import glob
 import subprocess
-import tempfile
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -144,10 +143,11 @@ def fallback_reflection(history: List[Dict[str, Any]]) -> str:
 
 def run_reflection(prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
     try:
-        # 使用 shutil 動態尋找 codex 執行檔路徑以維持移植性
-        codex_bin = shutil.which("codex") or "codex"
+        # 使用 Gemini CLI（預設 gemini-3-flash-preview）
+        gemini_bin = shutil.which("gemini") or "gemini"
+        model = os.getenv("SUBCONSCIOUS_MODEL", "gemini-3-flash-preview")
         result = subprocess.run(
-            [codex_bin, "exec", "-"],
+            [gemini_bin, "-m", model, "-p", "請依輸入規則輸出，僅回傳 Markdown 條列。"],
             input=prompt,
             capture_output=True,
             text=True,
@@ -159,7 +159,7 @@ def run_reflection(prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
         bullet_lines = [ln.strip() for ln in raw.splitlines() if ln.strip().startswith("- ")]
         reflection = "\n".join(bullet_lines[:3]).strip()
         if result.returncode != 0 or not reflection:
-            print("⚠️ codex 反思不可用，改用離線 fallback 規則產出教訓。")
+            print("⚠️ gemini 反思不可用，改用離線 fallback 規則產出教訓。")
             return fallback_reflection(history)
         return reflection
     except Exception as e:
