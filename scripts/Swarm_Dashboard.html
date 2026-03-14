@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Muse-Swarm 上帝視角控制面板</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <!-- 引入外部 Markdown 渲染庫 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --bg: #030712;
+            --panel: rgba(17, 24, 39, 0.7);
+            --accent: #3B82F6;
+            --pm: #10B981;
+            --engineer: #8B5CF6;
+            --marketing: #F59E0B;
+            --designer: #EC4899;
+            --text: #F9FAFB;
+            --border: rgba(255, 255, 255, 0.08);
+            --glass: blur(16px);
+            --ok: #22C55E;
+            --error: #EF4444;
+        }
+        body { 
+            font-family: 'Outfit', sans-serif; 
+            background: radial-gradient(circle at top right, #1E1B4B, #030712); 
+            color: var(--text); 
+            margin: 0; 
+            padding: 2rem; 
+            overflow: hidden; 
+            height: 100vh;
+        }
+        .grid { 
+            display: grid; 
+            /* 初始比例：左 320px, 中彈性, 右 300px */
+            grid-template-columns: 320px 20px 1fr 20px 300px; 
+            gap: 0; 
+            height: calc(100vh - 4rem); 
+            transition: opacity 0.3s;
+        }
+        
+        .panel { 
+            background: var(--panel); 
+            backdrop-filter: var(--glass);
+            -webkit-backdrop-filter: var(--glass);
+            border: 1px solid var(--border); 
+            border-radius: 24px; 
+            padding: 1.5rem; 
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            min-width: 100px; /* 防止過度縮小 */
+        }
+
+        /* 拖拽條樣式 */
+        .resizer {
+            width: 20px;
+            cursor: col-resize;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.3s;
+            z-index: 100;
+        }
+        .resizer::after {
+            content: "";
+            width: 2px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            transition: 0.3s;
+        }
+        .resizer:hover::after, .resizer.dragging::after {
+            background: var(--accent);
+            height: 60px;
+            box-shadow: 0 0 10px var(--accent);
+        }
+
+        h2 { font-size: 1.1rem; margin-top: 0; display: flex; align-items: center; gap: 12px; color: #94A3B8; font-weight: 500; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+
+        .role-map { display: flex; flex-direction: column; gap: 0.75rem; }
+        .role-card { 
+            background: rgba(255, 255, 255, 0.03); 
+            border: 1px solid var(--border); 
+            padding: 1rem; 
+            border-radius: 16px; 
+            transition: 0.3s; 
+        }
+        .role-card.active { 
+            border-color: var(--accent); 
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), transparent);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+        }
+        .role-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; }
+        .role-status { font-size: 0.75rem; color: #64748B; }
+
+        .event-stream { flex: 1; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; padding-right: 10px; }
+        .event { margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,0.03); }
+        .event-time { color: var(--accent); font-weight: 700; font-size: 0.75rem; }
+        
+        #preview-panel {
+            position: fixed;
+            right: -100%;
+            top: 2rem;
+            bottom: 2rem;
+            width: 600px;
+            background: rgba(17, 24, 39, 0.98);
+            backdrop-filter: blur(30px);
+            border-left: 1px solid var(--accent);
+            border-radius: 24px 0 0 24px;
+            z-index: 2000;
+            padding: 2.5rem;
+            box-shadow: -20px 0 60px rgba(0,0,0,0.8);
+            transition: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+        }
+        #preview-panel.open { right: 0; }
+        .preview-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        .close-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: white; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .close-btn:hover { background: var(--error); border-color: var(--error); }
+        
+        /* Markdown 渲染樣式 */
+        .preview-content { 
+            flex: 1; 
+            overflow-y: auto; 
+            color: #E2E8F0; 
+            line-height: 1.8; 
+            font-size: 1rem; 
+            padding: 25px; 
+            background: rgba(0,0,0,0.3); 
+            border-radius: 16px;
+            font-family: 'Inter', sans-serif;
+        }
+        .preview-content h1, .preview-content h2 { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-top: 1.5rem; }
+        .preview-content h3 { color: var(--ok); }
+        .preview-content code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.9em; }
+        .preview-content pre { background: rgba(0,0,0,0.4); padding: 15px; border-radius: 12px; overflow-x: auto; border: 1px solid var(--border); margin: 15px 0; }
+
+        .commander-input { margin-top: 1rem; }
+        textarea { 
+            width: 100%; height: 110px; 
+            background: rgba(0,0,0,0.5); 
+            border: 1px solid var(--border); 
+            border-radius: 16px; 
+            color: white; padding: 1rem; resize: none; 
+            font-family: inherit; font-size: 0.9rem;
+            transition: 0.3s;
+        }
+        textarea:focus { border-color: var(--accent); outline: none; }
+        .exec-btn { margin-top: 10px; width: 100%; padding: 14px; background: var(--accent); border: none; border-radius: 16px; color: white; font-weight: 700; cursor: pointer; transition: 0.2s; }
+        .exec-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(59, 130, 246, 0.4); }
+
+        .stat-item { padding: 12px; border-bottom: 1px solid var(--border); }
+        .stat-val { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+
+        .quick-tasks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 15px; margin-top: 10px; }
+        .task-btn { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); color: #94A3B8; padding: 12px; border-radius: 14px; font-size: 0.78rem; cursor: pointer; transition: 0.3s; text-align: left; }
+        .task-btn:hover { background: rgba(59, 130, 246, 0.1); border-color: var(--accent); color: white; }
+        
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+        /* 禁止選中文字，防止拖拽時造成乾擾 */
+        .no-select { user-select: none; -webkit-user-select: none; }
+    </style>
+</head>
+<body>
+    <div id="preview-panel">
+        <div class="preview-header">
+            <h2 id="preview-title" style="margin:0; color:var(--ok)">📄 成果詳細閱覽</h2>
+            <button class="close-btn" onclick="closePreview()">✕</button>
+        </div>
+        <div class="preview-content" id="preview-body">正在調取大腦結晶內容...</div>
+    </div>
+
+    <div class="grid" id="main-grid">
+        <!-- 角色狀態 -->
+        <div class="panel">
+            <h2>組織動態 (Roles)</h2>
+            <div class="role-map" id="role-map-container"></div>
+        </div>
+
+        <!-- 拖拽條 1 -->
+        <div class="resizer" id="resizer-1"></div>
+
+        <!-- 事件日誌 -->
+        <div class="panel">
+            <h2 style="justify-content: space-between;">
+                <span>🌀 Swarm Pulse</span>
+                <span class="status-dot"></span>
+            </h2>
+            <div class="event-stream" id="event-stream-container"></div>
+            <div class="commander-input">
+                <div class="quick-tasks">
+                    <button class="task-btn" onclick="setTemplate('彙整 SKIDIY 會議結晶：讀取最新 01_Projects/SKIDIY/Meetings/ 內容並更新全量待辦追蹤表')">📝 彙整會議結晶</button>
+                    <button class="task-btn" onclick="setTemplate('SEO 自動化：根據 SKIDIY 關鍵字清單，批量產出 10 篇 FAQ 頁面草稿')">📈 SEO 批量產出</button>
+                    <button class="task-btn" onclick="setTemplate('評量系統更新：分析學生評量 JSON 資料，產出視覺化學習歷程報告')">🎓 更新學生評量</button>
+                    <button class="task-btn" onclick="setTemplate('B2B 開發：撰寫給日本雪場管理方的合作開發開發 Cold Mail (Apple 風格)')">💌 B2B 合作信</button>
+                </div>
+                <textarea id="cmd-input" placeholder="輸入上帝指令..."></textarea>
+                <button class="exec-btn" id="exec-btn" onclick="executeCommand()">發送指令 (Execute)</button>
+            </div>
+        </div>
+
+        <!-- 拖拽條 2 -->
+        <div class="resizer" id="resizer-2"></div>
+
+        <!-- 統計與遙測 -->
+        <div class="panel">
+            <h2>遙測數據 (Telemetry)</h2>
+            <div id="telemetry-container"></div>
+            <div style="margin-top: auto; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 16px; font-size: 0.8rem; color: #64748B;">
+                💡 <b>上帝提醒</b><br>成果報告已可直接在網頁看。
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 拖拽縮放邏輯 ---
+        const grid = document.getElementById('main-grid');
+        const resizer1 = document.getElementById('resizer-1');
+        const resizer2 = document.getElementById('resizer-2');
+        let isDragging = false;
+        let currentResizer = null;
+
+        resizer1.addEventListener('mousedown', (e) => startDragging(e, 1));
+        resizer2.addEventListener('mousedown', (e) => startDragging(e, 2));
+
+        function startDragging(e, index) {
+            isDragging = true;
+            currentResizer = index;
+            document.body.classList.add('no-select');
+            document.getElementById(`resizer-${index}`).classList.add('dragging');
+            window.addEventListener('mousemove', drag);
+            window.addEventListener('mouseup', stopDragging);
+        }
+
+        function drag(e) {
+            if (!isDragging) return;
+            const containerWidth = grid.offsetWidth;
+            const resizerWidth = 20;
+            const mouseX = e.clientX - grid.getBoundingClientRect().left;
+
+            // 獲取當前渲染的寬度
+            let styles = window.getComputedStyle(grid);
+            let columns = styles.getPropertyValue('grid-template-columns').split(' ');
+            
+            let w1 = parseFloat(columns[0]);
+            let w3 = parseFloat(columns[2]);
+            let w5 = parseFloat(columns[4]);
+
+            if (currentResizer === 1) {
+                // 調整左側寬度
+                let newW1 = Math.max(150, Math.min(mouseX - resizerWidth/2, containerWidth - 400));
+                grid.style.gridTemplateColumns = `${newW1}px ${resizerWidth}px 1fr ${resizerWidth}px ${w5}px`;
+            } else if (currentResizer === 2) {
+                // 調整右側寬度
+                let newW5 = Math.max(150, Math.min(containerWidth - mouseX - resizerWidth/2, containerWidth - 400));
+                grid.style.gridTemplateColumns = `${w1}px ${resizerWidth}px 1fr ${resizerWidth}px ${newW5}px`;
+            }
+        }
+
+        function stopDragging() {
+            isDragging = false;
+            document.body.classList.remove('no-select');
+            if (currentResizer) {
+                document.getElementById(`resizer-${currentResizer}`).classList.remove('dragging');
+            }
+            window.removeEventListener('mousemove', drag);
+            window.removeEventListener('mouseup', stopDragging);
+        }
+
+        // --- 業務邏輯 ---
+        async function updateDashboard() {
+            try {
+                const res = await fetch('/api/swarm/status');
+                const state = await res.json();
+                
+                const roles = [
+                    { id: 'CEO', name: '👑 CEO (指揮官)', color: 'white' },
+                    { id: 'PM', name: '📋 PM (專案經理)', color: '#10B981' },
+                    { id: 'Designer', name: '🎨 Designer', color: '#EC4899' },
+                    { id: 'Engineer', name: '🛠️ Engineer', color: '#8B5CF6' },
+                    { id: 'Marketing', name: '📢 Marketing', color: '#F59E0B' }
+                ];
+                document.getElementById('role-map-container').innerHTML = roles.map(r => `
+                    <div class="role-card ${state.active_role === r.id ? 'active' : ''}">
+                        <div class="role-name" style="color:${r.color}">${r.name}</div>
+                        <div class="role-status">${state.active_role === r.id ? '正在執行上帝任務' : '狀態：待命中'}</div>
+                    </div>
+                `).join('');
+
+                const evRes = await fetch('/api/swarm/events');
+                const evData = await evRes.json();
+                const evContainer = document.getElementById('event-stream-container');
+                
+                evContainer.innerHTML = evData.slice().reverse().map(ev => {
+                    const timeStr = ev.timestamp?.includes('T') ? ev.timestamp.split('T')[1] : ev.timestamp;
+                    const isThought = ev.type === 'agent_thought' || ev.from_role === ev.to_role;
+                    const resultPreview = ev.metadata?.preview_content ? `
+                        <div style="margin-top: 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--ok); border-radius: 12px; padding: 15px; font-size: 0.85rem; color: #E5E7EB; line-height: 1.6;">
+                            <div style="color: var(--ok); font-weight: bold; margin-bottom: 10px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items:center;">
+                                <span>📄 大腦結晶</span>
+                                <button onclick="openFullResult('${ev.metadata.filename}')" style="background:var(--ok); color:white; border:none; padding:5px 12px; border-radius:8px; font-size:0.75rem; cursor:pointer; width:auto; margin:0; font-weight:700;">網頁看全文</button>
+                            </div>
+                            <div style="white-space: pre-wrap; opacity: 0.9;">${ev.metadata.preview_content}</div>
+                        </div>
+                    ` : '';
+                    
+                    return `
+                        <div class="event">
+                            <span class="event-time">[${timeStr}]</span> 
+                            <span style="color: ${isThought ? '#9CA3AF' : 'var(--pm)'}; font-weight: 600;">${isThought ? '💡 Thought:' : '🚀 Handoff:'}</span> 
+                            <div style="color: #D1D5DB; margin-top: 4px; line-height: 1.5;">${ev.description}</div>
+                            ${resultPreview}
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('telemetry-container').innerHTML = `
+                    <div class="stat-item">
+                        <div class="stat-val">100%</div>
+                        <div style="font-size:0.82rem; color:#64748B">核心穩定度</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-val">${state.pending_tasks?.length || 0}</div>
+                        <div style="font-size:0.82rem; color:#64748B">當前處理任務</div>
+                    </div>
+                `;
+            } catch (e) { console.error("Update failed", e); }
+        }
+
+        async function openFullResult(filename) {
+            const panel = document.getElementById('preview-panel');
+            const body = document.getElementById('preview-body');
+            const title = document.getElementById('preview-title');
+            panel.classList.add('open');
+            body.innerText = "調取知識庫結晶中...";
+            try {
+                const res = await fetch(`/api/swarm/output/${filename}`);
+                const data = await res.json();
+                if (data.success) {
+                    title.innerText = `📄 ${filename}`;
+                    body.innerHTML = marked.parse(data.content);
+                } else {
+                    body.innerHTML = `<span style="color:var(--error)">無法讀取內容</span>`;
+                }
+            } catch (e) { body.innerHTML = `<span style="color:var(--error)">連線失敗</span>`; }
+        }
+
+        function closePreview() {
+            document.getElementById('preview-panel').classList.remove('open');
+        }
+
+        function setTemplate(text) {
+            document.getElementById('cmd-input').value = text;
+        }
+
+        async function executeCommand() {
+            const btn = document.getElementById('exec-btn');
+            const val = document.getElementById('cmd-input').value;
+            if (!val) return;
+            btn.disabled = true;
+            btn.innerText = "發送指令中...";
+            try {
+                await fetch('/api/swarm/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: val })
+                });
+                document.getElementById('cmd-input').value = '';
+                setTimeout(updateDashboard, 500);
+            } catch (e) { alert("傳送失敗"); }
+            finally {
+                btn.disabled = false;
+                btn.innerText = "發送指令 (Execute)";
+            }
+        }
+
+        setInterval(updateDashboard, 3000);
+        updateDashboard();
+    </script>
+</body>
+</html>

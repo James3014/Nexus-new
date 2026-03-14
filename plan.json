@@ -1,6 +1,6 @@
 {
-    "plan_id": "nexus-pilot-1773474978",
-    "goal": "refactor django session to redis with tests",
+    "plan_id": "nexus-pilot-1773492842",
+    "goal": "\u8a9e\u97f3\u6717\u8b80 Jaden \u7e6a\u672c (Phase A)",
     "steps": [
         {
             "step_id": 1,

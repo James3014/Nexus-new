@@ -12,6 +12,8 @@ import asyncio
 import os
 import sys
 import re
+import json
+import time
 from collections import defaultdict
 from pathlib import Path
 from pydantic import BaseModel
@@ -43,14 +45,70 @@ class TestJobRequest(BaseModel):
     command: str
 
 
+class CommandRequest(BaseModel):
+    command: str
+
+
 # --- API Routes ---
 
 
-@app.get("/api/cron")
-def get_cron_jobs():
-    if not CronManager:
-        return {"error": "CronManager not found."}
-    return CronManager.get_all_jobs()
+@app.get("/swarm", response_class=HTMLResponse)
+def get_swarm_dashboard():
+    dashboard_path = TARGET_DIR / "Swarm_Dashboard.html"
+    if dashboard_path.exists():
+        return dashboard_path.read_text(encoding="utf-8")
+    return "<h1>Error: Swarm Dashboard file not found</h1>"
+
+
+@app.get("/api/swarm/status")
+def get_swarm_status():
+    state_path = Path("/Users/jameschen/Downloads/obsidian/知識庫/01_Operations/SWARM_STATE.json")
+    if state_path.exists():
+        with open(state_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"active_role": "CEO", "pending_tasks": []}
+
+
+@app.get("/api/swarm/events")
+def get_swarm_events():
+    event_path = Path("/Users/jameschen/Downloads/obsidian/知識庫/01_Operations/EVENT_STORE.jsonl")
+    events = []
+    if event_path.exists():
+        with open(event_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        ev = json.loads(line)
+                        # 💡 內容直連優化：如果具備成果路徑，嘗試讀取內容預覽
+                        if ev.get("metadata") and ev["metadata"].get("result_url"):
+                            res_path = Path(ev["metadata"]["result_url"])
+                            if res_path.exists():
+                                # 只讀取前 500 字作為預覽
+                                ev["metadata"]["preview_content"] = res_path.read_text(encoding="utf-8")[:500] + "..."
+                        events.append(ev)
+                    except:
+                        continue
+    return events[-50:]
+
+
+@app.post("/api/swarm/execute")
+def execute_swarm_command(req: CommandRequest):
+    try:
+        import subprocess
+        cmd = [sys.executable, str(TARGET_DIR / "swarm_orchestrator.py"), "CEO", "PM", req.command]
+        subprocess.Popen(cmd)
+        return {"success": True, "message": f"Command routed to PM: {req.command}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/swarm/output/{filename}")
+def get_swarm_output(filename: str):
+    output_dir = Path("/Users/jameschen/Downloads/obsidian/知識庫/01_Operations/Swarm_Outputs")
+    file_path = output_dir / filename
+    if file_path.exists() and str(file_path).startswith(str(output_dir)):
+        return {"success": True, "content": file_path.read_text(encoding="utf-8")}
+    return {"success": False, "error": "File not found"}
 
 
 @app.post("/api/cron/toggle")
