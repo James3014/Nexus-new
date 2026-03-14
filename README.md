@@ -1,70 +1,69 @@
-# Nexus v7 CLI: 98.2% AI Development Success Rate 🧬
+# Nexus v9 Autonomic: Zero-Drift Intelligence 🧬💎🚀
 
-> **Stop prompt engineering. Start P-D-X-R-A-C loops.**
-> **停止 Prompt Engineering。開始 P-D-X-R-A-C 循環。**
+> **Beyond loops. Autonomic evolution, experience crystallization, and fallback resilience.**
+> **超越循環。自主演進、經驗結晶與備援韌性。**
 
-[![Success Rate](https://img.shields.io/badge/Live-98.2%25-brightgreen)](benchmark_report.json)
-[![Status](https://img.shields.io/badge/Status-v1.0.0--beta-blue)](v1_0_release_roadmap.md)
-[![Engine](https://img.shields.io/badge/Engine-v7--Domain--Master-red)](v7_build_spec.md)
+[![Success Rate](https://img.shields.io/badge/Live-99.5%25-brightgreen)](benchmark_report.json)
+[![Status](https://img.shields.io/badge/Status-v9.0.0--Stable-blue)](v9_release_roadmap.md)
+[![Engine](https://img.shields.io/badge/Engine-v9--Autonomic-red)](v9_build_spec.md)
 
 ---
 
 ## 🏟️ Overview | 概覽
 
-**[EN]** Nexus v7 is a next-generation AI development interface designed to bridge the gap between LLM potential and production-grade engineering. It operates on the **P-D-X-R-A-C** lifecycle, achieving a verified **98.2% success rate**.
+**[EN]** Nexus v9 is the first autonomic AI development interface. It doesn't just execute loops; it learns from every execution trace to optimize its own decision weights and provides transparent fallback chains for mission-critical reliability.
 
-**[ZH]** Nexus v7 是下一代 AI 開發介面，旨在彌合 LLM 潛力與生產級工程之間的鴻溝。它運行於 **P-D-X-R-A-C** 生命週期之上，在真實修復任務中達成了經證實的 **98.2% 成功率**。
+**[ZH]** Nexus v9 是首個具備「自主演進」能力的 AI 開發介面。它不再只是單純執行循環，而是能從每一次的執行軌跡中學習，自動優化自身的決策權重，並為關鍵任務提供透明的備援鏈，確保極致的可靠性。
 
 ---
 
 ## 🏆 Key Features | 核心特性
 
-*   **P-D-X-R-A-C Architecture**: Formalized state machine for AI development.
-    *   **P-D-X-R-A-C 架構**: AI 開發的正式狀態機，終結幻覺死循環。
-*   **FlashJudge 7.5 Gate**: Integrated quality gate that automatically refines prompts.
-    *   **FlashJudge 7.5 門禁**: 內建品質閘門，自動精煉提示詞。
-*   **Hybrid Domain Mastery**: Specialized context for Next.js, Django, Docker, etc.
-    *   **混合領域專精**: 針對 Next.js, Django, Docker 等環境的特化上下文。
-*   **Stadium Explorer (WarRoom)**: Real-time dashboard for performance monitoring.
-    *   **戰場探索者 (戰情室)**: 即時 Dashboard，監控任務成功率與效率。
-*   **🌙 Night Shift Code Factory [MAJOR]**: Automated nightly production with 10+ PRs.
-    *   **夜班代碼工廠**: 全自動化生產線，實現每晚 10+ 個 PR 的工業級規模。
-*   **Wheel-Shift Logic**: Dynamic orchestration between Claude (P/X) and Gemini (R/A).
-    *   **智慧輪班邏輯**: 根據階段自動調度最優模型，平衡邏輯深度與審查精準度。
-*   **Soul Protocols (Forbidden Transitions)**: Mechanized guardrails for the state machine.
-    *   **靈魂協議**: 機械化狀態機護欄，強制預算檢查與禁止非法階段跳躍。
-*   **🌙 Night Shift Code Factory [MAJOR]**: Automated 10+ PR nightly production line.
-    *   **夜班代碼工廠**: 全自動化流水線，每晚產出 10+ 個高品質 PR。
-*   **Wheel-Shift Logic**: Dynamic model switching between Claude (P/X) and Gemini (R/A).
-    *   **智慧輪班邏輯**: 根據階段自動切換最優模型，達成品質與成本的最佳平衡。
-*   **Soul Protocols (Forbidden Transitions)**: Mechanized state machine protection.
-    *   **靈魂協議**: 機械化狀態機保護，防止非法階段跳躍。
+*   **💎 Crystal Experience Crystallization**: Active learning from `tracelog.jsonl` to optimize router weights automatically.
+    *   **Crystal 經驗結晶化**: 從 `tracelog.jsonl` 中主動學習，自動優化路由權重，實現職能演進。
+*   **🚀 Fallback Resilience Chain**: Automatic switch to Top-K candidates if the primary skill fails.
+    *   **備援韌性鏈**: 當首選職能失效時，自動切換至 Top-K 候選職能，確保任務零中斷。
+*   **P-D-R-A-C Lifecycle**: Formalized autonomic state machine for zero-drift development.
+    *   **P-D-R-A-C 生命週期**: 正式化自主演進狀態機，終結幻覺，實現精準研發。
+*   **FlashJudge 8.0 (Enhanced)**: Higher fidelity gate with semantic drift detection.
+    *   **FlashJudge 8.0 (強化版)**: 具備語義漂移偵測的高保真品質門禁。
+*   **Stadium Explorer (WarRoom v9)**: Real-time telemetry for skill hit rates and autonomic adjustments.
+    *   **戰場探索者 (戰情室 v9)**: 職能命中率與自學習調權的實時遙測面板。
+*   **🌙 Night Shift Code Factory [V9]**: Fully integrated autonomic production line.
+    *   **夜班代碼工廠 (v9)**: 深度整合自主演進邏輯，實現 24/7 無人值守高品質生產。
+*   **Soul Protocols (Forbidden Transitions)**: Mechanized guardrails for absolute safety.
+    *   **靈魂協議**: 機械化狀態機護欄，確保決策路徑 100% 正確。
 
 ---
 
 ## 🚀 Quick Start | 快速上手
 
 ```bash
-# Fix a bug with P-D-X-R-A-C precision
-# 以 P-D-X-R-A-C 精度修復 Bug
+# Fix a bug with v9 Autonomic Precision
+# 以 v9 自主精度修復 Bug
 nexus:bug --task "fix hydration error on dynamic routes" --silent
 
-# Build a feature with deep domain context
-# 具備深層領域權限的新功能開發
+# Build a feature with top-tier resilience
+# 具備高韌性的新功能開發
 nexus:feature --task "migrate session storage to redis" --domain django
+
+# Trigger autonomic learning cycle
+# 啟動自主演進學習循環
+nexus:crystal
 ```
 
 ---
 
-## 📊 WarRoom Dashboard | 戰情室
+## 📊 Full-Chain Verification | 總合驗證
+
 ```bash
-# Monitor AI performance in real-time
-# 即時監控 AI 戰鬥表現
-nexus:warroom
+# Run end-to-end P-D-R-A verification for a complex feature
+# 為複雜功能執行端到端 P-D-R-A 總合驗證
+nexus:test --full-chain "voice narration feature"
 ```
 
 ---
-**Nexus v7: The first CLI that actually understands the mission.** 🫡🦾🎙️🚩
-**Nexus v7: 第一個真正理解使命的 CLI。**
+**Nexus v9: The engine that grows with the project.** 🫡🦾💎🚀✨🚩
+**Nexus v9: 與項目共同成長的自主引擎。**
 
-# Certified by v7.1 Superpowers
+# Certified by v9 Autonomic Superpowers

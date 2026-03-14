@@ -1,245 +1,65 @@
-# Muse-Nexus Skills Router Decision Spec
+# Nexus v9 Skills Router Decision Spec (Autonomic Upgrade)
 
 ## Purpose
 
-這份文件把 `skills_router.py` 的決策規則先定成可驗證的 prototype，避免第一版 router 只是主觀 if/else。
+這份文件定義了 Nexus v9 `skills_router.py` 的自主決策規格。與 v7 不同，v9 不再僅依賴靜態規則，而是導入了**動態權重演進**與**備援韌性鏈**。
 
-目標不是一開始追求完美模型，而是：
+目標是：
 
-- 先有一致規則
-- 先能解釋為什麼某 skill 被選上
-- 先能人工 review decision 是否合理
+- **自學習 (Autonomic)**: 透過 `Crystal` 分析器從歷史軌跡中自動優化權重。
+- **高可用 (High Availability)**: 支援 Top-K 候選路由，實現職能失效時的自動切換。
+- **可解釋性 (Explainability)**: 雖然有權重調整，但決策過程依然透明可讀。
 
 ## Design Principle
 
-第一版不做黑箱權重模型，先做：
+Nexus v9 採用「分數加權 + 環境感知」機制：
 
-- decision tree
-- 簡單 scorecard
-- 可輸出 decision reason
+- **Top-K Routing**: 不再只選「最強」，而是選出「一群精英」，為 Fallback 提供冗餘。
+- **Crystal Weighting**: 從 `autonomic_weights.json` 載入基準分與動態修正分。
+- **Context Scoring**: 根據 `task_id`、`files` 等環境訊號即時加分。
 
-Priority:
-
-- 先做可驗證的計分原型
-- `phase_weight` 必須是最高優先訊號
-
-## Inputs
-
-最低限度輸入：
-
-- `phase`
-- `language`
-- `task_scale`
-- `is_new_feature`
-- `is_large_refactor`
-- `stacktrace_pattern`
-- `has_external_dependency_signal`
-- `failure_signature`
-
-Optional inputs:
-
-- `has_user_story`
-- `has_prd`
-- `needs_sequence_reasoning`
-- `existing_test_gap`
-- `framework_name`
-
-## First-Cut Decision Tree
-
-### Phase P
-
-If:
-
-- input is fuzzy -> prefer:
-  - `aibdd.spec.user-story.gen`
-  - `aibdd.spec.prd.detail-req.gen`
-
-If:
-
-- cross-module interaction is high -> add:
-  - `aibdd.spec.diagram.sequence-diagram.gen`
-
-If:
-
-- tech stack uncertainty is high -> add:
-  - `aibdd.spec.tech-stack.gen`
-
-### Phase D
-
-If:
-
-- stacktrace scope is large -> add:
-  - `codebase_investigator`
-
-If:
-
-- hotspot logic is hard to read -> add:
-  - `common.gen.pseudo-code`
-
-### Phase R
-
-If:
-
-- language is python and task is new feature -> consider:
-  - `aibdd.auto.python.e2e.red/green`
-  - `aibdd.auto.python.unittest.pytest-bdd.feature`
-
-If:
-
-- task is large refactor -> consider:
-  - `aibdd.auto.python.e2e.refactor`
-  - `aibdd.auto.python.code-quality`
-
-If:
-
-- repeated quality issues after patch -> consider:
-  - `aibdd.auto.python.code-quality`
-
-### Phase A
-
-If:
-
-- language is python and static quality signal matters -> consider:
-  - `aibdd.auto.python.code-quality`
-
-## Scorecard Prototype
-
-第一版可以給每個 skill 一個簡單分數：
+## Core Scoring Logic
 
 ```text
-total_score =
-  phase_weight
-  + language_match
-  + task_scale_weight
-  + new_feature_weight
-  + refactor_weight
-  + stacktrace_match_weight
-  + external_dependency_weight
+total_score = 
+  base_weight 
+  + skill_adjustment_weight (from Crystal learning)
+  + trigger_match_weight (high signal)
+  + environment_bonus (context match)
 ```
 
-Example scoring range:
+## Selection Rule (Top-K Fallback)
 
-- strong match: `+3`
-- medium match: `+2`
-- weak match: `+1`
-- no match: `0`
-- explicit mismatch: `-3`
+1.  **Filtering**: 只過濾出符合當前 `phase` (P/D/R/A/C) 的技能。
+2.  **Scoring**: 對候選技能進行綜合計分。
+3.  **Top-K Sort**: 依分數高低排序，回傳前 K 個 (預設 K=3) 職能。
+4.  **Sequential Execution**: 在 CLI 執行層，若 Top-1 失敗，自動嘗試 Top-2。
 
-Selection rule:
+## Autonomic Learning (Crystal Analyzer)
 
-- `score >= threshold` 才入選
-- 同時輸出 `reasons[]`
+v9 正式打破了「不使用歷史學習」的限制：
 
-## Example Output Shape
-
-```json
-[
-  {
-    "skill": "codebase_investigator",
-    "phase": "D",
-    "score": 7,
-    "threshold": 5,
-    "reasons": [
-      "stacktrace_scope_large",
-      "hotspot_count_high"
-    ],
-    "output_target": ".muse_state/diag_context_pack.json#hotspots"
-  }
-]
-```
+- **Success Signal**: 權重向上修正 (`success_rate` 越高，加權越大)。
+- **Failure Signal**: 權重下調或標記風險。
+- **Crystallization**: 透過 `nexus:crystal` 將反思結果固化至 `autonomic_weights.json`。
 
 ## Review Rule
 
-第一版 router 每次都應輸出：
+Router 依然保持高度透明：
 
-- selected skills
-- rejected candidates with key reason
-- score breakdown
+- **Decision Trace**: 在 `SkillsRouter.route_candidates` 中紀錄得分明細。
+- **WarRoom Telemetry**: 實時追蹤各職能的「選中率」與「成功率」。
 
-目的：
+## Validation Case Table (v9)
 
-- 讓人工 reviewer 能快速看出 decision 是否合理
-
-## First-Cut Constraints
-
-- 第一版先只做 selection，不做 skill execution
-- 不追求自動最佳化
-- 不使用歷史學習自動調權重
-- decision logic 需可手動閱讀與修改
-
-## Validation Approach
-
-應準備一組小型 case table，驗證 router decision：
-
-- fuzzy feature request
-- python large refactor
-- large stacktrace diagnosis
-- external API uncertainty
-- simple internal bugfix
-
-每個 case 都應有人類期望答案，與 router output 對照。
-
-## Prototype Evaluation Plan
-
-第一版 router 不應只靠主觀觀察，應做最小樣本驗證。
-
-Suggested sample set:
-
-- P phase fuzzy request
-- D phase large stacktrace
-- R phase python new feature
-- R phase large refactor
-- A phase static quality review
-
-For each sample, record:
-
-- expected selected skills
-- actual selected skills
-- rejected candidates
-- score breakdown
-
-Suggested metrics:
-
-- top-1 correctness
-- top-k coverage
-- false positive rate
-- false negative rate
-
-Prototype target:
-
-- 5 個樣本任務的 `top-1 correctness > 80%`
-
-## Early Weight Guidance
-
-第一版可先用保守權重，後續再調。
-
-Example priority:
-
-- `phase_weight`: highest priority
-- `language_match`: high
-- `stacktrace_match_weight`: high
-- `task_scale_weight`: medium
-- `new_feature_weight`: medium
-- `refactor_weight`: medium
-- `external_dependency_weight`: medium
-
-Suggested calibration note:
-
-- 對 D phase 而言，`stacktrace_match_weight` 可優先視為高信號
-- 若未來有相似度分數，可先以 `> 0.8` 當 strong match prototype threshold
-
-## Decision Review Rule
-
-若 router 與人工期望偏差過大，先調 decision tree，再調權重。
-
-優先順序：
-
-1. 修 decision rule
-2. 修 threshold
-3. 最後才修細部權重
+| Case | Expected Top-1 | Fallback Candidate | Expected Behavior |
+| :--- | :--- | :--- | :--- |
+| Fuzzy Request | `nexus-planner-expert` | `writing-plans` | 自動產出 PRD 計畫 |
+| UI/UX Polish | `nexus-design-polish` | `openui-ui-gen` | 若美學拋光失敗，轉向生成新 UI |
+| Complex Debug | `nexus-debug-expert` | `codebase_investigator` | RCA 失敗則進行代碼掃描 |
 
 ## Practical Conclusion
 
-Skills Router 第一版的目標不是「聰明」，而是：
+Nexus v9 Skills Router 的目標是實現：
 
-> 穩定、可解釋、可被人工校準。
+> **自主導航、失敗自癒、經驗結晶。**

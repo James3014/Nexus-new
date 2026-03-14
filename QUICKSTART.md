@@ -1,78 +1,76 @@
-# Nexus v7 Quick Start Guide | 快速上手指南 ⚡
+# Nexus v9 Autonomic: Quick Start Guide | 快速上手指南 ⚡
 
 ---
 
 ## 1. Installation | 安裝
 
-**[EN]** Nexus v7 requires Python 3.9+ and valid LLM API keys.
-**[ZH]** Nexus v7 需要 Python 3.9+ 以及有效的 LLM API 金鑰。
+**[EN]** Nexus v9 requires Python 3.9+ and valid LLM API keys.
+**[ZH]** Nexus v9 需要 Python 3.9+ 以及有效的 LLM API 金鑰。
 
 ```bash
 # Clone the repository | 複製儲存庫
-git clone https://github.com/nexus-ai/nexus-v7.git
-cd nexus-v7
+git clone https://github.com/nexus-ai/nexus-v9.git
+cd nexus-v9
 
 # Install dependencies | 安裝依賴
 pip install -r requirements.txt
 
 # Set up environment | 設定環境變數
-export JINA_API_KEY="your_jina_key"
 export OPENAI_API_KEY="your_api_key"
+export GOOGLE_API_KEY="your_gemini_key"
 ```
 
 ---
 
-## 2. First Bug Fix | 第一次 Bug 修復
+## 2. Autonomic Intelligence | 自主智慧
 
-**[EN]** Test Nexus on a real-world scenario to see the P-D-X-R-A-C loop.
-**[ZH]** 在真實場景中測試 Nexus，觀察 P-D-X-R-A-C 循環。
+**[EN]** Nexus v9 introduces the **Crystal Analyzer**. After running some tasks, trigger a learning cycle to optimize routing weights.
+**[ZH]** Nexus v9 引入了 **Crystal 分析器**。在執行一些任務後，啟動學習循環以優化路由權重。
 
 ```bash
-# Run with silent mode for clean output
-# 使用靜音模式以獲得乾淨的輸出
-python3 scripts/nexus_cli.py --silent nexus:bug --task "fix cors error on api calls"
+# Analyze tracelogs and crystallize experience
+# 分析執行日誌並結晶經驗
+python3 scripts/nexus_cli.py nexus:crystal
 ```
 
 ---
 
-## 3. Advanced Features | 進階功能
+## 3. Full-Chain Validation | 總合驗證
 
-**[EN]** For complex planning, use feature mode with domain adaptation.
-**[ZH]** 對於複雜計畫，使用具備領域自適應的功能模式。
+**[EN]** Use `--full-chain` to run a complete P-D-R-A cycle with integrated fallback support.
+**[ZH]** 使用 `--full-chain` 執行完整的 P-D-R-A 循環，內建備援支援。
 
 ```bash
-# Plan a migration | 規劃遷移
-python3 scripts/nexus_cli.py --silent nexus:feature --task "migrate session to redis" --domain django
+# Verify a feature end-to-end with fallback protection
+# 具備備援保護的端到端功能驗證
+python3 scripts/nexus_cli.py nexus:test --full-chain "voice narration UI"
 ```
 
 ---
 
-## 4. WarRoom Dashboard | 戰情室
+## 4. Skills & Resilience | 職能與韌性 🧠🚀
 
-**[EN]** Monitor your AI's battle stats in real-time.
-**[ZH]** 即時監控您的 AI 戰意與數據。
-
-### 3. Smart Navigation | 智慧導航 (Skills Router) 🧠
-**[EN]** Nexus v7 automatically selects the best "Skill" (plugin) based on your task description.
-**[ZH]** Nexus v7 會根據您的任務描述自動選配最佳的「技能 (Skill)」插件。
+**[EN]** Nexus v9 automatically routes to the best skill and provides **Fallback Resilience** if the primary skill fails.
+**[ZH]** Nexus v9 自動路由至最佳職能，並在首選職能失效時提供**備援韌性**。
 
 ```bash
-# Example: Fuzzy request triggers user-story generation
-# 範例：模糊需求自動觸發用戶故事生成
-python3 scripts/nexus_cli.py nexus:bug --task "fuzzy request: login page is blank" --dry-run
+# Example: Fallback Chain in action
+# 範例：備援鏈運作中
+python3 scripts/nexus_cli.py nexus:feature --task "optimize database indexes" --bypass-cb
 ```
-**[EN]** Look for the `🧠 [Router]` log to see which skills were selected.
-**[ZH]** 觀察 `🧠 [Router]` 日誌，查看系統選配了哪些智慧技能。
+**[EN]** Observe the `🛡️ [v9 Override]` or `🎯 [SkillsRouter]` logs to see autonomic decisions.
+**[ZH]** 觀察 `🛡️ [v9 Override]` 或 `🎯 [SkillsRouter]` 日誌，查看自主決策過程。
 
-### 4. Production Deployment | 生產級部署
-與隔離
+---
 
-**[EN]** Use `--output-dir` for task isolation in CI/CD.
-**[ZH]** 在 CI/CD 中使用 `--output-dir` 進行任務隔離。
+## 5. WarRoom v9 Telemetry | 戰情室遙測
+
+**[EN]** Real-time monitoring of skill hit rates and performance metrics.
+**[ZH]** 即時監控職能命中率與效能指標。
 
 ```bash
-python3 scripts/nexus_cli.py --output-dir ./runs/task_001 nexus:bug --task "refactor logic"
+python3 scripts/nexus_cli.py nexus:warroom
 ```
 
 ---
-**Ready to scale? | 準備好擴展了嗎？** 🫡🦾
+**Build Smarter. Evolve Faster.** 🫡🦾💎🚀✨🚩
