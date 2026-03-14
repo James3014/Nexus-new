@@ -12,7 +12,7 @@ class LLMClient:
 
     def _apply_domain_adaptation(self, prompt: str) -> str:
         """💾 Phase 3: 領域適應。根據 crystal_lessons.jsonl 動態強化 Prompt。"""
-        lesson_path = Path("obsidian/crystal_lessons.jsonl")
+        lesson_path = self.project_root / "obsidian/crystal_lessons.jsonl"
         if not lesson_path.exists():
             return prompt
 
@@ -61,10 +61,11 @@ class LLMClient:
         "required": ["status", "summary", "violations"],
     }
 
-    def __init__(self, bin_path=None, lock_file=None):
+    def __init__(self, bin_path=None, lock_file=None, project_root=None):
         # 優先使用傳入路徑，否則動態偵測絕對路徑
         self.llm_bin = bin_path or shutil.which("codex") or "codex"
         self.lock_file = lock_file or "/tmp/codex_loop_v2.lock"
+        self.project_root = Path(project_root or ".")
 
     def _build_error_result(
         self, summary, output="", tokens_total=0, category="llm_error"

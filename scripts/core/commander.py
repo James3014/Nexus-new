@@ -1,14 +1,15 @@
-from typing import List
 from pathlib import Path
 from core.state_io import StateIO
 from core.skills_router import SkillsRouter
 from core.context_hub import ContextHub
+
 
 class Commander:
     """
     🕹️ Nexus Commander
     負責 Phase 導航 (State Transition) 與 Orchestration。
     """
+
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
         self.state_io = StateIO(project_root)
@@ -18,13 +19,15 @@ class Commander:
     def next_step(self) -> str:
         """核心狀態機：根據當前狀態與計畫，決定下一步動作。"""
         state = self.state_io.load_global_state()
-        print(f"🧭 [Commander] Current state: {state.current_phase}:{state.current_step_id or 'none'}")
-        
+        print(
+            f"🧭 [Commander] Current state: {state.current_phase}:{state.current_step_id or 'none'}"
+        )
+
         # 🛡️ External Needed Hook (Lesson from 09_STATE_CONTRACT_DRAFT)
         if state.external_needed:
             print("🌐 [Commander] External knowledge requested (X-stage).")
             return "RUN_SKILL:external-research"
-            
+
         # 🛡️ 狀態轉移矩陣 (符合 02_TARGET_ARCHITECTURE)
         if state.current_phase == "P":
             return self._orchestrate_p(state)
@@ -32,7 +35,7 @@ class Commander:
             return self._orchestrate_d(state)
         elif state.current_phase == "R":
             return self._orchestrate_r(state)
-            
+
         return "STALL"
 
     def _orchestrate_p(self, state):
@@ -54,11 +57,13 @@ class Commander:
         """🧬 Nexus v7: 映射 CLI 命令至 NexusState"""
         state = self.state_io.load_global_state()
         state.current_phase = "P"
-        state.task = args.get("task", "")
+        state.task_id = args.get("task", "")
         # 加入 v7 特有元數據
         state.metadata["v7_triggered"] = True
         state.metadata["command"] = args.get("command")
-        
+
         self.state_io.save_global_state(state)
-        print(f"🔗 [Commander] CLI Command '{args.get('command')}' has been mapped to NexusState.")
+        print(
+            f"🔗 [Commander] CLI Command '{args.get('command')}' has been mapped to NexusState."
+        )
         return self.next_step()

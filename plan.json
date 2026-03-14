@@ -1,6 +1,6 @@
 {
-    "plan_id": "nexus-pilot-1773445912",
-    "goal": "codex backend unreachable (dns/network failure)",
+    "plan_id": "nexus-pilot-1773448608",
+    "goal": "codex returned non-schema output: Expecting value: line 1 column 1 (char 0)",
     "steps": [
         {
             "step_id": 1,

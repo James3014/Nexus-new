@@ -82,7 +82,7 @@ class ContextHub:
         self, failure_signature: str, root_cause: str, lesson: str
     ):
         """💾 Phase 5: 記錄失敗案例用於 Active Learning。"""
-        lesson_file = Path("obsidian/crystal_lessons.jsonl")
+        lesson_file = self.project_root / "obsidian/crystal_lessons.jsonl"
         lesson_file.parent.mkdir(parents=True, exist_ok=True)
 
         entry = {
