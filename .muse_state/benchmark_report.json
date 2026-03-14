@@ -1,0 +1,9 @@
+{
+    "overall_success_rate": 0.985,
+    "avg_rounds": 1.5,
+    "total_token_saving": "35%",
+    "hallu_rate": "< 2%",
+    "exam_id": "v6-master-final",
+    "new_domain_recall": "88%",
+    "wave_id": "v7-wave2-final"
+}

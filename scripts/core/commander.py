@@ -49,3 +49,16 @@ class Commander:
         """R 階段：修復 (對接 v5 repair)"""
         print("🛠️ [Commander] Triggering R-stage: Execution...")
         return "RUN_SKILL:repair"
+
+    def handle_nexus_command(self, args: dict):
+        """🧬 Nexus v7: 映射 CLI 命令至 NexusState"""
+        state = self.state_io.load_global_state()
+        state.current_phase = "P"
+        state.task = args.get("task", "")
+        # 加入 v7 特有元數據
+        state.metadata["v7_triggered"] = True
+        state.metadata["command"] = args.get("command")
+        
+        self.state_io.save_global_state(state)
+        print(f"🔗 [Commander] CLI Command '{args.get('command')}' has been mapped to NexusState.")
+        return self.next_step()

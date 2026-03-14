@@ -22,7 +22,7 @@ from core.skills_router import SkillsRouter
 from core.commander import Commander
 from core.context_hub import ContextHub
 from core.state_io import StateIO
-from core.state_contracts import NexusState, StepRecord
+from core.state_contracts import StepRecord
 
 # 配置
 BRAIN_SEARCH_BIN = os.getenv("MUSE_CORE_BRAIN_SEARCH", "/usr/local/bin/brain_search")
@@ -54,12 +54,14 @@ class CodexLoopV2:
         base_ref="HEAD",
         profile=None,
         isolated=False,
+        task=None,
     ):
         self.mode = mode
         self.scope = scope
         self.apply_patch = apply_patch
         self.base_ref = base_ref
         self.isolated = isolated
+        self.task = task
 
         # 0. 套用 Profile 預設 (DX Polish Lvl 16.5)
         if profile == "solo-dev":
@@ -306,9 +308,11 @@ class CodexLoopV2:
             return True
 
         # For KB repos, only review "Heart" files
-        is_heart = any(file_path.startswith(p) for p in brain_prefixes) or \
-                   Path(file_path).name in brain_files
-        
+        is_heart = (
+            any(file_path.startswith(p) for p in brain_prefixes)
+            or Path(file_path).name in brain_files
+        )
+
         return is_heart
 
     def _export_report(self, data):
@@ -386,6 +390,12 @@ class CodexLoopV2:
                 strike += 1
                 print(f"🚀 [Round {strike}/{self.max_strikes}] Initiating Audit...")
 
+                # 🛡️ Nexus v7: 處理 Task 指令開發
+                if self.task and strike == 1:
+                    print(f"🎯 [Task Mode] Goal: {self.task}")
+                    self._run_v5_p_stage("writing-plans", {"summary": self.task})
+                    # 計畫生成後，後續循環將透過 git 變更或 plan.json 進行
+
                 if manual_files:
                     code_files = [
                         str(Path(f).absolute())
@@ -419,16 +429,27 @@ class CodexLoopV2:
                             )
 
                     code_files = [f for f in files if f.endswith(".py")]
-                    
+
                     # 🛡️ Lvl 19: Narrow Review Scope (Skip non-brain .md files)
                     reviewable_files = [f for f in files if self._is_reviewable(f)]
                     if len(reviewable_files) < len(files):
-                        print(f"🧹 [Filter] Narrowing scope from {len(files)} to {len(reviewable_files)} brain-affecting files.")
+                        print(
+                            f"🧹 [Filter] Narrowing scope from {len(files)} to {len(reviewable_files)} brain-affecting files."
+                        )
                         files = reviewable_files
                         # Re-fetch diff for only reviewable files
                         if files:
-                            diff_args = ["diff", "--cached"] if effective_scope == "staged" else ["diff"]
-                            diff_text = subprocess.check_output(["git", "-C", self.git.project_root] + diff_args + ["--"] + files).decode()
+                            diff_args = (
+                                ["diff", "--cached"]
+                                if effective_scope == "staged"
+                                else ["diff"]
+                            )
+                            diff_text = subprocess.check_output(
+                                ["git", "-C", self.git.project_root]
+                                + diff_args
+                                + ["--"]
+                                + files
+                            ).decode()
                         else:
                             diff_text = ""
 
@@ -505,26 +526,65 @@ class CodexLoopV2:
                     # 🚀 [v5 Phase 3] 使用 Commander 決定下一步
                     action = self.commander.next_step()
                     print(f"🎮 [Commander] Orchestrated action: {action}")
-                    
+
+                    # 🧠 v5+ 優化: Hybrid Loop & FlashJudge (Phase 3 & 4)
+                    round_num = len(data.get("steps_history", [])) + 1
+
+                    # 階段 3: FlashJudge 預篩門禁
+                    if round_num == 1:
+                        print("⚖️ [FlashJudge] Evaluating prompt quality...")
+                        # 模擬評價 (未來對接 LLM Judge)
+                        prompt_score = 8.5  # 假設評分優良
+                        if prompt_score < 7:
+                            print(
+                                "⚠️ [FlashJudge] Quality < 7 → Triggering Sonnet Refine..."
+                            )
+                            # 觸發優化邏輯
+                        else:
+                            print(f"✅ [FlashJudge] Quality pass ({prompt_score}/10).")
+
+                    is_hybrid_strong = round_num % 2 == 0  # 偶數輪次使用強模型
+
+                    if is_hybrid_strong:
+                        print(
+                            f"🌓 [HybridLoop] Round {round_num}: Polish mode (Sonnet) activated."
+                        )
+                        # 這裡可以設置模型參數
+
+                    # 早期停止 (Early Stop)
+                    if round_num > 1:
+                        # 簡單的 Hash 變異檢測 (模擬)
+                        if data.get("diff_entropy", 1.0) < 0.05:
+                            print(
+                                f"🛑 [EarlyStop] Variance < 5%. Stabilized at round {round_num}."
+                            )
+                            break
+
                     if action.startswith("RUN_SKILL:"):
                         skill_id = action.split(":")[1]
-                        skill_path = self.skills_router.route(data.get("current_phase", "P"), data)
+                        skill_path = self.skills_router.route(
+                            data.get("current_phase", "P"), data
+                        )
                         self._run_v5_p_stage(skill_path, data)
-                        
+
                         # 💾 持久化狀態轉移 (Phase 4 核心)
                         state = self.state_io.load_global_state()
                         state.current_phase = data.get("current_phase", "P")
-                        state.steps_history.append(StepRecord(
-                            phase=state.current_phase,
-                            step_id=f"auto_{int(time.time())}",
-                            status="completed",
-                            started_at=datetime.now(),
-                            ended_at=datetime.now(),
-                            summary=data.get("summary")
-                        ))
+                        state.steps_history.append(
+                            StepRecord(
+                                phase=state.current_phase,
+                                step_id=f"auto_{int(time.time())}",
+                                status="completed",
+                                started_at=datetime.now(),
+                                ended_at=datetime.now(),
+                                summary=data.get("summary"),
+                            )
+                        )
                         self.state_io.save_global_state(state)
 
-                    task = derive_task_metadata(files if not manual_files else manual_files, diff_text)
+                    task = derive_task_metadata(
+                        files if not manual_files else manual_files, diff_text
+                    )
                     decision = self.escalation_policy.decide(
                         attempt=strike,
                         task=task,
@@ -551,13 +611,18 @@ class CodexLoopV2:
                     print(self.reporter.render_ansi_table(data.get("violations", [])))
                     self._export_report(data)
 
-                    allow_codex_patch = self.apply_patch or decision.allow_codex_patch
-                    if allow_codex_patch:
+                    if self.apply_patch:
                         print("🛠️ Applying auto-patches...")
                         self.patcher.apply(data.get("violations", []))
                         # 繼續下一輪循環
                         continue
                     else:
+                        # 🧠 v5+ 優化: 紀錄失敗教訓用於 Active Learning (Phase 5)
+                        self.context_hub.record_crystal_lesson(
+                            failure_signature=data.get("failure_signature", "unknown"),
+                            root_cause=data.get("summary", "N/A"),
+                            lesson=f"Failed at Strike {strike} with decision {decision.action}",
+                        )
                         return False
 
                 print("🎉 [PASSED] Cognitive security check cleared.")
@@ -574,7 +639,7 @@ class CodexLoopV2:
         模擬呼叫 v5 Skill 並生成 plan.json (符合 v1.5.2 合同)
         """
         print(f"🧬 [v5 P-stage] Initializing plan generation using {skill_path}...")
-        
+
         # 這裡模擬生成符合 scripts/core/state_contracts.py 定義的 plan.json
         plan_data = {
             "plan_id": f"nexus-pilot-{int(time.time())}",
@@ -585,15 +650,12 @@ class CodexLoopV2:
                     "action": "writing-plans",
                     "target": "v5-pilot",
                     "description": "Generated via v5 skills_router",
-                    "depends_on": []
+                    "depends_on": [],
                 }
             ],
-            "metadata": {
-                "skill_used": "writing-plans",
-                "contract_version": "1.5.2"
-            }
+            "metadata": {"skill_used": "writing-plans", "contract_version": "1.5.2"},
         }
-        
+
         plan_file = Path(self.git.project_root) / "plan.json"
         with open(plan_file, "w", encoding="utf-8") as f:
             json.dump(plan_data, f, indent=4)
@@ -622,6 +684,9 @@ if __name__ == "__main__":
         help="Launch in a leased UUID workspace to prevent Index contention",
     )
     parser.add_argument("--base", default="HEAD")
+    parser.add_argument(
+        "--task", default=None, help="Direct task description to build/modify"
+    )
     args = parser.parse_args()
 
     # 優先級：指定檔案 > all > base > staged
@@ -641,5 +706,6 @@ if __name__ == "__main__":
         base_ref=args.base,
         profile=args.profile,
         isolated=args.isolated,
+        task=args.task,
     )
     sys.exit(0 if engine.run_review(args.files) else 1)

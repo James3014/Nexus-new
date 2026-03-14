@@ -8,7 +8,33 @@ from pathlib import Path
 
 
 class LLMClient:
-    """負責與 LLM (Codex) 的通訊與結果解析。"""
+    """負責與 LLM (Codex) 的通訊與結果解析，並具備 v7 領域適應能力。"""
+
+    def _apply_domain_adaptation(self, prompt: str) -> str:
+        """💾 Phase 3: 領域適應。根據 crystal_lessons.jsonl 動態強化 Prompt。"""
+        lesson_path = Path("obsidian/crystal_lessons.jsonl")
+        if not lesson_path.exists():
+            return prompt
+
+        try:
+            with open(lesson_path, "r", encoding="utf-8") as f:
+                lessons = [json.loads(line) for line in f]
+
+            # 簡單的關鍵字匹配 (對應當前任務)
+            relevant_lessons = []
+            for l in lessons:
+                if l.get("signature") in prompt or l.get("cause") in prompt:
+                    relevant_lessons.append(f"- [{l['signature']}]: {l['lesson']}")
+
+            if relevant_lessons:
+                print(
+                    f"🧠 [DomainAdapt] Injected {len(relevant_lessons)} relevant lessons into Prompt."
+                )
+                header = "\n### [Domain-Specific Crystal Lessons]\n"
+                return prompt + header + "\n".join(relevant_lessons[:3]) + "\n"
+        except:
+            pass
+        return prompt
 
     OUTPUT_SCHEMA = {
         "type": "object",
@@ -40,7 +66,9 @@ class LLMClient:
         self.llm_bin = bin_path or shutil.which("codex") or "codex"
         self.lock_file = lock_file or "/tmp/codex_loop_v2.lock"
 
-    def _build_error_result(self, summary, output="", tokens_total=0, category="llm_error"):
+    def _build_error_result(
+        self, summary, output="", tokens_total=0, category="llm_error"
+    ):
         return {
             "status": "FAIL",
             "summary": summary,
@@ -52,8 +80,14 @@ class LLMClient:
 
     def _categorize_runtime_error(self, output):
         text = output.lower()
-        if "failed to lookup address information" in text or "error sending request for url" in text:
-            return "codex backend unreachable (dns/network failure)", "backend_unreachable"
+        if (
+            "failed to lookup address information" in text
+            or "error sending request for url" in text
+        ):
+            return (
+                "codex backend unreachable (dns/network failure)",
+                "backend_unreachable",
+            )
         if "could not create otel exporter" in text or "opentelemetry" in text:
             return "codex telemetry startup failure", "telemetry_failure"
         if "mcp startup" in text and "failed:" in text:
@@ -75,7 +109,8 @@ class LLMClient:
 
     def ask(self, prompt, payload):
         """執行 LLM 請求並返回解析後的 JSON 結果。"""
-        full_prompt = prompt + payload
+        adapted_prompt = self._apply_domain_adaptation(prompt)
+        full_prompt = adapted_prompt + payload
         schema_file = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -105,7 +140,10 @@ class LLMClient:
             runtime_summary, category = self._categorize_runtime_error(output)
             if runtime_summary:
                 return self._build_error_result(
-                    runtime_summary, output=output, tokens_total=tokens_total, category=category
+                    runtime_summary,
+                    output=output,
+                    tokens_total=tokens_total,
+                    category=category,
                 ), output
 
             try:
