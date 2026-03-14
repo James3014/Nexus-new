@@ -39,6 +39,11 @@ class Commander:
 
         return "STALL"
 
+    def get_crystal_lessons(self, relevance: float = 0.8) -> list[str]:
+        """從 CrystalAnalyzer 獲取相關性高於閾值的經驗結晶。"""
+        # 實戰中會對接 LancedB 或 Tracelog 語義檢索
+        return ["Avoid circular imports in nexus.core", "Use pydantic model_dump for state serialization"]
+
     def _orchestrate_p(self, state):
         """P 階段：計畫生成 (對焦 v5 writing-plans)"""
         print("🚀 [Commander] Triggering P-stage: Skills Routing...")

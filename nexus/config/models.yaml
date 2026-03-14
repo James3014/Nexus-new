@@ -1,0 +1,27 @@
+# Nexus v9 Model Optimization Config
+models:
+  gemini_flash:
+    id: "gemini-2.0-flash-exp"
+    temperature: 0.2
+    prompt_style: "toc-compact"
+    template: |
+      [Nexus Flash Execution]
+      短步驟: 
+      1. 分析當前錯誤與 Context Hub 結晶
+      2. 執行精確修補 (Minimal Changes)
+      3. 執行核對與自省 (Self-Critique)
+      
+      規則: 保持簡潔，直擊痛點。上輪錯誤是最好的老師。
+    self_critique: true
+    critique_threshold: 0.75
+
+  claude_sonnet:
+    id: "claude-3-5-sonnet-latest"
+    temperature: 0.0
+    prompt_style: "reasoning-deep"
+    template: |
+      [Nexus Sonnet Orchestration]
+      You are the high-reasoning engine of Nexus.
+      Analyze the P-D-R-A-C chain deeply.
+      Focus on architectural integrity and edge cases.
+    self_critique: false
