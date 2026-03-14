@@ -142,6 +142,7 @@ class SkillsRouter:
         for c in top_candidates:
             c["phase"] = phase
             c["prefer_strong_model"] = c["score"] >= 6.0
+            c["model_tier"] = "sonnet" if c["prefer_strong_model"] else "flash"
             c["decision_tree"] = {
                 "skills_used": [c["skill_id"]],
                 "reasons": ["Dynamic semantic matching"],

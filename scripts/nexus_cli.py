@@ -29,8 +29,12 @@ class NexusCLI:
         self.project_root = Path(__file__).resolve().parents[1]
         self.run_dir = Path(output_dir) if output_dir else self.project_root
         
-        # 核心引擎分離
-        self.engine = NexusEngine(
+        from nexus.containers import NexusContainer
+        self.container = NexusContainer()
+        self.container.project_root.from_value(str(self.project_root))
+        
+        # 透過容器獲取引擎
+        self.engine = self.container.engine_factory(
             project_root=self.project_root,
             run_dir=self.run_dir,
             silent=silent
@@ -72,14 +76,16 @@ class NexusCLI:
         """💎 [Nexus:Crystal] 啟動自學習權重演進"""
         try:
             from nexus.core.crystal import CrystalAnalyzer
+            analyzer = self.container.context_hub().state_io.project_root # Use the one from DI
+            # Actually CrystalAnalyzer still expects a path string currently
             analyzer = CrystalAnalyzer(str(self.project_root))
             analyzer.analyze()
         except Exception as e:
             print(f"❌ [Nexus:Crystal] Learning failed: {e}")
 
-    def run_benchmark(self, framework: str, task_count: int = 10, output_csv: str = "nexus_benchmark.csv"):
+    def run_benchmark(self, framework: str, task_count: int = 10, output_csv: str = "nexus_benchmark.csv", model: str = None, target: str = None):
         """📊 [Nexus:Benchmark] 透過引擎執行基準測試"""
-        results = self.engine.run_benchmark(framework, task_count, output_csv)
+        results = self.engine.run_benchmark(framework, task_count, output_csv, model, target)
         success_count = len([r for r in results if r['status'] == 'PASS'])
         print(f"✅ [Benchmark] Complete! Success Rate: {success_count/task_count*100:.1f}%")
 
@@ -120,6 +126,8 @@ def main():
     bench.add_argument("--framework", default="swe-verified", help="Benchmark framework")
     bench.add_argument("--tasks", type=int, default=10, help="Number of tasks")
     bench.add_argument("--output", default="nexus_benchmark.csv", help="Output CSV path")
+    bench.add_argument("--model", help="Model strategy hint (e.g. flash_iter)")
+    bench.add_argument("--target", help="Performance target (e.g. 90%%_sonnet)")
 
     args = parser.parse_args()
     if not args.command:
@@ -137,7 +145,7 @@ def main():
     elif args.command == "nexus:crystal":
         cli.run_crystal()
     elif args.command == "nexus:benchmark":
-        cli.run_benchmark(args.framework, args.tasks, args.output)
+        cli.run_benchmark(args.framework, args.tasks, args.output, args.model, args.target)
 
 if __name__ == "__main__":
     main()

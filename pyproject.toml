@@ -15,12 +15,14 @@ dependencies = [
     "pydantic>=2.0",
     "openai>=1.0.0",
     "gitpython>=3.1.0",
-    "radon>=5.1.0"
+    "radon>=5.1.0",
+    "dependency-injector>=4.41.0",
+    "pydantic-settings>=2.0.0"
 ]
 
 [project.scripts]
-nexus = "nexus.engine.coordinator:main"
+nexus = "scripts.nexus_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["nexus*"]
+include = ["nexus*", "scripts*"]

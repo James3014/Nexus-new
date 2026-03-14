@@ -20,15 +20,23 @@ class NexusEngine:
     ⚙️ Nexus v9 Core Engine
     負責執行 P-D-R-A-C 生命週期循環與業務邏輯調度。
     """
-    def __init__(self, project_root: Path, run_dir: Optional[Path] = None, silent: bool = False):
+    def __init__(
+        self, 
+        project_root: Path, 
+        run_dir: Optional[Path] = None, 
+        silent: bool = False,
+        state_io=None,
+        commander=None,
+        router=None
+    ):
         self.project_root = project_root
         self.run_dir = run_dir or project_root
         self.run_dir.mkdir(parents=True, exist_ok=True)
         
         self.silent = silent
-        self.state_io = StateIO(str(self.run_dir))
-        self.commander = Commander(str(self.run_dir))
-        self.router = SkillsRouter(str(self.project_root))
+        self.state_io = state_io
+        self.commander = commander
+        self.router = router
         self.tracelog_path = self.run_dir / "tracelog.jsonl"
 
     def _voice_notify(self, message: str):
@@ -163,9 +171,10 @@ class NexusEngine:
         self._log_trace("nexus:feature", task, "SUCCESS" if success else "FAIL", tokens=tokens)
         return success
 
-    def run_benchmark(self, framework: str, task_count: int = 10, output_csv: str = "nexus_benchmark.csv"):
+    def run_benchmark(self, framework: str, task_count: int = 10, output_csv: str = "nexus_benchmark.csv", model: str = None, target: str = None):
         """執行基準測試程式碼"""
         print(f"📊 [Nexus:Benchmark] Starting {framework} with {task_count} tasks...")
+        if model: print(f"📍 Strategy: {model} | Target: {target}")
         self._voice_notify(f"開始執行 {framework} 基準測試")
         
         import csv

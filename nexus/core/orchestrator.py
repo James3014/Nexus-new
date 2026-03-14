@@ -25,22 +25,38 @@ class NexusOrchestrator:
     🎭 Nexus v9 Orchestrator
     負責編排 P-D-R-A-C 生命週期。
     """
-    def __init__(self, task: str, skill_id: str, mode: str = "developer"):
+    def __init__(
+        self, 
+        task: str, 
+        skill_id: str, 
+        mode: str = "developer",
+        git=None,
+        llm=None,
+        linter=None,
+        patcher=None,
+        reporter=None,
+        workspace=None,
+        router=None,
+        commander=None,
+        context_hub=None,
+        state_io=None
+    ):
         self.task = task
         self.skill_id = skill_id
         self.mode = mode
         self.project_root = Path.cwd()
         
-        # 🛠️ Service Initialization
-        self.git = GitManager()
-        self.llm = LLMClient(project_root=str(self.project_root))
-        self.linter = Linter()
-        self.patcher = SafePatcher()
-        self.reporter = Reporter()
-        self.workspace = WorkspaceManager(str(self.project_root))
-        self.router = SkillsRouter(project_root=str(self.project_root))
-        self.commander = Commander(str(self.project_root))
-        self.state_io = StateIO(str(self.project_root))
+        # 🛠️ Service Injection (Provided by NexusContainer)
+        self.git = git
+        self.llm = llm
+        self.linter = linter
+        self.patcher = patcher
+        self.reporter = reporter
+        self.workspace = workspace
+        self.router = router
+        self.commander = commander
+        self.context_hub = context_hub
+        self.state_io = state_io
         
         self.total_tokens = 0
         self.max_strikes = 3 if mode != "audit" else 1
@@ -78,8 +94,9 @@ class NexusOrchestrator:
             
             # 3. 迭代自省 (Self-Critique)
             if self.mode != "audit" and data.get("status") != "PASS":
+                self._save_reflection(data, strike)
                 if self._should_self_critique(data):
-                    print("🔄 [FlashJudge] Self-critique triggered, retrying inner loop...")
+                    print(f"🔄 [FlashJudge] Self-critique triggered (Confidence: {data.get('confidence')}), retrying inner loop...")
                     continue
 
             if data.get("status") == "PASS":
@@ -88,6 +105,20 @@ class NexusOrchestrator:
             # 如果失敗，嘗試自癒或升級
             print(f"⚠️ Failed: {data.get('summary')}")
         return False
+
+    def _save_reflection(self, data: dict, strike: int):
+        """將模型自省結果存入 reflection.jsonl"""
+        reflection_file = self.project_root / "reflection.jsonl"
+        payload = {
+            "timestamp": datetime.now().isoformat(),
+            "strike": strike,
+            "status": data.get("status"),
+            "confidence": data.get("confidence", 1.0),
+            "summary": data.get("summary"),
+            "skill_id": self.skill_id
+        }
+        with open(reflection_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def _should_self_critique(self, response_data: dict) -> bool:
         """FlashJudge 邏輯: 判斷是否需要自評再審。"""
