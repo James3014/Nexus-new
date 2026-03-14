@@ -91,10 +91,11 @@ class CodexLoopV2:
         self.reporter = Reporter()
         self.workspace_manager = WorkspaceManager(self.git.project_root)
         self.escalation_policy = EscalationPolicy()
-        self.skills_router = SkillsRouter()
+        self.project_root = Path(__file__).resolve().parents[1]
+        self.skills_router = SkillsRouter(project_root=str(self.project_root))
         self.commander = Commander(self.git.project_root)
         self.context_hub = ContextHub(self.git.project_root)
-        self.state_io = StateIO(self.git.project_root)
+        self.state_io = StateIO(str(self.project_root))
 
         # 🛡️ Global Retry Circuit Breaker (Lvl 19)
         self._check_global_retry_limit(repo_id)

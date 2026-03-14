@@ -56,7 +56,6 @@
 
 ## Recommended Top-Level State Shape
 
-```json
 {
   "schema_version": "1.5.2-rc",
   "task_id": "muse_upgrade_v1_5_2_plus",
@@ -67,7 +66,10 @@
   "external_used": [],
   "skills_used": [],
   "research_pack_ref": ".muse_state/research_pack.json",
-  "reflection_ref": ".muse_state/reflection.jsonl"
+  "reflection_ref": ".muse_state/reflection.jsonl",
+  "superpowers_plan": {},
+  "tdd_status": "none",
+  "subagents_active": false
 }
 ```
 
@@ -105,6 +107,11 @@
 1. **P Phase Budget**: 若存在 `batch_id`，則 Phase P 的 `budget_token` 必須大於 0。
 2. **Audit Check**: 進入 Phase C (Crystal/Commit) 前，`audit_pass` 必須為 `true`。
 3. **Forbidden Transitions**: 嚴禁跨過 X (Research) 直接進入 R (Repair)，除非顯式標註。
+
+### `Superpowers Extensions` (v5.0.2)
+1. **`superpowers_plan`**: 儲存由 `writing-plans` 生成的微計劃 (`micro_steps`)。
+2. **`tdd_status`**: 記錄當前測試驅動狀態 (`red`, `green`, `refactor`, `none`)。
+3. **`subagents_active`**: 標記是否有背景 Sub-agents 正在執行並核任務。
 
 ## Field Drafts
 

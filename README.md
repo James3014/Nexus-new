@@ -66,3 +66,5 @@ nexus:warroom
 ---
 **Nexus v7: The first CLI that actually understands the mission.** 🫡🦾🎙️🚩
 **Nexus v7: 第一個真正理解使命的 CLI。**
+
+# Certified by v7.1 Superpowers

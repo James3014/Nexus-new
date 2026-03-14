@@ -1,6 +1,13 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
+from enum import Enum
+
+class TddStatus(str, Enum):
+    RED = "red"
+    GREEN = "green"
+    REFACTOR = "refactor"
+    NONE = "none"
 
 # --- P 階段: Plan ---
 
@@ -115,6 +122,12 @@ class NexusState(BaseModel):
     external_needed: bool = False
     external_used: List[Dict[str, Any]] = []
     skills_used: List[Dict[str, Any]] = []
+    
+    # --- Superpowers v5.0.2 Extensions ---
+    superpowers_plan: Dict[str, Any] = Field(default_factory=dict)
+    tdd_status: TddStatus = TddStatus.NONE
+    subagents_active: bool = False
+    
     metadata: Dict[str, Any] = {}
 
     @model_validator(mode='after')

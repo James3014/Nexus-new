@@ -10,11 +10,12 @@ class Commander:
     負責 Phase 導航 (State Transition) 與 Orchestration。
     """
 
-    def __init__(self, project_root: str):
-        self.project_root = Path(project_root)
-        self.state_io = StateIO(project_root)
-        self.router = SkillsRouter()
-        self.hub = ContextHub(project_root)
+    def __init__(self, run_dir: str):
+        self.run_dir = Path(run_dir)
+        self.project_root = self.run_dir.parents[1] if ".runs" in str(self.run_dir) else self.run_dir
+        self.state_io = StateIO(run_dir)
+        self.router = SkillsRouter(project_root=str(self.project_root))
+        self.hub = ContextHub(self.project_root)
 
     def next_step(self) -> str:
         """核心狀態機：根據當前狀態與計畫，決定下一步動作。"""

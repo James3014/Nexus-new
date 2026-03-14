@@ -89,23 +89,34 @@ class ContextHub:
         reflections: List[Dict],
         research: Optional[NexusResearch] = None,
     ) -> Dict[str, Any]:
-        """組裝修復階段所需的 Context Pack (對齊 v5+)。"""
-        return {
+        """組裝修復階段所需的 Context Pack (整合 Superpowers v5.0.2)。"""
+        state = self.state_io.load_global_state()
+        
+        # --- Context Compact: 壓縮 reflection 與歷史以提高 token 效率 (1.2x tokens) ---
+        compact_reflections = reflections[-2:] # 只保留最近 2 輪以防冗餘
+        
+        pack = {
             "root_cause": diagnosis.summary,
             "repair_strategy": diagnosis.pseudo_flows,
             "target_files": diagnosis.hotspots,
-            "recent_reflections": reflections,
+            "recent_reflections": compact_reflections,
             "external_research": research.key_findings if research else [],
+            
+            # Superpowers 擴展
+            "superpowers_plan": getattr(state, "superpowers_plan", {}),
+            "tdd_status": state.tdd_status,
+            "worktree_uuid": state.metadata.get("worktree_uuid", "main-branch"),
+            
             "logic_guard": {
-                "chain_of_thought": "Analyze logs → Plan minimal diff → Apply patch → Verify via Linter",
+                "chain_of_thought": "Analyze logs → Follow Superpowers Plan → Apply Patches → TDD Cycle",
                 "negative_constraints": [
                     "DO NOT modify files outside the provided hotspots",
-                    "DO NOT introduce unrelated refactoring",
-                    "STRICTLY follow the defined state contracts",
+                    "STRICTLY follow the defined TDD cycle (RED-GREEN-REFACTOR)",
                 ],
             },
             "memory_reminders": self._inject_memory_reminders("R")
         }
+        return pack
 
     def record_crystal_lesson(
         self, failure_signature: str, root_cause: str, lesson: str

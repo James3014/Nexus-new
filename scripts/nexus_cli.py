@@ -11,12 +11,14 @@ from datetime import datetime
 try:
     from core.commander import Commander
     from core.state_io import StateIO
+    from core.skills_router import SkillsRouter
     from codex_loop_brain import CodexLoopV2
 except ImportError:
-    # 支援 scripts/ 目錄下執行
+    # 支援 scripts/ 目羅下執行
     sys.path.append(str(Path(__file__).resolve().parent / "core"))
     from commander import Commander
     from state_io import StateIO
+    from skills_router import SkillsRouter
 
     # 如果在 scripts 目錄下執行，codex_loop_brain 應該在同級目錄
     sys.path.append(str(Path(__file__).resolve().parent))
@@ -40,6 +42,8 @@ class NexusCLI:
         self.tracelog_path = self.run_dir / "tracelog.jsonl"
         self.notify_script = "/usr/bin/python3 /Users/jameschen/.openclaw/skills/audio-notify/scripts/notify.py"
         self.silent = silent
+        self.superpowers = False
+        self.run_dir.mkdir(parents=True, exist_ok=True)
 
     def _voice_notify(self, message):
         """🔊 v7 Spec: 關鍵點強制語音通知"""
@@ -70,22 +74,26 @@ class NexusCLI:
         with open(self.tracelog_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-    def _invoke_skills_router(self, phase, lang="python", task_scale="medium", triggers=None):
-        """🧠 v7 Spec: 呼叫 Skills Router 進行智慧選配"""
-        triggers = triggers or []
-        script_path = Path(__file__).parent / "skills_router.py"
-        cmd = [sys.executable, str(script_path), f"--phase={phase}", f"--lang={lang}", f"--task-scale={task_scale}"]
-        if triggers:
-            cmd.append("--triggers")
-            cmd.extend(triggers)
+    def _invoke_skills_router(self, phase, task_id, context=None):
+        """🧠 v7 Spec: 呼叫強化型 Skills Router 進行智慧決策"""
+        context = context or {}
+        context["task_id"] = task_id
         
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            output = json.loads(result.stdout)
-            return output.get("selected_skills", [])
-        except Exception as e:
-            print(f"⚠️ [Router] Failed to invoke: {e}")
-            return []
+        router = SkillsRouter(project_root=str(self.project_root))
+        decision = router.route(phase, context)
+        
+        # 記錄決策樹資訊至 State
+        state = self.state_io.load_global_state()
+        state.skills_used.append({
+            "phase": phase,
+            "skill": decision["skill_id"],
+            "score": decision["score"],
+            "reasons": decision["decision_tree"]["reasons"],
+            "timestamp": datetime.now().isoformat()
+        })
+        self.state_io.save_global_state(state)
+        
+        return decision
 
     def _detect_triggers(self, task):
         """🔍 v7 Spec: 從任務描述中提取觸發關鍵字"""
@@ -122,19 +130,10 @@ class NexusCLI:
             self.cmdr.handle_nexus_command({"command": "nexus:bug", "task": task})
             
         # 🟢 [Skills Router] P-Phase 智慧選配
-        triggers = self._detect_triggers(task)
-        selected = self._invoke_skills_router("P", triggers=triggers)
-        if selected:
-            skill_list = [s["skill"] for s in selected]
-            print(f"🧠 [Router] Phase P selected: {', '.join(skill_list)}")
-            # 注入 metadata (此處模擬寫入 state/plan)
-            state = self.state_io.load_global_state()
-            state.metadata.update({
-                "skill_used": skill_list,
-                "router_version": "v0.1",
-                "decision_timestamp": datetime.now().isoformat()
-            })
-            self.state_io.save_global_state(state)
+        decision = self._invoke_skills_router("P", task, context={"files": ["unknown_files"]})
+        print(f"🧠 [Router] {decision['skill_id']} (Score: {decision['score']})")
+        if decision['prefer_strong_model']:
+            print("🚀 [ELEVATION] Score >6 -> Elevated to Strong Model.")
 
         # 2. 啟動 CodexLoopV2 全流程
         engine = CodexLoopV2(
@@ -222,21 +221,8 @@ class NexusCLI:
             )
             
         # 🟢 [Skills Router] P-Phase 智慧選配
-        triggers = self._detect_triggers(task)
-        if not domain or domain == "auto-detect":
-            triggers.append("new_feature")
-            
-        selected = self._invoke_skills_router("P", triggers=triggers)
-        if selected:
-            skill_list = [s["skill"] for s in selected]
-            print(f"🧠 [Router] Phase P selected: {', '.join(skill_list)}")
-            state = self.state_io.load_global_state()
-            state.metadata.update({
-                "skill_used": skill_list,
-                "router_version": "v0.1",
-                "decision_timestamp": datetime.now().isoformat()
-            })
-            self.state_io.save_global_state(state)
+        decision = self._invoke_skills_router("P", task, context={"files": ["new_feature_files"]})
+        print(f"🧠 [Router] {decision['skill_id']} (Score: {decision['score']})")
 
         # 2. 啟動 CodexLoopV2 (在 Feature 模式下通常需要先產 Spec)
         engine = CodexLoopV2(
@@ -351,6 +337,7 @@ def main():
     parser.add_argument("--model-override", help="Override default LLM model")
     parser.add_argument("--bypass-cb", action="store_true", help="Bypass global circuit breaker")
     parser.add_argument("--output-dir", help="Directory for task isolation (logs/state)")
+    parser.add_argument("--superpowers", action="store_true", help="Enable Superpowers v5 mode (TDD, Subagents)")
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -380,6 +367,7 @@ def main():
 
     args = parser.parse_args()
     cli = NexusCLI(silent=args.silent, output_dir=args.output_dir)
+    cli.superpowers = args.superpowers
 
     if args.command == "nexus:bug":
         cli.run_bug(

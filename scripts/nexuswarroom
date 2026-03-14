@@ -1,0 +1,31 @@
+import argparse
+import sys
+import time
+from pathlib import Path
+from core.batch_monitor import WarRoomMonitor as BatchMonitor
+
+def main():
+    parser = argparse.ArgumentParser(description="Nexus v7 WarRoom Monitor")
+    parser.add_argument("--factory", action="store_true", help="Monitor factory mode")
+    parser.add_argument("--watch", action="store_true", help="Streaming updates")
+    parser.add_argument("--alert-strike", type=int, default=4, help="Failure threshold")
+    
+    args = parser.parse_args()
+    project_root = Path(__file__).resolve().parents[1]
+    monitor = BatchMonitor(str(project_root))
+    
+    print(f"📡 [WarRoom] Monitoring Factory Snapshot | Project: {project_root}")
+    
+    if args.watch:
+        monitor.watch()
+    else:
+        # 模擬快照輸出，因為 WarRoomMonitor._show_sessions 是內部的
+        print("-" * 60)
+        print(f"🏰 Nexus Night Factory Snapshot | {time.ctime()}")
+        print("-" * 60)
+        # 直接執行監控類別的內部邏輯或直接顯示 Tmux
+        monitor._show_sessions()
+        print("-" * 60)
+
+if __name__ == "__main__":
+    main()
