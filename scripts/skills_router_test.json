@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Diagnosis with Large Stacktrace",
+    "cmd": "--phase=D --lang=python --task-scale=large --triggers large_stacktrace hotspot_logic",
+    "expect_skill": "codebase_investigator"
+  },
+  {
+    "name": "Planning with Fuzzy Request",
+    "cmd": "--phase=P --triggers fuzzy_request",
+    "expect_skill": "aibdd.spec.user-story.gen"
+  },
+  {
+    "name": "Repair with Quality Issues",
+    "cmd": "--phase=R --lang=python --triggers repeated_quality_issues",
+    "expect_skill": "self-healer"
+  }
+]

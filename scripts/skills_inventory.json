@@ -1,0 +1,40 @@
+{
+  "skills": {
+    "codebase_investigator": {
+      "phases": ["D"],
+      "langs": ["*"],
+      "triggers": ["large_stacktrace", "hotspot_logic"],
+      "description": "Deep analysis of codebase for diagnostic phase."
+    },
+    "self-healer": {
+      "phases": ["R"],
+      "langs": ["python"],
+      "triggers": ["repeated_quality_issues"],
+      "description": "Autonomous repair of code with repetitive quality failures."
+    },
+    "git-manager": {
+      "phases": ["P", "C"],
+      "langs": ["*"],
+      "triggers": ["worktree_needed", "git_commit"],
+      "description": "Git state and worktree management."
+    },
+    "aibdd.spec.user-story.gen": {
+      "phases": ["P"],
+      "langs": ["*"],
+      "triggers": ["fuzzy_request"],
+      "description": "Generate formalized user stories from fuzzy requests."
+    },
+    "aibdd.auto.python.e2e.red/green": {
+      "phases": ["R"],
+      "langs": ["python"],
+      "triggers": ["new_feature"],
+      "description": "Automated Red/Green TDD cycle for python."
+    },
+    "common.gen.pseudo-code": {
+      "phases": ["D"],
+      "langs": ["*"],
+      "triggers": ["hard_to_read_logic"],
+      "description": "Generate readable pseudo-code for complex logic blocks."
+    }
+  }
+}
