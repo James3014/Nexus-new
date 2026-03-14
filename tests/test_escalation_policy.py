@@ -6,7 +6,7 @@ SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from core.escalation_policy import EscalationPolicy, TaskMetadata, derive_task_metadata
+from nexus.core.escalation import EscalationPolicy, TaskMetadata, derive_task_metadata
 
 
 def test_prefers_gemini_repair_on_early_rounds_for_internal_work():

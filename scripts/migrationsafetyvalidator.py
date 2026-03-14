@@ -1,7 +1,7 @@
 import argparse
 import sys
 from pathlib import Path
-from core.migration_validator import MigrationValidator
+from nexus.core.migration_validator import MigrationValidator
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus v7 Migration Safety Validator")

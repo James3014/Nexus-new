@@ -11,19 +11,19 @@ from pathlib import Path
 from datetime import datetime
 
 # 導入拆分後的核心模組
-from core.git_manager import GitManager
-from core.llm_client import LLMClient
-from core.linter import Linter
-from core.patcher import SafePatcher
-from core.reporter import Reporter
-from core.workspace_manager import WorkspaceManager
-from core.escalation_policy import EscalationPolicy, derive_task_metadata
-from core.action_brief import build_action_brief
-from core.skills_router import SkillsRouter
-from core.commander import Commander
-from core.context_hub import ContextHub
-from core.state_io import StateIO
-from core.state_contracts import StepRecord
+from nexus.services.git import GitManager
+from nexus.services.llm import LLMClient
+from nexus.services.linter import Linter
+from nexus.services.patcher import SafePatcher
+from nexus.services.reporter import Reporter
+from nexus.services.workspace import WorkspaceManager
+from nexus.core.escalation import EscalationPolicy, derive_task_metadata
+from nexus.core.action_brief import build_action_brief
+from nexus.core.router import SkillsRouter
+from nexus.core.commander import Commander
+from nexus.core.context_hub import ContextHub
+from nexus.core.state_io import StateIO
+from nexus.core.state_contracts import StepRecord
 
 # 配置
 BRAIN_SEARCH_BIN = os.getenv("MUSE_CORE_BRAIN_SEARCH", "/usr/local/bin/brain_search")
@@ -41,82 +41,28 @@ if not PROMPT_TEMPLATE.exists():
     PROMPT_TEMPLATE = Path(KB_DIR) / "01_Operations/Templates/developer_prompt_v2.md"
 
 
-class CodexLoopV2:
+from nexus.core.orchestrator import NexusOrchestrator
+
+class CodexLoopV2(NexusOrchestrator):
     """
     🧬 Codex-Loop v2.0: Modular Intelligence Orchestrator
-    符合 Clean Code SRP 原則，將職責委派給專業模組。
+    [v9 Forwarder] 繼承自新架構的 Orchestrator 以維持相容性。
     """
-
-    def __init__(
-        self,
-        mode="developer",
-        scope="staged",
-        apply_patch=False,
-        base_ref="HEAD",
-        profile=None,
-        isolated=False,
-        task=None,
-        bypass_circuit_breaker=False,
-        prediction_risks=None,
-        skill_id=None,  # 🚀 [Nexus v9] 支援外部指定技能
-    ):
-        self.mode = mode
-        self.scope = scope
-        self.apply_patch = apply_patch
-        self.base_ref = base_ref
-        self.isolated = isolated
-        self.task = task
-        self.bypass_circuit_breaker = bypass_circuit_breaker
-        self.prediction_risks = prediction_risks or []
-        self.skill_id = skill_id
-
-        # 0. 套用 Profile 預設 (DX Polish Lvl 16.5)
-        if profile == "solo-dev":
-            self.mode = "safe-commit"
-            self.apply_patch = True
-            print(
-                "👤 [PROFILE] solo-dev active (Safe-Commit + Auto-Apply + 180s Timeout)"
-            )
-
-        # 1. 初始化 Git 管理員
-        self.git = GitManager()
-
-        # 🔗 基於絕對路徑的雜湊防衝突 (P16 Lesson 118: Use absolute-git-dir)
-        repo_path = str(self.git.git_dir).encode("utf-8")
-        repo_id = hashlib.md5(repo_path).hexdigest()[:8]
-
-        # 2. 初始化組件 (使用隔離路徑)
-        self.llm = LLMClient(
-            lock_file=Path(f"/tmp/codex_loop_{repo_id}.lock"),
-            project_root=self.git.project_root,
+    def __init__(self, **kwargs):
+        # 映射舊參數至新結構
+        super().__init__(
+            task=kwargs.get("task", ""),
+            skill_id=kwargs.get("skill_id", "writing-plans"),
+            mode=kwargs.get("mode", "developer")
         )
-        self.linter = Linter()
-        self.patcher = SafePatcher(lock_dir=self.git.git_dir or "/tmp")
-        self.reporter = Reporter()
-        self.workspace_manager = WorkspaceManager(self.git.project_root)
-        self.escalation_policy = EscalationPolicy()
-        self.project_root = Path(__file__).resolve().parents[1]
-        self.skills_router = SkillsRouter(project_root=str(self.project_root))
-        self.commander = Commander(self.git.project_root)
-        self.context_hub = ContextHub(self.git.project_root)
-        self.state_io = StateIO(str(self.project_root))
-
-        # 🛡️ Global Retry Circuit Breaker (Lvl 19)
-        self._check_global_retry_limit(repo_id)
-
-        # 🔗 重複偵測器 (Repetition Guard) 與 Token 統計
-        self.history_hashes = set()
-        self.total_tokens = 0
-
-        # 3. 根據 Persona Profile 進行配置調整
-        self._apply_persona_profile(mode)
-
-        # 報告與補丁路徑 (符合 P16 Sandbox 定義)
-        self.report_file = Path(f"/tmp/codex_loop_report_{repo_id}.md")
-        self.action_file = Path(f"/tmp/codex_next_action_{repo_id}.json")
-        self.patch_file = Path(f"/tmp/codex_auto_{repo_id}.patch")
-        self.transcripts_dir = Path(f"/tmp/codex_transcripts_{repo_id}")
-        self.transcripts_dir.mkdir(parents=True, exist_ok=True)
+        # 注入舊版特有的狀態
+        self.apply_patch = kwargs.get("apply_patch", False)
+        self.isolated = kwargs.get("isolated", False)
+        self.bypass_circuit_breaker = kwargs.get("bypass_circuit_breaker", False)
+        self.prediction_risks = kwargs.get("prediction_risks", [])
+        
+    def run_review(self, manual_files=None):
+        return super().run_review()
 
     def _print_escalation_decision(self, decision):
         print(

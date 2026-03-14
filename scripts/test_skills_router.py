@@ -7,7 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path("/Users/jameschen/Downloads/Muse-Nexus")
 sys.path.append(str(PROJECT_ROOT / "scripts"))
 
-from core.skills_router import SkillsRouter
+from nexus.core.router import SkillsRouter
 from core.context_hub import ContextHub
 from core.state_contracts import NexusState
 

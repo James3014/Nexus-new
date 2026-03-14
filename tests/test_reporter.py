@@ -6,7 +6,7 @@ SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from core.reporter import Reporter
+from nexus.services.reporter import Reporter
 
 
 def test_markdown_report_includes_escalation_and_action_brief(tmp_path):

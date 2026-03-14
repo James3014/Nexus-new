@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "muse-nexus"
+version = "9.0.0a1"
+description = "Nexus v9: Modular Intelligence Orchestrator for Muse-Core"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    {name = "James Chen", email = "james@example.com"}
+]
+dependencies = [
+    "pydantic>=2.0",
+    "openai>=1.0.0",
+    "gitpython>=3.1.0",
+    "radon>=5.1.0"
+]
+
+[project.scripts]
+nexus = "nexus.engine.coordinator:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nexus*"]

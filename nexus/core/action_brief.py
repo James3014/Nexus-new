@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from core.escalation_policy import EscalationDecision, TaskMetadata
+from nexus.core.escalation import EscalationDecision, TaskMetadata
 
 
 @dataclass(frozen=True)

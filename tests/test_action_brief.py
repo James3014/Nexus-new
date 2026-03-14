@@ -6,8 +6,8 @@ SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from core.action_brief import build_action_brief
-from core.escalation_policy import EscalationDecision, TaskMetadata
+from nexus.core.action_brief import build_action_brief
+from nexus.core.escalation import EscalationDecision, TaskMetadata
 
 
 def test_builds_gemini_repair_brief_from_review_feedback():

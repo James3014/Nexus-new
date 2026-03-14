@@ -7,9 +7,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Tuple
 from concurrent.futures import ProcessPoolExecutor
-from core.state_contracts import NexusIssue, NexusState, TddStatus
-from core.context_hub import ContextHub
-from core.workspace_manager import WorkspaceManager
+from nexus.core.state_contracts import NexusIssue, NexusState, TddStatus
+from nexus.core.context_hub import ContextHub
+from nexus.services.workspace import WorkspaceManager
 
 class AutoResearchNightShift:
     """

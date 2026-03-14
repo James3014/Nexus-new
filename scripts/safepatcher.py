@@ -1,7 +1,7 @@
 import argparse
 import sys
 from pathlib import Path
-from core.patcher import SafePatcher
+from nexus.services.patcher import SafePatcher
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus v7 SafePatcher")

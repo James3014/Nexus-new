@@ -6,7 +6,7 @@ SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from core.gemini_handoff import build_gemini_prompt
+from nexus.core.gemini_handoff import build_gemini_prompt
 
 
 def test_build_prompt_includes_action_brief_and_context():
