@@ -13,24 +13,12 @@ class ContextHub:
     負責收集、組裝與壓縮上下文，為 Agent 提供乾淨的 P-D-X-R-A-C 視圖。
     """
 
-    # 🏆 Nexus Primer: v7 新域大師核心規制
-    NEXUS_PRIMER = {
-        "constitutional_rules": [
-            "P: Plan MUST be atomic and measurable.",
-            "D: Diagnosis MUST focus on failure signatures, not just stack traces.",
-            "R: Repair MUST be minimal; no unrelated refactor.",
-            "A: Audit MUST prove the fix with unit/e2e tests.",
-        ],
-        "top_patterns": {
-            "FASTAPI_500": "Check dependency overrides and startup event order.",
-            "PYTHON_IMPORT_ERR": "Scan for circular dependencies or missing PYTHONPATH.",
-            "RACE_CONDITION": "Identify shared states and apply locks or atomic ops.",
-        },
-    }
-
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
         self.state_io = StateIO(project_root)
+        
+        from nexus.services.prompt_builder import PromptBuilder
+        self.prompt_builder = PromptBuilder(project_root)
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
         """讀取 AutoResearch 規則文件。"""
@@ -117,13 +105,6 @@ class ContextHub:
             "tdd_status": state.tdd_status,
             "worktree_uuid": state.metadata.get("worktree_uuid", "main-branch"),
             
-            "logic_guard": {
-                "chain_of_thought": "Analyze logs → Follow Superpowers Plan → Apply Patches → TDD Cycle",
-                "negative_constraints": [
-                    "DO NOT modify files outside the provided hotspots",
-                    "STRICTLY follow the defined TDD cycle (RED-GREEN-REFACTOR)",
-                ],
-            },
             "memory_reminders": self._inject_memory_reminders("R")
         }
         return pack

@@ -10,62 +10,14 @@ from pathlib import Path
 class LLMClient:
     """負責與 LLM (Codex) 的通訊與結果解析，並具備 v7 領域適應能力。"""
 
-    def _apply_domain_adaptation(self, prompt: str) -> str:
-        """💾 Phase 3: 領域適應。根據 crystal_lessons.jsonl 動態強化 Prompt。"""
-        lesson_path = self.project_root / "obsidian/crystal_lessons.jsonl"
-        if not lesson_path.exists():
-            return prompt
-
-        try:
-            with open(lesson_path, "r", encoding="utf-8") as f:
-                lessons = [json.loads(line) for line in f]
-
-            # 簡單的關鍵字匹配 (對應當前任務)
-            relevant_lessons = []
-            for l in lessons:
-                if l.get("signature") in prompt or l.get("cause") in prompt:
-                    relevant_lessons.append(f"- [{l['signature']}]: {l['lesson']}")
-
-            if relevant_lessons:
-                print(
-                    f"🧠 [DomainAdapt] Injected {len(relevant_lessons)} relevant lessons into Prompt."
-                )
-                header = "\n### [Domain-Specific Crystal Lessons]\n"
-                return prompt + header + "\n".join(relevant_lessons[:3]) + "\n"
-        except:
-            pass
-        return prompt
-
-    OUTPUT_SCHEMA = {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string"},
-            "summary": {"type": "string"},
-            "violations": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "file": {"type": "string"},
-                        "line": {"type": "integer"},
-                        "severity": {"type": "string"},
-                        "type": {"type": "string"},
-                        "reason": {"type": "string"},
-                        "suggestion": {"type": "string"},
-                        "patch": {"type": "string"},
-                    },
-                    "required": ["file", "reason", "suggestion"],
-                },
-            },
-        },
-        "required": ["status", "summary", "violations"],
-    }
-
     def __init__(self, bin_path=None, lock_file=None, project_root=None):
         # 優先使用傳入路徑，否則動態偵測絕對路徑
         self.llm_bin = bin_path or shutil.which("codex") or "codex"
         self.lock_file = lock_file or "/tmp/codex_loop_v2.lock"
         self.project_root = Path(project_root or ".")
+        
+        from nexus.services.prompt_builder import PromptBuilder
+        self.prompt_builder = PromptBuilder(str(self.project_root))
 
     def _build_error_result(
         self, summary, output="", tokens_total=0, category="llm_error"
@@ -97,27 +49,10 @@ class LLMClient:
             return "codex cli runtime panic", "cli_panic"
         return "", ""
 
-    def ask_with_template(self, task: str, diff: str, model_hint: str = "flash") -> tuple[dict, str]:
-        """根據模型提示使用特定模板進行請求，具備自動回退機制。"""
-        import yaml
-        config_path = Path(self.project_root) / "nexus" / "config" / "models.yaml"
-        with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-        
-        hint_key = "gemini_flash" if model_hint == "flash" else "claude_sonnet"
-        
-        # 🛡️ 模型可用性檢查與回退
-        if hint_key not in config["models"] or not config["models"][hint_key].get("id"):
-            print(f"⚠️ [LLMClient] Model {hint_key} not available. Falling back to gemini_flash.")
-            hint_key = "gemini_flash"
-
-        model_cfg = config["models"][hint_key]
-        
-        # 組合模板與 Task
-        prompt = model_cfg["template"].replace("[Nexus Task]", task)
-        
-        # 實際調用 LLM (此處仍為模擬，但在真實環境會調用 self.ask)
-        return {"status": "PASS", "confidence": 0.8, "tokens_used": 120}, "RAW_RESPONSE"
+    def ask_with_template(self, task: str, diff: str, model_hint: str = "flash", phase: str = "R") -> tuple[dict, str]:
+        """使用 PromptBuilder 組合完整 Payload 並發送請求。"""
+        full_payload = self.prompt_builder.build_full_payload(phase, task, diff, model_hint)
+        return self.ask(full_payload, "", phase=phase)
 
     def model_selector(self, phase: str, domain: str = "general") -> str:
         """
@@ -152,10 +87,9 @@ class LLMClient:
         return cmd
 
     def ask(self, prompt, payload, phase="P", second_opinion=False):
-        """執行 LLM 請求並返回解析後的 JSON 結果。"""
+        """執行 LLM 請求。"""
         model_name = self.model_selector(phase)
-        adapted_prompt = self._apply_domain_adaptation(prompt)
-        full_prompt = adapted_prompt + payload
+        full_prompt = prompt + payload # 此時 prompt 已由 Builder 處理
         schema_file = None
         try:
             with tempfile.NamedTemporaryFile(
