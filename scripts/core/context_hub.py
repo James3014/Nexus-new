@@ -1,4 +1,5 @@
 import json
+import subprocess
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
@@ -31,6 +32,32 @@ class ContextHub:
         self.project_root = Path(project_root)
         self.state_io = StateIO(project_root)
 
+    def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
+        """🔌 Hook: 呼叫 LogMemory Agent 取得 per-round 記憶。"""
+        try:
+            # 呼叫 scripts/logmemory.py (使用 uv run 以符合全域安全規則)
+            uv_path = "/Users/jameschen/.local/bin/uv"
+            cmd = [
+                uv_path, "run", 
+                "--with", "redis", 
+                "--with", "lancedb", 
+                str(self.project_root / "scripts/logmemory.py"), 
+                "--phase", phase,
+                "--cache"
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.project_root)
+            
+            if result.returncode == 0:
+                # 讀取產出的 reminders.json
+                reminder_file = self.project_root / "reminders.json"
+                if reminder_file.exists():
+                    data = json.loads(reminder_file.read_text())
+                    print(f"🧠 [MemoryHook] Injected {len(data.get('reminders', []))} reminders for phase {phase}")
+                    return data
+        except Exception as e:
+            print(f"⚠️ [MemoryHook] Injection failed: {e}")
+        return {"reminders": [], "total_sources": 0}
+
     def assemble_diag_pack(
         self, violations: List[Dict], summary: str
     ) -> Dict[str, Any]:
@@ -43,6 +70,7 @@ class ContextHub:
             "hotspots": list(set([v.get("file") for v in violations if v.get("file")])),
             "history_summary": [steps.summary for steps in state.steps_history[-3:]],
             "contract_version": "1.5.2",
+            "memory_reminders": self._inject_memory_reminders("D")
         }
         return pack
 
@@ -76,6 +104,7 @@ class ContextHub:
                     "STRICTLY follow the defined state contracts",
                 ],
             },
+            "memory_reminders": self._inject_memory_reminders("R")
         }
 
     def record_crystal_lesson(
