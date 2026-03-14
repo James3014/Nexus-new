@@ -503,7 +503,8 @@ class CodexLoopV2:
                     full_prompt += "\n[MANDATORY FORMATTING] DO NOT use Markdown wrappers (```json). DO NOT include explanatory text like '**Findings**'. OUTPUT ONLY VALID JSON DATA.\n"
 
                 print(f"🧠 Calling LLM for Cognitive Review (Strike {strike})...")
-                data, raw_output = self.llm.ask(full_prompt, diff_text)
+                current_phase = data.get("current_phase", "P") if strike > 1 else "P"
+                data, raw_output = self.llm.ask(full_prompt, diff_text, phase=current_phase)
 
                 # 🏆 [v7 Benchmark Accelerator]
                 # 當開啟繞過熔斷時，模擬高品質成功，以達成 CLI 基準測試指標

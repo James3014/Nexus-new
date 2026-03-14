@@ -97,8 +97,26 @@ class LLMClient:
             return "codex cli runtime panic", "cli_panic"
         return "", ""
 
-    def _build_codex_command(self, schema_path):
-        return [
+    def model_selector(self, phase: str, domain: str = "general") -> str:
+        """
+        🎡 Nexus Wheel-Shift: 動態模型選擇器 (Lvl 19)
+        - P/X (Plan/Research): 優先使用 Claude (邏輯縝密)
+        - R/A (Repair/Audit): 優先使用 Gemini (審查精準)
+        """
+        mapping = {
+            "P": "claude-3.5-sonnet",
+            "D": "claude-3.5-sonnet",
+            "X": "claude-3.5-sonnet",
+            "R": "gemini-1.5-pro",
+            "A": "gemini-1.5-pro",
+            "C": "gemini-1.5-pro"
+        }
+        target_model = mapping.get(phase, "claude-3.5-sonnet")
+        print(f"🎡 [Wheel-Shift] Phase {phase} -> Model: {target_model}")
+        return target_model
+
+    def _build_codex_command(self, schema_path, model_name=None):
+        cmd = [
             self.llm_bin,
             "exec",
             "-",
@@ -107,9 +125,13 @@ class LLMClient:
             "--output-schema",
             str(schema_path),
         ]
+        if model_name:
+            cmd.extend(["--model", model_name])
+        return cmd
 
-    def ask(self, prompt, payload):
+    def ask(self, prompt, payload, phase="P", second_opinion=False):
         """執行 LLM 請求並返回解析後的 JSON 結果。"""
+        model_name = self.model_selector(phase)
         adapted_prompt = self._apply_domain_adaptation(prompt)
         full_prompt = adapted_prompt + payload
         schema_file = None
@@ -123,7 +145,7 @@ class LLMClient:
             with open(self.lock_file, "w") as lock_f:
                 fcntl.flock(lock_f, fcntl.LOCK_EX)
                 res = subprocess.run(
-                    self._build_codex_command(schema_file),
+                    self._build_codex_command(schema_file, model_name),
                     input=full_prompt,
                     capture_output=True,
                     text=True,
