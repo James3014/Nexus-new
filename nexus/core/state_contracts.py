@@ -107,6 +107,7 @@ class StepRecord(BaseModel):
     status: str # pending, in_progress, completed, failed
     started_at: datetime
     ended_at: Optional[datetime] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展
     summary: Optional[str] = None
 
 from pydantic import model_validator

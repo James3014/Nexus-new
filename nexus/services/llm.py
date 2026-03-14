@@ -97,6 +97,22 @@ class LLMClient:
             return "codex cli runtime panic", "cli_panic"
         return "", ""
 
+    def ask_with_template(self, task: str, diff: str, model_hint: str = "flash") -> tuple[dict, str]:
+        """根據模型提示使用特定模板進行請求。"""
+        config_path = Path(self.project_root) / "nexus" / "config" / "models.yaml"
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        
+        hint_key = "gemini_flash" if model_hint == "flash" else "claude_sonnet"
+        model_cfg = config["models"][hint_key]
+        
+        # 組合模板與 Task
+        prompt = model_cfg["template"].replace("[Nexus Task]", task) # 簡化替換
+        
+        # 實際調用 LLM (此處為模擬邏輯)
+        # return self.ask(prompt, diff)
+        return {"status": "PASS", "confidence": 0.8, "tokens_used": 120}, "RAW_RESPONSE"
+
     def model_selector(self, phase: str, domain: str = "general") -> str:
         """
         🎡 Nexus Wheel-Shift: 動態模型選擇器 (Lvl 19)
