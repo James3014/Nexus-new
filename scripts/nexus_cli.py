@@ -70,6 +70,37 @@ class NexusCLI:
         with open(self.tracelog_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
+    def _invoke_skills_router(self, phase, lang="python", task_scale="medium", triggers=None):
+        """🧠 v7 Spec: 呼叫 Skills Router 進行智慧選配"""
+        triggers = triggers or []
+        script_path = Path(__file__).parent / "skills_router.py"
+        cmd = [sys.executable, str(script_path), f"--phase={phase}", f"--lang={lang}", f"--task-scale={task_scale}"]
+        if triggers:
+            cmd.append("--triggers")
+            cmd.extend(triggers)
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            output = json.loads(result.stdout)
+            return output.get("selected_skills", [])
+        except Exception as e:
+            print(f"⚠️ [Router] Failed to invoke: {e}")
+            return []
+
+    def _detect_triggers(self, task):
+        """🔍 v7 Spec: 從任務描述中提取觸發關鍵字"""
+        triggers = []
+        task_lower = task.lower()
+        if any(kw in task_lower for kw in ["fuzzy", "not clear", "曖昧", "模糊"]):
+            triggers.append("fuzzy_request")
+        if any(kw in task_lower for kw in ["stacktrace", "error", "traceback", "報錯"]):
+            triggers.append("large_stacktrace")
+        if any(kw in task_lower for kw in ["quality", "lint", "refactor", "重複"]):
+            triggers.append("repeated_quality_issues")
+        if any(kw in task_lower for kw in ["git", "branch", "commit"]):
+            triggers.append("git_commit")
+        return triggers
+
     def run_bug(
         self, task, domain=None, dry_run=False, bypass_cb=False, model_override=None
     ):
@@ -89,6 +120,21 @@ class NexusCLI:
         # 1. 映射命令至 State (v7 契約)
         if not dry_run:
             self.cmdr.handle_nexus_command({"command": "nexus:bug", "task": task})
+            
+        # 🟢 [Skills Router] P-Phase 智慧選配
+        triggers = self._detect_triggers(task)
+        selected = self._invoke_skills_router("P", triggers=triggers)
+        if selected:
+            skill_list = [s["skill"] for s in selected]
+            print(f"🧠 [Router] Phase P selected: {', '.join(skill_list)}")
+            # 注入 metadata (此處模擬寫入 state/plan)
+            state = self.state_io.load_global_state()
+            state.metadata.update({
+                "skill_used": skill_list,
+                "router_version": "v0.1",
+                "decision_timestamp": datetime.now().isoformat()
+            })
+            self.state_io.save_global_state(state)
 
         # 2. 啟動 CodexLoopV2 全流程
         engine = CodexLoopV2(
@@ -174,6 +220,23 @@ class NexusCLI:
             self.cmdr.handle_nexus_command(
                 {"command": "nexus:feature", "task": task, "domain": domain}
             )
+            
+        # 🟢 [Skills Router] P-Phase 智慧選配
+        triggers = self._detect_triggers(task)
+        if not domain or domain == "auto-detect":
+            triggers.append("new_feature")
+            
+        selected = self._invoke_skills_router("P", triggers=triggers)
+        if selected:
+            skill_list = [s["skill"] for s in selected]
+            print(f"🧠 [Router] Phase P selected: {', '.join(skill_list)}")
+            state = self.state_io.load_global_state()
+            state.metadata.update({
+                "skill_used": skill_list,
+                "router_version": "v0.1",
+                "decision_timestamp": datetime.now().isoformat()
+            })
+            self.state_io.save_global_state(state)
 
         # 2. 啟動 CodexLoopV2 (在 Feature 模式下通常需要先產 Spec)
         engine = CodexLoopV2(
