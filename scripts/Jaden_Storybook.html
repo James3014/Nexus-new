@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jaden 的奇幻滑雪冒險 - AI 繪本創作者</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #FF80AB;
+            --secondary: #3B82F6;
+            --bg: #F0F4F8;
+            --panel: rgba(255, 255, 255, 0.7);
+            --blur: 16px;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Noto Sans TC', sans-serif;
+            background: linear-gradient(135deg, #E0C3FC 0%, #8EC5FC 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .storybook-container {
+            width: 90vw;
+            height: 80vh;
+            background: var(--panel);
+            backdrop-filter: blur(var(--blur));
+            border-radius: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .canvas-area {
+            flex: 1;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            transition: all 0.5s ease;
+        }
+
+        .illustration-card {
+            width: 100%;
+            height: 100%;
+            max-width: 600px;
+            max-height: 600px;
+            background: white;
+            border-radius: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            overflow: hidden;
+            position: relative;
+            transform: rotate(-2deg);
+            transition: transform 0.3s ease;
+        }
+
+        .illustration-card:hover {
+            transform: rotate(0deg) scale(1.02);
+        }
+
+        .illustration-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .content-area {
+            width: 400px;
+            background: rgba(255, 255, 255, 0.5);
+            padding: 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        h1 {
+            font-family: 'Fredoka One', cursive;
+            color: var(--primary);
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 0px rgba(255,255,255,0.8);
+        }
+
+        .chapter-info {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--secondary);
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .story-text {
+            font-size: 1.25rem;
+            line-height: 1.8;
+            color: #4A5568;
+            margin-bottom: 40px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .narration-panel {
+            margin-top: 25px;
+            padding: 25px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.4), 
+                        0 10px 30px rgba(0,0,0,0.05);
+            transition: all 0.4s ease;
+        }
+
+        .narration-panel:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 20px;
+            display: none;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), #FF4081);
+            border-radius: 10px;
+            transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .narration-btns {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .btn-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--primary);
+            font-size: 1.4rem;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .btn-icon:hover {
+            transform: scale(1.1) rotate(5deg);
+            background: white;
+            box-shadow: 0 8px 20px rgba(255, 128, 171, 0.2);
+        }
+
+        .btn-icon:active {
+            transform: scale(0.95);
+        }
+
+        .btn {
+            padding: 15px 30px;
+            border-radius: 20px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            font-family: 'Noto Sans TC', sans-serif;
+            font-size: 1.1rem;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 10px 20px rgba(255, 128, 171, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 25px rgba(255, 128, 171, 0.5);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: var(--secondary);
+        }
+
+        /* 粒子背景 */
+        .particles {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* 翻頁動畫 */
+        .fade-in {
+            animation: fadeIn 0.8s forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 成功 Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(10px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            padding: 50px;
+            border-radius: 30px;
+            text-align: center;
+            max-width: 400px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.2);
+            animation: modalPop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes modalPop {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .modal h2 {
+            color: var(--primary);
+            font-family: 'Fredoka One', cursive;
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+
+        .modal p {
+            color: #4A5568;
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="storybook-container">
+        <div class="canvas-area">
+            <div class="illustration-card" id="card">
+                <img src="https://images.unsplash.com/photo-1551524164-687a55ea1110?auto=format&fit=crop&q=80&w=1000" id="illustration" alt="Story Illustration">
+            </div>
+        </div>
+        <div class="content-area">
+            <div id="story-content" class="fade-in">
+                <div class="chapter-info" id="chapter-label">Chapter 1</div>
+                <h1 id="title">銀白色的召喚</h1>
+                <p class="story-text" id="text">Jaden 穿上他最帥氣的藍色滑雪服，站在雪山之巔。今天不僅僅是滑雪，這是一場冒險的開始。</p>
+            </div>
+            
+            <div class="controls">
+                <button class="btn btn-secondary" onclick="prev()">上一頁</button>
+                <button class="btn btn-primary" onclick="next()" id="next-btn">下一頁</button>
+            </div>
+
+            <div class="narration-panel">
+                <div class="narration-btns">
+                    <button class="btn-icon" onclick="toggleNarration()" id="play-pause-btn">▶</button>
+                    <span id="narration-status" style="font-size: 0.9rem; color: #718096;">點擊朗讀故事</span>
+                </div>
+                <div class="progress-container" id="progress-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 成功 Modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+            <h2>太棒了，Jaden！</h2>
+            <p>你完成了一場精彩的滑雪冒險！<br>你是最勇敢的小戰士！🦾✨</p>
+            <button class="btn btn-primary" onclick="closeModal()">再讀一次</button>
+        </div>
+    </div>
+
+    <script>
+        const story = [
+            {
+                chapter: "Chapter 1",
+                title: "銀白色的召喚",
+                text: "Jaden 穿上他最帥氣的藍色滑雪服，站在雪山之巔。今天不僅僅是滑雪，這是一場冒險的開始。",
+                image: "file:///Users/jameschen/.gemini/antigravity/brain/0ff02f80-1fc2-4ea9-a21f-5adbd1afc7e8/jaden_ski_boy_chapter1_v2_1773489290881.png"
+            },
+            {
+                chapter: "Chapter 2",
+                title: "雪地裡的精靈",
+                text: "在滑下斜坡時，Jaden 遇到了一隻戴著護目鏡的小白兔。小白兔提議要帶 Jaden 去尋找傳說中的「閃鑽冰晶」。",
+                image: "file:///Users/jameschen/.gemini/antigravity/brain/0ff02f80-1fc2-4ea9-a21f-5adbd1afc7e8/jaden_ski_boy_chapter2_v2_1773489311123.png"
+            },
+            {
+                chapter: "Chapter 3",
+                title: "星光下的結晶",
+                text: "在山腳下，Jaden 終於找到了閃閱冰晶。這不僅是魔法，更是他努力練習、勇敢嘗試的禮物。",
+                image: "file:///Users/jameschen/.gemini/antigravity/brain/0ff02f80-1fc2-4ea9-a21f-5adbd1afc7e8/jaden_ski_chapter4_1773489133683.png"
+            }
+        ];
+
+        let current = 0;
+
+        function update() {
+            const content = document.getElementById('story-content');
+            content.classList.remove('fade-in');
+            void content.offsetWidth; // Trigger reflow
+            content.classList.add('fade-in');
+
+            document.getElementById('chapter-label').innerText = story[current].chapter;
+            document.getElementById('title').innerText = story[current].title;
+            document.getElementById('text').innerText = story[current].text;
+            document.getElementById('illustration').src = story[current].image;
+
+            document.getElementById('next-btn').innerText = current === story.length - 1 ? "完成閱讀" : "下一頁";
+        }
+
+        function next() {
+            stopNarration();
+            if (current < story.length - 1) {
+                current++;
+                update();
+            } else {
+                document.getElementById('modal-overlay').style.display = 'flex';
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').style.display = 'none';
+            stopNarration();
+            current = 0;
+            update();
+        }
+
+        // --- 語音朗讀邏輯 ---
+        let synth = window.speechSynthesis;
+        let utterance = null;
+        let isSpeaking = false;
+        let progressTimer = null;
+
+        function toggleNarration() {
+            if (isSpeaking) {
+                if (synth.paused) {
+                    synth.resume();
+                    updateNarrationUI(true);
+                } else {
+                    synth.pause();
+                    updateNarrationUI(false, "已暫停");
+                }
+            } else {
+                startNarration();
+            }
+        }
+
+        function startNarration() {
+            stopNarration();
+            const textToRead = story[current].text;
+            utterance = new SpeechSynthesisUtterance(textToRead);
+            utterance.lang = 'zh-TW';
+            utterance.rate = 1.0;
+
+            utterance.onstart = () => {
+                isSpeaking = true;
+                document.getElementById('progress-container').style.display = 'block';
+                updateNarrationUI(true);
+                simulateProgress(textToRead.length);
+            };
+
+            utterance.onend = () => {
+                isSpeaking = false;
+                updateNarrationUI(false, "朗讀結束");
+                clearInterval(progressTimer);
+                document.getElementById('progress-bar').style.width = '100%';
+                setTimeout(() => {
+                    document.getElementById('progress-container').style.display = 'none';
+                }, 1000);
+            };
+
+            synth.speak(utterance);
+        }
+
+        function stopNarration() {
+            synth.cancel();
+            isSpeaking = false;
+            clearInterval(progressTimer);
+            updateNarrationUI(false);
+            document.getElementById('progress-bar').style.width = '0%';
+            document.getElementById('progress-container').style.display = 'none';
+        }
+
+        function updateNarrationUI(playing, statusText) {
+            const btn = document.getElementById('play-pause-btn');
+            const status = document.getElementById('narration-status');
+            btn.innerText = playing ? "⏸" : "▶";
+            status.innerText = playing ? "正在為 Jaden 說故事..." : (statusText || "點擊朗讀故事");
+        }
+
+        function simulateProgress(length) {
+            let currentProgress = 0;
+            const duration = length * 300; // 估計朗讀時間 (每個字 300ms)
+            const interval = 100;
+            const step = (interval / duration) * 100;
+
+            clearInterval(progressTimer);
+            progressTimer = setInterval(() => {
+                if (!synth.paused && isSpeaking) {
+                    currentProgress += step;
+                    if (currentProgress > 98) currentProgress = 98;
+                    document.getElementById('progress-bar').style.width = currentProgress + '%';
+                }
+            }, interval);
+        }
+
+        function prev() {
+            stopNarration();
+            if (current > 0) {
+                current--;
+                update();
+            }
+        }
+
+        // Initial Load
+        window.onload = update;
+    </script>
+</body>
+</html>

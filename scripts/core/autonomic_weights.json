@@ -1,0 +1,18 @@
+{
+    "base_weights": {
+        "tdd_weight": 2.5,
+        "subagent_bias": 1.8,
+        "refactor_weight": 3.0,
+        "investigate_weight": 4.5
+    },
+    "skill_adjustments": {
+        "nexus-bdd-automation": 0.8,
+        "nexus-planner-expert": 0.0,
+        "nexus-design-polish": 0.8,
+        "nexus-debug-expert": 0.8,
+        "openui-ui-gen": 0.8,
+        "ui-validator": 0.0
+    },
+    "last_updated": "2026-03-14T20:49:26.220709",
+    "total_sessions_analyzed": 200
+}

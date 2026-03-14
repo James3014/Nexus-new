@@ -57,6 +57,8 @@ class CodexLoopV2:
         isolated=False,
         task=None,
         bypass_circuit_breaker=False,
+        prediction_risks=None,
+        skill_id=None,  # 🚀 [Nexus v9] 支援外部指定技能
     ):
         self.mode = mode
         self.scope = scope
@@ -65,6 +67,8 @@ class CodexLoopV2:
         self.isolated = isolated
         self.task = task
         self.bypass_circuit_breaker = bypass_circuit_breaker
+        self.prediction_risks = prediction_risks or []
+        self.skill_id = skill_id
 
         # 0. 套用 Profile 預設 (DX Polish Lvl 16.5)
         if profile == "solo-dev":
@@ -397,11 +401,14 @@ class CodexLoopV2:
                 strike += 1
                 print(f"🚀 [Round {strike}/{self.max_strikes}] Initiating Audit...")
 
-                # 🛡️ Nexus v7: 處理 Task 指令開發
                 if self.task and strike == 1:
                     print(f"🎯 [Task Mode] Goal: {self.task}")
-                    self._run_v5_p_stage("writing-plans", {"summary": self.task})
-                    # 計畫生成後，後續循環將透過 git 變更或 plan.json 進行
+                    # 如果有指定 skill_id，則繞過 Router 直接執行 P 階段計畫
+                    if self.skill_id:
+                        print(f"🛡️ [v9 Override] Using explicit skill: {self.skill_id}")
+                        self._run_v5_p_stage(self.skill_id, {"summary": self.task})
+                    else:
+                        self._run_v5_p_stage("writing-plans", {"summary": self.task})
 
                 if manual_files:
                     code_files = [
