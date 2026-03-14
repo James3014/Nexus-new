@@ -32,6 +32,16 @@ class ContextHub:
         self.project_root = Path(project_root)
         self.state_io = StateIO(project_root)
 
+    def load_program_rules(self, md_path: str = "program.md") -> str:
+        """讀取 AutoResearch 規則文件。"""
+        path = Path(md_path)
+        if not path.exists():
+            return "# Default: Optimize target file, metric FlashJudge > prev_score"
+        try:
+            return path.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"# Error loading rules: {e}"
+
     def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
         """🔌 Hook: 呼叫 LogMemory Agent 取得 per-round 記憶。"""
         try:

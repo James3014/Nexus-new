@@ -1,0 +1,44 @@
+name: Night Shift AutoResearch 🌙
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每晚 2AM 執行
+  workflow_dispatch:      # 支援手動觸發
+
+jobs:
+  autoresearch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install uv
+          uv pip install --system pandas matplotlib pydantic gitpython
+
+      - name: Execute Swarm AutoResearch 🐝
+        run: |
+          python3 scripts/nightshift.py --tasks "cors,hydration,redis" --max_rounds 20 --swarm --workers 4
+        env:
+          MUSE_RUN_CODEX_LOOP: 1
+
+      - name: Generate Visualization 📊
+        run: |
+          python3 scripts/plot_curve.py --csv optimization_curve_fix_cors_error.csv --out curve_cors.png
+          python3 scripts/plot_curve.py --csv optimization_curve_hydration_error.csv --out curve_hydration.png
+
+      - name: Commit Evolutions 🚀
+        run: |
+          git config --global user.name "Nexus-AutoResearch[bot]"
+          git config --global user.email "nexus-bot@muse-core.ai"
+          git add .
+          git commit -m "🌙 Night Shift Evolution: $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git push origin main

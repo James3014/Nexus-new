@@ -26,10 +26,10 @@ class WorkspaceManager:
         self.lock_file = Path("/tmp/codex-loop-merge.lock")
         self.lock_file.touch(exist_ok=True)
 
-    def lease(self):
+    def lease(self, task_id: str = None, branch_name: str = None):
         """租借一個全新、隔離的 Git 工作位面。"""
-        task_id = str(uuid.uuid4())[:8]
-        branch_name = f"isolated/task-{task_id}"
+        task_id = task_id or str(uuid.uuid4())[:8]
+        branch_name = branch_name or f"isolated/task-{task_id}"
         work_path = self.workspace_base / task_id
 
         print(f"🏗️ [Provisioning] Leasing workspace: {task_id} at {work_path}")

@@ -1,6 +1,6 @@
 {
-    "plan_id": "nexus-pilot-1773448608",
-    "goal": "codex returned non-schema output: Expecting value: line 1 column 1 (char 0)",
+    "plan_id": "nexus-pilot-1773474978",
+    "goal": "refactor django session to redis with tests",
     "steps": [
         {
             "step_id": 1,

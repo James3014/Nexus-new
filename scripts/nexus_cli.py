@@ -4,14 +4,18 @@ import sys
 import json
 import time
 import subprocess
+import signal
+import functools
 from pathlib import Path
 from datetime import datetime
+from typing import List, Optional
 
 # 導入 Nexus v7 核心
 try:
     from core.commander import Commander
     from core.state_io import StateIO
     from core.skills_router import SkillsRouter
+    from core.state_contracts import NexusState, TddStatus
     from codex_loop_brain import CodexLoopV2
 except ImportError:
     # 支援 scripts/ 目羅下執行
@@ -19,10 +23,31 @@ except ImportError:
     from commander import Commander
     from state_io import StateIO
     from skills_router import SkillsRouter
+    from state_contracts import NexusState, TddStatus
 
     # 如果在 scripts 目錄下執行，codex_loop_brain 應該在同級目錄
     sys.path.append(str(Path(__file__).resolve().parent))
     from codex_loop_brain import CodexLoopV2
+
+
+def timeout(seconds: int):
+    """階段超時監控裝飾器。"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            def handler(signum, frame):
+                raise TimeoutError(f"Action timed out after {seconds} seconds")
+            
+            # 設置鬧鐘
+            old_handler = signal.signal(signal.SIGALRM, handler)
+            signal.alarm(seconds)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                signal.alarm(0) # 取消鬧鐘
+                signal.signal(signal.SIGALRM, old_handler)
+        return wrapper
+    return decorator
 
 
 class NexusCLI:
@@ -109,13 +134,30 @@ class NexusCLI:
             triggers.append("git_commit")
         return triggers
 
+    def restrict_to_file(self, patch: str, target_file: str) -> str:
+        """將補丁限制在單一目標檔案，防止全域汙染。"""
+        if not target_file:
+            return patch
+        
+        lines = patch.splitlines()
+        filtered_lines = []
+        is_target_chunk = False
+        
+        for line in lines:
+            if line.startswith("--- ") or line.startswith("+++ "):
+                is_target_chunk = target_file in line
+            
+            if is_target_chunk or not (line.startswith("--- ") or line.startswith("+++ ") or line.startswith("@@ ")):
+                filtered_lines.append(line)
+        
+        return "\n".join(filtered_lines)
+
+    @timeout(300)
     def run_bug(
-        self, task, domain=None, dry_run=False, bypass_cb=False, model_override=None
+        self, task: str
     ):
         """nexus:bug -- P(quick) -> D -> X -> R -> A -> C"""
         print(f"🛡️ [Nexus:Bug] Initiating real-track repair for: {task}")
-        if model_override:
-            print(f"🤖 [Model] Overriding engine with: {model_override}")
         if dry_run:
             print("🧪 [Dry-Run] Simulation mode active. No changes will be persisted.")
         if bypass_cb:

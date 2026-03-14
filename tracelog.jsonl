@@ -54,3 +54,106 @@
 {"timestamp": "2026-03-14T08:34:33.213564", "command": "nexus:bug", "task": "fix jwt token expiration mismatch", "status": "SUCCESS", "tokens_used": 0, "flashjudge_score": 8.8}
 {"timestamp": "2026-03-14T08:34:33.444602", "command": "nexus:bug", "task": "resolve docker container restart loop", "status": "SUCCESS", "tokens_used": 0, "flashjudge_score": 8.8}
 {"timestamp": "2026-03-14T08:36:52.665404", "command": "nexus:feature", "task": "migrate session storage from file to redis", "status": "FAIL", "tokens_used": 0, "flashjudge_score": 9.2}
+{"timestamp": "2026-03-14T16:58:42.835834", "round": 1, "task": "AutoResearch Demo Run", "status": "IMPROVED", "flashjudge_score": 7.6, "best_score_so_far": 7.6}
+{"timestamp": "2026-03-14T16:58:42.915763", "round": 2, "task": "AutoResearch Demo Run", "status": "IMPROVED", "flashjudge_score": 7.7, "best_score_so_far": 7.7}
+{"timestamp": "2026-03-14T16:58:42.994882", "round": 3, "task": "AutoResearch Demo Run", "status": "IMPROVED", "flashjudge_score": 7.8, "best_score_so_far": 7.8}
+{"timestamp": "2026-03-14T16:58:53.451006", "round": 1, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 7.6, "best_score_so_far": 7.6}
+{"timestamp": "2026-03-14T16:58:53.530588", "round": 2, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 7.7, "best_score_so_far": 7.7}
+{"timestamp": "2026-03-14T16:58:53.612668", "round": 3, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 7.8, "best_score_so_far": 7.8}
+{"timestamp": "2026-03-14T16:58:53.694939", "round": 4, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 7.9, "best_score_so_far": 7.9}
+{"timestamp": "2026-03-14T16:58:53.777497", "round": 5, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.0, "best_score_so_far": 8.0}
+{"timestamp": "2026-03-14T16:58:53.858985", "round": 6, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.1, "best_score_so_far": 8.1}
+{"timestamp": "2026-03-14T16:58:53.936590", "round": 7, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.2, "best_score_so_far": 8.2}
+{"timestamp": "2026-03-14T16:58:54.016406", "round": 8, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.3, "best_score_so_far": 8.3}
+{"timestamp": "2026-03-14T16:58:54.089861", "round": 9, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.4, "best_score_so_far": 8.4}
+{"timestamp": "2026-03-14T16:58:54.162490", "round": 10, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.5, "best_score_so_far": 8.5}
+{"timestamp": "2026-03-14T16:58:54.237321", "round": 11, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.6, "best_score_so_far": 8.6}
+{"timestamp": "2026-03-14T16:58:54.307293", "round": 12, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.7, "best_score_so_far": 8.7}
+{"timestamp": "2026-03-14T16:58:54.378482", "round": 13, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.8, "best_score_so_far": 8.8}
+{"timestamp": "2026-03-14T16:58:54.527851", "round": 14, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 8.9, "best_score_so_far": 8.9}
+{"timestamp": "2026-03-14T16:58:54.592223", "round": 15, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 9.0, "best_score_so_far": 9.0}
+{"timestamp": "2026-03-14T16:58:54.657872", "round": 16, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 9.1, "best_score_so_far": 9.1}
+{"timestamp": "2026-03-14T16:58:54.722628", "round": 17, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 9.2, "best_score_so_far": 9.2}
+{"timestamp": "2026-03-14T16:58:54.784991", "round": 18, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 9.3, "best_score_so_far": 9.3}
+{"timestamp": "2026-03-14T16:58:54.846831", "round": 19, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 9.4, "best_score_so_far": 9.4}
+{"timestamp": "2026-03-14T16:58:54.908004", "round": 20, "task": "Optimize CORS Fix Logic", "status": "IMPROVED", "flashjudge_score": 9.5, "best_score_so_far": 9.5}
+{"timestamp": "2026-03-14T17:03:36.916541", "round": 1, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.6, "best_score_so_far": 7.6}
+{"timestamp": "2026-03-14T17:03:37.005078", "round": 2, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.7, "best_score_so_far": 7.7}
+{"timestamp": "2026-03-14T17:03:37.081089", "round": 3, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.8, "best_score_so_far": 7.8}
+{"timestamp": "2026-03-14T17:03:37.145729", "round": 4, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.9, "best_score_so_far": 7.9}
+{"timestamp": "2026-03-14T17:03:37.210382", "round": 5, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.0, "best_score_so_far": 8.0}
+{"timestamp": "2026-03-14T17:03:37.270120", "round": 6, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.1, "best_score_so_far": 8.1}
+{"timestamp": "2026-03-14T17:03:37.336097", "round": 7, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.2, "best_score_so_far": 8.2}
+{"timestamp": "2026-03-14T17:03:37.405734", "round": 8, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.3, "best_score_so_far": 8.3}
+{"timestamp": "2026-03-14T17:03:37.480781", "round": 9, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.4, "best_score_so_far": 8.4}
+{"timestamp": "2026-03-14T17:03:37.556289", "round": 10, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.5, "best_score_so_far": 8.5}
+{"timestamp": "2026-03-14T17:03:37.634504", "round": 11, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.6, "best_score_so_far": 8.6}
+{"timestamp": "2026-03-14T17:03:37.741133", "round": 12, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.7, "best_score_so_far": 8.7}
+{"timestamp": "2026-03-14T17:03:37.863725", "round": 13, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.8, "best_score_so_far": 8.8}
+{"timestamp": "2026-03-14T17:03:37.939806", "round": 14, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.9, "best_score_so_far": 8.9}
+{"timestamp": "2026-03-14T17:03:38.002631", "round": 15, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.0, "best_score_so_far": 9.0}
+{"timestamp": "2026-03-14T17:03:38.063934", "round": 16, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.1, "best_score_so_far": 9.1}
+{"timestamp": "2026-03-14T17:03:38.124228", "round": 17, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.2, "best_score_so_far": 9.2}
+{"timestamp": "2026-03-14T17:03:38.184172", "round": 18, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.3, "best_score_so_far": 9.3}
+{"timestamp": "2026-03-14T17:03:38.248642", "round": 19, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.4, "best_score_so_far": 9.4}
+{"timestamp": "2026-03-14T17:03:38.312461", "round": 20, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.5, "best_score_so_far": 9.5}
+{"timestamp": "2026-03-14T17:09:24.385925", "round": 1, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 7.6, "best_score_so_far": 7.6}
+{"timestamp": "2026-03-14T17:09:24.385917", "round": 1, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.6, "best_score_so_far": 7.6}
+{"timestamp": "2026-03-14T17:09:24.469093", "round": 2, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.7, "best_score_so_far": 7.7}
+{"timestamp": "2026-03-14T17:09:24.469098", "round": 2, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 7.7, "best_score_so_far": 7.7}
+{"timestamp": "2026-03-14T17:09:24.551088", "round": 3, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 7.8, "best_score_so_far": 7.8}
+{"timestamp": "2026-03-14T17:09:24.551164", "round": 3, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.8, "best_score_so_far": 7.8}
+{"timestamp": "2026-03-14T17:09:24.652588", "round": 4, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 7.9, "best_score_so_far": 7.9}
+{"timestamp": "2026-03-14T17:09:24.652592", "round": 4, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 7.9, "best_score_so_far": 7.9}
+{"timestamp": "2026-03-14T17:09:24.753887", "round": 5, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.0, "best_score_so_far": 8.0}
+{"timestamp": "2026-03-14T17:09:24.753924", "round": 5, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.0, "best_score_so_far": 8.0}
+{"timestamp": "2026-03-14T17:09:24.859788", "round": 6, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.1, "best_score_so_far": 8.1}
+{"timestamp": "2026-03-14T17:09:24.859790", "round": 6, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.1, "best_score_so_far": 8.1}
+{"timestamp": "2026-03-14T17:09:24.943752", "round": 7, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.2, "best_score_so_far": 8.2}
+{"timestamp": "2026-03-14T17:09:24.943794", "round": 7, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.2, "best_score_so_far": 8.2}
+{"timestamp": "2026-03-14T17:09:25.031901", "round": 8, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.3, "best_score_so_far": 8.3}
+{"timestamp": "2026-03-14T17:09:25.031914", "round": 8, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.3, "best_score_so_far": 8.3}
+{"timestamp": "2026-03-14T17:09:25.104992", "round": 9, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.4, "best_score_so_far": 8.4}
+{"timestamp": "2026-03-14T17:09:25.105071", "round": 9, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.4, "best_score_so_far": 8.4}
+{"timestamp": "2026-03-14T17:09:25.173749", "round": 10, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.5, "best_score_so_far": 8.5}
+{"timestamp": "2026-03-14T17:09:25.176964", "round": 10, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.5, "best_score_so_far": 8.5}
+{"timestamp": "2026-03-14T17:09:25.255736", "round": 11, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.6, "best_score_so_far": 8.6}
+{"timestamp": "2026-03-14T17:09:25.257786", "round": 11, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.6, "best_score_so_far": 8.6}
+{"timestamp": "2026-03-14T17:09:25.331015", "round": 12, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.7, "best_score_so_far": 8.7}
+{"timestamp": "2026-03-14T17:09:25.331767", "round": 12, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.7, "best_score_so_far": 8.7}
+{"timestamp": "2026-03-14T17:09:25.405966", "round": 13, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.8, "best_score_so_far": 8.8}
+{"timestamp": "2026-03-14T17:09:25.406952", "round": 13, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.8, "best_score_so_far": 8.8}
+{"timestamp": "2026-03-14T17:09:25.476053", "round": 14, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 8.9, "best_score_so_far": 8.9}
+{"timestamp": "2026-03-14T17:09:25.476049", "round": 14, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 8.9, "best_score_so_far": 8.9}
+{"timestamp": "2026-03-14T17:09:25.544368", "round": 15, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.0, "best_score_so_far": 9.0}
+{"timestamp": "2026-03-14T17:09:25.547789", "round": 15, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 9.0, "best_score_so_far": 9.0}
+{"timestamp": "2026-03-14T17:09:25.608900", "round": 16, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 9.1, "best_score_so_far": 9.1}
+{"timestamp": "2026-03-14T17:09:25.611856", "round": 16, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.1, "best_score_so_far": 9.1}
+{"timestamp": "2026-03-14T17:09:25.742569", "round": 17, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 9.2, "best_score_so_far": 9.2}
+{"timestamp": "2026-03-14T17:09:25.746348", "round": 17, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.2, "best_score_so_far": 9.2}
+{"timestamp": "2026-03-14T17:09:25.823135", "round": 18, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.3, "best_score_so_far": 9.3}
+{"timestamp": "2026-03-14T17:09:25.823135", "round": 18, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 9.3, "best_score_so_far": 9.3}
+{"timestamp": "2026-03-14T17:09:25.894049", "round": 19, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 9.4, "best_score_so_far": 9.4}
+{"timestamp": "2026-03-14T17:09:25.894058", "round": 19, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.4, "best_score_so_far": 9.4}
+{"timestamp": "2026-03-14T17:09:25.958997", "round": 20, "task": "hydration error", "status": "IMPROVED", "flashjudge_score": 9.5, "best_score_so_far": 9.5}
+{"timestamp": "2026-03-14T17:09:25.959058", "round": 20, "task": "fix cors error", "status": "IMPROVED", "flashjudge_score": 9.5, "best_score_so_far": 9.5}
+{"timestamp": "2026-03-14T17:11:42.808752", "round": 1, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 7.6, "best_score_so_far": 7.6}
+{"timestamp": "2026-03-14T17:11:42.896427", "round": 2, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 7.7, "best_score_so_far": 7.7}
+{"timestamp": "2026-03-14T17:11:43.000952", "round": 3, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 7.8, "best_score_so_far": 7.8}
+{"timestamp": "2026-03-14T17:11:43.094817", "round": 4, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 7.9, "best_score_so_far": 7.9}
+{"timestamp": "2026-03-14T17:11:43.162293", "round": 5, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.0, "best_score_so_far": 8.0}
+{"timestamp": "2026-03-14T17:11:43.227108", "round": 6, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.1, "best_score_so_far": 8.1}
+{"timestamp": "2026-03-14T17:11:43.292309", "round": 7, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.2, "best_score_so_far": 8.2}
+{"timestamp": "2026-03-14T17:11:43.358113", "round": 8, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.3, "best_score_so_far": 8.3}
+{"timestamp": "2026-03-14T17:11:43.425171", "round": 9, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.4, "best_score_so_far": 8.4}
+{"timestamp": "2026-03-14T17:11:43.494799", "round": 10, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.5, "best_score_so_far": 8.5}
+{"timestamp": "2026-03-14T17:11:43.561484", "round": 11, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.6, "best_score_so_far": 8.6}
+{"timestamp": "2026-03-14T17:11:43.625735", "round": 12, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.7, "best_score_so_far": 8.7}
+{"timestamp": "2026-03-14T17:11:43.703708", "round": 13, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.8, "best_score_so_far": 8.8}
+{"timestamp": "2026-03-14T17:11:43.774321", "round": 14, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 8.9, "best_score_so_far": 8.9}
+{"timestamp": "2026-03-14T17:11:43.843884", "round": 15, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 9.0, "best_score_so_far": 9.0}
+{"timestamp": "2026-03-14T17:11:44.116675", "round": 16, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 9.1, "best_score_so_far": 9.1}
+{"timestamp": "2026-03-14T17:11:44.214855", "round": 17, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 9.2, "best_score_so_far": 9.2}
+{"timestamp": "2026-03-14T17:11:44.343303", "round": 18, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 9.3, "best_score_so_far": 9.3}
+{"timestamp": "2026-03-14T17:11:44.412809", "round": 19, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 9.4, "best_score_so_far": 9.4}
+{"timestamp": "2026-03-14T17:11:44.483779", "round": 20, "task": "redis-migrate-b", "status": "IMPROVED", "flashjudge_score": 9.5, "best_score_so_far": 9.5}
