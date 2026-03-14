@@ -73,6 +73,39 @@
 
 這裡的 top-level state 可由 Commander 維護，作為 phase navigation 與 War Room 摘要的最小索引。
 
+## 🌙 Night Shift Batch Contracts (v7)
+
+### `NexusBatch` Schema
+```json
+{
+  "batch_id": "night-shift-20260314",
+  "budget_token": 50000,
+  "priority": 1,
+  "audit_pass": false
+}
+```
+
+### `Soul Protocols` 強化驗證
+- **Budget Lock**: 針對 Batch 任務，處於 `P` 階段時，`budget_token` 必須 > 0。
+- **Forbidden Matrix**: 攔截 `P -> R`, `D -> X`, `D -> A` 等未授權的階段跳躍。
+- **Commit Guard**: 任務進入 `C` 階段前必須核對 `audit_pass == true`。
+
+## 🌙 Night Shift Batch Contracts (v7)
+
+### `NexusBatch`
+```json
+{
+  "batch_id": "night-shift-20260314",
+  "budget_token": 50000,
+  "priority": 1
+}
+```
+
+### `Soul Protocols` 驗證規則 (Pydantic Layer)
+1. **P Phase Budget**: 若存在 `batch_id`，則 Phase P 的 `budget_token` 必須大於 0。
+2. **Audit Check**: 進入 Phase C (Crystal/Commit) 前，`audit_pass` 必須為 `true`。
+3. **Forbidden Transitions**: 嚴禁跨過 X (Research) 直接進入 R (Repair)，除非顯式標註。
+
 ## Field Drafts
 
 ### `schema_version`

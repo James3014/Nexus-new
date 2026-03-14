@@ -27,6 +27,18 @@
     *   **混合領域專精**: 針對 Next.js, Django, Docker 等環境的特化上下文。
 *   **Stadium Explorer (WarRoom)**: Real-time dashboard for performance monitoring.
     *   **戰場探索者 (戰情室)**: 即時 Dashboard，監控任務成功率與效率。
+*   **🌙 Night Shift Code Factory [MAJOR]**: Automated nightly production with 10+ PRs.
+    *   **夜班代碼工廠**: 全自動化生產線，實現每晚 10+ 個 PR 的工業級規模。
+*   **Wheel-Shift Logic**: Dynamic orchestration between Claude (P/X) and Gemini (R/A).
+    *   **智慧輪班邏輯**: 根據階段自動調度最優模型，平衡邏輯深度與審查精準度。
+*   **Soul Protocols (Forbidden Transitions)**: Mechanized guardrails for the state machine.
+    *   **靈魂協議**: 機械化狀態機護欄，強制預算檢查與禁止非法階段跳躍。
+*   **🌙 Night Shift Code Factory [MAJOR]**: Automated 10+ PR nightly production line.
+    *   **夜班代碼工廠**: 全自動化流水線，每晚產出 10+ 個高品質 PR。
+*   **Wheel-Shift Logic**: Dynamic model switching between Claude (P/X) and Gemini (R/A).
+    *   **智慧輪班邏輯**: 根據階段自動切換最優模型，達成品質與成本的最佳平衡。
+*   **Soul Protocols (Forbidden Transitions)**: Mechanized state machine protection.
+    *   **靈魂協議**: 機械化狀態機保護，防止非法階段跳躍。
 
 ---
 

@@ -145,6 +145,30 @@ Routing principle:
 - 將成功或失敗經驗固化成 lesson
 - 更新 memory / lesson pipeline
 
+## 🏗️ Factory Scaling (v7 Evolution)
+
+Nexus v7 透過以下組件實現工廠級規模化：
+
+### 🏎️ Factory Router
+- **智慧分發**: 基於優先級 (Hotfix Priority 0) 與模型配額 (QPS 節流) 的自動化派發系統。
+- **SQLite Queue**: 任務隊列持久化，支援崩潰自癒與任務重啟。
+
+### 🛡️ Batch Guard & WarRoom
+- **Session Isolation**: 基於 Tmux 的物理環境隔離，每個任務擁有獨立的 Worktree 與預算鎖。
+- **Stalled Detection**: 自動檢測任務停滯並觸發 "Melt" 熔斷機制，保障系統資源不被死鎖占用。
+
+## 🏗️ Factory Scaling (v7 Evolution)
+
+為了支援「夜班工廠」模式，架構擴充了以下組件：
+
+### Factory Router
+- **智慧調度**: 優先處理 Hotfix (Priority 0)，並根據模型 Quota (Claude 10RPM / Gemini 20RPM) 進行併發管理。
+- **SQLite Queue Manager**: 採用持久化隊列確保任務狀態原子化。
+
+### Batch Guard & Monitor
+- **Tmux Isolation**: 每個任務在獨立 Tmux Session 中運行，實現物理級別的預算與環境隔離。
+- **WarRoom Monitoring**: 實時監控 Token 消耗、Strike 次數與心跳狀態，支援自動熔斷 (Stalled Melt)。
+
 ## Suggested State Layout
 
 ```text
