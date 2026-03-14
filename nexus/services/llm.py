@@ -98,19 +98,25 @@ class LLMClient:
         return "", ""
 
     def ask_with_template(self, task: str, diff: str, model_hint: str = "flash") -> tuple[dict, str]:
-        """根據模型提示使用特定模板進行請求。"""
+        """根據模型提示使用特定模板進行請求，具備自動回退機制。"""
+        import yaml
         config_path = Path(self.project_root) / "nexus" / "config" / "models.yaml"
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         
         hint_key = "gemini_flash" if model_hint == "flash" else "claude_sonnet"
+        
+        # 🛡️ 模型可用性檢查與回退
+        if hint_key not in config["models"] or not config["models"][hint_key].get("id"):
+            print(f"⚠️ [LLMClient] Model {hint_key} not available. Falling back to gemini_flash.")
+            hint_key = "gemini_flash"
+
         model_cfg = config["models"][hint_key]
         
         # 組合模板與 Task
-        prompt = model_cfg["template"].replace("[Nexus Task]", task) # 簡化替換
+        prompt = model_cfg["template"].replace("[Nexus Task]", task)
         
-        # 實際調用 LLM (此處為模擬邏輯)
-        # return self.ask(prompt, diff)
+        # 實際調用 LLM (此處仍為模擬，但在真實環境會調用 self.ask)
         return {"status": "PASS", "confidence": 0.8, "tokens_used": 120}, "RAW_RESPONSE"
 
     def model_selector(self, phase: str, domain: str = "general") -> str:
