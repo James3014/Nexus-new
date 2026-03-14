@@ -29,7 +29,26 @@ skills/
 
 ---
 
-## 📜 Standards | 編碼標準
+### 1. Skill Development | 技能開發與擴充 🧪
+**[EN]** To add a new skill to Nexus, follow our **Smart Inventory** spec:
+**[ZH]** 若要為 Nexus 新增技能，請遵循 **智慧清單 (Inventory)** 規範：
+
+1.  **Define in `scripts/skills_inventory.json`**:
+    - `phases`: Use `["P", "D", "R", "A", "C"]` or `["*"]`.
+    - `triggers`: Keywords that trigger this skill (e.g., `performance`, `security`).
+2.  **Logic Implementation**: Place your Python logic or CLI tool in `scripts/`.
+
+**Example Inventory Entry | 清單範例**:
+```json
+"security-scanner": {
+  "phases": ["A"],
+  "langs": ["python", "javascript"],
+  "triggers": ["vulnerability", "leak"],
+  "description": "Scan for security leaks during Audit phase."
+}
+```
+
+### 2. PR Standards | PR 提交標準
 
 *   **Contract First | 契約優先**: All communication MUST use validated JSON schemas.
     *   所有通訊「必須」使用經過驗證的 JSON Schema。

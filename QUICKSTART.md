@@ -52,13 +52,20 @@ python3 scripts/nexus_cli.py --silent nexus:feature --task "migrate session to r
 **[EN]** Monitor your AI's battle stats in real-time.
 **[ZH]** 即時監控您的 AI 戰意與數據。
 
+### 3. Smart Navigation | 智慧導航 (Skills Router) 🧠
+**[EN]** Nexus v7 automatically selects the best "Skill" (plugin) based on your task description.
+**[ZH]** Nexus v7 會根據您的任務描述自動選配最佳的「技能 (Skill)」插件。
+
 ```bash
-python3 scripts/nexus_cli.py nexus:warroom
+# Example: Fuzzy request triggers user-story generation
+# 範例：模糊需求自動觸發用戶故事生成
+python3 scripts/nexus_cli.py nexus:bug --task "fuzzy request: login page is blank" --dry-run
 ```
+**[EN]** Look for the `🧠 [Router]` log to see which skills were selected.
+**[ZH]** 觀察 `🧠 [Router]` 日誌，查看系統選配了哪些智慧技能。
 
----
-
-## 5. Deployment | 部署與隔離
+### 4. Production Deployment | 生產級部署
+與隔離
 
 **[EN]** Use `--output-dir` for task isolation in CI/CD.
 **[ZH]** 在 CI/CD 中使用 `--output-dir` 進行任務隔離。

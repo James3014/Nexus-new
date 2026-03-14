@@ -23,7 +23,15 @@ jobs:
           pip install -r requirements.txt
           # Assume nexus-cli is in path or run via python
           
-      - name: Nexus Bug Repair
+      - name: 🧠 Smart Skill Selection
+        run: |
+          echo "### 🧠 Nexus Intelligence Report" >> $GITHUB_STEP_SUMMARY
+          SELECTED_SKILLS=$(python3 scripts/skills_router.py --phase=P --triggers "new_feature" "ci_run")
+          echo "Selected skills for this run: $SELECTED_SKILLS"
+          echo "#### Selected Skills: " >> $GITHUB_STEP_SUMMARY
+          echo "$SELECTED_SKILLS" | jq -r '.selected_skills[].skill' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+
+      - name: 🚀 Execute Nexus Repair
         if: github.event.label.name == 'nexus:bug'
         env:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
