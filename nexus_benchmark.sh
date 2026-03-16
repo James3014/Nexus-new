@@ -10,12 +10,15 @@ set -euo pipefail
 
 NEXUS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="${NEXUS_ROOT}"
+export NEXUS_BENCHMARK="1"
 
 TASK=""
 MODE="developer"
 EXECUTOR="gemini"
 REVIEWER="codex"
+ISOLATED=""
 FILES=()
+SELF_TEST=""
 
 # ── Argument Parsing ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -36,8 +39,20 @@ while [[ $# -gt 0 ]]; do
             REVIEWER="${2:-}"
             shift 2
             ;;
+        --apply)
+            APPLY="--apply"
+            shift
+            ;;
+        --isolated)
+            ISOLATED="--isolated"
+            shift
+            ;;
+        --self-test)
+            SELF_TEST="--self-test"
+            shift
+            ;;
         --help|-h)
-            echo "Usage: $0 --task '...' [--executor gemini|antigravity] [--reviewer codex|none] [files...]"
+            echo "Usage: $0 --task '...' [--executor gemini|antigravity] [--reviewer codex|none] [--apply] [--isolated] [--self-test] [files...]"
             exit 0
             ;;
         *)
@@ -47,7 +62,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$TASK" ]]; then
+APPLY="${APPLY:-}"
+
+# In self-test mode, task is not required
+if [[ -z "$TASK" && -z "$SELF_TEST" ]]; then
     echo "❌ CLI_CONTRACT_ERROR: --task is required in benchmark mode." >&2
     exit 2
 fi
@@ -60,16 +78,23 @@ if ! echo "$VALID_MODES" | grep -qw "$MODE"; then
     exit 2
 fi
 
-echo "🚀 [Launcher] Executing Benchmark via Core Engine..."
-echo "   Task:     ${TASK}"
+echo "🚀 [Launcher] Executing via Core Engine..."
+if [[ -n "$SELF_TEST" ]]; then
+    echo "   Mode:     SELF-TEST"
+else
+    echo "   Task:     ${TASK}"
+fi
 echo "   Executor: ${EXECUTOR}"
 echo "   Reviewer: ${REVIEWER}"
 
 # Handle empty FILES array safely under set -u
 python3 "${NEXUS_ROOT}/scripts/codex_loop_brain.py" \
     ${FILES[@]+"${FILES[@]}"} \
+    ${APPLY} \
     --benchmark \
     --mode "${MODE}" \
     --task "${TASK}" \
     --executor "${EXECUTOR}" \
-    --reviewer "${REVIEWER}"
+    --reviewer "${REVIEWER}" \
+    ${ISOLATED} \
+    ${SELF_TEST}

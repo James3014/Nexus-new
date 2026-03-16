@@ -1,4 +1,3 @@
-import os
 from .base import BaseExecutor
 from .protocol import (
     ExecutorInput, 
@@ -9,26 +8,22 @@ from .protocol import (
 
 class AntigravityExecutor(BaseExecutor):
     """
-    🌌 AntigravityExecutor
-    用於驗證執行器更換 (Swap Test) 的二次適配器。
-    目前為一個模擬 (Stub) 適配器，確保協議對齊且 Core 不會因為切換執行器而崩潰。
+    🌌 AntigravityExecutor (V5 Steel Stub)
+    用於驗證 Executor Swap 能力的正式適配器。
     """
-    
-    def __init__(self):
-        pass
-        
-    def execute(self, input_data: ExecutorInput, timeout: int = 120) -> ExecutorOutput:
-        """實作協議轉接：模擬 Antigravity 執行邏輯。"""
-        
-        # 模擬成功回傳
-        # 由於此執行器主要用於 Swap Test，預設回傳 SUCCESS 但不產生 patch。
+    def __init__(self, model_name: str = "antigravity-v1"):
+        self.model_name = model_name
+
+    def execute(self, input_data: ExecutorInput, timeout: int = 60) -> ExecutorOutput:
+        # 模擬一個簡單的成功回傳或錯誤，用於 Swap 測試
         return ExecutorOutput(
-            executor_name="antigravity_stub_v1",
+            executor_name="antigravity_stub",
             phase=input_data.phase,
             status=ExecutorStatusEnum.SUCCESS,
             patch_generated=False,
             evidence_present=True,
             raw_exit_code=0,
-            summary="Antigravity stub: Core swap verified. No action needed.",
-            meta={"tokens_output": 0}
+            files_touched=[],
+            summary="Antigravity stub executed successfully for protocol verification.",
+            meta={"model_name": self.model_name, "tokens_output": 0}
         )
