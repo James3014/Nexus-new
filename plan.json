@@ -1,17 +1,7 @@
 {
-    "plan_id": "nexus-pilot-1773492842",
-    "goal": "\u8a9e\u97f3\u6717\u8b80 Jaden \u7e6a\u672c (Phase A)",
-    "steps": [
-        {
-            "step_id": 1,
-            "action": "writing-plans",
-            "target": "v5-pilot",
-            "description": "Generated via v5 skills_router",
-            "depends_on": []
-        }
-    ],
+    "plan_id": "nexus-1773639085",
+    "goal": "3111",
     "metadata": {
-        "skill_used": "writing-plans",
-        "contract_version": "1.5.2"
+        "skill": "writing-plans"
     }
 }
