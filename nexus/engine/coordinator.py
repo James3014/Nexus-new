@@ -5,6 +5,7 @@ import time
 import subprocess
 import signal
 import functools
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -18,6 +19,8 @@ from nexus.services.reporter import Reporter
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.engine.phases.research import ResearchPhaseHandler
 from nexus.engine.phases.repair import RepairPhaseHandler
+
+logger = logging.getLogger(__name__)
 
 class NexusEngine:
     """
@@ -82,13 +85,25 @@ class NexusEngine:
         state.steps_history.append(step)
         self.state_io.save_global_state(state)
 
+    @staticmethod
+    def _normalize_review_status(review_result: Any) -> tuple[str, bool]:
+        """Normalize reviewer result into status string + success bool."""
+        if isinstance(review_result, bool):
+            return ("APPROVED" if review_result else "FAIL", bool(review_result))
+        if isinstance(review_result, dict):
+            status = str(review_result.get("status", "UNKNOWN")).upper()
+            success = status in {"APPROVED", "SUCCESS", "PASS", "SKIPPED_QUOTA"}
+            return (status, success)
+        status = str(review_result).upper()
+        return (status, status in {"APPROVED", "SUCCESS", "PASS", "SKIPPED_QUOTA"})
+
     def run_bug(self, bug_id: str, desc: str = None, manual_files: List[str] = None, plan_only: bool = False):
         """🕷️ Nexus P-D-X-R-A-C Lifecycle"""
-        self._voice_notify(f"偵測到臭蟲 {bug_id}")
+        self._voice_notify(f"Nexus 啟動：偵測到 Bug {bug_id}")
         self._log_trace("run_bug", bug_id, "START")
         
         # Prediction is now handled within Phase P (Planner)
-        print(f"🛡️ [Nexus:v9] Initiating Modular P-D-X-R-A-C for: {bug_id}")
+        logger.info("[Nexus:v9] Initiating modular P-D-X-R-A-C for: %s", bug_id)
         state = self.state_io.load_global_state()
         state.task_id = bug_id
         if not hasattr(state, "phase_tokens") or not state.phase_tokens:
@@ -121,7 +136,7 @@ class NexusEngine:
             "domain": None,
             "files_count": len(manual_files or [])
         })
-        print(f"🔍 [Nexus:Predict] Risk Level: {prediction_from_planner.get('risk_level', 'UNKNOWN')}")
+        logger.info("[Nexus:Predict] Risk Level: %s", prediction_from_planner.get("risk_level", "UNKNOWN"))
         self._add_step_to_history(state, "P", metadata={
             "plan": prediction_from_planner.get("risks", []),
             "risk_score": prediction_from_planner.get("risk_score", 0),
@@ -174,10 +189,10 @@ class NexusEngine:
             tokens_audit = res_data.get("tokens_audit", 0) # Placeholder if we split R/A
             state.phase_tokens["A"] = state.phase_tokens.get("A", 0) + tokens_audit
             
-            print(f"✅ [A-Stage] Audit Result: {res}")
+            logger.info("[A-Stage] Audit Result: %s", res)
             
             if res in ["APPROVED", "SKIPPED_QUOTA"]:
-                print(f"✅ [A-Stage] Pass via: {res}")
+                logger.info("[A-Stage] Pass via: %s", res)
                 success = True
                 self._add_step_to_history(state, "A", status="completed", summary=f"Pass via {res}")
                 break
@@ -192,7 +207,7 @@ class NexusEngine:
                 audit_meta = res_obj.get("audit_metadata", {})
                 target_phase = res_obj.get("return_target_phase") or audit_meta.get("return_target_phase") or "D"
                 
-                print(f"❌ [A-Stage] Audit REJECTED. Dynamic routing to: {target_phase}")
+                logger.warning("[A-Stage] Audit rejected. Dynamic routing to: %s", target_phase)
                 
                 # 更新狀態 (v2): 將 A-phase 的審核結果存入 metadata 以供後續追蹤
                 state.metadata["last_audit_feedback"] = {
@@ -214,7 +229,7 @@ class NexusEngine:
         # --- C Stage: Crystallize ---
         if success:
             state.current_phase = "C"
-            print("💎 [C-Stage] Pattern Crystallization...")
+            logger.info("[C-Stage] Pattern crystallization...")
             metadata = {}
             if state.metadata.get("best_answer_found"):
                 metadata = {"best_patch": state.metadata.get("codex_best_solution"), "source": "Codex-Best-Answer"}
@@ -228,7 +243,7 @@ class NexusEngine:
 
     def run_feature(self, task: str, domain: str = None, dry_run: bool = False, bypass_cb: bool = False, skill: str = None):
         """🚀 [Nexus:Feature] 實作新功能流 (v1.8 P-X-D-R-A-C Alignment)"""
-        print(f"🚀 [Nexus:Feature] Planning evolution for: {task}")
+        logger.info("[Nexus:Feature] Planning evolution for: %s", task)
         self._voice_notify("開始建置新功能")
         
         from nexus.engine.phases.planner import PlannerPhaseHandler
@@ -260,17 +275,43 @@ class NexusEngine:
 
         # --- D Stage: Diagnosis/Context ---
         state.current_phase = "D"
-        feature_pack = self.hub.assemble_feature_pack(plan=prediction)
+        if hasattr(self.hub, "assemble_feature_pack"):
+            try:
+                feature_pack = self.hub.assemble_feature_pack(plan=prediction)
+            except Exception as exc:
+                logger.warning(
+                    "[Feature] ContextHub assemble_feature_pack failed (%s); using compatibility fallback pack.",
+                    exc,
+                )
+                feature_pack = {
+                    "feature_goal": state.task_id,
+                    "proposed_plan": prediction,
+                    "external_research": [],
+                    "contract_alignment": "compat-fallback",
+                    "compat_error": str(exc),
+                }
+        else:
+            logger.warning(
+                "[Feature] ContextHub missing assemble_feature_pack; using compatibility fallback pack."
+            )
+            feature_pack = {
+                "feature_goal": state.task_id,
+                "proposed_plan": prediction,
+                "external_research": [],
+                "contract_alignment": "compat-fallback",
+            }
         if research_pack: feature_pack["research_context"] = research_pack
         self._add_step_to_history(state, "D", metadata={"pack_keys": list(feature_pack.keys())})
 
         # --- R/A Stage: Execution Loop ---
         success = False
         candidates = [{"skill_id": skill, "score": 9.9}] if skill else self.router.route_candidates("R", {"task_id": task, "type": "feature"})
+        last_review_status = "NOT_RUN"
+        changed_files_aggregate = set()
         
         for candidate in candidates:
             skill_id = candidate["skill_id"]
-            print(f"🛠️ [Execution] Using feature skill: {skill_id}")
+            logger.info("[Execution] Using feature skill: %s", skill_id)
             state.current_phase = "R"
             
             engine_loop = CodexLoopV2(
@@ -278,11 +319,30 @@ class NexusEngine:
                 skill_id=skill_id, context_hub=self.hub, state_io=self.state_io
             )
             
-            success = True if dry_run else engine_loop.run_review()
+            review_result = {"status": "APPROVED", "summary": "dry-run approved"} if dry_run else engine_loop.run_review()
+            last_review_status, success = self._normalize_review_status(review_result)
             tokens_used = engine_loop.total_tokens if engine_loop else 0
             state.phase_tokens["R"] = state.phase_tokens.get("R", 0) + tokens_used
             state.total_token_usage += tokens_used
-            self._add_step_to_history(state, "R", metadata={"skill": skill_id, "tokens": tokens_used, "dry_run": dry_run})
+            changed_files = []
+            try:
+                changed_files, _ = engine_loop.git.get_changes(engine_loop.scope, engine_loop.base_ref)
+            except Exception:
+                changed_files = []
+            for f in changed_files:
+                changed_files_aggregate.add(f)
+
+            self._add_step_to_history(
+                state,
+                "R",
+                metadata={
+                    "skill": skill_id,
+                    "tokens": tokens_used,
+                    "dry_run": dry_run,
+                    "review_status": last_review_status,
+                    "files": changed_files,
+                }
+            )
             
             if success:
                 state.audit_pass_count += 1
@@ -295,15 +355,31 @@ class NexusEngine:
             state.current_phase = "C"
             self.hub.record_crystal_lesson(state.task_id, "feature-implementation", f"Feature: {task}")
             self._add_step_to_history(state, "C", summary=f"Feature {task} complete")
-            
+
+        # --- Simulation Signal (Hard Gate for Benchmark Credibility) ---
+        sim_reasons = []
+        if dry_run:
+            sim_reasons.append("dry_run")
+        if state.phase_tokens.get("R", 0) == 0:
+            sim_reasons.append("zero_r_tokens")
+        if len(changed_files_aggregate) == 0:
+            sim_reasons.append("no_changed_files")
+        if last_review_status in {"FAIL", "REJECTED", "UNKNOWN"}:
+            sim_reasons.append(f"review_status_{last_review_status.lower()}")
+
+        state.metadata["last_review_status"] = last_review_status
+        state.metadata["simulated_run"] = bool(sim_reasons)
+        state.metadata["simulation_reasons"] = sim_reasons
+
         self.state_io.save_global_state(state)
         self._log_trace("nexus:feature", task, "SUCCESS" if success else "FAIL", tokens=state.total_token_usage)
         return success
 
     def run_benchmark(self, framework: str, task_count: int = 10, output_csv: str = "nexus_benchmark.csv", model: str = None, target: str = None):
         """執行基準測試程式碼"""
-        print(f"📊 [Nexus:Benchmark] Starting {framework} with {task_count} tasks...")
-        if model: print(f"📍 Strategy: {model} | Target: {target}")
+        logger.info("[Nexus:Benchmark] Starting %s with %s tasks...", framework, task_count)
+        if model:
+            logger.info("[Nexus:Benchmark] Strategy: %s | Target: %s", model, target)
         self._voice_notify(f"開始執行 {framework} 基準測試")
         
         import csv
