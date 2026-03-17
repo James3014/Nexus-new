@@ -1,0 +1,15 @@
+{
+  "case_id": "OFF-002",
+  "goal": "Add a health check endpoint to the API",
+  "initial_state": {
+    "files": ["src/api/main.py"]
+  },
+  "expected_outcome": {
+    "phases": ["P", "X", "D", "R", "A", "C"],
+    "min_score": 75
+  },
+  "metadata": {
+    "difficulty": "medium",
+    "feature": true
+  }
+}

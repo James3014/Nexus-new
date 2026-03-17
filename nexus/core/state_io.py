@@ -11,9 +11,18 @@ class StateIO:
     💾 Nexus State IO Manager
     負責狀態的持久化與讀取，支援 .musestate JSONL 與各階段 JSON 合同。
     """
-    def __init__(self, project_root: str, state_file: Optional[str] = None):
+    def __init__(self, project_root: str, state_file: Optional[str] = None, run_dir: Optional[str] = None):
         self.project_root = Path(project_root).resolve()
-        self.state_file = Path(state_file) if state_file else self.project_root / ".musestate"
+        self.run_dir = Path(run_dir) if run_dir else None
+        
+        # If run_dir is provided but state_file isn't, default to run_dir / "nexus_state.jsonl"
+        if self.run_dir and not state_file:
+            self.state_file = self.run_dir / "nexus_state.jsonl"
+        else:
+            self.state_file = Path(state_file) if state_file else self.project_root / ".musestate"
+        
+        if self.run_dir:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
         
     def load_global_state(self) -> NexusState:
         """從 .musestate 讀取最新的全域狀態。"""
@@ -68,7 +77,9 @@ class StateIO:
 
     def write_contract(self, filename: str, data: Any):
         """寫入通用的 JSON 合同檔案 (如 plan.json, diagnosis.json)。"""
-        target = self.project_root / filename
+        # Prefers run_dir if set, otherwise project_root
+        base_path = self.run_dir if self.run_dir else self.project_root
+        target = base_path / filename
         with open(target, "w", encoding="utf-8") as f:
             if hasattr(data, "model_dump"):
                 json.dump(data.model_dump(), f, indent=4)

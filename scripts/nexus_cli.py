@@ -16,9 +16,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# 導入專用導入
-from nexus.engine.coordinator import NexusEngine
-
 class NexusCLI:
     """
     🧬 Nexus v9 CLI Shell
@@ -26,25 +23,38 @@ class NexusCLI:
     全部業務調度委託給 NexusEngine。
     """
 
-    def __init__(self, silent=False, output_dir=None):
+    def __init__(self, silent=False, output_dir=None, fast_mode=False, audit_level="standard"):
         self.project_root = Path(__file__).resolve().parents[1]
-        self.run_dir = Path(output_dir) if output_dir else self.project_root
-        
-        from nexus.containers import NexusContainer
-        self.container = NexusContainer()
-        self.container.project_root.from_value(str(self.project_root))
-        
-        # 透過容器獲取引擎
-        self.engine = self.container.engine_factory(
-            project_root=self.project_root,
-            run_dir=self.run_dir,
-            silent=silent
-        )
+        self.run_dir = Path(output_dir) if output_dir else None
+        self.silent = silent
+        self.fast_mode = fast_mode
+        self.audit_level = audit_level
+        self._engine = None
+
+    @property
+    def engine(self):
+        """Lazy-loaded engine to avoid early heavy imports."""
+        if self._engine is None:
+            # Heavy imports only when actually running a command
+            from nexus.engine.coordinator import NexusEngine
+            from nexus.containers import NexusContainer
+            
+            container = NexusContainer()
+            container.project_root.from_value(str(self.project_root))
+            
+            self._engine = container.engine_factory(
+                project_root=self.project_root,
+                run_dir=self.run_dir,
+                silent=self.silent,
+                fast_mode=self.fast_mode,
+                audit_level=self.audit_level
+            )
+        return self._engine
 
     def run_bug(self, task: str, domain: str = None, dry_run: bool = False, bypass_cb: bool = False):
         """nexus:bug 介面"""
         start_time = time.time()
-        success = self.engine.run_bug(task, domain, dry_run, bypass_cb)
+        success = self.engine.run_bug(bug_id=f"bug-{int(start_time)}", desc=task, manual_files=None, plan_only=dry_run)
         if success:
             print(f"✅ [Nexus:Bug] Completed in {time.time() - start_time:.1f}s.")
         else:
@@ -77,12 +87,29 @@ class NexusCLI:
         """💎 [Nexus:Crystal] 啟動自學習權重演進"""
         try:
             from nexus.core.crystal import CrystalAnalyzer
-            analyzer = self.container.context_hub().state_io.project_root # Use the one from DI
-            # Actually CrystalAnalyzer still expects a path string currently
-            analyzer = CrystalAnalyzer(str(self.project_root))
+            # v1.8 Fix: Use engine's project_root
+            analyzer = CrystalAnalyzer(str(self.engine.project_root))
             analyzer.analyze()
         except Exception as e:
             print(f"❌ [Nexus:Crystal] Learning failed: {e}")
+
+    def run_clean(self, dry_run: bool = False):
+        """🧹 [Nexus:Clean] 清理過期的任務產物"""
+        runs_dir = self.project_root / ".nexus" / "runs"
+        if not runs_dir.exists():
+            print("✨ [Clean] No run artifacts found.")
+            return
+
+        print(f"🧹 [Nexus:Clean] Scanning {runs_dir}...")
+        for run_path in runs_dir.iterdir():
+            if run_path.is_dir() and run_path.name.startswith("task-"):
+                if dry_run:
+                    print(f"  [Dry-Run] Would remove: {run_path.name}")
+                else:
+                    import shutil
+                    shutil.rmtree(run_path)
+                    print(f"  [Done] Removed: {run_path.name}")
+        print("✅ [Clean] Completed.")
 
     def run_benchmark(self, framework: str, task_count: int = 10, output_csv: str = "nexus_benchmark.csv", model: str = None, target: str = None):
         """📊 [Nexus:Benchmark] 透過引擎執行基準測試"""
@@ -97,6 +124,8 @@ def main():
     parser.add_argument("--bypass-cb", action="store_true", help="Bypass global circuit breaker")
     parser.add_argument("--output-dir", help="Directory for task isolation (logs/state)")
     parser.add_argument("--superpowers", action="store_true", help="Enable Superpowers v5 mode (TDD, Subagents)")
+    parser.add_argument("--fast", action="store_true", help="Enable Fast Mode (skip research/heavy audit)")
+    parser.add_argument("--audit-level", choices=["bypass", "standard", "strict"], default="standard", help="Set audit intensity")
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -123,12 +152,17 @@ def main():
     subparsers.add_parser("nexus:crystal")
 
     # nexus:benchmark
+    # nexus:benchmark
     bench = subparsers.add_parser("nexus:benchmark")
     bench.add_argument("--framework", default="swe-verified", help="Benchmark framework")
     bench.add_argument("--tasks", type=int, default=10, help="Number of tasks")
     bench.add_argument("--output", default="nexus_benchmark.csv", help="Output CSV path")
     bench.add_argument("--model", help="Model strategy hint (e.g. flash_iter)")
     bench.add_argument("--target", help="Performance target (e.g. 90%%_sonnet)")
+
+    # nexus:clean
+    clean_parser = subparsers.add_parser("nexus:clean")
+    clean_parser.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
     if not args.command:
@@ -143,7 +177,7 @@ def main():
         chub_home.mkdir(parents=True, exist_ok=True)
         os.environ["CHUB_HOME"] = str(chub_home)
 
-    cli = NexusCLI(silent=args.silent, output_dir=args.output_dir)
+    cli = NexusCLI(silent=args.silent, output_dir=args.output_dir, fast_mode=args.fast, audit_level=args.audit_level)
     
     if args.command == "nexus:bug":
         cli.run_bug(args.task, args.domain, args.dry_run, args.bypass_cb)
@@ -155,6 +189,8 @@ def main():
         cli.run_crystal()
     elif args.command == "nexus:benchmark":
         cli.run_benchmark(args.framework, args.tasks, args.output, args.model, args.target)
+    elif args.command == "nexus:clean":
+        cli.run_clean(args.dry_run)
 
 if __name__ == "__main__":
     main()

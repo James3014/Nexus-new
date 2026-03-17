@@ -4,7 +4,7 @@
       "source": "codex",
       "content": "# 🛡️ Codex Lessons: Semantic Router & Ingestion Pipeline\n\n## 🐛 Debugging Lessons\n### 2026-03-10: Gemini CLI 無頭模式與分身 MCP 衝突\n- **問題 1**：Gemini CLI 預設為互動模式，在背景執行自動化迴圈時會因安全攔截 (Action Required) 而掛起 (Hang)。\n- **解法 1**：必須強制使用 `-y` (YOLO 模式) 自動同意所有操作，並搭配 `-p -` (從 stdin 讀取) 與 `-o json` (便於腳本解析) 實現無人值守。\n- **問題 2**：`generalist` (分身) 工具在調用外部 MCP 伺服器（如 `qmd`, `serena`）時存在名稱空間衝突，會報錯 `must be requested with its server prefix`。\n- **解法 2**：在分身環境中應優先降級使用原生的 `read_file`, `write_file` 與 `run_shell_command`。若需存取知識庫，應由指揮官 (Orchestrator) 先行檢索並將內容餵入分身的 Request 中。\n\n### 2026-03-09: `replace` 工具的精確性限制\n- **問題**：在 `replace` 指令中使用 `...` (ellipses) 或預留佔位符，導致工具因「0 occurrences found」而比對失敗。\n- **解法**：**嚴禁** 在 `old_string` 或 `new_string` 中使用佔位符。必須提供 **完整的、字面完全一致** 的原始程式碼片段，確保上下文完整且無歧義。\n- **鐵律**：每次執行 `replace` 前，應先讀取足夠的上下文（至少前後 10 行），直接複製貼上原始碼以確保比對成功。\n\n### 2026-03-06: 遞迴路由與路徑對齊\n- **問題**：`semantic_router.py` 預設只掃描 Inbox 根目錄且路徑硬編碼為 `/99_Inbox`，導致子目錄（如 `FB_Scraping_Temp`）內容積壓。\n- **解法**：修正為 `01_Operations/Inbox` 並導入 `os.walk",
       "type": "text",
-      "relevance": 0.7,
+      "relevance": 0.8,
       "id": "fd811da3"
     },
     {
@@ -30,10 +30,10 @@
         "recall_accuracy": 0.0
       },
       "type": "jsonl",
-      "relevance": 0.98,
+      "relevance": 0.87,
       "id": "60b31697"
     }
   ],
   "total_sources": 4,
-  "timestamp": "2026-03-17T09:26:49"
+  "timestamp": "2026-03-17T17:46:11.545718"
 }

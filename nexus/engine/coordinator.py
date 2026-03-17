@@ -32,6 +32,8 @@ class NexusEngine:
         project_root: Path, 
         run_dir: Optional[Path] = None, 
         silent: bool = False,
+        fast_mode: bool = False,
+        audit_level: str = "standard", # bypass, standard, strict
         state_io=None,
         commander=None,
         router=None,
@@ -39,12 +41,14 @@ class NexusEngine:
         phases: Optional[Dict[str, Any]] = None
     ):
         self.project_root = project_root
-        self.run_dir = run_dir or project_root
+        self.fast_mode = fast_mode
+        self.audit_level = audit_level
+        self.run_dir = run_dir or (project_root / ".nexus" / "runs" / f"task-{int(time.time())}")
         self.run_dir.mkdir(parents=True, exist_ok=True)
         
         self.silent = silent
         # 🛡️ v9 Hardening: 自動初始化核心組件
-        self.state_io = state_io or StateIO(project_root)
+        self.state_io = state_io or StateIO(str(project_root), run_dir=str(self.run_dir))
         self.router = router or SkillsRouter(project_root)
         self.reporter = reporter or Reporter(str(project_root), silent=silent)
         self.commander = commander or Commander(str(self.run_dir), self.state_io, self.router)
@@ -145,7 +149,10 @@ class NexusEngine:
 
         # --- X Stage: Research ---
         research_pack = None
-        if decision.get("external_needed"):
+        # FAST MODE: Skip research unless explicitly needed
+        skip_research = self.fast_mode and not decision.get("external_needed")
+        
+        if decision.get("external_needed") and not skip_research:
             state.current_phase = "X"
             res_data = researcher.run(state, {"task": desc})
             research_pack = res_data

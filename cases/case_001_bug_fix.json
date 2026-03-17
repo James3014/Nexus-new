@@ -1,0 +1,15 @@
+{
+  "case_id": "OFF-001",
+  "goal": "Fix missing 'os' import in research.py",
+  "initial_state": {
+    "files": ["nexus/engine/phases/research.py"]
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "A", "C"],
+    "min_score": 80
+  },
+  "metadata": {
+    "difficulty": "easy",
+    "regression": true
+  }
+}

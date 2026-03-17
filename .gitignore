@@ -8,3 +8,17 @@ __pycache__/
 
 .drclaw_session.json
 drclaw_audit.log
+
+# Nexus Runtime Artifacts
+.nexus/
+.musestate
+.nexus_metrics
+.nexus_lessons.jsonl
+feature_benchmark_results.json
+benchmark_*_results.json
+tracelog.jsonl
+scripts/core/router_decisions.jsonl
+perplexity/
+perplexity_results.csv
+nexus_benchmark.csv
+nexus.log

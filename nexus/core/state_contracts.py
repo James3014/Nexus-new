@@ -113,7 +113,7 @@ class StepRecord(BaseModel):
 from pydantic import model_validator
 
 class NexusState(BaseModel):
-    schema_version: str = "1.5.2"
+    schema_version: str = "1.8.0"
     task_id: str
     batch_id: Optional[str] = None
     config: TaskConfig = Field(default_factory=TaskConfig)
@@ -134,6 +134,12 @@ class NexusState(BaseModel):
     phase_tokens: Dict[str, int] = Field(default_factory=dict)
     audit_pass_count: int = 0
     retry_count: int = 0
+    
+    # --- Conversation Specific Metrics (CONV-001) ---
+    turn_count: int = 0
+    clarification_count: int = 0
+    correction_count: int = 0
+    unresolved_count: int = 0
     
     metadata: Dict[str, Any] = {}
     

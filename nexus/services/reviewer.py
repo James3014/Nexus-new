@@ -64,6 +64,7 @@ class CodexLoopV2(NexusOrchestrator):
         self.isolated = kwargs.get("isolated", False)
         self.bypass_circuit_breaker = kwargs.get("bypass_circuit_breaker", False)
         self.prediction_risks = kwargs.get("prediction_risks", [])
+        self.audit_level = kwargs.get("audit_level", "standard") # bypass, standard, strict
         
         # 🧬 Compatibility Layer
         self.executor = kwargs.get("executor")
@@ -105,7 +106,17 @@ class CodexLoopV2(NexusOrchestrator):
             self.persona_hint = "👤 MODE: DEVELOPER (Balanced cognitive-loop audit)."
 
     def _do_review(self, manual_files=None):
-        print(f"🔍 [Reviewer] Mode: {self.mode} | Scope: {self.scope}")
+        print(f"🔍 [Reviewer] Mode: {self.mode} | Level: {self.audit_level} | Scope: {self.scope}")
+        
+        # 🛡️ Governance Gate: Bypass Mode
+        if self.audit_level == "bypass":
+            print("⚡ [Reviewer] Audit Level: BYPASS. Auto-approving changes.")
+            return {"status": "APPROVED", "summary": "Bypassed via audit_level=bypass"}
+        
+        # 🛡️ Governance Gate: Strict Mode increases strikes
+        if self.audit_level == "strict":
+            self.max_strikes += 2
+            print(f"🛡️ [Reviewer] Audit Level: STRICT. Increased max strikes to {self.max_strikes}.")
         
         # 🧬 Legacy Hook: Pattern Lock Check (for sanity_check.py Step 3)
         if manual_files and any("dummy_target" in f for f in manual_files) and self.executor is None:

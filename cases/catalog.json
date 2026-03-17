@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "OFF-001",
+      "type": "bug",
+      "name": "Basic Python Import Fix",
+      "file": "case_001_bug_fix.json",
+      "tags": ["core", "smoke"]
+    },
+    {
+      "id": "OFF-002",
+      "type": "feature",
+      "name": "Add Simple Endpoint",
+      "file": "case_002_feat_add.json",
+      "tags": ["core", "api"]
+    }
+  ]
+}
