@@ -1,0 +1,20 @@
+{
+  "case_id": "OFF-010",
+  "goal": "Complete Nexus full lifecycle audit with research and deep repair",
+  "initial_state": {
+    "files": ["nexus/engine/coordinator.py"],
+    "deep_audit": true
+  },
+  "expected_outcome": {
+    "phases": ["P", "X", "D", "R", "A", "R", "A", "C"],
+    "min_score": 80
+  },
+  "metadata": {
+    "difficulty": "ultra-hard",
+    "regression": true,
+    "baseline": {
+      "tokens": 6000,
+      "phases": ["P", "X", "D", "R", "A", "R", "A", "C"]
+    }
+  }
+}

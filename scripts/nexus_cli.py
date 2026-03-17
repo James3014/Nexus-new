@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import sys
-import json
 import time
-import subprocess
-import signal
-import functools
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import List, Optional, Any
 
 # 🧪 Nexus v9 架構相容性導入層
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +12,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # 🛡️ Nexus 合約導入
-from nexus.core.state_contracts import NexusState, TddStatus
+from nexus.core.state_contracts import NexusState
+
 
 class NexusCLI:
     """
@@ -26,8 +22,10 @@ class NexusCLI:
     全部業務調度委託給 NexusEngine。
     """
 
-    def __init__(self, silent=False, output_dir=None, fast_mode=False, audit_level="standard"):
-        self.project_root = Path(__file__).resolve().parents[1]
+    def __init__(
+        self, silent=False, output_dir=None, fast_mode=False, audit_level="standard", project_root=None
+    ):
+        self.project_root = Path(project_root) if project_root else Path(__file__).resolve().parents[1]
         self.run_dir = Path(output_dir) if output_dir else None
         self.silent = silent
         self.fast_mode = fast_mode
@@ -40,30 +38,42 @@ class NexusCLI:
         if self._engine is None:
             # Phase C: Ensure run_dir is locked BEFORE creating the engine
             if not self.run_dir:
-                self.run_dir = self.project_root / ".nexus" / "runs" / f"task-{int(time.time())}"
+                self.run_dir = (
+                    self.project_root / ".nexus" / "runs" / f"task-{int(time.time())}"
+                )
             self.run_dir.mkdir(parents=True, exist_ok=True)
 
             # Heavy imports only when actually running a command
-            from nexus.engine.coordinator import NexusEngine
             from nexus.containers import NexusContainer
-            
+
             container = NexusContainer()
             container.project_root.from_value(str(self.project_root))
             container.run_dir.from_value(str(self.run_dir))
-            
+
             self._engine = container.engine_factory(
                 project_root=self.project_root,
                 run_dir=self.run_dir,
                 silent=self.silent,
                 fast_mode=self.fast_mode,
-                audit_level=self.audit_level
+                audit_level=self.audit_level,
             )
         return self._engine
 
-    def run_bug(self, task: str, domain: str = None, dry_run: bool = False, bypass_cb: bool = False):
+    def run_bug(
+        self,
+        task: str,
+        domain: str = None,
+        dry_run: bool = False,
+        bypass_cb: bool = False,
+    ):
         """nexus:bug 介面"""
         start_time = time.time()
-        success = self.engine.run_bug(bug_id=f"bug-{int(start_time)}", desc=task, manual_files=None, plan_only=dry_run)
+        success = self.engine.run_bug(
+            bug_id=f"bug-{int(start_time)}",
+            desc=task,
+            manual_files=None,
+            plan_only=dry_run,
+        )
         if success:
             print(f"✅ [Nexus:Bug] Completed in {time.time() - start_time:.1f}s.")
         else:
@@ -80,22 +90,30 @@ class NexusCLI:
             self.engine._log_trace("nexus:test", f"Skill {skill}", "SUCCESS")
             return
 
-        print(f"🧪 [Nexus:Test] Initiating automated validation...")
+        print("🧪 [Nexus:Test] Initiating automated validation...")
         self.engine._voice_notify("正在執行系統單元測試")
         print("  - Passed (Coverage 100%)")
 
-    def run_feature(self, task: str, domain: str = None, dry_run: bool = False, bypass_cb: bool = False, skill: str = None):
+    def run_feature(
+        self,
+        task: str,
+        domain: str = None,
+        dry_run: bool = False,
+        bypass_cb: bool = False,
+        skill: str = None,
+    ):
         """🚀 [Nexus:Feature] 實作新功能介面"""
         success = self.engine.run_feature(task, domain, dry_run, bypass_cb, skill)
         if success:
-            print(f"✅ [Nexus:Feature] Success.")
+            print("✅ [Nexus:Feature] Success.")
         else:
-            print(f"❌ [Nexus:Feature] Failed.")
+            print("❌ [Nexus:Feature] Failed.")
 
     def run_crystal(self):
         """💎 [Nexus:Crystal] 啟動自學習權重演進"""
         try:
             from nexus.core.crystal import CrystalAnalyzer
+
             # v1.8 Fix: Use engine's project_root
             analyzer = CrystalAnalyzer(str(self.engine.project_root))
             analyzer.analyze()
@@ -115,13 +133,26 @@ class NexusCLI:
                         print(f"  [Dry-Run] Would remove: {run_path.name}")
                     else:
                         import shutil
+
                         shutil.rmtree(run_path)
                         print(f"  [Done] Removed: {run_path.name}")
 
         # Adding root-level noise cleaning (Phase C hardening)
-        root_noise = [".musestate", ".muse_state", ".nexus_metrics", "tracelog.jsonl", "nexus.log", "reminders.json", "router_decisions.jsonl"]
+        root_noise = [
+            ".musestate",
+            ".muse_state",
+            ".nexus_metrics",
+            "tracelog.jsonl",
+            "nexus.log",
+            "reminders.json",
+            "router_decisions.jsonl",
+            "plan.json",
+            "reflection.jsonl",
+            "diagnosis.json",
+        ]
         print("🧹 [Nexus:Clean] Scanning root for noise...")
         import shutil
+
         for noise in root_noise:
             noise_path = self.project_root / noise
             if noise_path.exists():
@@ -142,7 +173,7 @@ class NexusCLI:
         """🔍 [Nexus:Check] 執行分層健康檢查"""
         print(f"🔍 [Nexus:Check] Running level: {level}...")
         state = self.engine.state_io.load_global_state()
-        
+
         # 根據 level 執行不同強度的檢查
         if level == "quick":
             print(f"  - Health Score: {state.health_score}")
@@ -153,9 +184,9 @@ class NexusCLI:
             time.sleep(1)
             print("  - [PASS] Replay: OFF-001")
         elif level == "nightly":
-             print("  - Running nightly deep diagnostic system...")
-             time.sleep(2)
-             print(f"  - [REPORT] Global Health Aggregate: {state.health_score}")
+            print("  - Running nightly deep diagnostic system...")
+            time.sleep(2)
+            print(f"  - [REPORT] Global Health Aggregate: {state.health_score}")
 
         self.engine._voice_notify(f"健康檢查完成，得分 {state.health_score}")
         self._check_alerts(state)
@@ -186,11 +217,11 @@ class NexusCLI:
         # 1. Check for candidates (UPG-001)
         print("  - Scanning for upgrade candidates (hotfixes/updates)...")
         time.sleep(1)
-        
+
         # 模擬發現升級
         update_version = "v1.8.1-hotfix"
         print(f"  - Found: {update_version}")
-        
+
         if dry_run:
             print(f"  - [Dry-Run] Would apply {update_version} in Canary mode.")
             return
@@ -199,28 +230,61 @@ class NexusCLI:
         print(f"  - [Canary] Deploying {update_version} to sandbox...")
         time.sleep(1)
         print("  - [Canary] Running basic health checks...")
-        
+
         # 呼叫 check quick
         self.run_check(level="quick")
-        
-        print(f"  - [UPG-004] Upgrade to {update_version} successful (Canary verified).")
+
+        print(
+            f"  - [UPG-004] Upgrade to {update_version} successful (Canary verified)."
+        )
         self.engine._voice_notify(f"自我升級至 {update_version} 完成")
 
-    def run_benchmark(self, framework: str, task_count: int = 10, output_csv: str = "nexus_benchmark.csv", model: str = None, target: str = None):
+    def run_benchmark(
+        self,
+        framework: str,
+        task_count: int = 10,
+        output_csv: str = "nexus_benchmark.csv",
+        model: str = None,
+        target: str = None,
+    ):
         """📊 [Nexus:Benchmark] 透過引擎執行基準測試"""
-        results = self.engine.run_benchmark(framework, task_count, output_csv, model, target)
-        success_count = len([r for r in results if r['status'] == 'PASS'])
-        print(f"✅ [Benchmark] Complete! Success Rate: {success_count/task_count*100:.1f}%")
+        results = self.engine.run_benchmark(
+            framework, task_count, output_csv, model, target
+        )
+        success_count = len([r for r in results if r["status"] == "PASS"])
+        print(
+            f"✅ [Benchmark] Complete! Success Rate: {success_count / task_count * 100:.1f}%"
+        )
+
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus v9 Refactored CLI Shell")
-    parser.add_argument("--silent", action="store_true", help="Disable voice notifications")
+    parser.add_argument(
+        "--silent", action="store_true", help="Disable voice notifications"
+    )
     parser.add_argument("--model-override", help="Override default LLM model")
-    parser.add_argument("--bypass-cb", action="store_true", help="Bypass global circuit breaker")
-    parser.add_argument("--output-dir", help="Directory for task isolation (logs/state)")
-    parser.add_argument("--superpowers", action="store_true", help="Enable Superpowers v5 mode (TDD, Subagents)")
-    parser.add_argument("--fast", action="store_true", help="Enable Fast Mode (skip research/heavy audit)")
-    parser.add_argument("--audit-level", choices=["bypass", "standard", "strict"], default="standard", help="Set audit intensity")
+    parser.add_argument(
+        "--bypass-cb", action="store_true", help="Bypass global circuit breaker"
+    )
+    parser.add_argument(
+        "--output-dir", help="Directory for task isolation (logs/state)"
+    )
+    parser.add_argument(
+        "--superpowers",
+        action="store_true",
+        help="Enable Superpowers v5 mode (TDD, Subagents)",
+    )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Enable Fast Mode (skip research/heavy audit)",
+    )
+    parser.add_argument(
+        "--audit-level",
+        choices=["bypass", "standard", "strict"],
+        default="standard",
+        help="Set audit intensity",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -233,7 +297,9 @@ def main():
     # nexus:test
     test_parser = subparsers.add_parser("nexus:test")
     test_parser.add_argument("--skill", help="Test specific skill")
-    test_parser.add_argument("--interaction", action="store_true", help="Run interaction contract tests")
+    test_parser.add_argument(
+        "--interaction", action="store_true", help="Run interaction contract tests"
+    )
     test_parser.add_argument("--full-chain", help="Run full P-D-R-A chain for a task")
 
     # nexus:feature
@@ -249,9 +315,13 @@ def main():
     # nexus:benchmark
     # nexus:benchmark
     bench = subparsers.add_parser("nexus:benchmark")
-    bench.add_argument("--framework", default="swe-verified", help="Benchmark framework")
+    bench.add_argument(
+        "--framework", default="swe-verified", help="Benchmark framework"
+    )
     bench.add_argument("--tasks", type=int, default=10, help="Number of tasks")
-    bench.add_argument("--output", default="nexus_benchmark.csv", help="Output CSV path")
+    bench.add_argument(
+        "--output", default="nexus_benchmark.csv", help="Output CSV path"
+    )
     bench.add_argument("--model", help="Model strategy hint (e.g. flash_iter)")
     bench.add_argument("--target", help="Performance target (e.g. 90%%_sonnet)")
 
@@ -261,7 +331,9 @@ def main():
 
     # nexus:check
     check_parser = subparsers.add_parser("nexus:check")
-    check_parser.add_argument("--level", choices=["quick", "pre-merge", "nightly"], default="quick")
+    check_parser.add_argument(
+        "--level", choices=["quick", "pre-merge", "nightly"], default="quick"
+    )
 
     # nexus:upgrade
     upgrade_parser = subparsers.add_parser("nexus:upgrade")
@@ -280,24 +352,39 @@ def main():
         chub_home.mkdir(parents=True, exist_ok=True)
         os.environ["CHUB_HOME"] = str(chub_home)
 
-    cli = NexusCLI(silent=args.silent, output_dir=args.output_dir, fast_mode=args.fast, audit_level=args.audit_level)
-    
+    cli = NexusCLI(
+        silent=args.silent,
+        output_dir=args.output_dir,
+        fast_mode=args.fast,
+        audit_level=args.audit_level,
+    )
+
     if args.command == "nexus:bug":
         cli.run_bug(args.task, args.domain, args.dry_run, args.bypass_cb)
     elif args.command == "nexus:test":
-        cli.run_test(skill=args.skill, interaction=args.interaction, full_chain=args.full_chain, bypass_cb=args.bypass_cb)
+        cli.run_test(
+            skill=args.skill,
+            interaction=args.interaction,
+            full_chain=args.full_chain,
+            bypass_cb=args.bypass_cb,
+        )
     elif args.command == "nexus:feature":
-        cli.run_feature(args.task, args.domain, args.dry_run, args.bypass_cb, args.skill)
+        cli.run_feature(
+            args.task, args.domain, args.dry_run, args.bypass_cb, args.skill
+        )
     elif args.command == "nexus:crystal":
         cli.run_crystal()
     elif args.command == "nexus:benchmark":
-        cli.run_benchmark(args.framework, args.tasks, args.output, args.model, args.target)
+        cli.run_benchmark(
+            args.framework, args.tasks, args.output, args.model, args.target
+        )
     elif args.command == "nexus:clean":
         cli.run_clean(args.dry_run)
     elif args.command == "nexus:check":
         cli.run_check(args.level)
     elif args.command == "nexus:upgrade":
         cli.run_upgrade(args.dry_run)
+
 
 if __name__ == "__main__":
     main()

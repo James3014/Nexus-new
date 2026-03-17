@@ -1,19 +1,143 @@
 {
-  "version": "1.0",
+  "version": "1.1",
+  "config": {
+    "default_token_drift_threshold": 0.2,
+    "default_phase_drift_penalty": 0.5
+  },
   "cases": [
     {
       "id": "OFF-001",
       "type": "bug",
       "name": "Basic Python Import Fix",
       "file": "case_001_bug_fix.json",
-      "tags": ["core", "smoke"]
+      "tags": ["core", "smoke", "v9-regression"],
+      "baseline": {
+        "tokens": 2000,
+        "phase_path": ["P", "D", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 70
+      }
     },
     {
       "id": "OFF-002",
       "type": "feature",
       "name": "Add Simple Endpoint",
       "file": "case_002_feat_add.json",
-      "tags": ["core", "api"]
+      "tags": ["core", "api", "v9-feature"],
+      "baseline": {
+        "tokens": 3500,
+        "phase_path": ["P", "X", "D", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 75
+      }
+    },
+    {
+      "id": "OFF-003",
+      "type": "bug",
+      "name": "Dependency Injection Conflict",
+      "file": "case_003_di_fix.json",
+      "tags": ["core", "stability"],
+      "baseline": {
+        "tokens": 4000,
+        "phase_path": ["P", "D", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 80
+      }
+    },
+    {
+      "id": "OFF-004",
+      "type": "feature",
+      "name": "Fast Mode Path Skipping",
+      "file": "case_004_fast_mode.json",
+      "tags": ["performance", "v9-core"],
+      "baseline": {
+        "tokens": 1500,
+        "phase_path": ["P", "D", "R", "C"],
+        "review_status": "APPROVED",
+        "health_min": 90
+      }
+    },
+    {
+      "id": "OFF-005",
+      "type": "bug",
+      "name": "Strict Audit Rejection",
+      "file": "case_005_strict_audit.json",
+      "tags": ["safety", "audit"],
+      "baseline": {
+        "tokens": 4500,
+        "phase_path": ["P", "D", "R", "A", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 60
+      }
+    },
+    {
+      "id": "OFF-006",
+      "type": "bug",
+      "name": "Knowledge Protection Guard",
+      "file": "case_006_kb_guard.json",
+      "tags": ["security", "persistence"],
+      "baseline": {
+        "tokens": 2500,
+        "phase_path": ["P", "D", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 85
+      }
+    },
+    {
+      "id": "OFF-007",
+      "type": "bug",
+      "name": "Dr. Claw Automated Diagnosis",
+      "file": "case_007_dr_claw.json",
+      "tags": ["diagnostics", "v9-special"],
+      "baseline": {
+        "tokens": 5000,
+        "phase_path": ["P", "D", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 70
+      }
+    },
+    {
+      "id": "OFF-008",
+      "type": "feature",
+      "name": "Wheel-Shift Model Allocation",
+      "file": "case_008_wheel_shift.json",
+      "tags": ["efficiency", "llm-ops"],
+      "baseline": {
+        "tokens": 3000,
+        "phase_path": ["P", "D", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 85
+      }
+    },
+    {
+      "id": "OFF-009",
+      "type": "core",
+      "name": "State Transition Integrity",
+      "file": "case_009_state_guard.json",
+      "tags": ["contract", "hard-gate"],
+      "baseline": {
+        "tokens": 2200,
+        "phase_path": ["P", "D", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 95
+      }
+    },
+    {
+      "id": "OFF-010",
+      "type": "audit",
+      "name": "Full Lifecycle Verification",
+      "file": "case_010_full_audit.json",
+      "tags": ["final-milestone"],
+      "baseline": {
+        "tokens": 6000,
+        "phase_path": ["P", "X", "D", "R", "A", "R", "A", "C"],
+        "review_status": "APPROVED",
+        "health_min": 80
+      }
     }
-  ]
+  ],
+  "slots": {
+    "target_count": 30,
+    "next_available_id": "OFF-011"
+  }
 }

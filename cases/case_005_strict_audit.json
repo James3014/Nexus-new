@@ -1,0 +1,20 @@
+{
+  "case_id": "OFF-005",
+  "goal": "Verify 'strict' audit level rejects sub-standard code",
+  "initial_state": {
+    "files": ["nexus/services/reviewer.py"],
+    "audit_level": "strict"
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "A", "R", "A", "C"],
+    "min_score": 60
+  },
+  "metadata": {
+    "difficulty": "hard",
+    "regression": false,
+    "baseline": {
+      "tokens": 4500,
+      "phases": ["P", "D", "R", "A", "R", "A", "C"]
+    }
+  }
+}

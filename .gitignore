@@ -18,6 +18,9 @@ feature_benchmark_results.json
 benchmark_*_results.json
 tracelog.jsonl
 scripts/core/router_decisions.jsonl
+router_decisions.jsonl
+reminders.json
+reflection.jsonl
 perplexity/
 perplexity_results.csv
 nexus_benchmark.csv

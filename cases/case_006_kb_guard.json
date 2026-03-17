@@ -1,0 +1,20 @@
+{
+  "case_id": "OFF-006",
+  "goal": "Ensure .nexus/knowledge assets are never purged",
+  "initial_state": {
+    "files": ["scripts/nexus_cli.py"],
+    "pre_script": "mkdir -p .nexus/knowledge && touch .nexus/knowledge/vault.dat"
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "A", "C"],
+    "min_score": 85
+  },
+  "metadata": {
+    "difficulty": "medium",
+    "regression": true,
+    "baseline": {
+      "tokens": 2500,
+      "phases": ["P", "D", "R", "A", "C"]
+    }
+  }
+}

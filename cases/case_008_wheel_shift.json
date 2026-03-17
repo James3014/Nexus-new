@@ -1,0 +1,20 @@
+{
+  "case_id": "OFF-008",
+  "goal": "Verify Wheel-Shift correctly selects domain models",
+  "initial_state": {
+    "files": ["nexus/services/llm.py"],
+    "domain": "ui_aesthetic"
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "A", "C"],
+    "min_score": 85
+  },
+  "metadata": {
+    "difficulty": "easy",
+    "regression": false,
+    "baseline": {
+      "tokens": 3000,
+      "phases": ["P", "D", "R", "A", "C"]
+    }
+  }
+}

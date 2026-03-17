@@ -35,6 +35,13 @@ class Reporter:
         except Exception:
             pass
 
+    def write_metrics(self, metrics: dict):
+        """💾 Phase C: 寫入運行時指標至 run_dir。"""
+        if self.run_dir:
+            metrics_file = self.run_dir / ".nexus_metrics"
+            with open(metrics_file, "w", encoding="utf-8") as f:
+                json.dump(metrics, f, ensure_ascii=False, indent=2)
+
     def log_trace(self, command: str, task: str, status: str, tokens: int = 0, score: float = 0.0):
         """📊 v7 Spec: 自動寫入 tracelog.jsonl"""
         entry = {

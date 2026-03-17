@@ -1,0 +1,20 @@
+{
+  "case_id": "OFF-007",
+  "goal": "Trigger Dr. Claw when audit fails on strike 3",
+  "initial_state": {
+    "files": ["nexus/engine/coordinator.py"],
+    "force_failure": true
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "A", "C"],
+    "min_score": 70
+  },
+  "metadata": {
+    "difficulty": "hard",
+    "regression": false,
+    "baseline": {
+      "tokens": 5000,
+      "phases": ["P", "D", "R", "A", "C"]
+    }
+  }
+}

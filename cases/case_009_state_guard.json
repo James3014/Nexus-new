@@ -1,0 +1,19 @@
+{
+  "case_id": "OFF-009",
+  "goal": "Verify state transition guard blocks invalid bypasses",
+  "initial_state": {
+    "files": ["nexus/core/state_contracts.py"]
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "A", "C"],
+    "min_score": 95
+  },
+  "metadata": {
+    "difficulty": "medium",
+    "regression": true,
+    "baseline": {
+      "tokens": 2200,
+      "phases": ["P", "D", "R", "A", "C"]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "case_id": "OFF-003",
+  "goal": "Fix DI registration conflict in state_io.py",
+  "initial_state": {
+    "files": ["nexus/core/state_io.py"]
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "A", "C"],
+    "min_score": 80
+  },
+  "metadata": {
+    "difficulty": "medium",
+    "stability_test": true,
+    "baseline": {
+      "tokens": 4000,
+      "phases": ["P", "D", "R", "A", "C"]
+    }
+  }
+}

@@ -151,6 +151,8 @@ class LLMClient:
             token_match_v2 = re.search(r"total_tokens[:\s]+(\d+(?:,\d+)?)", output, re.I)
             # 格式 3: usage: { ..."total_tokens": 123 }
             token_match_v3 = re.search(r"\"total_tokens\":\s*(\d+)", output, re.I)
+            # 格式 4: Total Session Tokens: 1,234 (codex-loop brain format)
+            token_match_v4 = re.search(r"Total Session Tokens:\s*(\d+(?:,\d+)?)", output, re.I)
             
             if token_match:
                 tokens_total = int(token_match.group(1).replace(",", ""))
@@ -158,6 +160,8 @@ class LLMClient:
                 tokens_total = int(token_match_v2.group(1).replace(",", ""))
             elif token_match_v3:
                 tokens_total = int(token_match_v3.group(1).replace(",", ""))
+            elif token_match_v4:
+                tokens_total = int(token_match_v4.group(1).replace(",", ""))
 
             runtime_summary, category = self._categorize_runtime_error(output)
             if runtime_summary:

@@ -1,0 +1,20 @@
+{
+  "case_id": "OFF-004",
+  "goal": "Verify fast mode skips X phase when no external info is needed",
+  "initial_state": {
+    "files": ["nexus/engine/coordinator.py"],
+    "fast_mode": true
+  },
+  "expected_outcome": {
+    "phases": ["P", "D", "R", "C"],
+    "min_score": 90
+  },
+  "metadata": {
+    "difficulty": "medium",
+    "regression": false,
+    "baseline": {
+      "tokens": 1500,
+      "phases": ["P", "D", "R", "C"]
+    }
+  }
+}
