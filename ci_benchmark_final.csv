@@ -1,0 +1,11 @@
+task_id,status,tokens,token_source_x,token_source_r,token_capture_status,phase_path,review_status,duration,health,drift
+OFF-001,PASS,0,0,0,,P -> D -> R -> A -> C,UNKNOWN,4.63,100.0,0.0
+OFF-002,PASS,0,0,0,,P -> D -> R -> A -> C,APPROVED,3.85,100.0,0.0
+OFF-003,PASS,0,0,0,,P -> D -> R -> A -> C,UNKNOWN,4.57,100.0,0.0
+OFF-004,PASS,0,0,0,,P -> D -> R -> A -> C,APPROVED,3.44,100.0,0.0
+OFF-005,PASS,0,0,0,,P -> D -> R -> A -> C,UNKNOWN,4.38,100.0,0.0
+OFF-006,PASS,0,0,0,,P -> D -> R -> A -> C,UNKNOWN,6.39,100.0,0.0
+OFF-007,PASS,0,0,0,,P -> D -> R -> A -> C,UNKNOWN,5.24,100.0,0.0
+OFF-008,PASS,0,0,0,,P -> D -> R -> A -> C,APPROVED,3.7,100.0,0.0
+OFF-009,PASS,0,0,0,,P -> D -> R -> A -> C,APPROVED,3.21,100.0,0.0
+OFF-010,PASS,0,0,0,,P -> D -> R -> A -> C,APPROVED,3.58,100.0,0.0

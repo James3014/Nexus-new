@@ -1,0 +1,4 @@
+task_id,status,tokens,token_raw_model,token_fallback_est,token_system_overhead,token_source_x,token_source_r,token_capture_status,phase_path,review_status,duration,health,drift
+OFF-001,PASS,150,0,0,150,50,100,,P -> X -> D -> R -> A -> C,APPROVED,14.81,99.7,0.0
+OFF-002,PASS,150,0,0,150,50,100,,P -> X -> D -> R -> A -> C,NOT_STARTED,10.42,99.7,0.0
+OFF-003,PASS,100,0,0,100,0,100,,P -> D -> R -> A -> C,APPROVED,4.8,99.8,0.0
