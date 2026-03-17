@@ -6,6 +6,7 @@ import time
 import subprocess
 import signal
 import functools
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
@@ -133,6 +134,14 @@ def main():
     if not args.command:
         parser.print_help()
         return
+
+    # Default CHUB_HOME for Nexus commands, unless user explicitly overrides it.
+    # This avoids ~/.chub permission issues in restricted/sandboxed environments.
+    if not os.environ.get("CHUB_HOME"):
+        base_dir = Path(args.output_dir) if args.output_dir else (REPO_ROOT / ".nexus")
+        chub_home = base_dir / ".chub"
+        chub_home.mkdir(parents=True, exist_ok=True)
+        os.environ["CHUB_HOME"] = str(chub_home)
 
     cli = NexusCLI(silent=args.silent, output_dir=args.output_dir)
     
