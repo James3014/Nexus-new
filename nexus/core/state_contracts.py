@@ -129,6 +129,12 @@ class NexusState(BaseModel):
     tdd_status: TddStatus = TddStatus.NONE
     subagents_active: bool = False
     
+    # --- Observability & Metrics ---
+    total_token_usage: int = 0
+    phase_tokens: Dict[str, int] = Field(default_factory=dict)
+    audit_pass_count: int = 0
+    retry_count: int = 0
+    
     metadata: Dict[str, Any] = {}
     
     def get_conversation_metadata(self) -> Dict[str, Any]:

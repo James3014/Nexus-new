@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 from datetime import datetime
+from enum import Enum
 from nexus.core.state_contracts import NexusState, StepRecord
 
 class StateIO:
@@ -10,9 +11,9 @@ class StateIO:
     💾 Nexus State IO Manager
     負責狀態的持久化與讀取，支援 .musestate JSONL 與各階段 JSON 合同。
     """
-    def __init__(self, project_root: str):
-        self.project_root = Path(project_root)
-        self.state_file = self.project_root / ".musestate"
+    def __init__(self, project_root: str, state_file: Optional[str] = None):
+        self.project_root = Path(project_root).resolve()
+        self.state_file = Path(state_file) if state_file else self.project_root / ".musestate"
         
     def load_global_state(self) -> NexusState:
         """從 .musestate 讀取最新的全域狀態。"""
@@ -33,16 +34,36 @@ class StateIO:
 
     def save_global_state(self, state: NexusState):
         """將狀態追加到 .musestate JSONL 中。"""
-        # Pydantic v2 使用 model_dump_json() 或 model_dump()
+        # Pydantic v2 使用 model_dump()
         data = state.model_dump()
+        
         # 轉換 datetime 為 string
         def json_serial(obj):
             if isinstance(obj, datetime):
                 return obj.isoformat()
-            raise TypeError("Type not serializable")
+            if isinstance(obj, Enum):
+                return obj.value
+            raise TypeError(f"Type {type(obj)} not serializable")
 
         with open(self.state_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(data, default=json_serial) + "\n")
+        
+        # 🧪 v9.1: Auto-sync token usage to a separate tiny summary file for easier metrics polling
+        summary_file = self.project_root / ".nexus_metrics"
+        print(f"DEBUG: Attempting to write metrics to {summary_file}")
+        try:
+            with open(summary_file, "w") as f:
+                json.dump({
+                    "task_id": state.task_id,
+                    "total_tokens": state.total_token_usage,
+                    "audit_pass": state.audit_pass_count,
+                    "retries": state.retry_count,
+                    "last_updated": datetime.now().isoformat()
+                }, f)
+            print(f"DEBUG: Successfully wrote metrics to {summary_file}")
+        except Exception as e:
+            print(f"DEBUG: Failed to write metrics: {e}")
+            
         print(f"💾 [StateIO] Global state persisted to {self.state_file}")
 
     def write_contract(self, filename: str, data: Any):

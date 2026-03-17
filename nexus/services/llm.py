@@ -5,6 +5,7 @@ import shutil
 import re
 import tempfile
 from pathlib import Path
+from typing import Any, List, Dict, Optional
 
 
 class LLMClient:
@@ -12,12 +13,33 @@ class LLMClient:
 
     def __init__(self, bin_path=None, lock_file=None, project_root=None):
         # 優先使用傳入路徑，否則動態偵測絕對路徑
-        self.llm_bin = bin_path or shutil.which("codex") or "codex"
+        self.llm_bin = bin_path or shutil.which("codex") or shutil.which("codex-loop") or "/Users/jameschen/.local/bin/codex-loop"
         self.lock_file = lock_file or "/tmp/codex_loop_v2.lock"
         self.project_root = Path(project_root or ".")
         
         from nexus.services.prompt_builder import PromptBuilder
         self.prompt_builder = PromptBuilder(str(self.project_root))
+        
+    def get_anti_token_estimate(self) -> int:
+        """
+        🛡️ Anti-Self-Metering: 估計指揮官（本體）的消耗量。
+        目前透過掃描 .nexus 目錄實作。
+        """
+        try:
+            # 簡化算法：掃描當前對話歷史
+            log_folder = self.project_root / ".nexus" / "transcripts"
+            total = 0
+            for f in log_folder.glob("*.md"):
+                total += len(f.read_text()) // 4 # 約略估計
+            return total
+        except:
+            return 0
+        
+    OUTPUT_SCHEMA = {
+        "status": "APPROVED | REJECTED | FAIL",
+        "summary": "Short explanation",
+        "violations": ["list of rule violations"]
+    }
 
     def _build_error_result(
         self, summary, output="", tokens_total=0, category="llm_error"
@@ -49,7 +71,7 @@ class LLMClient:
             return "codex cli runtime panic", "cli_panic"
         return "", ""
 
-    def ask_with_template(self, task: str, diff: str, model_hint: str = "flash", phase: str = "R") -> tuple[dict, str]:
+    def ask_with_template(self, task: str, diff: str, model_hint: str = "flash", phase: str = "R") -> tuple[Any, str]:
         """使用 PromptBuilder 組合完整 Payload 並發送請求。"""
         full_payload = self.prompt_builder.build_full_payload(phase, task, diff, model_hint)
         return self.ask(full_payload, "", phase=phase)
@@ -73,17 +95,27 @@ class LLMClient:
         return target_model
 
     def _build_codex_command(self, schema_path, model_name=None):
-        cmd = [
-            self.llm_bin,
-            "exec",
-            "-",
-            "--color",
-            "never",
-            "--output-schema",
-            str(schema_path),
-        ]
-        if model_name:
-            cmd.extend(["--model", model_name])
+        cmd = [self.llm_bin]
+        
+        # 🛡️ v1.8 魯棒性: 若使用的是 codex-loop 腳本，則改用相容參數
+        is_brain_script = "codex-loop" in str(self.llm_bin)
+        
+        if is_brain_script:
+            # codex-loop 腳本模式不支援 exec 與 output-schema
+            # 這裡我們模擬一個可以直接接受 input 的模式，或報錯提示
+            print(f"⚠️ [Compatibility] Using codex-loop script wrapper. Flags may differ.")
+            cmd.extend(["--mode", "developer", "--apply"])
+        else:
+            cmd.extend([
+                "exec",
+                "-",
+                "--color",
+                "never",
+                "--output-schema",
+                str(schema_path),
+            ])
+            if model_name:
+                cmd.extend(["--model", model_name])
         return cmd
 
     def ask(self, prompt, payload, phase="P", second_opinion=False):
@@ -110,11 +142,22 @@ class LLMClient:
 
             # 🛡️ 魯棒性 JSON 提取 (符合 Lvl 16 Lessons)
             output = res.stdout + res.stderr
-            # 🛡️ 提前提取 Token 消耗 (Lvl 16 DX)
+            # 🛡️ 提前提取 Token 消耗 (支援多種格式: codex-loop total, tokens used 等)
             tokens_total = 0
-            token_match = re.search(r"tokens used\s+(\d+(?:,\d+)?)", output)
+            
+            # 格式 1: tokens used 123
+            token_match = re.search(r"tokens used\s+(\d+(?:,\d+)?)", output, re.I)
+            # 格式 2: [Metrics] total_tokens: 123
+            token_match_v2 = re.search(r"total_tokens[:\s]+(\d+(?:,\d+)?)", output, re.I)
+            # 格式 3: usage: { ..."total_tokens": 123 }
+            token_match_v3 = re.search(r"\"total_tokens\":\s*(\d+)", output, re.I)
+            
             if token_match:
                 tokens_total = int(token_match.group(1).replace(",", ""))
+            elif token_match_v2:
+                tokens_total = int(token_match_v2.group(1).replace(",", ""))
+            elif token_match_v3:
+                tokens_total = int(token_match_v3.group(1).replace(",", ""))
 
             runtime_summary, category = self._categorize_runtime_error(output)
             if runtime_summary:

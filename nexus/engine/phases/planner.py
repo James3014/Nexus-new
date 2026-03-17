@@ -22,4 +22,9 @@ class PlannerPhaseHandler(BasePhaseHandler):
         risks = prediction["reasons"] # 將 reasons 映射到原本的 risks 接口
             
         print(f"⚖️ [Predict] Risk Score: {risk_score} | Detect {len(risks)} potential blockers.")
-        return {"risk_score": risk_score, "risks": risks, "risk_level": prediction["risk_level"]}
+        return {
+            "risk_score": risk_score, 
+            "risks": risks, 
+            "risk_level": prediction["risk_level"],
+            "tokens_used": prediction.get("tokens_used", 0)
+        }
