@@ -3,7 +3,7 @@
     "codebase_investigator": {
       "phases": ["D"],
       "langs": ["*"],
-      "triggers": ["large_stacktrace", "hotspot_logic"],
+      "triggers": ["修正", "最新", "搜尋", "位移", "large_stacktrace", "hotspot_logic"],
       "description": "Deep analysis of codebase for diagnostic phase."
     },
     "self-healer": {
@@ -63,7 +63,7 @@
     "nexus-debug-expert": {
       "phases": ["D", "R"],
       "langs": ["*"],
-      "triggers": ["debug", "root_cause", "crash", "fix", "rca"],
+      "triggers": ["debug", "root_cause", "crash", "fix", "rca", "修復", "對接"],
       "description": "Systematic 4-stage root cause analysis based on Superpowers v5."
     },
     "nexus-skill-creator": {
@@ -75,7 +75,7 @@
     "nexus-planner-expert": {
       "phases": ["P"],
       "langs": ["markdown"],
-      "triggers": ["plan", "writing-plans", "architecture", "implementation_plan", "roadmap"],
+      "triggers": ["plan", "writing-plans", "architecture", "implementation_plan", "roadmap", "計畫", "方案"],
       "description": "Atomic plan writing with Pre-Action Recall protocol based on Superpowers v5."
     }
   }

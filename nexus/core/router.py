@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
+from datetime import datetime
 
 
 class SkillsRouter:
@@ -87,72 +88,104 @@ class SkillsRouter:
         candidates = self.route_candidates(phase, context)
         return candidates[0] if candidates else {}
 
+    def generate_scorecard(self, skill_id: str, phase: str, context: Dict[str, Any], info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🚀 Nexus v9: Scorecard Generation
+        產出透明的技能評分表。
+        """
+        task_id_lower = context.get("task_id", "").lower()
+        
+        # 基礎分與情境分
+        base_score = 1.0
+        trigger_score = 0.0
+        for trigger in info.get("triggers", []):
+            if trigger.lower() in task_id_lower:
+                trigger_score += 2.0
+                
+        env_score = float(self._calculate_weights(phase, context))
+        final_score = round(base_score + trigger_score + env_score, 2)
+        
+        return {
+            "skill_id": skill_id,
+            "final_score": final_score,
+            "breakdown": {
+                "base": base_score,
+                "triggers": trigger_score,
+                "environment": env_score
+            },
+            "status": "SELECTED" if final_score >= 4.0 else "REJECTED",
+            "reason": "Meets threshold" if final_score >= 4.0 else "Below quality threshold (4.0)"
+        }
+
+    def save_decision_log(self, phase: str, selected: Dict[str, Any], rejected: List[Dict[str, Any]]):
+        """💾 v9: 持久化紀錄路由決策與評分表。"""
+        log_file = self.project_root / "scripts/core/router_decisions.jsonl"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "phase": phase,
+            "selected_skill": selected.get("skill_id"),
+            "score": selected.get("score"),
+            "scorecard": selected.get("scorecard"),
+            "rejections_count": len(rejected),
+            "rejected_samples": (rejected or [])[:3]
+        }
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
     def route_candidates(self, phase: str, context: Any = None, top_k: int = 3) -> List[Dict[str, Any]]:
         """
-        🚀 Nexus v9 Fallback Route
-        回傳符合階段的所有候選技能，並依權重評分排序。
+        🚀 Nexus v9 Fallback Route (Hardened)
+        回傳符合階段的所有候選技能，並附帶 Scorecard 與 Rejected 清單。
         """
-        # 🛡️ 加固：處理 context 為字串或 None 的情況
         if isinstance(context, str):
-            task_id_lower = context.lower()
             context_dict = {"task_id": context}
         else:
             context_dict = context or {}
             task_id_lower = context_dict.get("task_id", "").lower()
         
-        # 1. 從 Inventory 過濾出符合 Phase 的技能
         skills_data = self.inventory.get("skills", {})
         candidates = []
+        rejected = []
         
         for skill_id, info in skills_data.items():
             if phase in info.get("phases", []):
-                # 基本分：1.0
-                skill_score = 1.0
-                
-                # 情境加權 (與原有 _calculate_weights 併行)
-                # 命中 Triggers 加 2 分
-                for trigger in info.get("triggers", []):
-                    if trigger.lower() in task_id_lower:
-                        skill_score += 2.0
-                
-                # 附加原本的環境權重
-                env_score = self._calculate_weights(phase, context)
-                final_score = round(skill_score + env_score, 2)
+                scorecard = self.generate_scorecard(skill_id, phase, context_dict, info)
                 
                 candidate = {
                     "skill_id": skill_id,
-                    "score": final_score,
+                    "score": scorecard["final_score"],
+                    "scorecard": scorecard,
                     "description": info.get("description", ""),
                     "skill_path": str(self.project_root / "scripts" / skill_id / "SKILL.md")
                 }
-                candidates.append(candidate)
+                
+                if scorecard["status"] == "SELECTED":
+                    candidates.append(candidate)
+                else:
+                    rejected.append({
+                        "skill_id": skill_id,
+                        "reason": scorecard["reason"],
+                        "score": scorecard["final_score"]
+                    })
         
-        # 2. 排序並取 Top-K
         candidates.sort(key=lambda x: x["score"], reverse=True)
         top_candidates = candidates[:top_k]
         
-        # 3. 補強決策樹與 RAG Reminders (維持 v7 相容性)
-        reminders = {}
-        reminder_file = self.project_root / "reminders.json"
-        if reminder_file.exists():
-            try:
-                reminders = json.loads(reminder_file.read_text())
-            except Exception: pass
-
+        # 注入訊號與拒絕記錄
         for c in top_candidates:
             c["phase"] = phase
-            c["prefer_strong_model"] = c["score"] >= 6.0
-            c["model_tier"] = "sonnet" if c["prefer_strong_model"] else "flash"
+            c["rejected_candidates"] = (rejected or [])[:5]
             c["decision_tree"] = {
-                "skills_used": [c["skill_id"]],
-                "reasons": ["Dynamic semantic matching"],
-                "rank_score": c["score"]
+                "selected": c.get("skill_id", "NONE"),
+                "rejections_count": len(rejected or []),
+                "scorecard_summary": c["scorecard"].get("breakdown", {}) if c.get("scorecard") else {}
             }
-            c["memory_reminders"] = reminders.get("reminders", [])[:3]
 
-        if top_candidates:
-            print(f"🎯 [SkillsRouter] Phase {phase} -> Routed {len(top_candidates)} candidates. Top: {top_candidates[0]['skill_id']}")
-            
+        # 💾 v9: 自動持久化存檔決策 (即便沒選中也要紀錄)
+        self.save_decision_log(phase, top_candidates[0] if top_candidates else {"skill_id": "NONE"}, rejected)
+
         return top_candidates
 
 
