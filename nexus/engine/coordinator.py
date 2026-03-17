@@ -158,7 +158,7 @@ class NexusEngine:
             manual_files=manual_files
         )
         status = "SUCCESS" if res else "FAIL"
-        self.reporter.log_trace("run_bug", bug_id, status, 0, 0.0)
+        self.reporter.log_trace("run_bug", bug_id, status, self.accumulator.total_tokens_used, 0.0)
         return res
 
 
@@ -184,7 +184,7 @@ class NexusEngine:
             skill=skill
         )
         status = "SUCCESS" if res else "FAIL"
-        self.reporter.log_trace("run_feature", task, status, 0, 0.0)
+        self.reporter.log_trace("run_feature", task, status, self.accumulator.total_tokens_used, 0.0)
         return res
 
     def run_benchmark(

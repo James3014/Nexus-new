@@ -2,6 +2,9 @@ from typing import Dict, Any
 from nexus.core.state_contracts import NexusState
 
 class TokenAccumulator:
+    def __init__(self):
+        self.total_tokens_used = 0
+
     def record(self, state: NexusState, phase: str, res_data: Dict[str, Any], overhead: int = 0):
         if phase not in ["P", "D", "X", "R", "A", "C"]:
             raise ValueError(f"Invalid phase: {phase}")
@@ -33,5 +36,6 @@ class TokenAccumulator:
         phase_total = raw + fallback + overhead
         state.phase_tokens[phase] = state.phase_tokens.get(phase, 0) + phase_total
         state.total_token_usage = state.token_raw_model + state.token_fallback_est + state.token_system_overhead
+        self.total_tokens_used = state.total_token_usage
         return phase_total
 

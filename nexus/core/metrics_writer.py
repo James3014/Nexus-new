@@ -13,5 +13,6 @@ class MetricsWriter:
             "last_updated": datetime.now().isoformat(),
             **kwargs
         }
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
+        with open(self.path, "a", encoding="utf-8") as f:
+            json.dump(data, f)
+            f.write("\n")

@@ -59,3 +59,8 @@ def test_accumulator_cumulative(state, accumulator):
     assert state.total_token_usage == 450
     assert state.phase_tokens["X"] == 150
     assert state.phase_tokens["R"] == 300
+def test_accumulator_total_property(state, accumulator):
+    accumulator.record(state, phase="P", res_data={"token_raw_model": 10}, overhead=5)
+    assert accumulator.total_tokens_used == 15
+    accumulator.record(state, phase="X", res_data={"token_raw_model": 20}, overhead=5)
+    assert accumulator.total_tokens_used == 40

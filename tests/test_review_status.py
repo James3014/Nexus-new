@@ -20,3 +20,7 @@ def test_normalize_unknown():
     s, success = ReviewStatusNormalizer.normalize("GARBAGE")
     assert s == "UNKNOWN"
     assert success is False
+
+def test_normalize_aliases():
+    assert ReviewStatusNormalizer.normalize("PASS") == ("APPROVED", True)
+    assert ReviewStatusNormalizer.normalize("SUCCESS") == ("APPROVED", True)
