@@ -13,11 +13,11 @@ class StateIO:
     """
     def __init__(self, project_root: str, state_file: Optional[str] = None, run_dir: Optional[str] = None):
         self.project_root = Path(project_root).resolve()
-        self.run_dir = Path(run_dir) if run_dir else None
+        self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
+        print(f"DEBUG: StateIO run_dir set to: {self.run_dir}")
         
-        # If run_dir is provided but state_file isn't, default to run_dir / "nexus_state.jsonl"
         if self.run_dir and not state_file:
-            self.state_file = self.run_dir / "nexus_state.jsonl"
+            self.state_file = self.run_dir / ".musestate"
         else:
             self.state_file = Path(state_file) if state_file else self.project_root / ".musestate"
         
@@ -58,7 +58,7 @@ class StateIO:
             f.write(json.dumps(data, default=json_serial) + "\n")
         
         # 🧪 v9.1: Auto-sync token usage to a separate tiny summary file for easier metrics polling
-        summary_file = self.project_root / ".nexus_metrics"
+        summary_file = self.run_dir / ".nexus_metrics" if self.run_dir else self.project_root / ".nexus_metrics"
         print(f"DEBUG: Attempting to write metrics to {summary_file}")
         try:
             with open(summary_file, "w") as f:

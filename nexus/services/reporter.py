@@ -9,9 +9,14 @@ from typing import Optional
 class Reporter:
     """負責結果的呈現、持久化報告、語音通知與 Tracing。"""
 
-    def __init__(self, project_root: str, tracelog_path: Optional[Path] = None, silent: bool = False):
+    def __init__(self, project_root: str, tracelog_path: Optional[Path] = None, silent: bool = False, run_dir: Optional[str] = None):
         self.project_root = Path(project_root)
-        self.tracelog_path = tracelog_path or self.project_root / "tracelog.jsonl"
+        self.run_dir = Path(run_dir) if run_dir else None
+        # Phase C: Default tracelog to run_dir if available
+        if self.run_dir and tracelog_path is None:
+            self.tracelog_path = self.run_dir / "tracelog.jsonl"
+        else:
+            self.tracelog_path = tracelog_path or self.project_root / "tracelog.jsonl"
         self.silent = silent
 
     def voice_notify(self, message: str):

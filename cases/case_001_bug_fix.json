@@ -10,6 +10,10 @@
   },
   "metadata": {
     "difficulty": "easy",
-    "regression": true
+    "regression": true,
+    "baseline": {
+      "tokens": 2000,
+      "phases": ["P", "D", "R", "A", "C"]
+    }
   }
 }

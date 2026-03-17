@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 
@@ -10,8 +10,9 @@ class SkillsRouter:
     整合 Superpowers 權重體系與決策樹注入，提升 95%+ 路由準確度。
     """
 
-    def __init__(self, project_root: str, skills_root: str = "skills"):
+    def __init__(self, project_root: str, skills_root: str = "skills", run_dir: Optional[str] = None):
         self.project_root = Path(project_root)
+        self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
         # 核心職能來源改為從 inventory 動態讀取
         self.skills_root = Path(skills_root)
         
@@ -57,13 +58,13 @@ class SkillsRouter:
         is_repair = phase == "R"
         has_tests = any("test" in f.lower() for f in context.get("files", []))
         if is_repair or has_tests:
-            score += weights.get("tdd_weight", 2.5)
+            score += float(weights.get("tdd_weight", 2.5))
             
         # 2. Subagent 偏置
         files_count = len(context.get("files", []))
         is_large_task = files_count > 5 or len(context.get("steps_history", [])) > 3
         if is_large_task:
-            score += weights.get("subagent_bias", 1.8)
+            score += float(weights.get("subagent_bias", 1.8))
             
         # 3. 任務類別權重
         task_id_lower = context.get("task_id", "").lower()
@@ -71,15 +72,15 @@ class SkillsRouter:
         is_investigating = any(kw in task_id_lower for kw in ["investigate", "leak", "scan", "audit"])
         
         if is_refactoring:
-            score += weights.get("refactor_weight", 3.0)
+            score += float(weights.get("refactor_weight", 3.0))
         if is_investigating:
-            score += weights.get("investigate_weight", 4.5)
+            score += float(weights.get("investigate_weight", 4.5))
 
         # 4. 技能特徵加權 (自學習補強)
         # 如果 context 中有暗示特定術語，命中調整表
         for skill_key, bonus in adjustments.items():
             if skill_key.lower() in task_id_lower:
-                score += bonus
+                score += float(bonus)
             
         return score
 
@@ -119,7 +120,12 @@ class SkillsRouter:
 
     def save_decision_log(self, phase: str, selected: Dict[str, Any], rejected: List[Dict[str, Any]]):
         """💾 v9: 持久化紀錄路由決策與評分表。"""
-        log_file = self.project_root / "scripts/core/router_decisions.jsonl"
+        # Phase C: 產物收斂，優先使用 run_dir
+        if self.run_dir:
+            log_file = self.run_dir / "router_decisions.jsonl"
+        else:
+            log_file = self.project_root / "scripts/core/router_decisions.jsonl"
+            
         log_file.parent.mkdir(parents=True, exist_ok=True)
         
         entry = {
@@ -143,7 +149,6 @@ class SkillsRouter:
             context_dict = {"task_id": context}
         else:
             context_dict = context or {}
-            task_id_lower = context_dict.get("task_id", "").lower()
         
         skills_data = self.inventory.get("skills", {})
         candidates = []
@@ -187,10 +192,3 @@ class SkillsRouter:
         self.save_decision_log(phase, top_candidates[0] if top_candidates else {"skill_id": "NONE"}, rejected)
 
         return top_candidates
-
-
-if __name__ == "__main__":
-    # 簡易測試
-    router = SkillsRouter(project_root="/Users/jameschen/Downloads/Muse-Nexus")
-    test_context = {"files": ["app.py", "test_app.py", "utils.py", "core.py", "api.py", "db.py"], "task_id": "refactor-nexus"}
-    print(json.dumps(router.route("R", test_context), indent=2))

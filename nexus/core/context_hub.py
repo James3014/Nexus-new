@@ -13,10 +13,11 @@ class ContextHub:
     負責收集、組裝與壓縮上下文，為 Agent 提供乾淨的 P-D-X-R-A-C 視圖。
     """
 
-    def __init__(self, project_root: str, memory_service: Optional[Any] = None):
+    def __init__(self, project_root: str, memory_service: Optional[Any] = None, run_dir: Optional[str] = None):
         self.project_root = Path(project_root)
-        self.state_io = StateIO(project_root)
-        self.memory_service = memory_service or MemoryService(project_root)
+        self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
+        self.state_io = StateIO(project_root, run_dir=run_dir)
+        self.memory_service = memory_service or MemoryService(project_root, run_dir=run_dir)
         
         from nexus.services.prompt_builder import PromptBuilder
         self.prompt_builder = PromptBuilder(project_root)
@@ -96,6 +97,20 @@ class ContextHub:
             "memory_reminders": self._inject_memory_reminders("X") # Added memory for research phase
         }
 
+    def assemble_feature_pack(self, plan: Optional[Dict] = None) -> Dict[str, Any]:
+        """🧬 Phase 1: 為新功能建置組裝上下文。"""
+        state = self.state_io.load_global_state()
+        memory = self.memory_service.aggregate_memory()
+        
+        return {
+            "task": state.task_id,
+            "plan": plan or {},
+            "state": state.model_dump(),
+            "memory": memory,
+            "rules": self.load_program_rules(),
+            "timestamp": datetime.now().isoformat()
+        }
+
     def assemble_conversation_pack(self, audit_mode: bool = False) -> Dict[str, Any]:
         """
         組裝對話專用 Context Pack (v0.7 Spec)。
@@ -170,7 +185,12 @@ class ContextHub:
         self, failure_signature: str, root_cause: str, lesson: str, metadata: Optional[Dict] = None
     ):
         """💾 Phase 5: 記錄失敗案例用於 Active Learning。"""
-        lesson_file = self.project_root / "obsidian/crystal_lessons.jsonl"
+        # Noise Governance: If run_dir exists, store there. Otherwise, global obsidian/ folder.
+        if self.run_dir:
+            lesson_file = self.run_dir / "crystal_lessons.jsonl"
+        else:
+            lesson_file = self.project_root / "obsidian/crystal_lessons.jsonl"
+            
         lesson_file.parent.mkdir(parents=True, exist_ok=True)
 
         entry = {

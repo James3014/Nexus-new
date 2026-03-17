@@ -13,8 +13,9 @@ class MemoryService:
     負責聚合與快取跨階段的背景知識與歷史記錄。
     已從 legacy scripts/logmemory.py 重構為原生物件。
     """
-    def __init__(self, project_root: str):
+    def __init__(self, project_root: str, run_dir: Optional[str] = None):
         self.project_root = Path(project_root)
+        self.run_dir = Path(run_dir) if run_dir else None
         try:
             self.redis = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
             self.redis.ping()
@@ -88,7 +89,12 @@ class MemoryService:
         }
         
         # 持久化 reminders.json 以供其他工具/Shell 讀取 (後向相容)
-        (self.project_root / 'reminders.json').write_text(
+        # Phase C: 產物收斂，優先使用 run_dir
+        if self.run_dir:
+            dest_path = self.run_dir / 'reminders.json'
+        else:
+            dest_path = self.project_root / 'reminders.json'
+        dest_path.write_text(
             json.dumps(result, ensure_ascii=False, indent=2), 
             encoding='utf-8'
         )

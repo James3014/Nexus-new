@@ -110,6 +110,16 @@ class StepRecord(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展
     summary: Optional[str] = None
 
+# --- H 階段: Health & Self-Check (CHK-001) ---
+
+class HealthMetrics(BaseModel):
+    test_pass_rate: float = 0.0 # 0.0 - 1.0
+    drift_index: float = 0.0    # 偏離指數 (越小越健康)
+    error_rate: float = 0.0     # 錯誤率
+    token_efficiency: float = 1.0 # 1.0 為標準
+    last_check_at: Optional[datetime] = None
+    status: str = "UNKNOWN"     # HEALTHY, WARNING, CRITICAL
+
 from pydantic import model_validator
 
 class NexusState(BaseModel):
@@ -141,7 +151,31 @@ class NexusState(BaseModel):
     correction_count: int = 0
     unresolved_count: int = 0
     
+    # --- Health & Self-Check (CHK-001) ---
+    health_score: float = 100.0
+    health_metrics: HealthMetrics = Field(default_factory=HealthMetrics)
+    
     metadata: Dict[str, Any] = {}
+    
+    def calculate_health(self):
+        """計算系統健康得分 (0-100)"""
+        m = self.health_metrics
+        # 權重分配: Pass Rate (40%), Drift (20%), Error Rate (20%), Token Eff (20%)
+        score = (m.test_pass_rate * 40) + \
+                (max(0, 1 - m.drift_index) * 20) + \
+                (max(0, 1 - m.error_rate) * 20) + \
+                (min(1.0, m.token_efficiency) * 20)
+        self.health_score = round(score, 2)
+        
+        if self.health_score >= 80:
+            m.status = "HEALTHY"
+        elif self.health_score >= 50:
+            m.status = "WARNING"
+        else:
+            m.status = "CRITICAL"
+        
+        m.last_check_at = datetime.now()
+        return self.health_score
     
     def get_conversation_metadata(self) -> Dict[str, Any]:
         """安全獲取對話元數據容器"""

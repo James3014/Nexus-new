@@ -78,11 +78,38 @@ def replay_case(case_id: str):
     print(f"✅ Success: {success}")
     print(f"🛣️  Phases Reached: {' -> '.join(history_phases)}")
     
+    # CHK-003: Drift Detection
+    baseline = case_data.get("metadata", {}).get("baseline")
+    drift_index = 0.0
+    if baseline:
+        print("\n⚖️ [Drift Analysis]")
+        # 1. Token Drift
+        base_tokens = baseline.get("tokens", 1)
+        curr_tokens = final_state.total_token_usage
+        token_drift = abs(curr_tokens - base_tokens) / base_tokens
+        print(f"  - Token Drift: {token_drift:.2%} ({curr_tokens} vs {base_tokens})")
+        
+        # 2. Path Drift
+        base_phases = baseline.get("phases", [])
+        curr_phases = history_phases
+        phase_drift = 0.0 if curr_phases == base_phases else 0.5
+        if phase_drift > 0:
+            print(f"  - Path Drift Detected! Expected: {base_phases}, Got: {curr_phases}")
+        
+        drift_index = (token_drift * 0.5) + phase_drift
+        print(f"  - Final Drift Index: {drift_index:.4f}")
+        
+        # Sync to health metrics
+        final_state.health_metrics.drift_index = drift_index
+        final_state.calculate_health()
+        state_io.save_global_state(final_state)
+        print(f"🏥 [Health] New Score: {final_state.health_score} ({final_state.health_metrics.status})")
+
     # Simple Gate Check
     if all(p in history_phases for p in expected.get("phases", [])):
-        print("🎉 [MATCH] All required phases reached.")
+        print("\n🎉 [MATCH] All required phases reached.")
     else:
-        print("⚠️ [MISMATCH] Some expected phases were skipped.")
+        print("\n⚠️ [MISMATCH] Some expected phases were skipped.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Nexus Offline Case Replayer")

@@ -6,9 +6,15 @@ import subprocess
 import signal
 import functools
 import logging
+from enum import Enum
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+
+class RepairStrategy(str, Enum):
+    L1_QUICK = "L1"   # One-shot, minimal loop
+    L2_STANDARD = "L2" # Standard 5-turn loop
+    L3_DEEP = "L3"    # 10-turn, researcher enabled, cost-heavy
 
 from nexus.core.commander import Commander
 from nexus.core.state_io import StateIO
@@ -49,8 +55,8 @@ class NexusEngine:
         self.silent = silent
         # 🛡️ v9 Hardening: 自動初始化核心組件
         self.state_io = state_io or StateIO(str(project_root), run_dir=str(self.run_dir))
-        self.router = router or SkillsRouter(project_root)
-        self.reporter = reporter or Reporter(str(project_root), silent=silent)
+        self.router = router or SkillsRouter(project_root, run_dir=str(self.run_dir))
+        self.reporter = reporter or Reporter(str(project_root), silent=silent, run_dir=str(self.run_dir))
         self.commander = commander or Commander(str(self.run_dir), self.state_io, self.router)
         self.tracelog_path = self.run_dir / "tracelog.jsonl"
         self.phases = phases or {}
@@ -63,8 +69,8 @@ class NexusEngine:
             return self.commander.hub
         # Last resort fallback if commander fails
         from nexus.core.context_hub import ContextHub
-        # 🛡️ v9.2.1 Fix: pass project_root (path/str), not state_io object
-        self._hub = ContextHub(str(self.project_root))
+        # 🛡️ v9.2.1 Fix: pass project_root AND run_dir
+        self._hub = ContextHub(str(self.project_root), run_dir=str(self.run_dir))
         return self._hub
 
     def _voice_notify(self, message: str):
@@ -167,9 +173,19 @@ class NexusEngine:
         if research_pack: diag_pack["research_context"] = research_pack
         self._add_step_to_history(state, "D", metadata={"diag_pack_keys": list(diag_pack.keys())})
 
-        # --- R Stage: Repair (Max 5 Iterations) ---
+        # --- R Stage: Repair (FIX-001 Strategy Mapping) ---
         repair_attempts = 0
+        strategy = RepairStrategy.L2_STANDARD
+        if self.fast_mode:
+            strategy = RepairStrategy.L1_QUICK
+        
+        # 🧪 FIX-001: 根據策略調整參數
         max_repair_attempts = 5
+        if strategy == RepairStrategy.L1_QUICK:
+            max_repair_attempts = 1
+        elif strategy == RepairStrategy.L3_DEEP:
+            max_repair_attempts = 10
+
         success = False
         total_tokens = 0
         
@@ -177,11 +193,18 @@ class NexusEngine:
             repair_attempts += 1
             state.current_phase = "R"
             
+            # 🧪 FIX-003: Cost/Efficiency Circuit Breaker
+            if state.total_token_usage > state.config.budget_token * 1.5:
+                logger.warning("🚨 [FIX-003] Budget exceeded! Breaking repair loop.")
+                self._voice_notify("警告：運算預算用罄，停止修復")
+                break
+            
             res_data = repairer.run(state, {
                 "task": desc, 
                 "diag_pack": diag_pack, 
                 "attempt": repair_attempts,
-                "dry_run": plan_only # Using plan_only for dry_run
+                "dry_run": plan_only, # Using plan_only for dry_run
+                "audit_level": self.audit_level
             })
             
             res = res_data["status"]
@@ -233,6 +256,12 @@ class NexusEngine:
                 self.state_io.save_global_state(state)
                 continue
         
+        # --- Final Audit Gate Check (FIX-004) ---
+        if repair_attempts >= max_repair_attempts and not success:
+            logger.error("🛑 [FIX-004] Max attempts reached without approval. Force Failure.")
+            success = False
+            self._voice_notify("修復失敗：未達通過標準")
+
         # --- C Stage: Crystallize ---
         if success:
             state.current_phase = "C"
@@ -245,8 +274,29 @@ class NexusEngine:
             self.hub.record_crystal_lesson(bug_id, "v9-modular-pattern", "Success Outcome", metadata=metadata)
             self._add_step_to_history(state, "C", summary=f"Bug {bug_id} complete", metadata=metadata)
 
+        self._evaluate_health(state, success)
         self._log_trace("nexus:v9", bug_id, "SUCCESS" if success else "FAIL")
         return success
+
+    def _evaluate_health(self, state: NexusState, success: bool):
+        """🧬 CHK-001: 評估當前任務後的系統健康度"""
+        m = state.health_metrics
+        # 1. Test Pass Rate (簡化：當前任務是否成功)
+        m.test_pass_rate = 1.0 if success else 0.0
+        
+        # 2. Error Rate (根據 repair_attempts 估算)
+        m.error_rate = min(1.0, state.metadata.get("repair_attempts", 0) / 5.0)
+        
+        # 3. Token Efficiency (基準 5000 tokens)
+        budget = 5000
+        m.token_efficiency = max(0.1, 1.0 - (state.total_token_usage / (budget * 2)))
+        
+        # 4. Drift Index (暫時設為 0，除非偵測到顯著偏移)
+        m.drift_index = 0.0
+        
+        score = state.calculate_health()
+        logger.info("🏥 [HealthCheck] Score: %s | Status: %s", score, m.status)
+        self.state_io.save_global_state(state)
 
     def run_feature(self, task: str, domain: str = None, dry_run: bool = False, bypass_cb: bool = False, skill: str = None):
         """🚀 [Nexus:Feature] 實作新功能流 (v1.8 P-X-D-R-A-C Alignment)"""
@@ -273,7 +323,8 @@ class NexusEngine:
 
         # --- X Stage: Research ---
         research_pack = None
-        if decision.get("external_needed") or "SDK" in task or "WebSocket" in task:
+        skip_research = self.fast_mode and not decision.get("external_needed")
+        if (decision.get("external_needed") or "SDK" in task or "WebSocket" in task) and not skip_research:
             state.current_phase = "X"
             research_pack = researcher.run(state, {"task": task})
             state.phase_tokens["X"] = state.phase_tokens.get("X", 0) + research_pack.get("tokens_used", 0)
@@ -310,52 +361,72 @@ class NexusEngine:
         if research_pack: feature_pack["research_context"] = research_pack
         self._add_step_to_history(state, "D", metadata={"pack_keys": list(feature_pack.keys())})
 
-        # --- R/A Stage: Execution Loop ---
+        # --- R Stage: Repair Execution Loop (FIX-001 / FIX-002) ---
         success = False
-        candidates = [{"skill_id": skill, "score": 9.9}] if skill else self.router.route_candidates("R", {"task_id": task, "type": "feature"})
-        last_review_status = "NOT_RUN"
+        strategy = RepairStrategy.L2_STANDARD
+        if dry_run or self.fast_mode:
+            strategy = RepairStrategy.L1_QUICK
+        
+        max_repair_attempts = 1 if strategy == RepairStrategy.L1_QUICK else 5
+        repair_attempt = 0
         changed_files_aggregate = set()
+        last_review_status = "NOT_RUN"
+        
+        candidates = [{"skill_id": skill, "score": 9.9}] if skill else self.router.route_candidates("R", {"task_id": task, "type": "feature"})
         
         for candidate in candidates:
+            if success: break
             skill_id = candidate["skill_id"]
-            logger.info("[Execution] Using feature skill: %s", skill_id)
-            state.current_phase = "R"
             
-            engine_loop = CodexLoopV2(
-                mode="feature", scope="staged", apply_patch=not dry_run, task=task,
-                skill_id=skill_id, context_hub=self.hub, state_io=self.state_io
-            )
-            
-            review_result = {"status": "APPROVED", "summary": "dry-run approved"} if dry_run else engine_loop.run_review()
-            last_review_status, success = self._normalize_review_status(review_result)
-            tokens_used = engine_loop.total_tokens if engine_loop else 0
-            state.phase_tokens["R"] = state.phase_tokens.get("R", 0) + tokens_used
-            state.total_token_usage += tokens_used
-            changed_files = []
-            try:
-                changed_files, _ = engine_loop.git.get_changes(engine_loop.scope, engine_loop.base_ref)
-            except Exception:
-                changed_files = []
-            for f in changed_files:
-                changed_files_aggregate.add(f)
+            while repair_attempt < max_repair_attempts:
+                # 🧪 FIX-003: Cost/Efficiency Circuit Breaker
+                if state.total_token_usage > state.config.budget_token * 1.5:
+                    logger.warning("🚨 [FIX-003] Budget exceeded! Breaking repair loop.")
+                    self._voice_notify("預算用罄，停止建置")
+                    break
 
-            self._add_step_to_history(
-                state,
-                "R",
-                metadata={
-                    "skill": skill_id,
-                    "tokens": tokens_used,
-                    "dry_run": dry_run,
-                    "review_status": last_review_status,
-                    "files": changed_files,
-                }
-            )
-            
-            if success:
-                state.audit_pass_count += 1
-                state.current_phase = "A"
-                self._add_step_to_history(state, "A", status="completed", summary="Pass")
-                break
+                repair_attempt += 1
+                logger.info("[Execution] Using feature skill: %s (Attempt %s)", skill_id, repair_attempt)
+                state.current_phase = "R"
+                
+                engine_loop = CodexLoopV2(
+                    mode="feature", scope="staged", apply_patch=not dry_run, task=task,
+                    skill_id=skill_id, context_hub=self.hub, state_io=self.state_io,
+                    audit_level=self.audit_level
+                )
+                
+                review_result = {"status": "APPROVED", "summary": "dry-run approved"} if dry_run else engine_loop.run_review()
+                last_review_status, success = self._normalize_review_status(review_result)
+                tokens_used = engine_loop.total_tokens if engine_loop else 0
+                state.phase_tokens["R"] = state.phase_tokens.get("R", 0) + tokens_used
+                state.total_token_usage += tokens_used
+                
+                # FIX-002: Record failure signature if failed
+                if not success:
+                    self.hub.record_crystal_lesson(
+                        state.task_id, 
+                        "repair-failure", 
+                        f"Skill {skill_id} failed with {last_review_status}",
+                        metadata={"status": last_review_status, "attempt": repair_attempt}
+                    )
+
+                self._add_step_to_history(
+                    state,
+                    "R",
+                    metadata={
+                        "skill": skill_id,
+                        "tokens": tokens_used,
+                        "dry_run": dry_run,
+                        "review_status": last_review_status,
+                        "attempt": repair_attempt
+                    }
+                )
+                
+                if success:
+                    state.audit_pass_count += 1
+                    state.current_phase = "A"
+                    self._add_step_to_history(state, "A", status="completed", summary="Pass")
+                    break
         
         # --- C Stage: Crystallize ---
         if success:
@@ -372,13 +443,20 @@ class NexusEngine:
         if len(changed_files_aggregate) == 0:
             sim_reasons.append("no_changed_files")
         if last_review_status in {"FAIL", "REJECTED", "UNKNOWN"}:
-            sim_reasons.append(f"review_status_{last_review_status.lower()}")
+            sim_reasons.append(f"review_status_{str(last_review_status).lower()}")
 
         state.metadata["last_review_status"] = last_review_status
         state.metadata["simulated_run"] = bool(sim_reasons)
         state.metadata["simulation_reasons"] = sim_reasons
 
+        # --- Final Audit Gate Check (FIX-004) ---
+        if repair_attempt >= max_repair_attempts and not success:
+            logger.error("🛑 [FIX-004] Max attempts reached without approval. Force Failure.")
+            success = False
+            self._voice_notify("建置失敗：未通過審核閘口")
+
         self.state_io.save_global_state(state)
+        self._evaluate_health(state, success)
         self._log_trace("nexus:feature", task, "SUCCESS" if success else "FAIL", tokens=state.total_token_usage)
         return success
 

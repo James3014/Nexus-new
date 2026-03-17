@@ -30,10 +30,12 @@ class NexusContainer(containers.DeclarativeContainer):
     
     # 核心基礎服務 (Singletons)
     project_root = providers.Configuration()
+    run_dir = providers.Configuration() # Phase C: Track run_dir in container
     
     state_io = providers.Singleton(
         StateIO,
-        project_root=project_root
+        project_root=project_root,
+        run_dir=run_dir
     )
     
     git = providers.Singleton(GitManager)
@@ -42,12 +44,14 @@ class NexusContainer(containers.DeclarativeContainer):
     
     memory_service = providers.Singleton(
         MemoryService,
-        project_root=project_root
+        project_root=project_root,
+        run_dir=run_dir
     )
 
     router = providers.Singleton(
         SkillsRouter,
-        project_root=project_root
+        project_root=project_root,
+        run_dir=run_dir
     )
 
     linter = providers.Singleton(Linter)
@@ -60,7 +64,8 @@ class NexusContainer(containers.DeclarativeContainer):
     
     reporter = providers.Singleton(
         Reporter,
-        project_root=project_root
+        project_root=project_root,
+        run_dir=run_dir
     )
 
     workspace = providers.Singleton(
@@ -81,12 +86,13 @@ class NexusContainer(containers.DeclarativeContainer):
     context_hub = providers.Singleton(
         ContextHub,
         project_root=project_root,
-        memory_service=memory_service
+        memory_service=memory_service,
+        run_dir=run_dir
     )
 
     commander = providers.Singleton(
         Commander,
-        run_dir=project_root,
+        run_dir=run_dir,
         state_io=state_io,
         router=router,
         context_hub=context_hub
@@ -114,13 +120,13 @@ class NexusContainer(containers.DeclarativeContainer):
     research_phase = providers.Factory(
         ResearchPhaseHandler,
         project_root=project_root,
-        run_dir=project_root
+        run_dir=run_dir
     )
     
     repair_phase = providers.Factory(
         RepairPhaseHandler,
         project_root=project_root,
-        run_dir=project_root,
+        run_dir=run_dir,
         router=router,
         orchestrator_factory=orchestrator_factory.provider
     )
@@ -128,14 +134,14 @@ class NexusContainer(containers.DeclarativeContainer):
     planner_phase = providers.Factory( 
         PlannerPhaseHandler,
         project_root=project_root,
-        run_dir=project_root,
+        run_dir=run_dir,
         predictor=predictor
     )
-
 
     engine_factory = providers.Factory(
         NexusEngine,
         project_root=project_root,
+        run_dir=run_dir,
         state_io=state_io,
         commander=commander,
         router=router,

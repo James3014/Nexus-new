@@ -25,16 +25,18 @@ class RepairPhaseHandler(BasePhaseHandler):
         candidates = self.router.route_candidates("R", diag_pack)
         skill_id = candidates[0]["skill_id"] if candidates else "default-repair"
         
+        audit_level = context.get("audit_level", "standard")
+        
         if self.orchestrator_factory:
             engine_loop = self.orchestrator_factory(
                 mode="agent-shield", scope="staged", apply_patch=not dry_run,
-                task=task, skill_id=skill_id
+                task=task, skill_id=skill_id, audit_level=audit_level
             )
         else:
             # Legacy fallback if no factory provided
             engine_loop = CodexLoopV2(
                 mode="agent-shield", scope="staged", apply_patch=not dry_run,
-                task=task, skill_id=skill_id
+                task=task, skill_id=skill_id, audit_level=audit_level
             )
         
         res_obj = engine_loop.run_review()
