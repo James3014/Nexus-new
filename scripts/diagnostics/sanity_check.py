@@ -8,7 +8,7 @@ from pathlib import Path
 # Ensure we can import nexus and scripts
 sys.path.append(os.getcwd())
 
-from scripts.codex_loop_brain import CodexLoopV2
+from nexus.services.reviewer import CodexLoopV2
 from nexus.executors.gemini import GeminiExecutor
 from nexus.executors.protocol import ExecutorStatusEnum, ExecutorOutput, ProviderErrorType
 

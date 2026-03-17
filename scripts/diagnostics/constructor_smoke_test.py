@@ -33,7 +33,7 @@ def record(name, ok, reason=""):
 
 # ── Test 1: Module Import ──────────────────────────────────────────────────────
 try:
-    from scripts.codex_loop_brain import CodexLoopV2
+    from nexus.services.reviewer import CodexLoopV2
     record("T1: Module Import", True)
 except Exception as e:
     record("T1: Module Import", False, str(e))
@@ -43,7 +43,7 @@ except Exception as e:
 # ── Test 2: argparse Contract ──────────────────────────────────────────────────
 try:
     import argparse
-    from scripts.codex_loop_brain import CodexLoopV2  # already imported, just referencing for clarity
+    from nexus.services.reviewer import CodexLoopV2  # already imported, just referencing for clarity
 
     # Simulate argparse the same way __main__ does
     parser = argparse.ArgumentParser()

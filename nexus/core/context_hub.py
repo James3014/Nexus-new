@@ -1,10 +1,10 @@
 import json
-import subprocess
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch
 from nexus.core.state_io import StateIO
+from nexus.services.memory import MemoryService
 
 
 class ContextHub:
@@ -13,9 +13,10 @@ class ContextHub:
     負責收集、組裝與壓縮上下文，為 Agent 提供乾淨的 P-D-X-R-A-C 視圖。
     """
 
-    def __init__(self, project_root: str):
+    def __init__(self, project_root: str, memory_service: Optional[Any] = None):
         self.project_root = Path(project_root)
         self.state_io = StateIO(project_root)
+        self.memory_service = memory_service or MemoryService(project_root)
         
         from nexus.services.prompt_builder import PromptBuilder
         self.prompt_builder = PromptBuilder(project_root)
@@ -30,28 +31,25 @@ class ContextHub:
         except Exception as e:
             return f"# Error loading rules: {e}"
 
-    def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
-        """🔌 Hook: 呼叫 LogMemory Agent 取得 per-round 記憶。"""
-        try:
-            # 呼叫 scripts/logmemory.py (使用 uv run 以符合全域安全規則)
-            uv_path = "/Users/jameschen/.local/bin/uv"
-            cmd = [
-                uv_path, "run", 
-                "--with", "redis", 
-                "--with", "lancedb", 
-                str(self.project_root / "scripts/logmemory.py"), 
-                "--phase", phase,
-                "--cache"
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.project_root)
+    def make_pre_routing_decision(self, task_id: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+        """🧠 Pre-routing: 決定是否需要外部研究或特定模式。"""
+        # 簡單邏輯：包含 'bug' 或 'error' 且描述較長時，建議開啟外部研究
+        context = context or {}
+        external_needed = False
+        task_lower = task_id.lower()
+        if any(kw in task_lower for kw in ["fix", "error", "bug", "issue"]):
+            external_needed = True
             
-            if result.returncode == 0:
-                # 讀取產出的 reminders.json
-                reminder_file = self.project_root / "reminders.json"
-                if reminder_file.exists():
-                    data = json.loads(reminder_file.read_text())
-                    print(f"🧠 [MemoryHook] Injected {len(data.get('reminders', []))} reminders for phase {phase}")
-                    return data
+        return {
+            "external_needed": external_needed,
+            "mode": "standard",
+            "priority": "normal"
+        }
+
+    def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
+        """🔌 Hook: 呼叫 MemoryService 取得 per-round 記憶。"""
+        try:
+            return self.memory_service.cached_search(f"memory_v9_{phase}")
         except Exception as e:
             print(f"⚠️ [MemoryHook] Injection failed: {e}")
         return {"reminders": [], "total_sources": 0}
@@ -79,6 +77,7 @@ class ContextHub:
             "results": results,
             "fact_count": len(results),
             "relevance_gate": True,
+            "memory_reminders": self._inject_memory_reminders("X") # Added memory for research phase
         }
 
     def assemble_repair_pack(
@@ -110,7 +109,7 @@ class ContextHub:
         return pack
 
     def record_crystal_lesson(
-        self, failure_signature: str, root_cause: str, lesson: str
+        self, failure_signature: str, root_cause: str, lesson: str, metadata: Optional[Dict] = None
     ):
         """💾 Phase 5: 記錄失敗案例用於 Active Learning。"""
         lesson_file = self.project_root / "obsidian/crystal_lessons.jsonl"
@@ -121,6 +120,7 @@ class ContextHub:
             "signature": failure_signature,
             "cause": root_cause,
             "lesson": lesson,
+            "metadata": metadata or {},
             "recall_accuracy": 0.0,  # 初始準確度佔位
         }
         with open(lesson_file, "a", encoding="utf-8") as f:

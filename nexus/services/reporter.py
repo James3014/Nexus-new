@@ -1,9 +1,47 @@
 import json
+import sys
+import subprocess
 from pathlib import Path
+from datetime import datetime
+from typing import Optional
 
 
 class Reporter:
-    """負責結果的呈現與持久化報告。"""
+    """負責結果的呈現、持久化報告、語音通知與 Tracing。"""
+
+    def __init__(self, project_root: str, tracelog_path: Optional[Path] = None, silent: bool = False):
+        self.project_root = Path(project_root)
+        self.tracelog_path = tracelog_path or self.project_root / "tracelog.jsonl"
+        self.silent = silent
+
+    def voice_notify(self, message: str):
+        """🔊 v7 Spec: 關鍵點強制語音通知"""
+        if self.silent:
+            return
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "/Users/jameschen/.openclaw/skills/audio-notify/scripts/notify.py",
+                    message,
+                ],
+                check=False,
+            )
+        except Exception:
+            pass
+
+    def log_trace(self, command: str, task: str, status: str, tokens: int = 0, score: float = 0.0):
+        """📊 v7 Spec: 自動寫入 tracelog.jsonl"""
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "command": command,
+            "task": task,
+            "status": status,
+            "tokens_used": tokens,
+            "flashjudge_score": score,
+        }
+        with open(self.tracelog_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
 
     @staticmethod
     def _build_next_step_lines(data):

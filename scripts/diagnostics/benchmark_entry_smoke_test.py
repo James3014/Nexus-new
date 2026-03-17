@@ -76,7 +76,7 @@ except Exception as e:
 
 # ── T5: Benchmark pre-review path reachable ────────────────────────────────────
 try:
-    from scripts.codex_loop_brain import CodexLoopV2
+    from nexus.services.reviewer import CodexLoopV2
 
     mock_executor = MagicMock()
     engine = CodexLoopV2(

@@ -103,7 +103,7 @@ class SkillsRouter:
                 trigger_score += 2.0
                 
         env_score = float(self._calculate_weights(phase, context))
-        final_score = round(base_score + trigger_score + env_score, 2)
+        final_score = round(float(base_score + trigger_score + env_score), 2)
         
         return {
             "skill_id": skill_id,

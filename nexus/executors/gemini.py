@@ -20,6 +20,9 @@ class GeminiExecutor(BaseExecutor):
     
     def __init__(self, output_source: str = "/tmp/nexus_agent_output.txt"):
         self.output_source = Path(output_source)
+        self.model_name = "gemini-2.0-flash-exp" # Default for v9
+        self.sandbox_dir = Path("/tmp/nexus_sandbox")
+        self.sandbox_dir.mkdir(parents=True, exist_ok=True)
         
     def execute(self, input_data: ExecutorInput, timeout: int = 0) -> ExecutorOutput:
         """實作協議入口：Input -> [Read Output -> Extract -> Classify] -> Output"""

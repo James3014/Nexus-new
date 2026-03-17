@@ -9,10 +9,16 @@ from nexus.services.patcher import SafePatcher
 from nexus.services.reporter import Reporter
 from nexus.services.workspace import WorkspaceManager
 from nexus.services.prompt_builder import PromptBuilder
+from nexus.services.reviewer import CodexLoopV2
 from nexus.core.commander import Commander
 from nexus.core.context_hub import ContextHub
 from nexus.core.state_io import StateIO
 from nexus.core.router import SkillsRouter
+from nexus.services.memory import MemoryService
+from nexus.services.predictor import Predictor
+from nexus.engine.phases.planner import PlannerPhaseHandler
+from nexus.engine.phases.research import ResearchPhaseHandler
+from nexus.engine.phases.repair import RepairPhaseHandler
 
 class NexusContainer(containers.DeclarativeContainer):
     """
@@ -32,12 +38,31 @@ class NexusContainer(containers.DeclarativeContainer):
     
     git = providers.Singleton(GitManager)
     
+    predictor = providers.Singleton(Predictor)
+    
+    memory_service = providers.Singleton(
+        MemoryService,
+        project_root=project_root
+    )
+
+    router = providers.Singleton(
+        SkillsRouter,
+        project_root=project_root
+    )
+
     linter = providers.Singleton(Linter)
     
-    patcher = providers.Singleton(SafePatcher)
+    patcher = providers.Singleton(
+        SafePatcher,
+        lock_dir=project_root,
+        project_root=project_root
+    )
     
-    reporter = providers.Singleton(Reporter)
-    
+    reporter = providers.Singleton(
+        Reporter,
+        project_root=project_root
+    )
+
     workspace = providers.Singleton(
         WorkspaceManager,
         project_root=project_root
@@ -52,15 +77,11 @@ class NexusContainer(containers.DeclarativeContainer):
         LLMClient,
         project_root=project_root
     )
-    
-    router = providers.Singleton(
-        SkillsRouter,
-        project_root=project_root
-    )
-    
+
     context_hub = providers.Singleton(
         ContextHub,
-        project_root=project_root
+        project_root=project_root,
+        memory_service=memory_service
     )
 
     commander = providers.Singleton(
@@ -76,7 +97,8 @@ class NexusContainer(containers.DeclarativeContainer):
     from nexus.engine.coordinator import NexusEngine
     
     orchestrator_factory = providers.Factory(
-        NexusOrchestrator,
+        CodexLoopV2,
+        project_root=project_root,
         git=git,
         llm=llm,
         linter=linter,
@@ -89,9 +111,38 @@ class NexusContainer(containers.DeclarativeContainer):
         state_io=state_io
     )
 
+    research_phase = providers.Factory(
+        ResearchPhaseHandler,
+        project_root=project_root,
+        run_dir=project_root
+    )
+    
+    repair_phase = providers.Factory(
+        RepairPhaseHandler,
+        project_root=project_root,
+        run_dir=project_root,
+        router=router,
+        orchestrator_factory=orchestrator_factory.provider
+    )
+
+    planner_phase = providers.Factory( 
+        PlannerPhaseHandler,
+        project_root=project_root,
+        run_dir=project_root,
+        predictor=predictor
+    )
+
+
     engine_factory = providers.Factory(
         NexusEngine,
+        project_root=project_root,
         state_io=state_io,
         commander=commander,
-        router=router
+        router=router,
+        reporter=reporter,
+        phases=providers.Dict(
+            P=planner_phase,
+            X=research_phase,
+            R=repair_phase
+        )
     )

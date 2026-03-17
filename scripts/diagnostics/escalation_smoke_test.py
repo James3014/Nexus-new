@@ -7,7 +7,7 @@ import os
 # Ensure project root is in path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from scripts.codex_loop_brain import CodexLoopV2
+from nexus.services.reviewer import CodexLoopV2
 from nexus.executors.protocol import ExecutorOutput, ExecutorStatusEnum, TaskInstruction, ExecutorMeta
 
 class TestEscalationPipeline(unittest.TestCase):
