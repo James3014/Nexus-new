@@ -134,9 +134,26 @@ class NexusEngine:
                 success = True
                 break
             elif res == "REJECTED":
-                print(f"❌ [A-Stage] Audit REJECTED. Routing back to D.")
-                state.current_phase = "D"
+                # 🧬 v2: 強化反饋持久化與路由精準度
+                audit_meta = res_obj.get("audit_metadata", {})
+                target_phase = res_obj.get("return_target_phase") or audit_meta.get("return_target_phase") or "D"
+                
+                print(f"❌ [A-Stage] Audit REJECTED. Dynamic routing to: {target_phase}")
+                
+                # 更新狀態 (v2): 將 A-phase 的審核結果存入 metadata 以供後續追蹤
+                state.metadata["last_audit_feedback"] = {
+                    "summary": res_obj.get("summary"),
+                    "flags": res_obj.get("audit_flags", []),
+                    "target": target_phase,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # 更新 Phase (必須在 history 更新前，確保 validator 看到合法的轉移)
+                state.current_phase = target_phase
                 diag_pack["audit_feedback"] = res_obj.get("summary", "Unknown failure")
+                
+                # 🧬 持久化存儲 (v2 enforcement)
+                self.state_io.save_global_state(state)
                 continue
         
         # --- C Stage: Crystallize ---

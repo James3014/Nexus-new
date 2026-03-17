@@ -32,19 +32,35 @@ class ContextHub:
             return f"# Error loading rules: {e}"
 
     def make_pre_routing_decision(self, task_id: str, context: Optional[Dict] = None) -> Dict[str, Any]:
-        """🧠 Pre-routing: 決定是否需要外部研究或特定模式。"""
-        # 簡單邏輯：包含 'bug' 或 'error' 且描述較長時，建議開啟外部研究
+        """🧠 Pre-routing: 決定是否需要外部研究、特定模式或審核層級。"""
         context = context or {}
+        state = self.state_io.load_global_state()
+        task_type = state.metadata.get("task_type", "standard")
+        
         external_needed = False
         task_lower = task_id.lower()
         if any(kw in task_lower for kw in ["fix", "error", "bug", "issue"]):
             external_needed = True
             
-        return {
+        decision = {
             "external_needed": external_needed,
-            "mode": "standard",
-            "priority": "normal"
+            "mode": task_type,
+            "priority": "normal",
+            "audit_level": "full" # Default
         }
+
+        # 🧬 v0.7 Spec: Conversation Risk-Based Audit Level
+        if task_type == "conversation":
+            conv_meta = state.get_conversation_metadata()
+            # 判斷風險等級 (skip | light | full)
+            if not conv_meta.get("key_context_facts") and not conv_meta.get("user_corrections"):
+                decision["audit_level"] = "skip"
+            elif not conv_meta.get("needs_research") and conv_meta.get("answer_draft_status") == "partial":
+                decision["audit_level"] = "light"
+            else:
+                decision["audit_level"] = "full"
+        
+        return decision
 
     def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
         """🔌 Hook: 呼叫 MemoryService 取得 per-round 記憶。"""
@@ -79,6 +95,48 @@ class ContextHub:
             "relevance_gate": True,
             "memory_reminders": self._inject_memory_reminders("X") # Added memory for research phase
         }
+
+    def assemble_conversation_pack(self, audit_mode: bool = False) -> Dict[str, Any]:
+        """
+        組裝對話專用 Context Pack (v0.7 Spec)。
+        audit_mode=True 時啟用壓縮策略，節省 A 階段 token 消耗。
+        """
+        state = self.state_io.load_global_state()
+        conv_meta = state.get_conversation_metadata()
+
+        # 🧬 v2: 壓縮策略
+        if audit_mode:
+            # 只保留最近 2 回合摘要，不含詳細內容
+            steps_ctx = [{"phase": s.phase, "summary": s.summary} for s in state.steps_history[-2:]]
+        else:
+            steps_ctx = [s.summary for s in state.steps_history[-5:]]
+
+        pack = {
+            "conversation_id": conv_meta.get("conversation_id"),
+            "user_goal": conv_meta.get("user_goal"),
+            "current_question": conv_meta.get("current_question"),
+            "confirmed_constraints": conv_meta.get("confirmed_constraints", []),
+            "key_context_facts": conv_meta.get("key_context_facts", {}),
+            "user_corrections": conv_meta.get("user_corrections", []),
+            "unresolved_points": conv_meta.get("unresolved_points", []),
+            "answer_draft_status": conv_meta.get("answer_draft_status"),
+            "steps_history_summary": steps_ctx,
+            "memory_reminders": self._inject_memory_reminders("conversation"),
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # 注入最近的審核反饋 (如果有)
+        if "last_audit_feedback" in state.metadata:
+            pack["prior_audit_feedback"] = state.metadata["last_audit_feedback"]
+
+        # 注入研究結果 (非壓縮模式)
+        if not audit_mode and conv_meta.get("needs_research") and state.steps_history:
+            for step in reversed(state.steps_history):
+                if step.phase == "X" and step.status == "completed":
+                    pack["research_findings"] = step.metadata.get("findings", [])
+                    break
+
+        return pack
 
     def assemble_repair_pack(
         self,

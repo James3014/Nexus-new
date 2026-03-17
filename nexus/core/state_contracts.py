@@ -130,6 +130,39 @@ class NexusState(BaseModel):
     subagents_active: bool = False
     
     metadata: Dict[str, Any] = {}
+    
+    def get_conversation_metadata(self) -> Dict[str, Any]:
+        """安全獲取對話元數據容器"""
+        return self.metadata.get("conversation", {})
+
+    def init_conversation(self, conversation_id: str, user_goal: str):
+        """初始化對話治理容器 (v0.7 Spec)"""
+        self.metadata["task_type"] = "conversation"
+        self.metadata["conversation"] = {
+            "conversation_id": conversation_id,
+            "user_goal": user_goal,
+            "current_question": None,
+            "confirmed_constraints": [],
+            "key_context_facts": {},
+            "user_corrections": [],
+            "unresolved_points": [],
+            "needs_research": False,
+            "answer_draft_status": "draft",
+            "audit_flags": [],
+            "return_target_phase": "D",
+            "response_mode": "conversation"
+        }
+
+    def update_conversation_metadata(self, updates: Dict[str, Any]):
+        """更新對話元數據並維持結構一致性 (v2)"""
+        if "conversation" not in self.metadata:
+            self.init_conversation("pending", "Unknown Goal")
+        
+        self.metadata["conversation"].update(updates)
+
+    def response_mode(self) -> str:
+        """獲取當前響應模式"""
+        return self.metadata.get("response_mode", "standard")
 
     @model_validator(mode='after')
     def validate_nexus_protocols(self) -> 'NexusState':

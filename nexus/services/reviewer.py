@@ -95,8 +95,11 @@ class CodexLoopV2(NexusOrchestrator):
             self.apply_patch = True
             self.persona_hint = "👤 MODE: AGENT-SHIELD (Enforce strict self-healing to prevent agent regressions)."
         elif mode == "audit":
-            self.max_striites = 1
+            self.max_strikes = 1
             self.persona_hint = "👤 MODE: FINAL-AUDIT (Generate high-fidelity architectural oversight report)."
+        elif mode == "conversation":
+            self.max_strikes = 2
+            self.persona_hint = "👤 MODE: CONVERSATION (Context & Logic Audit: Ensure coverage, consistency, and goal alignment)."
         else:
             self.max_strikes = 3
             self.persona_hint = "👤 MODE: DEVELOPER (Balanced cognitive-loop audit)."
@@ -128,7 +131,65 @@ class CodexLoopV2(NexusOrchestrator):
                     res = self.executor.execute(mock_context)
                     return {"status": "APPROVED" if res.status.name == "SUCCESS" else "REJECTED", "summary": "Executor delegated."}
 
-                # 標準內容獲取邏輯
+                # 🧬 v2 HARDENING: Conversation mode bypasses code audit entirely
+                if self.mode == "conversation":
+                    # === CONVERSATION AUDIT PATH ===
+                    # 1. 取得風險決策 (skip / light / full)
+                    pre_decision = self.context_hub.make_pre_routing_decision(self.task)
+                    audit_level = pre_decision.get("audit_level", "full")
+                    
+                    if audit_level == "skip":
+                        return {
+                            "status": "SKIPPED_QUOTA",
+                            "summary": "Minimal risk: no new facts or constraints, skipping audit.",
+                            "audit_metadata": {"audit_profile": "conversation", "audit_level": "skip"}
+                        }
+                    
+                    # 2. 組裝壓縮 Pack (audit_mode 節省 token)
+                    conv_pack = self.context_hub.assemble_conversation_pack(audit_mode=True)
+                    
+                    # 3. 構建針對對話的審核提示詞
+                    prompt = self.persona_hint
+                    prompt += f"\nAudit Level: {audit_level}"
+                    prompt += f"\nTask: {self.task}"
+                    prompt += f"\n\n--- CONVERSATION STATE ---\n{json.dumps(conv_pack, indent=2)}"
+                    prompt += "\n\n--- AUDIT RULES ---"
+                    prompt += "\n1. [Context Coverage] Does the response cover all 'confirmed_constraints'?"
+                    prompt += "\n2. [Correction Compliance] Does it violate any 'user_corrections'?"
+                    prompt += "\n3. [Assumption Gap] If 'unresolved_points' exist, does it force a final conclusion?"
+                    prompt += "\n4. [Research Gate] If 'needs_research=True', was X phase skipped?"
+                    prompt += "\n5. [Goal Alignment] Is the response aligned with 'user_goal'?"
+                    
+                    if audit_level == "light":
+                        prompt += "\n\n[LIGHT AUDIT] Only check rules 1 and 2. Skip 3-5."
+                    
+                    # 4. 呼叫 LLM，無 diff_text 佔位符
+                    diff_placeholder = "[CONVERSATION_AUDIT: No code diff]"
+                    data, raw_output = self.llm.ask(prompt, diff_placeholder)
+                    self.total_tokens += data.get("tokens_used", 0)
+                    
+                    # 5. 標準化輸出
+                    if data.get("status") == "PASS":
+                        return {
+                            "status": "APPROVED",
+                            "summary": data.get("summary"),
+                            "audit_metadata": {"audit_profile": "conversation", "audit_level": audit_level}
+                        }
+                    
+                    return {
+                        "status": "REJECTED",
+                        "summary": data.get("summary", "Conversation audit failed"),
+                        "audit_flags": data.get("audit_flags", []),
+                        "return_target_phase": data.get("return_target_phase", "D"),
+                        "audit_metadata": {
+                            "audit_profile": "conversation",
+                            "audit_level": audit_level,
+                            "missing_constraints": data.get("missing_constraints", []),
+                            "assumption_gaps": data.get("assumption_gaps", [])
+                        }
+                    }
+                
+                # === CODE AUDIT PATH (non-conversation) ===
                 if manual_files:
                     code_files = [str(Path(f).absolute()) for f in manual_files if Path(f).is_file()]
                     files = code_files
@@ -143,18 +204,31 @@ class CodexLoopV2(NexusOrchestrator):
                 # Linter
                 linter_json = self.linter.scan(code_files)
                 
-                # LLM Call
-                data, raw_output = self.llm.ask(f"{self.persona_hint}\nReview task: {self.task}", diff_text)
+                # LLM Call (Code Mode)
+                prompt = self.persona_hint
+                prompt += f"\nReview task: {self.task}"
+
+                data, raw_output = self.llm.ask(prompt, diff_text)
                 self.total_tokens += data.get("tokens_used", 0)
 
                 if data.get("status") == "PASS":
                     return {"status": "APPROVED", "summary": data.get("summary")}
 
+                # 🧬 Spec: 提取 audit_metadata 與 return_target_phase
+                audit_metadata = data.get("audit_metadata", {})
+                return_target_phase = audit_metadata.get("return_target_phase", "D")
+
                 if self.apply_patch:
                     self.patcher.apply(data.get("violations", []))
                     continue
                 else:
-                    return {"status": "REJECTED", "summary": data.get("summary"), "violations": data.get("violations")}
+                    return {
+                        "status": "REJECTED",
+                        "summary": data.get("summary"),
+                        "violations": data.get("violations"),
+                        "audit_metadata": audit_metadata,
+                        "return_target_phase": return_target_phase
+                    }
 
             return {"status": "FAIL", "summary": "Max strikes reached."}
         finally:
