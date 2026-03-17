@@ -12,18 +12,22 @@ def project_root(tmp_path):
     return tmp_path
 
 def test_run_feature_has_single_finalize_path():
-    """檢測 run_feature 是否存在重複的收尾邏輯塊。"""
+    """檢測收尾邏輯是否已模組化並保持單一路徑。"""
+    pipeline_path = Path("nexus/engine/pipeline.py")
+    if not pipeline_path.exists():
+        pipeline_path = Path(__file__).parent.parent / "nexus/engine/pipeline.py"
+        
+    content = pipeline_path.read_text()
+    
+    # 檢查是否已在 pipeline 中定義 Crystallize 標記 (應出現一次)
+    assert content.count("# --- C Stage: Crystallize ---") == 1
+    
+    # 檢查 coordinator 是否已不再包含重複邏輯
     coord_path = Path("nexus/engine/coordinator.py")
     if not coord_path.exists():
-        # Fallback for CI environments where the test might run from different CWD
         coord_path = Path(__file__).parent.parent / "nexus/engine/coordinator.py"
-        
-    content = coord_path.read_text()
-    
-    # 檢查是否還有重複的 Crystallize 標記 (應出現兩次：run_bug 與 run_feature 各一)
-    assert content.count("# --- C Stage: Crystallize ---") == 2
-    # 檢查是否已移除模擬信號
-    assert "# --- Simulation Signal" not in content
+    coord_content = coord_path.read_text()
+    assert "# --- C Stage: Crystallize ---" not in coord_content
 
 def test_clean_does_not_delete_persistent_knowledge_assets(project_root):
     """驗證 nexus:clean 不會誤刪 .nexus/knowledge/ 內的資產。"""

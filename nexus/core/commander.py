@@ -69,7 +69,22 @@ class Commander:
         state.metadata["command"] = args.get("command")
 
         self.state_io.save_global_state(state)
-        print(
-            f"🔗 [Commander] CLI Command '{args.get('command')}' has been mapped to NexusState."
-        )
         return self.next_step()
+
+    def crystallize(self, state):
+        """🧬 Phase C: 結晶化 (符合 2026-03-18_Nexus_記憶與學習v2)"""
+        print(f"💎 [Commander] Crystallizing lessons for task: {state.task_id}")
+        # 保存至 crystal_lessons.jsonl
+        try:
+            lesson = {
+                "task_id": state.task_id,
+                "status": "success",
+                "phases": [h.phase for h in state.steps_history],
+                "health": state.health_score
+            }
+            lessons_path = self.project_root / "crystal_lessons.jsonl"
+            import json
+            with open(lessons_path, "a") as f:
+                f.write(json.dumps(lesson) + "\n")
+        except Exception as e:
+            print(f"⚠️ [Crystallize] Failed to save lesson: {e}")

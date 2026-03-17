@@ -1,7 +1,8 @@
 {
   "case_id": "OFF-002",
   "goal": "Add a health check endpoint to the API",
-  "initial_state": {
+    "force_external": true,
+    "initial_state": {
     "files": ["src/api/main.py"]
   },
   "expected_outcome": {

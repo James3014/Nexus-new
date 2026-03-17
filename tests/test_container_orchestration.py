@@ -12,6 +12,7 @@ def test_container_full_orchestration(tmp_path):
     # 1. 初始化容器
     container = NexusContainer()
     container.project_root.override(tmp_path)
+    container.run_dir.override(tmp_path / "run")
     
     # 2. Mock 外部服務以避免實際調用
     mock_llm = MagicMock()
@@ -48,8 +49,7 @@ def test_container_full_orchestration(tmp_path):
             mock_trace.assert_any_call("run_bug", bug_id, "START", 0, 0.0)
             
             # 檢查檔案建立
-            # Note: tracelog.jsonl is mocked via mock_trace, so it won't be created.
-            assert (tmp_path / ".musestate").exists()
+            assert engine.state_io.state_file.exists()
 
 def test_memory_service_integration(tmp_path):
     """驗證 MemoryService 是否能被 ContextHub 正確調用。"""

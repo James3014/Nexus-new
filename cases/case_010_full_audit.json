@@ -1,7 +1,8 @@
 {
   "case_id": "OFF-010",
   "goal": "Complete Nexus full lifecycle audit with research and deep repair",
-  "initial_state": {
+    "force_external": true,
+    "initial_state": {
     "files": ["nexus/engine/coordinator.py"],
     "deep_audit": true
   },

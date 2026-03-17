@@ -1,7 +1,8 @@
 {
   "case_id": "OFF-001",
   "goal": "Fix missing 'os' import in research.py",
-  "initial_state": {
+    "force_external": true,
+    "initial_state": {
     "files": ["nexus/engine/phases/research.py"]
   },
   "expected_outcome": {

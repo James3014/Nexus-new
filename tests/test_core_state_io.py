@@ -36,7 +36,7 @@ def test_state_io_lifecycle(temp_repo):
 def test_state_io_file_creation(temp_repo):
     """測試 .musestate 是否正確建立。"""
     io = StateIO(str(temp_repo))
-    state_file = temp_repo / ".musestate"
+    state_file = io.state_file
     
     assert not state_file.exists()
     io.load_global_state() # 觸發預設載入但不保存

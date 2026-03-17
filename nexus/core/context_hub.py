@@ -13,13 +13,21 @@ class ContextHub:
     負責收集、組裝與壓縮上下文，為 Agent 提供乾淨的 P-D-X-R-A-C 視圖。
     """
 
-    def __init__(self, project_root: str, memory_service: Optional[Any] = None, run_dir: Optional[str] = None):
+    def __init__(
+        self,
+        project_root: str,
+        memory_service: Optional[Any] = None,
+        run_dir: Optional[str] = None,
+    ):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
         self.state_io = StateIO(project_root, run_dir=run_dir)
-        self.memory_service = memory_service or MemoryService(project_root, run_dir=run_dir)
-        
+        self.memory_service = memory_service or MemoryService(
+            project_root, run_dir=run_dir
+        )
+
         from nexus.services.prompt_builder import PromptBuilder
+
         self.prompt_builder = PromptBuilder(project_root)
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
@@ -32,35 +40,45 @@ class ContextHub:
         except Exception as e:
             return f"# Error loading rules: {e}"
 
-    def make_pre_routing_decision(self, task_id: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+    def make_pre_routing_decision(
+        self, task_id: str, context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
         """🧠 Pre-routing: 決定是否需要外部研究、特定模式或審核層級。"""
         context = context or {}
         state = self.state_io.load_global_state()
         task_type = state.metadata.get("task_type", "standard")
-        
-        external_needed = False
+
+        external_needed = context.get("force_external", False)
         task_lower = task_id.lower()
-        if any(kw in task_lower for kw in ["fix", "error", "bug", "issue"]):
+        if (
+            any(kw in task_lower for kw in ["fix", "error", "bug", "issue"])
+            or "sdk" in task_lower
+        ):
             external_needed = True
-            
+
         decision = {
             "external_needed": external_needed,
             "mode": task_type,
             "priority": "normal",
-            "audit_level": "full" # Default
+            "audit_level": "full",  # Default
         }
 
         # 🧬 v0.7 Spec: Conversation Risk-Based Audit Level
         if task_type == "conversation":
             conv_meta = state.get_conversation_metadata()
             # 判斷風險等級 (skip | light | full)
-            if not conv_meta.get("key_context_facts") and not conv_meta.get("user_corrections"):
+            if not conv_meta.get("key_context_facts") and not conv_meta.get(
+                "user_corrections"
+            ):
                 decision["audit_level"] = "skip"
-            elif not conv_meta.get("needs_research") and conv_meta.get("answer_draft_status") == "partial":
+            elif (
+                not conv_meta.get("needs_research")
+                and conv_meta.get("answer_draft_status") == "partial"
+            ):
                 decision["audit_level"] = "light"
             else:
                 decision["audit_level"] = "full"
-        
+
         return decision
 
     def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
@@ -80,10 +98,13 @@ class ContextHub:
             "task_id": state.task_id,
             "failure_summary": summary,
             "violations": violations[:10],  # 截斷以保持 token 效率
-            "hotspots": list(set([v.get("file") for v in violations if v.get("file")])),
+            "hotspots": list(set([
+                (v.get("file") if isinstance(v, dict) else getattr(v, "file", None))
+                for v in violations
+            ])),
             "history_summary": [steps.summary for steps in state.steps_history[-3:]],
             "contract_version": "1.5.2",
-            "memory_reminders": self._inject_memory_reminders("D")
+            "memory_reminders": self._inject_memory_reminders("D"),
         }
         return pack
 
@@ -94,21 +115,23 @@ class ContextHub:
             "results": results,
             "fact_count": len(results),
             "relevance_gate": True,
-            "memory_reminders": self._inject_memory_reminders("X") # Added memory for research phase
+            "memory_reminders": self._inject_memory_reminders(
+                "X"
+            ),  # Added memory for research phase
         }
 
     def assemble_feature_pack(self, plan: Optional[Dict] = None) -> Dict[str, Any]:
         """🧬 Phase 1: 為新功能建置組裝上下文。"""
         state = self.state_io.load_global_state()
         memory = self.memory_service.aggregate_memory()
-        
+
         return {
             "task": state.task_id,
             "plan": plan or {},
             "state": state.model_dump(),
             "memory": memory,
             "rules": self.load_program_rules(),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
     def assemble_conversation_pack(self, audit_mode: bool = False) -> Dict[str, Any]:
@@ -122,7 +145,10 @@ class ContextHub:
         # 🧬 v2: 壓縮策略
         if audit_mode:
             # 只保留最近 2 回合摘要，不含詳細內容
-            steps_ctx = [{"phase": s.phase, "summary": s.summary} for s in state.steps_history[-2:]]
+            steps_ctx = [
+                {"phase": s.phase, "summary": s.summary}
+                for s in state.steps_history[-2:]
+            ]
         else:
             steps_ctx = [s.summary for s in state.steps_history[-5:]]
 
@@ -137,7 +163,7 @@ class ContextHub:
             "answer_draft_status": conv_meta.get("answer_draft_status"),
             "steps_history_summary": steps_ctx,
             "memory_reminders": self._inject_memory_reminders("conversation"),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
         # 注入最近的審核反饋 (如果有)
@@ -161,36 +187,41 @@ class ContextHub:
     ) -> Dict[str, Any]:
         """組裝修復階段所需的 Context Pack (整合 Superpowers v5.0.2)。"""
         state = self.state_io.load_global_state()
-        
+
         # --- Context Compact: 壓縮 reflection 與歷史以提高 token 效率 (1.2x tokens) ---
-        compact_reflections = reflections[-2:] # 只保留最近 2 輪以防冗餘
-        
+        compact_reflections = reflections[-2:]  # 只保留最近 2 輪以防冗餘
+
         pack = {
             "root_cause": diagnosis.summary,
             "repair_strategy": diagnosis.pseudo_flows,
             "target_files": diagnosis.hotspots,
             "recent_reflections": compact_reflections,
             "external_research": research.key_findings if research else [],
-            
             # Superpowers 擴展
             "superpowers_plan": getattr(state, "superpowers_plan", {}),
             "tdd_status": state.tdd_status,
             "worktree_uuid": state.metadata.get("worktree_uuid", "main-branch"),
-            
-            "memory_reminders": self._inject_memory_reminders("R")
+            "memory_reminders": self._inject_memory_reminders("R"),
         }
         return pack
 
     def record_crystal_lesson(
-        self, failure_signature: str, root_cause: str, lesson: str, metadata: Optional[Dict] = None
+        self,
+        failure_signature: str,
+        root_cause: str,
+        lesson: str,
+        metadata: Optional[Dict] = None,
     ):
         """💾 Phase 5: 記錄失敗案例用於 Active Learning。"""
         # Noise Governance: If run_dir exists, store there. Otherwise, global obsidian/ folder.
-        if self.run_dir:
+        if self.run_dir is not None:
             lesson_file = self.run_dir / "crystal_lessons.jsonl"
         else:
-            lesson_file = self.project_root / "obsidian/crystal_lessons.jsonl"
-            
+            # 🛡️ FIX-P1: Use a protected directory for knowledge baseline (not cleaned by nexus:clean)
+            lesson_file = (
+                self.project_root / ".nexus" / "knowledge" / "crystal_lessons.jsonl"
+            )
+
         lesson_file.parent.mkdir(parents=True, exist_ok=True)
 
         entry = {

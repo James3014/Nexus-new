@@ -38,13 +38,32 @@ def main():
         healths = [float(r["health"]) for r in rows if r["health"]]
         drifts = [float(r["drift"]) for r in rows if r["drift"]]
         
+        # 📊 [CI-Gate Metrics]
         avg_health = sum(healths) / len(healths) if healths else 0
         max_drift = max(drifts) if drifts else 0
+        
+        # 🛡️ TRU-101 Audit Gate: Status Check
+        statuses = [r["token_capture_status"] for r in rows]
+        empty_statuses = [s for s in statuses if not s]
+        raw_tokens = [int(r["token_raw_model"]) for r in rows if r["token_raw_model"]]
+        total_raw = sum(raw_tokens)
         
         print(f"\n📊 [CI-Gate Metrics]")
         print(f"- Average Health: {avg_health:.1f}%")
         print(f"- Max Drift: {max_drift:.2f}")
+        print(f"- Token Capture Statistics: {len(empty_statuses)} empty, {len(statuses)} total")
+        print(f"- Total Raw Tokens: {total_raw}")
         
+        # Fail if status is empty
+        if empty_statuses:
+            print(f"❌ Failure: {len(empty_statuses)} tasks had empty token_capture_status!")
+            sys.exit(1)
+            
+        if total_raw == 0:
+            print(f"⚠️ Warning: Total Raw Tokens is 0. System is currently running on AUDIT-ESTIMATE mode.")
+            # Depending on policy, this could be a fail or a warning.
+            # For now, following requirements: mark as partial verified.
+            
         if avg_health < 90:
             print(f"❌ Failure: Average health {avg_health:.1f}% dropped below 90%!")
             sys.exit(1)

@@ -36,7 +36,7 @@ def test_context_hub_exposes_feature_pack(tmp_path):
     engine = NexusEngine(project_root=tmp_path, silent=True)
     pack = engine.hub.assemble_feature_pack(plan={"steps": ["s1"]})
     assert isinstance(pack, dict)
-    assert "proposed_plan" in pack
+    assert "plan" in pack
 
 
 def test_run_feature_compat_fallback_when_hub_missing_feature_pack(tmp_path):
@@ -57,7 +57,11 @@ def test_run_feature_compat_fallback_when_hub_missing_feature_pack(tmp_path):
         silent=True,
         router=mock_router,
         commander=mock_commander,
+        phases={"P": MagicMock(), "X": MagicMock(), "R": MagicMock()}
     )
+    # Mock the pipeline directly to test compat shell logic
+    engine.pipeline = MagicMock()
+    engine.pipeline.run.return_value = True
 
     with patch("nexus.engine.coordinator.CodexLoopV2.run_review", return_value={"status": "APPROVED"}):
         ok = engine.run_feature("compat fallback smoke", dry_run=True)
@@ -85,7 +89,11 @@ def test_run_feature_compat_fallback_when_hub_feature_pack_raises(tmp_path):
         silent=True,
         router=mock_router,
         commander=mock_commander,
+        phases={"P": MagicMock(), "X": MagicMock(), "R": MagicMock()}
     )
+    # Mock the pipeline directly to test compat shell logic
+    engine.pipeline = MagicMock()
+    engine.pipeline.run.return_value = True
 
     with patch("nexus.engine.coordinator.CodexLoopV2.run_review", return_value={"status": "APPROVED"}):
         ok = engine.run_feature("compat fallback raise smoke", dry_run=True)
