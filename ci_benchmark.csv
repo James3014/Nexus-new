@@ -1,11 +1,11 @@
 task_id,status,tokens,token_raw_model,token_fallback_est,token_system_overhead,token_source_x,token_source_r,token_capture_status,phase_path,review_status,duration,health,drift
-OFF-001,PASS,150,0,0,150,50,100,unknown,P -> X -> D -> R -> C,APPROVED,17.02,99.6,0.0
-OFF-002,PASS,150,0,0,150,50,100,unknown,P -> X -> D -> R -> C,APPROVED,8.32,99.6,0.0
-OFF-003,PASS,150,0,0,150,50,100,unknown,P -> X -> D -> R -> C,APPROVED,12.3,99.6,0.0
-OFF-004,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> C,APPROVED,4.31,99.73,0.0
-OFF-005,PASS,150,0,0,150,50,100,unknown,P -> X -> D -> R -> C,APPROVED,10.66,99.6,0.0
-OFF-006,PASS,150,0,0,150,50,100,unknown,P -> X -> D -> R -> C,APPROVED,14.93,99.6,0.0
-OFF-007,PASS,150,0,0,150,50,100,unknown,P -> X -> D -> R -> C,APPROVED,10.4,99.6,0.0
-OFF-008,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> C,APPROVED,3.36,99.73,0.0
-OFF-009,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> C,APPROVED,3.55,99.73,0.0
-OFF-010,PASS,150,0,0,150,50,100,unknown,P -> X -> D -> R -> C,APPROVED,8.58,99.6,0.0
+OFF-001,PASS,77280,75754,1376,150,1426,75854,ok,P -> X -> D -> R -> A -> C,APPROVED,38.46,80.0,0.0
+OFF-002,PASS,1512,0,1362,150,1412,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,3.83,95.97,0.0
+OFF-003,PASS,1671,0,1521,150,1571,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.62,95.54,0.0
+OFF-004,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,2.82,99.73,0.0
+OFF-005,PASS,1486,0,1336,150,1386,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.43,96.04,0.0
+OFF-006,PASS,1593,0,1443,150,1493,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.38,95.75,0.0
+OFF-007,PASS,1525,0,1375,150,1425,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,6.09,95.93,0.0
+OFF-008,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,2.81,99.73,0.0
+OFF-009,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,2.83,99.73,0.0
+OFF-010,PASS,1604,0,1454,150,1504,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,3.8,95.72,0.0

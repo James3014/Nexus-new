@@ -1,0 +1,121 @@
+version: v0
+defaults:
+  ask_policy: no_ask
+  max_retry: 1
+  timeout_sec: 900
+
+tasks:
+  - id: cleanup
+    depends_on: []
+    run: "pkill -f 'ci_gate|nexus:benchmark' || true"
+    done_when:
+      type: command_rc_zero
+    on_fail: continue
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: gate.ci
+    depends_on: [cleanup]
+    run: "uv run scripts/ops/ci_gate.py"
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+    evidence_paths:
+      - /tmp/nexus_ci_gate.log
+      - ci_benchmark.csv
+
+  - id: bench.replay
+    depends_on: [gate.ci]
+    run: "python3 -c \"import csv,sys;rows=list(csv.DictReader(open('ci_benchmark.csv',encoding='utf-8')));assert rows,'empty csv';succ=sum((r.get('status','').upper()=='PASS') for r in rows);avg=sum(float(r.get('health') or 0) for r in rows)/len(rows);T_KEY=[k for k in rows[0].keys() if 'capture_status' in k][0];empty=sum(1 for r in rows if not (r.get(T_KEY) or '').strip());print(f'success={succ/len(rows)*100:.2f},avg={avg:.2f},empty={empty}');sys.exit(0 if (succ/len(rows)>=0.95 and avg>=90 and empty==0) else 1)\""
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    timeout_sec: 60
+    ask_policy: no_ask
+
+  - id: docs.index.sync
+    depends_on: [bench.replay]
+    run: "uv run python3 -c \"import re,csv;from pathlib import Path; idx=Path('docs/INDEX.md'); content=idx.read_text(encoding='utf-8'); rows=list(csv.DictReader(open('ci_benchmark.csv',encoding='utf-8'))); succ=sum((r.get('status','').upper()=='PASS') for r in rows); avg=sum(float(r.get('health') or 0) for r in rows)/len(rows); T_KEY=[k for k in rows[0].keys() if 'capture_status' in k][0]; empty=sum(1 for r in rows if not (r.get(T_KEY) or '').strip()); snapshot=f'(PASS, {succ/len(rows)*100:.1f}, {avg:.1f}, empty={empty})'; new=re.sub(r'Last Verified Snapshot: `.*`', f'Last Verified Snapshot: `{snapshot}`', content); idx.write_text(new,encoding='utf-8')\""
+    done_when:
+      type: command_rc_zero
+    on_fail: escalate
+    max_retry: 0
+    ask_policy: no_ask
+
+  - id: infra.runner.phase_task_schema
+    depends_on: [docs.index.sync]
+    run: "uv run pytest -v tests/test_task_runner_phase_task.py -k schema --maxfail=1"
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: infra.runner.phase_task_dispatch
+    depends_on: [infra.runner.phase_task_schema]
+    run: "uv run pytest -v tests/test_task_runner_phase_task.py -k dispatch --maxfail=1"
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: infra.runner.phase_task_done_when
+    depends_on: [infra.runner.phase_task_dispatch]
+    run: "uv run pytest -v tests/test_task_runner_phase_task.py -k done_when --maxfail=1"
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: test.runner.phase_task
+    depends_on: [infra.runner.phase_task_done_when]
+    run: "uv run pytest -v tests/test_task_runner_phase_task.py --maxfail=1"
+    done_when:
+      type: command_rc_zero
+    on_fail: escalate
+    max_retry: 0
+    ask_policy: no_ask
+
+  - id: test.v1_5_2.internal
+    depends_on: [test.runner.phase_task]
+    run: "uv run pytest -q tests/test_nexus_v1_5_2_internal.py --maxfail=1"
+    done_when:
+      type: command_rc_zero
+    on_fail: escalate
+    max_retry: 0
+    ask_policy: no_ask
+
+  - id: test.v1_5_2.external
+    depends_on: [test.v1_5_2.internal]
+    run: "uv run pytest -q tests/test_nexus_v1_5_2_external.py --maxfail=1"
+    done_when:
+      type: command_rc_zero
+    on_fail: escalate
+    max_retry: 0
+    ask_policy: no_ask
+
+  - id: prod.phase_task.external_research_smoke
+    depends_on: [test.v1_5_2.external]
+    type: phase_task
+    phase: R
+    task: "Verify and fix external research pack consistency"
+    domain: "core"
+    done_when:
+      type: phase_result_ok
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: docs.runner.phase_task
+    depends_on: [prod.phase_task.external_research_smoke]
+    run: "test -f /Users/jameschen/Workspace/nexus/docs/12_AGENT_EXECUTION_GUIDE.md"
+    done_when:
+      type: command_rc_zero
+    on_fail: escalate
+    max_retry: 0
+    ask_policy: no_ask

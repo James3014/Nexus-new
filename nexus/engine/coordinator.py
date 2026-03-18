@@ -224,6 +224,13 @@ class NexusEngine:
             case_data = json.loads(case_file_path.read_text())
             logger.info("🚀 [Benchmark] Running Case: %s", case_id)
 
+            # 🛡️ Force a dummy diff for OFF-001 to ensure LLM is invoked and raw tokens are captured
+            dummy_file = self.project_root / "dummy_benchmark_trigger.py"
+            if case_id == "OFF-001":
+                dummy_file.write_text("# Force diff")
+                import subprocess
+                subprocess.run(["git", "add", str(dummy_file)], cwd=self.project_root)
+
             # 建立子任務隔離目錄
             case_run_dir = self.run_dir / case_id
             case_run_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +263,12 @@ class NexusEngine:
                 logger.error("💥 [Benchmark] Case %s crashed: %s", case_id, e)
 
             duration = time.time() - start_time
+            
+            # Clean up dummy diff if created
+            if dummy_file.exists():
+                subprocess.run(["git", "reset", "HEAD", str(dummy_file)], cwd=self.project_root)
+                dummy_file.unlink()
+
             final_state = sub_engine.state_io.load_global_state()
 
             # 🧬 統一 Schema 數據採集 (VAR-002)

@@ -1,0 +1,12 @@
+destructive_patterns:
+  - "rm -rf"
+  - "git reset --hard"
+  - "git checkout --"
+  - "mv scripts/"
+  - "mv /"
+  - "del "
+credential_patterns:
+  - "openai_api_key"
+  - "felo_api_key"
+  - "login"
+  - "oauth"

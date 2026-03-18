@@ -1,3 +1,12 @@
+"""
+⚠️ LEGACY / ARCHIVED SCRIPT
+This script is part of the legacy Muse-Nexus implementation and is no longer actively maintained.
+Please use the corresponding module in `scripts/core/` or `nexus/` instead.
+---
+⚠️ 舊版 / 封存腳本
+此腳本為舊版 Muse-Nexus 實作，已不再主動維護。
+請改用 `scripts/core/` 或 `nexus/` 中的對應模組。
+"""
 import subprocess
 import json
 import fcntl

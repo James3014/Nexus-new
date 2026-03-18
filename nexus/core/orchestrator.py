@@ -43,15 +43,34 @@ class NexusOrchestrator:
         self.context_hub = context_hub
         self.state_io = state_io
 
+        self.execution_mode = mode
+        self.trigger_reason = "initial_launch"
+        self.mode_history = []
+
         self.total_tokens = 0
         self.total_raw_model = 0
         self.total_fallback_est = 0
         self.token_capture_statuses = []
         self.max_strikes = 3 if mode != "audit" else 1
 
+    def set_execution_mode(self, mode: str, reason: str):
+        """🛡️ 模式切換入口，並記錄原因。"""
+        if self.execution_mode != mode:
+            print(f"🔄 [Orchestrator] Mode switch: {self.execution_mode} -> {mode} (Reason: {reason})")
+            self.mode_history.append({
+                "from": self.execution_mode,
+                "to": mode,
+                "reason": reason,
+                "timestamp": datetime.now().isoformat()
+            })
+            self.execution_mode = mode
+            self.trigger_reason = reason
+            # Update constraints based on new mode
+            self.max_strikes = 3 if mode != "audit" else 1
+
     def run_review(self) -> bool:
         """核心門禁審核邏輯"""
-        print(f"🎭 [Orchestrator] Reviewing task: {self.task}")
+        print(f"🎭 [Orchestrator] Reviewing task: {self.task} | Mode: {self.execution_mode}")
 
         # 1. Setup Environment
         # 2. Strike Loop
@@ -61,7 +80,7 @@ class NexusOrchestrator:
         strike = 0
         while strike < self.max_strikes:
             strike += 1
-            print(f"🚀 [Round {strike}/{self.max_strikes}] Running loop...")
+            print(f"🚀 [Round {strike}/{self.max_strikes}] Running loop in {self.execution_mode} mode...")
 
             # 1. RAG 注入: 從 Context Hub 獲取 Crystal 結晶 (Lessons)
             lessons = self.commander.get_crystal_lessons(relevance=0.8)
@@ -117,6 +136,8 @@ class NexusOrchestrator:
             "confidence": data.get("confidence", 1.0),
             "summary": data.get("summary"),
             "skill_id": self.skill_id,
+            "execution_mode": self.execution_mode,
+            "trigger_reason": self.trigger_reason,
         }
         with open(reflection_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")

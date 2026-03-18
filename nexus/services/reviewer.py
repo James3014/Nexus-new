@@ -64,7 +64,12 @@ class CodexLoopV2(NexusOrchestrator):
         self.report_file = self.project_root / ".nexus/review_report.md"
         self.action_file = self.project_root / ".nexus/action_brief.json"
 
-        self._apply_persona_profile(self.mode)
+        self._apply_persona_profile(self.execution_mode)
+
+    def set_execution_mode(self, mode: str, reason: str):
+        """[Override] 模式切換與 Persona 更新。"""
+        super().set_execution_mode(mode, reason)
+        self._apply_persona_profile(mode)
 
     def run_review(self, manual_files=None):
         """[v9 Override] 執行審核循環。"""
@@ -92,13 +97,18 @@ class CodexLoopV2(NexusOrchestrator):
 
     def _do_review(self, manual_files=None):
         print(
-            f"🔍 [Reviewer] Mode: {self.mode} | Level: {self.audit_level} | Scope: {self.scope}"
+            f"🔍 [Reviewer] Mode: {self.execution_mode} | Level: {self.audit_level} | Scope: {self.scope}"
         )
 
         # 🛡️ Governance Gate: Bypass Mode
         if self.audit_level == "bypass":
             print("⚡ [Reviewer] Audit Level: BYPASS. Auto-approving changes.")
-            return {"status": "APPROVED", "summary": "Bypassed via audit_level=bypass"}
+            return {
+                "status": "APPROVED",
+                "summary": "Bypassed via audit_level=bypass",
+                "execution_mode": self.execution_mode,
+                "trigger_reason": self.trigger_reason
+            }
 
         # 🛡️ Governance Gate: Strict Mode increases strikes
         if self.audit_level == "strict":
@@ -182,6 +192,8 @@ class CodexLoopV2(NexusOrchestrator):
                     return {
                         "status": status,
                         "summary": data.get("summary"),
+                        "execution_mode": self.execution_mode,
+                        "trigger_reason": self.trigger_reason,
                         "audit_metadata": {
                             "audit_profile": "conversation",
                             "audit_level": audit_level,
@@ -191,6 +203,8 @@ class CodexLoopV2(NexusOrchestrator):
                 return {
                     "status": "REJECTED",
                     "summary": data.get("summary", "Conversation audit failed"),
+                    "execution_mode": self.execution_mode,
+                    "trigger_reason": self.trigger_reason,
                     "audit_flags": data.get("audit_flags", []),
                     "return_target_phase": data.get("return_target_phase", "D"),
                     "audit_metadata": {
@@ -218,10 +232,16 @@ class CodexLoopV2(NexusOrchestrator):
                 return {
                     "status": "APPROVED",
                     "summary": "No changes found in scope.",
+                    "execution_mode": self.execution_mode,
+                    "trigger_reason": self.trigger_reason,
                 }
 
             # Linter
             linter_json = self.linter.scan(code_files)
+            
+            # P0 Trigger: Critical path hardening (simulate check)
+            if any("core/" in f for f in code_files) and self.execution_mode == "developer":
+                 self.set_execution_mode("agent-shield", "P0_core_file_change")
 
             # LLM Call (Code Mode)
             prompt = self.persona_hint
@@ -238,7 +258,12 @@ class CodexLoopV2(NexusOrchestrator):
             status, success = ReviewStatusNormalizer.normalize(data.get("status", "FAIL"))
             
             if success:
-                return {"status": status, "summary": data.get("summary")}
+                return {
+                    "status": status, 
+                    "summary": data.get("summary"),
+                    "execution_mode": self.execution_mode,
+                    "trigger_reason": self.trigger_reason,
+                }
 
             # 🧬 Spec: 提取 audit_metadata 與 return_target_phase
             audit_metadata = data.get("audit_metadata", {})
@@ -252,6 +277,8 @@ class CodexLoopV2(NexusOrchestrator):
                 "status": "REJECTED",
                 "summary": data.get("summary"),
                 "violations": data.get("violations"),
+                "execution_mode": self.execution_mode,
+                "trigger_reason": self.trigger_reason,
                 "audit_metadata": audit_metadata,
                 "return_target_phase": return_target_phase,
             }

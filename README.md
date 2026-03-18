@@ -63,6 +63,14 @@ nexus:test --full-chain "voice narration feature"
 ```
 
 ---
+
+## 🗺️ Navigation | 導航
+
+For detailed project architecture, refactor roadmap, and script ownership, please refer to the **[Project Index (docs/INDEX.md)](docs/INDEX.md)**.
+
+關於專案架構、重構路線圖與腳本所有權的詳細資訊，請參閱 **[專案索引 (docs/INDEX.md)](docs/INDEX.md)**。
+
+---
 **Nexus v9: The engine that grows with the project.** 🫡🦾💎🚀✨🚩
 **Nexus v9: 與項目共同成長的自主引擎。**
 

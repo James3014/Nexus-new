@@ -3,6 +3,7 @@ import argparse
 import sys
 import time
 import os
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
@@ -344,6 +345,9 @@ def main():
     upgrade_parser = subparsers.add_parser("nexus:upgrade")
     upgrade_parser.add_argument("--dry-run", action="store_true")
 
+    # nexus:runner
+    subparsers.add_parser("nexus:runner")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -389,6 +393,17 @@ def main():
         cli.run_check(args.level)
     elif args.command == "nexus:upgrade":
         cli.run_upgrade(args.dry_run)
+    elif args.command == "nexus:runner":
+        # 🧪 v9: Launch the automated task runner
+        scripts_root = Path(__file__).resolve().parents[2]
+        runner_path = scripts_root / "scripts" / "ops" / "task_runner.py"
+        if not runner_path.exists():
+            print(f"❌ Error: Task Runner not found at {runner_path}")
+            sys.exit(1)
+        
+        # Execute runner and relay its exit code
+        rc = subprocess.call([sys.executable, str(runner_path)])
+        sys.exit(rc)
 
 
 if __name__ == "__main__":

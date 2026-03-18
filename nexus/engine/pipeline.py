@@ -69,7 +69,12 @@ class NexusPipeline:
                 review_status_raw = res.get("status", "REJECTED")
                 state.metadata["last_review_status"] = review_status_raw
             
-            self.engine._add_step_to_history(state, "R", metadata={"status": review_status_raw})
+            # Log R (Repair) phase
+            self.engine._add_step_to_history(state, "R", metadata={"status": "executed"})
+            
+            # Log A (Audit) phase explicitly for phase path consistency
+            state.current_phase = "A"
+            self.engine._add_step_to_history(state, "A", metadata={"status": review_status_raw})
             
             status, audit_success = self.engine.ReviewStatusNormalizer.normalize(review_status_raw)
             
