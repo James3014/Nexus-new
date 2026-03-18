@@ -256,11 +256,38 @@ class CodexLoopV2(NexusOrchestrator):
             )
 
             status, success = ReviewStatusNormalizer.normalize(data.get("status", "FAIL"))
-            
+
+            violations = data.get("violations") or []
+            no_change_reason = (data.get("no_change_reason") or "").strip()
+            patch_generated = bool(data.get("patch_generated"))
+            if not patch_generated:
+                patch_generated = any(bool(v.get("patch")) for v in violations if isinstance(v, dict))
+
+            # Hard gate: PASS requires either patch evidence or explicit no-change reason.
+            if success and not patch_generated and not no_change_reason:
+                success = False
+                status = "REJECTED"
+                data["summary"] = (
+                    "Rejected: PASS without patch evidence or no_change_reason."
+                )
+
+            patch_apply_success = None
+            if self.apply_patch and patch_generated:
+                patch_apply_success = self.patcher.apply(violations)
+                if not patch_apply_success:
+                    success = False
+                    status = "REJECTED"
+                    data["summary"] = (
+                        "Rejected: patch apply failed; no code change was committed."
+                    )
+
             if success:
                 return {
                     "status": status, 
                     "summary": data.get("summary"),
+                    "patch_generated": patch_generated,
+                    "no_change_reason": no_change_reason,
+                    "patch_apply_success": patch_apply_success,
                     "execution_mode": self.execution_mode,
                     "trigger_reason": self.trigger_reason,
                     "tokens_used": self.total_tokens,
@@ -274,13 +301,16 @@ class CodexLoopV2(NexusOrchestrator):
             return_target_phase = audit_metadata.get("return_target_phase", "D")
 
             # 🧬 If apply_patch is on, we apply it once but still return REJECTED to the Orchestrator loop
-            if self.apply_patch:
-                self.patcher.apply(data.get("violations", []))
+            if self.apply_patch and patch_generated and patch_apply_success is None:
+                patch_apply_success = self.patcher.apply(violations)
 
             return {
                 "status": "REJECTED",
                 "summary": data.get("summary"),
-                "violations": data.get("violations"),
+                "violations": violations,
+                "patch_generated": patch_generated,
+                "no_change_reason": no_change_reason,
+                "patch_apply_success": patch_apply_success,
                 "execution_mode": self.execution_mode,
                 "trigger_reason": self.trigger_reason,
                 "audit_metadata": audit_metadata,

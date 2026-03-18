@@ -85,7 +85,24 @@ class NexusPipeline:
             self.engine._add_step_to_history(state, "A", metadata={"status": review_status_raw})
             
             status, audit_success = self.engine.ReviewStatusNormalizer.normalize(review_status_raw)
-            
+            result_object = res.get("result_object", {}) if isinstance(res, dict) else {}
+            patch_generated = bool(result_object.get("patch_generated"))
+            no_change_reason = (result_object.get("no_change_reason") or "").strip()
+            patch_apply_success = result_object.get("patch_apply_success")
+
+            # Hard gate against phantom success:
+            # - If patch was generated, it must be applied successfully.
+            # - If no patch was generated, PASS must carry an explicit reason.
+            if audit_success:
+                if patch_generated and patch_apply_success is False:
+                    logger.error("❌ [Gate] Audit PASS blocked: patch apply failed.")
+                    audit_success = False
+                    status = "REJECTED"
+                elif not patch_generated and not no_change_reason:
+                    logger.error("❌ [Gate] Audit PASS blocked: missing no_change_reason.")
+                    audit_success = False
+                    status = "REJECTED"
+
             if audit_success:
                 success = True
                 break

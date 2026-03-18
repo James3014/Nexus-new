@@ -7,6 +7,58 @@ from datetime import datetime
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+
+def _parse_bool(v):
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s in {"true", "1", "yes", "y", "ok"}:
+        return True
+    if s in {"false", "0", "no", "n"}:
+        return False
+    return None
+
+
+def compute_phantom_success(rows):
+    """
+    Detect 'phantom success' from benchmark rows.
+    Rules for PASS rows:
+    - patch_generated=true requires patch_apply_success=true.
+    - patch_generated=false requires non-empty no_change_reason.
+    Rows without the required fields are counted as inconclusive (not hard-fail yet).
+    """
+    phantom_count = 0
+    inconclusive_count = 0
+    inspected_pass = 0
+
+    for r in rows:
+        if str(r.get("status", "")).upper() != "PASS":
+            continue
+        inspected_pass += 1
+
+        pg_raw = r.get("patch_generated")
+        pa_raw = r.get("patch_apply_success")
+        ncr = (r.get("no_change_reason") or "").strip()
+
+        pg = _parse_bool(pg_raw)
+        pa = _parse_bool(pa_raw)
+
+        # Schema not yet present in this row -> inconclusive.
+        if pg is None and pa is None and not ncr:
+            inconclusive_count += 1
+            continue
+
+        if pg is True and pa is not True:
+            phantom_count += 1
+        elif pg is False and not ncr:
+            phantom_count += 1
+
+    return {
+        "phantom_count": phantom_count,
+        "inconclusive_count": inconclusive_count,
+        "inspected_pass": inspected_pass,
+    }
+
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -84,6 +136,7 @@ def main():
         unknown_statuses = [s for s in capture_statuses if s == "unknown" or not s]
         raw_tokens = [int(r["token_raw_model"]) for r in rows if r["token_raw_model"]]
         total_raw = sum(raw_tokens)
+        phantom = compute_phantom_success(rows)
 
         # 📊 [CI-Gate Metrics]
         gate_summary = {
@@ -95,6 +148,8 @@ def main():
             "learning_velocity": learning_velocity,
             "token_mode": raw_token_mode,
             "total_raw_tokens": total_raw,
+            "phantom_success_count": phantom["phantom_count"],
+            "phantom_inconclusive_count": phantom["inconclusive_count"],
             "pass_count": pass_count,
             "total_count": len(statuses),
             "timestamp": datetime.now().isoformat()
@@ -109,6 +164,7 @@ def main():
         print(f"- Token Mode: {raw_token_mode}")
         print(f"- Token Capture Statistics: {len(unknown_statuses)} unknown/empty, {len(capture_statuses)} total")
         print(f"- Total Raw Tokens: {total_raw}")
+        print(f"- Phantom Success: {phantom['phantom_count']} detected, {phantom['inconclusive_count']} inconclusive")
 
         # Write Summary Report
         report_path = REPO_ROOT / ".nexus" / "ci_gate_report.json"
@@ -128,6 +184,11 @@ def main():
             
         if total_raw == 0:
             print(f"⚠️ Warning: Total Raw Tokens is 0. System is currently running on AUDIT_ESTIMATE mode.")
+
+        # Hard gate: detected phantom success must fail CI.
+        if phantom["phantom_count"] > 0:
+            print(f"❌ Failure: Detected {phantom['phantom_count']} phantom PASS rows!")
+            sys.exit(1)
             
         # 🛠️ Threshold Policy (WP-1 Refinement)
         import os

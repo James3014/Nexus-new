@@ -9,6 +9,8 @@
 
 {
   "status": "PASS" 或 "FAIL",
+  "patch_generated": true 或 false,
+  "no_change_reason": "當 patch_generated=false 且 status=PASS 時必填，說明為何不需要改碼",
   "summary": "一句話總結審核結果",
   "violations": [
     {
@@ -21,6 +23,10 @@
     }
   ]
 }
+
+當 status=PASS 時，必須滿足以下其中一條：
+1) patch_generated=true 且至少一個 violation 內含可套用 patch
+2) patch_generated=false 且提供 no_change_reason（不可為空）
 
 如果發現 CRITICAL 級別的違規，status 必須為 FAIL。
 請參考以下 MANDATORY LESSONS 進行審核。
