@@ -66,6 +66,34 @@ Agent 的任務不是「自由發揮重構」，而是：
    - agent 建骨架與 prototype
    - human 審 schema naming、router logic、gatekeeper semantics
 
+## Optimization Safety Guardrails (2026-03-19)
+
+這一節為 ACTIVE 規則，適用於所有「優化」與「自動修復」任務。
+
+1. Single-layer changes per round
+   - 禁止同輪同時改 `reviewer + patcher + pipeline + ci_gate`
+   - 一次最多改 1 層，避免連鎖誤判
+
+2. Mandatory pre-optimization smoke
+   - 任何成功率/健康度優化前，必跑：
+   - `uv run python scripts/ops/write_path_smoke.py`
+   - `uv run python scripts/ops/scope_guard.py`
+
+3. Phantom inconclusive is not stable
+   - 若 `phantom_inconclusive_count > 0`，不得宣告穩定
+   - 需先補齊 evidence 欄位，再進下一輪
+
+4. AUDIT_ESTIMATE interpretation rule
+   - 若 `token_mode=AUDIT_ESTIMATE`，禁止把 token 指標當主要優化結論
+   - 只能用 `success/health + 實體寫入證據` 判定
+
+5. No threshold masking
+   - 發生 gate 失敗時，先做 L0/L1 回歸
+   - 不得直接開 `RELAXED_GATE` 或調降門檻掩蓋問題
+
+6. Fixed document write-back order
+   - `docs/EXEC_LIVE_STATUS.md` -> `docs/EXEC_REPORT_<timestamp>.md` -> `docs/INDEX.md`
+
 ## Allowed First-Cut Scope
 
 Agent 第一波只允許處理：

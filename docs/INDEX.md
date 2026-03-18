@@ -619,3 +619,13 @@
 
 ### 一條命令（新）
 - `scripts/ops/gate_ladder.sh`
+
+### 自優化防呆注意事項（目前排程必遵守）
+1. 禁止同輪同時改 `reviewer + patcher + pipeline + ci_gate`；一次最多改 1 層，避免連鎖誤判。
+2. 任何「成功率/健康度優化」前，必跑：
+   - `uv run python scripts/ops/write_path_smoke.py`
+   - `uv run python scripts/ops/scope_guard.py`
+3. 若 `ci_gate` 出現 `phantom_inconclusive_count > 0`，不得宣告穩定，必須先補齊 evidence 欄位再進下一輪。
+4. 若 `token_mode=AUDIT_ESTIMATE`，禁止用 token 指標當主要優化結論，只能用 success/health + 實體寫入證據判定。
+5. 發生 gate 失敗時，先做 L0/L1 回歸，不可直接調降門檻（`RELAXED_GATE`）掩蓋問題。
+6. 文件回寫順序固定：`EXEC_LIVE_STATUS` -> `EXEC_REPORT_*` -> `INDEX Done/Next`。
