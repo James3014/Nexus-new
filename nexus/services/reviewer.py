@@ -106,6 +106,9 @@ class CodexLoopV2(NexusOrchestrator):
             return {
                 "status": "APPROVED",
                 "summary": "Bypassed via audit_level=bypass",
+                "patch_generated": False,
+                "no_change_reason": "audit_level=bypass",
+                "patch_apply_success": None,
                 "execution_mode": self.execution_mode,
                 "trigger_reason": self.trigger_reason
             }
@@ -232,6 +235,9 @@ class CodexLoopV2(NexusOrchestrator):
                 return {
                     "status": "APPROVED",
                     "summary": "No changes found in scope.",
+                    "patch_generated": False,
+                    "no_change_reason": "no_diff_in_scope",
+                    "patch_apply_success": None,
                     "execution_mode": self.execution_mode,
                     "trigger_reason": self.trigger_reason,
                 }

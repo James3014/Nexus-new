@@ -91,3 +91,23 @@ def test_pipeline_blocks_audit_pass_when_patch_apply_failed():
     pipeline = NexusPipeline(engine)
     ok = pipeline.run("fix phantom success", task_type="bug")
     assert ok is False
+
+
+def test_reviewer_bypass_carries_no_change_reason():
+    mock_git = MagicMock()
+    mock_git.project_root = "."
+    mock_git.get_changes.return_value = (["test.py"], "diff")
+
+    reviewer = CodexLoopV2(
+        project_root=".",
+        git=mock_git,
+        llm=MagicMock(),
+        linter=MagicMock(),
+        patcher=MagicMock(),
+        apply_patch=False,
+        audit_level="bypass",
+    )
+    result = reviewer.run_review()
+    assert result["status"] == "APPROVED"
+    assert result["patch_generated"] is False
+    assert result["no_change_reason"] == "audit_level=bypass"
