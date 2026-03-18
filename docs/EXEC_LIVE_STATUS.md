@@ -1,5 +1,6 @@
 # EXEC LIVE STATUS
 
+<<<<<<< Updated upstream
 Last Update: 2026-03-19 01:50:22
 
 | Task | Status | Retry | Last Update | Note |
@@ -33,6 +34,18 @@ Last Update: 2026-03-19 01:50:22
 | wp4.optimize.loop | done | 0 | 2026-03-19 01:18:22 | command_rc=0 |
 | gate.ci.r1 | done | 0 | 2026-03-19 01:21:22 | command_rc=0 |
 | bench.replay.r1 | failed | 0 | 2026-03-19 01:21:22 | crashed_during_previous_run |
+=======
+Last Update: 2026-03-19 04:56:30
+
+| Task | Status | Retry | Last Update | Note |
+|---|---|---:|---|---|
+| preflight.read_index | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.memory.schema | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.memory.ingest | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.policy.learning | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.optimize.loop | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| gate.ci.r1 | running | 0 | 2026-03-19 04:56:30 | uv run scripts/ops/ci_gate.py |
+>>>>>>> Stashed changes
 
 Rule: pause only on destructive/credential/spec_conflict.
 

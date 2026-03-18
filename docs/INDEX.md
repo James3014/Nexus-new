@@ -73,6 +73,13 @@
 - 單一執行入口：`uv run scripts/nexus_cli.py nexus:runner`
 
 ### Done
+<<<<<<< Updated upstream
+=======
+- 修復 `scripts/ops/nexus_longrun_supervisor.sh` 因 Seatbelt 啟動即退出的問題（here-document operation not permitted），並收斂腳本至 `Workspace/nexus/scripts/ops`。
+- supervisor `stop -> start -> status` 驗收已 PASS，且 `runner_supervisor_state.json` 存在。
+- WP-4 已成功收斂到主線並完成 tests 驗收 (2026-03-19)。
+- `task_status.json` 的 re-entrant lock 與舊有 failed 狀態已修正並清理。
+>>>>>>> Stashed changes
 - WP-3：`learning_velocity <= 0` 連續三輪時，自動注入 `auto.optimize.injected` 已完成。
 - `auto.repair` blocked 原型已收斂，並實現 `execute_repairs` 實體執行。
 - 修正 macOS Seatbelt 導致的 workspace lock 衝突問題。
@@ -94,13 +101,40 @@
 - WP-2 驗收完成：STRICT 門檻可過（`avg_health >= 90`、`lowest_phase_health >= 80`）。
 
 ### Blocked
-- 無
+- (目前無嚴重 blocker，supervisor 已成功修復並穩定運行)
 
 ### Next
+<<<<<<< Updated upstream
 1. 收斂 WP-4 到主線：將 `worktrees/wt-wp4-*` 變更合併回主工作樹並完成驗收。
 2. 修正 `task_status` 殘留狀態問題（避免 `failed` 舊紀錄與 `result=done` 同時出現）。
 3. 維持 `ci_gate` PASS 與 Token 逐輪判定口徑（`RAW_AUDIT` / `AUDIT_ESTIMATE`）。
 4. 啟用持續基線循環（`gate.ci -> bench.replay -> docs.index.sync`）直到 token/配額耗盡。
+=======
+1. 參考交接報告：`EXEC_REPORT_20260319_045400.md`。
+2. 依 `INDEX.md` `Next` 項指示，修復完畢後可切回 supervisor「一條 start」模式。
+3. 啟動 `nexus:runner` 繼續消化 `task_manifest.yaml` 中的任務。
+
+## 計劃完工核對表（來自 backup_20260318_104736）
+完成判定規則：
+1. 有對應執行證據（`EXEC_REPORT` / `task_status` / 測試或 gate 輸出）。
+2. 已回寫到本檔 `Done` 或有明確完成快照時間。
+3. 以上任一缺失即不得封存。
+
+| 計劃檔 | 狀態 | 判定 | 備註 |
+|---|---|---|---|
+| `2026-03-17_TRU-101_修復任務單.md` | `TODO` | 未完成 | 需補主工作區對應檔與驗收證據。 |
+| `2026-03-17_TRU-101_實跑驗證紀錄.md` | `TODO` | 未完成 | 需補 replay/gate 證據連結。 |
+| `2026-03-18_TRU-101_驗收修正版與待修清單.md` | `IN_PROGRESS` | 未完成 | 有相關任務紀錄，但缺單一收斂結論。 |
+| `2026-03-18_TRU-101_後續優化與驗證節奏.md` | `IN_PROGRESS` | 未完成 | 需補里程碑完成判定與截止條件。 |
+| `2026-03-18_Nexus_第二輪精準收斂重構計畫.md` | `IN_PROGRESS` | 部分完成 | Phase R 已完成；仍有後續收斂項待關閉。 |
+| `2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md` | `TODO` | 未完成 | 尚未看到完成封板證據。 |
+| `2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md` | `TODO` | 未完成 | 規劃檔存在，待執行與驗收。 |
+| `2026-03-18_Nexus_NightShift_整合分級路線圖.md` | `TODO` | 未完成 | 規劃檔存在，待執行與驗收。 |
+| `2026-03-18_CodexLoop_角色調整與啟用策略.md` | `IN_PROGRESS` | 未完成 | 角色策略有調整，缺完成快照與驗收。 |
+| `2026-03-18_工作區搬遷規劃.md` | `DONE` | 已完成 | 主工作區已切換至 `~/Workspace/nexus`。 |
+| `2026-03-18_工作區搬遷執行指令.md` | `DONE` | 已完成 | 搬遷已落地，舊路徑改為歷史參考。 |
+
+>>>>>>> Stashed changes
 
 ## Token 口徑（唯一判定規則）
 1. 每輪 benchmark 必須記錄 `total_raw_tokens`。
@@ -371,6 +405,13 @@
 - 目前優先處理 gate blocker 與最小可驗證修補，避免把主線拉回大範圍重構。
 
 ### Done
+<<<<<<< Updated upstream
+=======
+- 修復 `scripts/ops/nexus_longrun_supervisor.sh` 因 Seatbelt 啟動即退出的問題（here-document operation not permitted），並收斂腳本至 `Workspace/nexus/scripts/ops`。
+- supervisor `stop -> start -> status` 驗收已 PASS，且 `runner_supervisor_state.json` 存在。
+- WP-4 已成功收斂到主線並完成 tests 驗收 (2026-03-19)。
+- `task_status.json` 的 re-entrant lock 與舊有 failed 狀態已修正並清理。
+>>>>>>> Stashed changes
 - `phase_health` 基建（schema/measurement）與 `auto.repair.proto` 已通過。
 - 技能路由 `selected_skills` 修正完成（已成功選中 `nexus-debug-expert`）。
 - `docs/EXEC_LIVE_STATUS.md` 格式統一與專業化優化。

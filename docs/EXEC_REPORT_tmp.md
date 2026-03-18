@@ -1,0 +1,1 @@
+worker-1 | model=gemini-3-flash-preview\nworker-1 | ownership=nexus/core/memory\nworker-2 | model=gemini-3-flash-preview\nworker-2 | ownership=nexus/core/policy\nworker-3 | model=gemini-3-flash-preview\nworker-3 | ownership=nexus/core/optimize\nworker-4 | model=gemini-3-flash-preview\nworker-4 | ownership=scripts/ops
