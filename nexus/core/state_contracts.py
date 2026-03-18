@@ -120,6 +120,11 @@ class HealthMetrics(BaseModel):
     last_check_at: Optional[datetime] = None
     status: str = "UNKNOWN"     # HEALTHY, WARNING, CRITICAL
 
+class PhaseMetric(BaseModel):
+    health: float = 0.0
+    signals: Dict[str, Any] = Field(default_factory=dict)
+     # HEALTHY, WARNING, CRITICAL
+
 from pydantic import model_validator
 
 class NexusState(BaseModel):
@@ -159,6 +164,21 @@ class NexusState(BaseModel):
     health_score: float = 100.0
     health_metrics: HealthMetrics = Field(default_factory=HealthMetrics)
     
+    # --- Phase Health Autonomy (PHA-001) ---
+    pipeline_health: float = 100.0
+    learning_velocity: float = 0.0
+    phase_metrics: Dict[str, PhaseMetric] = Field(
+        default_factory=lambda: {
+            "P": PhaseMetric(),
+            "X": PhaseMetric(),
+            "D": PhaseMetric(),
+            "R": PhaseMetric(),
+            "A": PhaseMetric(),
+            "C": PhaseMetric()
+        }
+    )
+    auto_actions: List[Dict[str, Any]] = []
+
     metadata: Dict[str, Any] = {}
     
     def calculate_health(self):

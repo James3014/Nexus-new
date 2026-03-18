@@ -100,8 +100,8 @@
 
 ## anti 回報整併（主控核對版）
 - anti 回報重點：`ci_gate PASS`、`Health 高分`、流程可由 `nexus:runner` 一路跑完。
-- 主控核對結果：上述可成立；但 token 仍屬 `Audit-Estimate`，不得宣告 raw token 已打通。
-- 最終採信口徑：`Gate PASS` + `Success/Health 達標` + `Raw Tokens=0（估計模式）`。
+- 主控核對結果：上述可成立；`raw token` 已打通（`total_raw_tokens=75754`），可進入真實 Token 審計。
+- 最終採信口徑：`Gate PASS` + `Success/Health 達標` + `Raw Tokens>0（真實審計模式）`。
 
 ## 交接快照（給 antigravity）
 - 交接時間：2026-03-18（Asia/Taipei）
@@ -123,7 +123,7 @@
 ## 給 anti 的後續任務（直接照做）
 1. 先跑 `uv run scripts/nexus_cli.py nexus:runner`，確認 `gate.ci -> bench.replay -> docs.index.sync` 全部完成。
 2. 調整 `task_manifest.yaml` 的 `bench.replay` 驗收，必須包含：`success_rate >= 95`、`avg_health >= 90`、`empty token status = 0`（不可只檢查 health 與 empty）。
-3. 若 `Total Raw Tokens = 0`，維持 `Audit-Estimate` 標記，不得宣稱 raw token 已打通。
+3. 若後續任一輪 `Total Raw Tokens` 回到 `0`，才回退 `Audit-Estimate` 標記；目前口徑維持 `raw token 已打通`。
 4. 更新本檔「當前狀態」快照（只寫證據支持的數值）。
 5. 回報格式固定：`SUMMARY`、`METRICS`、`GATE`、`NEXT`。
 
@@ -321,10 +321,9 @@
 - `task_runner.py` 已支援 `phase_task` 與 `phase_result_ok`。
 - 工作區搬遷：**已完成（2026-03-18）**
 - `uv run scripts/ops/ci_gate.py`：**PASS**
-- 最新驗收快照：`(PASS, 100.0, 97.01, empty=0)`
+- 最新驗收快照：`(PASS, 100.0, 95.4, empty=0, raw=75754)`
 
 ### Blocked
-- `raw token` 尚未打通（`total_raw_tokens = 0`），會影響後續 benchmark 成本審計，但**不阻塞本輪主線**。
 - 舊路徑 `/Users/jameschen/Downloads/Muse-Nexus` 僅能作歷史參考，不得再拿來當執行路徑。
 
 ## 相關連結
@@ -390,7 +389,7 @@
 
 11. 第二輪精準收斂重構（High Priority）
 - `2026-03-18_Nexus_第二輪精準收斂重構計畫.md`
-- 目標：先修 `raw token=0`、phase path 一致性與 legacy 邊界，不再做大翻修。
+- 目標：持續強化 `phase_health` 健康自治（觀測/自癒/自優化）與 legacy 邊界收斂。
 
 12. Codex-Loop 角色調整（High Priority）
 - `2026-03-18_CodexLoop_角色調整與啟用策略.md`

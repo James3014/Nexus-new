@@ -271,6 +271,10 @@ class NexusEngine:
 
             final_state = sub_engine.state_io.load_global_state()
 
+            # Calculate lowest_phase_health for this run
+            phase_healths = [m.health for m in final_state.phase_metrics.values() if m.health > 0]
+            lowest_ph = min(phase_healths) if phase_healths else 0.0
+
             # 🧬 統一 Schema 數據採集 (VAR-002)
             res = {
                 "task_id": case_id,
@@ -289,14 +293,15 @@ class NexusEngine:
                 "duration": round(duration, 2),
                 "health": final_state.health_score,
                 "drift": final_state.health_metrics.drift_index,
+                "lowest_phase_health": lowest_ph,
             }
             results.append(res)
             logger.info(
-                "🏁 [Benchmark] Case %s: %s (Tokens: %d, Drift: %.2f)",
+                "🏁 [Benchmark] Case %s: %s (Tokens: %d, ph_min: %.1f)",
                 case_id,
                 res["status"],
                 res["tokens"],
-                res["drift"],
+                res["lowest_phase_health"],
             )
 
         # 輸出 CSV
@@ -316,6 +321,7 @@ class NexusEngine:
                 "duration",
                 "health",
                 "drift",
+                "lowest_phase_health",
             ]
             with open(output_csv, "w", newline="") as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

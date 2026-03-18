@@ -346,7 +346,9 @@ def main():
     upgrade_parser.add_argument("--dry-run", action="store_true")
 
     # nexus:runner
-    subparsers.add_parser("nexus:runner")
+    runner_parser = subparsers.add_parser("nexus:runner")
+    runner_parser.add_argument("--task", help="Run specific task ID")
+    runner_parser.add_argument("--with-deps", action="store_true", help="Run with dependencies")
 
     args = parser.parse_args()
     if not args.command:
@@ -400,9 +402,15 @@ def main():
         if not runner_path.exists():
             print(f"❌ Error: Task Runner not found at {runner_path}")
             sys.exit(1)
-        
+
         # Execute runner and relay its exit code
-        rc = subprocess.call([sys.executable, str(runner_path)])
+        runner_cmd = [sys.executable, str(runner_path)]
+        if args.task:
+            runner_cmd.extend(["--task", args.task])
+        if args.with_deps:
+            runner_cmd.append("--with-deps")
+
+        rc = subprocess.call(runner_cmd)
         sys.exit(rc)
 
 

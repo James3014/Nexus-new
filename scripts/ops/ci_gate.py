@@ -37,10 +37,12 @@ def main():
             
         healths = [float(r["health"]) for r in rows if r["health"]]
         drifts = [float(r["drift"]) for r in rows if r["drift"]]
+        phase_healths = [float(r["lowest_phase_health"]) for r in rows if "lowest_phase_health" in r and r["lowest_phase_health"]]
         
         # 📊 [CI-Gate Metrics]
         avg_health = sum(healths) / len(healths) if healths else 0
         max_drift = max(drifts) if drifts else 0
+        min_phase_health = min(phase_healths) if phase_healths else 0
         
         # 🛡️ TRU-101 Audit Gate: Status Check
         statuses = [r["token_capture_status"] for r in rows]
@@ -51,6 +53,7 @@ def main():
         print(f"\n📊 [CI-Gate Metrics]")
         print(f"- Average Health: {avg_health:.1f}%")
         print(f"- Max Drift: {max_drift:.2f}")
+        print(f"- Lowest Phase Health: {min_phase_health:.1f}%")
         print(f"- Token Capture Statistics: {len(empty_statuses)} empty, {len(statuses)} total")
         print(f"- Total Raw Tokens: {total_raw}")
         
@@ -61,8 +64,6 @@ def main():
             
         if total_raw == 0:
             print(f"⚠️ Warning: Total Raw Tokens is 0. System is currently running on AUDIT-ESTIMATE mode.")
-            # Depending on policy, this could be a fail or a warning.
-            # For now, following requirements: mark as partial verified.
             
         if avg_health < 90:
             print(f"❌ Failure: Average health {avg_health:.1f}% dropped below 90%!")
@@ -70,6 +71,9 @@ def main():
         if max_drift > 0.5:
             print(f"❌ Failure: Max drift {max_drift:.2f} exceeded 0.5 threshold!")
             sys.exit(1)
+        if min_phase_health < 80:
+             print(f"❌ Failure: Lowest phase health {min_phase_health:.1f}% dropped below 80%!")
+             sys.exit(1)
             
         print("\n🎉 [CI-Gate] ALL QUALITY GATES PASSED!")
     except Exception as e:

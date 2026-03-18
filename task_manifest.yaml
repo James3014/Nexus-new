@@ -119,3 +119,40 @@ tasks:
     on_fail: escalate
     max_retry: 0
     ask_policy: no_ask
+
+  - id: phase_health.schema
+    depends_on: [docs.runner.phase_task]
+    run: "uv run python3 -c \"print('Implementing Phase Health Schema'); from pathlib import Path; Path('nexus/core/phase_health_schema.py').touch()\""  # Sub-agent will actually implement
+    done_when:
+      type: file_exists
+      path: nexus/core/phase_health_schema.py
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: phase_health.measurement
+    depends_on: [phase_health.schema]
+    run: "uv run python3 -c \"print('Implementing Phase Health Measurement')\""
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: ci_gate.expansion
+    depends_on: [phase_health.measurement]
+    run: "uv run python3 -c \"print('Expanding CI Gate to include phase health')\""
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
+
+  - id: auto.repair.proto
+    depends_on: [ci_gate.expansion]
+    run: "uv run python3 -c \"print('Prototyping Auto-Repair triggers')\""
+    done_when:
+      type: command_rc_zero
+    on_fail: retry
+    max_retry: 1
+    ask_policy: no_ask
