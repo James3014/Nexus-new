@@ -73,7 +73,8 @@ if __name__ == "__main__":
             try:
                 # 優先嘗試 git apply
                 res = subprocess.run(
-                    ["git", "apply", "--3way", "--whitespace=fix", "--recount", str(tmp_patch)], 
+                    ["git", "apply", "--3way", "--whitespace=fix", "--recount", str(tmp_patch)],
+                    cwd=str(self.project_root) if self.project_root else None,
                     capture_output=True, text=True
                 )
                 if res.returncode == 0:
