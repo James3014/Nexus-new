@@ -25,3 +25,5 @@ perplexity/
 perplexity_results.csv
 nexus_benchmark.csv
 nexus.log
+
+.worktrees/
