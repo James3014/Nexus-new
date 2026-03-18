@@ -73,13 +73,10 @@
 - 單一執行入口：`uv run scripts/nexus_cli.py nexus:runner`
 
 ### Done
-<<<<<<< Updated upstream
-=======
 - 修復 `scripts/ops/nexus_longrun_supervisor.sh` 因 Seatbelt 啟動即退出的問題（here-document operation not permitted），並收斂腳本至 `Workspace/nexus/scripts/ops`。
 - supervisor `stop -> start -> status` 驗收已 PASS，且 `runner_supervisor_state.json` 存在。
 - WP-4 已成功收斂到主線並完成 tests 驗收 (2026-03-19)。
 - `task_status.json` 的 re-entrant lock 與舊有 failed 狀態已修正並清理。
->>>>>>> Stashed changes
 - WP-3：`learning_velocity <= 0` 連續三輪時，自動注入 `auto.optimize.injected` 已完成。
 - `auto.repair` blocked 原型已收斂，並實現 `execute_repairs` 實體執行。
 - 修正 macOS Seatbelt 導致的 workspace lock 衝突問題。
@@ -104,12 +101,10 @@
 - (目前無嚴重 blocker，supervisor 已成功修復並穩定運行)
 
 ### Next
-<<<<<<< Updated upstream
 1. 收斂 WP-4 到主線：將 `worktrees/wt-wp4-*` 變更合併回主工作樹並完成驗收。
 2. 修正 `task_status` 殘留狀態問題（避免 `failed` 舊紀錄與 `result=done` 同時出現）。
 3. 維持 `ci_gate` PASS 與 Token 逐輪判定口徑（`RAW_AUDIT` / `AUDIT_ESTIMATE`）。
 4. 啟用持續基線循環（`gate.ci -> bench.replay -> docs.index.sync`）直到 token/配額耗盡。
-=======
 1. 參考交接報告：`EXEC_REPORT_20260319_045400.md`。
 2. 依 `INDEX.md` `Next` 項指示，修復完畢後可切回 supervisor「一條 start」模式。
 3. 啟動 `nexus:runner` 繼續消化 `task_manifest.yaml` 中的任務。
@@ -134,7 +129,6 @@
 | `2026-03-18_工作區搬遷規劃.md` | `DONE` | 已完成 | 主工作區已切換至 `~/Workspace/nexus`。 |
 | `2026-03-18_工作區搬遷執行指令.md` | `DONE` | 已完成 | 搬遷已落地，舊路徑改為歷史參考。 |
 
->>>>>>> Stashed changes
 
 ## Token 口徑（唯一判定規則）
 1. 每輪 benchmark 必須記錄 `total_raw_tokens`。
@@ -405,13 +399,10 @@
 - 目前優先處理 gate blocker 與最小可驗證修補，避免把主線拉回大範圍重構。
 
 ### Done
-<<<<<<< Updated upstream
-=======
 - 修復 `scripts/ops/nexus_longrun_supervisor.sh` 因 Seatbelt 啟動即退出的問題（here-document operation not permitted），並收斂腳本至 `Workspace/nexus/scripts/ops`。
 - supervisor `stop -> start -> status` 驗收已 PASS，且 `runner_supervisor_state.json` 存在。
 - WP-4 已成功收斂到主線並完成 tests 驗收 (2026-03-19)。
 - `task_status.json` 的 re-entrant lock 與舊有 failed 狀態已修正並清理。
->>>>>>> Stashed changes
 - `phase_health` 基建（schema/measurement）與 `auto.repair.proto` 已通過。
 - 技能路由 `selected_skills` 修正完成（已成功選中 `nexus-debug-expert`）。
 - `docs/EXEC_LIVE_STATUS.md` 格式統一與專業化優化。
@@ -611,3 +602,20 @@
 ## 階段健康自治實作計畫（新）
 - 文件：`/Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md`
 - 內容：WBS、觸發門檻、task_manifest 匯入包、DoD
+
+## 2026-03-19 Phantom Success 事件（ACTIVE）
+- RCA 文件：`/Users/jameschen/Workspace/nexus/docs/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md`
+- 相關修復 commit：
+  - `fc85508`（block phantom success）
+  - `60b94ff`（bypass no-change evidence）
+  - `52d9cc0`（patcher git apply cwd fix）
+
+### 防再犯 5 條（執行版）
+1. 先 smoke 再 full：先跑 `uv run python scripts/ops/write_path_smoke.py`。
+2. 成功定義硬化：PASS 必須有 `patch_generated+patch_apply_success` 或 `no_change_reason`。
+3. 禁止吞錯：`git apply` 失敗直接 fail。
+4. 分層 gate：L0（smoke/tests）→ L1（mini benchmark）→ L2（full ci_gate）。
+5. 變更範圍鎖定：先過 `uv run python scripts/ops/scope_guard.py`。
+
+### 一條命令（新）
+- `scripts/ops/gate_ladder.sh`
