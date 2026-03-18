@@ -79,6 +79,8 @@ class NexusOrchestrator:
                 model_hint="flash" if strike % 2 != 0 else "sonnet",
             )
             self.total_tokens += data.get("tokens_used", 0)
+            self.total_raw_model += data.get("token_raw_model", 0)
+            self.total_fallback_est += data.get("token_fallback_est", 0)
             self.token_capture_statuses.append(
                 data.get("token_capture_status", "unknown")
             )
