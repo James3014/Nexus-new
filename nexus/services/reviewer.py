@@ -263,6 +263,10 @@ class CodexLoopV2(NexusOrchestrator):
                     "summary": data.get("summary"),
                     "execution_mode": self.execution_mode,
                     "trigger_reason": self.trigger_reason,
+                    "tokens_used": self.total_tokens,
+                    "token_raw_model": self.total_raw_model,
+                    "token_fallback_est": self.total_fallback_est,
+                    "token_capture_status": "|".join(self.token_capture_statuses)
                 }
 
             # 🧬 Spec: 提取 audit_metadata 與 return_target_phase
@@ -281,6 +285,10 @@ class CodexLoopV2(NexusOrchestrator):
                 "trigger_reason": self.trigger_reason,
                 "audit_metadata": audit_metadata,
                 "return_target_phase": return_target_phase,
+                "tokens_used": self.total_tokens,
+                "token_raw_model": self.total_raw_model,
+                "token_fallback_est": self.total_fallback_est,
+                "token_capture_status": "|".join(self.token_capture_statuses)
             }
         finally:
             os.chdir(original_cwd)

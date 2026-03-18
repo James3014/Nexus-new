@@ -26,5 +26,6 @@ class PlannerPhaseHandler(BasePhaseHandler):
             "risk_score": risk_score, 
             "risks": risks, 
             "risk_level": prediction["risk_level"],
-            "tokens_used": prediction.get("tokens_used", 0)
+            "tokens_used": prediction.get("tokens_used", 0),
+            "token_capture_status": "ok"
         }

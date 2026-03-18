@@ -21,9 +21,10 @@ class WorkspaceManager:
 
     def __init__(self, project_root):
         self.project_root = Path(project_root).resolve()
-        self.workspace_base = Path("/tmp/codex-workspaces")
+        # 🛡️ v9 Hardening: Avoid /tmp due to macOS Seatbelt/Isolation
+        self.workspace_base = self.project_root / ".nexus" / "workspaces"
         self.workspace_base.mkdir(parents=True, exist_ok=True)
-        self.lock_file = Path("/tmp/codex-loop-merge.lock")
+        self.lock_file = self.project_root / ".nexus" / "workspace_merge.lock"
         self.lock_file.touch(exist_ok=True)
 
     def lease(self, task_id: str = None, branch_name: str = None):

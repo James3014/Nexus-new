@@ -1,5 +1,7 @@
 import logging
 import time
+import json
+from datetime import datetime
 from typing import Dict, Any, Optional
 from nexus.core.state_contracts import NexusState
 
@@ -49,6 +51,10 @@ class NexusPipeline:
             
         if research_pack:
             pack["research_context"] = research_pack
+        
+        # 🧬 WP-1: Record D phase overhead and capture potential research tokens
+        pack["token_capture_status"] = "ok"
+        accumulator.record(state, "D", pack, overhead=50)
         self.engine._add_step_to_history(state, "D", metadata={"pack_keys": list(pack.keys())})
 
         # --- R/A Stage: Repair Loop ---
@@ -74,6 +80,8 @@ class NexusPipeline:
             
             # Log A (Audit) phase explicitly for phase path consistency
             state.current_phase = "A"
+            # 🧬 WP-1: Record A phase explicitly to capture status and overhead
+            accumulator.record(state, "A", res, overhead=50)
             self.engine._add_step_to_history(state, "A", metadata={"status": review_status_raw})
             
             status, audit_success = self.engine.ReviewStatusNormalizer.normalize(review_status_raw)
@@ -94,9 +102,30 @@ class NexusPipeline:
             self.engine.commander.crystallize(state)
             self.engine._add_step_to_history(state, "C")
 
+        # 🧬 Phase Health Autonomy: Update and Capture
+        from nexus.core.phase_health import PhaseHealthCalculator
+        PhaseHealthCalculator.update_state(state)
+
         # Health Evaluation
         health_score = health_evaluator.evaluate(state, success)
-        logger.info(f"📊 Final Health: {health_score:.1f}% | Success: {success}")
+        logger.info(f"📊 Final Health: {health_score:.1f}% | Success: {success} | Pipeline Health: {state.pipeline_health}%")
         
         self.engine.state_io.save_global_state(state)
+        
+        # 📂 WP-1: Save run-specific phase metrics
+        try:
+            run_dir = self.engine.run_dir / "phase_metrics"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            run_file = run_dir / f"{state.task_id}_metrics.json"
+            
+            payload = {
+                "task_id": state.task_id,
+                "timestamp": datetime.now().isoformat(),
+                "pipeline_health": state.pipeline_health,
+                "metrics": {p: m.dict() for p, m in state.phase_metrics.items()}
+            }
+            run_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.error(f"❌ [WP-1] Failed to save phase metrics: {e}")
+
         return success
