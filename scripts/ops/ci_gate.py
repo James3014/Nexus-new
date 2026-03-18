@@ -59,6 +59,25 @@ def compute_phantom_success(rows):
         "inspected_pass": inspected_pass,
     }
 
+
+def validate_write_proof(repo_root: Path):
+    proof = repo_root / ".nexus" / "runs" / "latest" / "write_proof.json"
+    if not proof.exists():
+        return False, "write_proof.json missing"
+    try:
+        data = json.loads(proof.read_text(encoding="utf-8"))
+        changed = data.get("changed")
+        if changed is True:
+            return True, "ok"
+        decision = str(data.get("decision", "")).strip()
+        if decision == "no_change":
+            reason = str(data.get("no_change_reason", "")).strip()
+            if reason:
+                return True, "ok_no_change"
+        return False, "write_proof exists but not actionable"
+    except Exception as e:
+        return False, f"invalid write_proof.json: {e}"
+
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -137,6 +156,7 @@ def main():
         raw_tokens = [int(r["token_raw_model"]) for r in rows if r["token_raw_model"]]
         total_raw = sum(raw_tokens)
         phantom = compute_phantom_success(rows)
+        write_proof_ok, write_proof_note = validate_write_proof(REPO_ROOT)
 
         # 📊 [CI-Gate Metrics]
         gate_summary = {
@@ -150,6 +170,8 @@ def main():
             "total_raw_tokens": total_raw,
             "phantom_success_count": phantom["phantom_count"],
             "phantom_inconclusive_count": phantom["inconclusive_count"],
+            "write_proof_ok": write_proof_ok,
+            "write_proof_note": write_proof_note,
             "pass_count": pass_count,
             "total_count": len(statuses),
             "timestamp": datetime.now().isoformat()
@@ -165,6 +187,7 @@ def main():
         print(f"- Token Capture Statistics: {len(unknown_statuses)} unknown/empty, {len(capture_statuses)} total")
         print(f"- Total Raw Tokens: {total_raw}")
         print(f"- Phantom Success: {phantom['phantom_count']} detected, {phantom['inconclusive_count']} inconclusive")
+        print(f"- Write Proof: {'ok' if write_proof_ok else 'missing/invalid'} ({write_proof_note})")
 
         # Write Summary Report
         report_path = REPO_ROOT / ".nexus" / "ci_gate_report.json"
@@ -188,6 +211,12 @@ def main():
         # Hard gate: detected phantom success must fail CI.
         if phantom["phantom_count"] > 0:
             print(f"❌ Failure: Detected {phantom['phantom_count']} phantom PASS rows!")
+            sys.exit(1)
+        if phantom["inconclusive_count"] > 0:
+            print(f"❌ Failure: Detected {phantom['inconclusive_count']} phantom inconclusive PASS rows!")
+            sys.exit(1)
+        if not write_proof_ok:
+            print(f"❌ Failure: {write_proof_note}")
             sys.exit(1)
             
         # 🛠️ Threshold Policy (WP-1 Refinement)

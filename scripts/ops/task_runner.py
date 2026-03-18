@@ -282,6 +282,8 @@ def main() -> int:
             sync_status(state)
             return 1
 
+        phase_task_enabled = os.environ.get("NEXUS_ENABLE_PHASE_TASK", "0") == "1"
+
         for task in tasks:
             tid = task["id"]
             if not args.task and state["tasks"].get(tid, {}).get("status") == "done":
@@ -319,6 +321,16 @@ def main() -> int:
                 selected_skills = []
                 try:
                     if task_type == "phase_task":
+                        if not phase_task_enabled:
+                            state["tasks"][tid] = {
+                                "status": "blocked",
+                                "retry": i,
+                                "updated_at": now_str(),
+                                "note": "phase_task disabled by policy (set NEXUS_ENABLE_PHASE_TASK=1 to enable)",
+                            }
+                            state["result"] = "blocked"
+                            sync_status(state)
+                            return 1
                         rc, out, err, selected_skills = run_phase_task(task)
                     else:
                         rc, out, err = run_shell(run_cmd, timeout_sec=timeout_sec)
