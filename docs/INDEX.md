@@ -97,8 +97,10 @@
 - 無
 
 ### Next
-1. 啟動 WP-4：Episodic Memory / Policy Learning 閉環。
-2. 維持 `ci_gate` PASS 與 Token 逐輪判定口徑（`RAW_AUDIT` / `AUDIT_ESTIMATE`）。
+1. 收斂 WP-4 到主線：將 `worktrees/wt-wp4-*` 變更合併回主工作樹並完成驗收。
+2. 修正 `task_status` 殘留狀態問題（避免 `failed` 舊紀錄與 `result=done` 同時出現）。
+3. 維持 `ci_gate` PASS 與 Token 逐輪判定口徑（`RAW_AUDIT` / `AUDIT_ESTIMATE`）。
+4. 啟用持續基線循環（`gate.ci -> bench.replay -> docs.index.sync`）直到 token/配額耗盡。
 
 ## Token 口徑（唯一判定規則）
 1. 每輪 benchmark 必須記錄 `total_raw_tokens`。
@@ -143,6 +145,11 @@
   - `ci_benchmark.csv`：`success=100%`、`avg_health=96.74`、`lowest_phase_health=80.0`
   - Token 現況：`token_raw_model=0`（本輪判定 `AUDIT_ESTIMATE`）
   - 報告檔：`/Users/jameschen/Workspace/nexus/docs/EXEC_REPORT_20260319_001500.md`
+- 2026-03-19 01:50（Asia/Taipei）：新回報檔已生成
+  - 報告檔：`/Users/jameschen/Workspace/nexus/docs/EXEC_REPORT_20260319_151200.md`
+  - `ci_gate_report.json`：`success_rate=1.0`、`avg_health=96.744`、`lowest_phase_health=80.0`、`learning_velocity=-0.128`、`token_mode=AUDIT_ESTIMATE`
+  - 核對結果：回報中的 WP-4 證據檔目前僅存在 `worktrees/wt-wp4-*`，尚未落到主工作樹，WP-4 不能判定為主線完成。
+  - 停止原因：本輪 manifest 任務鏈已跑完後進入 idle；需用持續基線循環任務避免「回報後停住」。
 - 工作區搬遷：**已完成（2026-03-18）**
 - 主工作路徑：`/Users/jameschen/Workspace/nexus`（唯一工作路徑）
 - 舊路徑：`/Users/jameschen/Downloads/Muse-Nexus`（僅歷史參考，不得作為執行路徑）
