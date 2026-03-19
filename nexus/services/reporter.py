@@ -19,9 +19,9 @@ class Reporter:
             self.tracelog_path = tracelog_path or self.project_root / "tracelog.jsonl"
         self.silent = silent
 
-    def voice_notify(self, message: str):
-        """🔊 v7 Spec: 關鍵點強制語音通知"""
-        if self.silent:
+    def voice_notify(self, message: str, urgency: str = "normal"):
+        """🔊 v7 Spec: 關鍵點語音通知 (支持優先級)"""
+        if self.silent and urgency != "critical":
             return
         try:
             subprocess.run(

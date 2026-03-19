@@ -1,0 +1,2 @@
+task_id,status,tokens,token_raw_model,token_fallback_est,token_system_overhead,token_source_x,token_source_r,token_capture_status,phase_path,review_status,duration,health,drift,lowest_phase_health,policy_hit,learning_velocity
+OFF-001,FAIL,0,0,0,0,0,0,unknown,,UNKNOWN,3.98,100.0,0.0,0.0,,0.0

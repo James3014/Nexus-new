@@ -19,5 +19,9 @@
 1. 預設模式：AUTO-EXECUTE。
 2. 禁止詢問「是否繼續」。
 
+## [重要] 核心意識形態（憲法級）
+1. **Nexus 優先執行制**：所有實施任務（Coding, Benchmarking, Fixing）必須由 Nexus 引擎或分身執行，Agent 僅負責 Orchestration。
+2. **語音通報分級**：重要的提示（Startup, Completion, Critical Alert）不受靜默模式限制，必須發出語音。
+
 ---
 *Created by Nex-CEx Orchestrator*

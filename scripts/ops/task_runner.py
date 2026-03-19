@@ -225,20 +225,49 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", help="Run specific task ID")
+    parser.add_argument("--with-deps", action="store_true", help="Run with recursive dependencies")
     args = parser.parse_args()
 
     lock_fd = acquire_lock()
     if lock_fd is None: return 3
 
     try:
+        print(f"DEBUG: ROOT dir: {ROOT}")
+        print(f"DEBUG: Loading MANIFEST from: {MANIFEST}")
+        with open(MANIFEST, "r") as f:
+            print(f"DEBUG: Manifest snippet: {f.read(100)}...")
         manifest = load_config(MANIFEST)
         policy = load_config(POLICY)
         defaults = manifest.get("defaults", {})
-        all_tasks = topo_sort(manifest.get("tasks", []))
-        
+        all_tasks = manifest.get("tasks", [])
+        print(f"DEBUG: all_tasks count: {len(all_tasks)}")
+        if all_tasks:
+            print(f"DEBUG: first task ID: {all_tasks[0]['id']}")
+
         tasks_to_run = all_tasks
         if args.task:
-            tasks_to_run = [t for t in all_tasks if t["id"] == args.task]
+            if args.with_deps:
+                # 🧬 Recursive dependency resolution
+                needed = set()
+                def add_needed(tid):
+                    if tid in needed: return
+                    needed.add(tid)
+                    t_obj = next((t for t in all_tasks if t["id"] == tid), None)
+                    if t_obj:
+                        for dep in t_obj.get("depends_on", []):
+                            add_needed(dep)
+                add_needed(args.task)
+                tasks_to_run = [t for t in all_tasks if t["id"] in needed]
+            else:
+                tasks_to_run = [t for t in all_tasks if t["id"] == args.task]
+        
+        # Re-sort to maintain topo order after filtering
+        print(f"DEBUG: tasks_to_run IDs: {[t['id'] for t in tasks_to_run]}")
+        try:
+            tasks_to_run = topo_sort(tasks_to_run)
+        except Exception as e:
+            print(f"❌ TopoSort Error: {e}")
+            return 5
 
         state = {"started_at": now_str(), "tasks": {}, "result": "running"}
         for t in tasks_to_run:

@@ -111,8 +111,9 @@ class NexusEngine:
             )
         return self._memory
 
-    def _voice_notify(self, message: str):
-        self.reporter.voice_notify(message)
+    def _voice_notify(self, message: str, urgency: str = "normal"):
+        """🧬 Smart-Notify: 分優先級的語音通報"""
+        self.reporter.voice_notify(message, urgency=urgency)
 
     def _log_trace(
         self, command: str, task: str, status: str, tokens: int = 0, score: float = 0.0
@@ -158,7 +159,8 @@ class NexusEngine:
         context: Dict = None,
     ):
         """🕷️ Nexus P-D-X-R-A-C Lifecycle (Unified Redirect)"""
-        self._voice_notify(f"Nexus 啟動：偵測到 Bug {bug_id}")
+        self._voice_notify(f"Nexus 啟動：偵測到 Bug {bug_id}", urgency="critical")
+        logger.info(f"🚀 [Nexus] Starting L2-Repair for {bug_id}")
         desc_resolved = desc or bug_id
         
         self.reporter.log_trace("run_bug", bug_id, "START", 0, 0.0)
@@ -217,8 +219,9 @@ class NexusEngine:
         original_silent = self.reporter.silent
         if framework == "health-audit":
             self.reporter.silent = True
+            self._voice_notify("啟動健康度自動審計...", urgency="critical")
         else:
-            self._voice_notify(f"開始執行 {framework} 真實基準測試")
+            self._voice_notify(f"開始執行 {framework} 真實基準測試", urgency="critical")
         catalog_path = self.project_root / "cases" / "catalog.json"
         if not catalog_path.exists():
             logger.error("❌ Benchmark catalog not found!")

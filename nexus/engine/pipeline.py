@@ -15,6 +15,9 @@ class NexusPipeline:
         task_id = f"{task_type}-{int(time.time())}"
         state = NexusState(task_id=task_id)
         state.metadata["task_description"] = task_desc
+        
+        # 🧠 v9.4: Brain-Sync protocol. Load policies from memory service.
+        self.engine.policy_manager.apply_policy_to_state(state, task_desc)
         self.engine.state_io.save_global_state(state) # 🛡️ Save before commander loads it
         self.engine.commander.next_step(status="started") # 🎯 Trinity Trigger
         state.metadata["task_description"] = task_desc
