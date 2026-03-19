@@ -220,6 +220,8 @@ class LLMClient:
                 
             return self._parse_json_response(output, tokens_total, "ok" if tokens_total > 0 else "fallback_est")
             
+        except subprocess.TimeoutExpired:
+            return self._build_error_result("CLI execution timed out after 180 seconds.", capture_status="timeout"), "Timeout"
         except Exception as e:
             return self._build_error_result(f"CLI execution failed: {e}", capture_status="cli_error"), str(e)
 
