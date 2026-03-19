@@ -27,6 +27,10 @@ class RepairPhaseHandler(BasePhaseHandler):
         diag_pack = context.get("diag_pack")
         repair_attempts = context.get("attempt", 1)
         dry_run = context.get("dry_run", False)
+        
+        audit_feedback = context.get("audit_feedback")
+        if audit_feedback:
+            task = f"⚠️ [System Audit Warning]: Your previous attempt was REJECTED because: {audit_feedback}\n\nOriginal Task: {task}"
 
         print(f"🛠️ [R-Stage] Repair Attempt {repair_attempts}")
 

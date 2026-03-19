@@ -93,13 +93,16 @@ class NexusPipeline:
             # Hard gate against phantom success:
             # - If patch was generated, it must be applied successfully.
             # - If no patch was generated, PASS must carry an explicit reason.
+            audit_failure_msg = ""
             if audit_success:
                 if patch_generated and patch_apply_success is False:
-                    logger.error("❌ [Gate] Audit PASS blocked: patch apply failed.")
+                    audit_failure_msg = "Audit PASS blocked: patch apply failed."
+                    logger.error(f"❌ [Gate] {audit_failure_msg}")
                     audit_success = False
                     status = "REJECTED"
                 elif not patch_generated and not no_change_reason:
-                    logger.error("❌ [Gate] Audit PASS blocked: missing no_change_reason.")
+                    audit_failure_msg = "Audit PASS blocked: missing no_change_reason."
+                    logger.error(f"❌ [Gate] {audit_failure_msg}")
                     audit_success = False
                     status = "REJECTED"
 
@@ -131,6 +134,16 @@ class NexusPipeline:
             
             if status == "REJECTED" and repair_attempts < self.engine.max_retries:
                 logger.warning(f"🔄 Audit Rejected. Retrying repair (Status: {status})")
+
+                # 🛡️ Dynamic Feedback Loop Injection
+                if audit_failure_msg:
+                    state.metadata["last_audit_failure"] = audit_failure_msg
+                elif "summary" in (res if isinstance(res, dict) else {}):
+                    state.metadata["last_audit_failure"] = res.get("summary")
+                elif "summary" in result_object:
+                    state.metadata["last_audit_failure"] = result_object.get("summary")
+                    
+                pack["audit_feedback"] = state.metadata.get("last_audit_failure", "Unknown audit failure")
                 continue
             else:
                 break

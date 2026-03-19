@@ -49,9 +49,26 @@ class LLMClient:
             return 0
 
     OUTPUT_SCHEMA = {
-        "status": "APPROVED | REJECTED | FAIL",
-        "summary": "Short explanation",
-        "violations": ["list of rule violations"],
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["APPROVED", "REJECTED", "FAIL"]},
+            "summary": {"type": "string"},
+            "no_change_reason": {"type": "string"},
+            "violations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "suggestion": {"type": "string"},
+                        "patch": {"type": "string"}
+                    },
+                    "required": ["file", "reason", "suggestion"]
+                }
+            }
+        },
+        "required": ["status", "summary"]
     }
 
     def _build_error_result(

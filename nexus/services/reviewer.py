@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 import os
 import json
 import shutil
@@ -232,16 +233,35 @@ class CodexLoopV2(NexusOrchestrator):
                 code_files = [f for f in files if f.endswith(".py")]
 
             if not code_files and not diff_text.strip():
-                return {
-                    "status": "APPROVED",
-                    "summary": "No changes found in scope.",
-                    "patch_generated": False,
-                    "no_change_reason": "no_diff_in_scope",
-                    "patch_apply_success": None,
-                    "execution_mode": self.execution_mode,
-                    "trigger_reason": self.trigger_reason,
-                }
-
+                # 🚀 [v9 Reconnect] The old code-writing capability is brought back!
+                # If apply_patch is True, we tell the LLM there are no changes yet, and it must gen one!
+                if not self.apply_patch:
+                    return {
+                        "status": "APPROVED",
+                        "summary": "No changes found in scope.",
+                        "patch_generated": False,
+                        "no_change_reason": "no_diff_in_scope",
+                        "patch_apply_success": None,
+                        "execution_mode": self.execution_mode,
+                        "trigger_reason": self.trigger_reason,
+                    }
+                else:
+                    # 🔍 Trace mentioned files in task to provide context for generation
+                    mentioned_files = re.findall(r'(?:[a-zA-Z0-9_\-\.]+/)?[a-zA-Z0-9_\-\.]+\.(?:py|js|ts|html|css|sh|md|yaml|yml|json)', self.task)
+                    context_chunks = ["[No changes yet. Initial generation triggered.]"]
+                    for f in mentioned_files:
+                        f_path = Path(self.git.project_root) / f
+                        if f_path.is_file():
+                            try:
+                                content = f_path.read_text(encoding="utf-8")
+                                context_chunks.append(f"--- FILE CONTENT: {f} ---\n{content}")
+                                if f not in code_files:
+                                    code_files.append(str(f_path))
+                            except Exception:
+                                pass
+                    diff_text = "\n\n".join(context_chunks)
+                    if len(context_chunks) == 1:
+                        diff_text += "\n(No specific file context found in task description. Please identify target files yourself if possible or ask for more info.)"
             # Linter
             linter_json = self.linter.scan(code_files)
             

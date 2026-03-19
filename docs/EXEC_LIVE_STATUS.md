@@ -1,15 +1,15 @@
 # EXEC LIVE STATUS
 
-Last Update: 2026-03-19 06:35:00
+Last Update: 2026-03-19 08:49:01
 
 | Task | Status | Retry | Last Update | Note |
 |---|---|---:|---|---|
-| gate.ci.full | done | 0 | 2026-03-19 06:22:12 | PASS (100.0%, health 96.7, phantom=0) |
-| hotfix.phantom.guard | done | 0 | 2026-03-19 06:28:00 | fc85508 + 60b94ff |
-| hotfix.patcher.cwd | done | 0 | 2026-03-19 06:31:00 | 52d9cc0 |
-| l0.write_path_smoke | done | 0 | 2026-03-19 06:33:00 | WRITE_PATH_SMOKE PASS |
-| l0.scope_guard | done | 0 | 2026-03-19 06:34:00 | SCOPE_GUARD PASS |
-| l0.phantom.tests | done | 0 | 2026-03-19 06:34:00 | 6 passed |
+| preflight.read_index | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.memory.schema | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.memory.ingest | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.policy.learning | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| wp4.optimize.loop | done | 0 | 2026-03-19 04:56:30 | command_rc=0 |
+| gate.ci.r1 | failed | 2 | 2026-03-19 08:49:00 | rc=1; command_rc=1;  |
 
 Rule: pause only on destructive/credential/spec_conflict.
 
