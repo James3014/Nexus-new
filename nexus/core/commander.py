@@ -11,15 +11,25 @@ class Commander:
     """
 
     def __init__(self, run_dir: str, state_io=None, router=None, context_hub=None):
-        self.run_dir = Path(run_dir)
-        self.project_root = self.run_dir.parents[1] if ".runs" in str(self.run_dir) else self.run_dir
+        self.run_dir = Path(run_dir).resolve()
+        
+        # 🛡️ 健全的專案根路徑偵測：跳過 .nexus 進入真正的專案根部
+        curr = self.run_dir
+        self.project_root = curr
+        while curr.parent != curr:
+            if (curr / ".git").exists():
+                self.project_root = curr
+                break
+            if (curr / ".nexus").exists() and curr.name != ".nexus":
+                self.project_root = curr
+                break
+            curr = curr.parent
+            
         self.state_io = state_io
         self.router = router
         self.hub = context_hub
 
-    def next_step(self) -> str:
-        """核心狀態機：根據當前狀態與計畫，決定下一步動作。"""
-    def next_step(self, status: str, metadata: Optional[Dict] = None, summary: Optional[str] = None):
+    def next_step(self, status: str = "running", metadata: Optional[Dict] = None, summary: Optional[str] = None):
         """🧬 狀態自動機切換門檻"""
         state = self.state_io.load_global_state()
         from nexus.core.crystal_analyzer import TraumaEngine

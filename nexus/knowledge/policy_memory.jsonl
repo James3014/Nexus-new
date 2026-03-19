@@ -1,0 +1,9 @@
+[
+  {
+    "id": "POL-AUTO-1773904384",
+    "pattern": "os",
+    "trigger_desc": "Missing 'os' or 'os.path' imports",
+    "remedy": "Add 'import os' and 'import os.path' to file header",
+    "priority": 10
+  }
+]

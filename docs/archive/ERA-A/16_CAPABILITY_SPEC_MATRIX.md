@@ -5,25 +5,29 @@
 
 ---
 
-## 1. XState-Flow-Architect / FSM
+## 1. XState-Flow-Architect / Commander (v9.2)
 - **Problem It Solves**: 解決目前任務調度邏輯散落在各處的問題，實現具備斷點續傳與備援路由的狀態機。
 - **Core or Skill**: Core
-- **Trigger Phase**: P (Plan / Orchestration)
-- **Input Contract**: `intent_id`, `current_state`, `event_payload`
-- **Output Contract**: `next_state`, `action_to_dispatch`
-- **Success Criteria**: 狀態轉換 100% 準確，WarRoom 視覺化成功渲染。
-- **Failure Semantics**: `STATE_LOCKED`, `INVALID_TRANSITION`; 可恢復。
-- **Retry/Fallback Policy**: 退回上一級穩定狀態 (Safe-Stage)。
-- **Token/Cost Impact**: 低。
-- **Security/Risk Notes**: 需防止狀態爆炸與無限循環。
-- **Dependency/Prerequisite**: `state_contracts.py` (現存於 `/Users/jameschen/Workspace/nexus/nexus/core/state_contracts.py`)
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/core/factory_router.py` (包含路由與隊列管理邏輯)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/core/factory_router.py`
+- **Trigger Phase**: Orchestration (All Phases)
+- **Input Contract**: `NexusState`, `status`
+- **Output Contract**: `next_phase`
+- **Success Criteria**: 狀態轉換 100% 準確，P-D-R-A-C 閉環運作。
+- **Dependency/Prerequisite**: `commander.py` (現存於 `/Users/jameschen/Workspace/nexus/nexus/core/commander.py`)
+- **Integration Point**: `/Users/jameschen/Workspace/nexus/nexus/engine/pipeline.py`
 - **Priority**: P0 (Runner 核心)
-- **Confidence**: High
-- **Open Questions**: Python 端是否直接嵌入 Node.js XState 實體？
+- **Confidence**: High (Fully Integrated)
 
-## 2. RootSeeker-v3
+## 2. Policy-Manager (Trinity v9.2)
+- **Problem It Solves**: 實現 Episodic Memory 到長期策略的閉環，自動注入歷史成功的修復規則。
+- **Core or Skill**: Skill / Intelligence
+- **Trigger Phase**: P (Predict) / C (Crystal)
+- **Input Contract**: `task_description`
+- **Output Contract**: `policy_hit_ids`
+- **Success Criteria**: 命中率 > 20% 且能有效縮短 Repair 輪次。
+- **Dependency/Prerequisite**: `policy_manager.py` (現存於 `/Users/jameschen/Workspace/nexus/nexus/core/policy_manager.py`)
+- **Integration Point**: `commander.py` (P-Stage Hook)
+- **Priority**: P0 (品質核心)
+- **Confidence**: High
 - **Problem It Solves**: 讓診斷從「讀報錯」升級為「邊查邊想」，追蹤跨檔案調用鏈，解決修復品質不穩的痛點。
 - **Core or Skill**: Skill
 - **Trigger Phase**: D (Diagnose)

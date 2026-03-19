@@ -1,4 +1,0 @@
-task_id,status,tokens,token_raw_model,token_fallback_est,token_system_overhead,token_source_x,token_source_r,token_capture_status,phase_path,review_status,duration,health,drift
-OFF-001,FAIL,1426,0,1376,50,1426,0,fallback_est,P -> X -> D,UNKNOWN,5.91,100.0,0.0
-OFF-002,FAIL,1412,0,1362,50,1412,0,fallback_est,P -> X -> D,UNKNOWN,4.52,100.0,0.0
-OFF-003,FAIL,1571,0,1521,50,1571,0,fallback_est,P -> X -> D,UNKNOWN,4.96,100.0,0.0

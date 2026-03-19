@@ -1,7 +1,13 @@
-# 2026-03-18 Nexus Incident Copilot v0.1 計畫與 TODO
+# 2026-03-19 Nexus Incident Copilot v0.2 (v9 Alignment)
 
 ## 目標
-在不改變 Nexus 主架構前提下，建立「可落地、可驗證、可審計」的自動化故障偵測與處置輔助流程。
+將 Incident Copilot 與 Nexus v9 核心架構對位，實現基於「資源自覺」與「分身隔離」的主動式診斷與自癒輔助。
+
+## 核心升級
+1. **主動觸發 (Active Trigger)**: 從等待 Log 變更為直接掛鉤 `task_runner.py` 的 Exit Code (如 429/401)。
+2. **隔離區診斷**: 支援對 `isolated_swarm/` 目錄及其殘留狀態的深度掃描。
+
+---
 
 ## 範圍（MVP）
 1. OTel/Log ingestion（最小）

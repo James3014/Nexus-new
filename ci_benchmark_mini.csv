@@ -1,4 +1,0 @@
-task_id,status,tokens,token_raw_model,token_fallback_est,token_system_overhead,token_source_x,token_source_r,token_capture_status,phase_path,review_status,duration,health,drift,lowest_phase_health
-OFF-001,PASS,1626,0,1376,250,1426,100,ok,P -> X -> D -> R -> A -> C,APPROVED,6.89,95.66,0.0,80.0
-OFF-002,PASS,1612,0,1362,250,1412,100,ok,P -> X -> D -> R -> A -> C,APPROVED,5.8,95.7,0.0,80.0
-OFF-003,PASS,1771,0,1521,250,1571,100,ok,P -> X -> D -> R -> A -> C,APPROVED,6.54,95.28,0.0,80.0

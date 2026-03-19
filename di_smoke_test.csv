@@ -1,6 +1,0 @@
-task_id,status,tokens,fallback_triggered,duration
-issue-1,PASS,1600,0,45.5
-issue-2,PASS,1700,0,45.5
-issue-3,FAIL,1800,0,45.5
-issue-4,PASS,1900,0,45.5
-issue-5,PASS,2000,1,45.5

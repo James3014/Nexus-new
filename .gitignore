@@ -27,3 +27,5 @@ nexus_benchmark.csv
 nexus.log
 
 .worktrees/
+
+isolated_swarm/

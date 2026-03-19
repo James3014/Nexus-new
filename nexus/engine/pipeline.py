@@ -14,6 +14,12 @@ class NexusPipeline:
         """執行核心 P-X-D-R-A-C 管線"""
         task_id = f"{task_type}-{int(time.time())}"
         state = NexusState(task_id=task_id)
+        state.metadata["task_description"] = task_desc
+        self.engine.state_io.save_global_state(state) # 🛡️ Save before commander loads it
+        self.engine.commander.next_step(status="started") # 🎯 Trinity Trigger
+        state.metadata["task_description"] = task_desc
+        self.engine.state_io.save_global_state(state) # 🛡️ Save before commander loads it
+        self.engine.commander.next_step(status="started") # 🎯 Trinity Trigger
         
         # Shortcuts to engine components
         hub = self.engine.hub
@@ -91,7 +97,7 @@ class NexusPipeline:
         # --- C Stage: Crystallize ---
         if success:
             state.current_phase = "C"
-            self.engine.commander.crystallize(state)
+            self.engine.commander.next_step(status="completed")
             self.engine._add_step_to_history(state, "C")
 
         # Health Evaluation

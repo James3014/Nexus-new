@@ -1,12 +1,14 @@
-# 2026-03-18 Nexus 記憶與學習 v2（重構後）計畫與 TODO
+# 2026-03-19 Nexus 記憶與學習 v2.1 (v9 Alignment)
 
-## 啟動前提（Gate）
+## 啟動前提（Gate） [PASSED]
 本計畫**排在重構之後**，前置依賴如下：
-1. `2026-03-17_Nexus_重構PR任務包_超細版.md` 內高優先 PR 已完成。
-2. Benchmark 與 CI replay 可重跑且結果穩定。
-3. Token 與 phase 事件欄位契約固定（至少 2 次連跑無破壞性變更）。
+1. `2026-03-17_Nexus_重構PR任務包_超細版.md` 內高優先 PR 已完成。 [DONE]
+2. Benchmark 與 CI replay 可重跑且結果穩定。 [DONE]
+3. Token 與 phase 事件欄位契約固定 (v1.5.2)。 [DONE]
 
 未達上述條件時，不進入本計畫開發。
+
+---
 
 ## 目標（第一性原理）
 1. 記憶：在決策當下提供可提升成功率/成本效率的資訊。
@@ -19,8 +21,6 @@
 
 ## 分階段規劃（排程在重構後）
 
-### Phase M1（Week 1）資料模型與事件契約
-交付：
 1. 記憶雙層模型
 - `episodic_memory`：任務事件原始紀錄（task/phase/decision/result/cost）。
 - `policy_memory`：可執行規則（條件/動作/信心分數/來源證據）。
