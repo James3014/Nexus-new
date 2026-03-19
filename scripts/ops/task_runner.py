@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT))
 from scripts.utils.git_worktree import GitWorktreeManager
 from scripts.ops.incident_rca_adapter import IncidentRCAAdapter
+from scripts.utils.pid_lock import acquire_lock, release_lock
+from nexus.core.task_graph import topo_sort
 wt_manager = GitWorktreeManager(ROOT)
 incident_adapter = IncidentRCAAdapter(ROOT)
 MANIFEST = ROOT / os.environ.get("MANIFEST", "task_manifest.yaml")
@@ -124,45 +126,7 @@ def check_done(task: dict, rc: int, stdout: str, stderr: str) -> tuple[bool, str
         return rc == 0, f"phase_result_ok:{stdout}"
     return False, "unsupported done_when"
 
-def acquire_lock() -> int | None:
-    if os.environ.get("NEXUS_FORCE_RUN") == "1":
-        return 99999
-    if LOCK_FILE.exists():
-        try:
-            pid = int(LOCK_FILE.read_text().strip())
-            os.kill(pid, 0)
-            return None
-        except:
-            LOCK_FILE.unlink(missing_ok=True)
-    try:
-        fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode())
-        return fd
-    except:
-        return None
 
-def release_lock(fd: int | None) -> None:
-    if fd is not None:
-        try: os.close(fd)
-        except: pass
-        LOCK_FILE.unlink(missing_ok=True)
-
-def topo_sort(tasks: list[dict]) -> list[dict]:
-    by_id = {t["id"]: t for t in tasks}
-    visited, temp, out = set(), set(), []
-    def dfs(tid):
-        if tid in visited: return
-        if tid in temp: raise RuntimeError(f"cycle:{tid}")
-        temp.add(tid)
-        task_obj = by_id.get(tid)
-        if not task_obj: raise RuntimeError(f"missing:{tid}")
-        for d in task_obj.get("depends_on", []):
-            dfs(d)
-        temp.remove(tid)
-        visited.add(tid)
-        out.append(task_obj)
-    for tid in by_id: dfs(tid)
-    return out
 
 def execute_single_task(task: dict, run_cmd: str, manifest_defaults: dict, policy: dict, state: dict):
     tid = task["id"]
@@ -228,7 +192,7 @@ def main():
     parser.add_argument("--with-deps", action="store_true", help="Run with recursive dependencies")
     args = parser.parse_args()
 
-    lock_fd = acquire_lock()
+    lock_fd = acquire_lock(LOCK_FILE)
     if lock_fd is None: return 3
 
     try:
@@ -343,7 +307,7 @@ def main():
         write_heartbeat(state)
         return 0 if not failed_tids else 1
     finally:
-        release_lock(lock_fd)
+        release_lock(LOCK_FILE, lock_fd)
 
 if __name__ == "__main__":
     import sys
