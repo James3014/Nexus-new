@@ -103,7 +103,29 @@ class NexusPipeline:
                     audit_success = False
                     status = "REJECTED"
 
+            state.metadata["patch_generated"] = bool(result_object.get("patch_generated")) if result_object else False
+            state.metadata["no_change_reason"] = (result_object.get("no_change_reason") or "").strip() if result_object else ""
+            state.metadata["patch_apply_success"] = result_object.get("patch_apply_success") if result_object else False
+
             if audit_success:
+                # 🛡️ WP-6: Forced Write Proof Generation
+                proof_data = {
+                    "task_id": state.task_id,
+                    "target_files": result_object.get("files", []) if 'result_object' in locals() else [],
+                    "before_hash": "N/A",
+                    "after_hash": "N/A",
+                    "changed": bool(patch_apply_success) if 'patch_apply_success' in locals() else False,
+                    "decision": "no_change" if not patch_generated else "APPROVED",
+                    "no_change_reason": no_change_reason if 'no_change_reason' in locals() else ""
+                }
+                try:
+                    proof_dir = self.engine.run_dir.parent / "latest"
+                    proof_dir.mkdir(parents=True, exist_ok=True)
+                    (proof_dir / "write_proof.json").write_text(json.dumps(proof_data, indent=2))
+                    logger.info("✅ write_proof.json persisted.")
+                except Exception as e:
+                    logger.error(f"❌ Failed to persist write_proof: {e}")
+                
                 success = True
                 break
             

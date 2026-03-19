@@ -153,7 +153,8 @@ def check_done(task: dict, rc: int, stdout: str, stderr: str) -> tuple[bool, str
             return False, "done_when command missing"
         try:
             rc, _, err = run_shell(cmd, timeout_sec=task.get("timeout_sec", 900))
-            return rc == 0, f"cmd_rc={rc} {err.strip()}"
+            err_str = err.strip() if err else ""
+            return rc == 0, f"cmd_rc={rc} {err_str}"
         except Exception as e:
             return False, f"done_when exception: {e}"
     return False, "unsupported done_when"

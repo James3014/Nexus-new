@@ -284,6 +284,9 @@ class NexusEngine:
                 "health": final_state.health_score,
                 "drift": final_state.health_metrics.drift_index,
                 "lowest_phase_health": lowest_ph,
+                "patch_generated": final_state.metadata.get("patch_generated"),
+                "patch_apply_success": final_state.metadata.get("patch_apply_success"),
+                "no_change_reason": final_state.metadata.get("no_change_reason", ""),
             }
             results.append(res)
             logger.info(
@@ -312,6 +315,9 @@ class NexusEngine:
                 "health",
                 "drift",
                 "lowest_phase_health",
+                "patch_generated",
+                "patch_apply_success",
+                "no_change_reason",
             ]
             with open(output_csv, "w", newline="") as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
