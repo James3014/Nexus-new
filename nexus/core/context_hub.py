@@ -24,6 +24,19 @@ class ToonRenderer:
             
         return "\n".join(summary)
 
+class ContextScorer:
+    """🎯 Trinity Context Scorer: 依階段決定檔案權重 (PHA-021)"""
+    @staticmethod
+    def get_relevance(phase: str, file_path: str) -> float:
+        path = file_path.lower()
+        if phase == "P":
+            return 1.0 if any(k in path for k in ["index", "manifest", "todo"]) else 0.5
+        if phase == "D":
+            return 1.0 if any(k in path for k in ["test", "log", "trace"]) else 0.4
+        if phase in ["R", "A"]:
+            return 1.0 if path.endswith(".py") or path.endswith(".js") else 0.3
+        return 0.5
+
 class ContextHub:
     """
     🧠 Nexus Context Hub

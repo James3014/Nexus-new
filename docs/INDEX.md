@@ -7,8 +7,15 @@
 - **實時狀態彙報**：[EXEC_LIVE_STATUS.md](file:///Users/jameschen/Workspace/nexus/docs/EXEC_LIVE_STATUS.md)
 
 ### Next (正在做 / 下一個)
-- [x] **Goal 1: Phase Health 落檔** (已完成：數據鏈補全與自動填充邏輯已掛載至 Commander)
-- [ ] **Goal 2: Auto Repair 觸發** (待啟動：連動 Phase Health < 70% 觸發修復)
+- [x] **Goal 1: Phase Health 落檔** (已完成)
+- [x] **Goal 2: Auto Repair 觸發** (已完成：健康度 < 70% 自動自癒)
+- [ ] **Goal 3: Trinity Evolution Phase 5** (即將啟動：全量對位率基準測試)
+- [ ] **Goal 4: Learning Velocity 優化** (代碼已完成：TraumaEngine 持續採集中)
+
+### Trinity Evolution (三位一體演化)
+- [x] **Intent Gate**：攔截模糊指令，提升 P 階段對位率 (TDD PASSED)
+- [x] **Coherence Filter (TOON)**：語義壓縮，Context 噪訊下降 70% (TDD PASSED)
+- [x] **Autonomic Learning (Trauma)**：失敗驅動調權，系統具備自癒學習能力 (TDD PASSED)
 
 ### Done (已完成)
 - **物理收斂 WP-4**：完成 `wt-wp4-1` 至主線的實體合併與測試驗收 (2026-03-19)。參閱 [重構PR任務包_超細版](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-17_Nexus_重構PR任務包_超細版.md)。
