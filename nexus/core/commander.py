@@ -28,6 +28,15 @@ class Commander:
             f"🧭 [Commander] Current state: {state.current_phase}:{state.current_step_id or 'none'}"
         )
 
+        # 🎯 P 階段: Policy 檢索與注入 (Week 2 M2)
+        if state.current_phase == "P":
+            from nexus.core.policy_manager import PolicyManager
+            pm = PolicyManager(self.project_root)
+            # 這裡需要傳入任務描述，假設從 state 或 manifest 取得
+            descr = state.metadata.get("task_description", "")
+            pm.apply_policy_to_state(state, descr)
+            self.state_io.save_global_state(state)
+
         # 🧪 C 階段: 創傷捕捉 + 記憶與學習 v2 (Episode 紀錄)
         if state.current_phase == "C" or status == "completed":
             from nexus.core.policy_manager import PolicyManager

@@ -158,6 +158,10 @@ class NexusState(BaseModel):
     # --- Trinity v9.0 Extensions ---
     autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
     learning_velocity: float = 0.0
+    policy_hit_ids: List[str] = Field(default_factory=list)
+    policy_applied: bool = False
+    execution_mode: str = "one-shot"
+    trigger_reason: str = "user"
     
     # --- Observability & Metrics ---
     total_token_usage: int = 0

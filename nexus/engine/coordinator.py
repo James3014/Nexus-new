@@ -294,14 +294,17 @@ class NexusEngine:
                 "health": final_state.health_score,
                 "drift": final_state.health_metrics.drift_index,
                 "lowest_phase_health": lowest_ph,
+                "policy_hit": ",".join(final_state.policy_hit_ids),
+                "learning_velocity": final_state.learning_velocity,
             }
             results.append(res)
             logger.info(
-                "🏁 [Benchmark] Case %s: %s (Tokens: %d, ph_min: %.1f)",
+                "🏁 [Benchmark] Case %s: %s (Tokens: %d, ph_min: %.1f, v: %.2f)",
                 case_id,
                 res["status"],
                 res["tokens"],
                 res["lowest_phase_health"],
+                res["learning_velocity"],
             )
 
         # 輸出 CSV
@@ -322,6 +325,8 @@ class NexusEngine:
                 "health",
                 "drift",
                 "lowest_phase_health",
+                "policy_hit",
+                "learning_velocity",
             ]
             with open(output_csv, "w", newline="") as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

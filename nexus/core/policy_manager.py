@@ -40,7 +40,11 @@ class PolicyManager:
             })
         return policies
 
-    def apply_policy_to_state(self, state: NexusState):
-        """將 Policy 注入當前狀態機"""
-        # TODO: 真正影響下一步決策
-        pass
+    def apply_policy_to_state(self, state: NexusState, task_description: str):
+        """將 Policy 注入當前狀態機 (PHA-051)"""
+        policies = self.propose_policy(task_description)
+        if policies:
+            print(f"🎯 [PolicyManager] Applying {len(policies)} policies...")
+            state.policy_hit_ids = [p["rule_id"] for p in policies]
+            state.policy_applied = True
+            # 可擴展: 根據 policy 修改 state.config 或其他參數
