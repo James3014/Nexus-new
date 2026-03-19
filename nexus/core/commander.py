@@ -28,9 +28,18 @@ class Commander:
             f"🧭 [Commander] Current state: {state.current_phase}:{state.current_step_id or 'none'}"
         )
 
-        # 🧪 C 階段: 創傷捕捉與學習
+        # 🧪 C 階段: 創傷捕捉 + 記憶與學習 v2 (Episode 紀錄)
         if state.current_phase == "C" or status == "completed":
+            from nexus.core.policy_manager import PolicyManager
+            pm = PolicyManager(self.project_root)
+            
             TraumaEngine.process_failures(state)
+            pm.record_episode(state) # 🔄 M1: record_episode
+            
+            # 每 10 回合壓縮一次記憶 (PHA-041)
+            if len(state.steps_history) % 10 == 0:
+                 import subprocess
+                 subprocess.run(["uv", "run", "scripts/ops/flash_ingest.py"], capture_output=True)
 
         # 🛡️ External Needed Hook (Lesson from 09_STATE_CONTRACT_DRAFT)
         if state.external_needed:
