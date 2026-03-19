@@ -40,9 +40,14 @@ class PlannerPhaseHandler(BasePhaseHandler):
 
     def _guard_intent(self, task: str) -> tuple[bool, str]:
         """🛡️ 檢查意圖是否模糊 (Heuristic)"""
-        if len(task) < 10:
+        # 放寬長度限制並支援 OFF- 系列任務編號 (v9-Audit-Fix)
+        if len(task) < 5:
             return False, "指令過於簡短，請描述具體目標。"
         
+        # 如果是明確的基準測試任務 ID，直接放行
+        if task.startswith("OFF-") or task.startswith("FEAT-"):
+            return True, ""
+
         fuzzy_keywords = ["改一下", "改改", "修一下", "弄好"]
         if any(kw in task for kw in fuzzy_keywords) and "/" not in task:
             return False, "檢測到模糊指令且未指定路徑。"

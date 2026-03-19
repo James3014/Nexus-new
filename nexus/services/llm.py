@@ -7,8 +7,23 @@ import tempfile
 import os
 from pathlib import Path
 from typing import Any
-import openai
-from openai import OpenAI
+try:
+    from nexus.engine.phases.base import BasePhaseHandler
+except ImportError:
+    # Fallback if circular import
+    class BasePhaseHandler:
+        def __init__(self, *args, **kwargs): pass
+
+try:
+    from nexus.core.state_contracts import NexusState
+except ImportError:
+    NexusState = Any
+    try:
+        import openai
+        from openai import OpenAI
+    except ImportError:
+        openai = None
+        OpenAI = None
 
 
 class LLMClient:
@@ -29,9 +44,12 @@ class LLMClient:
             self.oauth_provider = os.getenv("NEXUS_OAUTH_PROVIDER", "gemini")
             print(f"⚠️ [Auth] OPENAI_API_KEY missing. Falling back to OAuth CLI: {self.oauth_provider}")
 
-        from nexus.services.prompt_builder import PromptBuilder
-
-        self.prompt_builder = PromptBuilder(str(self.project_root))
+        try:
+            from nexus.services.prompt_builder import PromptBuilder
+            self.prompt_builder = PromptBuilder(str(self.project_root))
+        except (ImportError, TypeError):
+            self.prompt_builder = None # type: ignore
+            print("⚠️ [LLM] PromptBuilder loading failed.")
 
     def get_anti_token_estimate(self) -> int:
         """
@@ -165,46 +183,61 @@ class LLMClient:
 
     def _ask_via_cli(self, prompt, model_name, phase):
         """🛡️ OAuth Fallback: 透過 CLI (gemini) 獲取結果與真實 Token。"""
-        try:
-            # 建立暫存檔存放 prompt 避免 arg 長度限制
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                prompt_file = f.name
+        import time
+        max_retries = 3
+        last_err = ""
+        
+        for attempt in range(max_retries):
+            try:
+                # 注入系統提示
+                sys_msg = f"You are a Nexus v9 agent. Return JSON matching this schema: {json.dumps(self.OUTPUT_SCHEMA)}"
                 
-            # 注入系統提示
-            sys_msg = f"You are a Nexus v9 agent. Return JSON matching this schema: {json.dumps(self.OUTPUT_SCHEMA)}"
-            
-            # 實際執行時將 prompt 內容傳入 stdin
-            res = subprocess.run(
-                [self.oauth_provider, "-p", sys_msg + "\n\n" + prompt, "--output-format", "json"],
-                capture_output=True, text=True, timeout=180
-            )
-            
-            os.unlink(prompt_file)
-            
-            if res.returncode != 0:
-                return self._build_error_result(f"CLI error: {res.stderr}", capture_status="cli_error"), res.stderr
+                # 實際執行時將 prompt 內容以 STDIN 方式傳入避免 ARG_MAX (PHA-021)
+                res = subprocess.run(
+                    [self.oauth_provider, "-p", sys_msg, "--output-format", "json"],
+                    input=prompt,
+                    capture_output=True, text=True, timeout=180
+                )
                 
-            # 🛡️ Hardened: 由於 STDOUT 可能包含 "Loaded cached..." 等噪音，需提取純 JSON 部分
-            stdout = res.stdout
-            json_start = stdout.find("{")
-            json_end = stdout.rfind("}")
-            if json_start == -1 or json_end == -1:
-                return self._build_error_result("CLI output contains no JSON", capture_status="cli_error"), stdout
+                if res.returncode != 0:
+                    last_err = res.stderr
+                    print(f"⚠️ [LLM_CLI] Attempt {attempt+1} failed: {res.stderr}")
+                    time.sleep(2 ** attempt) # Exponential backoff
+                    continue
+                    
+                # 🛡️ Hardened: 由於 STDOUT 可能包含 "Loaded cached..." 等噪音，需提取純 JSON 部分
+                stdout_str = str(res.stdout)
+                json_start = stdout_str.find("{")
+                json_end = stdout_str.rfind("}")
+                if json_start == -1 or json_end == -1:
+                    last_err = "No JSON in output"
+                    print(f"⚠️ [LLM_CLI] Attempt {attempt+1} - No JSON found in output.")
+                    continue
+                    
+                json_text = stdout_str[json_start : json_end + 1]
+                data = json.loads(json_text)
+                output = data.get("response", "{}")
                 
-            data = json.loads(stdout[json_start:json_end+1])
-            output = data.get("response", "{}")
-            
-            # 擷取真實 Token
-            tokens_total = 0
-            stats = data.get("stats", {}).get("models", {})
-            for m_name, m_stats in stats.items():
-                tokens_total += m_stats.get("tokens", {}).get("total", 0)
+                # 擷取真實 Token
+                tokens_total = 0
+                stats = data.get("stats", {}).get("models", {})
+                if isinstance(stats, dict):
+                    for m_stats in stats.values():
+                        if isinstance(m_stats, dict):
+                            tokens_total += m_stats.get("tokens", {}).get("total", 0)
+                    
+                return self._parse_json_response(output, tokens_total, "ok" if tokens_total > 0 else "fallback_est")
                 
-            return self._parse_json_response(output, tokens_total, "ok" if tokens_total > 0 else "fallback_est")
-            
-        except Exception as e:
-            return self._build_error_result(f"CLI execution failed: {e}", capture_status="cli_error"), str(e)
+            except Exception as e:
+                last_err = str(e)
+                print(f"⚠️ [LLM_CLI] Attempt {attempt+1} exception: {e}")
+                time.sleep(2 ** attempt)
+                
+        return self._build_error_result(
+            f"CLI execution failed after {max_retries} retries: {last_err}", 
+            capture_status="cli_error",
+            category="cli_fallback_failure"
+        ), last_err
 
     def _parse_json_response(self, output, tokens_total, capture_status):
         """統一解析 JSON 並注入 Token 指標。"""

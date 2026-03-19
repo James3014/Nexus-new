@@ -1,7 +1,7 @@
 # Nexus Phase Health Implementation Plan (v1)
 
 > [!important]
-> **Status**: `ACTIVE` / `ERA-C`
+> **Status**: `COMPLETED` / `ERA-C` (2026-03-19)
 
 ## Scope
 目標是把以下 5 項變成可直接執行的工程任務：

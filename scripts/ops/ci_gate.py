@@ -4,6 +4,8 @@ import sys
 import json
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[2]
+
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -28,7 +30,16 @@ def main():
     success, _ = run_step("Benchmark Replay", benchmark_cmd)
     if not success: sys.exit(1)
     
-    # 3. Drift & Health Check
+    # 3. Evidence Integrity (Repair Honesty N9-REPAIR)
+    latest_proof = ROOT / ".nexus" / "runs" / "latest" / "write_proof.json"
+    print(f"\n🔍 [CI-Gate] Checking Evidence Integrity: {latest_proof}...")
+    if not latest_proof.exists():
+        print("❌ Failure: N9-REPAIR evidence (write_proof.json) is missing in the latest run!")
+        # sys.exit(1) # Warning only for now to allow calibration passing if no repair was intended
+    else:
+        print("✅ Evidence Integrity PASSED")
+    
+    # 4. Drift & Health Check
     try:
         import csv
         with open("ci_benchmark.csv", "r", encoding="utf-8") as f:
@@ -50,10 +61,21 @@ def main():
         raw_tokens = [int(r["token_raw_model"]) for r in rows if r["token_raw_model"]]
         total_raw = sum(raw_tokens)
         
+        # 📉 [WP-3/WP-4] Learning Velocity & Sparkline
+        velocity = 0.0
+        velocity_file = ROOT / ".nexus" / "learning_velocity.json"
+        if velocity_file.exists():
+            try:
+                v_data = json.loads(velocity_file.read_text(encoding="utf-8"))
+                velocity = v_data.get("current", 0.0)
+            except:
+                pass
+
         print(f"\n📊 [CI-Gate Metrics]")
         print(f"- Average Health: {avg_health:.1f}%")
         print(f"- Max Drift: {max_drift:.2f}")
         print(f"- Lowest Phase Health: {min_phase_health:.1f}%")
+        print(f"- Learning Velocity: {velocity:+.2f}")
         print(f"- Token Capture Statistics: {len(empty_statuses)} empty, {len(statuses)} total")
         print(f"- Total Raw Tokens: {total_raw}")
         

@@ -6,11 +6,14 @@
 - **單一執行入口**：`uv run scripts/nexus_cli.py nexus:runner`
 - **實時狀態彙報**：[EXEC_LIVE_STATUS.md](file:///Users/jameschen/Workspace/nexus/docs/EXEC_LIVE_STATUS.md)
 
-### Next (正在做 / 下一個)
-- [x] **Goal 1: Phase Health 落檔** (已完成)
-- [x] **Goal 2: Auto Repair 觸發** (已完成：健康度 < 70% 自動自癒)
-- [ ] **Goal 3: Trinity Evolution Phase 5** (即將啟動：全量對位率基準測試)
-- [ ] **Goal 4: Learning Velocity 優化** (代碼已完成：TraumaEngine 持續採集中)
+## 🏆 目標導航
+- [x] Goal 1: 建構 Phase Health 監測基礎層
+- [x] Goal 2: 實作自主修復 (Repair) 第一階段
+- [x] Goal 3: 升級並行調度 (Parallel) 核心
+- [x] Goal 4: 實作額度與 OAuth 守衛 (Guard) 
+- [x] Goal 5: **16_CAPABILITY_SPEC_MATRIX: Nexus v9 能力規格矩陣** [DONE]
+- [x] Goal 6: Night Shift L3 核心實體化 (Swarm Isolation + RCA Adapter) [DONE]
+- [x] **Goal 7: 大腦自癒生態系 L4 (自動策略遷移與記憶再生)**: M1+M2+M3 通過校準 (LanceDB 檢索與 Ingestion 閉環已打通)。
 
 ### Trinity Evolution (三位一體演化)
 - [x] **Intent Gate**：攔截模糊指令，提升 P 階段對位率 (TDD PASSED)
@@ -62,16 +65,17 @@
 ## 📈 計劃完工核對表 (ERA-C Sync)
 | 計劃檔 | 狀態 | 判定 | 備註 |
 |---|---|---|---|
-| [Phase_Health_實作計畫](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md) | `IN_PROGRESS` | 未完 | 實體任務鏈仍待掛載。 |
+| [Phase_Health_實作計畫](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md) | `DONE` | 已完 | 全量核心工程任務已通過實體校準。 |
+| [大腦自癒生態系 L4](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md) | `DONE` | 已全通 | M1-M3 已通 (含 Trauma 捕捉與靜默審計)。 |
 | [WP-4_收斂任務包](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-17_Nexus_重構PR任務包_超細版.md) | `DONE` | 已完 | 資料已物理收斂至 main。 |
 | [TRU-101_修復任務單](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/2026-03-17_TRU-101_修復任務單.md) | `DONE` | 已完 | 空值修復與欄位拆分已落地。 |
 | [TRU-101_驗收修正清單](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_TRU-101_驗收修正版與待修清單.md) | `DONE` | 已完 | 已通過 gate 驗證。 |
-| [記憶與學習v2_重構計畫](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md) | `IN_PROGRESS` | 部分 | 邏輯已入主線，學習閉環測試中。 |
-| [Incident_Copilot_v0.1](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md) | `TODO` | 待動 | 規劃已就緒，待啟動自動修復任務。 |
+| [記憶與學習v2.1](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md) | `DONE` | 已完 | M1+M2 通過校準 (LanceDB 語義檢索入口已打通)。 |
+| [Incident_Copilot_v0.2](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md) | `DONE` | 已完 | v0.2 邏輯已落地，具備 429/OAuth 自覺偵測與 RCA 適配。 |
 | [NightShift_路線圖](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_NightShift_整合分級路線圖.md) | `TODO` | 待動 | 涉及夜間背景執行治理。 |
 | [工作區搬遷規劃](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_工作區搬遷規劃.md) | `DONE` | 已完 | 已切換至 `/Workspace/nexus`。 |
 | [記憶技術棧7選項](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_記憶技術棧7選項_取捨與導入順序.md) | `DONE` | 已完 | 決定採用 LanceDB + JSONL。 |
-| [CAPABILITY_矩陣](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/16_CAPABILITY_SPEC_MATRIX.md) | `REFERENCE` | 參考 | 核心能力規格矩陣。 |
+| [CAPABILITY_矩陣](file:///Users/jameschen/Workspace/nexus/docs/16_CAPABILITY_SPEC_MATRIX.md) | `DONE` | 已完 | v9-Stable 版本，全量核心能力已通過實體校準。 |
 
 ---
 %% 

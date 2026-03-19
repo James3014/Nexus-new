@@ -83,6 +83,7 @@ class NexusEngine:
         )
         self.tracelog_path = self.run_dir / "tracelog.jsonl"
         self.phases = phases or {}
+        self._memory = None
 
     @property
     def hub(self):
@@ -98,6 +99,18 @@ class NexusEngine:
         self._hub = ContextHub(str(self.project_root), run_dir=str(self.run_dir))
         return self._hub
 
+    @property
+    def memory(self):
+        """🧠 v9.3: Lazy-loaded MemoryService for semantic learning."""
+        if self._memory is None:
+            from nexus.services.memory import MemoryService
+            self._memory = MemoryService(
+                project_root=str(self.project_root),
+                run_dir=str(self.run_dir),
+                silent=self.silent
+            )
+        return self._memory
+
     def _voice_notify(self, message: str):
         self.reporter.voice_notify(message)
 
@@ -111,8 +124,8 @@ class NexusEngine:
         state: NexusState,
         phase: str,
         status: str = "completed",
-        metadata: Dict[str, Any] = None,
-        summary: str = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        summary: Optional[str] = None,
     ):
         """🧬 Nexus Soul Protocol: Record step into history for auditability."""
         from nexus.core.state_contracts import StepRecord
@@ -200,7 +213,12 @@ class NexusEngine:
         logger.info(
             "[Nexus:Benchmark] Initializing real-world benchmark run for %s", framework
         )
-        self._voice_notify(f"開始執行 {framework} 真實基準測試")
+        # 💡 Sir's Request: 不要發出健康審計的語音通知 (PHA-050)
+        original_silent = self.reporter.silent
+        if framework == "health-audit":
+            self.reporter.silent = True
+        else:
+            self._voice_notify(f"開始執行 {framework} 真實基準測試")
         catalog_path = self.project_root / "cases" / "catalog.json"
         if not catalog_path.exists():
             logger.error("❌ Benchmark catalog not found!")
