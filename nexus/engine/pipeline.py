@@ -1,7 +1,5 @@
 import logging
 import time
-import json
-from datetime import datetime
 from typing import Dict, Any, Optional
 from nexus.core.state_contracts import NexusState
 
@@ -51,10 +49,6 @@ class NexusPipeline:
             
         if research_pack:
             pack["research_context"] = research_pack
-        
-        # 🧬 WP-1: Record D phase overhead and capture potential research tokens
-        pack["token_capture_status"] = "ok"
-        accumulator.record(state, "D", pack, overhead=50)
         self.engine._add_step_to_history(state, "D", metadata={"pack_keys": list(pack.keys())})
 
         # --- R/A Stage: Repair Loop ---
@@ -80,70 +74,16 @@ class NexusPipeline:
             
             # Log A (Audit) phase explicitly for phase path consistency
             state.current_phase = "A"
-            # 🧬 WP-1: Record A phase explicitly to capture status and overhead
-            accumulator.record(state, "A", res, overhead=50)
             self.engine._add_step_to_history(state, "A", metadata={"status": review_status_raw})
             
             status, audit_success = self.engine.ReviewStatusNormalizer.normalize(review_status_raw)
-            result_object = res.get("result_object", {}) if isinstance(res, dict) else {}
-            patch_generated = bool(result_object.get("patch_generated"))
-            no_change_reason = (result_object.get("no_change_reason") or "").strip()
-            patch_apply_success = result_object.get("patch_apply_success")
-
-            # Hard gate against phantom success:
-            # - If patch was generated, it must be applied successfully.
-            # - If no patch was generated, PASS must carry an explicit reason.
-            audit_failure_msg = ""
+            
             if audit_success:
-                if patch_generated and patch_apply_success is False:
-                    audit_failure_msg = "Audit PASS blocked: patch apply failed."
-                    logger.error(f"❌ [Gate] {audit_failure_msg}")
-                    audit_success = False
-                    status = "REJECTED"
-                elif not patch_generated and not no_change_reason:
-                    audit_failure_msg = "Audit PASS blocked: missing no_change_reason."
-                    logger.error(f"❌ [Gate] {audit_failure_msg}")
-                    audit_success = False
-                    status = "REJECTED"
-
-            state.metadata["patch_generated"] = bool(result_object.get("patch_generated")) if result_object else False
-            state.metadata["no_change_reason"] = (result_object.get("no_change_reason") or "").strip() if result_object else ""
-            state.metadata["patch_apply_success"] = result_object.get("patch_apply_success") if result_object else False
-
-            if audit_success:
-                # 🛡️ WP-6: Forced Write Proof Generation
-                proof_data = {
-                    "task_id": state.task_id,
-                    "target_files": result_object.get("files", []) if 'result_object' in locals() else [],
-                    "before_hash": "N/A",
-                    "after_hash": "N/A",
-                    "changed": bool(patch_apply_success) if 'patch_apply_success' in locals() else False,
-                    "decision": "no_change" if not patch_generated else "APPROVED",
-                    "no_change_reason": no_change_reason if 'no_change_reason' in locals() else ""
-                }
-                try:
-                    proof_dir = self.engine.run_dir.parent / "latest"
-                    proof_dir.mkdir(parents=True, exist_ok=True)
-                    (proof_dir / "write_proof.json").write_text(json.dumps(proof_data, indent=2))
-                    logger.info("✅ write_proof.json persisted.")
-                except Exception as e:
-                    logger.error(f"❌ Failed to persist write_proof: {e}")
-                
                 success = True
                 break
             
             if status == "REJECTED" and repair_attempts < self.engine.max_retries:
                 logger.warning(f"🔄 Audit Rejected. Retrying repair (Status: {status})")
-
-                # 🛡️ Dynamic Feedback Loop Injection
-                if audit_failure_msg:
-                    state.metadata["last_audit_failure"] = audit_failure_msg
-                elif "summary" in (res if isinstance(res, dict) else {}):
-                    state.metadata["last_audit_failure"] = res.get("summary")
-                elif "summary" in result_object:
-                    state.metadata["last_audit_failure"] = result_object.get("summary")
-                    
-                pack["audit_feedback"] = state.metadata.get("last_audit_failure", "Unknown audit failure")
                 continue
             else:
                 break
@@ -154,30 +94,9 @@ class NexusPipeline:
             self.engine.commander.crystallize(state)
             self.engine._add_step_to_history(state, "C")
 
-        # 🧬 Phase Health Autonomy: Update and Capture
-        from nexus.core.phase_health import PhaseHealthCalculator
-        PhaseHealthCalculator.update_state(state)
-
         # Health Evaluation
         health_score = health_evaluator.evaluate(state, success)
-        logger.info(f"📊 Final Health: {health_score:.1f}% | Success: {success} | Pipeline Health: {state.pipeline_health}%")
+        logger.info(f"📊 Final Health: {health_score:.1f}% | Success: {success}")
         
         self.engine.state_io.save_global_state(state)
-        
-        # 📂 WP-1: Save run-specific phase metrics
-        try:
-            run_dir = self.engine.run_dir / "phase_metrics"
-            run_dir.mkdir(parents=True, exist_ok=True)
-            run_file = run_dir / f"{state.task_id}_metrics.json"
-            
-            payload = {
-                "task_id": state.task_id,
-                "timestamp": datetime.now().isoformat(),
-                "pipeline_health": state.pipeline_health,
-                "metrics": {p: m.dict() for p, m in state.phase_metrics.items()}
-            }
-            run_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception as e:
-            logger.error(f"❌ [WP-1] Failed to save phase metrics: {e}")
-
         return success

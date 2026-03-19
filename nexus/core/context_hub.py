@@ -96,7 +96,6 @@ class ContextHub:
         state = self.state_io.load_global_state()
         pack = {
             "task_id": state.task_id,
-            "task": summary, # 🚀 Preserving task instruction
             "failure_summary": summary,
             "violations": violations[:10],  # 截斷以保持 token 效率
             "hotspots": list(set([

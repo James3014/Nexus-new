@@ -43,13 +43,23 @@ def assign_worker(task_name):
 
 def sync_manifest(next_tasks):
     with open(MANIFEST_PATH, "r") as f:
-        manifest = yaml.safe_load(f)
+        manifest = yaml.safe_load(f) or {"tasks": []}
     
-    current_tasks = {t["id"] for t in manifest.get("tasks", [])}
+    # 建索引以方便查找與更新
+    current_tasks_map = {t["id"]: t for t in manifest.get("tasks", [])}
     
     for i, task_text in enumerate(next_tasks):
+        # 使用任務內容的雜湊或編號作為 ID，此處維持 index.task.n 但檢查內容
         task_id = f"index.task.{i+1}"
-        if task_id not in current_tasks:
+        
+        if task_id in current_tasks_map:
+            # 如果 ID 存在，檢查描述是否變更
+            if current_tasks_map[task_id].get("description") != task_text:
+                print(f"  [*] Updating {task_id}: {task_text}")
+                current_tasks_map[task_id]["description"] = task_text
+                # 若內容變更，可能需要重設狀態，但這裡交由 runner 判定 done_when
+        else:
+            # 新增任務
             worker = assign_worker(task_text)
             new_task = {
                 "id": task_id,

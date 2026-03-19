@@ -149,7 +149,7 @@ class NexusState(BaseModel):
     token_raw_model: int = 0
     token_fallback_est: int = 0
     token_system_overhead: int = 0
-    token_capture_status: str = "ok"
+    token_capture_status: str = "unknown"
     phase_tokens: Dict[str, int] = Field(default_factory=dict)
     audit_pass_count: int = 0
     retry_count: int = 0

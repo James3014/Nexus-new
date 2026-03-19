@@ -49,26 +49,9 @@ class LLMClient:
             return 0
 
     OUTPUT_SCHEMA = {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["APPROVED", "REJECTED", "FAIL"]},
-            "summary": {"type": "string"},
-            "no_change_reason": {"type": "string"},
-            "violations": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "file": {"type": "string"},
-                        "reason": {"type": "string"},
-                        "suggestion": {"type": "string"},
-                        "patch": {"type": "string"}
-                    },
-                    "required": ["file", "reason", "suggestion"]
-                }
-            }
-        },
-        "required": ["status", "summary"]
+        "status": "APPROVED | REJECTED | FAIL",
+        "summary": "Short explanation",
+        "violations": ["list of rule violations"],
     }
 
     def _build_error_result(
@@ -220,8 +203,6 @@ class LLMClient:
                 
             return self._parse_json_response(output, tokens_total, "ok" if tokens_total > 0 else "fallback_est")
             
-        except subprocess.TimeoutExpired:
-            return self._build_error_result("CLI execution timed out after 180 seconds.", capture_status="timeout"), "Timeout"
         except Exception as e:
             return self._build_error_result(f"CLI execution failed: {e}", capture_status="cli_error"), str(e)
 

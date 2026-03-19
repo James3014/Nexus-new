@@ -1,16 +1,13 @@
+#!/usr/bin/env python3
 import json
 import os
-import sys
 import subprocess
 import time
 from pathlib import Path
 from datetime import datetime
 import yaml
-import argparse
 
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 MANIFEST = ROOT / "task_manifest.yaml"
 POLICY = ROOT / "configs" / "ask_policy.yaml"
 STATUS = ROOT / ".nexus" / "task_status.json"
@@ -32,7 +29,7 @@ def save_status(state: dict) -> None:
 
 
 def write_heartbeat(state: dict) -> None:
-    header = [
+    lines = [
         "# EXEC LIVE STATUS",
         "",
         f"Last Update: {now_str()}",
@@ -41,20 +38,11 @@ def write_heartbeat(state: dict) -> None:
         "|---|---|---:|---|---|",
     ]
     for tid, meta in state.get("tasks", {}).items():
-        header.append(
+        lines.append(
             f"| {tid} | {meta.get('status','pending')} | {meta.get('retry',0)} | {meta.get('updated_at','-')} | {meta.get('note','-')} |"
         )
-    header += ["", "Rule: pause only on destructive/credential/spec_conflict."]
-    
-    extra = ""
-    if HEARTBEAT.exists():
-        content = HEARTBEAT.read_text(encoding="utf-8")
-        if "### Learning Velocity Trend" in content:
-            extra = "\n\n" + content.split("### Learning Velocity Trend")[1].strip()
-            extra = "### Learning Velocity Trend\n" + extra
-    
-    full_content = "\n".join(header) + "\n\n" + extra
-    HEARTBEAT.write_text(full_content.strip() + "\n", encoding="utf-8")
+    lines += ["", "Rule: pause only on destructive/credential/spec_conflict."]
+    HEARTBEAT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def should_pause(run_cmd: str, policy: dict) -> tuple[bool, str]:
@@ -102,13 +90,12 @@ def run_phase_task(task: dict) -> tuple[int, str, str, list]:
             cli.engine.state_io.save_global_state(state)
             return 0, "MEASUREMENT_COMPLETE", "", []
 
-        if tid == "auto.repair.proto" or task_desc == "auto.repair.proto":
+        if tid == "auto.repair.proto":
             from nexus.core.auto_repair import AutoRepairEngine
             state = cli.engine.state_io.load_global_state()
-            # 🧪 [WP-3] Execute repairs to achieve convergence (Done status)
-            AutoRepairEngine.execute_repairs(state)
+            actions = AutoRepairEngine.analyze_and_suggest(state)
             cli.engine.state_io.save_global_state(state)
-            return 0, "REPAIR_EXECUTED", "", []
+            return 0, f"ACTIONS_SUGGESTED:{len(actions)}", "", []
 
         # Default Phase Task Execution
         success = False
@@ -153,8 +140,7 @@ def check_done(task: dict, rc: int, stdout: str, stderr: str) -> tuple[bool, str
             return False, "done_when command missing"
         try:
             rc, _, err = run_shell(cmd, timeout_sec=task.get("timeout_sec", 900))
-            err_str = err.strip() if err else ""
-            return rc == 0, f"cmd_rc={rc} {err_str}"
+            return rc == 0, f"cmd_rc={rc} {err.strip()}"
         except Exception as e:
             return False, f"done_when exception: {e}"
     return False, "unsupported done_when"
@@ -218,13 +204,9 @@ def topo_sort(tasks: list[dict]) -> list[dict]:
     return out
 
 
-def sync_status(state: dict) -> None:
-    """Ensure both persistent state and documentation are consistent."""
-    save_status(state)
-    write_heartbeat(state)
+import argparse
 
 def main() -> int:
-    print(f"DEBUG: main started, args={sys.argv}")
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", help="Run specific task ID (and its dependencies if needed)")
     parser.add_argument("--with-deps", action="store_true", help="Run task with its dependencies")
@@ -239,57 +221,41 @@ def main() -> int:
         manifest = load_config(MANIFEST)
         policy = load_config(POLICY)
 
-        if STATUS.exists():
-            try:
-                state = json.loads(STATUS.read_text(encoding="utf-8"))
-                # Always reset runtime state when starting a new invocation
-                state["started_at"] = now_str()
-                state["result"] = "running"
-                state.pop("finished_at", None)
-                
-                # 🧬 Clean up stale "running" tasks from previous crashed runs
-                for tid in state.get("tasks", {}):
-                    if state["tasks"][tid].get("status") == "running":
-                        state["tasks"][tid]["status"] = "failed"
-                        state["tasks"][tid]["note"] = "crashed_during_previous_run"
-            except:
-                state = {"started_at": now_str(), "tasks": {}, "result": "running"}
-        else:
-            state = {"started_at": now_str(), "tasks": {}, "result": "running"}
-             
-        sync_status(state)
-        
+        state = {"started_at": now_str(), "tasks": {}, "result": "running"}
+        save_status(state)
+        write_heartbeat(state)
         try:
             all_tasks = topo_sort(manifest.get("tasks", []))
             if args.task:
                 target_ids = {args.task}
                 if args.with_deps:
+                    # In topo_sort, we already have dependencies included if we find the task
+                    # But if we just want to FILTER the sorted list:
                     by_id = {t["id"]: t for t in manifest.get("tasks", [])}
                     if args.task not in by_id:
                         print(f"Task {args.task} not found in manifest")
                         return 1
+                    
+                    # Compute closure of dependencies
                     def get_deps(tid, res):
                         for d in by_id[tid].get("depends_on", []):
                             if d not in res:
                                 res.add(d)
                                 get_deps(d, res)
                     get_deps(args.task, target_ids)
+                
                 tasks = [t for t in all_tasks if t["id"] in target_ids]
             else:
                 tasks = all_tasks
         except Exception as e:
             state["result"] = "blocked"
             state["error"] = str(e)
-            sync_status(state)
+            save_status(state)
+            write_heartbeat(state)
             return 1
-
-        phase_task_enabled = os.environ.get("NEXUS_ENABLE_PHASE_TASK", "0") == "1"
 
         for task in tasks:
             tid = task["id"]
-            if not args.task and state["tasks"].get(tid, {}).get("status") == "done":
-                continue
-
             max_retry = int(task.get("max_retry", manifest.get("defaults", {}).get("max_retry", 1)))
             timeout_sec = int(task.get("timeout_sec", manifest.get("defaults", {}).get("timeout_sec", 900)))
             run_cmd = task.get("run", "")
@@ -303,7 +269,8 @@ def main() -> int:
                     "note": f"pause_on:{reason}",
                 }
                 state["result"] = "paused"
-                sync_status(state)
+                save_status(state)
+                write_heartbeat(state)
                 return 2
 
             ok = False
@@ -315,23 +282,12 @@ def main() -> int:
                     "updated_at": now_str(),
                     "note": run_cmd if task_type == "shell" else f"phase_task:{task.get('phase')}",
                 }
-                state["result"] = "running"
-                state.pop("finished_at", None)
-                sync_status(state)
+                save_status(state)
+                write_heartbeat(state)
 
                 selected_skills = []
                 try:
                     if task_type == "phase_task":
-                        if not phase_task_enabled:
-                            state["tasks"][tid] = {
-                                "status": "blocked",
-                                "retry": i,
-                                "updated_at": now_str(),
-                                "note": "phase_task disabled by policy (set NEXUS_ENABLE_PHASE_TASK=1 to enable)",
-                            }
-                            state["result"] = "blocked"
-                            sync_status(state)
-                            return 1
                         rc, out, err, selected_skills = run_phase_task(task)
                     else:
                         rc, out, err = run_shell(run_cmd, timeout_sec=timeout_sec)
@@ -348,7 +304,8 @@ def main() -> int:
                     }
                     if selected_skills:
                         state["tasks"][tid]["selected_skills"] = selected_skills
-                    sync_status(state)
+                    save_status(state)
+                    write_heartbeat(state)
                     ok = True
                     break
 
@@ -358,71 +315,30 @@ def main() -> int:
                     "updated_at": now_str(),
                     "note": f"rc={rc}; {check_note}; {err.strip()}",
                 }
-                sync_status(state)
+                save_status(state)
+                write_heartbeat(state)
                 time.sleep(1)
 
             if not ok:
                 action = task.get("on_fail", "escalate")
                 if action == "retry":
-                    state_res = "failed"
+                    state["result"] = "failed"
                 elif action == "fallback":
                     state["tasks"][tid]["status"] = "fallback_needed"
-                    state_res = "failed"
+                    state["result"] = "failed"
                 else:
                     state["tasks"][tid]["status"] = "blocked"
                     state["tasks"][tid]["note"] = f"escalate_required; {state['tasks'][tid].get('note','')}"
-                    state_res = "blocked"
-                state["result"] = state_res
-                sync_status(state)
+                    state["result"] = "blocked"
+                save_status(state)
+                write_heartbeat(state)
                 return 1
-
-            # 🧬 [WP-2] Auto-Health Audit & Dynamic Injection
-            # 🛡️ v9 Hardening: Prevent infinite repair loops
-            if (task_type == "phase_task" or "nexus:runner" in run_cmd) and not tid.startswith("auto.repair"):
-                 metric_file = ROOT / ".nexus" / "runs" / "latest" / "phase_metrics.json"
-                 if metric_file.exists():
-                     try:
-                         m_data = json.loads(metric_file.read_text(encoding="utf-8"))
-                         p_metrics = m_data.get("phase_metrics", {})
-                         pipeline_h = m_data.get("pipeline_health", 100.0)
-                         
-                         low_phase = None
-                         for p, m in p_metrics.items():
-                             h = m if isinstance(m, (int, float)) else m.get("health", 0.0)
-                             if 0 < h < 85:
-                                 low_phase = p
-                                 break
-                         
-                         # STRICT Threshold: only inject if health is actually low
-                         if low_phase or pipeline_h < 85:
-                             repair_id = f"auto.repair.{low_phase or 'pipeline'}.{int(time.time())}"
-                             print(f"🔧 [Auto-Repair] Low health detected (Pipeline: {pipeline_h}%, Phase {low_phase}: {p_metrics.get(low_phase,{}).get('health') if low_phase else 'N/A'}%). Injecting {repair_id}")
-                             
-                             repair_task = {
-                                 "id": repair_id,
-                                 "type": "phase_task",
-                                 "phase": "R",
-                                 "task": "auto.repair.proto",
-                                 "done_when": {"type": "phase_result_ok"},
-                                 "on_fail": "escalate",
-                                 "max_retry": 2
-                             }
-                             # Inject into current tasks
-                             tasks.insert(tasks.index(task) + 1, repair_task)
-                     except:
-                         pass
 
         state["result"] = "done"
         state["finished_at"] = now_str()
-        sync_status(state)
+        save_status(state)
+        write_heartbeat(state)
         return 0
-
-    except Exception as e:
-        print(f"❌ Unhandled Exception in Runner: {e}")
-        state["result"] = "blocked"
-        state["error"] = str(e)
-        sync_status(state)
-        return 1
     finally:
         release_lock(lock_fd)
 

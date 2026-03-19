@@ -50,7 +50,7 @@ class NexusOrchestrator:
         self.total_tokens = 0
         self.total_raw_model = 0
         self.total_fallback_est = 0
-        self.token_capture_statuses = ["ok"]
+        self.token_capture_statuses = []
         self.max_strikes = 3 if mode != "audit" else 1
 
     def set_execution_mode(self, mode: str, reason: str):

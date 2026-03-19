@@ -11,6 +11,14 @@ Requires-Dist: gitpython>=3.1.0
 Requires-Dist: radon>=5.1.0
 Requires-Dist: dependency-injector>=4.41.0
 Requires-Dist: pydantic-settings>=2.0.0
+Requires-Dist: lancedb>=0.5.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: redis>=5.0.0
+Requires-Dist: pytest>=8.0.0
+Requires-Dist: pytest-asyncio>=0.23.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: tiktoken>=0.6.0
 
 # Nexus v9 Autonomic: Zero-Drift Intelligence 🧬💎🚀
 
@@ -75,6 +83,14 @@ nexus:crystal
 # 為複雜功能執行端到端 P-D-R-A 總合驗證
 nexus:test --full-chain "voice narration feature"
 ```
+
+---
+
+## 🗺️ Navigation | 導航
+
+For detailed project architecture, refactor roadmap, and script ownership, please refer to the **[Project Index (docs/INDEX.md)](docs/INDEX.md)**.
+
+關於專案架構、重構路線圖與腳本所有權的詳細資訊，請參閱 **[專案索引 (docs/INDEX.md)](docs/INDEX.md)**。
 
 ---
 **Nexus v9: The engine that grows with the project.** 🫡🦾💎🚀✨🚩

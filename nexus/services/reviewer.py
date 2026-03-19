@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import re
 import os
 import json
 import shutil
@@ -107,9 +106,6 @@ class CodexLoopV2(NexusOrchestrator):
             return {
                 "status": "APPROVED",
                 "summary": "Bypassed via audit_level=bypass",
-                "patch_generated": False,
-                "no_change_reason": "audit_level=bypass",
-                "patch_apply_success": None,
                 "execution_mode": self.execution_mode,
                 "trigger_reason": self.trigger_reason
             }
@@ -233,35 +229,13 @@ class CodexLoopV2(NexusOrchestrator):
                 code_files = [f for f in files if f.endswith(".py")]
 
             if not code_files and not diff_text.strip():
-                # 🚀 [v9 Reconnect] The old code-writing capability is brought back!
-                # If apply_patch is True, we tell the LLM there are no changes yet, and it must gen one!
-                if not self.apply_patch:
-                    return {
-                        "status": "APPROVED",
-                        "summary": "No changes found in scope.",
-                        "patch_generated": False,
-                        "no_change_reason": "no_diff_in_scope",
-                        "patch_apply_success": None,
-                        "execution_mode": self.execution_mode,
-                        "trigger_reason": self.trigger_reason,
-                    }
-                else:
-                    # 🔍 Trace mentioned files in task to provide context for generation
-                    mentioned_files = re.findall(r'(?:[a-zA-Z0-9_\-\.]+/)?[a-zA-Z0-9_\-\.]+\.(?:py|js|ts|html|css|sh|md|yaml|yml|json)', self.task)
-                    context_chunks = ["[No changes yet. Initial generation triggered.]"]
-                    for f in mentioned_files:
-                        f_path = Path(self.git.project_root) / f
-                        if f_path.is_file():
-                            try:
-                                content = f_path.read_text(encoding="utf-8")
-                                context_chunks.append(f"--- FILE CONTENT: {f} ---\n{content}")
-                                if f not in code_files:
-                                    code_files.append(str(f_path))
-                            except Exception:
-                                pass
-                    diff_text = "\n\n".join(context_chunks)
-                    if len(context_chunks) == 1:
-                        diff_text += "\n(No specific file context found in task description. Please identify target files yourself if possible or ask for more info.)"
+                return {
+                    "status": "APPROVED",
+                    "summary": "No changes found in scope.",
+                    "execution_mode": self.execution_mode,
+                    "trigger_reason": self.trigger_reason,
+                }
+
             # Linter
             linter_json = self.linter.scan(code_files)
             
@@ -282,44 +256,13 @@ class CodexLoopV2(NexusOrchestrator):
             )
 
             status, success = ReviewStatusNormalizer.normalize(data.get("status", "FAIL"))
-
-            violations = data.get("violations") or []
-            no_change_reason = (data.get("no_change_reason") or "").strip()
-            patch_generated = bool(data.get("patch_generated"))
-            if not patch_generated:
-                patch_generated = any(bool(v.get("patch")) for v in violations if isinstance(v, dict))
-
-            # Hard gate: PASS requires either patch evidence or explicit no-change reason.
-            if success and not patch_generated and not no_change_reason:
-                success = False
-                status = "REJECTED"
-                data["summary"] = (
-                    "Rejected: PASS without patch evidence or no_change_reason."
-                )
-
-            patch_apply_success = None
-            if self.apply_patch and patch_generated:
-                patch_apply_success = self.patcher.apply(violations)
-                if not patch_apply_success:
-                    success = False
-                    status = "REJECTED"
-                    data["summary"] = (
-                        "Rejected: patch apply failed; no code change was committed."
-                    )
-
+            
             if success:
                 return {
                     "status": status, 
                     "summary": data.get("summary"),
-                    "patch_generated": patch_generated,
-                    "no_change_reason": no_change_reason,
-                    "patch_apply_success": patch_apply_success,
                     "execution_mode": self.execution_mode,
                     "trigger_reason": self.trigger_reason,
-                    "tokens_used": self.total_tokens,
-                    "token_raw_model": self.total_raw_model,
-                    "token_fallback_est": self.total_fallback_est,
-                    "token_capture_status": "|".join(self.token_capture_statuses)
                 }
 
             # 🧬 Spec: 提取 audit_metadata 與 return_target_phase
@@ -327,24 +270,17 @@ class CodexLoopV2(NexusOrchestrator):
             return_target_phase = audit_metadata.get("return_target_phase", "D")
 
             # 🧬 If apply_patch is on, we apply it once but still return REJECTED to the Orchestrator loop
-            if self.apply_patch and patch_generated and patch_apply_success is None:
-                patch_apply_success = self.patcher.apply(violations)
+            if self.apply_patch:
+                self.patcher.apply(data.get("violations", []))
 
             return {
                 "status": "REJECTED",
                 "summary": data.get("summary"),
-                "violations": violations,
-                "patch_generated": patch_generated,
-                "no_change_reason": no_change_reason,
-                "patch_apply_success": patch_apply_success,
+                "violations": data.get("violations"),
                 "execution_mode": self.execution_mode,
                 "trigger_reason": self.trigger_reason,
                 "audit_metadata": audit_metadata,
                 "return_target_phase": return_target_phase,
-                "tokens_used": self.total_tokens,
-                "token_raw_model": self.total_raw_model,
-                "token_fallback_est": self.total_fallback_est,
-                "token_capture_status": "|".join(self.token_capture_statuses)
             }
         finally:
             os.chdir(original_cwd)

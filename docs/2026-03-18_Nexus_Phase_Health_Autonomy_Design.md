@@ -1,8 +1,5 @@
 # Nexus Phase Health Autonomy Design (v0)
 
-> [!important]
-> **Status**: `ACTIVE` / `ERA-C`
-
 ## 1. 目的與範圍
 本設計定義 Nexus 在 `P -> X -> D -> R -> A -> C` 六階段中的自動健康監測、主動修復（Self-Heal）與主動優化（Self-Optimize）機制。
 
