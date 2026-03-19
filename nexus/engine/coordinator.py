@@ -222,6 +222,7 @@ class NexusEngine:
                 continue
 
             case_data = json.loads(case_file_path.read_text())
+            goal_desc = case_data.get("goal", "")
             logger.info("🚀 [Benchmark] Running Case: %s", case_id)
 
             # 🛡️ Force a dummy diff for OFF-001 to ensure LLM is invoked and raw tokens are captured
@@ -253,11 +254,11 @@ class NexusEngine:
             try:
                 if case_type == "bug":
                     success = sub_engine.run_bug(
-                        case_id, desc=case_data.get("goal"), context=case_data
+                        case_id, desc=goal_desc, context=case_data
                     )
                 else:
                     success = sub_engine.run_feature(
-                        case_data.get("goal"), context=case_data
+                        goal_desc, context=case_data
                     )
             except Exception as e:
                 logger.error("💥 [Benchmark] Case %s crashed: %s", case_id, e)
