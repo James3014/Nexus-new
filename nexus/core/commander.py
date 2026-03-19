@@ -19,15 +19,30 @@ class Commander:
 
     def next_step(self) -> str:
         """核心狀態機：根據當前狀態與計畫，決定下一步動作。"""
+    def next_step(self, status: str, metadata: Optional[Dict] = None, summary: Optional[str] = None):
+        """🧬 狀態自動機切換門檻"""
         state = self.state_io.load_global_state()
+        from nexus.core.crystal_analyzer import TraumaEngine
+
         print(
             f"🧭 [Commander] Current state: {state.current_phase}:{state.current_step_id or 'none'}"
         )
+
+        # 🧪 C 階段: 創傷捕捉與學習
+        if state.current_phase == "C" or status == "completed":
+            TraumaEngine.process_failures(state)
 
         # 🛡️ External Needed Hook (Lesson from 09_STATE_CONTRACT_DRAFT)
         if state.external_needed:
             print("🌐 [Commander] External knowledge requested (X-stage).")
             return "RUN_SKILL:external-research"
+
+        # 🛡️ Phase Health Autonomy (PHA-001): 執行前先更新與保存健康度
+        from nexus.core.phase_health import PhaseHealthCalculator
+        from nexus.core.auto_repair import AutoRepairEngine
+        PhaseHealthCalculator.update_state(state)
+        AutoRepairEngine.execute_repairs(state)
+        self.state_io.save_global_state(state)
 
         # 🛡️ 狀態轉移矩陣 (符合 02_TARGET_ARCHITECTURE)
         if state.current_phase == "P":

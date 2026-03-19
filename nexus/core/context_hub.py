@@ -2,10 +2,27 @@ import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
-from nexus.core.state_contracts import NexusDiagnosis, NexusResearch
+from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
 
+
+class ToonRenderer:
+    """👾 TOON (Trinity Output Optimization Network) 語義壓縮器 (PHA-020)"""
+    @staticmethod
+    def render(state: NexusState) -> str:
+        """將長篇歷史、日誌壓縮為 Markdown 表格摘要"""
+        summary = ["| Phase | ID | Status | Summary |", "|---|---|---|---|"]
+        
+        # 只取最後 3 筆詳細記錄
+        for step in state.steps_history[-3:]:
+            summary.append(f"| {step.phase} | {step.step_id} | {step.status} | {step.summary or 'none'} |")
+            
+        # 其他補上計數
+        if len(state.steps_history) > 3:
+            summary.append(f"| ... | ({len(state.steps_history)-3} others) | ... | (Compressed) |")
+            
+        return "\n".join(summary)
 
 class ContextHub:
     """
@@ -121,14 +138,17 @@ class ContextHub:
         }
 
     def assemble_feature_pack(self, plan: Optional[Dict] = None) -> Dict[str, Any]:
-        """🧬 Phase 1: 為新功能建置組裝上下文。"""
+        """🧬 Phase 1: 為新功能建置組裝上下文 (含 TOON 壓縮)。"""
         state = self.state_io.load_global_state()
         memory = self.memory_service.aggregate_memory()
+        
+        # 🧪 TOON 語義壓縮生效
+        toon_view = ToonRenderer.render(state)
 
         return {
             "task": state.task_id,
             "plan": plan or {},
-            "state": state.model_dump(),
+            "TOON_SUMMARY": toon_view,
             "memory": memory,
             "rules": self.load_program_rules(),
             "timestamp": datetime.now().isoformat(),

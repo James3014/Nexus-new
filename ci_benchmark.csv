@@ -1,11 +1,11 @@
 task_id,status,tokens,token_raw_model,token_fallback_est,token_system_overhead,token_source_x,token_source_r,token_capture_status,phase_path,review_status,duration,health,drift,lowest_phase_health
-OFF-001,FAIL,1726,0,1376,350,1426,300,cli_error,P -> X -> D -> R -> A -> R -> A -> R -> A,REJECTED,74.43,55.4,0.0,0.0
-OFF-002,PASS,1512,0,1362,150,1412,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,4.14,95.97,0.0,0.0
-OFF-003,PASS,1671,0,1521,150,1571,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.18,95.54,0.0,0.0
-OFF-004,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,2.99,99.73,0.0,0.0
-OFF-005,PASS,1486,0,1336,150,1386,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.52,96.04,0.0,0.0
-OFF-006,PASS,1593,0,1443,150,1493,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,6.0,95.75,0.0,0.0
-OFF-007,PASS,1525,0,1375,150,1425,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.93,95.93,0.0,0.0
-OFF-008,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,2.88,99.73,0.0,0.0
-OFF-009,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,3.06,99.73,0.0,0.0
-OFF-010,PASS,1604,0,1454,150,1504,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,4.06,95.72,0.0,0.0
+OFF-001,PASS,1726,0,1376,350,1426,300,unknown,P -> X -> D -> R -> A -> R -> A -> R -> A -> C,APPROVED,29.33,95.4,0.0,0.0
+OFF-002,PASS,1512,0,1362,150,1412,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,3.97,95.97,0.0,0.0
+OFF-003,FAIL,1871,0,1521,350,1571,300,cli_error,P -> X -> D -> R -> A -> R -> A -> R -> A,REJECTED,42.83,55.01,0.0,0.0
+OFF-004,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,3.22,99.73,0.0,0.0
+OFF-005,PASS,1486,0,1336,150,1386,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.54,96.04,0.0,0.0
+OFF-006,PASS,1593,0,1443,150,1493,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,5.4,95.75,0.0,0.0
+OFF-007,PASS,1525,0,1375,150,1425,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,6.38,95.93,0.0,0.0
+OFF-008,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,2.96,99.73,0.0,0.0
+OFF-009,PASS,100,0,0,100,0,100,unknown,P -> D -> R -> A -> C,APPROVED,2.98,99.73,0.0,0.0
+OFF-010,PASS,1604,0,1454,150,1504,100,unknown,P -> X -> D -> R -> A -> C,APPROVED,4.1,95.72,0.0,0.0

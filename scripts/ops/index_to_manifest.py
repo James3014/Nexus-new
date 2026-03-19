@@ -24,7 +24,7 @@ def parse_index_next():
     with open(INDEX_PATH, "r") as f:
         content = f.read()
     
-    next_section = re.search(r"## Next\n(.*?)(?=\n##|\Z)", content, re.DOTALL)
+    next_section = re.search(r"###? Next.*?\n(.*?)(?=\n#|\Z)", content, re.DOTALL)
     if not next_section:
         return []
     
@@ -65,8 +65,8 @@ def sync_manifest(next_tasks):
                 "id": task_id,
                 "description": task_text,
                 "worker": worker,
-                "depends_on": [manifest["tasks"][-1]["id"]] if manifest.get("tasks") else [],
-                "run": f"uv run scripts/engine/nexus_cli.py nexus:runner --task {task_id}",
+                "depends_on": [],
+                "run": f"uv run scripts/engine/nexus_cli.py nexus:feature --task {task_id}",
                 "done_when": {"type": "phase_result_ok"}
             }
             manifest.setdefault("tasks", []).append(new_task)

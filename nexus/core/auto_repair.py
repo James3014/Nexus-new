@@ -40,7 +40,35 @@ class AutoRepairEngine:
     @classmethod
     def execute_repairs(cls, state: NexusState):
         actions = cls.analyze_and_suggest(state)
-        # In a real implementation, this would trigger subprocesses
-        # For prototype, we just log them
-        for action in actions:
-            print(f"🔧 [Auto-Repair] Suggested Action: {action['type']} -> {action['action']}")
+        if not actions:
+            return
+
+        import yaml
+        from pathlib import Path
+        manifest_path = Path.cwd() / "task_manifest.yaml"
+        
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = yaml.safe_load(f) or {"tasks": []}
+            
+            existing_ids = {t["id"] for t in manifest.get("tasks", [])}
+            added = False
+
+            for action in actions:
+                task_id = f"auto.repair.{action['type'].lower()}"
+                if task_id not in existing_ids:
+                    print(f"🔧 [Auto-Repair] Injecting task: {task_id}")
+                    manifest["tasks"].append({
+                        "id": task_id,
+                        "description": f"AUTO-REPAIR: {action['reason']}",
+                        "run": action["action"],
+                        "priority": action["priority"],
+                        "depends_on": []
+                    })
+                    added = True
+            
+            if added:
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    yaml.dump(manifest, f, allow_unicode=True, sort_keys=False)
+        except Exception as e:
+            print(f"⚠️ [Auto-Repair] Failed to inject tasks: {e}")

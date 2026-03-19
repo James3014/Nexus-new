@@ -14,17 +14,37 @@ class PlannerPhaseHandler(BasePhaseHandler):
         self.predictor = predictor or Predictor()
 
     def run(self, state: NexusState, context: Dict[str, Any]) -> Dict[str, Any]:
-        task = context.get("task")
+        task = context.get("task", "")
         print(f"🔮 [Nexus:Predict] Scanning environment for task: {task}")
         
+        # 🛡️ Trinity Intent Guard (PHA-010)
+        intent_pass, refusal_reason = self._guard_intent(task)
+        if not intent_pass:
+            print(f"🛑 [IntentGuard] Refused: {refusal_reason}")
+            return {
+                "intent_pass": False,
+                "refusal_reason": refusal_reason,
+                "risk_score": 1.0,
+                "risk_level": "BLOCK"
+            }
+
         prediction = self.predictor.predict(task, context)
-        risk_score = prediction["risk_score"]
-        risks = prediction["reasons"] # 將 reasons 映射到原本的 risks 接口
-            
-        print(f"⚖️ [Predict] Risk Score: {risk_score} | Detect {len(risks)} potential blockers.")
+        # ... 
         return {
-            "risk_score": risk_score, 
-            "risks": risks, 
+            "intent_pass": True,
+            "risk_score": prediction["risk_score"], 
+            "risks": prediction["reasons"], 
             "risk_level": prediction["risk_level"],
             "tokens_used": prediction.get("tokens_used", 0)
         }
+
+    def _guard_intent(self, task: str) -> tuple[bool, str]:
+        """🛡️ 檢查意圖是否模糊 (Heuristic)"""
+        if len(task) < 10:
+            return False, "指令過於簡短，請描述具體目標。"
+        
+        fuzzy_keywords = ["改一下", "改改", "修一下", "弄好"]
+        if any(kw in task for kw in fuzzy_keywords) and "/" not in task:
+            return False, "檢測到模糊指令且未指定路徑。"
+            
+        return True, ""

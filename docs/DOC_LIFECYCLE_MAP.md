@@ -3,7 +3,7 @@
 > [!important]
 > **Status**: `ACTIVE` / `ERA-C`
 
-更新時間：2026-03-18（Asia/Taipei）
+更新時間：2026-03-19（Asia/Taipei）
 用途：統一判定「哪份是主規格、哪份是歷史依據」，避免 agent 混用不同時期口徑。
 
 ## Era 定義
@@ -12,29 +12,27 @@
 - `ERA-C`：主重構後精準收斂 + phase health autonomy（當前主線）
 
 ## ACTIVE（當前主規格）
-- `ERA-C` [INDEX.md](/Users/jameschen/Workspace/nexus/docs/INDEX.md)
-- `ERA-C` [SYSTEM_ARCHITECTURE_BLUEPRINT.md](/Users/jameschen/Workspace/nexus/docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md)
-- `ERA-C` [2026-03-18_Nexus_Phase_Health_Implementation_Plan.md](/Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md)
-- `ERA-C` [2026-03-18_Nexus_Phase_Health_Autonomy_Design.md](/Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Autonomy_Design.md)
-- `ERA-C` [EXEC_LIVE_STATUS.md](/Users/jameschen/Workspace/nexus/docs/EXEC_LIVE_STATUS.md)
+- `ERA-C` [INDEX.md](file:///Users/jameschen/Workspace/nexus/docs/INDEX.md)
+- `ERA-C` [SYSTEM_ARCHITECTURE_BLUEPRINT.md](file:///Users/jameschen/Workspace/nexus/docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md)
+- `ERA-C` [2026-03-18_Nexus_Phase_Health_Implementation_Plan.md](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md)
+- `ERA-C` [2026-03-18_Nexus_Phase_Health_Autonomy_Design.md](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Autonomy_Design.md)
+- `ERA-C` [EXEC_LIVE_STATUS.md](file:///Users/jameschen/Workspace/nexus/docs/EXEC_LIVE_STATUS.md)
+- `ERA-C` [2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md](file:///Users/jameschen/Workspace/nexus/docs/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md)
 
 ## REFERENCE（可參考，不可覆蓋 ACTIVE）
-- `ERA-B` [19_AGENT_TASK_PACK_v1.md](/Users/jameschen/Workspace/nexus/docs/19_AGENT_TASK_PACK_v1.md)
-- `ERA-B` [12_AGENT_EXECUTION_GUIDE.md](/Users/jameschen/Workspace/nexus/docs/12_AGENT_EXECUTION_GUIDE.md)
-- `ERA-B` [17_GEMINI_CODEX_HANDOFF_USAGE.md](/Users/jameschen/Workspace/nexus/docs/17_GEMINI_CODEX_HANDOFF_USAGE.md)
-- `ERA-B` [18_REFACTOR_PROGRESS_BOARD.md](/Users/jameschen/Workspace/nexus/docs/18_REFACTOR_PROGRESS_BOARD.md)
-- `ERA-B` [2026-03-18_Nexus_第二輪精準收斂重構計畫.md](/Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_第二輪精準收斂重構計畫.md)
-- `ERA-A` [08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md](/Users/jameschen/Workspace/nexus/docs/08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md)
-- `ERA-A` [09_STATE_CONTRACT_DRAFT.md](/Users/jameschen/Workspace/nexus/docs/09_STATE_CONTRACT_DRAFT.md)
-- `ERA-A` [10_IMPLEMENTATION_SEQUENCE.md](/Users/jameschen/Workspace/nexus/docs/10_IMPLEMENTATION_SEQUENCE.md)
-- `ERA-A` [15_MIGRATION_SAFETY_VALIDATOR_PLAN.md](/Users/jameschen/Workspace/nexus/docs/15_MIGRATION_SAFETY_VALIDATOR_PLAN.md)
+- `ERA-B` [12_AGENT_EXECUTION_GUIDE.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/12_AGENT_EXECUTION_GUIDE.md)
+- `ERA-B` [17_GEMINI_CODEX_HANDOFF_USAGE.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/17_GEMINI_CODEX_HANDOFF_USAGE.md)
+- `ERA-B` [18_REFACTOR_PROGRESS_BOARD.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/18_REFACTOR_PROGRESS_BOARD.md)
+- `ERA-B` [19_AGENT_TASK_PACK_v1.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/19_AGENT_TASK_PACK_v1.md)
+- `ERA-B` [2026-03-18_Nexus_第二輪精準收斂重構計畫.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_第二輪精準收斂重構計畫.md)
 
 ## ARCHIVE（封存，禁止作為執行依據）
-- `ERA-A` [01_CURRENT_STATE.md](/Users/jameschen/Workspace/nexus/docs/01_CURRENT_STATE.md)
-- `ERA-A` [02_TARGET_ARCHITECTURE.md](/Users/jameschen/Workspace/nexus/docs/02_TARGET_ARCHITECTURE.md)
-- `ERA-A` [03_GAP_ANALYSIS.md](/Users/jameschen/Workspace/nexus/docs/03_GAP_ANALYSIS.md)
-- `ERA-A` [04_REFACTOR_ROADMAP.md](/Users/jameschen/Workspace/nexus/docs/04_REFACTOR_ROADMAP.md)
-- `ERA-A` [11_FIRST_CUT_FILE_PLAN.md](/Users/jameschen/Workspace/nexus/docs/11_FIRST_CUT_FILE_PLAN.md)
+- `ERA-A` [01_CURRENT_STATE.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/01_CURRENT_STATE.md)
+- `ERA-A` [02_TARGET_ARCHITECTURE.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/02_TARGET_ARCHITECTURE.md)
+- `ERA-A` [03_GAP_ANALYSIS.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/03_GAP_ANALYSIS.md)
+- `ERA-A` [04_REFACTOR_ROADMAP.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/04_REFACTOR_ROADMAP.md)
+- `ERA-A` [11_FIRST_CUT_FILE_PLAN.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/11_FIRST_CUT_FILE_PLAN.md)
+- `ERA-A` [08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/08_MIGRATION_RUNBOOK_V1_5_2_PLUS.md)
 
 ## 執行規則（強制）
 1. 任務新增、驗收口徑、gate 門檻，只能引用 `ACTIVE`。

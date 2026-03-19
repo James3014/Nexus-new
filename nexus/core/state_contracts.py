@@ -125,10 +125,21 @@ class PhaseMetric(BaseModel):
     signals: Dict[str, Any] = Field(default_factory=dict)
      # HEALTHY, WARNING, CRITICAL
 
+# --- T 階段: Trinity & Learning ---
+
+class TraumaRecord(BaseModel):
+    failure_signature: str
+    penalty: float = -0.5
+    expiry: Optional[datetime] = None
+
+class NexusWeights(BaseModel):
+    skill_weights: Dict[str, float] = Field(default_factory=lambda: {"generalist": 1.0})
+    trauma_records: List[TraumaRecord] = Field(default_factory=list)
+
 from pydantic import model_validator
 
 class NexusState(BaseModel):
-    schema_version: str = "1.8.0"
+    schema_version: str = "1.9.0"
     task_id: str
     batch_id: Optional[str] = None
     config: TaskConfig = Field(default_factory=TaskConfig)
@@ -143,6 +154,10 @@ class NexusState(BaseModel):
     superpowers_plan: Dict[str, Any] = Field(default_factory=dict)
     tdd_status: TddStatus = TddStatus.NONE
     subagents_active: bool = False
+    
+    # --- Trinity v9.0 Extensions ---
+    autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
+    learning_velocity: float = 0.0
     
     # --- Observability & Metrics ---
     total_token_usage: int = 0
