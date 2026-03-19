@@ -363,8 +363,11 @@ def main():
         chub_home.mkdir(parents=True, exist_ok=True)
         os.environ["CHUB_HOME"] = str(chub_home)
 
+    # 💡 Sir's Request: 健康審計不論如何都靜默
+    is_health_audit = (args.command == "nexus:benchmark" and getattr(args, 'framework', None) == "health-audit")
+    
     cli = NexusCLI(
-        silent=args.silent,
+        silent=args.silent or is_health_audit,
         output_dir=args.output_dir,
         fast_mode=args.fast,
         audit_level=args.audit_level,
