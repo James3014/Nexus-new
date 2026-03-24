@@ -1,0 +1,8 @@
+--- a/django/core/cache/backends/filebased.py
++++ b/django/core/cache/backends/filebased.py
+@@ -94,1 +94,4 @@
+-            with open(fname, \"rb\") as f:
++            try:
++                with open(fname, \"rb\") as f:
++            except FileNotFoundError:
++                return False

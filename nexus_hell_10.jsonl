@@ -1,0 +1,10 @@
+{"hell_task":"linux-cve-2026-1234","language":"C","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"openssl-0day","language":"C","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"v8-sandbox-escape","language":"C++","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"aws-lambda-rust","language":"Rust","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"gcp-k8s-operator","language":"Go","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"azure-ad-exploit","language":"TypeScript","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"salesforce-apex-injection","language":"Java","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"sap-hana-rce","language":"ABAP","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"oracle-db-priv-esc","language":"PL/SQL","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"ios-kernel-patch","language":"C/Swift","status":"PATCHED","audit":"SAFE","poc":"blocked"}

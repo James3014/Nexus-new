@@ -1,0 +1,5 @@
+--- a/django/http/response.py
++++ b/django/http/response.py
+@@ -322,1 +322,1 @@
+-        if isinstance(value, bytes):
++        if isinstance(value, (bytes, memoryview)):

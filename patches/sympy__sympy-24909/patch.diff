@@ -1,0 +1,6 @@
+--- a/sympy/physics/units/prefixes.py
++++ b/sympy/physics/units/prefixes.py
+@@ -80,4 +80,4 @@
+-        if isinstance(other, (Quantity, Prefix)):
+-            return other * self
++        return Prefix.__mul__(self, other)

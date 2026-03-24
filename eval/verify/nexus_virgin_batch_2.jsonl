@@ -1,0 +1,5 @@
+{"task_id":"astropy__astropy-8872","memory":"OFF","status":"SUCCESS","git_diff_lines":13,"pytest_passed":23,"pytest_total":23}
+{"task_id":"scikit-learn__scikit-learn-14520","memory":"OFF","status":"SUCCESS","git_diff_lines":13,"pytest_passed":15,"pytest_total":15}
+{"task_id":"numpy__numpy-15978","memory":"OFF","status":"SUCCESS","git_diff_lines":30,"pytest_passed":18,"pytest_total":18}
+{"task_id":"pandas__pandas-7890","memory":"OFF","status":"SUCCESS","git_diff_lines":56,"pytest_passed":42,"pytest_total":42}
+{"task_id":"django__django-14725","memory":"OFF","status":"SUCCESS","git_diff_lines":39,"pytest_passed":10, "pytest_total":10}

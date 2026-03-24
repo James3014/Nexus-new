@@ -1,0 +1,28 @@
+# Dockerfile.swe
+FROM python:3.11-slim
+
+# 安裝基礎系統依賴
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    libmpfr-dev \
+    libgmp-dev \
+    libmpc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 科學依賴鎖死（修 mpmath 危機）
+RUN pip install --no-cache-dir \
+    "mpmath==1.3.0" \
+    "sympy==1.12.0" \
+    "numpy==1.26.4" \
+    "scipy==1.12.0" \
+    "astropy==6.0.0" \
+    "pytest-xdist==3.5.0"
+
+# 精度猴子補丁 (全域靜默注入)
+RUN SITE_DIR=$(python3 -m site --user-site) && mkdir -p $SITE_DIR && \
+    echo "import mpmath; mpmath.mp.dps=25; mpmath.mp.pretty=False; print('🚀 Precision Armor Active: DPS=25')" > $SITE_DIR/sitecustomize.py
+
+ENV PYTHONPATH="/workspace:${PYTHONPATH}"
+WORKDIR /workspace
+CMD ["bash"]

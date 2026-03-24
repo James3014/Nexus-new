@@ -3,7 +3,7 @@ from pathlib import Path
 
 # 延遲導入服務，避免循環依賴
 from nexus.services.git import GitManager
-from nexus.services.llm import LLMClient
+from nexus.services.gateway import BattlesuitGateway as LLMClient
 from nexus.services.linter import Linter
 from nexus.services.patcher import SafePatcher
 from nexus.services.reporter import Reporter
@@ -79,7 +79,7 @@ class NexusContainer(containers.DeclarativeContainer):
     )
     
     llm = providers.Singleton(
-        LLMClient,
+        BattlesuitGateway,
         project_root=project_root
     )
 

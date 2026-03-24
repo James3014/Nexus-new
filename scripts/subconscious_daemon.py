@@ -14,6 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+# 🛡️ Nexus Integration
+try:
+    from nexus.services.gateway import BattlesuitGateway as LLMClient
+except ImportError:
+    LLMClient = None
+
 
 def resolve_vault_root() -> Path:
     # 1) Explicit env override
@@ -142,8 +148,20 @@ def fallback_reflection(history: List[Dict[str, Any]]) -> str:
 
 
 def run_reflection(prompt: str, history: List[Dict[str, Any]]) -> Optional[str]:
+    # 🛡️ Nexus Battlesuit Gateway Integration
+    if LLMClient:
+        client = LLMClient(project_root=os.getcwd())
+        data, raw_output = client.ask(prompt, "", phase="X")
+        if data.get("status") == "FAIL":
+            print("⚠️ Battlesuit Gateway failed, fallback to direct CLI.")
+        else:
+            # 嘗試提取條列式反射內容
+            bullet_lines = [l.strip() for l in raw_output.splitlines() if l.strip().startswith("- ")]
+            if bullet_lines:
+                return "\n".join(bullet_lines[:3])
+
     try:
-        # 使用 Gemini CLI（預設 gemini-3-flash-preview）
+        # Fallback to direct CLI
         gemini_bin = shutil.which("gemini") or "gemini"
         model = os.getenv("SUBCONSCIOUS_MODEL", "gemini-3-flash-preview")
         include_dirs = [str(Path.home())]

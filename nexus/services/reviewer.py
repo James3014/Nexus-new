@@ -7,6 +7,7 @@ from pathlib import Path
 # Internal Nexus Imports
 from nexus.core.orchestrator import NexusOrchestrator
 from nexus.core.review_status import ReviewStatusNormalizer
+from nexus.services.gateway import BattlesuitGateway as LLMClient
 
 # Configuration
 BRAIN_SEARCH_BIN = os.getenv("MUSE_CORE_BRAIN_SEARCH", "/usr/local/bin/brain_search")

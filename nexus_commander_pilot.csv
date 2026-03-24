@@ -1,0 +1,2 @@
+task_id,status,tokens,duration,patch_gen
+astropy__astropy-12907,PASS,100,0.42,False

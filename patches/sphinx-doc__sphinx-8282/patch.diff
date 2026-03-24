@@ -1,0 +1,5 @@
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1245,3 +1245,6 @@
++            if self.config.autodoc_typehints == 'none':
++                return \"\"
