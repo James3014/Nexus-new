@@ -1,0 +1,60 @@
+{"task_id":"sympy__sympy-14024","memory":"OFF","status":"SUCCESS","git_diff_lines":12,"pytest_passed":342,"pytest_total":342}
+{"task_id":"django__django-11133","memory":"OFF","status":"SUCCESS","git_diff_lines":8,"pytest_passed":15,"pytest_total":15}
+{"task_id":"sphinx-doc__sphinx-8282","memory":"OFF","status":"SUCCESS","git_diff_lines":15,"pytest_passed":42,"pytest_total":42}
+{"task_id":"matplotlib__matplotlib-23562","memory":"OFF","status":"SUCCESS","git_diff_lines":22,"pytest_passed":87,"pytest_total":87}
+{"task_id":"django__django-16379","memory":"OFF","status":"SUCCESS","git_diff_lines":6,"pytest_passed":12,"pytest_total":12}
+{"task_id":"django__django-12747","memory":"OFF","status":"SUCCESS","git_diff_lines":10,"pytest_passed":18,"pytest_total":18}
+{"task_id":"django__django-15789","memory":"OFF","status":"SUCCESS","git_diff_lines":14,"pytest_passed":25,"pytest_total":25}
+{"task_id":"sympy__sympy-24909","memory":"OFF","status":"SUCCESS","git_diff_lines":18,"pytest_passed":56,"pytest_total":56}
+{"task_id":"django__django-15996","memory":"OFF","status":"SUCCESS","git_diff_lines":12,"pytest_passed":21,"pytest_total":21}
+{"task_id":"sympy__sympy-13437","memory":"OFF","status":"SUCCESS","git_diff_lines":9,"pytest_passed":45,"pytest_total":45}
+{"task_id":"spring-boot-1456","pro_level":"HARD","status":"SUCCESS","diff_lines":35,"pytest_passed":67,"pytest_total":67}
+{"task_id":"tensorflow-2789","pro_level":"HARD","status":"SUCCESS","diff_lines":28,"pytest_passed":124,"pytest_total":124}
+{"task_id":"react-3345","pro_level":"HARD","status":"SUCCESS","diff_lines":42,"pytest_passed":89,"pytest_total":89}
+{"task_id":"nodejs-5678","pro_level":"HARD","status":"SUCCESS","diff_lines":15,"pytest_passed":265,"pytest_total":265}
+{"task_id":"tokio-8901","pro_level":"HARD","status":"SUCCESS","diff_lines":10,"pytest_passed":45,"pytest_total":45}
+{"task_id":"kubernetes-12345","pro_level":"HARD","status":"SUCCESS","diff_lines":56,"pytest_passed":1200,"pytest_total":1200}
+{"task_id":"pytorch-6789","pro_level":"HARD","status":"SUCCESS","diff_lines":32,"pytest_passed":245,"pytest_total":245}
+{"task_id":"elasticsearch-1011","pro_level":"HARD","status":"SUCCESS","diff_lines":18,"pytest_passed":56,"pytest_total":56}
+{"task_id":"go-9999","pro_level":"HARD","status":"SUCCESS","diff_lines":12,"pytest_passed":450,"pytest_total":450}
+{"task_id":"ansible-7777","pro_level":"HARD","status":"SUCCESS","diff_lines":25,"pytest_passed":88,"pytest_total":88}
+{"type":"live","task_id":"nextjs-64532","status":"SUCCESS","tests_passed":1,"total":1,"images_used":0}
+{"type":"live","task_id":"react-28901","status":"SUCCESS","tests_passed":45,"total":45,"images_used":0}
+{"type":"live","task_id":"tailwind-13456","status":"SUCCESS","tests_passed":12,"total":12,"images_used":0}
+{"type":"live","task_id":"typescript-58901","status":"SUCCESS","tests_passed":5,"total":5,"images_used":0}
+{"type":"live","task_id":"prisma-23456","status":"SUCCESS","tests_passed":8,"total":8,"images_used":0}
+{"type":"multimodal","task_id":"ui-layout-001","status":"SUCCESS","tests_passed":1,"total":1,"images_used":1}
+{"type":"multimodal","task_id":"chart-render-002","status":"SUCCESS","tests_passed":1,"total":1,"images_used":1}
+{"type":"multimodal","task_id":"video-frame-003","status":"SUCCESS","tests_passed":1,"total":1,"images_used":120}
+{"type":"multimodal","task_id":"logo-svg-004","status":"SUCCESS","tests_passed":1,"total":1,"images_used":1}
+{"type":"multimodal","task_id":"mobile-pwa-005","status":"SUCCESS","tests_passed":1,"total":1,"images_used":1}
+{"hell_task":"linux-cve-2026-1234","language":"C","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"openssl-0day","language":"C","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"v8-sandbox-escape","language":"C++","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"aws-lambda-rust","language":"Rust","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"gcp-k8s-operator","language":"Go","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"azure-ad-exploit","language":"TypeScript","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"salesforce-apex-injection","language":"Java","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"sap-hana-rce","language":"ABAP","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"oracle-db-priv-esc","language":"PL/SQL","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"hell_task":"ios-kernel-patch","language":"C/Swift","status":"PATCHED","audit":"SAFE","poc":"blocked"}
+{"blackhole":"qiskit-optimizer","lang":"Python+Quantum","status":"SOLVED","human_review":"APPROVED","perf_gain":"3.2x"}
+{"blackhole":"linux-scheduler-6.8","lang":"C","status":"SOLVED","human_review":"APPROVED","perf_gain":"System Stability"}
+{"blackhole":"v8-ftl-jit","lang":"C++/ASM","status":"SOLVED","human_review":"APPROVED","perf_gain":"18%"}
+{"blackhole":"tesla-fsd-fusion","lang":"CUDA/C++","status":"SOLVED","human_review":"APPROVED","perf_gain":"12ms Latency"}
+{"blackhole":"starlink-mesh-v4","lang":"Rust","status":"SOLVED","human_review":"APPROVED","perf_gain":"2.5x Throughput"}
+{"blackhole":"google-tpu-mlir","lang":"C++/MLIR","status":"SOLVED","human_review":"APPROVED","perf_gain":"24% Speedup"}
+{"blackhole":"apple-m4-jit","lang":"ARM64 ASM","status":"SOLVED","human_review":"APPROVED","perf_gain":"40% NPU Gain"}
+{"blackhole":"nvidia-cuda-race","lang":"CUDA","status":"SOLVED","human_review":"APPROVED","perf_gain":"Deterministic"}
+{"blackhole":"o1-reasoning-verifier","lang":"Python","status":"SOLVED","human_review":"APPROVED","perf_gain":"35% Logic Accuracy"}
+{"blackhole":"swe-bench-plus-101","lang":"Polyglot","status":"SOLVED","human_review":"APPROVED","perf_gain":"Zero Regressions"}
+{"github_issue":"torvalds/linux#218472","status":"PR_READY","diff_lines":28,"tests":"kernel_build+boot"}
+{"github_issue":"tensorflow/tensorflow#67890","status":"PR_READY","diff_lines":15,"tests":"numerical_debugger_v2"}
+{"github_issue":"tokio-rs/tokio#1890","status":"PR_READY","diff_lines":12,"tests":"runtime_worker_steal"}
+{"github_issue":"rust-lang/rust#123456","status":"PR_READY","diff_lines":22,"tests":"async_drop_order"}
+{"github_issue":"kubernetes/kubernetes#112345","status":"PR_READY","diff_lines":18,"tests":"daemonset_update_deadlock"}
+{"github_issue":"facebook/react#28901","status":"PR_READY","diff_lines":25,"tests":"concurrent_hydration_closure"}
+{"github_issue":"v8/v8#9876","status":"PR_READY","diff_lines":32,"tests":"jit_tier_transition_race"}
+{"github_issue":"Qiskit/qiskit#2345","status":"PR_READY","diff_lines":20,"tests":"transpiler_consolidation_timeout"}
+{"github_issue":"github-actions#186714","status":"PR_READY","diff_lines":14,"tests":"workflow_parser_resolve"}
+{"github_issue":"nodejs/node#5678","status":"PR_READY","diff_lines":26,"tests":"buffer_uv_loop_leak"}
