@@ -40,8 +40,13 @@ def get_ps():
         table.add_column("Action", style="magenta")
         table.add_column("Status", style="yellow")
         
-        for p in procs:
-            table.add_row(str(p['pid']), p['tenant'], str(p['action']), "RUNNING")
+        # Handle both list and dict responses from proxy
+        if isinstance(procs, dict):
+            for pid, p in procs.items():
+                table.add_row(str(pid), str(p.get('tenant', 'unknown')), str(p.get('action', 'bg')), "RUNNING")
+        elif isinstance(procs, list):
+            for p in procs:
+                table.add_row(str(p.get('pid')), str(p.get('tenant', 'unknown')), str(p.get('action', 'bg')), "RUNNING")
         
         console.print(table)
     except Exception as e:
@@ -53,14 +58,17 @@ def nexus_consult(question):
             res = requests.post(
                 f"{API_BASE}/consult",
                 headers={"X-Tenant-ID": TENANT_ID},
-                json={"question": question}
+                json={"question": question},
+                timeout=30 # Prevent long hangs
             )
-            res.encoding = 'utf-8' # Force UTF-8 decoding
+            res.encoding = 'utf-8'
             data = res.json()
         
         console.print(Panel(Markdown(data['answer']), title="[bold magenta]Nexus Consultant[/bold magenta]", border_style="magenta"))
+    except requests.exceptions.ConnectionError:
+        console.print(Panel("[bold red]ERROR[/bold red]: 無法連線至 Singularity Hub。\n[dim]請檢查 Host 端 (Sir) 是否已啟動 Proxy，或是環境變數 NEXUS_HUB_URL 是否正確。[/dim]", border_style="red", title="連線失敗"))
     except Exception as e:
-        console.print(f"[red]Consultation failed: {e}[/red]")
+        console.print(f"[bold red]Consultation failed:[/bold red] {str(e)}")
 
 def nexus_govern(repo_url):
     try:
@@ -89,9 +97,13 @@ def nexus_query(pattern):
 def main_loop():
     print_header()
     
+    # [SOTA 30.8] Standardize input for CJK resilience
+    sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+    
     while True:
         try:
-            cmd = Prompt.ask("[bold cyan]Nexus[/bold cyan]")
+            # Using rich's Prompt but with extra safety
+            cmd = Prompt.ask("[bold cyan]Nexus[/bold cyan]").strip()
             
             if not cmd:
                 continue
@@ -126,17 +138,16 @@ def main_loop():
             else:
                 nexus_consult(cmd)
                 
-        except KeyboardInterrupt:
-            console.print("\n[bold yellow]Nexus Hibernating...[/bold yellow]")
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[bold yellow]Nexus Hibernating (User Exit)...[/bold yellow]")
             break
         except Exception as e:
-            console.print(f"[red]Loop Error: {e}[/red]")
+            # [SOTA 30.8] No-Crash Policy: Display Panel instead of traceback
+            console.print(Panel(f"[red]系統核心已攔截異常：[/red] {str(e)}\n[dim]Nexus 正在自我重啟輸入流...[/dim]", title="🛡️ 核心防護層", border_style="yellow"))
+            time.sleep(0.5)
 
 if __name__ == "__main__":
-    # [SOTA 30.7] Robust UTF-8 Hardening for Stdin/Stdout
+    # Ensure UTF8-Sentry
     if hasattr(sys.stdin, 'reconfigure'):
         sys.stdin.reconfigure(encoding='utf-8', errors='replace')
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        
     main_loop()
