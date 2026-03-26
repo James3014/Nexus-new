@@ -16,7 +16,7 @@ from rich.text import Text
 # Direct Neural Interface to the Nexus OS Kernel.
 
 console = Console()
-API_BASE = "http://127.0.0.1:5001"
+API_BASE = os.getenv("NEXUS_HUB_URL", "http://127.0.0.1:5001")
 TENANT_ID = "Tenant_Friend"
 
 def print_header():
@@ -133,8 +133,10 @@ def main_loop():
             console.print(f"[red]Loop Error: {e}[/red]")
 
 if __name__ == "__main__":
-    # Ensure UTF-8 for stdin/stdout in potentially misconfigured environments
-    if sys.platform != "win32":
-        import io
-        sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+    # [SOTA 30.7] Robust UTF-8 Hardening for Stdin/Stdout
+    if hasattr(sys.stdin, 'reconfigure'):
+        sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        
     main_loop()
