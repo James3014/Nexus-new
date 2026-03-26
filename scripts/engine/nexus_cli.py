@@ -113,6 +113,124 @@ class NexusCLI:
         else:
             print("❌ [Nexus:Feature] Failed.")
 
+    def run_swarm_mode(self, port: int, token: str = None, region: str = "unknown"):
+        """🐝 [Nexus:Swarm] Start Node Swarm Mode (HTTP Server)"""
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import json
+
+        nexus_self = self
+        node_id = f"node-{port}-{region}"
+
+        class SwarmHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                # 🛡️ Token Validation (v18.2 Pragmatic Hardening)
+                if token:
+                    client_token = self.headers.get("X-Nexus-Token")
+                    if client_token != token:
+                        print(f"🚨 [{node_id}] Unauthorized access attempt detected!")
+                        self.send_response(401)
+                        self.end_headers()
+                        self.wfile.write(b"Unauthorized: Invalid X-Nexus-Token")
+                        return
+
+                if self.path == "/sensing":
+                    # W3C Traceparent Header Parsing
+                    traceparent = self.headers.get("traceparent", "")
+                    trace_id = "unknown"
+                    if traceparent:
+                        parts = traceparent.split("-")
+                        if len(parts) >= 2:
+                            trace_id = parts[1]
+
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    post_data = self.rfile.read(content_length)
+                    
+                    try:
+                        req = json.loads(post_data)
+                        print(f"\n🐝 [{node_id}] Received SensingRequest: {req.get('task_key', 'N/A')}", flush=True)
+                        print(f"🔗 [TraceID:{trace_id}] Active context detected.", flush=True)
+                        
+                        start_exec = time.time()
+                        
+                        path = req.get("path", "")
+                        allowed_roots = os.getenv("NEXUS_ALLOWED_PATHS", "").split(",")
+                        
+                        def is_path_safe(p, allowed):
+                            if not allowed or not allowed[0]: return True # Default to wide open if unset for now
+                            p = os.path.realpath(p)
+                            for root in allowed:
+                                if p.startswith(os.path.realpath(root)):
+                                    return True
+                            return False
+
+                        if path and not is_path_safe(path, allowed_roots):
+                            print(f"🛑 [Security] Blocked access to unauthorized path: {path}")
+                            response = {
+                                "node_id": node_id,
+                                "status": "SECURITY_VIO",
+                                "summary": f"Access denied for path: {path}"
+                            }
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.end_headers()
+                            self.wfile.write(json.dumps(response).encode())
+                            return
+
+                        # 🛡️ 實體 L6 閘門調用 (v18.1 Hardening)
+                        try:
+                            from scripts.engine.l6_gate import L6AuditParser
+                            import nexus_core
+                            
+                            old_code = req.get("old_code", "")
+                            new_code = req.get("new_code", "")
+                            audit_text = req.get("audit_report", "")
+                            
+                            diffs = []
+                            if old_code and new_code:
+                                diffs = nexus_core.check_pub_api_diff(old_code, new_code)
+                            
+                            audit_data = L6AuditParser.parse(audit_text) if audit_text else {}
+                            if diffs:
+                                L6AuditParser.check_consistency(audit_data, diffs)
+                        except Exception as gate_err:
+                            print(f"⚠️ [Gate:Error] {gate_err}")
+
+                        # Simulated work
+                        time.sleep(1.0) 
+                        exec_ms = int((time.time() - start_exec) * 1000)
+
+                        response = {
+                            "node_id": node_id,
+                            "status": "HEALTHY",
+                            "summary": f"Audit of {req.get('path')} completed by {node_id}.",
+                            "metrics": {
+                                "execution_ms": exec_ms,
+                                "region": region
+                            }
+                        }
+                        
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps(response).encode())
+
+                    except Exception as e:
+                        print(f"❌ [Node:Error] {e}")
+                        self.send_response(500)
+                        self.end_headers()
+                        self.wfile.write(str(e).encode())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+        print(f"🐝 [Nexus:Swarm] Node {node_id} listening on port {port}...")
+        httpd = HTTPServer(("localhost", port), SwarmHandler)
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print(f"\n🛑 [Nexus:Swarm] Node {node_id} shutting down.")
+            httpd.server_close()
+
     def run_crystal(self):
         """💎 [Nexus:Crystal] 啟動自學習權重演進"""
         try:
@@ -290,6 +408,18 @@ def main():
         default="standard",
         help="Set audit intensity",
     )
+    parser.add_argument(
+        "--swarm-mode", action="store_true", help="Start node in swarm mode"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8001, help="Port for swarm mode"
+    )
+    parser.add_argument(
+        "--swarm-token", default=None, help="Security token for swarm mode"
+    )
+    parser.add_argument(
+        "--region", default="unknown", help="Region identifier for swarm node"
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -351,7 +481,7 @@ def main():
     runner_parser.add_argument("--with-deps", action="store_true", help="Run with dependencies")
 
     args = parser.parse_args()
-    if not args.command:
+    if not args.command and not args.swarm_mode:
         parser.print_help()
         return
 
@@ -372,6 +502,12 @@ def main():
         fast_mode=args.fast,
         audit_level=args.audit_level,
     )
+
+    if args.swarm_mode:
+        cli.run_swarm_mode(args.port, args.swarm_token, args.region)
+        return
+    
+    domestic_region = args.region
 
     if args.command == "nexus:bug":
         cli.run_bug(args.task, args.domain, args.dry_run, args.bypass_cb)

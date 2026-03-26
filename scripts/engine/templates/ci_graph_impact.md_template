@@ -1,0 +1,35 @@
+# 🚨 Nexus 變更影響分析報告 (Architectural Impact Report)
+
+## 📝 變更摘要 (Change Summary)
+本次 PR 涉及以下核心檔案，可能觸發跨語言連鎖反應：
+{pr_files_list}
+
+---
+
+## 🕸️ 變更波及圖譜 (Impact Visualization)
+```mermaid
+graph TD
+    classDef highRisk fill:#f96,stroke:#333,stroke-width:4px;
+    classDef source fill:#69c,stroke:#333,stroke-width:2px;
+
+    {mermaid_nodes}
+    {mermaid_edges}
+    
+    %% Highlight high-risk sites
+    {high_risk_highlights}
+```
+
+---
+
+## 🛡️ 治理預警 (Governance Alerts)
+{fragility_alerts}
+
+---
+
+## 🛠️ 下游影響點 (Affected Downstream Sites)
+| 類型 | 符號 / 檔案 | 路徑 | 建議行動 |
+| :--- | :--- | :--- | :--- |
+{impact_table_rows}
+
+---
+%% 由 Nexus CPG Lite 自動產生 %%

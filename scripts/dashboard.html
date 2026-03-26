@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Singularity v17 | Impeccable OS</title>
+    <!-- Use High-End Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #00f2ff;
+            --secondary: #7e22ce;
+            --bg-deep: #020205;
+            --surface: rgba(10, 10, 20, 0.4);
+            --border: rgba(255, 255, 255, 0.08);
+            --text-main: #e2e8f0;
+            --text-dim: #94a3b8;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg-deep);
+            color: var(--text-main);
+            font-family: 'Space Grotesk', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            /* Dynamic background glow */
+            background: 
+                radial-gradient(circle at 10% 10%, rgba(126, 34, 206, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 90% 90%, rgba(0, 242, 255, 0.1) 0%, transparent 40%),
+                var(--bg-deep);
+        }
+
+        /* Top Navigation - Ultra Slim & Elegant */
+        nav {
+            padding: 20px 60px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+        }
+
+        .brand {
+            font-weight: 700;
+            font-size: 1.1rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            background: linear-gradient(to right, #fff, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stats-group { display: flex; gap: 30px; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; }
+        .stat-item { display: flex; flex-direction: column; align-items: flex-end; }
+        .stat-val { color: var(--accent); font-weight: 500; font-size: 0.8rem; }
+
+        /* Main Composition */
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 0 40px;
+            position: relative;
+        }
+
+        .console-box {
+            width: 100%;
+            max-width: 860px;
+            transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .hero-title {
+            font-size: 2.8rem;
+            font-weight: 300;
+            text-align: center;
+            margin-bottom: 40px;
+            letter-spacing: -0.02em;
+            color: #fff;
+        }
+
+        /* Impeccable Input Design */
+        .input-container {
+            position: relative;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 10px;
+            display: flex;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+            transition: 0.4s;
+        }
+        .input-container:focus-within {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 30px 60px rgba(0,0,0,0.5), 0 0 20px rgba(0,242,255,0.1);
+        }
+
+        #nexus-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: 20px 30px;
+            color: #fff;
+            font-size: 1.25rem;
+            outline: none;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .exe-btn {
+            background: #fff;
+            color: #000;
+            border: none;
+            border-radius: 12px;
+            padding: 0 25px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.3s;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        .exe-btn:hover { background: var(--accent); transform: scale(1.02); }
+
+        /* Results Card */
+        #result-viewport {
+            display: none;
+            margin-top: -60px;
+            width: 100%;
+            max-width: 860px;
+            background: var(--surface);
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            padding: 40px;
+            animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--accent);
+        }
+
+        #result-text {
+            font-size: 1rem;
+            line-height: 1.8;
+            color: var(--text-main);
+        }
+
+        /* Footer Notifications */
+        footer {
+            padding: 30px 60px;
+            display: flex;
+            justify-content: space-between;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.65rem;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            border-top: 1px solid var(--border);
+        }
+
+        .pulse-dot { height: 6px; width: 6px; background: var(--accent); border-radius: 50%; display: inline-block; margin-right: 10px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 0.2; } 50% { opacity: 1; } 100% { opacity: 0.2; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Utility */
+        .back-link {
+            margin-top: 30px;
+            display: inline-block;
+            cursor: pointer;
+            color: var(--text-dim);
+            font-size: 0.8rem;
+            text-decoration: underline;
+        }
+        .back-link:hover { color: #fff; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="brand">Nexus Singularity</div>
+        <div class="stats-group">
+            <div class="stat-item">
+                <span style="opacity:0.5">SOTA CORE</span>
+                <span class="stat-val">85.5% P@1</span>
+            </div>
+            <div class="stat-item">
+                <span style="opacity:0.5">EQUITY</span>
+                <span class="stat-val">2500 🗲</span>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        <div class="console-box" id="home-view">
+            <h1 class="hero-title">How can Nexus evolve your code today?</h1>
+            <div class="input-container">
+                <input type="text" id="nexus-input" placeholder="Ask a question, Query code, or Deploy a Repo URL..." spellcheck="false">
+                <button class="exe-btn" onclick="executeNexus()">Execute</button>
+            </div>
+            <div style="text-align: center; margin-top: 25px; font-size: 0.8rem; color: var(--text-dim); display: flex; gap: 20px; justify-content: center;">
+                <span># Governance</span>
+                <span># Consultancy</span>
+                <span># Wisdom-Led</span>
+            </div>
+        </div>
+
+        <div id="result-viewport">
+            <div class="result-header">
+                <span>NEXUS_REASONING_ENGINE_v17.4</span>
+                <span id="proc-id">TASK: IDLE</span>
+            </div>
+            <div id="result-text">
+                <!-- Content injected here -->
+            </div>
+            <span class="back-link" onclick="resetView()">← Return to Command Hub</span>
+        </div>
+    </main>
+
+    <footer>
+        <div><span class="pulse-dot"></span> KERNEL STATUS: OPTIMAL</div>
+        <div id="live-notif">WAITTING FOR COMMAND INPUT...</div>
+        <div>V17_SINGULARITY_RELEASE</div>
+    </footer>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:5001";
+
+        async function executeNexus() {
+            const input = document.getElementById('nexus-input').value;
+            if (!input) return;
+
+            const home = document.getElementById('home-view');
+            const viewport = document.getElementById('result-viewport');
+            const content = document.getElementById('result-text');
+            const procId = document.getElementById('proc-id');
+            const notif = document.getElementById('live-notif');
+
+            home.style.opacity = "0";
+            setTimeout(() => home.style.display = "none", 400);
+
+            viewport.style.display = "block";
+            content.innerHTML = "Initializing neural context bridge... Gathering symbolic metadata...<br><br><span style='color:var(--accent);'>[SCANNING LOCAL WORKSPACE]</span>";
+
+            try {
+                if (input.startsWith('http')) {
+                    const res = await fetch(`${API_BASE}/govern`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'Tenant_Friend' },
+                        body: JSON.stringify({ repo: input })
+                    });
+                    const data = await res.json();
+                    procId.innerHTML = "TASK: GOVERNANCE_DEPLOYED";
+                    content.innerHTML = `<h2 style="color:#fff; margin-bottom:15px;">Sentinel Proxy Active</h2>
+                                         Nexus has engaged the **Singularity OS Kernel**. Your repository is now under 85.5% SOTA protection.<br><br>
+                                         <div style="font-family:JetBrains Mono; font-size:0.8rem; background:rgba(0,0,0,0.2); padding:15px; border-radius:10px; border:1px solid var(--border);">
+                                         - Target: ${input}<br>
+                                         - Process ID: ${data.task_id}<br>
+                                         - Policy: Autonomous Repair
+                                         </div><br>
+                                         You can monitor progress in the silent telemetry bar below.`;
+                    notif.innerHTML = `GOVERNING: ${input} [ACTIVE]`;
+                } else {
+                    const res = await fetch(`${API_BASE}/consult`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': 'Tenant_Friend' },
+                        body: JSON.stringify({ question: input })
+                    });
+                    const data = await res.json();
+                    procId.innerHTML = "TASK: AI_CONSULTANCY";
+                    content.innerHTML = `<h2 style="color:#fff; margin-bottom:15px;">Reasoning Insight</h2>` + 
+                                         data.answer.replace(/\n/g, '<br>').replace('// Nexus AI Consultant [SOTA 85.5%]:', '<span style="color:var(--accent)">SYSTEM_ADVISORY_ACTIVE:</span>');
+                }
+            } catch (e) {
+                content.innerHTML = "Connection Error. Sentinel Proxy may be offline.";
+            }
+        }
+
+        function resetView() {
+            const home = document.getElementById('home-view');
+            const viewport = document.getElementById('result-viewport');
+            viewport.style.display = "none";
+            home.style.display = "block";
+            setTimeout(() => home.style.opacity = "1", 50);
+            document.getElementById('nexus-input').value = "";
+        }
+    </script>
+</body>
+</html>
