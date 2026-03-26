@@ -16,7 +16,7 @@ GEMINI_KEY = os.getenv("GOOGLE_API_KEY")
 client = None
 if GEMINI_KEY:
     try:
-        # [SOTA 30.6] Using the new Google GenAI SDK
+        # [SOTA 30.7] Using the new Google GenAI SDK with gemini-2.5-flash
         client = genai.Client(api_key=GEMINI_KEY)
     except Exception as e:
         print(f"⚠️ [Nexus:Neural] Failed to initialize Google GenAI Client: {e}")
@@ -182,9 +182,11 @@ def consult_ai():
     tenant_id = request.headers.get("X-Tenant-ID", "unknown")
     
     # [v30.5 Singularity Armor]
+    global client
+    print(f"// [Nexus:Neural] Consult request. Client state: {'Active' if client else 'OFF'}")
     if client:
         try:
-            # 1. Collect OS Context for the Armor
+            print("// [Nexus:Neural] Collecting OS context...")
             from nexus_os_kernel import nexus_ps 
             procs_data = nexus_ps()
             proc_list = "\n".join([f"- PID: {pid} | Action: {p['action'] if isinstance(p, dict) and 'action' in p else 'background'}" for pid, p in procs_data.items()])
@@ -214,17 +216,21 @@ def consult_ai():
             3. If code is provided, perform architectural audit.
             """
             
-            # [SOTA 30.6] Updated to new SDK method
+            print(f"// [Nexus:Neural] Dispatching to Gemini 2.5 Flash... (Prompt len: {len(nexus_prompt)})")
+            # [SOTA 30.7] Updated to gemini-2.5-flash for the latest neural performance
             response_obj = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=nexus_prompt
             )
+            print("// [Nexus:Neural] Inference return success.")
             return jsonify({
                 "status": "success",
                 "answer": response_obj.text
             })
         except Exception as e:
             print(f"⚠️ [Nexus:Neural] Inference failure: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback to legacy simulated response below...
 
     # Legacy Simulated Logic (Fallback)
