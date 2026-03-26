@@ -8,6 +8,7 @@ from nexus_os_kernel import nexus_spawn, nexus_ps, nexus_kill
 from auto_evolution_engine import nexus_evolve
 
 app = Flask(__name__)
+app.config['JSON_AS_ASCII'] = False # [SOTA] Ensure CJK characters are returned as UTF-8
 
 # [SOTA 10/10] Multi-tenant Sentinel Proxy Middleware v2
 # Implementation based on Sir's expert architectural principles (Phase 2).

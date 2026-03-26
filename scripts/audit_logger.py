@@ -23,8 +23,8 @@ def log_event(tenant_id, event, resource, result, request_id="N/A"):
         "timestamp": datetime.now().isoformat()
     }
     
-    with open(log_file, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         
     print(f"// Nexus-Audit: Tenant [{tenant_id}] Event [{event}] -> {result}")
 

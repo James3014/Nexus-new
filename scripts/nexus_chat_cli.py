@@ -55,6 +55,7 @@ def nexus_consult(question):
                 headers={"X-Tenant-ID": TENANT_ID},
                 json={"question": question}
             )
+            res.encoding = 'utf-8' # Force UTF-8 decoding
             data = res.json()
         
         console.print(Panel(Markdown(data['answer']), title="[bold magenta]Nexus Consultant[/bold magenta]", border_style="magenta"))
@@ -132,4 +133,8 @@ def main_loop():
             console.print(f"[red]Loop Error: {e}[/red]")
 
 if __name__ == "__main__":
+    # Ensure UTF-8 for stdin/stdout in potentially misconfigured environments
+    if sys.platform != "win32":
+        import io
+        sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
     main_loop()
