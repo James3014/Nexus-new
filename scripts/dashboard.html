@@ -293,6 +293,11 @@
             setTimeout(() => home.style.opacity = "1", 50);
             document.getElementById('nexus-input').value = "";
         }
+
+        // Add Enter Key Support
+        document.getElementById('nexus-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') executeNexus();
+        });
     </script>
 </body>
 </html>
