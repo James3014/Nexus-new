@@ -30,8 +30,17 @@
 nexus-pilot-friend pilot_a
 ```
 
-第二位朋友：
-
 ```bash
 nexus-pilot-friend pilot_b
 ```
+
+## 注意事項：Command Not Found？
+
+如果執行 `nexus-pilot-friend` 顯示 `command not found`，請確認您的 `PATH` 包含 `~/.local/bin`：
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+🏆 **Nexus Pilot CLI - 試用愉快！**
