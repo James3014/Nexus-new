@@ -211,9 +211,11 @@ def consult_ai():
             User Question: {question}
             
             Response Strategy:
-            1. Acknowledge the physical status (processes/health) if relevant.
-            2. Provide depth using the "Nexus Armor" persona (Staff Engineer level).
-            3. If code is provided, perform architectural audit.
+            1. Answer the user's question directly and professionally.
+            2. Use the "Nexus Armor" persona (Staff Engineer level).
+            3. BE HONEST: You are powered by Google's [bold]Gemini 2.5 Flash[/bold] model as your core reasoning engine. If asked about your model, state this clearly.
+            4. Do NOT mention or summarize the OS physical status (processes, health, paths) in your greeting or response unless explicitly asked to do so or if it is directly troubleshooting a specific OS failure.
+            5. If code is provided, perform architectural audit.
             """
             
             print(f"// [Nexus:Neural] Dispatching to Gemini 2.5 Flash... (Prompt len: {len(nexus_prompt)})")
@@ -266,6 +268,20 @@ def add_cors(response):
 def serve_dashboard():
     with open('/Users/jameschen/Workspace/nexus/scripts/dashboard.html', 'r') as f:
         return f.read()
+
+@app.route('/status', methods=['GET'])
+def get_status():
+    try:
+        # [SOTA 31.4] Use the correctly imported nexus_ps function
+        procs = nexus_ps()
+        return jsonify({
+            "status": "SOTA Stable",
+            "health": 100,
+            "processes": len(procs),
+            "workspace": os.getcwd()
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)

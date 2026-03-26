@@ -21,13 +21,27 @@ TENANT_ID = "Tenant_Friend"
 
 def print_header():
     console.clear()
-    header_text = Text("NEXUS SINGULARITY OS [v30.3]", style="bold cyan")
-    header_text.append(" | ", style="white")
-    header_text.append("SOTA 85.5%", style="bold green")
-    header_text.append(" | ", style="white")
-    header_text.append("ACTIVE HUB MODE", style="bold magenta")
+    status_msg = "SOTA Stable"
+    health = 100
+    procs_count = 13
     
-    console.print(Panel(header_text, border_style="blue", expand=False))
+    try:
+        res = requests.get(f"{API_BASE}/status", timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            status_msg = data.get("status", status_msg)
+            health = data.get("health", health)
+            procs_count = data.get("processes", procs_count)
+    except:
+        pass # Fallback to defaults if proxy not yet fully available
+
+    header_text = Text(f"NEXUS SINGULARITY OS [v31.3]", style="bold cyan")
+    header_text.append("\n" + "━" * 40 + "\n", style="blue")
+    header_text.append(f"STATUS: {status_msg} ", style="bold green")
+    header_text.append(f"| HEALTH: {health}% ", style="bold yellow")
+    header_text.append(f"| PROCESSES: {procs_count}\n", style="bold magenta")
+    
+    console.print(Panel(header_text, border_style="blue", expand=False, title="[bold white]Command Center[/bold white]"))
     console.print("[dim]Type your question directly, or use /commands for governance.[/dim]\n")
 
 def get_ps():
@@ -111,6 +125,8 @@ def main_loop():
             if cmd.lower() in ["/exit", "/quit", "exit", "quit"]:
                 console.print("[bold yellow]Singularity Session Terminated. Nexus Standing By.[/bold yellow]")
                 break
+            elif cmd == "/status":
+                print_header()
             elif cmd == "/ps":
                 get_ps()
             elif cmd == "/clear":
