@@ -6,20 +6,20 @@ from flask import Flask, request, jsonify
 from audit_logger import log_event
 from nexus_os_kernel import nexus_spawn, nexus_ps, nexus_kill
 from auto_evolution_engine import nexus_evolve
-import google.generativeai as genai
+from google import genai
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False # [SOTA] Ensure CJK characters are returned as UTF-8
 
-# Initialize Gemini if API key is present
+# Initialize Google-GenAI Client if API key is present
 GEMINI_KEY = os.getenv("GOOGLE_API_KEY")
-model = None
+client = None
 if GEMINI_KEY:
     try:
-        genai.configure(api_key=GEMINI_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # [SOTA 30.6] Using the new Google GenAI SDK
+        client = genai.Client(api_key=GEMINI_KEY)
     except Exception as e:
-        print(f"⚠️ [Nexus:Neural] Failed to initialize Gemini: {e}")
+        print(f"⚠️ [Nexus:Neural] Failed to initialize Google GenAI Client: {e}")
 
 # [SOTA 10/10] Multi-tenant Sentinel Proxy Middleware v2
 # Implementation based on Sir's expert architectural principles (Phase 2).
@@ -182,7 +182,7 @@ def consult_ai():
     tenant_id = request.headers.get("X-Tenant-ID", "unknown")
     
     # [v30.5 Singularity Armor]
-    if model:
+    if client:
         try:
             # 1. Collect OS Context for the Armor
             from nexus_os_kernel import nexus_ps 
@@ -198,8 +198,8 @@ def consult_ai():
             - Active Workspace: /Users/jameschen/Workspace/nexus/workspaces/{tenant_id}/
             """
             
-            prompt = f"""
-            You are the Nexus Singularity OS v30.5 AI Consultant.
+            nexus_prompt = f"""
+            You are the Nexus Singularity OS v30.6 AI Consultant.
             You are the "Intelligence Spine" of an advanced Agentic OS.
             You must provide professional, concise, and expert technical advice in Traditional Chinese.
             
@@ -214,10 +214,14 @@ def consult_ai():
             3. If code is provided, perform architectural audit.
             """
             
-            res = model.generate_content(prompt)
+            # [SOTA 30.6] Updated to new SDK method
+            response_obj = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=nexus_prompt
+            )
             return jsonify({
                 "status": "success",
-                "answer": res.text
+                "answer": response_obj.text
             })
         except Exception as e:
             print(f"⚠️ [Nexus:Neural] Inference failure: {e}")
