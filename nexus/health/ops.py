@@ -62,6 +62,18 @@ class SelfHealCommandResult:
     notes: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class HealthExplainResult:
+    snapshot_score: float
+    snapshot_status: str
+    pipeline_health: float
+    phase_health: dict[str, float] = field(default_factory=dict)
+    anti_hallucination: dict[str, object] = field(default_factory=dict)
+    learning: dict[str, object] = field(default_factory=dict)
+    self_healing: dict[str, object] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+
 def normalize_check_level(level: str) -> str:
     normalized = CHECK_LEVEL_ALIASES.get(level, level)
     if normalized not in CHECK_BENCHMARK_TASKS:
@@ -189,4 +201,67 @@ def run_self_heal(engine, mode: str = "standard") -> SelfHealCommandResult:
         phase_route=cycle_phase_route,
         planned_actions=cycle_plan_actions,
         notes=list(cycle.notes),
+    )
+
+
+def run_health_explain(engine) -> HealthExplainResult:
+    state = engine.state_io.load_global_state()
+    snapshot = HealthScorer.apply_snapshot(state)
+    metadata = state.metadata or {}
+    phase_health = {
+        phase: round(float(getattr(metric, "health", 0.0) or 0.0), 2)
+        for phase, metric in (state.phase_metrics or {}).items()
+    }
+
+    proof_type = str(metadata.get("last_proof_type", "") or "")
+    proof_value = str(metadata.get("last_proof_value", "") or "")
+    anti_hallucination = {
+        "last_review_status": str(metadata.get("last_review_status", "") or ""),
+        "patch_generated": bool(metadata.get("last_patch_generated", False)),
+        "patch_apply_success": bool(metadata.get("last_patch_apply_success", False)),
+        "proof_type": proof_type,
+        "proof_present": bool(proof_type and proof_value),
+        "phantom_success_reason": str(metadata.get("phantom_success_reason", "") or ""),
+    }
+
+    learning = {
+        "frozen": bool(metadata.get("learning_frozen", False)),
+        "freeze_reasons": list(metadata.get("learning_freeze_reasons", []) or []),
+        "ingest_status": str(metadata.get("learning_ingest_status", "") or ""),
+        "curiosity_score": float(metadata.get("curiosity_score", 0.0) or 0.0),
+        "pattern_reuse_rate": float(metadata.get("pattern_reuse_rate", 0.0) or 0.0),
+        "lesson_quality": float(metadata.get("lesson_quality", 0.0) or 0.0),
+        "next_run_hit_rate": float(metadata.get("next_run_hit_rate", 0.0) or 0.0),
+    }
+
+    cycle = metadata.get("self_heal_cycle") or {}
+    route_bias = metadata.get("self_heal_route_bias") or {}
+    self_healing = {
+        "cycle_status": str(cycle.get("status", "") or ""),
+        "diagnosis_kind": str((cycle.get("diagnosis") or {}).get("kind", "") or ""),
+        "after_diagnosis_kind": str((cycle.get("after_diagnosis") or {}).get("kind", "") or ""),
+        "phase_route": list(cycle.get("phase_route", []) or []),
+        "route_before": list(route_bias.get("route_before", []) or []),
+        "route_after": list(route_bias.get("route_after", []) or []),
+        "route_weights": dict(metadata.get("self_heal_route_phase_weights", {}) or {}),
+        "policy_sync": str(metadata.get("self_heal_route_policy_sync", "") or ""),
+    }
+
+    notes: list[str] = []
+    if anti_hallucination["patch_generated"] and anti_hallucination["patch_apply_success"] and not anti_hallucination["proof_present"]:
+        notes.append("anti_hallucination_block_risk:missing_proof")
+    if learning["frozen"]:
+        notes.append("learning_frozen")
+    if self_healing["cycle_status"]:
+        notes.append(f"self_heal_cycle:{self_healing['cycle_status']}")
+
+    return HealthExplainResult(
+        snapshot_score=round(float(snapshot.overall_score), 2),
+        snapshot_status=str(snapshot.status),
+        pipeline_health=round(float(state.pipeline_health or 0.0), 2),
+        phase_health=phase_health,
+        anti_hallucination=anti_hallucination,
+        learning=learning,
+        self_healing=self_healing,
+        notes=notes,
     )

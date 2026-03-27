@@ -8,6 +8,9 @@ from nexus.delivery.models import CompletionResult
 from nexus.delivery.models import TaskLevel
 from nexus.delivery.report import write_report_bundle
 from nexus.delivery.suggestions import suggest_verification_commands
+from nexus.health.ops import run_self_check
+from nexus.health.ops import run_health_explain
+from nexus.health.ops import run_self_heal
 
 class NexusCommandService:
     """🧬 v9 Command Service: CLI 授權的業務邏輯層。
@@ -23,6 +26,9 @@ class NexusCommandService:
         self.last_completion_report_paths: tuple[Path, Path] | None = None
         self.last_completion_error: Optional[str] = None
         self.last_effective_verify_commands: list[str] = []
+        self.last_self_check_result = None
+        self.last_self_heal_result = None
+        self.last_health_explain_result = None
 
     def _run_completion_gate(
         self,
@@ -71,6 +77,7 @@ class NexusCommandService:
         verify_commands: Optional[list[str]] = None,
         artifact_paths: Optional[list[str]] = None,
         bug_id: Optional[str] = None,
+        execution_context: Optional[dict] = None,
     ):
         """Execute a bug task through the sole delivery-aware service boundary."""
         import time
@@ -79,7 +86,7 @@ class NexusCommandService:
             bug_id=bug_id,
             desc=task,
             plan_only=plan_only,
-            context={"delivery_mode": delivery_mode},
+            context={"delivery_mode": delivery_mode, **(execution_context or {})},
         )
         if not success:
             return False
@@ -100,11 +107,12 @@ class NexusCommandService:
         delivery_mode: str = "standard",
         verify_commands: Optional[list[str]] = None,
         artifact_paths: Optional[list[str]] = None,
+        execution_context: Optional[dict] = None,
     ):
         """Execute a feature task through the sole delivery-aware service boundary."""
         success = self.engine.run_feature(
             task=task,
-            context={"delivery_mode": delivery_mode},
+            context={"delivery_mode": delivery_mode, **(execution_context or {})},
             domain=domain,
             dry_run=dry_run,
             skill=skill
@@ -127,3 +135,15 @@ class NexusCommandService:
             model=model,
             target=target
         )
+
+    def execute_self_check(self, level: str = "standard"):
+        self.last_self_check_result = run_self_check(self.engine, level=level)
+        return self.last_self_check_result
+
+    def execute_self_heal(self, mode: str = "standard"):
+        self.last_self_heal_result = run_self_heal(self.engine, mode=mode)
+        return self.last_self_heal_result
+
+    def execute_health_explain(self):
+        self.last_health_explain_result = run_health_explain(self.engine)
+        return self.last_health_explain_result

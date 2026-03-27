@@ -4,6 +4,7 @@ import sys
 import time
 import os
 import subprocess
+import json
 from pathlib import Path
 from datetime import datetime
 
@@ -14,6 +15,11 @@ if str(REPO_ROOT) not in sys.path:
 
 # 🛡️ Nexus 合約導入
 from nexus.core.state_contracts import NexusState
+from nexus.delivery.interactive import (
+    resolve_check_level,
+    resolve_delivery_mode,
+    resolve_self_heal_mode,
+)
 
 
 class NexusCLI:
@@ -75,13 +81,26 @@ class NexusCLI:
         domain: str = None,
         dry_run: bool = False,
         bypass_cb: bool = False,
+        delivery_mode: str = "standard",
+        verify_commands: list[str] | None = None,
+        artifact_paths: list[str] | None = None,
     ):
         """nexus:bug 介面"""
-        success = self.service.execute_bug(task, dry_run)
+        success = self.service.execute_bug(
+            task,
+            dry_run,
+            delivery_mode=delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+        )
+        self._print_delivery_summary("Bug", delivery_mode)
         if success:
             print("✅ [Nexus:Bug] Success.")
         else:
+            if self.service.last_completion_error:
+                print(f"❌ [Nexus:Bug] Delivery gate failed: {self.service.last_completion_error}")
             print("❌ [Nexus:Bug] Failed.")
+        return success
 
     def run_test(self, skill=None, interaction=False, full_chain=None, bypass_cb=False):
         """🧪 [Nexus:Test] 執行驗證"""
@@ -105,13 +124,43 @@ class NexusCLI:
         dry_run: bool = False,
         bypass_cb: bool = False,
         skill: str = None,
+        delivery_mode: str = "standard",
+        verify_commands: list[str] | None = None,
+        artifact_paths: list[str] | None = None,
     ):
         """🚀 [Nexus:Feature] 實作新功能介面"""
-        success = self.service.execute_feature(task, domain, dry_run, skill)
+        success = self.service.execute_feature(
+            task,
+            domain,
+            dry_run,
+            skill,
+            delivery_mode=delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+        )
+        self._print_delivery_summary("Feature", delivery_mode)
         if success:
             print("✅ [Nexus:Feature] Success.")
         else:
+            if self.service.last_completion_error:
+                print(f"❌ [Nexus:Feature] Delivery gate failed: {self.service.last_completion_error}")
             print("❌ [Nexus:Feature] Failed.")
+        return success
+
+    def _print_delivery_summary(self, label: str, delivery_mode: str) -> None:
+        if delivery_mode != "high":
+            return
+        commands = self.service.last_effective_verify_commands
+        report_paths = self.service.last_completion_report_paths
+        if commands:
+            print(f"🧪 [Nexus:{label}] Verification Commands:")
+            for command in commands:
+                print(f"  - {command}")
+        if isinstance(report_paths, tuple) and len(report_paths) == 2:
+            json_path, md_path = report_paths
+            print("🧾 [Nexus:{}] Delivery Reports:".format(label))
+            print(f"  - JSON: {json_path}")
+            print(f"  - Markdown: {md_path}")
 
     def run_swarm_mode(self, port: int, token: str = None, region: str = "unknown"):
         """🐝 [Nexus:Swarm] Start Node Swarm Mode (HTTP Server)"""
@@ -292,26 +341,123 @@ class NexusCLI:
         print("✅ [Clean] Completed.")
 
     def run_check(self, level: str = "quick"):
-        """🔍 [Nexus:Check] 執行分層健康檢查"""
+        """🔍 [Nexus:Check] 執行分級自檢。"""
         print(f"🔍 [Nexus:Check] Running level: {level}...")
-        state = self.engine.state_io.load_global_state()
+        result = self.service.execute_self_check(level=level)
+        print(f"  - Snapshot Score: {result.snapshot_score}")
+        print(f"  - Snapshot Status: {result.snapshot_status}")
+        if result.benchmark_tasks:
+            print(f"  - Benchmark Tasks: {result.benchmark_tasks}")
+            print(f"  - Benchmark Avg Health: {result.benchmark_avg_health}")
+            if getattr(result, "benchmark_pass_rate", None) is not None:
+                print(f"  - Benchmark Pass Rate: {result.benchmark_pass_rate}")
+            if getattr(result, "benchmark_output", None):
+                print(f"  - Benchmark Output: {result.benchmark_output}")
+        if result.notes:
+            print("  - Notes:")
+            for note in result.notes:
+                print(f"    - {note}")
+        if result.ok:
+            print("✅ [Nexus:Check] PASS")
+        else:
+            print("❌ [Nexus:Check] FAIL")
 
-        # 根據 level 執行不同強度的檢查
-        if level == "quick":
-            print(f"  - Health Score: {state.health_score}")
-            print(f"  - Status: {state.health_metrics.status}")
-        elif level == "pre-merge":
-            # 模擬 pre-merge 流程：執行 replay
-            print("  - Running pre-merge replay validation...")
-            time.sleep(1)
-            print("  - [PASS] Replay: OFF-001")
-        elif level == "nightly":
-            print("  - Running nightly deep diagnostic system...")
-            time.sleep(2)
-            print(f"  - [REPORT] Global Health Aggregate: {state.health_score}")
+    def run_self_heal(self, mode: str = "standard"):
+        """🩹 [Nexus:Self-Heal] 執行分級自癒。"""
+        print(f"🩹 [Nexus:Self-Heal] Running mode: {mode}...")
+        result = self.service.execute_self_heal(mode=mode)
+        print(f"  - Before Score: {result.before_score}")
+        print(f"  - After Score: {result.after_score}")
+        print(f"  - Diagnosis: {result.diagnosis_kind}")
+        print(f"  - After Diagnosis: {result.after_diagnosis_kind}")
+        print(f"  - Cycle Status: {result.cycle_status}")
+        if getattr(result, "phase_route", None):
+            print(f"  - Phase Route: {' -> '.join(result.phase_route)}")
+        if result.planned_actions:
+            print("  - Planned Actions:")
+            for action in result.planned_actions:
+                print(f"    - {action}")
+        if result.notes:
+            print("  - Notes:")
+            for note in result.notes:
+                print(f"    - {note}")
+        if result.ok:
+            print("✅ [Nexus:Self-Heal] PASS")
+        else:
+            print("❌ [Nexus:Self-Heal] FAIL")
 
-        self.engine._voice_notify(f"健康檢查完成，得分 {state.health_score}")
-        self._check_alerts(state)
+    def run_health_explain(self, output: str = "text"):
+        """📋 [Nexus:Health] explain 抗幻/學習/自癒整合狀態。"""
+        result = self.service.execute_health_explain()
+        payload = {
+            "snapshot_score": result.snapshot_score,
+            "snapshot_status": result.snapshot_status,
+            "pipeline_health": result.pipeline_health,
+            "phase_health": result.phase_health,
+            "anti_hallucination": result.anti_hallucination,
+            "learning": result.learning,
+            "self_healing": result.self_healing,
+            "notes": result.notes,
+        }
+        if output == "json":
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+
+        print("📋 [Nexus:Health:Explain] 三系統整合戰報")
+        print(f"  - Snapshot: {result.snapshot_score} ({result.snapshot_status})")
+        print(f"  - Pipeline Health: {result.pipeline_health}")
+        if result.phase_health:
+            ordered = " ".join(
+                f"{phase}:{score}"
+                for phase, score in sorted(result.phase_health.items(), key=lambda item: item[0])
+            )
+            print(f"  - Phase Health: {ordered}")
+
+        anti = result.anti_hallucination
+        print("  - Anti-Hallucination:")
+        print(f"    - Review Status: {anti.get('last_review_status')}")
+        print(f"    - Patch: generated={anti.get('patch_generated')} applied={anti.get('patch_apply_success')}")
+        print(f"    - Proof: present={anti.get('proof_present')} type={anti.get('proof_type') or '(none)'}")
+        if anti.get("phantom_success_reason"):
+            print(f"    - Phantom Reason: {anti.get('phantom_success_reason')}")
+
+        learning = result.learning
+        print("  - Learning:")
+        print(f"    - Frozen: {learning.get('frozen')}")
+        if learning.get("freeze_reasons"):
+            print(f"    - Freeze Reasons: {', '.join(learning.get('freeze_reasons'))}")
+        print(f"    - Ingest Status: {learning.get('ingest_status') or '(none)'}")
+        print(f"    - Curiosity: {learning.get('curiosity_score')}")
+        print(
+            "    - Scores: reuse={reuse} lesson={lesson} next_hit={next_hit}".format(
+                reuse=learning.get("pattern_reuse_rate"),
+                lesson=learning.get("lesson_quality"),
+                next_hit=learning.get("next_run_hit_rate"),
+            )
+        )
+
+        healing = result.self_healing
+        print("  - Self-Healing:")
+        print(f"    - Cycle Status: {healing.get('cycle_status') or '(none)'}")
+        print(
+            f"    - Diagnosis: {healing.get('diagnosis_kind') or '(none)'} -> {healing.get('after_diagnosis_kind') or '(none)'}"
+        )
+        if healing.get("phase_route"):
+            print(f"    - Phase Route: {' -> '.join(healing.get('phase_route'))}")
+        if healing.get("route_after"):
+            print(f"    - Route Bias: {' -> '.join(healing.get('route_before') or [])} => {' -> '.join(healing.get('route_after') or [])}")
+        print(f"    - Policy Sync: {healing.get('policy_sync') or '(none)'}")
+        if healing.get("route_weights"):
+            weights = healing.get("route_weights")
+            print(
+                "    - Route Weights: "
+                + " ".join(f"{k}:{v}" for k, v in sorted(weights.items(), key=lambda item: item[0]))
+            )
+
+        if result.notes:
+            print("  - Notes:")
+            for note in result.notes:
+                print(f"    - {note}")
 
     def _check_alerts(self, state: NexusState):
         """🚨 CHK-004: 偵測健康度下降並產生警報"""
@@ -420,6 +566,12 @@ def main():
     parser.add_argument(
         "--region", default="unknown", help="Region identifier for swarm node"
     )
+    parser.add_argument(
+        "--delivery-mode",
+        choices=["ask", "standard", "high"],
+        default="ask",
+        help="Prompt or choose whether to require high-standard delivery verification.",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -428,6 +580,8 @@ def main():
     bug.add_argument("--task", required=True)
     bug.add_argument("--domain", default=None)
     bug.add_argument("--dry-run", action="store_true")
+    bug.add_argument("--verify", action="append", default=[])
+    bug.add_argument("--artifact", action="append", default=[])
 
     # nexus:test
     test_parser = subparsers.add_parser("nexus:test")
@@ -443,6 +597,8 @@ def main():
     feat.add_argument("--domain", default=None)
     feat.add_argument("--dry-run", action="store_true")
     feat.add_argument("--skill", help="Manually specify a skill to use")
+    feat.add_argument("--verify", action="append", default=[])
+    feat.add_argument("--artifact", action="append", default=[])
 
     # nexus:crystal
     subparsers.add_parser("nexus:crystal")
@@ -468,8 +624,21 @@ def main():
     # nexus:check
     check_parser = subparsers.add_parser("nexus:check")
     check_parser.add_argument(
-        "--level", choices=["quick", "pre-merge", "nightly"], default="quick"
+        "--level",
+        choices=["ask", "quick", "standard", "high", "full", "pre-merge", "nightly"],
+        default="ask",
     )
+
+    # nexus:self-heal
+    self_heal_parser = subparsers.add_parser("nexus:self-heal")
+    self_heal_parser.add_argument(
+        "--mode", choices=["ask", "dry-run", "standard", "strict"], default="ask"
+    )
+
+    # nexus:health
+    health_parser = subparsers.add_parser("nexus:health")
+    health_parser.add_argument("action", choices=["explain"], nargs="?", default="explain")
+    health_parser.add_argument("--output", choices=["text", "json"], default="text")
 
     # nexus:upgrade
     upgrade_parser = subparsers.add_parser("nexus:upgrade")
@@ -510,7 +679,16 @@ def main():
     domestic_region = args.region
 
     if args.command == "nexus:bug":
-        cli.run_bug(args.task, args.domain, args.dry_run, args.bypass_cb)
+        delivery_mode = resolve_delivery_mode(args.delivery_mode)
+        cli.run_bug(
+            args.task,
+            args.domain,
+            args.dry_run,
+            args.bypass_cb,
+            delivery_mode=delivery_mode,
+            verify_commands=args.verify,
+            artifact_paths=args.artifact,
+        )
     elif args.command == "nexus:test":
         cli.run_test(
             skill=args.skill,
@@ -519,8 +697,16 @@ def main():
             bypass_cb=args.bypass_cb,
         )
     elif args.command == "nexus:feature":
+        delivery_mode = resolve_delivery_mode(args.delivery_mode)
         cli.run_feature(
-            args.task, args.domain, args.dry_run, args.bypass_cb, args.skill
+            args.task,
+            args.domain,
+            args.dry_run,
+            args.bypass_cb,
+            args.skill,
+            delivery_mode=delivery_mode,
+            verify_commands=args.verify,
+            artifact_paths=args.artifact,
         )
     elif args.command == "nexus:crystal":
         cli.run_crystal()
@@ -531,11 +717,17 @@ def main():
     elif args.command == "nexus:clean":
         cli.run_clean(args.dry_run)
     elif args.command == "nexus:check":
-        cli.run_check(args.level)
+        cli.run_check(resolve_check_level(args.level))
+    elif args.command == "nexus:self-heal":
+        cli.run_self_heal(resolve_self_heal_mode(args.mode))
+    elif args.command == "nexus:health":
+        if args.action == "explain":
+            cli.run_health_explain(args.output)
     elif args.command == "nexus:upgrade":
         cli.run_upgrade(args.dry_run)
     elif args.command == "nexus:runner":
         # 🧪 v9: Launch the automated task runner
+        delivery_mode = resolve_delivery_mode(args.delivery_mode)
         scripts_root = Path(__file__).resolve().parents[2]
         runner_path = scripts_root / "scripts" / "ops" / "task_runner.py"
         if not runner_path.exists():
@@ -548,6 +740,7 @@ def main():
             runner_cmd.extend(["--task", args.task])
         if args.with_deps:
             runner_cmd.append("--with-deps")
+        runner_cmd.extend(["--delivery-mode", delivery_mode])
 
         rc = subprocess.call(runner_cmd)
         sys.exit(rc)
