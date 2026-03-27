@@ -7,18 +7,78 @@ def cli(tmp_path):
     return NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
 
 def test_cli_bug_dispatch(cli):
-    # Mock the engine
-    mock_engine = MagicMock()
-    cli._engine = mock_engine
+    mock_service = MagicMock()
+    mock_service.execute_bug.return_value = True
+    mock_service.last_completion_error = None
+    cli._service = mock_service
     
     # Run the command
-    cli.run_bug(task="test-bug")
+    cli.run_bug(task="test-bug", delivery_mode="high", verify_commands=["/bin/echo ok"])
     
     # Verify dispatch
-    mock_engine.run_bug.assert_called_once()
-    args, kwargs = mock_engine.run_bug.call_args
-    assert kwargs["desc"] == "test-bug"
+    mock_service.execute_bug.assert_called_once_with(
+        "test-bug",
+        False,
+        delivery_mode="high",
+        verify_commands=["/bin/echo ok"],
+        artifact_paths=None,
+    )
 
 def test_command_service_exists():
     from nexus.app.command_service import NexusCommandService
     assert NexusCommandService is not None
+
+
+def test_cli_bug_prints_delivery_summary(cli, capsys, tmp_path):
+    mock_service = MagicMock()
+    mock_service.execute_bug.return_value = True
+    mock_service.last_completion_error = None
+    mock_service.last_effective_verify_commands = ["/bin/echo ok"]
+    mock_service.last_completion_report_paths = (tmp_path / "r.json", tmp_path / "r.md")
+    cli._service = mock_service
+
+    cli.run_bug(task="test-bug", delivery_mode="high", verify_commands=["/bin/echo ok"])
+
+    output = capsys.readouterr().out
+    assert "Verification Commands" in output
+    assert "/bin/echo ok" in output
+    assert "Delivery Reports" in output
+
+
+def test_cli_phase6_dispatches_runner(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    with patch("scripts.engine.nexus_cli.subprocess.call", return_value=0) as mock_call:
+        rc = cli.run_phase6_research(
+            workspace="/tmp/autoresearch",
+            rounds=50,
+            proof_ratio_min=95.0,
+            output_prefix="phase6",
+            skip_autopilot=True,
+        )
+    assert rc == 0
+    invoked = mock_call.call_args[0][0]
+    assert "phase6_research.py" in " ".join(invoked)
+    assert "--workspace" in invoked
+    assert "--skip-autopilot" in invoked
+
+
+def test_cli_profile_apply_writes_prod_defaults(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    rc = cli.run_profile(action="apply", name="prod")
+    assert rc == 0
+    assert cli.profile_path.exists()
+    payload = cli.profile_path.read_text(encoding="utf-8")
+    assert '"name": "prod"' in payload
+    assert '"delivery_mode": "high"' in payload
+
+
+def test_cli_release_ready_dispatches_gate_script(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    gate_script = tmp_path / "scripts" / "ops" / "nexus_release_gate.sh"
+    gate_script.parent.mkdir(parents=True, exist_ok=True)
+    gate_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    with patch("scripts.engine.nexus_cli.subprocess.call", return_value=0) as mock_call:
+        rc = cli.run_release_ready()
+    assert rc == 0
+    called = mock_call.call_args[0][0]
+    assert str(gate_script) in called[0]

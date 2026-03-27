@@ -37,8 +37,18 @@ class NexusCLI:
         self.silent = silent
         self.fast_mode = fast_mode
         self.audit_level = audit_level
+        self.profile_path = self.project_root / ".nexus" / "runtime_profile.json"
+        self.runtime_profile = self._load_runtime_profile()
         self._engine = None
         self._service = None
+
+    def _load_runtime_profile(self) -> dict:
+        if not self.profile_path.exists():
+            return {}
+        try:
+            return json.loads(self.profile_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
 
     @property
     def engine(self):
@@ -544,6 +554,74 @@ class NexusCLI:
             f"✅ [Benchmark] Complete! Success Rate: {success_count / task_count * 100:.1f}%"
         )
 
+    def run_phase6_research(
+        self,
+        workspace: str,
+        rounds: int = 100,
+        proof_ratio_min: float = 95.0,
+        output_prefix: str = "phase6",
+        skip_autopilot: bool = False,
+    ) -> int:
+        """🧪 [Nexus:Phase6] 執行可重跑 P6 研究流程並產報告。"""
+        script_path = self.project_root / "scripts" / "ops" / "phase6_research.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--workspace",
+            workspace,
+            "--rounds",
+            str(rounds),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+            "--output-prefix",
+            output_prefix,
+        ]
+        if skip_autopilot:
+            cmd.append("--skip-autopilot")
+        return subprocess.call(cmd)
+
+    def run_profile(self, action: str, name: str = "prod") -> int:
+        if action == "show":
+            profile = self.runtime_profile or {
+                "name": "default",
+                "delivery_mode": "ask",
+                "check_level": "ask",
+                "self_heal_mode": "ask",
+            }
+            print(json.dumps(profile, ensure_ascii=False, indent=2))
+            return 0
+
+        if action != "apply":
+            print(f"❌ unsupported profile action: {action}")
+            return 2
+
+        if name != "prod":
+            print(f"❌ unsupported profile name: {name}")
+            return 2
+
+        profile = {
+            "name": "prod",
+            "delivery_mode": "high",
+            "check_level": "high",
+            "self_heal_mode": "strict",
+            "proof_ratio_min": 95.0,
+        }
+        self.profile_path.parent.mkdir(parents=True, exist_ok=True)
+        self.profile_path.write_text(
+            json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.runtime_profile = profile
+        print(f"✅ [Nexus:Profile] applied: {name}")
+        print(f"  - path: {self.profile_path}")
+        return 0
+
+    def run_release_ready(self) -> int:
+        gate_script = self.project_root / "scripts" / "ops" / "nexus_release_gate.sh"
+        if not gate_script.exists():
+            print(f"❌ [Nexus:Release] missing gate script: {gate_script}")
+            return 2
+        return subprocess.call([str(gate_script)])
+
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus v9 Refactored CLI Shell")
@@ -668,6 +746,22 @@ def main():
     runner_parser.add_argument("--task", help="Run specific task ID")
     runner_parser.add_argument("--with-deps", action="store_true", help="Run with dependencies")
 
+    # nexus:phase6
+    phase6_parser = subparsers.add_parser("nexus:phase6")
+    phase6_parser.add_argument("--workspace", required=True, help="Autoresearch workspace path")
+    phase6_parser.add_argument("--rounds", type=int, default=100)
+    phase6_parser.add_argument("--proof-ratio-min", type=float, default=95.0)
+    phase6_parser.add_argument("--output-prefix", default="phase6")
+    phase6_parser.add_argument("--skip-autopilot", action="store_true")
+
+    # nexus:profile
+    profile_parser = subparsers.add_parser("nexus:profile")
+    profile_parser.add_argument("action", choices=["show", "apply"])
+    profile_parser.add_argument("--name", choices=["prod"], default="prod")
+
+    # nexus:release-ready
+    subparsers.add_parser("nexus:release-ready")
+
     args = parser.parse_args()
     if not args.command and not args.swarm_mode:
         parser.print_help()
@@ -698,7 +792,10 @@ def main():
     domestic_region = args.region
 
     if args.command == "nexus:bug":
-        delivery_mode = resolve_delivery_mode(args.delivery_mode)
+        requested_delivery_mode = args.delivery_mode
+        if requested_delivery_mode == "ask":
+            requested_delivery_mode = str(cli.runtime_profile.get("delivery_mode", "ask"))
+        delivery_mode = resolve_delivery_mode(requested_delivery_mode)
         cli.run_bug(
             args.task,
             args.domain,
@@ -716,7 +813,10 @@ def main():
             bypass_cb=args.bypass_cb,
         )
     elif args.command == "nexus:feature":
-        delivery_mode = resolve_delivery_mode(args.delivery_mode)
+        requested_delivery_mode = args.delivery_mode
+        if requested_delivery_mode == "ask":
+            requested_delivery_mode = str(cli.runtime_profile.get("delivery_mode", "ask"))
+        delivery_mode = resolve_delivery_mode(requested_delivery_mode)
         cli.run_feature(
             args.task,
             args.domain,
@@ -736,9 +836,15 @@ def main():
     elif args.command == "nexus:clean":
         cli.run_clean(args.dry_run)
     elif args.command == "nexus:check":
-        cli.run_check(resolve_check_level(args.level))
+        requested_level = args.level
+        if requested_level == "ask":
+            requested_level = str(cli.runtime_profile.get("check_level", "ask"))
+        cli.run_check(resolve_check_level(requested_level))
     elif args.command == "nexus:self-heal":
-        cli.run_self_heal(resolve_self_heal_mode(args.mode))
+        requested_mode = args.mode
+        if requested_mode == "ask":
+            requested_mode = str(cli.runtime_profile.get("self_heal_mode", "ask"))
+        cli.run_self_heal(resolve_self_heal_mode(requested_mode))
     elif args.command == "nexus:health":
         if args.action == "explain":
             cli.run_health_explain(args.output)
@@ -762,6 +868,21 @@ def main():
         runner_cmd.extend(["--delivery-mode", delivery_mode])
 
         rc = subprocess.call(runner_cmd)
+        sys.exit(rc)
+    elif args.command == "nexus:phase6":
+        rc = cli.run_phase6_research(
+            workspace=args.workspace,
+            rounds=args.rounds,
+            proof_ratio_min=args.proof_ratio_min,
+            output_prefix=args.output_prefix,
+            skip_autopilot=args.skip_autopilot,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:profile":
+        rc = cli.run_profile(action=args.action, name=args.name)
+        sys.exit(rc)
+    elif args.command == "nexus:release-ready":
+        rc = cli.run_release_ready()
         sys.exit(rc)
 
 

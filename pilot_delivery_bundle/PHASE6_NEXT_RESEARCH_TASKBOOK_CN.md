@@ -40,11 +40,16 @@
 
 ## 驗收指令（最小集）
 ```bash
+# 方式 A：直接走 Nexus CLI（建議）
+python3 scripts/engine/nexus_cli.py nexus:phase6 \
+  --workspace /Users/jameschen/Downloads/obsidian/01_Projects/Autoresearch \
+  --rounds 100 \
+  --proof-ratio-min 95.0 \
+  --output-prefix phase6
+
+# 方式 B：手動
 python3 autopilot.py
-python3 formal_research_hardening.py \
-  --input phase6_round_summary.jsonl \
-  --out phase6_out \
-  --proof-ratio-min 95.0
+python3 formal_research_hardening.py --input phase6_round_summary.jsonl --out phase6_out --proof-ratio-min 95.0
 ```
 
 ## 禁止事項
