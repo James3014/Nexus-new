@@ -1,4 +1,8 @@
 {
+  "router": {
+    "canonical_impl": "nexus/core/router.py",
+    "legacy_shim": "scripts/core/skills_router.py"
+  },
   "skills": {
     "codebase_investigator": {
       "phases": ["D"],
