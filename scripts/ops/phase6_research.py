@@ -35,6 +35,42 @@ def _run(cmd: list[str], cwd: Path) -> None:
         raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(cmd)}")
 
 
+def _choose_hardening_command(
+    python_exec: str,
+    hardening: Path,
+    summary_jsonl: Path,
+    out_dir: Path,
+    proof_ratio_min: float,
+) -> list[str]:
+    probe = subprocess.run(
+        [python_exec, str(hardening), "-h"],
+        capture_output=True,
+        text=True,
+    )
+    help_text = (probe.stdout or "") + "\n" + (probe.stderr or "")
+    if "--round-summary" in help_text and "--output-dir" in help_text:
+        return [
+            python_exec,
+            str(hardening),
+            "--round-summary",
+            str(summary_jsonl),
+            "--output-dir",
+            str(out_dir),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+        ]
+    return [
+        python_exec,
+        str(hardening),
+        "--input",
+        str(summary_jsonl),
+        "--out",
+        str(out_dir),
+        "--proof-ratio-min",
+        str(proof_ratio_min),
+    ]
+
+
 def main() -> int:
     args = build_parser().parse_args()
     workspace = Path(args.workspace).expanduser().resolve()
@@ -61,19 +97,10 @@ def main() -> int:
         return 2
 
     phase6_out = workspace / f"{args.output_prefix}_out"
-    _run(
-        [
-            sys.executable,
-            str(hardening),
-            "--input",
-            str(summary_jsonl),
-            "--out",
-            str(phase6_out),
-            "--proof-ratio-min",
-            str(args.proof_ratio_min),
-        ],
-        workspace,
+    hardening_cmd = _choose_hardening_command(
+        sys.executable, hardening, summary_jsonl, phase6_out, args.proof_ratio_min
     )
+    _run(hardening_cmd, workspace)
 
     rows = load_jsonl(summary_jsonl)
     metrics = compute_phase6_metrics(rows)

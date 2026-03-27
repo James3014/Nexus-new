@@ -38,7 +38,20 @@ def compute_phase6_metrics(rows: list[dict]) -> Phase6Metrics:
     last20 = rows[-20:]
     mismatches = [float(r.get("mismatch_rate", 999.0)) for r in last20]
     proofs = [float(r.get("proof_ratio", 0.0)) for r in last20]
-    precisions = [float(r.get("best_precision", 0.0)) for r in rows]
+    precisions: list[float] = []
+    for row in rows:
+        if row.get("best_precision") is not None:
+            precisions.append(float(row.get("best_precision", 0.0)))
+            continue
+        if row.get("precision_alpha") is not None:
+            precisions.append(float(row.get("precision_alpha", 0.0)))
+            continue
+        params = row.get("params")
+        if isinstance(params, dict) and params.get("PRECISION_ALPHA") is not None:
+            precisions.append(float(params.get("PRECISION_ALPHA", 0.0)))
+            continue
+        if isinstance(params, dict) and params.get("PRECISION") is not None:
+            precisions.append(float(params.get("PRECISION", 0.0)))
 
     return Phase6Metrics(
         mismatch_lt_0_5_last20=len([m for m in mismatches if m < 0.5]),
@@ -54,4 +67,3 @@ def gate_passed(metrics: Phase6Metrics) -> bool:
         and metrics.mismatch_max_last20 < 0.5
         and metrics.proof_ratio_min_last20 >= 95.0
     )
-

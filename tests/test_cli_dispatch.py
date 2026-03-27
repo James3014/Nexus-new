@@ -82,3 +82,18 @@ def test_cli_release_ready_dispatches_gate_script(tmp_path):
     assert rc == 0
     called = mock_call.call_args[0][0]
     assert str(gate_script) in called[0]
+
+
+def test_cli_bug_prod_profile_requires_release_ready(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    cli.runtime_profile = {"name": "prod"}
+    mock_service = MagicMock()
+    mock_service.execute_bug.return_value = True
+    mock_service.last_completion_error = None
+    mock_service.last_effective_verify_commands = []
+    mock_service.last_completion_report_paths = None
+    cli._service = mock_service
+    with patch.object(cli, "run_release_ready", return_value=1):
+        ok = cli.run_bug(task="test-bug", delivery_mode="standard")
+    assert ok is False
+    assert cli.service.last_completion_error == "release_ready_gate_failed"

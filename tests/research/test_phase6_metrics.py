@@ -18,6 +18,15 @@ def test_compute_phase6_metrics_uses_last20_window() -> None:
     assert metrics.best_precision == 0.99
 
 
+def test_compute_phase6_metrics_reads_precision_from_params() -> None:
+    rows = [
+        {"mismatch_rate": 0.3, "proof_ratio": 97.0, "params": {"PRECISION_ALPHA": 0.95}},
+        {"mismatch_rate": 0.2, "proof_ratio": 98.0, "params": {"PRECISION_ALPHA": 0.99}},
+    ]
+    metrics = compute_phase6_metrics(rows)
+    assert metrics.best_precision == 0.99
+
+
 def test_gate_passed_requires_all_conditions() -> None:
     assert gate_passed(
         Phase6Metrics(
@@ -35,4 +44,3 @@ def test_gate_passed_requires_all_conditions() -> None:
             best_precision=0.99,
         )
     )
-

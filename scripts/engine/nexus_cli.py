@@ -103,6 +103,8 @@ class NexusCLI:
             verify_commands=verify_commands,
             artifact_paths=artifact_paths,
         )
+        if success:
+            success = self._enforce_release_gate_for_prod(skip_gate=dry_run)
         self._print_delivery_summary("Bug", delivery_mode)
         if success:
             print("✅ [Nexus:Bug] Success.")
@@ -148,6 +150,8 @@ class NexusCLI:
             verify_commands=verify_commands,
             artifact_paths=artifact_paths,
         )
+        if success:
+            success = self._enforce_release_gate_for_prod(skip_gate=dry_run)
         self._print_delivery_summary("Feature", delivery_mode)
         if success:
             print("✅ [Nexus:Feature] Success.")
@@ -156,6 +160,17 @@ class NexusCLI:
                 print(f"❌ [Nexus:Feature] Delivery gate failed: {self.service.last_completion_error}")
             print("❌ [Nexus:Feature] Failed.")
         return success
+
+    def _enforce_release_gate_for_prod(self, *, skip_gate: bool) -> bool:
+        if skip_gate:
+            return True
+        if str(self.runtime_profile.get("name", "")) != "prod":
+            return True
+        rc = self.run_release_ready()
+        if rc != 0:
+            self.service.last_completion_error = "release_ready_gate_failed"
+            return False
+        return True
 
     def _print_delivery_summary(self, label: str, delivery_mode: str) -> None:
         if delivery_mode != "high":
