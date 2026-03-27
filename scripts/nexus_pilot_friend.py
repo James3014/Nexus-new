@@ -2,7 +2,7 @@
 import os
 import sys
 
-from scripts.nexus_chat_cli import main as pilot_main
+from scripts.nexus_pilot_cli import main as pilot_main
 
 
 DEFAULT_GATEWAY = "http://100.82.155.88:5005"

@@ -1,6 +1,7 @@
 from nexus.pilot_cli.commands import handle_command
 from nexus.pilot_cli.session import PilotSession
-from scripts.nexus_chat_cli import handle_user_input, process_repl_line
+from scripts import nexus_chat_cli as legacy_chat_cli
+from scripts.nexus_pilot_cli import handle_user_input, process_repl_line
 
 
 def test_status_command_returns_session_summary():
@@ -110,3 +111,8 @@ def test_command_executes_without_flushing_legacy_pending_buffer():
     assert len(outputs) == 1
     assert "Tenant:" in outputs[0]
     assert pending == ["長題第一行", "長題第二行"]
+
+
+def test_legacy_chat_cli_shim_points_to_new_entry():
+    assert legacy_chat_cli.handle_user_input is handle_user_input
+    assert legacy_chat_cli.process_repl_line is process_repl_line

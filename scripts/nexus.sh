@@ -20,7 +20,7 @@ export NEXUS_HUB_URL=$HUB_URL
 export PYTHONIOENCODING=utf-8
 
 # Use relative path to find the CLI script
-CLI_PATH="$SCRIPT_DIR/nexus_chat_cli.py"
+CLI_PATH="$SCRIPT_DIR/nexus_pilot_cli.py"
 
 # Check for 'uv' and use it to run the CLI with dependencies
 if command -v uv &> /dev/null; then

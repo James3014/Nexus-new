@@ -1,0 +1,1 @@
+/Users/jameschen/Workspace/nexus/scripts/nexus_chat_cli.py

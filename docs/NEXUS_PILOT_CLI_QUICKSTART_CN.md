@@ -35,7 +35,7 @@ nexus-pilot-friend pilot_a
 如果你直接在專案內執行：
 
 ```bash
-/usr/bin/python3 /Users/jameschen/Workspace/nexus/scripts/nexus_chat_cli.py
+/usr/bin/python3 /Users/jameschen/Workspace/nexus/scripts/nexus_pilot_cli.py
 ```
 
 如果已安裝專案 script：
@@ -43,6 +43,8 @@ nexus-pilot-friend pilot_a
 ```bash
 nexus-pilot
 ```
+
+舊入口 `scripts/nexus_chat_cli.py` 目前仍保留，但只作相容 shim，不再是正式主入口。
 
 ## 首次啟動會問你
 
@@ -97,6 +99,38 @@ CLI 會把同一波貼上的內容收成同一題，不需要靠 `/paste` 這類
 - `/govern`
 - `/reset`
 - `/exit`
+
+## 核心任務流的高標交付
+
+朋友模式 `nexus-pilot-friend` 主要是聊天式入口，不會一開始就要求你選交付模式。  
+但如果你切到 Nexus 核心任務流，例如：
+
+```bash
+python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:bug --task "fix login callback" --delivery-mode ask
+python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:feature --task "add SSO audit trail" --delivery-mode ask
+python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
+```
+
+系統會主動詢問你：
+
+- `standard`：一般交付，不強制 completion gate
+- `high`：高標交付，任務結束前必須通過 completion gate
+
+當你選 `high` 時：
+
+- `bug / feature` 若沒給 `--verify`，系統會自動推建議驗證命令
+- 目前支援 Python / Rust / Go 專案
+- CLI 會顯示這次實際採用的驗證命令
+- 若有產生交付報告，CLI 也會印出報告路徑
+
+如果你想手動指定驗證命令，也可以直接加：
+
+```bash
+python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:bug \
+  --task "fix login callback" \
+  --delivery-mode ask \
+  --verify "uv run pytest -q"
+```
 
 ## 處理本機專案
 
@@ -153,6 +187,7 @@ CLI 會：
 - Battle Lane 已有正式 gateway contract，但若 gateway 不可用，會退回本地 stub
 - 本版重點是 pilot 體驗，不是完整公開版 Nexus
 - 若要接正式遠端 runtime，請設定 `NEXUS_PILOT_GATEWAY_URL`
+- 如果你要的是 Nexus 核心任務的「高標交付」，請改走 `scripts/engine/nexus_cli.py` 的 `bug / feature / runner` 入口
 
 ## 自訂 Gateway
 

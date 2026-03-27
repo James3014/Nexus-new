@@ -44,6 +44,14 @@ nexus/core/memory/schema.py
 nexus/core/optimize/__init__.py
 nexus/core/optimize/loop.py
 nexus/core/policy/learning.py
+nexus/delivery/__init__.py
+nexus/delivery/contract.py
+nexus/delivery/gate.py
+nexus/delivery/interactive.py
+nexus/delivery/models.py
+nexus/delivery/phantom_guard.py
+nexus/delivery/report.py
+nexus/delivery/suggestions.py
 nexus/engine/__init__.py
 nexus/engine/coordinator.py
 nexus/engine/pipeline.py
@@ -154,6 +162,7 @@ scripts/morning_briefing.py
 scripts/nexus_chat_cli.py
 scripts/nexus_cli.py
 scripts/nexus_os_kernel.py
+scripts/nexus_pilot_cli.py
 scripts/nexus_pilot_friend.py
 scripts/nexus_sentinel_proxy.py
 scripts/nexus_swarm_manager.py
@@ -338,9 +347,11 @@ scripts/ops/engrave_policies.py
 scripts/ops/export_eval_report.py
 scripts/ops/incident_rca_adapter.py
 scripts/ops/index_to_manifest.py
+scripts/ops/nexus_completion_gate.py
 scripts/ops/night_summary.py
 scripts/ops/pilot_cli_delivery_smoke.py
 scripts/ops/post_index_update.py
+scripts/ops/render_delivery_report.py
 scripts/ops/render_phase_sparkline.py
 scripts/ops/review_proposal.py
 scripts/ops/scope_guard.py
@@ -351,9 +362,6 @@ scripts/ops/write_phase_metrics.py
 scripts/patch_templates/adapter_template.py
 scripts/patch_templates/deprecation_log.py
 scripts/patch_templates/dto_template.py
-scripts/tmp/absolute_neural_proof.py
-scripts/tmp/absolute_nexus_proof.py
-scripts/tmp/final_nexus_truth.py
 scripts/tools/skiing_graph_linker.py
 scripts/utils/git_worktree.py
 scripts/utils/pid_lock.py
@@ -390,6 +398,7 @@ tests/test_reviewer_orchestrator_boundary.py
 tests/test_script_entrypoints.py
 tests/test_state_io_split.py
 tests/test_state_io_split_hardened.py
+tests/test_task_runner_completion_gate.py
 tests/test_task_runner_phase_task.py
 tests/test_token_accumulator.py
 tests/test_token_pipeline_contract.py

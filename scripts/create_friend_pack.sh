@@ -8,7 +8,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 echo "// Nexus: Generating Friend Pack..."
 
 cd "$SCRIPT_DIR"
-zip -j "$TARGET" nexus.sh nexus_chat_cli.py
+zip -j "$TARGET" nexus.sh nexus_pilot_cli.py nexus_chat_cli.py
 
 if [ $? -eq 0 ]; then
     echo "// SUCCESS: Created $SCRIPT_DIR/$TARGET"

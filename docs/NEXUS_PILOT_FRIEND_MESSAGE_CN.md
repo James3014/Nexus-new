@@ -39,6 +39,23 @@ nexus-pilot-friend pilot_a
 /govern
 /reset
 /exit
+
+如果你之後要改用 Nexus 核心任務流，而不是聊天入口，可用：
+
+python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:bug --task "fix login callback" --delivery-mode ask
+python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:feature --task "add SSO audit trail" --delivery-mode ask
+python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
+
+系統會主動問你要不要高標交付：
+
+- standard：一般交付
+- high：交付前強制 completion gate
+
+選 high 時，系統會：
+
+- 自動推建議驗證命令（Python / Rust / Go）
+- 顯示實際採用的驗證命令
+- 顯示交付報告路徑
 ```
 
 ## 建議租戶命名

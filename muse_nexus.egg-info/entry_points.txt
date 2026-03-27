@@ -1,5 +1,5 @@
 [console_scripts]
 nexus = scripts.nexus_cli:main
-nexus-pilot = scripts.nexus_chat_cli:main
+nexus-pilot = scripts.nexus_pilot_cli:main
 nexus-pilot-friend = scripts.nexus_pilot_friend:main
 nexus-pilot-proxy = scripts.nexus_sentinel_proxy:run_proxy
