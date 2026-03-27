@@ -120,3 +120,38 @@ def test_learning_scorer_ignores_conflicting_reviewer_signal_when_pipeline_succe
     assert state.metadata["learning_frozen"] is False
     assert state.metadata["curiosity_feedback_reward"] >= 10.0
     assert state.metadata["lesson_quality"] >= 85.0
+
+
+def test_learning_scorer_freezes_when_success_patch_has_no_physical_proof():
+    state = NexusState(task_id="learn-8")
+    state.steps_history = [_step("P"), _step("D"), _step("R"), _step("A"), _step("C")]
+    state.metadata["pipeline_success"] = True
+    state.metadata["last_review_status"] = "APPROVED"
+    state.metadata["last_patch_generated"] = True
+    state.metadata["last_patch_apply_success"] = True
+    state.metadata["last_proof_type"] = ""
+    state.metadata["last_proof_value"] = ""
+
+    evidence = LearningEvidenceBuilder.build(state)
+    LearningScorer.apply(state, evidence)
+
+    assert state.metadata["learning_frozen"] is True
+    assert "missing_physical_proof_evidence" in state.metadata["learning_freeze_reasons"]
+    assert "pattern_reuse_rate" not in state.metadata
+
+
+def test_learning_scorer_allows_success_patch_with_valid_proof():
+    state = NexusState(task_id="learn-9")
+    state.steps_history = [_step("P"), _step("X"), _step("D"), _step("R"), _step("A"), _step("C")]
+    state.metadata["pipeline_success"] = True
+    state.metadata["last_review_status"] = "APPROVED"
+    state.metadata["last_patch_generated"] = True
+    state.metadata["last_patch_apply_success"] = True
+    state.metadata["last_proof_type"] = "git_diff_checksum"
+    state.metadata["last_proof_value"] = "deadbeef"
+
+    evidence = LearningEvidenceBuilder.build(state)
+    LearningScorer.apply(state, evidence)
+
+    assert state.metadata["learning_frozen"] is False
+    assert state.metadata["pattern_reuse_rate"] >= 70.0

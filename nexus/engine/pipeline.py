@@ -82,6 +82,11 @@ class NexusPipeline:
                 review_status_raw = res.get("status", "REJECTED")
                 state.metadata["last_review_status"] = review_status_raw
                 result_object = res.get("result_object", {})
+                state.metadata["last_patch_generated"] = bool(result_object.get("patch_generated", False))
+                state.metadata["last_patch_apply_success"] = bool(result_object.get("patch_apply_success", False))
+                state.metadata["last_no_change_reason"] = str(result_object.get("no_change_reason", "") or "")
+                state.metadata["last_proof_type"] = str(result_object.get("proof_type", "") or "")
+                state.metadata["last_proof_value"] = str(result_object.get("proof_value", "") or "")
             else:
                 result_object = {}
             

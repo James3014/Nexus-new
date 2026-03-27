@@ -38,7 +38,7 @@ class SelfHealService:
         diagnosis = HealthDiagnostics.diagnose(state, before)
         self._update_diagnosis_fidelity(state, diagnosis.kind)
         planner = RepairPlanner(self.repo_root)
-        plan = planner.build_plan(diagnosis)
+        plan = planner.build_plan(diagnosis, state=state)
         policy_actions = planner.build_policy_actions(triggers)
         if policy_actions:
             merged_actions = {action.id: action for action in plan.actions}

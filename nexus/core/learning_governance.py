@@ -22,12 +22,21 @@ class LearningGovernance:
     GAMMA = 1.0
     DEFAULT_TOKEN_BUDGET = 5000
     DEFAULT_MEMORY_HEALTH_BASELINE = 100.0
+    VALID_PROOF_TYPES = {"git_diff", "git_diff_checksum", "checksum"}
 
     @classmethod
     def evaluate(cls, state: NexusState, evidence: LearningEvidence) -> LearningDecision:
         reasons: List[str] = []
         freeze = False
         metadata = state.metadata
+
+        if cls._requires_physical_proof(evidence):
+            if not evidence.proof_present:
+                freeze = True
+                reasons.append("missing_physical_proof_evidence")
+            elif evidence.proof_type.lower() not in cls.VALID_PROOF_TYPES:
+                freeze = True
+                reasons.append("invalid_physical_proof_type")
 
         if bool(metadata.get("sir_veto_learning", False)):
             freeze = True
@@ -66,6 +75,14 @@ class LearningGovernance:
             freeze_learning=freeze,
             curiosity_score=round(curiosity_score, 2),
             reasons=reasons,
+        )
+
+    @staticmethod
+    def _requires_physical_proof(evidence: LearningEvidence) -> bool:
+        return bool(
+            evidence.success
+            and evidence.patch_generated
+            and evidence.patch_apply_success
         )
 
     @classmethod

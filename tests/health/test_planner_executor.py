@@ -2,6 +2,7 @@ from pathlib import Path
 
 import yaml
 
+from nexus.core.state_contracts import NexusState
 from nexus.health.diagnostics import HealthDiagnosis
 from nexus.health.models import HealthTrigger
 from nexus.health.executor import RepairExecutor
@@ -139,3 +140,25 @@ def test_executor_runs_main_after_sandbox_success(tmp_path):
     assert result.telemetry["sandbox_passed"] is True
     assert calls["count"] == 2
     assert (repo_root / ".nexus" / "runs" / "latest" / "evidence.json").exists()
+
+
+def test_planner_applies_fault_lesson_route_bias(tmp_path):
+    state = NexusState(task_id="route-bias")
+    state.metadata["fault_lesson_hits"] = [
+        {
+            "relevance": 0.9,
+            "content": {
+                "lesson": "audit_failure recovered after forcing phase A first",
+                "repair_patch": "auto.repair.route.a; auto.repair.route.r",
+            },
+        }
+    ]
+
+    plan = RepairPlanner(tmp_path).build_plan(
+        HealthDiagnosis(kind="audit_failure", summary="audit rejected repair", target_phase="A"),
+        state=state,
+    )
+
+    assert plan.phase_route[0] == "A"
+    assert "self_heal_route_bias" in state.metadata
+    assert state.metadata["self_heal_route_bias"]["scores"]["A"] > 0
