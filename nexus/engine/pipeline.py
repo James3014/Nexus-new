@@ -1,6 +1,7 @@
 import logging
 import time
 from typing import Dict, Any, Optional
+from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.core.state_contracts import NexusState
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,8 @@ class NexusPipeline:
         task_id = f"{task_type}-{int(time.time())}"
         state = NexusState(task_id=task_id)
         state.metadata["task_description"] = task_desc
+        if context:
+            state.metadata.update(context)
         
         # 🧠 v9.4: Brain-Sync protocol. Load policies from memory service.
         self.engine.policy_manager.apply_policy_to_state(state, task_desc)
@@ -43,7 +46,8 @@ class NexusPipeline:
 
         # --- X Stage: Research ---
         research_pack = None
-        if research_policy.should_research(decision, task_desc):
+        force_research = bool(state.metadata.get("benchmark_force_research"))
+        if force_research or research_policy.should_research(decision, task_desc):
             state.current_phase = "X"
             research_pack = researcher.run(state, {"task": task_desc})
             accumulator.record(state, "X", research_pack, overhead=50)
@@ -77,6 +81,9 @@ class NexusPipeline:
             if isinstance(res, dict):
                 review_status_raw = res.get("status", "REJECTED")
                 state.metadata["last_review_status"] = review_status_raw
+                result_object = res.get("result_object", {})
+            else:
+                result_object = {}
             
             # Log R (Repair) phase
             self.engine._add_step_to_history(state, "R", metadata={"status": "executed"})
@@ -86,6 +93,18 @@ class NexusPipeline:
             self.engine._add_step_to_history(state, "A", metadata={"status": review_status_raw})
             
             status, audit_success = self.engine.ReviewStatusNormalizer.normalize(review_status_raw)
+            phantom_reason = detect_inconclusive_success(
+                status=review_status_raw,
+                patch_generated=result_object.get("patch_generated", False),
+                patch_apply_success=result_object.get("patch_apply_success", False),
+                no_change_reason=result_object.get("no_change_reason", ""),
+                proof_type=result_object.get("proof_type", ""),
+                proof_value=result_object.get("proof_value", ""),
+            )
+            if phantom_reason:
+                audit_success = False
+                status = "REJECTED"
+                state.metadata["phantom_success_reason"] = phantom_reason
             
             if audit_success:
                 success = True
@@ -98,10 +117,12 @@ class NexusPipeline:
                 break
 
         # --- C Stage: Crystallize ---
+        state.metadata["pipeline_success"] = bool(success)
         if success:
             state.current_phase = "C"
-            self.engine.commander.next_step(status="completed")
             self.engine._add_step_to_history(state, "C")
+            self.engine.state_io.save_global_state(state)
+            self.engine.commander.next_step(status="completed", state=state)
 
         # Health Evaluation
         health_score = health_evaluator.evaluate(state, success)

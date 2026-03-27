@@ -2,11 +2,14 @@
 import os
 import json
 import shutil
+import hashlib
+import subprocess
 from pathlib import Path
 
 # Internal Nexus Imports
 from nexus.core.orchestrator import NexusOrchestrator
 from nexus.core.review_status import ReviewStatusNormalizer
+from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.services.gateway import BattlesuitGateway as LLMClient
 
 # Configuration
@@ -16,7 +19,7 @@ UI_TASTE_MD = os.getenv("MUSE_CORE_UI_TASTE", "")
 UV_BIN = shutil.which("uv") or "uv"
 
 
-class CodexLoopV2(NexusOrchestrator):
+class GatewayReviewLoop(NexusOrchestrator):
     """
     🧬 Codex-Loop v2.0: Modular Intelligence Orchestrator (Hardened)
     [v9 Forwarder] 繼承自新架構的 Orchestrator。
@@ -107,6 +110,9 @@ class CodexLoopV2(NexusOrchestrator):
             return {
                 "status": "APPROVED",
                 "summary": "Bypassed via audit_level=bypass",
+                "patch_generated": False,
+                "patch_apply_success": False,
+                "no_change_reason": "audit_level=bypass",
                 "execution_mode": self.execution_mode,
                 "trigger_reason": self.trigger_reason
             }
@@ -257,11 +263,47 @@ class CodexLoopV2(NexusOrchestrator):
             )
 
             status, success = ReviewStatusNormalizer.normalize(data.get("status", "FAIL"))
+            patch_generated = bool(data.get("patch_generated", False))
+            patch_apply_success = False
+            no_change_reason = data.get("no_change_reason", "")
+            proof_type = ""
+            proof_value = ""
+
+            if patch_generated and self.apply_patch:
+                patch_apply_success = bool(self.patcher.apply(data.get("violations", [])))
+                if patch_apply_success:
+                    proof_type, proof_value = self._collect_physical_proof(files)
+
+            phantom_reason = detect_inconclusive_success(
+                status=status,
+                patch_generated=patch_generated,
+                patch_apply_success=patch_apply_success if patch_generated else False,
+                no_change_reason=no_change_reason,
+                proof_type=proof_type,
+                proof_value=proof_value,
+            )
             
             if success:
+                if phantom_reason:
+                    return {
+                        "status": "REJECTED",
+                        "summary": f"Rejected: {phantom_reason}",
+                        "patch_generated": patch_generated,
+                        "patch_apply_success": patch_apply_success,
+                        "no_change_reason": no_change_reason,
+                        "proof_type": proof_type,
+                        "proof_value": proof_value,
+                        "execution_mode": self.execution_mode,
+                        "trigger_reason": self.trigger_reason,
+                    }
                 return {
                     "status": status, 
                     "summary": data.get("summary"),
+                    "patch_generated": patch_generated,
+                    "patch_apply_success": patch_apply_success,
+                    "no_change_reason": no_change_reason,
+                    "proof_type": proof_type,
+                    "proof_value": proof_value,
                     "execution_mode": self.execution_mode,
                     "trigger_reason": self.trigger_reason,
                 }
@@ -271,13 +313,15 @@ class CodexLoopV2(NexusOrchestrator):
             return_target_phase = audit_metadata.get("return_target_phase", "D")
 
             # 🧬 If apply_patch is on, we apply it once but still return REJECTED to the Orchestrator loop
-            if self.apply_patch:
-                self.patcher.apply(data.get("violations", []))
-
             return {
                 "status": "REJECTED",
                 "summary": data.get("summary"),
                 "violations": data.get("violations"),
+                "patch_generated": patch_generated,
+                "patch_apply_success": patch_apply_success,
+                "no_change_reason": no_change_reason,
+                "proof_type": proof_type,
+                "proof_value": proof_value,
                 "execution_mode": self.execution_mode,
                 "trigger_reason": self.trigger_reason,
                 "audit_metadata": audit_metadata,
@@ -285,6 +329,46 @@ class CodexLoopV2(NexusOrchestrator):
             }
         finally:
             os.chdir(original_cwd)
+
+    def _collect_physical_proof(self, files):
+        diff_text = self._read_git_diff(files)
+        if not diff_text.strip():
+            return "", ""
+        digest = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+        return "git_diff_checksum", digest
+
+    def _read_git_diff(self, files):
+        root = str(self.git.project_root)
+        rel_files = self._normalize_git_paths(files)
+        if rel_files:
+            scoped = self._run_git_diff(["--"] + rel_files, root)
+            if scoped.strip():
+                return scoped
+        return self._run_git_diff([], root)
+
+    def _run_git_diff(self, extra_args, root):
+        try:
+            cmd = ["git", "-C", root, "diff"] + list(extra_args)
+            return subprocess.check_output(
+                cmd,
+                stderr=subprocess.DEVNULL,
+            ).decode("utf-8", errors="ignore")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return ""
+
+    def _normalize_git_paths(self, files):
+        out = []
+        root = Path(self.git.project_root).resolve()
+        for item in files or []:
+            p = Path(item)
+            if not p.is_absolute():
+                out.append(str(p))
+                continue
+            try:
+                out.append(str(p.resolve().relative_to(root)))
+            except ValueError:
+                continue
+        return out
 
     def _run_isolated_review(self, manual_files):
         print("🧪 [Isolation] Sandbox review initiated (Simulated)")
@@ -298,5 +382,9 @@ if __name__ == "__main__":
     parser.add_argument("files", nargs="*", help="Files to review")
     parser.add_argument("--mode", default="developer")
     args = parser.parse_args()
-    engine = CodexLoopV2(mode=args.mode)
+    engine = GatewayReviewLoop(mode=args.mode)
     print(engine.run_review(args.files))
+
+
+# Legacy compatibility alias. Active code should import GatewayReviewLoop.
+CodexLoopV2 = GatewayReviewLoop
