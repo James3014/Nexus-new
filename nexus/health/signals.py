@@ -83,6 +83,10 @@ class HealthSignalCollector:
                     signals.setdefault("pattern_reuse_rate", 55.0)
                     signals.setdefault("lesson_quality", 75.0)
                     signals.setdefault("next_run_hit_rate", 60.0)
+                if state.metadata.get("sandbox_hit_rate") is not None:
+                    sandbox_hit_rate = float(state.metadata["sandbox_hit_rate"])
+                    if sandbox_hit_rate >= 1.0:
+                        signals["next_run_hit_rate"] = max(float(signals.get("next_run_hit_rate", 0.0)), 88.0)
 
             collected[phase] = signals
 
@@ -111,7 +115,11 @@ class HealthSignalCollector:
         signals.setdefault("research_latency_norm", latency_norm)
 
     @staticmethod
-    def _collect_d_signals(signals: Dict[str, float], state: NexusState, d_step) -> None:
+    def _collect_d_signals(
+        signals: Dict[str, float],
+        state: NexusState,
+        d_step,
+    ) -> None:
         diagnose_meta = d_step.metadata if d_step else {}
         if diagnose_meta:
             pack_keys = diagnose_meta.get("pack_keys") or []
@@ -125,6 +133,22 @@ class HealthSignalCollector:
             signals.setdefault("false_positive_rate", 40.0)
         elif diagnose_meta:
             signals.setdefault("false_positive_rate", 10.0)
+        if state.metadata.get("diagnosis_fidelity") is not None:
+            fidelity = float(state.metadata["diagnosis_fidelity"])
+            signals["root_cause_confidence"] = max(
+                float(signals.get("root_cause_confidence", 0.0)),
+                min(98.0, 45.0 + (fidelity * 0.55)),
+            )
+            signals["diagnosis_precision"] = max(
+                float(signals.get("diagnosis_precision", 0.0)),
+                min(98.0, 40.0 + (fidelity * 0.58)),
+            )
+            # Higher fidelity implies lower false-positive probability.
+            inferred_fp = max(0.0, 100.0 - fidelity)
+            signals["false_positive_rate"] = min(
+                float(signals.get("false_positive_rate", inferred_fp)),
+                inferred_fp,
+            )
 
     @staticmethod
     def _collect_r_signals(signals: Dict[str, float], state: NexusState, review_status: str) -> None:

@@ -171,3 +171,26 @@ def test_a_signal_backfills_coverage_when_missing():
     collected = HealthSignalCollector.collect(state)
     assert collected["A"]["coverage_signal"] == 80.0
     assert collected["A"]["regression_pass_rate"] == 100.0
+
+
+def test_d_signal_prefers_diagnosis_fidelity_when_present():
+    state = NexusState(task_id="spec-lock-d-fidelity")
+    state.metadata["diagnosis_fidelity"] = 90.0
+    for phase in ("P", "X", "D", "R", "A", "C"):
+        state.phase_metrics.setdefault(phase, PhaseMetric(signals={}))
+
+    collected = HealthSignalCollector.collect(state)
+    assert collected["D"]["root_cause_confidence"] >= 90.0
+    assert collected["D"]["diagnosis_precision"] >= 90.0
+    assert collected["D"]["false_positive_rate"] <= 10.0
+
+
+def test_c_signal_uses_sandbox_hit_rate_to_raise_next_run_projection():
+    state = NexusState(task_id="spec-lock-c-sandbox")
+    state.metadata["sandbox_hit_rate"] = 1.0
+    state.metadata["next_run_hit_rate"] = 50.0
+    for phase in ("P", "X", "D", "R", "A", "C"):
+        state.phase_metrics.setdefault(phase, PhaseMetric(signals={}))
+
+    collected = HealthSignalCollector.collect(state)
+    assert collected["C"]["next_run_hit_rate"] >= 88.0

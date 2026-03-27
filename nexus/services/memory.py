@@ -1,12 +1,20 @@
-import lancedb
 import pandas as pd
 import json
 import hashlib
 import gc
-import redis
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+
+try:
+    import lancedb
+except ModuleNotFoundError:  # pragma: no cover - optional backend
+    lancedb = None
+
+try:
+    import redis
+except ModuleNotFoundError:  # pragma: no cover - optional backend
+    redis = None
 
 class MemoryService:
     """
@@ -18,9 +26,11 @@ class MemoryService:
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if run_dir else None
         self.db_path = self.project_root / ".nexus" / "knowledge" / "lancedb"
+        self.fault_lessons_jsonl = self.project_root / ".nexus" / "knowledge" / "fault_lessons.jsonl"
         self._db = None
         try:
-            import redis
+            if redis is None:
+                raise ModuleNotFoundError("redis")
             self.redis = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
             self.redis.ping()
             self.redis_available = True
@@ -29,6 +39,8 @@ class MemoryService:
 
     def _get_db(self):
         if self._db is None:
+            if lancedb is None:
+                return None
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._db = lancedb.connect(self.db_path)
             
@@ -56,6 +68,8 @@ class MemoryService:
         """🧬 語義檢索實作 (M2-Active)"""
         try:
             db = self._get_db()
+            if not db:
+                return []
             if table_name not in db.table_names():
                 return []
             
@@ -86,10 +100,41 @@ class MemoryService:
                     "relevance": round(confidence, 2),
                     "source": "lancedb-fts" if "_score" in row.index else "lancedb-fallback"
                 })
-            return []
+            return reminders
         except Exception as e:
             print(f"⚠️ [MemorySearch] Critical failure: {e}")
             return []
+
+    def _load_local_crystal_lessons(self, limit: int = 3) -> List[Dict[str, Any]]:
+        """Fallback lessons from local JSONL when vector DB is unavailable."""
+        candidates = [
+            self.project_root / "obsidian" / "crystal_lessons.jsonl",
+            self.project_root / ".nexus" / "knowledge" / "crystal_lessons.jsonl",
+        ]
+        reminders: List[Dict[str, Any]] = []
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    for idx, line in enumerate(handle):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        payload = json.loads(line)
+                        reminders.append(
+                            {
+                                "id": f"local-{path.stem}-{idx}",
+                                "content": payload,
+                                "relevance": 0.8,
+                                "source": "local-crystal-jsonl",
+                            }
+                        )
+                        if len(reminders) >= limit:
+                            return reminders
+            except Exception:
+                continue
+        return reminders
 
     def ingest_episode(self, episode: Dict[str, Any]):
         """🧪 Phase M3: 學習閉環入口。根據任務結果更新 Policy 權重。"""
@@ -139,6 +184,8 @@ class MemoryService:
         else:
             # Fallback to random/recent if no query provided
             reminders = self.semantic_search("general_nexus_task")[:3]
+        if not reminders:
+            reminders = self._load_local_crystal_lessons(limit=3)
 
         result = {
             'reminders': reminders, 
@@ -159,6 +206,106 @@ class MemoryService:
         import gc
         gc.collect()
         return result
+
+    def lookup_fault_lessons(self, fault_hash: str, limit: int = 3) -> List[Dict[str, Any]]:
+        if not fault_hash:
+            return []
+        # 1) Prefer LanceDB table when available.
+        db = self._get_db()
+        if db and "fault_lessons" in db.table_names():
+            try:
+                table = db.open_table("fault_lessons")
+                df = table.to_pandas()
+                if "fault_hash" in df.columns:
+                    hits = df[df["fault_hash"] == fault_hash].head(limit)
+                    reminders: List[Dict[str, Any]] = []
+                    for _, row in hits.iterrows():
+                        reminders.append(
+                            {
+                                "id": str(row.get("fault_hash", "unknown")),
+                                "content": {
+                                    "lesson": row.get("lesson", ""),
+                                    "repair_patch": row.get("repair_patch", ""),
+                                },
+                                "relevance": float(row.get("audit_pass_rate", 0.0)),
+                                "source": "lancedb-fault-lessons",
+                            }
+                        )
+                    if reminders:
+                        return reminders
+            except Exception:
+                pass
+
+        # 2) Fallback to local JSONL.
+        if not self.fault_lessons_jsonl.exists():
+            return []
+        reminders: List[Dict[str, Any]] = []
+        try:
+            with open(self.fault_lessons_jsonl, "r", encoding="utf-8") as handle:
+                for idx, line in enumerate(handle):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    payload = json.loads(line)
+                    if payload.get("fault_hash") != fault_hash:
+                        continue
+                    reminders.append(
+                        {
+                            "id": f"fault-{idx}",
+                            "content": {
+                                "lesson": payload.get("lesson", ""),
+                                "repair_patch": payload.get("repair_patch", ""),
+                            },
+                            "relevance": float(payload.get("audit_pass_rate", 0.0)),
+                            "source": "jsonl-fault-lessons",
+                        }
+                    )
+                    if len(reminders) >= limit:
+                        break
+        except Exception:
+            return []
+        return reminders
+
+    def record_fault_lesson(
+        self,
+        fault_hash: str,
+        error_type: str,
+        diagnosis_kind: str,
+        lesson: str,
+        repair_patch: str,
+        audit_pass_rate: float,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not fault_hash:
+            return
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "fault_hash": fault_hash,
+            "error_type": error_type,
+            "diagnosis_kind": diagnosis_kind,
+            "lesson": lesson,
+            "repair_patch": repair_patch,
+            "audit_pass_rate": float(audit_pass_rate),
+            "metadata": metadata or {},
+        }
+
+        # Always append JSONL as durable fallback.
+        self.fault_lessons_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.fault_lessons_jsonl, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        # Best-effort sync into LanceDB.
+        db = self._get_db()
+        if not db:
+            return
+        try:
+            if "fault_lessons" not in db.table_names():
+                db.create_table("fault_lessons", data=[entry])
+                return
+            table = db.open_table("fault_lessons")
+            table.add([entry])
+        except Exception:
+            pass
 
     def cached_search(self, key: str, ttl: int = 1800) -> Dict[str, Any]:
         """雙層快取搜尋。"""

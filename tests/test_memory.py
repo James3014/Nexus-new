@@ -37,11 +37,11 @@ class TestMemoryService(unittest.TestCase):
         # Check if reminders.json is generated
         self.assertTrue((self.project_root / "reminders.json").exists())
 
-    @patch("redis.Redis")
-    def test_cached_search(self, mock_redis):
+    @patch("nexus.services.memory.redis")
+    def test_cached_search(self, mock_redis_module):
         # Mock redis available
         mock_r = MagicMock()
-        mock_redis.return_value = mock_r
+        mock_redis_module.Redis.return_value = mock_r
         mock_r.ping.return_value = True
         mock_r.get.return_value = None # Cache miss
         
@@ -50,6 +50,52 @@ class TestMemoryService(unittest.TestCase):
         
         self.assertIn("reminders", result)
         mock_r.setex.assert_called_once()
+
+    def test_semantic_search_returns_rows_instead_of_empty(self):
+        service = MemoryService(project_root=str(self.project_root))
+
+        class _FakeResults:
+            def to_pandas(self):
+                import pandas as pd
+                return pd.DataFrame(
+                    [{"rule_id": "POL-001", "action": "use os.path", "_score": 1.0}]
+                )
+
+        class _FakeSearch:
+            def limit(self, _limit):
+                return _FakeResults()
+
+        class _FakeTable:
+            def search(self, _query, query_type="fts"):
+                return _FakeSearch()
+
+        class _FakeDB:
+            def table_names(self):
+                return ["policy"]
+
+            def open_table(self, _name):
+                return _FakeTable()
+
+        service._get_db = lambda: _FakeDB()
+        rows = service.semantic_search("os.path")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "POL-001")
+
+    def test_fault_lessons_roundtrip_jsonl(self):
+        fault_hash = "abc123hash"
+        self.service.record_fault_lesson(
+            fault_hash=fault_hash,
+            error_type="ModuleNotFoundError",
+            diagnosis_kind="environment_failure",
+            lesson="Install missing dependency",
+            repair_patch="auto.repair.environment",
+            audit_pass_rate=0.91,
+            metadata={"k": "v"},
+        )
+        hits = self.service.lookup_fault_lessons(fault_hash, limit=2)
+        self.assertTrue(hits)
+        self.assertEqual(hits[0]["source"], "jsonl-fault-lessons")
+        self.assertIn("lesson", hits[0]["content"])
 
 if __name__ == "__main__":
     unittest.main()
