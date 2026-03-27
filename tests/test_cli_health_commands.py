@@ -89,6 +89,14 @@ def test_cli_health_explain_dispatches_to_service(tmp_path):
                 "route_weights": {"R": 10.0},
                 "policy_sync": "ok",
             },
+            "adversarial_metrics": {
+                "discriminator_checks": 10,
+                "discriminator_pass_rate": 70.0,
+                "discriminator_block_rate": 30.0,
+                "generator_success_window": 5,
+                "generator_success_rate": 80.0,
+                "gan_alignment_score": 78.0,
+            },
             "notes": [],
         },
     )()

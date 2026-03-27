@@ -98,6 +98,8 @@ class NexusPipeline:
             self.engine._add_step_to_history(state, "A", metadata={"status": review_status_raw})
             
             status, audit_success = self.engine.ReviewStatusNormalizer.normalize(review_status_raw)
+            checks = int(state.metadata.get("anti_hallucination_checks", 0) or 0) + 1
+            state.metadata["anti_hallucination_checks"] = checks
             phantom_reason = detect_inconclusive_success(
                 status=review_status_raw,
                 patch_generated=result_object.get("patch_generated", False),
@@ -110,6 +112,13 @@ class NexusPipeline:
                 audit_success = False
                 status = "REJECTED"
                 state.metadata["phantom_success_reason"] = phantom_reason
+                state.metadata["anti_hallucination_block_count"] = int(
+                    state.metadata.get("anti_hallucination_block_count", 0) or 0
+                ) + 1
+            elif audit_success:
+                state.metadata["anti_hallucination_pass_count"] = int(
+                    state.metadata.get("anti_hallucination_pass_count", 0) or 0
+                ) + 1
             
             if audit_success:
                 success = True

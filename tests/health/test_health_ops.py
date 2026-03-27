@@ -196,12 +196,16 @@ def test_run_health_explain_returns_integrated_view(monkeypatch, tmp_path):
             "last_patch_apply_success": True,
             "last_proof_type": "git_diff_checksum",
             "last_proof_value": "abc",
+            "anti_hallucination_checks": 10,
+            "anti_hallucination_pass_count": 7,
+            "anti_hallucination_block_count": 3,
             "learning_frozen": False,
             "learning_ingest_status": "ingested",
             "curiosity_score": 32.5,
             "pattern_reuse_rate": 80.0,
             "lesson_quality": 86.0,
             "next_run_hit_rate": 83.0,
+            "self_heal_status_window": ["repaired", "failed", "healthy"],
             "self_heal_route_phase_weights": {"R": 10.0},
             "self_heal_route_policy_sync": "ok",
             "self_heal_cycle": {
@@ -228,3 +232,17 @@ def test_run_health_explain_returns_integrated_view(monkeypatch, tmp_path):
     assert result.anti_hallucination["proof_present"] is True
     assert result.learning["ingest_status"] == "ingested"
     assert result.self_healing["cycle_status"] == "repaired"
+    assert result.adversarial_metrics["discriminator_checks"] == 10
+    assert result.adversarial_metrics["generator_success_window"] == 3
+
+
+def test_run_health_explain_alignment_zero_without_history(monkeypatch, tmp_path):
+    from nexus.health.ops import run_health_explain
+
+    engine = _engine(tmp_path)
+    monkeypatch.setattr(
+        "nexus.health.ops.HealthScorer.apply_snapshot",
+        lambda current: _FakeSnapshot(overall_score=50.0, status="WARNING"),
+    )
+    result = run_health_explain(engine)
+    assert result.adversarial_metrics["gan_alignment_score"] == 0.0

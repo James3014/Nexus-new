@@ -397,6 +397,7 @@ class NexusCLI:
             "anti_hallucination": result.anti_hallucination,
             "learning": result.learning,
             "self_healing": result.self_healing,
+            "adversarial_metrics": result.adversarial_metrics,
             "notes": result.notes,
         }
         if output == "json":
@@ -453,6 +454,24 @@ class NexusCLI:
                 "    - Route Weights: "
                 + " ".join(f"{k}:{v}" for k, v in sorted(weights.items(), key=lambda item: item[0]))
             )
+
+        adversarial = result.adversarial_metrics
+        if adversarial:
+            print("  - GAN Metrics:")
+            print(
+                "    - Discriminator: checks={checks} pass_rate={pass_rate}% block_rate={block_rate}%".format(
+                    checks=adversarial.get("discriminator_checks"),
+                    pass_rate=adversarial.get("discriminator_pass_rate"),
+                    block_rate=adversarial.get("discriminator_block_rate"),
+                )
+            )
+            print(
+                "    - Generator: window={window} success_rate={success_rate}%".format(
+                    window=adversarial.get("generator_success_window"),
+                    success_rate=adversarial.get("generator_success_rate"),
+                )
+            )
+            print(f"    - Alignment Score: {adversarial.get('gan_alignment_score')}")
 
         if result.notes:
             print("  - Notes:")

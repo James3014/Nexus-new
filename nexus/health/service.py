@@ -154,6 +154,7 @@ class SelfHealService:
         state.metadata.pop("health_error_kind", None)
 
     def _record(self, state: NexusState, result: SelfHealCycleResult) -> None:
+        self._update_self_heal_status_window(state, result.status)
         state.metadata["health_snapshot"] = self._snapshot_dict(result.after)
         state.metadata["health_diagnosis"] = asdict(result.after_diagnosis)
         state.metadata["self_heal_cycle"] = {
@@ -191,6 +192,16 @@ class SelfHealService:
             "health_score": result.after.overall_score,
             "cycle_status": result.status,
         }
+
+    @staticmethod
+    def _update_self_heal_status_window(state: NexusState, cycle_status: str) -> None:
+        metadata = state.metadata
+        raw = metadata.get("self_heal_status_window")
+        window = list(raw) if isinstance(raw, list) else []
+        status = str(cycle_status or "").strip().lower() or "unknown"
+        window.append(status)
+        window = window[-30:]
+        metadata["self_heal_status_window"] = window
 
     def _apply_evidence_json(self, state: NexusState) -> None:
         path = self.repo_root / ".nexus" / "runs" / "latest" / "evidence.json"

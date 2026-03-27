@@ -71,6 +71,7 @@ class HealthExplainResult:
     anti_hallucination: dict[str, object] = field(default_factory=dict)
     learning: dict[str, object] = field(default_factory=dict)
     self_healing: dict[str, object] = field(default_factory=dict)
+    adversarial_metrics: dict[str, object] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
 
@@ -246,6 +247,7 @@ def run_health_explain(engine) -> HealthExplainResult:
         "route_weights": dict(metadata.get("self_heal_route_phase_weights", {}) or {}),
         "policy_sync": str(metadata.get("self_heal_route_policy_sync", "") or ""),
     }
+    adversarial_metrics = _build_adversarial_metrics(metadata)
 
     notes: list[str] = []
     if anti_hallucination["patch_generated"] and anti_hallucination["patch_apply_success"] and not anti_hallucination["proof_present"]:
@@ -263,5 +265,45 @@ def run_health_explain(engine) -> HealthExplainResult:
         anti_hallucination=anti_hallucination,
         learning=learning,
         self_healing=self_healing,
+        adversarial_metrics=adversarial_metrics,
         notes=notes,
     )
+
+
+def _build_adversarial_metrics(metadata: dict) -> dict[str, object]:
+    checks = int(metadata.get("anti_hallucination_checks", 0) or 0)
+    blocks = int(metadata.get("anti_hallucination_block_count", 0) or 0)
+    passes = int(metadata.get("anti_hallucination_pass_count", 0) or 0)
+    d_block_rate = round((blocks / checks) * 100.0, 2) if checks > 0 else 0.0
+    d_pass_rate = round((passes / checks) * 100.0, 2) if checks > 0 else 0.0
+
+    status_window = metadata.get("self_heal_status_window")
+    window = list(status_window) if isinstance(status_window, list) else []
+    if window:
+        repaired_like = len([s for s in window if str(s).lower() in {"repaired", "healthy"}])
+        g_success_rate = round((repaired_like / len(window)) * 100.0, 2)
+    else:
+        g_success_rate = 0.0
+
+    # Simple alignment score: reward successful repair and healthy gate behavior.
+    # Penalize high block rate lightly (blocks are useful), but too many indicate unstable generator output.
+    if checks == 0 and not window:
+        alignment = 0.0
+    else:
+        alignment = max(
+            0.0,
+            min(
+                100.0,
+                round((0.6 * g_success_rate) + (0.3 * d_pass_rate) + (0.1 * (100.0 - d_block_rate)), 2),
+            ),
+        )
+    return {
+        "discriminator_checks": checks,
+        "discriminator_block_count": blocks,
+        "discriminator_pass_count": passes,
+        "discriminator_block_rate": d_block_rate,
+        "discriminator_pass_rate": d_pass_rate,
+        "generator_success_window": len(window),
+        "generator_success_rate": g_success_rate,
+        "gan_alignment_score": alignment,
+    }
