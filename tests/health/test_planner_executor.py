@@ -162,3 +162,16 @@ def test_planner_applies_fault_lesson_route_bias(tmp_path):
     assert plan.phase_route[0] == "A"
     assert "self_heal_route_bias" in state.metadata
     assert state.metadata["self_heal_route_bias"]["scores"]["A"] > 0
+
+
+def test_planner_applies_route_weight_prior_without_fault_lessons(tmp_path):
+    state = NexusState(task_id="route-prior")
+    state.metadata["self_heal_route_phase_weights"] = {"A": 30.0, "R": 5.0}
+
+    plan = RepairPlanner(tmp_path).build_plan(
+        HealthDiagnosis(kind="audit_failure", summary="audit rejected repair", target_phase="A"),
+        state=state,
+    )
+
+    assert plan.phase_route[0] == "A"
+    assert "route_prior" in state.metadata["self_heal_route_bias"]

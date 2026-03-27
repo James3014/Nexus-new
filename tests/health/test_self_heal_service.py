@@ -81,6 +81,8 @@ def test_self_heal_service_records_repaired_cycle(monkeypatch, tmp_path):
     assert cycle.status == "repaired"
     assert state.metadata["self_heal_cycle"]["status"] == "repaired"
     assert state.metadata["auto_repair_last_result"]["cycle_status"] == "repaired"
+    assert "self_heal_route_phase_weights" in state.metadata
+    assert state.metadata["self_heal_route_phase_weights"]["R"] > 0
     assert executor.plans
 
 

@@ -110,28 +110,35 @@ class RepairPlanner:
         if not state or not phase_route:
             return phase_route
 
-        hits = state.metadata.get("fault_lesson_hits")
-        if not isinstance(hits, list) or not hits:
-            return phase_route
-
         scores = {phase: 0.0 for phase in ["P", "X", "D", "R", "A", "C"]}
-        for hit in hits:
-            if not isinstance(hit, dict):
-                continue
-            relevance = float(hit.get("relevance", 0.0) or 0.0)
-            content = hit.get("content") or {}
-            if isinstance(content, dict):
-                text = " ".join(
-                    str(content.get(key, "") or "")
-                    for key in ("lesson", "repair_patch", "diagnosis_kind")
-                ).lower()
-            else:
-                text = str(content).lower()
-            if not text.strip():
-                continue
-            self._accumulate_phase_scores(scores, text, relevance)
+        prior_weights = state.metadata.get("self_heal_route_phase_weights")
+        if isinstance(prior_weights, dict):
+            for phase, weight in prior_weights.items():
+                phase_name = str(phase).upper()
+                if phase_name not in scores:
+                    continue
+                bounded = max(-40.0, min(40.0, float(weight or 0.0)))
+                scores[phase_name] += bounded
 
-        if not any(v > 0 for v in scores.values()):
+        hits = state.metadata.get("fault_lesson_hits")
+        if isinstance(hits, list):
+            for hit in hits:
+                if not isinstance(hit, dict):
+                    continue
+                relevance = float(hit.get("relevance", 0.0) or 0.0)
+                content = hit.get("content") or {}
+                if isinstance(content, dict):
+                    text = " ".join(
+                        str(content.get(key, "") or "")
+                        for key in ("lesson", "repair_patch", "diagnosis_kind")
+                    ).lower()
+                else:
+                    text = str(content).lower()
+                if not text.strip():
+                    continue
+                self._accumulate_phase_scores(scores, text, relevance)
+
+        if not any(abs(v) > 0.0 for v in scores.values()):
             return phase_route
 
         indexed_route = list(enumerate(phase_route))
@@ -147,6 +154,11 @@ class RepairPlanner:
             "scores": {k: round(v, 2) for k, v in scores.items() if v > 0},
             "route_before": list(phase_route),
             "route_after": list(reordered),
+            "route_prior": {
+                str(k).upper(): round(float(v), 2)
+                for k, v in (prior_weights.items() if isinstance(prior_weights, dict) else [])
+                if str(k).upper() in {"P", "X", "D", "R", "A", "C"}
+            },
         }
         return reordered
 

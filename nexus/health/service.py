@@ -67,6 +67,7 @@ class SelfHealService:
             after_diagnosis=after_diagnosis,
             notes=notes,
         )
+        self._update_route_weight_memory(state, result)
         self._record(state, result)
         self._record_fault_lesson(state, result)
         return result
@@ -279,8 +280,42 @@ class SelfHealService:
                 "cycle_status": result.status,
                 "after_score": result.after.overall_score,
                 "notes": list(result.notes),
+                "phase_route": list(result.plan.phase_route),
             },
         )
+
+    def _update_route_weight_memory(self, state: NexusState, result: SelfHealCycleResult) -> None:
+        metadata = state.metadata
+        route = [str(p).upper() for p in (result.plan.phase_route or []) if str(p).upper() in {"P", "X", "D", "R", "A", "C"}]
+        if not route:
+            return
+
+        decay = float(metadata.get("self_heal_route_weight_decay", 0.92) or 0.92)
+        decay = min(0.99, max(0.5, decay))
+        reward_map = {
+            "healthy": 8.0,
+            "repaired": 12.0,
+            "noop": 0.0,
+            "degraded": -4.0,
+            "failed": -10.0,
+        }
+        reward = reward_map.get(str(result.status), 0.0)
+        old_weights = metadata.get("self_heal_route_phase_weights")
+        if not isinstance(old_weights, dict):
+            old_weights = {}
+
+        new_weights: dict[str, float] = {}
+        for phase in ["P", "X", "D", "R", "A", "C"]:
+            base = float(old_weights.get(phase, 0.0) or 0.0) * decay
+            if phase in route:
+                pos = route.index(phase)
+                position_weight = max(0.4, 1.0 - (0.15 * float(pos)))
+                base += reward * position_weight
+            new_weights[phase] = max(-100.0, min(100.0, round(base, 2)))
+
+        metadata["self_heal_route_phase_weights"] = new_weights
+        metadata["self_heal_route_weight_last_update"] = datetime.now().isoformat()
+        metadata["self_heal_route_weight_status"] = str(result.status)
 
     @staticmethod
     def _snapshot_dict(snapshot: HealthSnapshot) -> dict:
