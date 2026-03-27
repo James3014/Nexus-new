@@ -9,7 +9,38 @@ from pathlib import Path
 sys.path.append(str(Path.cwd()))
 
 
-def replay_case(case_id: str):
+def execute_replay_case(
+    cli,
+    *,
+    case_type: str,
+    case_id: str,
+    goal: str,
+    delivery_mode: str = "standard",
+    verify_commands: list[str] | None = None,
+    artifact_paths: list[str] | None = None,
+) -> bool:
+    if case_type == "bug":
+        return cli.service.execute_bug(
+            goal,
+            delivery_mode=delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+            bug_id=case_id,
+        )
+    return cli.service.execute_feature(
+        goal,
+        delivery_mode=delivery_mode,
+        verify_commands=verify_commands,
+        artifact_paths=artifact_paths,
+    )
+
+
+def replay_case(
+    case_id: str,
+    delivery_mode: str = "standard",
+    verify_commands: list[str] | None = None,
+    artifact_paths: list[str] | None = None,
+):
     project_root = Path.cwd()
     catalog_path = project_root / "cases" / "catalog.json"
 
@@ -37,7 +68,10 @@ def replay_case(case_id: str):
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # Standard DI Setup (v1.8 Core)
+    from nexus.app.command_service import NexusCommandService
     from nexus.containers import NexusContainer
+    from nexus.delivery.interactive import resolve_delivery_mode
+    from scripts.engine.nexus_cli import NexusCLI
 
     container = NexusContainer()
     container.project_root.from_value(str(project_root))
@@ -51,15 +85,24 @@ def replay_case(case_id: str):
     state_file = run_dir / "replay_state.jsonl"
     state_io = container.state_io(state_file=str(state_file))
     engine.state_io = state_io
+    cli = NexusCLI(project_root=project_root, output_dir=run_dir, silent=True)
+    cli._engine = engine
+    cli._service = NexusCommandService(engine)
+    resolved_delivery_mode = resolve_delivery_mode(delivery_mode)
 
     start_time = time.time()
     success = False
 
     try:
-        if case_meta["type"] == "bug":
-            success = engine.run_bug(case_id, desc=case_data["goal"])
-        else:
-            success = engine.run_feature(case_data["goal"])
+        success = execute_replay_case(
+            cli,
+            case_type=case_meta["type"],
+            case_id=case_id,
+            goal=case_data["goal"],
+            delivery_mode=resolved_delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+        )
     except Exception as e:
         print(f"💥 [Replay] Execution Failed: {e}")
 
@@ -133,6 +176,19 @@ def replay_case(case_id: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Nexus Offline Case Replayer")
     parser.add_argument("case_id", help="ID of the case to replay (e.g., OFF-001)")
+    parser.add_argument(
+        "--delivery-mode",
+        choices=["ask", "standard", "high"],
+        default="standard",
+        help="Prompt or choose whether replay must satisfy high-standard delivery verification.",
+    )
+    parser.add_argument("--verify", action="append", default=[])
+    parser.add_argument("--artifact", action="append", default=[])
     args = parser.parse_args()
 
-    replay_case(args.case_id)
+    replay_case(
+        args.case_id,
+        delivery_mode=args.delivery_mode,
+        verify_commands=args.verify,
+        artifact_paths=args.artifact,
+    )

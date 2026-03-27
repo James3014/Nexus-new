@@ -28,6 +28,7 @@ from nexus.engine.health.evaluator import HealthEvaluator
 from nexus.core.review_status import ReviewStatusNormalizer
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.engine.pipeline import NexusPipeline
+from nexus.app.command_service import NexusCommandService
 
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,27 @@ class NexusEngine:
         self, command: str, task: str, status: str, tokens: int = 0, score: float = 0.0
     ):
         self.reporter.log_trace(command, task, status, tokens, score)
+
+    def _execute_isolated_case(
+        self,
+        sub_engine,
+        *,
+        case_type: str,
+        case_id: str,
+        goal_desc: str,
+        case_data: dict,
+    ) -> bool:
+        service = NexusCommandService(sub_engine)
+        if case_type == "bug":
+            return service.execute_bug(
+                goal_desc,
+                delivery_mode="standard",
+                bug_id=case_id,
+            )
+        return service.execute_feature(
+            goal_desc,
+            delivery_mode="standard",
+        )
 
     def _add_step_to_history(
         self,
@@ -273,14 +295,13 @@ class NexusEngine:
             start_time = time.time()
             success = False
             try:
-                if case_type == "bug":
-                    success = sub_engine.run_bug(
-                        case_id, desc=goal_desc, context=case_data
-                    )
-                else:
-                    success = sub_engine.run_feature(
-                        goal_desc, context=case_data
-                    )
+                success = self._execute_isolated_case(
+                    sub_engine,
+                    case_type=case_type,
+                    case_id=case_id,
+                    goal_desc=goal_desc,
+                    case_data=case_data,
+                )
             except Exception as e:
                 logger.error("💥 [Benchmark] Case %s crashed: %s", case_id, e)
 

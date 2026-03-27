@@ -1,3 +1,12 @@
+import sys
+import types
+
+sys.modules.setdefault("lancedb", types.SimpleNamespace(connect=lambda *args, **kwargs: None))
+sys.modules.setdefault(
+    "redis",
+    types.SimpleNamespace(Redis=lambda *args, **kwargs: types.SimpleNamespace(ping=lambda: True)),
+)
+
 from nexus.engine.coordinator import NexusEngine
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.services.predictor import Predictor
@@ -98,3 +107,29 @@ def test_run_feature_compat_fallback_when_hub_feature_pack_raises(tmp_path):
     with patch("nexus.engine.coordinator.CodexLoopV2.run_review", return_value={"status": "APPROVED"}):
         ok = engine.run_feature("compat fallback raise smoke", dry_run=True)
     assert ok is True
+
+
+def test_execute_isolated_case_routes_through_command_service(tmp_path):
+    engine = NexusEngine(project_root=tmp_path, silent=True)
+    sub_engine = MagicMock()
+
+    with patch("nexus.engine.coordinator.NexusCommandService") as mock_service_cls:
+        mock_service = MagicMock()
+        mock_service.execute_bug.return_value = True
+        mock_service_cls.return_value = mock_service
+
+        ok = engine._execute_isolated_case(
+            sub_engine,
+            case_type="bug",
+            case_id="OFF-001",
+            goal_desc="fix login callback",
+            case_data={"goal": "fix login callback"},
+        )
+
+    assert ok is True
+    mock_service_cls.assert_called_once_with(sub_engine)
+    mock_service.execute_bug.assert_called_once_with(
+        "fix login callback",
+        delivery_mode="standard",
+        bug_id="OFF-001",
+    )

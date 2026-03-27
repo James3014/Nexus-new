@@ -18,7 +18,17 @@ def execute(cli, args):
 
     # 執行任務管線內容分組內容分組
     try:
-        success = cli.engine.run_bug(args.task)
+        delivery_mode = getattr(args, "delivery_mode", "standard")
+        verify_commands = list(getattr(args, "verify", []) or [])
+        artifact_paths = list(getattr(args, "artifact", []) or [])
+        success = cli.service.execute_bug(
+            args.task,
+            delivery_mode=delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+        )
+        if delivery_mode == "high":
+            cli._print_delivery_summary("Swarm", delivery_mode)
         if success:
             print("✅ [Nexus:Swarm] Mission Succeeded.")
         else:

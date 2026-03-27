@@ -15,6 +15,10 @@ sys.path.append(str(ROOT))
 from scripts.utils.git_worktree import GitWorktreeManager
 from scripts.ops.incident_rca_adapter import IncidentRCAAdapter
 from scripts.utils.pid_lock import acquire_lock, release_lock
+from nexus.delivery.interactive import resolve_delivery_mode
+from nexus.delivery.gate import evaluate_completion
+from nexus.delivery.models import CompletionRequest, TaskLevel
+from nexus.delivery.report import write_report_bundle
 from nexus.core.task_graph import topo_sort
 wt_manager = GitWorktreeManager(ROOT)
 incident_adapter = IncidentRCAAdapter(ROOT)
@@ -99,11 +103,23 @@ def run_phase_task(task: dict, cwd: Path | str | None = None) -> tuple[int, str,
         success = False
         if phase == "R":
             if "bug" in tid.lower() or "fix" in tid.lower():
-                success = cli.engine.run_bug(tid, desc=task_desc)
+                success = cli.service.execute_bug(
+                    task_desc,
+                    delivery_mode="standard",
+                    bug_id=tid,
+                )
             else:
-                success = cli.engine.run_feature(task_desc, domain=domain)
+                success = cli.service.execute_feature(
+                    task_desc,
+                    domain=domain,
+                    delivery_mode="standard",
+                )
         else:
-            success = cli.engine.run_feature(task_desc, domain=domain)
+            success = cli.service.execute_feature(
+                task_desc,
+                domain=domain,
+                delivery_mode="standard",
+            )
 
         rc = 0 if success else 1
         stdout = "SUCCESS" if success else "FAIL"
@@ -125,6 +141,45 @@ def check_done(task: dict, rc: int, stdout: str, stderr: str) -> tuple[bool, str
     if t == "phase_result_ok":
         return rc == 0, f"phase_result_ok:{stdout}"
     return False, "unsupported done_when"
+
+
+def run_completion_gate_for_task(
+    task: dict,
+    manifest_defaults: dict,
+    cwd: Path | str | None = None,
+) -> tuple[bool, str]:
+    gate_cfg = task.get("completion_gate")
+    gate_required = bool(
+        task.get(
+            "require_completion_gate",
+            manifest_defaults.get("require_completion_gate", False),
+        )
+    )
+    if not gate_cfg:
+        if gate_required:
+            return False, "completion_gate_missing"
+        return True, "completion_gate_skipped"
+
+    verify_commands = list(gate_cfg.get("verify_commands", []))
+    if not verify_commands:
+        return False, "completion_gate_missing_verify_commands"
+
+    task_level = TaskLevel(gate_cfg.get("task_level", "small_fix"))
+    artifact_paths = [
+        Path(path)
+        for path in gate_cfg.get("artifact_paths", task.get("evidence_paths", []))
+    ]
+    output_dir = Path(gate_cfg.get("output_dir", ROOT / "logs" / "delivery"))
+    request = CompletionRequest(
+        task_name=task["id"],
+        task_level=task_level,
+        verification_commands=verify_commands,
+        artifact_paths=artifact_paths,
+        cwd=Path(cwd) if cwd else ROOT,
+    )
+    result = evaluate_completion(request)
+    write_report_bundle(result, output_dir)
+    return result.gate_passed, result.status.value
 
 
 
@@ -167,8 +222,33 @@ def execute_single_task(task: dict, run_cmd: str, manifest_defaults: dict, polic
 
             done, note = check_done(task, rc, out, err)
             if done:
+                gate_passed, gate_note = run_completion_gate_for_task(
+                    task,
+                    manifest_defaults,
+                    cwd=wt_path or ROOT,
+                )
+                if not gate_passed:
+                    with state_lock:
+                        state["tasks"][tid].update(
+                            {
+                                "status": "failed",
+                                "note": f"completion_gate:{gate_note}",
+                                "updated_at": now_str(),
+                            }
+                        )
+                    save_status(state)
+                    write_heartbeat(state)
+                    incident_adapter.generate_report(tid, f"completion_gate:{gate_note}")
+                    time.sleep(1)
+                    continue
                 with state_lock:
-                    state["tasks"][tid].update({"status": "done", "note": note, "updated_at": now_str()})
+                    state["tasks"][tid].update(
+                        {
+                            "status": "done",
+                            "note": f"{note}; completion_gate:{gate_note}",
+                            "updated_at": now_str(),
+                        }
+                    )
                 save_status(state)
                 write_heartbeat(state)
                 return "DONE"
@@ -190,6 +270,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", help="Run specific task ID")
     parser.add_argument("--with-deps", action="store_true", help="Run with recursive dependencies")
+    parser.add_argument(
+        "--delivery-mode",
+        choices=["ask", "standard", "high"],
+        default="ask",
+        help="Choose whether task completion requires high-standard delivery verification.",
+    )
     args = parser.parse_args()
 
     lock_fd = acquire_lock(LOCK_FILE)
@@ -202,7 +288,9 @@ def main():
             print(f"DEBUG: Manifest snippet: {f.read(100)}...")
         manifest = load_config(MANIFEST)
         policy = load_config(POLICY)
-        defaults = manifest.get("defaults", {})
+        defaults = dict(manifest.get("defaults", {}))
+        delivery_mode = resolve_delivery_mode(args.delivery_mode)
+        defaults["require_completion_gate"] = delivery_mode == "high"
         all_tasks = manifest.get("tasks", [])
         print(f"DEBUG: all_tasks count: {len(all_tasks)}")
         if all_tasks:
@@ -233,7 +321,12 @@ def main():
             print(f"❌ TopoSort Error: {e}")
             return 5
 
-        state = {"started_at": now_str(), "tasks": {}, "result": "running"}
+        state = {
+            "started_at": now_str(),
+            "tasks": {},
+            "result": "running",
+            "delivery_mode": delivery_mode,
+        }
         for t in tasks_to_run:
             state["tasks"][t["id"]] = {"status": "pending", "retry": 0, "updated_at": now_str()}
         save_status(state)
