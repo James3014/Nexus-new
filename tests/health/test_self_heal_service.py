@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+import json
 
 from nexus.core.state_contracts import NexusState, HealthMetrics
 from nexus.health.models import HealthDiagnosis, HealthSnapshot, HealthTrigger, PhaseScore, RepairExecutionResult
@@ -83,6 +84,15 @@ def test_self_heal_service_records_repaired_cycle(monkeypatch, tmp_path):
     assert state.metadata["auto_repair_last_result"]["cycle_status"] == "repaired"
     assert "self_heal_route_phase_weights" in state.metadata
     assert state.metadata["self_heal_route_phase_weights"]["R"] > 0
+    assert state.metadata["self_heal_route_policy_sync"] == "ok"
+    policy_path = tmp_path / ".nexus" / "knowledge" / "policy_memory.jsonl"
+    assert policy_path.exists()
+    rows = [
+        json.loads(line)
+        for line in policy_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert any(row.get("rule_id") == "ROUTE-WEIGHT-R" for row in rows)
     assert executor.plans
 
 

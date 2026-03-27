@@ -5,6 +5,7 @@ import gc
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from nexus.core.memory_coordinator import MemoryCoordinator
 
 try:
     import lancedb
@@ -27,6 +28,8 @@ class MemoryService:
         self.run_dir = Path(run_dir) if run_dir else None
         self.db_path = self.project_root / ".nexus" / "knowledge" / "lancedb"
         self.fault_lessons_jsonl = self.project_root / ".nexus" / "knowledge" / "fault_lessons.jsonl"
+        self.policy_memory_jsonl = self.project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
+        self.coordinator = MemoryCoordinator()
         self._db = None
         try:
             if redis is None:
@@ -306,6 +309,90 @@ class MemoryService:
             table.add([entry])
         except Exception:
             pass
+
+    def sync_route_phase_weights(
+        self,
+        weights: Dict[str, float],
+        cycle_status: str = "",
+        fault_hash: str = "",
+    ) -> None:
+        if not isinstance(weights, dict) or not weights:
+            return
+
+        normalized: Dict[str, float] = {}
+        for phase, raw in weights.items():
+            phase_key = str(phase).upper()
+            if phase_key not in {"P", "X", "D", "R", "A", "C"}:
+                continue
+            normalized[phase_key] = max(-100.0, min(100.0, float(raw or 0.0)))
+        if not normalized:
+            return
+
+        now = datetime.now().isoformat()
+        existing = self._load_policy_memory_rows()
+        kept = [
+            row
+            for row in existing
+            if str(row.get("rule_id", "")).upper() not in {
+                f"ROUTE-WEIGHT-{phase}" for phase in normalized.keys()
+            }
+        ]
+
+        for phase, weight in normalized.items():
+            confidence = round((weight + 100.0) / 200.0, 4)
+            drift = round(max(0.0, 50.0 - abs(weight)), 2)
+            kept.append(
+                {
+                    "rule_id": f"ROUTE-WEIGHT-{phase}",
+                    "condition": f"self_heal_route_phase={phase}",
+                    "action": f"prioritize repair_phase_{phase}",
+                    "confidence": confidence,
+                    "semantic_drift": drift,
+                    "source": "self_heal_route_weight",
+                    "governance_level": "adaptive",
+                    "tags": ["self_heal_route", "learning_generated"],
+                    "zero_decay": False,
+                    "immutable": False,
+                    "created_at": now,
+                    "last_access": now,
+                    "last_used_at": now,
+                    "metadata": {
+                        "phase": phase,
+                        "route_weight": round(weight, 2),
+                        "cycle_status": str(cycle_status),
+                        "fault_hash": str(fault_hash or ""),
+                    },
+                }
+            )
+
+        self._write_policy_memory_rows(kept)
+
+    def _load_policy_memory_rows(self) -> List[Dict[str, Any]]:
+        if not self.policy_memory_jsonl.exists():
+            return []
+        rows: List[Dict[str, Any]] = []
+        try:
+            with open(self.policy_memory_jsonl, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(payload, dict):
+                        rows.append(payload)
+        except Exception:
+            return []
+        return rows
+
+    def _write_policy_memory_rows(self, rows: List[Dict[str, Any]]) -> None:
+        self.policy_memory_jsonl.parent.mkdir(parents=True, exist_ok=True)
+        with self.coordinator.lock(self.policy_memory_jsonl):
+            with open(self.policy_memory_jsonl, "w", encoding="utf-8") as handle:
+                for row in rows:
+                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def cached_search(self, key: str, ttl: int = 1800) -> Dict[str, Any]:
         """雙層快取搜尋。"""

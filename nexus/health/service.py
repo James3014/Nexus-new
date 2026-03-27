@@ -316,6 +316,15 @@ class SelfHealService:
         metadata["self_heal_route_phase_weights"] = new_weights
         metadata["self_heal_route_weight_last_update"] = datetime.now().isoformat()
         metadata["self_heal_route_weight_status"] = str(result.status)
+        try:
+            self.memory_service.sync_route_phase_weights(
+                new_weights,
+                cycle_status=str(result.status),
+                fault_hash=str(state.metadata.get("fault_hash", "") or ""),
+            )
+            metadata["self_heal_route_policy_sync"] = "ok"
+        except Exception:
+            metadata["self_heal_route_policy_sync"] = "failed"
 
     @staticmethod
     def _snapshot_dict(snapshot: HealthSnapshot) -> dict:
