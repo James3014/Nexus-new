@@ -1,75 +1,47 @@
-# Nexus 超短版操作手冊（6 指令）
+# Nexus 朋友版操作手冊（兩步啟動）
 
-這份是給你和朋友的「日常最小集合」，先用這 6 個就夠。
+這份給朋友使用，只保留「安裝 + 登入 + 對話」。
 
-## 0. CLI 入口
+## 朋友先安裝（Standalone，免 Nexus repo）
 ```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py <command>
+curl -fsSL http://100.82.155.88:5005/install/nexus-pilot-friend.sh | bash
 ```
-
-## 1. 套用正式模式（建議先跑）
-用途：把日常任務切到正式交付策略（高標交付 + 高檢查 + strict 自癒）。
-
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:profile apply --name prod
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:profile show
-```
-
-## 2. 修 Bug
-用途：執行修復任務。`prod` 模式下成功後會自動做 release gate。
-
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:bug --task "fix login callback" --delivery-mode ask
-```
-
-## 3. 做功能
-用途：執行 feature 任務。`prod` 模式下成功後會自動做 release gate。
-
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:feature --task "add SSO audit trail" --delivery-mode ask
-```
-
-## 4. 自檢
-用途：看現在健康狀態是否可交付。
-
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:check --level ask
-```
-
-## 5. 自癒
-用途：出現降級或異常時快速修復。
-
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:self-heal --mode ask
-```
-
-## 6. 正式交付 Gate
-用途：交付前總門檻，沒過就不算可交付。
-
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:release-ready
-```
-
-## 研究模式（需要時再用）
-用途：跑 Phase 6 研究，不是每次任務都要開。
-
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:phase6 \
-  --workspace /Users/jameschen/Downloads/obsidian/01_Projects/Autoresearch \
-  --rounds 100 \
-  --proof-ratio-min 95 \
-  --output-prefix phase6
-```
-
----
-
-朋友快速啟動（對話入口）：
+啟動：
 ```bash
 nexus-pilot-friend pilot_a
 ```
+
+第一次進去會問 API Key，輸入後就能開始聊天。
+
+## 指令說明（朋友版）
+
+- `/status`：查看目前連線狀態（Tenant / Gateway / Provider / Model）。
+  範例：`/status`
+- `/gateway <url>`：切換後端 Gateway 位址。
+  範例：`/gateway http://100.82.155.88:5005`
+- `/provider <name>`：切換模型供應商顯示值（不會改你的 API key 類型）。
+  範例：`/provider Gemini`
+- `/model <name>`：切換要使用的模型名稱。
+  範例：`/model gemini-2.5-flash`
+- `/govern <task>`：把任務送進治理流程（不是一般聊天）。
+  範例：`/govern 幫我檢查登入 API 為什麼 500`
+- `/help`：顯示指令清單。
+- `/exit`：離開 CLI。
+
+平常聊天不用加指令，直接輸入問題即可。
 
 若出現 `command not found`，先補 PATH：
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
+```
+
+---
+
+## 維運者（你）才需要的入口
+
+如果要跑 Nexus 核心任務流（不是朋友對話入口），請在你的 Nexus repo 內執行：
+
+```bash
+python3 scripts/engine/nexus_cli.py <command>
 ```

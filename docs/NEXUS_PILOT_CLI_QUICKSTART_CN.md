@@ -2,12 +2,12 @@
 
 這份是給第一次使用 Nexus 的朋友。
 
-## 1) 安裝
+## 1) 安裝（推薦：Standalone，不需 Nexus 專案）
 
-請先在你的電腦執行：
+請先拿到這支腳本（由管理者提供），然後執行：
 
 ```bash
-bash /path/to/nexus/scripts/ops/install_nexus_pilot_friend.sh
+curl -fsSL http://100.82.155.88:5005/install/nexus-pilot-friend.sh | bash
 ```
 
 安裝完成後，開一個新終端機，執行：
@@ -20,6 +20,12 @@ nexus-pilot-friend <tenant_id>
 
 ```bash
 nexus-pilot-friend pilot_a
+```
+
+如果你是開發者本人、機器上有完整 Nexus repo，才使用 repo 安裝器（開發者模式）：
+
+```bash
+bash /path/to/nexus/scripts/ops/install_nexus_pilot_friend.sh
 ```
 
 ## 2) 第一次啟動
@@ -36,21 +42,28 @@ nexus-pilot-friend pilot_a
 - 貼錯誤訊息
 - 貼多行長題目（會自動當成同一題）
 
-常用指令：
+常用指令（朋友版）：
 
-- `/status`
-- `/mount <本機專案路徑>`
-- `/clone <github_repo_url> [目的地]`
-- `/govern`
-- `/provider <name>`
-- `/model <name>`
-- `/reset`
-- `/exit`
+- `/status`：查看目前連線狀態（Tenant / Gateway / Provider / Model）。
+- `/gateway <url>`：切換後端 Gateway。
+- `/provider <name>`：切換供應商名稱（例如 Gemini）。
+- `/model <name>`：切換模型名稱。
+- `/govern <task>`：把任務送入治理流程。
+- `/help`：顯示指令說明。
+- `/exit`：離開 CLI。
+
+範例：
+
+```text
+/status
+/model gemini-2.5-flash
+/govern 幫我分析這段錯誤堆疊並給修復步驟
+```
 
 ## 4) 兩種工作方式
 
 1. 聊天模式：直接問答、貼 bug、貼 log。  
-2. 治理模式：輸入 `/govern`，進入任務導向流程（分析、修復、回報）。
+2. 治理模式：輸入 `/govern <任務內容>`，進入任務導向流程（分析、修復、回報）。
 
 ## 5) 連到遠端 Gateway（如果有提供）
 
@@ -84,15 +97,10 @@ nexus-pilot-friend <tenant_id>
 
 確認 Provider / Model / Gateway 是否正確，再重試提問。
 
-### Q3. 要處理本機專案
+### Q3. `govern` 和直接聊天差在哪裡？
 
-先掛載：
-
-```text
-/mount /path/to/your/project
-```
-
-再直接描述需求，或輸入 `/govern`。
+- 直接聊天：拿來問問題、要建議、快速查錯。
+- `/govern <task>`：拿來送正式任務，讓 Gateway 走治理流程。
 
 ## 7) 安全說明
 
@@ -108,4 +116,5 @@ nexus-pilot-friend <tenant_id>
 
 - 本地入口：`nexus-pilot`
 - 核心交付 gate：`nexus:release-ready`（已串接 `nexus:acceptance-check`）
-- 朋友安裝腳本：`scripts/ops/install_nexus_pilot_friend.sh`
+- 朋友安裝腳本（推薦）：`scripts/ops/install_nexus_pilot_friend_standalone.sh`
+- 開發者安裝腳本（需完整 repo）：`scripts/ops/install_nexus_pilot_friend.sh`

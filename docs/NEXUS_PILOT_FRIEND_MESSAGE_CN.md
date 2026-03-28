@@ -7,7 +7,7 @@
 
 1. 如果你還沒安裝，先執行：
 
-bash /path/to/nexus/scripts/ops/install_nexus_pilot_friend.sh
+curl -fsSL http://100.82.155.88:5005/install/nexus-pilot-friend.sh | bash
 
 2. 直接啟動：
 
@@ -22,40 +22,18 @@ nexus-pilot-friend pilot_a
 4. 長問題可以直接貼，貼完後按一次 Enter 送出。
 
 5. 需要治理時輸入：
-/govern
-
-6. 如果要處理本機專案：
-/mount /path/to/project
-
-7. 如果要處理 GitHub repo：
-/clone https://github.com/your-org/your-repo.git
+/govern <任務內容>
 
 可用指令：
-/status
-/mount <workspace>
-/clone <repo-url> [dest]
-/provider <name>
-/model <name>
-/govern
-/reset
-/exit
+/status                # 看目前連線狀態
+/gateway <url>         # 切換 Gateway
+/provider <name>       # 切換供應商名稱
+/model <name>          # 切換模型名稱
+/govern <task>         # 送正式治理任務
+/help                  # 顯示指令清單
+/exit                  # 離開
 
-如果你之後要改用 Nexus 核心任務流，而不是聊天入口，可用：
-
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:bug --task "fix login callback" --delivery-mode ask
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:feature --task "add SSO audit trail" --delivery-mode ask
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
-
-系統會主動問你要不要高標交付：
-
-- standard：一般交付
-- high：交付前強制 completion gate
-
-選 high 時，系統會：
-
-- 自動推建議驗證命令（Python / Rust / Go）
-- 顯示實際採用的驗證命令
-- 顯示交付報告路徑
+（給朋友版）直接用 `nexus-pilot-friend` 聊天與治理即可，不需要 Nexus 核心開發指令。
 ```
 
 ## 建議租戶命名
@@ -69,7 +47,7 @@ python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:runne
 - CLI 會記住 tenant/provider/model/workspace
 - API key 預設只留在 session，不會顯示完整值
 - 如果看不到 `nexus-pilot-friend`，先開一個新的 terminal 視窗再試一次
-- 如果還是看不到 `nexus-pilot`，再執行：
+- 如果還是看不到 `nexus-pilot-friend`，再執行：
 
 ```bash
 source ~/.zshrc
@@ -83,5 +61,5 @@ export NEXUS_PILOT_PROVIDER=Gemini
 export NEXUS_PILOT_MODEL=gemini-2.5-flash
 export NEXUS_PILOT_TENANT_ID=pilot_a
 export NEXUS_PILOT_API_KEY=<你的 key>
-nexus-pilot
+nexus-pilot-friend pilot_a
 ```

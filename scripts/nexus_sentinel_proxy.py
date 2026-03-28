@@ -3,12 +3,23 @@ import json
 import socketserver
 import os
 import sys
+from pathlib import Path
+from typing import Optional
 
 # [SOTA 50.0] Nexus Sentinel Proxy (Zero Dependency)
 # Built to survive "Environment Hell" on MacOS.
 # Uses pure http.server for 100% startup guarantee.
 
 PORT = int(os.getenv("NEXUS_PILOT_PROXY_PORT", "5005"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+STANDALONE_INSTALLER = REPO_ROOT / "scripts" / "ops" / "install_nexus_pilot_friend_standalone.sh"
+
+
+def _read_standalone_installer() -> Optional[str]:
+    try:
+        return STANDALONE_INSTALLER.read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 class NexusHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -25,6 +36,21 @@ class NexusHandler(http.server.BaseHTTPRequestHandler):
                 "mode": "Zero-Dependency",
                 "link": "ABS_ZERO_v50.0"
             }).encode('utf-8'))
+        elif self.path in ['/install/nexus-pilot-friend.sh', '/install']:
+            script = _read_standalone_installer()
+            if script is None:
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "error": "standalone installer not found",
+                    "path": str(STANDALONE_INSTALLER),
+                }).encode('utf-8'))
+                return
+            self.send_response(200)
+            self.send_header('Content-type', 'text/x-shellscript; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(script.encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()

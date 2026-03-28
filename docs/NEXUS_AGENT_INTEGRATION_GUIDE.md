@@ -21,7 +21,12 @@
 ### 1.1 呼叫穩定態 CLI (Nexus Pilot Friend)
 Agent 必須透過 Codex 具現化的 Pilot 入口進行掛載。這套系統已內置 Venv 隔離與專業的 I/O 引擎，絕不掉字：
 
-**安裝與初始化 (一鍵具現)：**
+**安裝與初始化 (一鍵具現，推薦 Standalone)：**
+```bash
+bash /Users/jameschen/Workspace/nexus/scripts/ops/install_nexus_pilot_friend_standalone.sh
+```
+
+如果是開發者機器（已有完整 Nexus repo），才用 repo 安裝器：
 ```bash
 bash /Users/jameschen/Workspace/nexus/scripts/ops/install_nexus_pilot_friend.sh
 ```
