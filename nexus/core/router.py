@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 
 
 class SkillsRouter:
@@ -15,6 +16,8 @@ class SkillsRouter:
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
         # 核心職能來源改為從 inventory 動態讀取
         self.skills_root = Path(skills_root)
+        self.builtin_skills_root = self.project_root / "scripts" / "skills_builtin"
+        self.external_skills_root = self.project_root / "scripts"
         
         # 載入技能庫清單 (Skills Inventory)
         self.inventory_path = self.project_root / "scripts" / "skills_inventory.json"
@@ -28,6 +31,42 @@ class SkillsRouter:
         # 載入自學習權重 (Autonomic Weights)
         self.weights_path = self.project_root / "scripts" / "core" / "autonomic_weights.json"
         self.weights_config = self._load_weights()
+        self._decision_seq = 0
+
+    def _new_decision_id(self, phase: str, skill_id: str, context: Dict[str, Any]) -> str:
+        self._decision_seq += 1
+        task_id = str(context.get("task_id", "") or "")
+        seed = f"{phase}|{skill_id}|{task_id}|{datetime.now(timezone.utc).isoformat()}|{self._decision_seq}"
+        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+        return f"dec_{phase.lower()}_{digest}"
+
+    def _resolve_skill_artifact(self, skill_id: str) -> Dict[str, Any]:
+        """
+        Resolve skill artifact path with deterministic priority:
+        1) scripts/skills_builtin/<skill_id>/SKILL.md
+        2) scripts/<skill_id>/SKILL.md
+        """
+        builtin_path = self.builtin_skills_root / skill_id / "SKILL.md"
+        if builtin_path.exists():
+            return {
+                "skill_path": str(builtin_path),
+                "skill_source": "builtin",
+                "artifact_found": True,
+            }
+
+        external_path = self.external_skills_root / skill_id / "SKILL.md"
+        if external_path.exists():
+            return {
+                "skill_path": str(external_path),
+                "skill_source": "external",
+                "artifact_found": True,
+            }
+
+        return {
+            "skill_path": str(builtin_path),
+            "skill_source": "missing",
+            "artifact_found": False,
+        }
 
     def _load_weights(self) -> Dict[str, Any]:
         """從 JSON 載入權重，若失敗則回傳預設值。"""
@@ -131,6 +170,7 @@ class SkillsRouter:
         entry = {
             "timestamp": datetime.now().isoformat(),
             "phase": phase,
+            "decision_id": selected.get("decision_id"),
             "selected_skill": selected.get("skill_id"),
             "score": selected.get("score"),
             "scorecard": selected.get("scorecard"),
@@ -157,21 +197,29 @@ class SkillsRouter:
         for skill_id, info in skills_data.items():
             if phase in info.get("phases", []):
                 scorecard = self.generate_scorecard(skill_id, phase, context_dict, info)
+                artifact = self._resolve_skill_artifact(skill_id)
                 
                 candidate = {
                     "skill_id": skill_id,
                     "score": scorecard["final_score"],
                     "scorecard": scorecard,
+                    "decision_id": self._new_decision_id(phase, skill_id, context_dict),
                     "description": info.get("description", ""),
-                    "skill_path": str(self.project_root / "scripts" / skill_id / "SKILL.md")
+                    "skill_path": artifact["skill_path"],
+                    "skill_source": artifact["skill_source"],
+                    "artifact_found": artifact["artifact_found"],
                 }
                 
-                if scorecard["status"] == "SELECTED":
+                if scorecard["status"] == "SELECTED" and artifact["artifact_found"]:
                     candidates.append(candidate)
                 else:
                     rejected.append({
                         "skill_id": skill_id,
-                        "reason": scorecard["reason"],
+                        "reason": (
+                            "Skill artifact not found in builtin/external roots"
+                            if not artifact["artifact_found"]
+                            else scorecard["reason"]
+                        ),
                         "score": scorecard["final_score"]
                     })
         

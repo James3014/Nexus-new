@@ -9,7 +9,7 @@ from nexus.services.patcher import SafePatcher
 from nexus.services.reporter import Reporter
 from nexus.services.workspace import WorkspaceManager
 from nexus.services.prompt_builder import PromptBuilder
-from nexus.services.reviewer import CodexLoopV2
+from nexus.services.reviewer import GatewayReviewLoop
 from nexus.core.commander import Commander
 from nexus.core.context_hub import ContextHub
 from nexus.core.state_io import StateIO
@@ -79,7 +79,7 @@ class NexusContainer(containers.DeclarativeContainer):
     )
     
     llm = providers.Singleton(
-        BattlesuitGateway,
+        LLMClient,
         project_root=project_root
     )
 
@@ -103,7 +103,7 @@ class NexusContainer(containers.DeclarativeContainer):
     from nexus.engine.coordinator import NexusEngine
     
     orchestrator_factory = providers.Factory(
-        CodexLoopV2,
+        GatewayReviewLoop,
         project_root=project_root,
         git=git,
         llm=llm,

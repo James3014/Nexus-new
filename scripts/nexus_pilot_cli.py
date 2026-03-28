@@ -14,6 +14,12 @@ from nexus.pilot_cli.gateway import (
     chat_via_gateway,
     ensure_local_gateway_running,
 )
+from nexus.pilot_cli.health_actions import (
+    begin_self_check_prompt,
+    begin_self_heal_prompt,
+    resolve_pending_health_choice,
+    run_pilot_health_command,
+)
 from nexus.pilot_cli.input_engine import read_interactive_line
 from nexus.pilot_cli.onboarding import prompt_for_missing_session_fields
 from nexus.pilot_cli.router import route_input
@@ -22,11 +28,19 @@ from nexus.pilot_cli.ui import render_main_screen
 
 
 def handle_user_input(user_input: str, session: PilotSession) -> str:
+    handled, output = resolve_pending_health_choice(session, user_input)
+    if handled:
+        return output or ""
+
     session.last_user_request = user_input
     if user_input.startswith("/"):
         return handle_command(user_input, session)
 
     route = route_input(user_input)
+    if route.lane == "SELF_CHECK_PROMPT":
+        return begin_self_check_prompt(session)
+    if route.lane == "SELF_HEAL_PROMPT":
+        return begin_self_heal_prompt(session)
     if route.lane == "BATTLE_CONFIRM":
         payload = build_governance_payload(session, user_input)
         task_hint = payload.get("tenant_id") or "unassigned-tenant"

@@ -1,6 +1,8 @@
 import json
+import os
 import sys
 import subprocess
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -19,19 +21,36 @@ class Reporter:
             self.tracelog_path = tracelog_path or self.project_root / "tracelog.jsonl"
         self.silent = silent
 
+    @staticmethod
+    def _resolve_notify_command(message: str) -> Optional[list[str]]:
+        """Resolve available notifier command without raising noisy file-not-found errors."""
+        if os.environ.get("NEXUS_AUDIO_NOTIFY", "1").strip() in {"0", "false", "False", "off", "OFF"}:
+            return None
+
+        script_override = os.environ.get("NEXUS_AUDIO_NOTIFY_SCRIPT", "").strip()
+        if script_override:
+            script_path = Path(script_override).expanduser()
+            if script_path.exists():
+                return [sys.executable, str(script_path), message]
+
+        default_script = Path("/Users/jameschen/.openclaw/skills/audio-notify/scripts/notify.py")
+        if default_script.exists():
+            return [sys.executable, str(default_script), message]
+
+        say_bin = shutil.which("say")
+        if say_bin:
+            return [say_bin, message]
+        return None
+
     def voice_notify(self, message: str, urgency: str = "normal"):
         """🔊 v7 Spec: 關鍵點語音通知 (支持優先級)"""
         if self.silent and urgency != "critical":
             return
+        cmd = self._resolve_notify_command(message)
+        if not cmd:
+            return
         try:
-            subprocess.run(
-                [
-                    sys.executable,
-                    "/Users/jameschen/.openclaw/skills/audio-notify/scripts/notify.py",
-                    message,
-                ],
-                check=False,
-            )
+            subprocess.run(cmd, check=False)
         except Exception:
             pass
 

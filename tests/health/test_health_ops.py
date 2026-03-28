@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -246,3 +247,30 @@ def test_run_health_explain_alignment_zero_without_history(monkeypatch, tmp_path
     )
     result = run_health_explain(engine)
     assert result.adversarial_metrics["gan_alignment_score"] == 0.0
+
+
+def test_run_health_explain_appends_time_series_log(monkeypatch, tmp_path):
+    from nexus.health.ops import (
+        HEALTH_EXPLAIN_TIMESERIES_RELATIVE_PATH,
+        run_health_explain,
+    )
+
+    engine = _engine(tmp_path)
+    monkeypatch.setattr(
+        "nexus.health.ops.HealthScorer.apply_snapshot",
+        lambda current: _FakeSnapshot(overall_score=81.0, status="WARNING"),
+    )
+
+    run_health_explain(engine)
+    run_health_explain(engine)
+
+    output_path = tmp_path / HEALTH_EXPLAIN_TIMESERIES_RELATIVE_PATH
+    assert output_path.exists()
+    lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+
+    payload = json.loads(lines[-1])
+    assert payload["snapshot_score"] == 81.0
+    assert payload["snapshot_status"] == "WARNING"
+    assert "adversarial_metrics" in payload
+    assert "ts_utc" in payload

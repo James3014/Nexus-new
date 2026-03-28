@@ -1,0 +1,25 @@
+{
+  "tenants": {
+    "A": {
+      "tokens": 2500,
+      "fixes": 47,
+      "swebench": 82.3
+    },
+    "B": {
+      "tokens": 1800,
+      "fixes": 32,
+      "swebench": 79.1
+    }
+  },
+  "global_sota": 85.5,
+  "last_updated": "Thu Mar 26 09:30:03 2026",
+  "version": "v17_singularity",
+  "evolution_log": [
+    {
+      "timestamp": "Thu Mar 26 09:34:56 2026",
+      "focus": "repair_phase",
+      "old_sota": 82.3,
+      "new_sota": 85.5
+    }
+  ]
+}

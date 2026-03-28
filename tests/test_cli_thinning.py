@@ -6,6 +6,7 @@ import ast
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
+from unittest.mock import patch
 from scripts.nexus_cli import NexusCLI
 
 
@@ -33,13 +34,49 @@ def test_cli_bug_dispatch_no_business_logic(tmp_path):
 def test_cli_feature_dispatch(tmp_path):
     """CLI 的 run_feature 應委派給 engine，不含硬編碼回覆。"""
     cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
-    mock_engine = MagicMock()
-    mock_engine.run_feature.return_value = True
-    cli._engine = mock_engine
+    mock_service = MagicMock()
+    mock_service.execute_feature.return_value = True
+    mock_service.last_completion_error = None
+    mock_service.last_effective_verify_commands = ["/bin/echo ok"]
+    mock_service.last_completion_report_paths = None
+    cli._service = mock_service
 
-    cli.run_feature(task="新增購物車功能")
+    cli.run_feature(
+        task="新增購物車功能",
+        delivery_mode="high",
+        verify_commands=["/bin/echo ok"],
+    )
 
-    mock_engine.run_feature.assert_called_once()
+    mock_service.execute_feature.assert_called_once_with(
+        "新增購物車功能",
+        None,
+        False,
+        None,
+        delivery_mode="high",
+        verify_commands=["/bin/echo ok"],
+        artifact_paths=None,
+    )
+
+
+def test_cli_feature_prints_delivery_summary(tmp_path, capsys):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    mock_service = MagicMock()
+    mock_service.execute_feature.return_value = True
+    mock_service.last_completion_error = None
+    mock_service.last_effective_verify_commands = ["uv run pytest -q"]
+    mock_service.last_completion_report_paths = (tmp_path / "r.json", tmp_path / "r.md")
+    cli._service = mock_service
+
+    cli.run_feature(
+        task="新增購物車功能",
+        delivery_mode="high",
+        verify_commands=["uv run pytest -q"],
+    )
+
+    output = capsys.readouterr().out
+    assert "Verification Commands" in output
+    assert "uv run pytest -q" in output
+    assert "Delivery Reports" in output
 
 
 def test_command_service_bridges_engine(tmp_path):
@@ -47,6 +84,8 @@ def test_command_service_bridges_engine(tmp_path):
     from nexus.app.command_service import NexusCommandService
     mock_engine = MagicMock()
     mock_engine.run_bug.return_value = True
+    mock_engine.project_root = tmp_path
+    mock_engine.run_dir = tmp_path / "runs"
     svc = NexusCommandService(engine=mock_engine)
 
     svc.execute_bug(task="修復 DB 連線問題")
@@ -59,10 +98,93 @@ def test_command_service_feature_params(tmp_path):
     from nexus.app.command_service import NexusCommandService
     mock_engine = MagicMock()
     mock_engine.run_feature.return_value = False
+    mock_engine.project_root = tmp_path
+    mock_engine.run_dir = tmp_path / "runs"
     svc = NexusCommandService(engine=mock_engine)
 
     svc.execute_feature(task="新增 SSO", domain="auth", dry_run=True, skill="coding")
 
     mock_engine.run_feature.assert_called_once_with(
-        task="新增 SSO", domain="auth", dry_run=True, skill="coding"
+        task="新增 SSO",
+        context={"delivery_mode": "standard"},
+        domain="auth",
+        dry_run=True,
+        skill="coding",
     )
+
+
+def test_command_service_high_delivery_requires_verify_commands(tmp_path):
+    from nexus.app.command_service import NexusCommandService
+    from nexus.delivery.models import CompletionResult, CompletionStatus, TaskLevel
+
+    mock_engine = MagicMock()
+    mock_engine.run_bug.return_value = True
+    mock_engine.project_root = tmp_path
+    mock_engine.run_dir = tmp_path / "runs"
+    svc = NexusCommandService(engine=mock_engine)
+    with patch("nexus.app.command_service.suggest_verification_commands", return_value=["/bin/echo ok"]), \
+         patch(
+             "nexus.app.command_service.evaluate_completion",
+             return_value=CompletionResult(
+                 task_name="bug-1",
+                 task_level=TaskLevel.SMALL_FIX,
+                 status=CompletionStatus.VERIFIED,
+                 gate_passed=True,
+                 summary="ok",
+                 verification_records=[],
+             ),
+         ), \
+         patch(
+             "nexus.app.command_service.write_report_bundle",
+             return_value=(tmp_path / "r.json", tmp_path / "r.md"),
+         ):
+        ok = svc.execute_bug(
+            task="修復 DB 連線問題",
+            delivery_mode="high",
+            verify_commands=[],
+        )
+
+        assert ok is True
+        assert svc.last_completion_result is not None
+        assert svc.last_completion_result.status.value == "verified"
+        assert svc.last_effective_verify_commands == ["/bin/echo ok"]
+
+
+def test_command_service_high_delivery_uses_rust_suggestions(tmp_path):
+    from nexus.app.command_service import NexusCommandService
+    from nexus.delivery.models import CompletionResult, CompletionStatus, TaskLevel
+
+    rust_dir = tmp_path / "nexus-core"
+    rust_dir.mkdir()
+    (rust_dir / "Cargo.toml").write_text("[package]\nname='nexus-core'\n", encoding="utf-8")
+    mock_engine = MagicMock()
+    mock_engine.run_feature.return_value = True
+    mock_engine.project_root = tmp_path
+    mock_engine.run_dir = tmp_path / "runs"
+    svc = NexusCommandService(engine=mock_engine)
+    seen = {}
+
+    def fake_evaluate(request):
+        seen["commands"] = request.verification_commands
+        return CompletionResult(
+            task_name=request.task_name,
+            task_level=TaskLevel.FEATURE,
+            status=CompletionStatus.PARTIALLY_VERIFIED,
+            gate_passed=False,
+            summary="failed",
+            verification_records=[],
+        )
+
+    with patch("nexus.app.command_service.evaluate_completion", side_effect=fake_evaluate), \
+         patch(
+             "nexus.app.command_service.write_report_bundle",
+             return_value=(tmp_path / "r.json", tmp_path / "r.md"),
+         ):
+        ok = svc.execute_feature(
+            task="fix rust leak in nexus-core",
+            delivery_mode="high",
+            verify_commands=[],
+        )
+
+        assert ok is False
+        assert seen["commands"] == ["cargo test --manifest-path nexus-core/Cargo.toml"]

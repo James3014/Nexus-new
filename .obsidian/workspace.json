@@ -1,0 +1,281 @@
+{
+  "main": {
+    "id": "4436147961af2375",
+    "type": "split",
+    "children": [
+      {
+        "id": "1f86e7285b0096ea",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "787f356ec3100ac6",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "NEXUS_PHANTOM_GUARD_SPEC"
+            }
+          },
+          {
+            "id": "483ec7286397532a",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "NEXUS_PHANTOM_GUARD_SPEC"
+            }
+          },
+          {
+            "id": "70a0e354bad7d784",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "evolution/docs/specs/NEXUS_REFACTOR_GUIDE_SPEC.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "NEXUS_REFACTOR_GUIDE_SPEC"
+            }
+          },
+          {
+            "id": "b15781390dcc996d",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "evolution/docs/specs/NEXUS_LEARNING_SPEC.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "NEXUS_LEARNING_SPEC"
+            }
+          },
+          {
+            "id": "247f1945860900ee",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/Chatgpt 評價.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Chatgpt 評價"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "3252c65ddf36121d",
+    "type": "split",
+    "children": [
+      {
+        "id": "68e25c3bcaf82c82",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "469322156ea657be",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "檔案瀏覽器"
+            }
+          },
+          {
+            "id": "c2d2c729ccc7173c",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "NEXUS_PHASE_HEALTH_SPEC",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜尋"
+            }
+          },
+          {
+            "id": "331b20b9abf15017",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "書籤"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 376.5
+  },
+  "right": {
+    "id": "1a386102a6bc576a",
+    "type": "split",
+    "children": [
+      {
+        "id": "ad339ff703636980",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "9aa27f123d515bca",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "NEXUS_PHANTOM_GUARD_SPEC 的反向連結"
+            }
+          },
+          {
+            "id": "8749fa5059e9c41a",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "NEXUS_PHANTOM_GUARD_SPEC 的對外連結"
+            }
+          },
+          {
+            "id": "7085659fef71bb74",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "標籤"
+            }
+          },
+          {
+            "id": "977eda246e766bc5",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "所有屬性"
+            }
+          },
+          {
+            "id": "99e5876e7419b23a",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "NEXUS_PHANTOM_GUARD_SPEC 的大綱"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:開啟快速切換": false,
+      "graph:查看關聯圖": false,
+      "canvas:建立新畫布": false,
+      "daily-notes:開啟今天的每日筆記": false,
+      "templates:插入模板": false,
+      "command-palette:開啟命令面板": false,
+      "bases:建立新的 base": false
+    }
+  },
+  "active": "787f356ec3100ac6",
+  "lastOpenFiles": [
+    "docs/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
+    "scripts/ops/nexus_acceptance_check.py",
+    "Autoresearch_runtime/speed_auto_phase7_report_cn.json",
+    "Autoresearch_runtime/speed_auto_research_report_cn.json",
+    "Autoresearch_runtime/speed_auto_out/round_summary.jsonl",
+    "Autoresearch_runtime/speed_auto_out/param_state.json",
+    "Autoresearch_runtime/speed_auto_out/gate_eval.json",
+    "Autoresearch_runtime/speed_auto_out",
+    "Autoresearch_runtime/speed_base_research_report_cn.json",
+    "Autoresearch_runtime/speed_base_out/round_summary.jsonl",
+    "Autoresearch_runtime/speed_base_out/param_state.json",
+    "docs/PHASE7_RESEARCH_CN.md",
+    "docs/SKILLS_AUTOTUNE_RESEARCH_CN.md",
+    "scripts/skills_builtin/skill-creator-advanced/SKILL.md",
+    "scripts/skills_builtin/felo-cli/SKILL.md",
+    "scripts/skills_builtin/superpowers/SKILL.md",
+    "scripts/skills_builtin/common.gen.pseudo-code/SKILL.md",
+    "scripts/skills_builtin/aibdd.auto.python.e2e.red/green/SKILL.md",
+    "scripts/skills_builtin/aibdd.spec.user-story.gen/SKILL.md",
+    "scripts/skills_builtin/git-manager/SKILL.md",
+    "scripts/skills_builtin/self-healer/SKILL.md",
+    "scripts/skills_builtin/codebase_investigator/SKILL.md",
+    "scripts/skills_builtin/README.md",
+    "docs/SKILLS_ROUTER_MIGRATION_CN.md",
+    "pilot_delivery_bundle/PHASE6_RESEARCH_FREEZE_2026-03-28_CN.md",
+    "pilot_delivery_bundle/PHASE6_NEXT_RESEARCH_TASKBOOK_CN.md",
+    "pilot_delivery_bundle/PHASE5_RESEARCH_FREEZE_2026-03-28_CN.md",
+    "Autoresearch/PHASE3_BASELINE_LOCK_AND_NEXT_STUDY_CN.md",
+    "Autoresearch/FORMAL_RESEARCH_HARDENING_CN.md",
+    "Autoresearch/data_sample.md",
+    "docs/NEXUS_GAN_LONGRUN_PLAYBOOK_CN.md",
+    "evolution/docs/specs/NEXUS_5_PILLARS_SPEC.md",
+    "evolution/docs/specs/NEXUS_AUTOMATED_EXECUTOR_SPEC.md",
+    "evolution/docs/specs/NEXUS_CAPABILITY_MATRIX_SPEC.md",
+    "evolution/docs/specs/NEXUS_CODE_ARCH_MATRIX_SPEC.md",
+    "evolution/docs/specs/NEXUS_COMMAND_SPEC.md"
+  ]
+}

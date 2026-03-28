@@ -16,13 +16,20 @@ class TestReporter(unittest.TestCase):
         shutil.rmtree(self.project_root)
 
     @patch("subprocess.run")
+    @patch("pathlib.Path.exists", return_value=True)
     @patch("sys.executable", "/usr/bin/python3")
-    def test_voice_notify(self, mock_run):
+    def test_voice_notify(self, _mock_exists, mock_run):
         self.reporter.voice_notify("Hello Test")
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
         self.assertIn("notify.py", args[1])
         self.assertEqual(args[2], "Hello Test")
+
+    @patch.dict("os.environ", {"NEXUS_AUDIO_NOTIFY": "0"}, clear=False)
+    @patch("subprocess.run")
+    def test_voice_notify_disabled_by_env(self, mock_run):
+        self.reporter.voice_notify("Hello Test")
+        mock_run.assert_not_called()
 
     def test_log_trace(self):
         self.reporter.log_trace("test_cmd", "test_task", "SUCCESS", tokens=100, score=0.8)

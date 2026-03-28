@@ -1,5 +1,7 @@
 import sys
 import types
+import subprocess
+from pathlib import Path
 
 sys.modules.setdefault("lancedb", types.SimpleNamespace(connect=lambda *args, **kwargs: None))
 sys.modules.setdefault(
@@ -11,6 +13,7 @@ from nexus.engine.coordinator import NexusEngine
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.services.predictor import Predictor
 from nexus.core.state_contracts import NexusState
+from nexus.core.context_hub import ContextHub
 from unittest.mock import MagicMock, patch
 
 def test_engine_initialization(tmp_path):
@@ -72,8 +75,7 @@ def test_run_feature_compat_fallback_when_hub_missing_feature_pack(tmp_path):
     engine.pipeline = MagicMock()
     engine.pipeline.run.return_value = True
 
-    with patch("nexus.engine.coordinator.CodexLoopV2.run_review", return_value={"status": "APPROVED"}):
-        ok = engine.run_feature("compat fallback smoke", dry_run=True)
+    ok = engine.run_feature("compat fallback smoke", dry_run=True)
     assert ok is True
 
 
@@ -104,8 +106,7 @@ def test_run_feature_compat_fallback_when_hub_feature_pack_raises(tmp_path):
     engine.pipeline = MagicMock()
     engine.pipeline.run.return_value = True
 
-    with patch("nexus.engine.coordinator.CodexLoopV2.run_review", return_value={"status": "APPROVED"}):
-        ok = engine.run_feature("compat fallback raise smoke", dry_run=True)
+    ok = engine.run_feature("compat fallback raise smoke", dry_run=True)
     assert ok is True
 
 
@@ -132,4 +133,52 @@ def test_execute_isolated_case_routes_through_command_service(tmp_path):
         "fix login callback",
         delivery_mode="standard",
         bug_id="OFF-001",
+        execution_context={
+            "auto_repair_enabled": False,
+            "benchmark_run": True,
+            "benchmark_force_research": True,
+            "benchmark_target_files": [],
+        },
     )
+
+
+def test_context_hub_disables_external_research_for_benchmark_run(tmp_path):
+    hub = ContextHub(str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "bench"))
+    decision = hub.make_pre_routing_decision(
+        "OFF-001",
+        {"type": "bug", "benchmark_run": True},
+    )
+
+    assert decision["external_needed"] is False
+    assert decision["mode"] == "benchmark"
+
+
+def test_benchmark_fixture_mutates_and_restores(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True, capture_output=True)
+
+    target = tmp_path / "nexus" / "engine" / "phases"
+    target.mkdir(parents=True)
+    research_file = target / "research.py"
+    original_text = "import json\nimport os\n"
+    research_file.write_text(original_text, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    engine = NexusEngine(project_root=tmp_path, silent=True)
+    fixture = engine._apply_benchmark_fixture(
+        {
+            "benchmark_fixture": {
+                "file": "nexus/engine/phases/research.py",
+                "target": "import os\n",
+                "replacement": "",
+            }
+        }
+    )
+
+    assert fixture is not None
+    assert research_file.read_text(encoding="utf-8") == "import json\n"
+
+    engine._restore_benchmark_fixture(fixture)
+    assert research_file.read_text(encoding="utf-8") == original_text

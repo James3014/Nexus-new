@@ -2,6 +2,7 @@
 import json
 import time
 import logging
+import subprocess
 from enum import Enum
 from pathlib import Path
 from datetime import datetime
@@ -18,7 +19,6 @@ from nexus.core.commander import Commander
 from nexus.core.state_io import StateIO
 from nexus.core.router import SkillsRouter
 from nexus.core.state_contracts import NexusState
-from nexus.services.reviewer import CodexLoopV2
 from nexus.services.reporter import Reporter
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.engine.phases.research import ResearchPhaseHandler
@@ -29,6 +29,7 @@ from nexus.core.review_status import ReviewStatusNormalizer
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.engine.pipeline import NexusPipeline
 from nexus.app.command_service import NexusCommandService
+from nexus.benchmark.workspace import BenchmarkWorkspace
 
 
 logger = logging.getLogger(__name__)
@@ -83,8 +84,27 @@ class NexusEngine:
             str(self.run_dir), self.state_io, self.router
         )
         self.tracelog_path = self.run_dir / "tracelog.jsonl"
-        self.phases = phases or {}
+        if phases:
+            self.phases = phases
+        else:
+            self.phases = {
+                "P": PlannerPhaseHandler(
+                    project_root=self.project_root,
+                    run_dir=self.run_dir,
+                ),
+                "X": ResearchPhaseHandler(
+                    project_root=self.project_root,
+                    run_dir=self.run_dir,
+                ),
+                "R": RepairPhaseHandler(
+                    project_root=self.project_root,
+                    run_dir=self.run_dir,
+                    router=self.router,
+                    orchestrator_factory=None,
+                ),
+            }
         self._memory = None
+        self._policy_manager = None
 
     @property
     def hub(self):
@@ -112,6 +132,18 @@ class NexusEngine:
             )
         return self._memory
 
+    @property
+    def policy_manager(self):
+        """📔 Lazy-loaded policy manager used by the pipeline policy phase."""
+        if self._policy_manager is None:
+            from nexus.core.policy_manager import PolicyManager
+
+            self._policy_manager = PolicyManager(
+                project_root=str(self.project_root),
+                run_dir=str(self.run_dir),
+            )
+        return self._policy_manager
+
     def _voice_notify(self, message: str, urgency: str = "normal"):
         """🧬 Smart-Notify: 分優先級的語音通報"""
         self.reporter.voice_notify(message, urgency=urgency)
@@ -136,11 +168,56 @@ class NexusEngine:
                 goal_desc,
                 delivery_mode="standard",
                 bug_id=case_id,
+                execution_context={
+                    "auto_repair_enabled": False,
+                    "benchmark_run": True,
+                    "benchmark_force_research": True,
+                    "benchmark_target_files": case_data.get("initial_state", {}).get("files", []),
+                },
             )
         return service.execute_feature(
             goal_desc,
             delivery_mode="standard",
+            execution_context={
+                "auto_repair_enabled": False,
+                "benchmark_run": True,
+                "benchmark_force_research": True,
+                "benchmark_target_files": case_data.get("initial_state", {}).get("files", []),
+            },
         )
+
+    def _apply_benchmark_fixture(self, case_data: dict) -> Optional[Dict[str, Any]]:
+        fixture = case_data.get("benchmark_fixture")
+        if not fixture:
+            return None
+
+        relative_file = fixture.get("file")
+        target_text = fixture.get("target")
+        replacement_text = fixture.get("replacement", "")
+        if not relative_file or target_text is None:
+            raise ValueError("benchmark_fixture requires file and target")
+
+        file_path = self.project_root / relative_file
+        original_text = file_path.read_text(encoding="utf-8")
+        if target_text not in original_text:
+            raise ValueError(f"benchmark fixture target not found in {relative_file}")
+
+        mutated_text = original_text.replace(target_text, replacement_text, 1)
+        file_path.write_text(mutated_text, encoding="utf-8")
+        return {
+            "file": file_path,
+            "relative_file": relative_file,
+            "original_text": original_text,
+        }
+
+    def _restore_benchmark_fixture(self, applied_fixture: Optional[Dict[str, Any]]) -> None:
+        if not applied_fixture:
+            return
+
+        file_path = Path(applied_fixture["file"])
+        relative_file = applied_fixture["relative_file"]
+        original_text = applied_fixture["original_text"]
+        file_path.write_text(original_text, encoding="utf-8")
 
     def _add_step_to_history(
         self,
@@ -268,12 +345,36 @@ class NexusEngine:
             goal_desc = case_data.get("goal", "")
             logger.info("🚀 [Benchmark] Running Case: %s", case_id)
 
-            # 🛡️ Force a dummy diff for OFF-001 to ensure LLM is invoked and raw tokens are captured
-            dummy_file = self.project_root / "dummy_benchmark_trigger.py"
-            if case_id == "OFF-001":
-                dummy_file.write_text("# Force diff")
-                import subprocess
-                subprocess.run(["git", "add", str(dummy_file)], cwd=self.project_root)
+            benchmark_workspace = BenchmarkWorkspace(self.project_root, case_id, self.run_dir / case_id)
+            workspace_root = benchmark_workspace.create()
+            applied_fixture = None
+            try:
+                applied_fixture = benchmark_workspace.apply_fixture(case_data)
+            except Exception as exc:
+                logger.error("💥 [Benchmark] Fixture setup failed for %s: %s", case_id, exc)
+                benchmark_workspace.cleanup()
+                results.append(
+                    {
+                        "task_id": case_id,
+                        "status": "FAIL",
+                        "tokens": 0,
+                        "token_raw_model": 0,
+                        "token_fallback_est": 0,
+                        "token_system_overhead": 0,
+                        "token_source_x": 0,
+                        "token_source_r": 0,
+                        "token_capture_status": "fixture_error",
+                        "phase_path": "",
+                        "review_status": "UNKNOWN",
+                        "duration": 0.0,
+                        "health": 0.0,
+                        "drift": 0.0,
+                        "lowest_phase_health": 0.0,
+                        "policy_hit": "",
+                        "learning_velocity": 0.0,
+                    }
+                )
+                continue
 
             # 建立子任務隔離目錄
             case_run_dir = self.run_dir / case_id
@@ -283,7 +384,7 @@ class NexusEngine:
             from nexus.containers import NexusContainer
 
             container = NexusContainer()
-            container.project_root.from_value(str(self.project_root))
+            container.project_root.from_value(str(workspace_root))
             container.run_dir.from_value(
                 str(case_run_dir)
             )  # 🛡️ FIX: Pass as string to avoid DI dict wrapping
@@ -306,17 +407,27 @@ class NexusEngine:
                 logger.error("💥 [Benchmark] Case %s crashed: %s", case_id, e)
 
             duration = time.time() - start_time
-            
-            # Clean up dummy diff if created
-            if dummy_file.exists():
-                subprocess.run(["git", "reset", "HEAD", str(dummy_file)], cwd=self.project_root)
-                dummy_file.unlink()
+            benchmark_workspace.restore_fixture(applied_fixture)
+            benchmark_workspace.cleanup()
 
             final_state = sub_engine.state_io.load_global_state()
 
             # Calculate lowest_phase_health for this run
             phase_healths = [m.health for m in final_state.phase_metrics.values() if m.health > 0]
             lowest_ph = min(phase_healths) if phase_healths else 0.0
+            phase_health_map = {
+                phase: (final_state.phase_metrics.get(phase).health if final_state.phase_metrics.get(phase) else 0.0)
+                for phase in ["P", "X", "D", "R", "A", "C"]
+            }
+            phase_signal_status = {
+                phase: (
+                    "measured"
+                    if final_state.phase_metrics.get(phase)
+                    and bool(final_state.phase_metrics.get(phase).signals)
+                    else "missing"
+                )
+                for phase in ["P", "X", "D", "R", "A", "C"]
+            }
 
             # 🧬 統一 Schema 數據採集 (VAR-002)
             res = {
@@ -337,6 +448,18 @@ class NexusEngine:
                 "health": final_state.health_score,
                 "drift": final_state.health_metrics.drift_index,
                 "lowest_phase_health": lowest_ph,
+                "phase_health_p": phase_health_map["P"] if phase_signal_status["P"] == "measured" else "",
+                "phase_health_x": phase_health_map["X"] if phase_signal_status["X"] == "measured" else "",
+                "phase_health_d": phase_health_map["D"] if phase_signal_status["D"] == "measured" else "",
+                "phase_health_r": phase_health_map["R"] if phase_signal_status["R"] == "measured" else "",
+                "phase_health_a": phase_health_map["A"] if phase_signal_status["A"] == "measured" else "",
+                "phase_health_c": phase_health_map["C"] if phase_signal_status["C"] == "measured" else "",
+                "phase_signal_status_p": phase_signal_status["P"],
+                "phase_signal_status_x": phase_signal_status["X"],
+                "phase_signal_status_d": phase_signal_status["D"],
+                "phase_signal_status_r": phase_signal_status["R"],
+                "phase_signal_status_a": phase_signal_status["A"],
+                "phase_signal_status_c": phase_signal_status["C"],
                 "policy_hit": ",".join(final_state.policy_hit_ids),
                 "learning_velocity": final_state.learning_velocity,
             }
@@ -368,6 +491,18 @@ class NexusEngine:
                 "health",
                 "drift",
                 "lowest_phase_health",
+                "phase_health_p",
+                "phase_health_x",
+                "phase_health_d",
+                "phase_health_r",
+                "phase_health_a",
+                "phase_health_c",
+                "phase_signal_status_p",
+                "phase_signal_status_x",
+                "phase_signal_status_d",
+                "phase_signal_status_r",
+                "phase_signal_status_a",
+                "phase_signal_status_c",
                 "policy_hit",
                 "learning_velocity",
             ]

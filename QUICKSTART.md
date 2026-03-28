@@ -67,7 +67,29 @@ python3 scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
 
 ---
 
-## 4. Full-Chain Validation | 總合驗證
+## 4. Self-Check / Self-Heal | 自檢與自癒
+
+**[EN]** `nexus:check` now supports graded health audits. Use `quick` for a local snapshot, `standard` for a single benchmark replay, `high` for a stricter single-case health gate, and `full` for the heaviest benchmark lane. `nexus:self-heal` supports `dry-run`, `standard`, and `strict`.
+
+**[ZH]** `nexus:check` 現在支援分級自檢。`quick` 只看本地健康快照，`standard` 會跑單 case benchmark，`high` 會用更嚴格門檻檢查單 case 健康，`full` 則走最重的 benchmark lane。`nexus:self-heal` 則支援 `dry-run`、`standard`、`strict`。
+
+```bash
+# Snapshot-only health check
+# 只看快照的快速自檢
+python3 scripts/engine/nexus_cli.py nexus:check --level quick
+
+# Single-case benchmark health audit
+# 單 case benchmark 健康審計
+python3 scripts/engine/nexus_cli.py nexus:check --level standard
+
+# Strict self-heal with health recovery requirement
+# 嚴格自癒，要求修後健康恢復
+python3 scripts/engine/nexus_cli.py nexus:self-heal --mode strict
+```
+
+---
+
+## 5. Full-Chain Validation | 總合驗證
 
 **[EN]** Use `--full-chain` to run a complete P-D-R-A cycle with integrated fallback support.
 **[ZH]** 使用 `--full-chain` 執行完整的 P-D-R-A 循環，內建備援支援。

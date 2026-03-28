@@ -1,0 +1,13 @@
+{
+  "mode": "explore",
+  "round": 40,
+  "local_fit": true,
+  "global_converged": true,
+  "alignment": 99.49,
+  "gate_pass_rate": 100.0,
+  "params": {
+    "ALPHA": 0.4446,
+    "THRESHOLD": 0.8499,
+    "PRECISION": 0.99
+  }
+}

@@ -84,6 +84,66 @@ def test_cli_release_ready_dispatches_gate_script(tmp_path):
     assert str(gate_script) in called[0]
 
 
+def test_cli_skills_autotune_dispatches_runner(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    with patch("scripts.engine.nexus_cli.subprocess.call", return_value=0) as mock_call:
+        rc = cli.run_skills_autotune(
+            apply=True,
+            min_samples=5,
+            baseline=0.6,
+            learning_rate=0.4,
+        )
+    assert rc == 0
+    invoked = mock_call.call_args[0][0]
+    assert "skills_autotune.py" in " ".join(invoked)
+    assert "--apply" in invoked
+    assert "--min-samples" in invoked
+
+
+def test_cli_phase7_dispatches_runner(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    with patch("scripts.engine.nexus_cli.subprocess.call", return_value=0) as mock_call:
+        rc = cli.run_phase7_research(
+            workspace="/tmp/autoresearch",
+            rounds=40,
+            proof_ratio_min=95.0,
+            output_prefix="phase7",
+            skip_autopilot=True,
+            autotune_apply=True,
+            min_samples=4,
+            baseline=0.6,
+            learning_rate=0.5,
+        )
+    assert rc == 0
+    invoked = mock_call.call_args[0][0]
+    assert "phase7_research.py" in " ".join(invoked)
+    assert "--workspace" in invoked
+    assert "--skip-autopilot" in invoked
+    assert "--autotune-apply" in invoked
+
+
+def test_cli_skills_health_dispatches_runner(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    with patch("scripts.engine.nexus_cli.subprocess.call", return_value=0) as mock_call:
+        rc = cli.run_skills_health(output="json", workspace="/tmp/autoresearch")
+    assert rc == 0
+    invoked = mock_call.call_args[0][0]
+    assert "skills_health.py" in " ".join(invoked)
+    assert "--output" in invoked
+    assert "--workspace" in invoked
+
+
+def test_cli_skills_optimize_dispatches_runner(tmp_path):
+    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
+    with patch("scripts.engine.nexus_cli.subprocess.call", return_value=0) as mock_call:
+        rc = cli.run_skills_optimize(max_items=2, rebound=0.2)
+    assert rc == 0
+    invoked = mock_call.call_args[0][0]
+    assert "skills_optimization_runner.py" in " ".join(invoked)
+    assert "--max-items" in invoked
+    assert "--rebound" in invoked
+
+
 def test_cli_bug_prod_profile_requires_release_ready(tmp_path):
     cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
     cli.runtime_profile = {"name": "prod"}

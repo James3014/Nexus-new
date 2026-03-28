@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +35,7 @@ CHECK_BENCHMARK_TASKS = {
 STRICT_SAFE_ACTION_TIMEOUT_SEC = 45
 STRICT_TASK_RUNNER_TIMEOUT_SEC = 75
 STRICT_TOTAL_TIMEOUT_SEC = 90
+HEALTH_EXPLAIN_TIMESERIES_RELATIVE_PATH = Path(".nexus/metrics/health_explain_timeseries.jsonl")
 
 
 @dataclass(frozen=True)
@@ -257,7 +260,7 @@ def run_health_explain(engine) -> HealthExplainResult:
     if self_healing["cycle_status"]:
         notes.append(f"self_heal_cycle:{self_healing['cycle_status']}")
 
-    return HealthExplainResult(
+    result = HealthExplainResult(
         snapshot_score=round(float(snapshot.overall_score), 2),
         snapshot_status=str(snapshot.status),
         pipeline_health=round(float(state.pipeline_health or 0.0), 2),
@@ -268,6 +271,32 @@ def run_health_explain(engine) -> HealthExplainResult:
         adversarial_metrics=adversarial_metrics,
         notes=notes,
     )
+    try:
+        _append_health_explain_timeseries(Path(engine.project_root), result)
+    except OSError as exc:
+        result.notes.append(f"timeseries_log_write_failed:{exc.__class__.__name__}")
+    return result
+
+
+def _append_health_explain_timeseries(project_root: Path, result: HealthExplainResult) -> Path:
+    output_path = project_root / HEALTH_EXPLAIN_TIMESERIES_RELATIVE_PATH
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ts_utc": datetime.now(timezone.utc).isoformat(),
+        "snapshot_score": round(float(result.snapshot_score), 2),
+        "snapshot_status": str(result.snapshot_status),
+        "pipeline_health": round(float(result.pipeline_health), 2),
+        "phase_health": dict(result.phase_health),
+        "anti_hallucination": dict(result.anti_hallucination),
+        "learning": dict(result.learning),
+        "self_healing": dict(result.self_healing),
+        "adversarial_metrics": dict(result.adversarial_metrics),
+        "notes": list(result.notes),
+    }
+    with output_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False))
+        handle.write("\n")
+    return output_path
 
 
 def _build_adversarial_metrics(metadata: dict) -> dict[str, object]:

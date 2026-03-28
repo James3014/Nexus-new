@@ -13,6 +13,16 @@ def test_router_marks_fix_request_for_battle_lane():
     assert route.lane == "BATTLE_CONFIRM"
 
 
+def test_router_marks_self_check_request_for_prompt():
+    route = route_input("幫我自檢一下")
+    assert route.lane == "SELF_CHECK_PROMPT"
+
+
+def test_router_marks_self_heal_request_for_prompt():
+    route = route_input("幫我自修")
+    assert route.lane == "SELF_HEAL_PROMPT"
+
+
 def test_gateway_builds_battle_payload():
     session = PilotSession(
         tenant_id="pilot_a",

@@ -1,0 +1,12 @@
+{
+  "ts_utc": "2026-03-28T00:21:31.656412+00:00",
+  "project_root": "/Users/jameschen/Workspace/nexus",
+  "workspace": "/Users/jameschen/Workspace/nexus/Autoresearch_runtime",
+  "phase6_return_code": 0,
+  "autotune_return_code": 0,
+  "phase6_report": "/Users/jameschen/Workspace/nexus/Autoresearch_runtime/phase7_prod_1_sweep_6_research_report_cn.json",
+  "autotune_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/skills_autotune_report.json",
+  "phase6_gate_passed": true,
+  "autotune_tuned_skill_count": 0,
+  "autotune_applied": false
+}

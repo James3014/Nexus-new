@@ -82,11 +82,17 @@ class NexusCommandService:
         """Execute a bug task through the sole delivery-aware service boundary."""
         import time
         bug_id = bug_id or f"bug-{int(time.time())}"
+        merged_context = dict(execution_context or {})
+        if plan_only:
+            # Dry-run should be deterministic and fast:
+            # skip self-heal/task-runner side loops by marking benchmark_run.
+            merged_context.setdefault("benchmark_run", True)
+            merged_context.setdefault("auto_repair_enabled", False)
         success = self.engine.run_bug(
             bug_id=bug_id,
             desc=task,
             plan_only=plan_only,
-            context={"delivery_mode": delivery_mode, **(execution_context or {})},
+            context={"delivery_mode": delivery_mode, **merged_context},
         )
         if not success:
             return False

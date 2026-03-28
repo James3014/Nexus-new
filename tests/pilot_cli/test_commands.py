@@ -43,6 +43,27 @@ def test_natural_language_fix_request_returns_battle_prompt():
     assert "Battle Mode" in output
 
 
+def test_natural_language_self_check_returns_choice_prompt():
+    session = PilotSession()
+    output = handle_user_input("幫我自檢一下", session)
+    assert "選擇自檢強度" in output
+    assert session.pending_action == "self_check"
+
+
+def test_pending_self_check_choice_executes_selected_level(monkeypatch):
+    session = PilotSession()
+    handle_user_input("幫我自檢一下", session)
+    monkeypatch.setattr(
+        "nexus.pilot_cli.health_actions.run_pilot_health_command",
+        lambda action, level: f"{action}:{level}",
+    )
+
+    output = handle_user_input("high", session)
+
+    assert output == "self_check:high"
+    assert session.pending_action is None
+
+
 def test_mount_command_sets_workspace():
     session = PilotSession()
     output = handle_command("/mount ~/repo", session)

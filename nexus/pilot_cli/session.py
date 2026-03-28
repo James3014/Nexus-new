@@ -13,6 +13,7 @@ class PilotSession:
     mode: str = "FAST"
     active_task_id: Optional[str] = None
     last_user_request: Optional[str] = None
+    pending_action: Optional[str] = None
 
     def masked_api_key(self) -> str:
         if not self.api_key:
@@ -43,6 +44,7 @@ class PilotSession:
         self.mode = "FAST"
         self.active_task_id = None
         self.last_user_request = None
+        self.pending_action = None
 
     def clear_secrets(self) -> None:
         self.api_key = None

@@ -8,6 +8,8 @@ from pathlib import Path
 # Ensure project imports work
 sys.path.append(str(Path.cwd()))
 
+from nexus.health.scoring import HealthScorer
+
 
 def execute_replay_case(
     cli,
@@ -143,7 +145,7 @@ def replay_case(
 
         # Sync to health metrics
         final_state.health_metrics.drift_index = drift_index
-        final_state.calculate_health()
+        HealthScorer.apply_snapshot(final_state)
         state_io.save_global_state(final_state)
         print(
             f"🏥 [Health] New Score: {final_state.health_score} ({final_state.health_metrics.status})"

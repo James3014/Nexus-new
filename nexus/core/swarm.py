@@ -1,6 +1,6 @@
 import logging
 from typing import Any, Dict, List
-from nexus.services.reviewer import CodexLoopV2
+from nexus.services.reviewer import GatewayReviewLoop
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +68,8 @@ class NexusSwarmOrchestrator:
 
     def _repair(self, plan: str) -> Dict[str, Any]:
         print("🛠️ [Swarm:Coder] Implementing repair...")
-        # Use CodexLoopV2 for the actual heavy lifting
-        loop = CodexLoopV2(
+        # Use the review loop for the actual heavy lifting
+        loop = GatewayReviewLoop(
             git=getattr(self.engine, "git", None),
             linter=getattr(self.engine, "linter", None),
             patcher=getattr(self.engine, "patcher", None),

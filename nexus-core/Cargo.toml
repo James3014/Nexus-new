@@ -1,0 +1,14 @@
+[package]
+name = "nexus-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nexus_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py310"] }
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"

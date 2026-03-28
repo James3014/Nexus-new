@@ -1,0 +1,94 @@
+{
+  "91989": {
+    "tenant": "Tenant_0",
+    "repo": "repo_0",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:34:54 2026",
+    "status": "terminated",
+    "end_time": "Thu Mar 26 09:34:56 2026"
+  },
+  "91991": {
+    "tenant": "Tenant_1",
+    "repo": "repo_1",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:34:54 2026",
+    "status": "running"
+  },
+  "91992": {
+    "tenant": "Tenant_2",
+    "repo": "repo_2",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:34:54 2026",
+    "status": "running"
+  },
+  "91993": {
+    "tenant": "Tenant_3",
+    "repo": "repo_3",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:34:54 2026",
+    "status": "running"
+  },
+  "91994": {
+    "tenant": "Tenant_4",
+    "repo": "repo_4",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:34:54 2026",
+    "status": "running"
+  },
+  "94650": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/pilot-repo",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:50:19 2026",
+    "status": "running"
+  },
+  "94891": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/pilot-repo",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:51:03 2026",
+    "status": "running"
+  },
+  "95330": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/pilot-repo",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:52:42 2026",
+    "status": "running"
+  },
+  "96427": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/pilot-repo",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:56:37 2026",
+    "status": "running"
+  },
+  "97042": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/pilot-repo",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 09:58:59 2026",
+    "status": "running"
+  },
+  "97428": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/pilot-repo",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 10:00:33 2026",
+    "status": "running"
+  },
+  "99208": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/pilot-repo-ui",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 10:07:27 2026",
+    "status": "running"
+  },
+  "17999": {
+    "tenant": "Tenant_Friend",
+    "repo": "https://github.com/nexus-friend/minimalist-demo",
+    "phase": "PXDRAC",
+    "start_time": "Thu Mar 26 12:12:28 2026",
+    "status": "running"
+  }
+}

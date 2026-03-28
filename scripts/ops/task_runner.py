@@ -27,6 +27,8 @@ POLICY = ROOT / "configs" / "ask_policy.yaml"
 STATUS = ROOT / ".nexus" / "task_status.json"
 HEARTBEAT = ROOT / "docs" / "EXEC_LIVE_STATUS.md"
 LOCK_FILE = ROOT / ".nexus" / "task_runner.lock"
+PHASE_SECTION_START = "<!-- NEXUS_PHASE_METRICS:START -->"
+PHASE_SECTION_END = "<!-- NEXUS_PHASE_METRICS:END -->"
 
 state_lock = threading.Lock()
 
@@ -45,6 +47,15 @@ def save_status(state: dict) -> None:
 
 def write_heartbeat(state: dict) -> None:
     with state_lock:
+        preserved_phase_section = ""
+        if HEARTBEAT.exists():
+            existing = HEARTBEAT.read_text(encoding="utf-8")
+            start = existing.find(PHASE_SECTION_START)
+            end = existing.find(PHASE_SECTION_END)
+            if start != -1 and end != -1 and end >= start:
+                end = end + len(PHASE_SECTION_END)
+                preserved_phase_section = existing[start:end].strip()
+
         lines = [
             "# EXEC LIVE STATUS",
             "",
@@ -60,6 +71,8 @@ def write_heartbeat(state: dict) -> None:
                 f"| {tid} | {meta.get('status','pending')} | {meta.get('retry',0)} | {meta.get('updated_at','-')} | {meta.get('note','-')} |"
             )
         lines += ["", "Rule: pause only on destructive/credential/spec_conflict."]
+        if preserved_phase_section:
+            lines += ["", preserved_phase_section]
         HEARTBEAT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 def is_quota_error(text: str) -> bool:
@@ -398,6 +411,16 @@ def main():
         state["finished_at"] = now_str()
         save_status(state)
         write_heartbeat(state)
+        try:
+            optimize_cmd = [
+                sys.executable,
+                str(ROOT / "scripts" / "ops" / "skills_optimization_runner.py"),
+                "--project-root",
+                str(ROOT),
+            ]
+            subprocess.run(optimize_cmd, capture_output=True, text=True, check=False)
+        except Exception:
+            pass
         return 0 if not failed_tids else 1
     finally:
         release_lock(LOCK_FILE, lock_fd)

@@ -75,6 +75,13 @@ class ContextHub:
     ) -> Dict[str, Any]:
         """🧠 Pre-routing: 決定是否需要外部研究、特定模式或審核層級。"""
         context = context or {}
+        if context.get("benchmark_run"):
+            return {
+                "external_needed": False,
+                "mode": "benchmark",
+                "priority": "normal",
+                "audit_level": "full",
+            }
         state = self.state_io.load_global_state()
         task_type = state.metadata.get("task_type", "standard")
 

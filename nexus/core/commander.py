@@ -1,7 +1,10 @@
 from pathlib import Path
+from typing import Dict, Optional
+from nexus.core.state_contracts import NexusState
 from nexus.core.state_io import StateIO
 from nexus.core.router import SkillsRouter
 from nexus.core.context_hub import ContextHub
+from nexus.health.service import SelfHealService
 
 
 class Commander:
@@ -28,10 +31,17 @@ class Commander:
         self.state_io = state_io
         self.router = router
         self.hub = context_hub
+        self.self_heal_service = SelfHealService(self.project_root)
 
-    def next_step(self, status: str = "running", metadata: Optional[Dict] = None, summary: Optional[str] = None):
+    def next_step(
+        self,
+        status: str = "running",
+        metadata: Optional[Dict] = None,
+        summary: Optional[str] = None,
+        state: Optional[NexusState] = None,
+    ):
         """🧬 狀態自動機切換門檻"""
-        state = self.state_io.load_global_state()
+        state = state or self.state_io.load_global_state()
         from nexus.core.crystal_analyzer import TraumaEngine
 
         print(
@@ -65,12 +75,11 @@ class Commander:
             print("🌐 [Commander] External knowledge requested (X-stage).")
             return "RUN_SKILL:external-research"
 
-        # 🛡️ Phase Health Autonomy (PHA-001): 執行前先更新與保存健康度
-        from nexus.core.phase_health import PhaseHealthCalculator
-        from nexus.core.auto_repair import AutoRepairEngine
-        PhaseHealthCalculator.update_state(state)
-        AutoRepairEngine.execute_repairs(state)
-        self.state_io.save_global_state(state)
+        # 🛡️ Phase Health Autonomy (PHA-001): delegate health/self-heal to dedicated service.
+        # Benchmarks must remain deterministic and must not trigger nested auto-repair task runners.
+        if not state.metadata.get("benchmark_run"):
+            self.self_heal_service.run_cycle(state)
+            self.state_io.save_global_state(state)
 
         # 🛡️ 狀態轉移矩陣 (符合 02_TARGET_ARCHITECTURE)
         if state.current_phase == "P":
