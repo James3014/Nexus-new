@@ -61,20 +61,35 @@ class NexusCLI:
                 )
             self.run_dir.mkdir(parents=True, exist_ok=True)
 
-            # Heavy imports only when actually running a command
-            from nexus.containers import NexusContainer
+            # Heavy imports only when actually running a command.
+            # Prefer DI container, but gracefully fall back to direct engine wiring
+            # when dependency_injector is unavailable.
+            try:
+                from nexus.containers import NexusContainer
 
-            container = NexusContainer()
-            container.project_root.from_value(str(self.project_root))
-            container.run_dir.from_value(str(self.run_dir))
+                container = NexusContainer()
+                container.project_root.from_value(str(self.project_root))
+                container.run_dir.from_value(str(self.run_dir))
 
-            self._engine = container.engine_factory(
-                project_root=self.project_root,
-                run_dir=self.run_dir,
-                silent=self.silent,
-                fast_mode=self.fast_mode,
-                audit_level=self.audit_level,
-            )
+                self._engine = container.engine_factory(
+                    project_root=self.project_root,
+                    run_dir=self.run_dir,
+                    silent=self.silent,
+                    fast_mode=self.fast_mode,
+                    audit_level=self.audit_level,
+                )
+            except ModuleNotFoundError as exc:
+                if exc.name != "dependency_injector":
+                    raise
+                from nexus.engine.coordinator import NexusEngine
+
+                self._engine = NexusEngine(
+                    project_root=self.project_root,
+                    run_dir=self.run_dir,
+                    silent=self.silent,
+                    fast_mode=self.fast_mode,
+                    audit_level=self.audit_level,
+                )
         return self._engine
 
     @property
@@ -635,7 +650,197 @@ class NexusCLI:
         if not gate_script.exists():
             print(f"❌ [Nexus:Release] missing gate script: {gate_script}")
             return 2
-        return subprocess.call([str(gate_script)])
+        gate_rc = subprocess.call([str(gate_script)])
+        if gate_rc != 0:
+            return gate_rc
+        print("== Release Gate: acceptance check ==")
+        return self.run_acceptance_check()
+
+    def run_acceptance_check(
+        self,
+        window: int = 50,
+        repair_success_min: float = 80.0,
+        phantom_fp_max: float = 5.0,
+        regression_pass_min: float = 95.0,
+        retry_spike_factor: float = 2.0,
+        retry_abs_max: float = 1.0,
+        output_dir: str = ".nexus/reports",
+    ) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "nexus_acceptance_check.py"
+        if not script_path.exists():
+            print(f"❌ [Nexus:Acceptance] missing script: {script_path}")
+            return 2
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--window",
+            str(window),
+            "--repair-success-min",
+            str(repair_success_min),
+            "--phantom-fp-max",
+            str(phantom_fp_max),
+            "--regression-pass-min",
+            str(regression_pass_min),
+            "--retry-spike-factor",
+            str(retry_spike_factor),
+            "--retry-abs-max",
+            str(retry_abs_max),
+            "--output-dir",
+            output_dir,
+        ]
+        return subprocess.call(cmd)
+
+    def run_skills_autotune(
+        self,
+        apply: bool = False,
+        min_samples: int = 3,
+        baseline: float = 0.55,
+        learning_rate: float = 0.6,
+        degrade_threshold: float = 0.2,
+        max_step: float = 0.35,
+        degrade_consecutive_rounds: int = 3,
+    ) -> int:
+        """🧪 [Nexus:Skills-Autotune] 研究型技能自動調參。"""
+        script_path = self.project_root / "scripts" / "ops" / "skills_autotune.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--min-samples",
+            str(min_samples),
+            "--baseline",
+            str(baseline),
+            "--learning-rate",
+            str(learning_rate),
+            "--degrade-threshold",
+            str(degrade_threshold),
+            "--max-step",
+            str(max_step),
+            "--degrade-consecutive-rounds",
+            str(degrade_consecutive_rounds),
+        ]
+        if apply:
+            cmd.append("--apply")
+        return subprocess.call(cmd)
+
+    def run_phase7_research(
+        self,
+        workspace: str,
+        rounds: int = 100,
+        proof_ratio_min: float = 95.0,
+        output_prefix: str = "phase7",
+        skip_autopilot: bool = False,
+        autotune_apply: bool = False,
+        min_samples: int = 3,
+        baseline: float = 0.55,
+        learning_rate: float = 0.6,
+        degrade_threshold: float = 0.2,
+        max_step: float = 0.35,
+        degrade_consecutive_rounds: int = 3,
+    ) -> int:
+        """🧪 [Nexus:Phase7] autoresearch + skills autotune 一鍵研究流程。"""
+        script_path = self.project_root / "scripts" / "ops" / "phase7_research.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--workspace",
+            workspace,
+            "--rounds",
+            str(rounds),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+            "--output-prefix",
+            output_prefix,
+            "--min-samples",
+            str(min_samples),
+            "--baseline",
+            str(baseline),
+            "--learning-rate",
+            str(learning_rate),
+            "--degrade-threshold",
+            str(degrade_threshold),
+            "--max-step",
+            str(max_step),
+            "--degrade-consecutive-rounds",
+            str(degrade_consecutive_rounds),
+        ]
+        if skip_autopilot:
+            cmd.append("--skip-autopilot")
+        if autotune_apply:
+            cmd.append("--autotune-apply")
+        return subprocess.call(cmd)
+
+    def run_phase7_loop(
+        self,
+        workspace: str,
+        rounds: int = 20,
+        proof_ratio_min: float = 95.0,
+        max_loops: int = 10,
+        stable_wins: int = 3,
+        output_prefix: str = "phase7_loop",
+        degrade_threshold: float = 0.2,
+        max_step: float = 0.35,
+        degrade_consecutive_rounds: int = 3,
+    ) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "phase7_autotune_loop.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--workspace",
+            workspace,
+            "--rounds",
+            str(rounds),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+            "--max-loops",
+            str(max_loops),
+            "--stable-wins",
+            str(stable_wins),
+            "--output-prefix",
+            output_prefix,
+            "--degrade-threshold",
+            str(degrade_threshold),
+            "--max-step",
+            str(max_step),
+            "--degrade-consecutive-rounds",
+            str(degrade_consecutive_rounds),
+        ]
+        return subprocess.call(cmd)
+
+    def run_skills_health(self, output: str = "text", workspace: str | None = None) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "skills_health.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--output",
+            output,
+        ]
+        if workspace:
+            cmd.extend(["--workspace", workspace])
+        return subprocess.call(cmd)
+
+    def run_skills_optimize(self, max_items: int = 3, rebound: float = 0.15) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "skills_optimization_runner.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--max-items",
+            str(max_items),
+            "--rebound",
+            str(rebound),
+        ]
+        return subprocess.call(cmd)
 
 
 def main():
@@ -777,6 +982,63 @@ def main():
     # nexus:release-ready
     subparsers.add_parser("nexus:release-ready")
 
+    # nexus:acceptance-check
+    acceptance_parser = subparsers.add_parser("nexus:acceptance-check")
+    acceptance_parser.add_argument("--window", type=int, default=50)
+    acceptance_parser.add_argument("--repair-success-min", type=float, default=80.0)
+    acceptance_parser.add_argument("--phantom-fp-max", type=float, default=5.0)
+    acceptance_parser.add_argument("--regression-pass-min", type=float, default=95.0)
+    acceptance_parser.add_argument("--retry-spike-factor", type=float, default=2.0)
+    acceptance_parser.add_argument("--retry-abs-max", type=float, default=1.0)
+    acceptance_parser.add_argument("--output-dir", default=".nexus/reports")
+
+    # nexus:skills-autotune
+    autotune_parser = subparsers.add_parser("nexus:skills-autotune")
+    autotune_parser.add_argument("--apply", action="store_true")
+    autotune_parser.add_argument("--min-samples", type=int, default=3)
+    autotune_parser.add_argument("--baseline", type=float, default=0.55)
+    autotune_parser.add_argument("--learning-rate", type=float, default=0.6)
+    autotune_parser.add_argument("--degrade-threshold", type=float, default=0.2)
+    autotune_parser.add_argument("--max-step", type=float, default=0.35)
+    autotune_parser.add_argument("--degrade-consecutive-rounds", type=int, default=3)
+
+    # nexus:phase7
+    phase7_parser = subparsers.add_parser("nexus:phase7")
+    phase7_parser.add_argument("--workspace", required=True, help="Autoresearch workspace path")
+    phase7_parser.add_argument("--rounds", type=int, default=100)
+    phase7_parser.add_argument("--proof-ratio-min", type=float, default=95.0)
+    phase7_parser.add_argument("--output-prefix", default="phase7")
+    phase7_parser.add_argument("--skip-autopilot", action="store_true")
+    phase7_parser.add_argument("--autotune-apply", action="store_true")
+    phase7_parser.add_argument("--min-samples", type=int, default=3)
+    phase7_parser.add_argument("--baseline", type=float, default=0.55)
+    phase7_parser.add_argument("--learning-rate", type=float, default=0.6)
+    phase7_parser.add_argument("--degrade-threshold", type=float, default=0.2)
+    phase7_parser.add_argument("--max-step", type=float, default=0.35)
+    phase7_parser.add_argument("--degrade-consecutive-rounds", type=int, default=3)
+
+    # nexus:phase7-loop
+    phase7_loop_parser = subparsers.add_parser("nexus:phase7-loop")
+    phase7_loop_parser.add_argument("--workspace", required=True, help="Autoresearch workspace path")
+    phase7_loop_parser.add_argument("--rounds", type=int, default=20)
+    phase7_loop_parser.add_argument("--proof-ratio-min", type=float, default=95.0)
+    phase7_loop_parser.add_argument("--max-loops", type=int, default=10)
+    phase7_loop_parser.add_argument("--stable-wins", type=int, default=3)
+    phase7_loop_parser.add_argument("--output-prefix", default="phase7_loop")
+    phase7_loop_parser.add_argument("--degrade-threshold", type=float, default=0.2)
+    phase7_loop_parser.add_argument("--max-step", type=float, default=0.35)
+    phase7_loop_parser.add_argument("--degrade-consecutive-rounds", type=int, default=3)
+
+    # nexus:skills-health
+    skills_health_parser = subparsers.add_parser("nexus:skills-health")
+    skills_health_parser.add_argument("--output", choices=["text", "json"], default="text")
+    skills_health_parser.add_argument("--workspace", default=None, help="Optional phase7 workspace")
+
+    # nexus:skills-optimize
+    skills_optimize_parser = subparsers.add_parser("nexus:skills-optimize")
+    skills_optimize_parser.add_argument("--max-items", type=int, default=3)
+    skills_optimize_parser.add_argument("--rebound", type=float, default=0.15)
+
     args = parser.parse_args()
     if not args.command and not args.swarm_mode:
         parser.print_help()
@@ -898,6 +1160,63 @@ def main():
         sys.exit(rc)
     elif args.command == "nexus:release-ready":
         rc = cli.run_release_ready()
+        sys.exit(rc)
+    elif args.command == "nexus:acceptance-check":
+        rc = cli.run_acceptance_check(
+            window=args.window,
+            repair_success_min=args.repair_success_min,
+            phantom_fp_max=args.phantom_fp_max,
+            regression_pass_min=args.regression_pass_min,
+            retry_spike_factor=args.retry_spike_factor,
+            retry_abs_max=args.retry_abs_max,
+            output_dir=args.output_dir,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:skills-autotune":
+        rc = cli.run_skills_autotune(
+            apply=args.apply,
+            min_samples=args.min_samples,
+            baseline=args.baseline,
+            learning_rate=args.learning_rate,
+            degrade_threshold=args.degrade_threshold,
+            max_step=args.max_step,
+            degrade_consecutive_rounds=args.degrade_consecutive_rounds,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:phase7":
+        rc = cli.run_phase7_research(
+            workspace=args.workspace,
+            rounds=args.rounds,
+            proof_ratio_min=args.proof_ratio_min,
+            output_prefix=args.output_prefix,
+            skip_autopilot=args.skip_autopilot,
+            autotune_apply=args.autotune_apply,
+            min_samples=args.min_samples,
+            baseline=args.baseline,
+            learning_rate=args.learning_rate,
+            degrade_threshold=args.degrade_threshold,
+            max_step=args.max_step,
+            degrade_consecutive_rounds=args.degrade_consecutive_rounds,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:phase7-loop":
+        rc = cli.run_phase7_loop(
+            workspace=args.workspace,
+            rounds=args.rounds,
+            proof_ratio_min=args.proof_ratio_min,
+            max_loops=args.max_loops,
+            stable_wins=args.stable_wins,
+            output_prefix=args.output_prefix,
+            degrade_threshold=args.degrade_threshold,
+            max_step=args.max_step,
+            degrade_consecutive_rounds=args.degrade_consecutive_rounds,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:skills-health":
+        rc = cli.run_skills_health(output=args.output, workspace=args.workspace)
+        sys.exit(rc)
+    elif args.command == "nexus:skills-optimize":
+        rc = cli.run_skills_optimize(max_items=args.max_items, rebound=args.rebound)
         sys.exit(rc)
 
 

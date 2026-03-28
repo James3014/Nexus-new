@@ -1,243 +1,111 @@
-# Nexus Pilot CLI 快速使用指南
+# Nexus Pilot CLI 快速指南（朋友版）
 
-## 目的
+這份是給第一次使用 Nexus 的朋友。
 
-這份指南是給第一批朋友或 pilot tenant 用的。
+## 1) 安裝
 
-你會拿到一個聊天式 CLI，先體驗 Nexus 的高速問答，再在對話中升級成治理任務。
-
-## 啟動方式
-
-如果朋友是自己安裝這版：
+請先在你的電腦執行：
 
 ```bash
 bash /path/to/nexus/scripts/ops/install_nexus_pilot_friend.sh
 ```
 
-安裝完成後可直接執行：
+安裝完成後，開一個新終端機，執行：
+
+```bash
+nexus-pilot-friend <tenant_id>
+```
+
+範例：
 
 ```bash
 nexus-pilot-friend pilot_a
 ```
 
-推薦直接給朋友這條：
+## 2) 第一次啟動
 
-```bash
-nexus-pilot-friend pilot_a
-```
+第一次通常只需要輸入你的 API Key。
 
-它會自動帶入：
+進入後會看到 `NEXUS >` 提示符，直接開始聊天即可。
 
-- `Gateway = http://100.82.155.88:5005`
-- `Provider = Gemini`
-- `Model = gemini-2.5-flash`
+## 3) 平常怎麼用
 
-如果你直接在專案內執行：
+可以直接：
 
-```bash
-/usr/bin/python3 /Users/jameschen/Workspace/nexus/scripts/nexus_pilot_cli.py
-```
+- 問問題（自然語言）
+- 貼錯誤訊息
+- 貼多行長題目（會自動當成同一題）
 
-如果已安裝專案 script：
-
-```bash
-nexus-pilot
-```
-
-舊入口 `scripts/nexus_chat_cli.py` 目前仍保留，但只作相容 shim，不再是正式主入口。
-
-## 首次啟動會問你
-
-現在的朋友模式預設只會問：
-
-1. `API Key`
-
-其餘欄位會自動補上或沿用既有設定：
-
-- `Tenant ID`：可由 `nexus-pilot-friend pilot_a` 或環境變數帶入
-- `Provider`：預設自動走 `Gemini`
-- `Model`：預設 `gemini-2.5-flash`
-- `Workspace`：先略過，需要時再用 `/mount`
-
-如果你手動執行 `nexus-pilot`，沒有預設 tenant 時，系統也會自動生成一個預設 tenant id，不再卡在第一步。
-
-填完後就會直接進入 Nexus 主畫面。
-
-第一次填完後，CLI 會自動記住以下內容，之後通常不用再重填：
-
-- Tenant ID
-- Provider
-- Model
-- Workspace
-
-`API Key` 預設不寫入持久設定，但你可以用環境變數一次帶入：
-
-```bash
-export NEXUS_PILOT_API_KEY=你的_API_KEY
-```
-
-## 基本使用方式
-
-直接輸入自然語言即可：
-
-- `幫我看這個錯誤`
-- `這段 stack trace 是什麼意思`
-- `幫我修這個 bug`
-
-現在可以直接貼長文與多行題目。
-CLI 會把同一波貼上的內容收成同一題，不需要靠 `/paste` 這類額外命令。
-
-當 Nexus 判斷這已經是治理任務時，會提示你升級為 Battle Mode。
-
-## 可用指令
+常用指令：
 
 - `/status`
-- `/mount <workspace>`
-- `/clone <repo-url> [dest]`
+- `/mount <本機專案路徑>`
+- `/clone <github_repo_url> [目的地]`
+- `/govern`
 - `/provider <name>`
 - `/model <name>`
-- `/govern`
 - `/reset`
 - `/exit`
 
-## 核心任務流的高標交付
+## 4) 兩種工作方式
 
-朋友模式 `nexus-pilot-friend` 主要是聊天式入口，不會一開始就要求你選交付模式。  
-但如果你切到 Nexus 核心任務流，例如：
+1. 聊天模式：直接問答、貼 bug、貼 log。  
+2. 治理模式：輸入 `/govern`，進入任務導向流程（分析、修復、回報）。
 
-```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:bug --task "fix login callback" --delivery-mode ask
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:feature --task "add SSO audit trail" --delivery-mode ask
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
-```
+## 5) 連到遠端 Gateway（如果有提供）
 
-系統會主動詢問你：
-
-- `standard`：一般交付，不強制 completion gate
-- `high`：高標交付，任務結束前必須通過 completion gate
-
-當你選 `high` 時：
-
-- `bug / feature` 若沒給 `--verify`，系統會自動推建議驗證命令
-- 目前支援 Python / Rust / Go 專案
-- CLI 會顯示這次實際採用的驗證命令
-- 若有產生交付報告，CLI 也會印出報告路徑
-
-如果你想手動指定驗證命令，也可以直接加：
+若你收到主機位址，先設定：
 
 ```bash
-python3 /Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py nexus:bug \
-  --task "fix login callback" \
-  --delivery-mode ask \
-  --verify "uv run pytest -q"
+export NEXUS_PILOT_GATEWAY_URL=http://<HOST>:5005
 ```
 
-## 處理本機專案
+再啟動：
 
-如果朋友要處理自己的本機目錄：
+```bash
+nexus-pilot-friend <tenant_id>
+```
+
+## 6) 常見問題
+
+### Q1. 顯示 `command not found: nexus-pilot-friend`
+
+1. 先重開一個新終端機。  
+2. 再試一次。  
+3. 還是不行就重跑安裝腳本。
+
+### Q2. 啟動後沒回應
+
+先輸入：
 
 ```text
-/mount /path/to/project
+/status
 ```
 
-掛好後可直接問：
+確認 Provider / Model / Gateway 是否正確，再重試提問。
+
+### Q3. 要處理本機專案
+
+先掛載：
 
 ```text
-幫我分析這個專案
-/govern
+/mount /path/to/your/project
 ```
 
-## 處理 GitHub repo
+再直接描述需求，或輸入 `/govern`。
 
-如果朋友手上只有 GitHub URL：
+## 7) 安全說明
 
-```text
-/clone https://github.com/your-org/your-repo.git
-```
+- API Key 只在當前 session 使用。  
+- `/status` 只顯示遮罩後資訊。  
+- 結束 CLI 後，session 內的 key 不會留在對話輸出中。
 
-CLI 會：
+---
 
-- clone 到預設工作區
-- 自動把該目錄設成目前 workspace
+## 給管理者（非朋友）
 
-如果想自訂目的地：
+以下內容是維運者才需要：
 
-```text
-/clone https://github.com/your-org/your-repo.git /path/to/dest
-```
-
-## 典型流程
-
-```text
-1. 啟動 CLI
-2. 只輸入 API key
-3. 先問問題或貼錯誤
-4. 如果需要治理，輸入 /govern
-5. 查看 task 與 phase 摘要
-```
-
-## 安全說明
-
-- API key 只會存在於目前 session
-- `/status` 只會顯示遮罩後的 key
-- 結束 session 後會清除 session 內的 secret
-
-## 目前版本限制
-
-- Battle Lane 已有正式 gateway contract，但若 gateway 不可用，會退回本地 stub
-- 本版重點是 pilot 體驗，不是完整公開版 Nexus
-- 若要接正式遠端 runtime，請設定 `NEXUS_PILOT_GATEWAY_URL`
-- 如果你要的是 Nexus 核心任務的「高標交付」，請改走 `scripts/engine/nexus_cli.py` 的 `bug / feature / runner` 入口
-
-## 自訂 Gateway
-
-如果你有自己的 gateway：
-
-```bash
-export NEXUS_PILOT_GATEWAY_URL=http://your-host:5005
-nexus-pilot
-```
-
-## Tailscale 發放建議
-
-如果朋友是透過你的 Tailscale 內網接入，建議直接把 gateway 指到你的這台主機：
-
-```bash
-export NEXUS_PILOT_GATEWAY_URL=http://100.82.155.88:5005
-nexus-pilot
-```
-
-這樣朋友的 CLI 會透過 Tailscale 連到你的 Nexus Gateway，而不是直接暴露公網 port。
-
-建議流程：
-
-1. 你的主機先啟動 `nexus-pilot-proxy`
-2. 朋友在自己的機器上設定 `NEXUS_PILOT_GATEWAY_URL=http://100.82.155.88:5005`
-3. 朋友執行 `nexus-pilot-friend pilot_a`
-4. 朋友只需要輸入自己的 API key
-
-如果你想讓朋友幾乎不用設定，建議一起提供以下環境變數：
-
-```bash
-export NEXUS_PILOT_GATEWAY_URL=http://100.82.155.88:5005
-export NEXUS_PILOT_PROVIDER=Gemini
-export NEXUS_PILOT_MODEL=gemini-2.5-flash
-```
-
-若你已替某位朋友指定 tenant，也可以直接加上：
-
-```bash
-export NEXUS_PILOT_TENANT_ID=pilot_a
-```
-
-這樣朋友第一次進 CLI 時，通常只需要補自己的 API key，甚至連這個都可以用 `NEXUS_PILOT_API_KEY` 事先帶入。
-
-如果未來你改用 MagicDNS，也可以把 IP 換成你的 Tailscale hostname。
-
-## 本地 Proxy
-
-若要手動啟動本地 proxy：
-
-```bash
-nexus-pilot-proxy
-```
+- 本地入口：`nexus-pilot`
+- 核心交付 gate：`nexus:release-ready`（已串接 `nexus:acceptance-check`）
+- 朋友安裝腳本：`scripts/ops/install_nexus_pilot_friend.sh`
