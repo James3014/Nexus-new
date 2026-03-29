@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+import datetime
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -35,6 +36,7 @@ def build_research_pack(
 
     return {
         "schema_version": "research_pack.v1",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "task": task,
         "mode": mode,
         "source": source,

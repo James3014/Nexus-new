@@ -22,3 +22,18 @@ def test_build_research_pack_contract_shape():
     assert pack["winner"]["hypothesis_id"] == "H1"
     assert isinstance(pack["experiments"], list)
     assert isinstance(pack["hypotheses"], list)
+    assert "created_at" in pack
+
+def test_build_research_pack_edge_cases():
+    pack = build_research_pack(
+        task="",
+        mode="",
+        source="",
+        reason="",
+    )
+    assert pack["schema_version"] == "research_pack.v1"
+    assert pack["budget_used"]["rounds"] == 0
+    assert pack["budget_used"]["time_sec"] == 0.0
+    assert pack["token_fallback_est"] == 0
+    assert pack["token_capture_status"] == "n/a"
+    assert "created_at" in pack
