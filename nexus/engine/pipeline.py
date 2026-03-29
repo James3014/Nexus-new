@@ -11,11 +11,18 @@ from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_
 from nexus.research.research_pack import build_research_pack
 from nexus.learning.skill_artifact import build_skill_artifact
 from nexus.learning.knowledge_index import KnowledgeIndex
+from nexus.core.event_bus import NexusEventBus
 
 logger = logging.getLogger(__name__)
 
 class NexusPipeline:
-    """⚙️ Nexus Task Pipeline (P-X-D-R-A-C)"""
+    """⚙️ Nexus Task Pipeline (P-X-D-R-A-C)
+    
+    IDENTITY: Nexus is a Battlesuit (戰甲), NOT an Agent.
+    The AI model wearing Nexus executes tasks through this 6-phase pipeline.
+    The learning system belongs to Nexus (the armor), not to any specific model.
+    Experience persists across model switches — whoever wears the armor benefits.
+    """
     def __init__(self, engine):
         self.engine = engine
 
@@ -161,6 +168,20 @@ class NexusPipeline:
         # --- P Stage: Plan ---
         state.current_phase = "P"
         p_decision_id = register_phase_decision("P", "planner")
+        
+        # 🆕 P 階段學習：查找歷史上同類任務的成功策略
+        try:
+            from nexus.learning.knowledge_index import KnowledgeIndex
+            ki = KnowledgeIndex(self.engine.project_root, use_embedding=True)
+            p_hints = ki.search_similar(task_desc, top_k=2, threshold=0.2, task_type=task_type)
+            strategies = [fm.plan_strategy for fm, _ in p_hints if fm.plan_strategy]
+            if strategies:
+                kwargs["plan_hint"] = f"歷史成功策略: {strategies[0]}"
+                state.metadata["inherited_plan_strategy"] = strategies[0]
+                logger.info("📋 P 階段：繼承歷史策略 → %s", strategies[0])
+        except Exception as exc:
+            logger.debug("p_phase_learning_skip: %s", exc)
+
         decision = hub.make_pre_routing_decision(task_id, {"type": task_type, **(context or {})})
         prediction = planner.run(state, {"task": task_desc, **kwargs})
         accumulator.record(state, "P", prediction) # P phase recording
@@ -190,6 +211,19 @@ class NexusPipeline:
         if not dry_run_mode and (force_research or research_decision.should_research):
             state.current_phase = "X"
             x_decision_id = register_phase_decision("X", "researcher")
+            
+            # 🆕 X 階段學習：注入歷史勝出假設
+            try:
+                from nexus.learning.knowledge_index import KnowledgeIndex
+                ki = KnowledgeIndex(self.engine.project_root, use_embedding=True)
+                x_hints = ki.search_similar(task_desc, top_k=2, threshold=0.3, task_type=task_type)
+                prior = [fm.winning_hypothesis for fm, _ in x_hints if fm.winning_hypothesis]
+                if prior:
+                    state.metadata["prior_winning_hypotheses"] = prior
+                    logger.info("🔬 X 階段：找到 %d 個歷史勝出假設", len(prior))
+            except Exception as exc:
+                logger.debug("x_phase_learning_skip: %s", exc)
+                
             if research_decision.mode == "experimental" and state.metadata.get("research_workspace"):
                 research_pack = self._run_experimental_research(
                     task_id=task_id,
@@ -243,8 +277,8 @@ class NexusPipeline:
 
         # --- Hermes Phase 2: Inject learned skills summary ---
         try:
-            knowledge_index = KnowledgeIndex(self.engine.project_root)
-            similar_skills = knowledge_index.search_similar(task_desc, top_k=3, threshold=0.1)
+            knowledge_index = KnowledgeIndex(self.engine.project_root, use_embedding=True)
+            similar_skills = knowledge_index.search_similar(task_desc, top_k=3, threshold=0.1, task_type=task_type)
             if similar_skills:
                 pack["learned_skills"] = [
                     {
@@ -254,6 +288,12 @@ class NexusPipeline:
                         "keywords": fm.keywords[:5],
                         "score": round(score, 3),
                         "skill_id": fm.task_id,
+                        "plan_strategy": fm.plan_strategy,
+                        "winning_hypothesis": fm.winning_hypothesis,
+                        "phantom_patterns": fm.phantom_patterns,
+                        "cycle_count": fm.cycle_count,
+                        "cycle_root_cause": fm.cycle_root_cause,
+                        "verification_commands": fm.verification_commands,
                     }
                     for fm, score in similar_skills
                 ]
@@ -266,6 +306,20 @@ class NexusPipeline:
             "D",
             metadata={"pack_keys": list(pack.keys()), "decision_id": d_decision_id, "skill_id": "diagnose-pack"},
         )
+        
+        # 🆕 R 階段循環預防：基於歷史循環根因調整修復策略
+        try:
+            learned = pack.get("learned_skills", [])
+            if learned:
+                best = learned[0]
+                if best.get("cycle_root_cause") == "phantom_proof":
+                    pack["enforce_physical_proof"] = True
+                    logger.info("🔄 歷史循環根因=phantom_proof，強制要求物理證明")
+                elif best.get("cycle_root_cause") == "insufficient_diag":
+                    pack["force_deep_diagnosis"] = True
+                    logger.info("🔄 歷史循環根因=insufficient_diag，強制深度診斷")
+        except Exception as exc:
+            logger.debug("r_phase_cycle_prevention_skip: %s", exc)
 
         # --- R/A Stage: Repair Loop ---
         repair_attempts = 0
@@ -348,6 +402,12 @@ class NexusPipeline:
             state.current_phase = "R"
             logger.info(f"🛠️ [Pipeline] Attempt {repair_attempts}/{self.engine.max_retries}")
 
+            # RCA Early Trigger
+            if repair_attempts >= 2:
+                pack["force_deep_diagnosis"] = True
+                logger.info("🩺 連續失敗 ≥2，強制深度診斷")
+                NexusEventBus.publish("repair_failed", {"task_id": state.task_id, "attempt": repair_attempts})
+
             # R: Repair
             # --- Hermes Phase 2: Load full skill context for repair ---
             try:
@@ -379,9 +439,49 @@ class NexusPipeline:
                 state.metadata["last_no_change_reason"] = str(result_object.get("no_change_reason", "") or "")
                 state.metadata["last_proof_type"] = str(result_object.get("proof_type", "") or "")
                 state.metadata["last_proof_value"] = str(result_object.get("proof_value", "") or "")
+                
+                # 🆕 VDD：捕獲驗證指令
+                audit_meta = result_object.get("audit_metadata", {})
+                if audit_meta.get("verify_commands"):
+                    state.metadata["verification_commands"] = audit_meta["verify_commands"]
+                if audit_meta.get("return_codes"):
+                    state.metadata["verification_exit_codes"] = list(audit_meta["return_codes"].values())
             else:
                 result_object = {}
-            
+                
+            # 🆕 CLI Pre-Gate：R 結束後，先用 exit code 做機械驗證
+            pregate_passed = True
+            try:
+                from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
+                
+                # 1. 從歷史技能繼承的驗證指令
+                verify_cmds = list(state.metadata.get("verification_commands", []))
+                
+                # 2. 從 diag_pack 傳入的驗證指令
+                pack_verify = pack.get("verify_commands", [])
+                if pack_verify:
+                    verify_cmds.extend(pack_verify)
+                
+                # 3. 自動推斷（Python / Rust / Go 等）
+                if not verify_cmds:
+                    verify_cmds = _auto_detect_verify_commands(self.engine.project_root)
+                
+                if verify_cmds and str(review_status_raw) != "REJECTED":
+                    logger.info("🚦 CLI Pre-Gate Triggered: Running %d verify commands", len(verify_cmds))
+                    pregate_passed, pregate_results = run_cli_pregate(
+                        self.engine.project_root, verify_cmds, timeout_per_cmd=60
+                    )
+                    state.metadata["cli_pregate_results"] = pregate_results
+                    state.metadata["verification_commands"] = verify_cmds
+                    state.metadata["verification_exit_codes"] = [r["exit_code"] for r in pregate_results]
+                    
+                    if not pregate_passed:
+                        review_status_raw = "REJECTED"
+                        result_object["cli_pregate_rejected"] = True
+                        logger.info("🚫 CLI Pre-Gate 攔截：強制退回修復重試")
+            except Exception as exc:
+                logger.debug("cli_pregate_skip: %s", exc)
+                
             # Log R (Repair) phase
             self.engine._add_step_to_history(
                 state,
@@ -405,6 +505,22 @@ class NexusPipeline:
                 metadata={"status": review_status_raw, "decision_id": a_decision_id, "skill_id": "audit-review"},
             )
             
+            # 🆕 A 階段學習：預載歷史幻覺模式
+            try:
+                from nexus.learning.knowledge_index import KnowledgeIndex
+                ki = KnowledgeIndex(self.engine.project_root, use_embedding=True)
+                a_hints = ki.search_similar(task_desc, top_k=3, threshold=0.2, task_type=task_type)
+                known_phantoms = []
+                for fm, _ in a_hints:
+                    known_phantoms.extend(fm.phantom_patterns)
+                if known_phantoms:
+                    state.metadata["known_phantom_patterns"] = known_phantoms
+                    if "missing_physical_proof" in known_phantoms:
+                        state.metadata["require_strict_proof"] = True
+                    logger.info("🛡️ A 階段：預載 %d 個歷史幻覺模式", len(known_phantoms))
+            except Exception as exc:
+                logger.debug("a_phase_learning_skip: %s", exc)
+            
             status, audit_success = self.engine.ReviewStatusNormalizer.normalize(review_status_raw)
             checks = int(state.metadata.get("anti_hallucination_checks", 0) or 0) + 1
             state.metadata["anti_hallucination_checks"] = checks
@@ -423,6 +539,7 @@ class NexusPipeline:
                 state.metadata["anti_hallucination_block_count"] = int(
                     state.metadata.get("anti_hallucination_block_count", 0) or 0
                 ) + 1
+                NexusEventBus.publish("phantom_detected", {"task_id": state.task_id, "reason": phantom_reason})
             elif audit_success:
                 state.metadata["anti_hallucination_pass_count"] = int(
                     state.metadata.get("anti_hallucination_pass_count", 0) or 0
@@ -461,6 +578,12 @@ class NexusPipeline:
                 break
             
             if status == "REJECTED" and repair_attempts < self.engine.max_retries:
+                # 🆕 記錄拒絕原因，供 CycleAnalyzer 分析
+                rejection_history = list(state.metadata.get("rejection_history", []))
+                reason_tag = phantom_reason if phantom_reason else f"rejected:{review_status_raw}"
+                rejection_history.append(reason_tag)
+                state.metadata["rejection_history"] = rejection_history
+                
                 logger.warning(f"🔄 Audit Rejected. Retrying repair (Status: {status})")
                 continue
             else:
@@ -468,6 +591,25 @@ class NexusPipeline:
 
         # --- C Stage: Crystallize ---
         state.metadata["pipeline_success"] = bool(success)
+        
+        # 🆕 循環根因分析
+        try:
+            from nexus.learning.cycle_analyzer import analyze_cycle
+            cycle = analyze_cycle(state.metadata.get("rejection_history", []))
+            state.metadata["cycle_root_cause"] = cycle["root_cause"]
+            state.metadata["cycle_analysis"] = cycle
+        except Exception as exc:
+            logger.debug("c_phase_cycle_analysis_failed: %s", exc)
+
+        # 🆕 記錄 P 階段實際使用的策略（供下次 P 階段讀取）
+        state.metadata["plan_strategy_used"] = state.metadata.get("inherited_plan_strategy", "")
+
+        # 🆕 合併幻覺歷史
+        phantom_history = list(state.metadata.get("known_phantom_patterns", []))
+        if state.metadata.get("phantom_success_reason"):
+            phantom_history.append(state.metadata["phantom_success_reason"])
+        state.metadata["phantom_pattern_history"] = list(set(phantom_history))
+        
         if success:
             state.current_phase = "C"
             c_decision_id = register_phase_decision("C", "crystallize")
@@ -498,6 +640,8 @@ class NexusPipeline:
                 # --- Hermes Integration: Build Skill Artifact ---
                 try:
                     outcome_dict = c_event.to_dict() if hasattr(c_event, "to_dict") else vars(c_event)
+                    outcome_dict["verification_commands"] = state.metadata.get("verification_commands", [])
+                    outcome_dict["verification_exit_codes"] = state.metadata.get("verification_exit_codes", [])
                     research_pack = state.metadata.get("research_pack")
                     repair_result = state.metadata.get("repair_result", {})
                     
@@ -516,6 +660,7 @@ class NexusPipeline:
                         skill_path.write_text(skill_md, encoding="utf-8")
                         state.metadata["generated_skill_path"] = str(skill_path)
                         logger.info("✨ Generated skill artifact: %s", skill_path.name)
+                        NexusEventBus.publish("skill_created", {"task_id": state.task_id, "skill_path": str(skill_path)})
                 except Exception as artifact_exc:
                     logger.warning("skill_artifact_generation_failed: %s", artifact_exc)
                     

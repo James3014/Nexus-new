@@ -239,7 +239,7 @@ class RepairExecutor:
             return 124
 
     def _validate_in_sandbox(self, actions, timeout_sec: Optional[int] = None) -> tuple[int, str]:
-        sandbox = SpeculativeSandbox(self.repo_root)
+        sandbox = SpeculativeSandbox(self.repo_root, mode="auto")
         sandbox_root: Path | None = None
         try:
             sandbox_root = sandbox.fork()

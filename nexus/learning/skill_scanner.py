@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Tuple
 from datetime import datetime, timezone
+from nexus.core.event_bus import NexusEventBus
 
 
 @dataclass
@@ -86,4 +87,7 @@ def scan_skill(content: str) -> ScanResult:
             warnings.append(f"🟡 WARN: {reason} (偵測到 {len(matches)} 處)")
 
     safe = len(blocked) == 0
+    if not safe:
+        NexusEventBus.publish("scan_blocked", {"blocked_reasons": blocked, "content_preview": content[:200]})
+        
     return ScanResult(safe=safe, warnings=warnings, blocked_reasons=blocked)

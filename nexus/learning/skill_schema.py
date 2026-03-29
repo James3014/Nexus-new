@@ -23,6 +23,18 @@ class SkillFrontmatter:
     keywords: List[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     
+    # --- 全六階段學習信號 ---
+    plan_strategy: str = ""
+    winning_hypothesis: str = ""
+    phantom_patterns: List[str] = field(default_factory=list)
+    cycle_count: int = 0
+    cycle_root_cause: str = ""
+    
+    # --- VDD：驗證驅動信號 ---
+    verification_commands: List[str] = field(default_factory=list)
+    verification_exit_codes: List[int] = field(default_factory=list)
+
+    
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 

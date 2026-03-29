@@ -27,6 +27,24 @@ def _build_yaml_frontmatter(fm: SkillFrontmatter) -> str:
     lines.append(f"  repair_success: {'true' if fm.success_metric.repair_success else 'false'}")
     lines.append(f"  retry_count: {fm.success_metric.retry_count}")
     lines.append(f"  pattern_reuse_rate: {fm.success_metric.pattern_reuse_rate}")
+    lines.append(f"plan_strategy: {fm.plan_strategy}")
+    lines.append(f"winning_hypothesis: {fm.winning_hypothesis}")
+    if fm.phantom_patterns:
+        pp_str = ", ".join(f'"{p}"' for p in fm.phantom_patterns)
+        lines.append(f"phantom_patterns: [{pp_str}]")
+    else:
+        lines.append("phantom_patterns: []")
+    lines.append(f"cycle_count: {fm.cycle_count}")
+    lines.append(f"cycle_root_cause: {fm.cycle_root_cause}")
+    
+    if fm.verification_commands:
+        vc_str = ", ".join(f'"{c}"' for c in fm.verification_commands)
+        lines.append(f"verification_commands: [{vc_str}]")
+        exit_codes_str = ", ".join(str(c) for c in fm.verification_exit_codes)
+        lines.append(f"verification_exit_codes: [{exit_codes_str}]")
+    else:
+        lines.append("verification_commands: []")
+        lines.append("verification_exit_codes: []")
     
     lines.append("---")
     return "\n".join(lines)
@@ -84,7 +102,12 @@ def build_skill_artifact(
         task_id=task_id,
         success_metric=success_metric,
         task_type=task_type,
-        keywords=[task_type] + (["research"] if research_pack else [])
+        keywords=[task_type] + (["research"] if research_pack else []),
+        plan_strategy=outcome_event.get("plan_strategy_used", ""),
+        winning_hypothesis=str(research_pack.get("winner", {}).get("hypothesis_id", "")) if research_pack else "",
+        phantom_patterns=list(outcome_event.get("phantom_pattern_history", [])),
+        cycle_count=int(outcome_event.get("retry_count", 0)),
+        cycle_root_cause=str(outcome_event.get("cycle_root_cause", ""))
     )
     
     yaml_header = _build_yaml_frontmatter(fm)

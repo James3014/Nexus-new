@@ -15,7 +15,7 @@ PHASE_WEIGHTS: Dict[str, Dict[str, float]] = {
     "D": {"root_cause_confidence": 0.4, "diagnosis_precision": 0.4, "false_positive_rate": 0.2},
     "R": {"fix_success_rate": 0.5, "retry_penalty": 0.3, "scope_drift": 0.2},
     "A": {"regression_pass_rate": 0.5, "side_effect_score": 0.3, "coverage_signal": 0.2},
-    "C": {"pattern_reuse_rate": 0.4, "lesson_quality": 0.3, "next_run_hit_rate": 0.3},
+    "C": {"pattern_reuse_rate": 0.3, "lesson_quality": 0.3, "next_run_hit_rate": 0.4},
 }
 
 INVERSE_SIGNALS = {"research_latency", "research_latency_norm", "false_positive_rate", "retry_penalty", "scope_drift"}
