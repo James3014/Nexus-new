@@ -1079,6 +1079,26 @@ def main():
     skills_optimize_parser.add_argument("--max-items", type=int, default=3)
     skills_optimize_parser.add_argument("--rebound", type=float, default=0.15)
 
+    # nexus:skills-learned
+    learned_parser = subparsers.add_parser("nexus:skills-learned")
+    learned_sub = learned_parser.add_subparsers(dest="skills_action")
+    learned_sub.add_parser("list")
+    show_p = learned_sub.add_parser("show")
+    show_p.add_argument("skill_id")
+    search_p = learned_sub.add_parser("search")
+    search_p.add_argument("query")
+    search_p.add_argument("--top-k", type=int, default=5)
+    approve_p = learned_sub.add_parser("approve")
+    approve_p.add_argument("skill_id")
+    scan_p = learned_sub.add_parser("scan")
+    scan_p.add_argument("skill_id", nargs="?", default=None)
+    scan_p.add_argument("--all", action="store_true", dest="scan_all")
+    archive_p = learned_sub.add_parser("archive")
+    archive_p.add_argument("skill_id")
+    learned_sub.add_parser("stats")
+    promote_p = learned_sub.add_parser("promote")
+    promote_p.add_argument("skill_id")
+
     args = parser.parse_args()
     if not args.command and not args.swarm_mode:
         parser.print_help()
@@ -1264,7 +1284,89 @@ def main():
         rc = cli.run_skills_health(output=args.output, workspace=args.workspace)
         sys.exit(rc)
     elif args.command == "nexus:skills-optimize":
-        rc = cli.run_skills_optimize(max_items=args.max_items, rebound=args.rebound)
+        from nexus.engine.hub import NexusHub
+        hub = NexusHub(REPO_ROOT)
+        hub.optimize_skills(max_items=args.max_items, rebound=args.rebound)
+    elif args.command == "nexus:skills-learned":
+        from nexus.learning.knowledge_index import KnowledgeIndex
+        index = KnowledgeIndex(REPO_ROOT)
+        if args.skills_action == "list":
+            skills = index.store.list_learned_skills()
+            print(f"\n📚 Learned Skills ({len(skills)}):")
+            for s in skills:
+                fm = index.store.get_skill_summary(s)
+                if fm:
+                    print(f" - [{fm.task_id}] {fm.name} ({fm.task_type}) | Trust: {fm.trust_level}")
+        elif args.skills_action == "show":
+            content = index.load_full_skill(args.skill_id)
+            if content:
+                print(f"\n--- SKILL: {args.skill_id} ---\n")
+                print(content)
+            else:
+                print(f"❌ Skill not found: {args.skill_id}")
+        elif args.skills_action == "search":
+            results = index.search_similar(args.query, top_k=args.top_k)
+            print(f"\n🔍 Search Results for '{args.query}':")
+            if not results:
+                print(" No matches found.")
+            for fm, score in results:
+                print(f" [{round(score, 3)}] {fm.task_id}: {fm.name} - {fm.description[:80]}...")
+        elif args.skills_action == "approve":
+            from nexus.learning.skill_lifecycle import promote_skill
+            result = promote_skill(REPO_ROOT / "skills" / "learned", args.skill_id, "reviewed")
+            print(result["message"])
+        elif args.skills_action == "scan":
+            from nexus.learning.skill_scanner import scan_skill as do_scan
+            skills_dir = REPO_ROOT / "skills" / "learned"
+            targets = []
+            if getattr(args, "scan_all", False):
+                targets = list(skills_dir.glob("*.md"))
+            elif args.skill_id:
+                sid = args.skill_id if args.skill_id.endswith(".md") else f"{args.skill_id}.md"
+                targets = [skills_dir / sid]
+            for t in targets:
+                if t.exists():
+                    sr = do_scan(t.read_text(encoding="utf-8"))
+                    status = "✅ SAFE" if sr.safe else "🛑 UNSAFE"
+                    print(f"\n{status}: {t.stem}")
+                    for w in sr.warnings:
+                        print(f"  {w}")
+                    for b in sr.blocked_reasons:
+                        print(f"  {b}")
+                else:
+                    print(f"❌ Skill not found: {t.stem}")
+        elif args.skills_action == "archive":
+            from nexus.learning.skill_lifecycle import archive_skill
+            result = archive_skill(REPO_ROOT / "skills" / "learned", args.skill_id)
+            print(result["message"])
+        elif args.skills_action == "stats":
+            from nexus.learning.skill_lifecycle import get_skills_stats
+            stats = get_skills_stats(REPO_ROOT / "skills" / "learned")
+            print(f"\n📊 Skill Health Report")
+            print(f"  Total: {stats['total']}")
+            for level, count in stats["by_level"].items():
+                print(f"  [{level}]: {count}")
+            print(f"  Safe: {stats['scan_results']['safe']} | Unsafe: {stats['scan_results']['unsafe']}")
+            print(f"  Total Uses: {stats['total_uses']}")
+        elif args.skills_action == "promote":
+            from nexus.learning.skill_lifecycle import promote_skill, TRUST_LEVELS
+            import re as _re
+            skills_dir = REPO_ROOT / "skills" / "learned"
+            sid = args.skill_id if args.skill_id.endswith(".md") else f"{args.skill_id}.md"
+            sp = skills_dir / sid
+            if sp.exists():
+                content = sp.read_text(encoding="utf-8")
+                m = _re.search(r"trust_level:\s*(.+)", content)
+                cur = m.group(1).strip().strip('"').strip("'") if m else "auto-generated"
+                cur_idx = TRUST_LEVELS.index(cur) if cur in TRUST_LEVELS else 0
+                if cur_idx < len(TRUST_LEVELS) - 1:
+                    result = promote_skill(skills_dir, args.skill_id, TRUST_LEVELS[cur_idx + 1])
+                    print(result["message"])
+                else:
+                    print(f"❌ {args.skill_id} 已經是最高等級: {cur}")
+            else:
+                print(f"❌ Skill not found: {args.skill_id}")
+        rc = 0
         sys.exit(rc)
 
 

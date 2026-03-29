@@ -9,6 +9,8 @@ from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.core.state_contracts import NexusState
 from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_event
 from nexus.research.research_pack import build_research_pack
+from nexus.learning.skill_artifact import build_skill_artifact
+from nexus.learning.knowledge_index import KnowledgeIndex
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +240,27 @@ class NexusPipeline:
         if research_pack:
             pack["research_context"] = research_pack
             pack["research_pack"] = research_pack
+
+        # --- Hermes Phase 2: Inject learned skills summary ---
+        try:
+            knowledge_index = KnowledgeIndex(self.engine.project_root)
+            similar_skills = knowledge_index.search_similar(task_desc, top_k=3, threshold=0.1)
+            if similar_skills:
+                pack["learned_skills"] = [
+                    {
+                        "name": fm.name,
+                        "description": fm.description[:200],
+                        "task_type": fm.task_type,
+                        "keywords": fm.keywords[:5],
+                        "score": round(score, 3),
+                        "skill_id": fm.task_id,
+                    }
+                    for fm, score in similar_skills
+                ]
+                state.metadata["matched_skills_count"] = len(similar_skills)
+                logger.info("🧠 Found %d similar learned skills", len(similar_skills))
+        except Exception as skill_exc:
+            logger.warning("learned_skill_lookup_failed: %s", skill_exc)
         self.engine._add_step_to_history(
             state,
             "D",
@@ -326,6 +349,20 @@ class NexusPipeline:
             logger.info(f"🛠️ [Pipeline] Attempt {repair_attempts}/{self.engine.max_retries}")
 
             # R: Repair
+            # --- Hermes Phase 2: Load full skill context for repair ---
+            try:
+                learned = pack.get("learned_skills", [])
+                if learned and learned[0].get("score", 0) >= 0.3:
+                    best_skill_id = learned[0]["skill_id"]
+                    knowledge_index = KnowledgeIndex(self.engine.project_root)
+                    full_skill = knowledge_index.load_full_skill(best_skill_id)
+                    if full_skill:
+                        pack["skill_context"] = full_skill[:2000]
+                        state.metadata["skill_context_loaded"] = best_skill_id
+                        logger.info("📚 Loaded skill context: %s", best_skill_id)
+            except Exception as skill_ctx_exc:
+                logger.warning("skill_context_load_failed: %s", skill_ctx_exc)
+
             res = repairer.run(state, pack)
             accumulator.record(state, "R", res, overhead=100)
             current_decision_id = str((state.metadata.get("phase_decisions", {}) or {}).get("R") or register_phase_decision("R", "default-repair"))
@@ -457,6 +494,31 @@ class NexusPipeline:
                     metadata={"status": "COMPLETED", "audit_status": "APPROVED", "source": "pipeline.crystallize"},
                 )
                 append_skill_outcome_event(self.engine.project_root, c_event)
+                
+                # --- Hermes Integration: Build Skill Artifact ---
+                try:
+                    outcome_dict = c_event.to_dict() if hasattr(c_event, "to_dict") else vars(c_event)
+                    research_pack = state.metadata.get("research_pack")
+                    repair_result = state.metadata.get("repair_result", {})
+                    
+                    skill_md = build_skill_artifact(
+                        task_id=state.task_id,
+                        task_desc=getattr(state, "task_desc", state.task_id),
+                        research_pack=research_pack,
+                        repair_result=repair_result,
+                        outcome_event=outcome_dict
+                    )
+                    
+                    if skill_md:
+                        skill_dir = self.engine.project_root / "skills" / "learned"
+                        skill_dir.mkdir(parents=True, exist_ok=True)
+                        skill_path = skill_dir / f"{state.task_id}.md"
+                        skill_path.write_text(skill_md, encoding="utf-8")
+                        state.metadata["generated_skill_path"] = str(skill_path)
+                        logger.info("✨ Generated skill artifact: %s", skill_path.name)
+                except Exception as artifact_exc:
+                    logger.warning("skill_artifact_generation_failed: %s", artifact_exc)
+                    
             except Exception as exc:
                 logger.warning("skill_outcome_event_write_failed: %s", exc)
             self.engine.state_io.save_global_state(state)
