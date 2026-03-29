@@ -75,13 +75,15 @@ def test_cli_profile_apply_writes_prod_defaults(tmp_path):
 def test_cli_release_ready_dispatches_gate_script(tmp_path):
     cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
     gate_script = tmp_path / "scripts" / "ops" / "nexus_release_gate.sh"
+    acceptance_script = tmp_path / "scripts" / "ops" / "nexus_acceptance_check.py"
     gate_script.parent.mkdir(parents=True, exist_ok=True)
     gate_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    acceptance_script.write_text("print('ok')\n", encoding="utf-8")
     with patch("scripts.engine.nexus_cli.subprocess.call", return_value=0) as mock_call:
         rc = cli.run_release_ready()
     assert rc == 0
-    called = mock_call.call_args[0][0]
-    assert str(gate_script) in called[0]
+    first_called = mock_call.call_args_list[0][0][0]
+    assert str(gate_script) in first_called[0]
 
 
 def test_cli_skills_autotune_dispatches_runner(tmp_path):

@@ -109,14 +109,30 @@ class NexusCLI:
         delivery_mode: str = "standard",
         verify_commands: list[str] | None = None,
         artifact_paths: list[str] | None = None,
+        research_workspace: str | None = None,
+        research_rounds: int = 5,
+        research_stable_wins: int = 3,
+        research_force: bool = False,
     ):
         """nexus:bug 介面"""
-        success = self.service.execute_bug(
-            task,
-            dry_run,
+        execution_context: dict[str, object] = {}
+        if research_workspace:
+            execution_context["research_workspace"] = research_workspace
+            execution_context["research_rounds"] = max(int(research_rounds), 1)
+            execution_context["research_stable_wins"] = max(int(research_stable_wins), 1)
+        if research_force:
+            execution_context["research_force"] = True
+        execute_kwargs = dict(
             delivery_mode=delivery_mode,
             verify_commands=verify_commands,
             artifact_paths=artifact_paths,
+        )
+        if execution_context:
+            execute_kwargs["execution_context"] = execution_context
+        success = self.service.execute_bug(
+            task,
+            dry_run,
+            **execute_kwargs,
         )
         if success:
             success = self._enforce_release_gate_for_prod(skip_gate=dry_run)
@@ -154,16 +170,32 @@ class NexusCLI:
         delivery_mode: str = "standard",
         verify_commands: list[str] | None = None,
         artifact_paths: list[str] | None = None,
+        research_workspace: str | None = None,
+        research_rounds: int = 5,
+        research_stable_wins: int = 3,
+        research_force: bool = False,
     ):
         """🚀 [Nexus:Feature] 實作新功能介面"""
+        execution_context: dict[str, object] = {}
+        if research_workspace:
+            execution_context["research_workspace"] = research_workspace
+            execution_context["research_rounds"] = max(int(research_rounds), 1)
+            execution_context["research_stable_wins"] = max(int(research_stable_wins), 1)
+        if research_force:
+            execution_context["research_force"] = True
+        execute_kwargs = dict(
+            delivery_mode=delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+        )
+        if execution_context:
+            execute_kwargs["execution_context"] = execution_context
         success = self.service.execute_feature(
             task,
             domain,
             dry_run,
             skill,
-            delivery_mode=delivery_mode,
-            verify_commands=verify_commands,
-            artifact_paths=artifact_paths,
+            **execute_kwargs,
         )
         if success:
             success = self._enforce_release_gate_for_prod(skip_gate=dry_run)
@@ -899,6 +931,10 @@ def main():
     bug.add_argument("--dry-run", action="store_true")
     bug.add_argument("--verify", action="append", default=[])
     bug.add_argument("--artifact", action="append", default=[])
+    bug.add_argument("--research-workspace", default=None)
+    bug.add_argument("--research-rounds", type=int, default=5)
+    bug.add_argument("--research-stable-wins", type=int, default=3)
+    bug.add_argument("--research-force", action="store_true")
 
     # nexus:test
     test_parser = subparsers.add_parser("nexus:test")
@@ -916,6 +952,10 @@ def main():
     feat.add_argument("--skill", help="Manually specify a skill to use")
     feat.add_argument("--verify", action="append", default=[])
     feat.add_argument("--artifact", action="append", default=[])
+    feat.add_argument("--research-workspace", default=None)
+    feat.add_argument("--research-rounds", type=int, default=5)
+    feat.add_argument("--research-stable-wins", type=int, default=3)
+    feat.add_argument("--research-force", action="store_true")
 
     # nexus:crystal
     subparsers.add_parser("nexus:crystal")
@@ -1081,6 +1121,10 @@ def main():
             delivery_mode=delivery_mode,
             verify_commands=args.verify,
             artifact_paths=args.artifact,
+            research_workspace=args.research_workspace,
+            research_rounds=args.research_rounds,
+            research_stable_wins=args.research_stable_wins,
+            research_force=args.research_force,
         )
     elif args.command == "nexus:test":
         cli.run_test(
@@ -1103,6 +1147,10 @@ def main():
             delivery_mode=delivery_mode,
             verify_commands=args.verify,
             artifact_paths=args.artifact,
+            research_workspace=args.research_workspace,
+            research_rounds=args.research_rounds,
+            research_stable_wins=args.research_stable_wins,
+            research_force=args.research_force,
         )
     elif args.command == "nexus:crystal":
         cli.run_crystal()

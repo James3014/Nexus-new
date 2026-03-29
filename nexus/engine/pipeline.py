@@ -1,9 +1,14 @@
 import logging
 import time
+import json
+import subprocess
+import sys
+from pathlib import Path
 from typing import Dict, Any, Optional
 from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.core.state_contracts import NexusState
 from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_event
+from nexus.research.research_pack import build_research_pack
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +16,104 @@ class NexusPipeline:
     """⚙️ Nexus Task Pipeline (P-X-D-R-A-C)"""
     def __init__(self, engine):
         self.engine = engine
+
+    def _run_experimental_research(
+        self,
+        *,
+        task_id: str,
+        task_desc: str,
+        workspace: str,
+        rounds: int,
+        stable_wins: int,
+        proof_ratio_min: float,
+    ) -> Dict[str, Any]:
+        workspace_path = Path(workspace).expanduser()
+        if not workspace_path.is_absolute():
+            workspace_path = (self.engine.project_root / workspace_path).resolve()
+        else:
+            workspace_path = workspace_path.resolve()
+        script = self.engine.project_root / "scripts" / "ops" / "phase7_autotune_loop.py"
+        prefix = f"xphase_{task_id}"
+        start_ts = time.time()
+        cmd = [
+            sys.executable,
+            str(script),
+            "--project-root",
+            str(self.engine.project_root),
+            "--workspace",
+            str(workspace_path),
+            "--rounds",
+            str(rounds),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+            "--max-loops",
+            str(max(stable_wins + 2, 3)),
+            "--stable-wins",
+            str(stable_wins),
+            "--output-prefix",
+            prefix,
+        ]
+        rc = subprocess.call(cmd, cwd=str(self.engine.project_root))
+        report_path = workspace_path / f"{prefix}_final_report_cn.json"
+        report: Dict[str, Any] = {}
+        if report_path.exists():
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except Exception:
+                report = {}
+
+        history = list(report.get("history", []) or [])
+        hypotheses: list[dict[str, Any]] = []
+        experiments: list[dict[str, Any]] = []
+        for idx, row in enumerate(history, start=1):
+            best = dict(row.get("best", {}) or {})
+            hid = f"H{idx}"
+            hypotheses.append(
+                {
+                    "id": hid,
+                    "description": f"min_samples={best.get('min_samples')} baseline={best.get('baseline')} learning_rate={best.get('learning_rate')}",
+                    "confidence": 0.8 if int(row.get("apply_rc", 1) or 1) == 0 else 0.4,
+                }
+            )
+            experiments.append(
+                {
+                    "round": idx,
+                    "hypothesis": hid,
+                    "metric": 1.0 if int(row.get("apply_rc", 1) or 1) == 0 else 0.0,
+                    "kept": int(row.get("apply_rc", 1) or 1) == 0,
+                    "sweep_report": row.get("sweep_report"),
+                }
+            )
+
+        final_best = dict(report.get("final_best", {}) or {})
+        winner = {
+            "hypothesis_id": f"H{len(history)}" if history else "",
+            "patch_diff": "",
+            "final_metric": 1.0 if bool(report.get("converged")) else 0.0,
+            "params": final_best,
+            "report_path": str(report_path),
+        }
+        eliminated = [h["id"] for h in hypotheses[:-1]] if hypotheses else []
+        elapsed = time.time() - start_ts
+        return build_research_pack(
+            task=task_desc,
+            mode="experimental",
+            source="AUTORESEARCH_PHASE7_LOOP",
+            reason="router_selected_experimental",
+            hypotheses=hypotheses,
+            experiments=experiments,
+            winner=winner,
+            eliminated=eliminated,
+            rounds=int(report.get("loops_executed", len(history)) or len(history)),
+            time_sec=elapsed,
+            status="SUCCESS" if bool(report.get("converged")) and rc == 0 else "FAIL",
+            findings=[
+                f"phase7_loop_rc={rc}",
+                f"converged={bool(report.get('converged'))}",
+                f"report={report_path}",
+            ],
+            raw={"report": report, "return_code": rc},
+        )
 
     def run(self, task_desc: str, task_type: str = "bug", context: Optional[Dict] = None, **kwargs) -> bool:
         """執行核心 P-X-D-R-A-C 管線"""
@@ -70,10 +173,55 @@ class NexusPipeline:
         # --- X Stage: Research ---
         research_pack = None
         force_research = bool(state.metadata.get("benchmark_force_research"))
-        if not dry_run_mode and (force_research or research_policy.should_research(decision, task_desc)):
+        research_decision = research_policy.route(
+            decision,
+            task_desc,
+            task_type=task_type,
+            prediction=prediction,
+            context=state.metadata,
+        )
+        state.metadata["research_route"] = {
+            "should_research": research_decision.should_research,
+            "mode": research_decision.mode,
+            "reason": research_decision.reason,
+            "rounds": research_decision.rounds,
+            "stable_wins": research_decision.stable_wins,
+        }
+        if not dry_run_mode and (force_research or research_decision.should_research):
             state.current_phase = "X"
             x_decision_id = register_phase_decision("X", "researcher")
-            research_pack = researcher.run(state, {"task": task_desc})
+            if research_decision.mode == "experimental" and state.metadata.get("research_workspace"):
+                research_pack = self._run_experimental_research(
+                    task_id=task_id,
+                    task_desc=task_desc,
+                    workspace=str(state.metadata.get("research_workspace")),
+                    rounds=max(int(state.metadata.get("research_rounds", research_decision.rounds) or 0), 1),
+                    stable_wins=max(int(state.metadata.get("research_stable_wins", research_decision.stable_wins) or 0), 1),
+                    proof_ratio_min=float(state.metadata.get("research_proof_ratio_min", 95.0) or 95.0),
+                )
+            else:
+                legacy_pack = researcher.run(state, {"task": task_desc})
+                research_pack = build_research_pack(
+                    task=task_desc,
+                    mode="external",
+                    source=str(legacy_pack.get("source", "INTERNAL")),
+                    reason=research_decision.reason,
+                    hypotheses=[],
+                    experiments=[],
+                    winner={},
+                    eliminated=[],
+                    rounds=research_decision.rounds,
+                    time_sec=0.0,
+                    status=str(legacy_pack.get("status", "FAIL")),
+                    findings=list(legacy_pack.get("findings", []) or []),
+                    raw=legacy_pack,
+                )
+            try:
+                research_path = self.engine.run_dir / "research_pack.json"
+                research_path.write_text(json.dumps(research_pack, ensure_ascii=False, indent=2), encoding="utf-8")
+                state.metadata["research_pack_path"] = str(research_path)
+            except Exception as exc:
+                logger.warning("research_pack_write_failed: %s", exc)
             accumulator.record(state, "X", research_pack, overhead=50)
             self.engine._add_step_to_history(
                 state,
@@ -91,6 +239,7 @@ class NexusPipeline:
             
         if research_pack:
             pack["research_context"] = research_pack
+            pack["research_pack"] = research_pack
         self.engine._add_step_to_history(
             state,
             "D",
