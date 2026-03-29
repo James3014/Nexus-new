@@ -16,11 +16,12 @@ class PilotSession:
     pending_action: Optional[str] = None
 
     def masked_api_key(self) -> str:
-        if not self.api_key:
+        key = self.api_key
+        if not key:
             return "(not set)"
-        if len(self.api_key) <= 4:
-            return "*" * len(self.api_key)
-        return f"{self.api_key[:4]}***"
+        if len(key) <= 4:
+            return "*" * len(key)
+        return f"{key[:4]}***"
 
     def describe(self) -> str:
         tenant_id = self.tenant_id or "(not set)"

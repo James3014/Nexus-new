@@ -7,16 +7,18 @@ from typing import Optional
 try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.key_binding import KeyBindings
+    from nexus.pilot_cli.session import PilotSession
 except Exception:  # pragma: no cover
     PromptSession = None
     KeyBindings = None
+    PilotSession = None
 
 BRACKETED_PASTE_START = b"\x1b[200~"
 BRACKETED_PASTE_END = b"\x1b[201~"
 _PROMPT_SESSION = None
 
 
-def _build_prompt_toolkit_session():
+def _build_prompt_toolkit_session(input=None, output=None):
     if PromptSession is None or KeyBindings is None:
         return None
 
@@ -26,11 +28,16 @@ def _build_prompt_toolkit_session():
     def _clear(event):
         event.app.current_buffer.reset()
 
-    return PromptSession(
-        multiline=False,
-        key_bindings=bindings,
-        wrap_lines=True,
-    )
+    kwargs = {
+        "multiline": False,
+        "key_bindings": bindings,
+        "wrap_lines": True,
+    }
+    if input is not None:
+        kwargs["input"] = input
+    if output is not None:
+        kwargs["output"] = output
+    return PromptSession(**kwargs)
 
 
 def _should_use_prompt_toolkit() -> bool:

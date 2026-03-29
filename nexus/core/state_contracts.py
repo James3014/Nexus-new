@@ -168,6 +168,8 @@ class NexusState(BaseModel):
     token_fallback_est: int = 0
     token_system_overhead: int = 0
     token_capture_status: str = "unknown"
+    trace_id: str = ""       # W3C TraceContext trace-id (hex, 32 chars)
+    span_id: str = ""        # W3C TraceContext span-id (hex, 16 chars)
     phase_tokens: Dict[str, int] = Field(default_factory=dict)
     audit_pass_count: int = 0
     retry_count: int = 0

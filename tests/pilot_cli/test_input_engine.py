@@ -161,20 +161,16 @@ def test_build_prompt_toolkit_session_enables_multiline_submit(monkeypatch):
     source = inspect.getsource(_build_prompt_toolkit_session)
 
     assert '@bindings.add("escape")' in source
-    assert "multiline=False" in source
+    assert '"multiline": False' in source
 
 
 def test_prompt_toolkit_session_accepts_bracketed_paste_as_single_message():
     if create_pipe_input is None or DummyOutput is None:
         pytest.skip("prompt_toolkit not installed in test environment")
 
-    session = _build_prompt_toolkit_session()
-
-    assert session is not None
-
     with create_pipe_input() as pipe_input:
-        session.input = pipe_input
-        session.output = DummyOutput()
+        session = _build_prompt_toolkit_session(input=pipe_input, output=DummyOutput())
+        assert session is not None
         result_holder = {}
 
         def run_prompt():

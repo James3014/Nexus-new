@@ -7,9 +7,14 @@ class SkillSuccessMetric:
     repair_success: bool = False
     retry_count: int = 0
     pattern_reuse_rate: float = 0.0
+    entrypoint: str = ""
+    success_rate: float = 0.0
+    
+    # 🆕 Decay Tracking
+    last_used_at: str = ""
     
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        return asdict(self)  # type: ignore[arg-type]
 
 @dataclass
 class SkillFrontmatter:
@@ -27,12 +32,15 @@ class SkillFrontmatter:
     plan_strategy: str = ""
     winning_hypothesis: str = ""
     phantom_patterns: List[str] = field(default_factory=list)
+    version: str = "1.0"
     cycle_count: int = 0
     cycle_root_cause: str = ""
+    embedding_model_version: str = ""
     
     # --- VDD：驗證驅動信號 ---
     verification_commands: List[str] = field(default_factory=list)
     verification_exit_codes: List[int] = field(default_factory=list)
+    embedding_model_version: str = ""
 
     
     def to_dict(self) -> Dict[str, Any]:

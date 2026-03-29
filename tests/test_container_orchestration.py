@@ -43,7 +43,7 @@ def test_container_full_orchestration(tmp_path):
             engine.run_bug(bug_id, desc)
             
             # 5. 斷言驗證
-            mock_voice.assert_any_call(f"Nexus 啟動：偵測到 Bug {bug_id}")
+            mock_voice.assert_any_call(f"Nexus 啟動：偵測到 Bug {bug_id}", urgency="critical")
             # coordinator.py:67: self._log_trace("run_bug", bug_id, "START")
             # which calls reporter.log_trace("run_bug", bug_id, "START", 0, 0.0)
             mock_trace.assert_any_call("run_bug", bug_id, "START", 0, 0.0)

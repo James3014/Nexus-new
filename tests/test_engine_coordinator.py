@@ -114,7 +114,7 @@ def test_execute_isolated_case_routes_through_command_service(tmp_path):
     engine = NexusEngine(project_root=tmp_path, silent=True)
     sub_engine = MagicMock()
 
-    with patch("nexus.engine.coordinator.NexusCommandService") as mock_service_cls:
+    with patch("nexus.app.command_service.NexusCommandService") as mock_service_cls:
         mock_service = MagicMock()
         mock_service.execute_bug.return_value = True
         mock_service_cls.return_value = mock_service

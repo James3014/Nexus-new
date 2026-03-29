@@ -188,7 +188,7 @@ def main() -> int:
     parser.add_argument("--output-dir", default=".nexus/reports")
     parser.add_argument("--window", type=int, default=50)
     parser.add_argument("--repair-success-min", type=float, default=80.0)
-    parser.add_argument("--phantom-fp-max", type=float, default=5.0)
+    parser.add_argument("--phantom-fp-max", type=float, default=3.0)
     parser.add_argument("--regression-pass-min", type=float, default=95.0)
     parser.add_argument("--retry-spike-factor", type=float, default=2.0)
     parser.add_argument("--retry-abs-max", type=float, default=1.0)

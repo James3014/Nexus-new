@@ -44,8 +44,11 @@ class _DummyHealthEvaluator:
 
 
 class _DummyResearchPolicy:
-    def should_research(self, decision, task_desc):
-        return False
+    def route(self, decision, task_desc, **kwargs):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            should_research=False, mode="skip", reason="dummy", rounds=0, stable_wins=0
+        )
 
 
 class _DummyPlanner:

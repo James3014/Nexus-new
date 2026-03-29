@@ -220,5 +220,5 @@ def test_pipeline_records_c_before_commander_completion():
     assert ok is True
     assert phase_calls[-1] == "C"
     engine.commander.next_step.assert_has_calls(
-        [call(status="started"), call(status="started"), call(status="completed", state=ANY)]
+        [call(status="started"), call(status="completed", state=ANY)]
     )

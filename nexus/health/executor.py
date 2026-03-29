@@ -37,6 +37,7 @@ class RepairExecutor:
             if total_timeout_sec is not None
             else None
         )
+        self._last_sandbox_report: dict[str, object] = {}
 
     def execute(self, plan: RepairPlan) -> RepairExecutionResult:
         if not plan.actions:
@@ -50,7 +51,7 @@ class RepairExecutor:
         manifest_path: Path | None = None
         task_runner_invoked = False
         return_codes: dict[str, int] = {}
-        telemetry: dict[str, object] = {"sandbox_attempted": False, "sandbox_passed": None}
+        telemetry: dict[str, object] = {"sandbox_attempted": False, "sandbox_passed": None, "sandbox_report": self._last_sandbox_report}
         success = True
         started_at = time.monotonic()
 
@@ -161,7 +162,8 @@ class RepairExecutor:
         )
 
     def _write_manifest(self, actions, root: Optional[Path] = None) -> Path:
-        manifest_root = Path(root) if root is not None else self.repo_root
+        manifest_root = Path(root) if root is not None else self.repo_root / ".nexus" / "records" / "auto-repair"
+        manifest_root.mkdir(parents=True, exist_ok=True)
         fd, temp_path = tempfile.mkstemp(prefix="nexus-auto-repair-", suffix=".yaml", dir=str(manifest_root))
         os.close(fd)
         manifest_path = Path(temp_path)
@@ -256,7 +258,9 @@ class RepairExecutor:
         except Exception as exc:
             return 1, f"sandbox_error:{type(exc).__name__}:{exc}"
         finally:
-            sandbox.cleanup()
+            if sandbox_root:
+                sandbox.cleanup()
+            self._last_sandbox_report = sandbox.sandbox_report
 
     def _write_evidence_json(self, return_codes: dict[str, int], notes: list[str], telemetry: dict[str, object]) -> Path:
         evidence_dir = self.repo_root / ".nexus" / "runs" / "latest"

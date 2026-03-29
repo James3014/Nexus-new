@@ -1,4 +1,5 @@
 import json
+from typing import Dict, Any
 
 from nexus.pilot_cli.fastlane_formatter import (
     build_fastlane_prompt,
@@ -20,8 +21,8 @@ def gemini_endpoint(model: str, api_key: str) -> str:
     )
 
 
-def gemini_payload(user_request: str) -> dict:
-    payload = {
+def gemini_payload(user_request: str) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
         "contents": [{"parts": [{"text": build_fastlane_prompt(user_request, LONG_INPUT_THRESHOLD)}]}],
         "generationConfig": {
             "temperature": 0.1,
@@ -57,7 +58,7 @@ def gemini_payload(user_request: str) -> dict:
 
 
 def compress_long_gemini_answer(session: PilotSession, original_prompt: str, draft_answer: str) -> str:
-    payload = {
+    payload: Dict[str, Any] = {
         "contents": [{"parts": [{"text": build_long_answer_compression_prompt(original_prompt, draft_answer)}]}],
         "generationConfig": {
             "temperature": 0.0,

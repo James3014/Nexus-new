@@ -19,6 +19,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 
 from nexus.learning.skill_scanner import scan_skill
+from nexus.learning.disk_janitor import DiskJanitor
+from nexus.learning.disk_policy import DiskPolicy
 
 
 TRUST_LEVELS = ["auto-generated", "reviewed", "tested", "production"]
@@ -42,8 +44,21 @@ class UsageEvent:
 
 
 def record_usage(skills_dir: Path, skill_id: str, task_id: str, outcome: str = "success") -> None:
-    """Append a usage event to the JSONL log."""
+    """Append a usage event to the JSONL log, rotating if necessary."""
     log_path = skills_dir / USAGE_LOG_FILENAME
+    
+    # 1. Automatic Log Rotation Trigger
+    try:
+        policy = DiskPolicy.from_env()
+        max_bytes = policy.max_log_size_mb * 1024 * 1024
+        if log_path.exists() and log_path.stat().st_size > max_bytes:
+            janitor = DiskJanitor(skills_dir.parent.parent, config=policy)
+            janitor.rotate_usage_log(skills_dir)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("auto_log_rotation_failed task_id=unknown skill_id=%s trace_id=unknown: %s", skill_id, exc)
+
+    # 2. Append event
     event = UsageEvent(
         skill_id=skill_id,
         used_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -53,22 +68,42 @@ def record_usage(skills_dir: Path, skill_id: str, task_id: str, outcome: str = "
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
 
+    # Update last_used_at in skill frontmatter
+    skill_path = skills_dir / f"{skill_id}.md"
+    if skill_path.exists():
+        content = skill_path.read_text(encoding="utf-8")
+        now_str = event.used_at
+        if re.search(r"^last_used_at:", content, re.MULTILINE):
+            content = re.sub(r"^last_used_at:.*$", f"last_used_at: {now_str}", content, flags=re.MULTILINE)
+        else:
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                parts[1] = parts[1].rstrip("\n") + f"\nlast_used_at: {now_str}\n"
+                content = "---".join(parts)
+        skill_path.write_text(content, encoding="utf-8")
+
 
 def count_successful_uses(skills_dir: Path, skill_id: str) -> int:
-    """Count successful usage events for a given skill."""
+    """Count successful usage events for a given skill (streaming, OOM-safe)."""
     log_path = skills_dir / USAGE_LOG_FILENAME
     if not log_path.exists():
         return 0
     count = 0
-    for line in log_path.read_text(encoding="utf-8").strip().split("\n"):
-        if not line.strip():
-            continue
-        try:
-            entry = json.loads(line)
-            if entry.get("skill_id") == skill_id and entry.get("outcome") == "success":
-                count += 1
-        except json.JSONDecodeError:
-            continue
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("skill_id") == skill_id and entry.get("outcome") == "success":
+                        count += 1
+                except json.JSONDecodeError:
+                    continue
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("usage_log_read_failed task_id=unknown skill_id=unknown trace_id=unknown: %s", exc)
     return count
 
 
@@ -121,14 +156,31 @@ def promote_skill(skills_dir: Path, skill_id: str, target_level: str) -> Dict[st
             }
 
     # Perform promotion: update trust_level in frontmatter
-    if trust_match:
-        new_content = content.replace(
-            trust_match.group(0),
-            f"trust_level: {target_level}",
-        )
+    parts = content.split("---", 2)
+    if len(parts) >= 3:
+        frontmatter = parts[1]
+        
+        if re.search(r"^trust_level:\s*.+$", frontmatter, re.MULTILINE):
+            frontmatter = re.sub(
+                r"^trust_level:\s*.+$",
+                f"trust_level: {target_level}",
+                frontmatter,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        else:
+            frontmatter = frontmatter.rstrip("\n") + f"\ntrust_level: {target_level}\n"
+            
+        new_content = f"---{frontmatter}---{parts[2]}"
     else:
-        # Insert trust_level after the first ---
-        new_content = content.replace("---\n", f"---\ntrust_level: {target_level}\n", 1)
+        # Fallback to safe regex if file format is broken
+        new_content = re.sub(
+            r"^trust_level:\s*.+$",
+            f"trust_level: {target_level}",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
 
     skill_path.write_text(new_content, encoding="utf-8")
     return {
@@ -152,6 +204,27 @@ def archive_skill(skills_dir: Path, skill_id: str) -> Dict[str, Any]:
         "success": True,
         "message": f"📦 技能 {skill_id} 已歸檔到 skills/archived/",
     }
+
+def reactivate_skill(skills_dir: Path, skill_id: str) -> Dict[str, Any]:
+    """重新啟用被衰減的技能，恢復其 trust 權重。"""
+    filename = f"{skill_id}.md" if not skill_id.endswith(".md") else skill_id
+    skill_path = skills_dir / filename
+    if not skill_path.exists():
+        return {"success": False, "message": f"技能不存在: {skill_id}"}
+
+    content = skill_path.read_text(encoding="utf-8")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if re.search(r"^last_used_at:", content, re.MULTILINE):
+        content = re.sub(r"^last_used_at:.*$", f"last_used_at: {now}", content, flags=re.MULTILINE)
+    else:
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            parts[1] = parts[1].rstrip("\n") + f"\nlast_used_at: {now}\n"
+            content = "---".join(parts)
+
+    skill_path.write_text(content, encoding="utf-8")
+    return {"success": True, "message": f"🔄 Crystal reactivated: {skill_id}"}
 
 
 def auto_promote_all(skills_dir: Path) -> List[Dict[str, Any]]:

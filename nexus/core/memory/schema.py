@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
 class EpisodicMemory(BaseModel):
@@ -15,9 +15,9 @@ class EpisodicMemory(BaseModel):
     reward: float = Field(0.0, description="該行動的獎勵或評分")
     timestamp: datetime = Field(default_factory=datetime.now, description="記錄時間")
 
-    class Config:
-        json_schema_extra = {
-            "example": {
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{
                 "run_id": "run-123",
                 "task_id": "task-456",
                 "state_before": {"file_exists": False},
@@ -25,5 +25,6 @@ class EpisodicMemory(BaseModel):
                 "state_after": {"file_exists": True},
                 "reward": 1.0,
                 "timestamp": "2024-03-19T10:00:00"
-            }
+            }]
         }
+    )

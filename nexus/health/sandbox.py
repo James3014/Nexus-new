@@ -28,11 +28,23 @@ class SpeculativeSandbox:
     def _docker_available() -> bool:
         try:
             result = subprocess.run(
-                ["docker", "info"], capture_output=True, timeout=5
+                ["docker", "info"],
+                capture_output=True,
+                check=False,
+                timeout=5
             )
             return result.returncode == 0
         except Exception:
             return False
+
+    @property
+    def sandbox_report(self) -> dict:
+        """回報沙盒執行資訊，供 outcome event 記錄"""
+        return {
+            "sandbox_mode": self.mode,
+            "docker_available": self.mode == "docker" or self._docker_available(),
+            "source_root": str(self.source_root),
+        }
 
     def fork(self) -> Path:
         if self.mode == "docker":

@@ -1,3 +1,4 @@
+from rich.console import Console
 from nexus.pilot_cli.session import PilotSession
 
 

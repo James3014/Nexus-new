@@ -28,9 +28,7 @@ from nexus.engine.health.evaluator import HealthEvaluator
 from nexus.core.review_status import ReviewStatusNormalizer
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.engine.pipeline import NexusPipeline
-from nexus.app.command_service import NexusCommandService
 from nexus.benchmark.workspace import BenchmarkWorkspace
-
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +103,10 @@ class NexusEngine:
             }
         self._memory = None
         self._policy_manager = None
+        
+        # OTel Initialization
+        from nexus.telemetry.otel_config import init_otel
+        init_otel(project_root=self.project_root)
 
     @property
     def hub(self):
@@ -162,7 +164,9 @@ class NexusEngine:
         goal_desc: str,
         case_data: dict,
     ) -> bool:
-        service = NexusCommandService(sub_engine)
+        import importlib
+        app_module = importlib.import_module("nexus.app.command_service")
+        service = app_module.NexusCommandService(sub_engine)
         if case_type == "bug":
             return service.execute_bug(
                 goal_desc,
@@ -429,10 +433,16 @@ class NexusEngine:
                 for phase in ["P", "X", "D", "R", "A", "C"]
             }
 
+            pipeline_outcome = final_state.metadata.get("pipeline_outcome", {})
+            terminal_state = pipeline_outcome.get("terminal_state", "SUCCESS" if success else "FAILED")
+            
             # 🧬 統一 Schema 數據採集 (VAR-002)
             res = {
                 "task_id": case_id,
-                "status": "PASS" if success else "FAIL",
+                "status": terminal_state,
+                "exit_code": pipeline_outcome.get("exit_code", 0 if success else 1),
+                "pregate_skip": pipeline_outcome.get("pregate_skip", False),
+                "phantom_detected": bool(final_state.metadata.get("phantom_success_reason")),
                 "tokens": final_state.total_token_usage,
                 "token_raw_model": final_state.token_raw_model,
                 "token_fallback_est": final_state.token_fallback_est,
@@ -441,9 +451,7 @@ class NexusEngine:
                 "token_source_r": final_state.phase_tokens.get("R", 0),
                 "token_capture_status": final_state.token_capture_status,
                 "phase_path": " -> ".join([h.phase for h in final_state.steps_history]),
-                "review_status": final_state.metadata.get(
-                    "last_review_status", "UNKNOWN"
-                ),
+                "review_status": final_state.metadata.get("last_review_status", "UNKNOWN"),
                 "duration": round(duration, 2),
                 "health": final_state.health_score,
                 "drift": final_state.health_metrics.drift_index,
@@ -478,6 +486,9 @@ class NexusEngine:
             fieldnames = [
                 "task_id",
                 "status",
+                "exit_code",
+                "pregate_skip",
+                "phantom_detected",
                 "tokens",
                 "token_raw_model",
                 "token_fallback_est",

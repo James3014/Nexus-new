@@ -46,8 +46,48 @@ def _build_yaml_frontmatter(fm: SkillFrontmatter) -> str:
         lines.append("verification_commands: []")
         lines.append("verification_exit_codes: []")
     
+    lines.append(f"embedding_model_version: {fm.embedding_model_version}")
     lines.append("---")
     return "\n".join(lines)
+
+def validate_frontmatter(content: str) -> tuple[bool, list[str]]:
+    """
+    Validates the SKILL.md frontmatter against the standard schema.
+    Returns (is_valid, list_of_errors).
+    """
+    errors = []
+    if not content or not content.startswith("---"):
+        return False, ["Missing YAML frontmatter block starting with '---'"]
+        
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return False, ["Malformed YAML frontmatter block"]
+        
+    yaml_text = parts[1]
+    try:
+        data = yaml.safe_load(yaml_text)
+    except Exception as e:
+        return False, [f"YAML parsing error: {e}"]
+        
+    if not isinstance(data, dict):
+        return False, ["Frontmatter is not a valid YAML dictionary"]
+        
+    required_keys = ["name", "description", "trust_level", "task_id", "created_at"]
+    for key in required_keys:
+        if key not in data:
+            errors.append(f"Missing required key: {key}")
+            
+    # Validate types and contents
+    if "trust_level" in data and data["trust_level"] not in ("auto-generated", "reviewed", "tested", "production"):
+        errors.append(f"Invalid trust_level: {data['trust_level']}")
+        
+    if "keywords" in data and not isinstance(data["keywords"], list):
+        errors.append("keywords must be a list")
+        
+    if "verification_exit_codes" in data and not isinstance(data["verification_exit_codes"], list):
+        errors.append("verification_exit_codes must be a list")
+        
+    return len(errors) == 0, errors
 
 def build_skill_artifact(
     task_id: str,

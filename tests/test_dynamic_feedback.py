@@ -10,9 +10,11 @@ class MockEngine:
     def __init__(self):
         self.max_retries = 3
         self.run_dir = Path("/tmp/mock_run")
+        self.project_root = Path("/tmp/mock_root")
         
         self.hub = MagicMock()
         self.accumulator = MagicMock()
+        self.policy_manager = MagicMock()
         self.health_evaluator = MagicMock()
         self.research_policy = MagicMock()
         self.ReviewStatusNormalizer = MagicMock()
@@ -93,6 +95,6 @@ def test_pipeline_injects_audit_failure_to_repairer():
     second_call_pack = mock_repairer.run.call_args_list[1][0][1] # (state, pack) -> pack is index 1
     
     assert "audit_feedback" in second_call_pack, "pack must contain audit_feedback"
-    assert "missing no_change_reason" in second_call_pack["audit_feedback"]
+    assert "missing_no_change_reason" in second_call_pack["audit_feedback"]
     
     print("✅ test_pipeline_injects_audit_failure_to_repairer PASSED")

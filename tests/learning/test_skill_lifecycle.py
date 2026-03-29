@@ -1,8 +1,10 @@
 """Tests for skill_lifecycle.py"""
 
 import json
+import re
 import tempfile
 from pathlib import Path
+from unittest.mock import patch, mock_open
 
 from nexus.learning.skill_lifecycle import (
     record_usage,
@@ -31,6 +33,11 @@ Some safe content.
     path.write_text(content, encoding="utf-8")
     return path
 
+
+def test_record_usage_mocked():
+    with patch("builtins.open", mock_open()) as m:
+        record_usage(Path("/tmp/skills"), "test-skill", "task-1", "success")
+        m.assert_called_once()
 
 def test_record_and_count_usage():
     with tempfile.TemporaryDirectory() as tmpdir:

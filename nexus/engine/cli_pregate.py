@@ -20,7 +20,7 @@ def run_cli_pregate(
     ]
     """
     if not commands:
-        return True, []
+        return True, [{"cmd": "_SKIPPED", "exit_code": -1, "passed": True, "pregate_skip": True}]
     
     results = []
     all_passed = True
