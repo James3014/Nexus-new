@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 from enum import Enum
 
@@ -125,66 +125,36 @@ class PhaseMetric(BaseModel):
     signals: Dict[str, Any] = Field(default_factory=dict)
      # HEALTHY, WARNING, CRITICAL
 
-# --- T 階段: Trinity & Learning ---
+# --- R02 Decomposed Sub-objects ---
 
-class TraumaRecord(BaseModel):
-    failure_signature: str
-    penalty: float = -0.5
-    expiry: Optional[datetime] = None
-
-class NexusWeights(BaseModel):
-    skill_weights: Dict[str, float] = Field(default_factory=lambda: {"generalist": 1.0})
-    trauma_records: List[TraumaRecord] = Field(default_factory=list)
-
-from pydantic import model_validator
-
-class NexusState(BaseModel):
-    schema_version: str = "1.9.0"
-    task_id: str
-    batch_id: Optional[str] = None
-    config: TaskConfig = Field(default_factory=TaskConfig)
-    current_phase: str = "P"
-    current_step_id: Optional[str] = None
-    steps_history: List[StepRecord] = []
-    external_needed: bool = False
-    external_used: List[Dict[str, Any]] = []
-    skills_used: List[Dict[str, Any]] = []
-    
-    # --- Superpowers v5.0.2 Extensions ---
-    superpowers_plan: Dict[str, Any] = Field(default_factory=dict)
-    tdd_status: TddStatus = TddStatus.NONE
-    subagents_active: bool = False
-    
-    # --- Trinity v9.0 Extensions ---
-    autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
-    policy_hit_ids: List[str] = Field(default_factory=list)
-    policy_applied: bool = False
-    execution_mode: str = "one-shot"
-    trigger_reason: str = "user"
-    
-    # --- Observability & Metrics ---
-    total_token_usage: int = 0
-    token_raw_model: int = 0
-    token_fallback_est: int = 0
-    token_system_overhead: int = 0
-    token_capture_status: str = "unknown"
-    trace_id: str = ""       # W3C TraceContext trace-id (hex, 32 chars)
-    span_id: str = ""        # W3C TraceContext span-id (hex, 16 chars)
+class TokenAccounting(BaseModel):
+    """Token 使用量追蹤"""
+    total_usage: int = 0
+    raw_model: int = 0
+    fallback_est: int = 0
+    system_overhead: int = 0
+    capture_status: str = "unknown"
     phase_tokens: Dict[str, int] = Field(default_factory=dict)
+
+class ObservabilityContext(BaseModel):
+    """追蹤與可觀測性"""
+    trace_id: str = ""
+    span_id: str = ""
+    auto_actions: List[Dict[str, Any]] = Field(default_factory=list)
+
+class AuditCounters(BaseModel):
+    """審計與重試計數器"""
     audit_pass_count: int = 0
     retry_count: int = 0
-    
-    # --- Conversation Specific Metrics (CONV-001) ---
     turn_count: int = 0
     clarification_count: int = 0
     correction_count: int = 0
     unresolved_count: int = 0
-    
-    # --- Health & Self-Check (CHK-001) ---
+
+class PhaseHealthSnapshot(BaseModel):
+    """階段健康快照"""
     health_score: float = 100.0
     health_metrics: HealthMetrics = Field(default_factory=HealthMetrics)
-    
-    # --- Phase Health Autonomy (PHA-001) ---
     pipeline_health: float = 100.0
     learning_velocity: float = 0.0
     phase_metrics: Dict[str, PhaseMetric] = Field(
@@ -197,17 +167,218 @@ class NexusState(BaseModel):
             "C": PhaseMetric()
         }
     )
-    auto_actions: List[Dict[str, Any]] = []
 
-    metadata: Dict[str, Any] = {}
-    
-    def calculate_health(self):
-        """Compatibility wrapper for the unified health scoring pipeline."""
-        from nexus.health.scoring import HealthScorer
+# --- T 階段: Trinity & Learning ---
 
-        snapshot = HealthScorer.apply_snapshot(self)
-        return snapshot.overall_score
+class TraumaRecord(BaseModel):
+    failure_signature: str
+    penalty: float = -0.5
+    expiry: Optional[datetime] = None
+
+class NexusWeights(BaseModel):
+    skill_weights: Dict[str, float] = Field(default_factory=lambda: {"generalist": 1.0})
+    trauma_records: List[TraumaRecord] = Field(default_factory=list)
+
+
+class NexusState(BaseModel):
+    schema_version: str = "2.0.0"
+    task_id: str
+    batch_id: Optional[str] = None
+    config: TaskConfig = Field(default_factory=TaskConfig)
     
+    # Execution
+    current_phase: str = "P"
+    current_step_id: Optional[str] = None
+    steps_history: List[StepRecord] = Field(default_factory=list)
+    external_needed: bool = False
+    external_used: List[Dict[str, Any]] = Field(default_factory=list)
+    skills_used: List[Dict[str, Any]] = Field(default_factory=list)
+    execution_mode: str = "one-shot"
+    trigger_reason: str = "user"
+
+    # Sub-objects (Composition)
+    tokens: TokenAccounting = Field(default_factory=TokenAccounting)
+    observability: ObservabilityContext = Field(default_factory=ObservabilityContext)
+    audit: AuditCounters = Field(default_factory=AuditCounters)
+    phase_health: PhaseHealthSnapshot = Field(default_factory=PhaseHealthSnapshot)
+
+    # Legacy (保持)
+    superpowers_plan: Dict[str, Any] = Field(default_factory=dict)
+    tdd_status: TddStatus = TddStatus.NONE
+    subagents_active: bool = False
+    autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
+    policy_hit_ids: List[str] = Field(default_factory=list)
+    policy_applied: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    # === Backward Compatibility Properties ===
+
+    # TokenAccounting
+    @property
+    def total_token_usage(self) -> int:
+        return self.tokens.total_usage
+
+    @total_token_usage.setter
+    def total_token_usage(self, v: int):
+        self.tokens.total_usage = v
+
+    @property
+    def token_raw_model(self) -> int:
+        return self.tokens.raw_model
+
+    @token_raw_model.setter
+    def token_raw_model(self, v: int):
+        self.tokens.raw_model = v
+
+    @property
+    def token_fallback_est(self) -> int:
+        return self.tokens.fallback_est
+
+    @token_fallback_est.setter
+    def token_fallback_est(self, v: int):
+        self.tokens.fallback_est = v
+
+    @property
+    def token_system_overhead(self) -> int:
+        return self.tokens.system_overhead
+
+    @token_system_overhead.setter
+    def token_system_overhead(self, v: int):
+        self.tokens.system_overhead = v
+
+    @property
+    def token_capture_status(self) -> str:
+        return self.tokens.capture_status
+
+    @token_capture_status.setter
+    def token_capture_status(self, v: str):
+        self.tokens.capture_status = v
+
+    @property
+    def phase_tokens(self) -> Dict[str, int]:
+        return self.tokens.phase_tokens
+
+    @phase_tokens.setter
+    def phase_tokens(self, v: Dict[str, int]):
+        self.tokens.phase_tokens = v
+
+    # ObservabilityContext
+    @property
+    def trace_id(self) -> str:
+        return self.observability.trace_id
+
+    @trace_id.setter
+    def trace_id(self, v: str):
+        self.observability.trace_id = v
+
+    @property
+    def span_id(self) -> str:
+        return self.observability.span_id
+
+    @span_id.setter
+    def span_id(self, v: str):
+        self.observability.span_id = v
+
+    @property
+    def auto_actions(self) -> List[Dict[str, Any]]:
+        return self.observability.auto_actions
+
+    @auto_actions.setter
+    def auto_actions(self, v: List[Dict[str, Any]]):
+        self.observability.auto_actions = v
+
+    # AuditCounters
+    @property
+    def audit_pass_count(self) -> int:
+        return self.audit.audit_pass_count
+
+    @audit_pass_count.setter
+    def audit_pass_count(self, v: int):
+        self.audit.audit_pass_count = v
+
+    @property
+    def retry_count(self) -> int:
+        return self.audit.retry_count
+
+    @retry_count.setter
+    def retry_count(self, v: int):
+        self.audit.retry_count = v
+
+    @property
+    def turn_count(self) -> int:
+        return self.audit.turn_count
+
+    @turn_count.setter
+    def turn_count(self, v: int):
+        self.audit.turn_count = v
+
+    @property
+    def clarification_count(self) -> int:
+        return self.audit.clarification_count
+
+    @clarification_count.setter
+    def clarification_count(self, v: int):
+        self.audit.clarification_count = v
+
+    @property
+    def correction_count(self) -> int:
+        return self.audit.correction_count
+
+    @correction_count.setter
+    def correction_count(self, v: int):
+        self.audit.correction_count = v
+
+    @property
+    def unresolved_count(self) -> int:
+        return self.audit.unresolved_count
+
+    @unresolved_count.setter
+    def unresolved_count(self, v: int):
+        self.audit.unresolved_count = v
+
+    # PhaseHealthSnapshot
+    @property
+    def health_score(self) -> float:
+        return self.phase_health.health_score
+
+    @health_score.setter
+    def health_score(self, v: float):
+        self.phase_health.health_score = v
+
+    @property
+    def health_metrics(self) -> HealthMetrics:
+        return self.phase_health.health_metrics
+
+    @health_metrics.setter
+    def health_metrics(self, v: HealthMetrics):
+        self.phase_health.health_metrics = v
+
+    @property
+    def pipeline_health(self) -> float:
+        return self.phase_health.pipeline_health
+
+    @pipeline_health.setter
+    def pipeline_health(self, v: float):
+        self.phase_health.pipeline_health = v
+
+    @property
+    def learning_velocity(self) -> float:
+        return self.phase_health.learning_velocity
+
+    @learning_velocity.setter
+    def learning_velocity(self, v: float):
+        self.phase_health.learning_velocity = v
+
+    @property
+    def phase_metrics(self) -> Dict[str, PhaseMetric]:
+        return self.phase_health.phase_metrics
+
+    @phase_metrics.setter
+    def phase_metrics(self, v: Dict[str, PhaseMetric]):
+        self.phase_health.phase_metrics = v
+
+    # ----------------------------------------------------
+
     def get_conversation_metadata(self) -> Dict[str, Any]:
         """安全獲取對話元數據容器"""
         return self.metadata.get("conversation", {})
@@ -240,6 +411,78 @@ class NexusState(BaseModel):
     def response_mode(self) -> str:
         """獲取當前響應模式"""
         return self.metadata.get("response_mode", "standard")
+
+    @model_validator(mode='before')
+    @classmethod
+    def map_legacy_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+            
+        # mapping token fields
+        tokens = data.get('tokens', {})
+        if not isinstance(tokens, dict):
+            tokens = tokens.model_dump() if hasattr(tokens, 'model_dump') else {}
+        for legacy_key, new_key in [
+            ('total_token_usage', 'total_usage'),
+            ('token_raw_model', 'raw_model'),
+            ('token_fallback_est', 'fallback_est'),
+            ('token_system_overhead', 'system_overhead'),
+            ('token_capture_status', 'capture_status'),
+            ('phase_tokens', 'phase_tokens'),
+        ]:
+            if legacy_key in data:
+                tokens[new_key] = data.pop(legacy_key)
+        if tokens:
+            data['tokens'] = tokens
+
+        # mapping observability
+        observability = data.get('observability', {})
+        if not isinstance(observability, dict):
+            observability = observability.model_dump() if hasattr(observability, 'model_dump') else {}
+        for legacy_key, new_key in [
+            ('trace_id', 'trace_id'),
+            ('span_id', 'span_id'),
+            ('auto_actions', 'auto_actions'),
+        ]:
+            if legacy_key in data:
+                observability[new_key] = data.pop(legacy_key)
+        if observability:
+            data['observability'] = observability
+
+        # mapping audit
+        audit = data.get('audit', {})
+        if not isinstance(audit, dict):
+            audit = audit.model_dump() if hasattr(audit, 'model_dump') else {}
+        for legacy_key, new_key in [
+            ('audit_pass_count', 'audit_pass_count'),
+            ('retry_count', 'retry_count'),
+            ('turn_count', 'turn_count'),
+            ('clarification_count', 'clarification_count'),
+            ('correction_count', 'correction_count'),
+            ('unresolved_count', 'unresolved_count'),
+        ]:
+            if legacy_key in data:
+                audit[new_key] = data.pop(legacy_key)
+        if audit:
+            data['audit'] = audit
+
+        # mapping phase_health
+        phase_health = data.get('phase_health', {})
+        if not isinstance(phase_health, dict):
+            phase_health = phase_health.model_dump() if hasattr(phase_health, 'model_dump') else {}
+        for legacy_key, new_key in [
+            ('health_score', 'health_score'),
+            ('health_metrics', 'health_metrics'),
+            ('pipeline_health', 'pipeline_health'),
+            ('learning_velocity', 'learning_velocity'),
+            ('phase_metrics', 'phase_metrics'),
+        ]:
+            if legacy_key in data:
+                phase_health[new_key] = data.pop(legacy_key)
+        if phase_health:
+            data['phase_health'] = phase_health
+
+        return data
 
     @model_validator(mode='after')
     def validate_nexus_protocols(self) -> 'NexusState':
