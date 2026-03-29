@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
+                "file": "docs/code_to_architecture_matrix.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "NEXUS_PHANTOM_GUARD_SPEC"
+              "title": "code_to_architecture_matrix"
             }
           },
           {
@@ -241,17 +241,22 @@
   },
   "active": "787f356ec3100ac6",
   "lastOpenFiles": [
+    "MagicMock/mock.workspace_root/4627439232",
+    "scripts/__pycache__/v1.8_feature_bench.cpython-312.pyc",
+    "scripts/__pycache__/v1.8_mega.cpython-312.pyc",
+    "MagicMock/mock.workspace_root/5406005184",
+    "MagicMock/mock.workspace_root/4995954304",
+    "MagicMock/mock.workspace_root/4969931856",
+    "scripts/core/__pycache__/migration_safety_validator.cpython-312.pyc",
+    "MagicMock/mock.workspace_root/5113992816",
+    "MagicMock/mock.workspace_root/5878008288",
+    "MagicMock/mock.workspace_root/5418394224",
+    "MagicMock/mock.workspace_root/5993375760",
+    "RELEASE_NOTES_V9.md",
+    "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
+    "docs/Chatgpt 評價.md",
+    "skills/learned/mock-skill-1.md",
     "docs/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
-    "scripts/ops/nexus_acceptance_check.py",
-    "Autoresearch_runtime/speed_auto_phase7_report_cn.json",
-    "Autoresearch_runtime/speed_auto_research_report_cn.json",
-    "Autoresearch_runtime/speed_auto_out/round_summary.jsonl",
-    "Autoresearch_runtime/speed_auto_out/param_state.json",
-    "Autoresearch_runtime/speed_auto_out/gate_eval.json",
-    "Autoresearch_runtime/speed_auto_out",
-    "Autoresearch_runtime/speed_base_research_report_cn.json",
-    "Autoresearch_runtime/speed_base_out/round_summary.jsonl",
-    "Autoresearch_runtime/speed_base_out/param_state.json",
     "docs/PHASE7_RESEARCH_CN.md",
     "docs/SKILLS_AUTOTUNE_RESEARCH_CN.md",
     "scripts/skills_builtin/skill-creator-advanced/SKILL.md",
@@ -271,11 +276,6 @@
     "Autoresearch/PHASE3_BASELINE_LOCK_AND_NEXT_STUDY_CN.md",
     "Autoresearch/FORMAL_RESEARCH_HARDENING_CN.md",
     "Autoresearch/data_sample.md",
-    "docs/NEXUS_GAN_LONGRUN_PLAYBOOK_CN.md",
-    "evolution/docs/specs/NEXUS_5_PILLARS_SPEC.md",
-    "evolution/docs/specs/NEXUS_AUTOMATED_EXECUTOR_SPEC.md",
-    "evolution/docs/specs/NEXUS_CAPABILITY_MATRIX_SPEC.md",
-    "evolution/docs/specs/NEXUS_CODE_ARCH_MATRIX_SPEC.md",
-    "evolution/docs/specs/NEXUS_COMMAND_SPEC.md"
+    "docs/NEXUS_GAN_LONGRUN_PLAYBOOK_CN.md"
   ]
 }

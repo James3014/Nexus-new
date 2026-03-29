@@ -133,7 +133,7 @@ class NexusPipeline:
             from nexus.telemetry.otel_config import init_otel
             init_otel(project_root=self.engine.project_root)
         except Exception:
-            pass  # OTel 初始化失敗不應阻擋
+            logger.debug("otel_init_skipped")  # OTel 初始化失敗不應阻擋
 
         from nexus.telemetry.tracer import NexusTracer
         tracer = NexusTracer()
@@ -203,7 +203,7 @@ class NexusPipeline:
                     kwargs["plan_hint"] = f"歷史成功策略: {strategies[0]}"
                     state.metadata["inherited_plan_strategy"] = strategies[0]
                     logger.info("📋 P 階段：繼承歷史策略 → %s", strategies[0])
-            except Exception as exc:
+            except (ImportError, FileNotFoundError) as exc:
                 logger.debug("p_phase_learning_skip: %s", exc)
 
             decision = hub.make_pre_routing_decision(task_id, {"type": task_type, **(context or {})})
@@ -246,7 +246,7 @@ class NexusPipeline:
                         if prior:
                             state.metadata["prior_winning_hypotheses"] = prior
                             logger.info("🔬 X 階段：找到 %d 個歷史勝出假設", len(prior))
-                    except Exception as exc:
+                    except (ImportError, FileNotFoundError) as exc:
                         logger.debug("x_phase_learning_skip: %s", exc)
 
                     if research_decision.mode == "experimental" and state.metadata.get("research_workspace"):
@@ -279,7 +279,7 @@ class NexusPipeline:
                         research_path = self.engine.run_dir / "research_pack.json"
                         research_path.write_text(json.dumps(research_pack, ensure_ascii=False, indent=2), encoding="utf-8")
                         state.metadata["research_pack_path"] = str(research_path)
-                    except Exception as exc:
+                    except (OSError, TypeError) as exc:
                         logger.warning("research_pack_write_failed: %s", exc)
                     accumulator.record(state, "X", research_pack, overhead=50)
                     self.engine._add_step_to_history(
@@ -334,7 +334,7 @@ class NexusPipeline:
                                         skill_dict["_embedding_version_mismatch"] = True
                                         skill_dict["score"] = round(skill_dict["score"] * 0.5, 3)  # 降權而非丟棄
                                         logger.warning("⚠️ Embedding version mismatch for skill %s, de-weighted score.", skill_dict["skill_id"])
-                    except Exception as skill_exc:
+                    except (ImportError, FileNotFoundError, ValueError) as skill_exc:
                         logger.warning("learned_skill_lookup_failed: %s", skill_exc)
                     self.engine._add_step_to_history(
                         state,
@@ -353,7 +353,7 @@ class NexusPipeline:
                             elif best.get("cycle_root_cause") == "insufficient_diag":
                                 pack["force_deep_diagnosis"] = True
                                 logger.info("🔄 歷史循環根因=insufficient_diag，強制深度診斷")
-                    except Exception as exc:
+                    except (ValueError, KeyError, TypeError, AttributeError) as exc:
                         logger.debug("r_phase_cycle_prevention_skip: %s", exc)
 
                     # --- R/A Stage: Repair Loop ---
@@ -428,7 +428,7 @@ class NexusPipeline:
                                 },
                             )
                             append_skill_outcome_event(self.engine.project_root, event)
-                        except Exception as exc:
+                        except (OSError, RuntimeError, ValueError) as exc:
                             logger.warning("skill_outcome_event_write_failed: %s", exc)
                         success = True
                     while (not dry_run_mode) and repair_attempts < self.engine.max_retries:
@@ -463,8 +463,8 @@ class NexusPipeline:
                                     pack["skill_context"] = full_skill[:2000]
                                     state.metadata["skill_context_loaded"] = best_skill_id
                                     logger.info("📚 Loaded skill context: %s", best_skill_id)
-                        except Exception as skill_ctx_exc:
-                            logger.warning("skill_context_load_failed: %s", skill_ctx_exc)
+                        except (ImportError, FileNotFoundError, ValueError) as skill_ctx_exc:
+                            logger.warning("skill_context_load_fallback: %s", skill_ctx_exc)
 
                         with tracer.phase_span('R', task_id=task_id) as r_span:
                             res = repairer.run(state, pack)
@@ -542,7 +542,7 @@ class NexusPipeline:
                                     review_status_raw = "REJECTED"
                                     result_object["cli_pregate_rejected"] = True
                                     logger.info("🚫 CLI Pre-Gate 攔截：強制退回修復重試")
-                        except Exception as exc:
+                        except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
                             logger.debug("cli_pregate_skip: %s", exc)
 
                         # Log R (Repair) phase
@@ -581,7 +581,7 @@ class NexusPipeline:
                                 if "missing_physical_proof" in known_phantoms:
                                     state.metadata["require_strict_proof"] = True
                                 logger.info("🛡️ A 階段：預載 %d 個歷史幻覺模式", len(known_phantoms))
-                        except Exception as exc:
+                        except (ImportError, FileNotFoundError, ValueError) as exc:
                             logger.debug("a_phase_learning_skip: %s", exc)
 
                         with tracer.phase_span('A', task_id=task_id) as a_span:
@@ -634,7 +634,7 @@ class NexusPipeline:
                                 },
                             )
                             append_skill_outcome_event(self.engine.project_root, event)
-                        except Exception as exc:
+                        except (OSError, RuntimeError, ValueError) as exc:
                             logger.warning("skill_outcome_event_write_failed: %s", exc)
 
                         if audit_success:
@@ -684,7 +684,7 @@ class NexusPipeline:
                                             "attempt": repair_attempts,
                                         })
                                         break  # 跳出 R↔A，讓外層邏輯決定是否重進 P
-                                except Exception as esc_exc:
+                                except (ValueError, TypeError, KeyError) as esc_exc:
                                     logger.debug("escalation_analysis_failed: %s", esc_exc)
 
                             logger.warning(f"🔄 Audit Rejected. Retrying repair (Status: {status})")
@@ -744,7 +744,7 @@ class NexusPipeline:
                         cycle = analyze_cycle(state.metadata.get("rejection_history", []))
                         state.metadata["cycle_root_cause"] = cycle["root_cause"]
                         state.metadata["cycle_analysis"] = cycle
-                    except Exception as exc:
+                    except (ValueError, TypeError, KeyError) as exc:
                         logger.debug("c_phase_cycle_analysis_failed: %s", exc)
 
                     # 🆕 記錄 P 階段實際使用的策略（供下次 P 階段讀取）
@@ -767,7 +767,7 @@ class NexusPipeline:
                         commit_sha = subprocess.check_output(
                             ["git", "rev-parse", "HEAD"], cwd=str(self.engine.project_root), stderr=subprocess.DEVNULL
                         ).decode().strip()
-                    except Exception:
+                    except (subprocess.CalledProcessError, OSError, FileNotFoundError):
                         pass
                         
                     outcome_v2 = NexusOutcomeV2(
@@ -867,12 +867,12 @@ class NexusPipeline:
                                                     "task_id": state.task_id,
                                                     "registry_path": str(exchange.registry.db_path),
                                                 })
-                                    except Exception as share_exc:
+                                    except (OSError, ConnectionError, RuntimeError, ValueError) as share_exc:
                                         logger.warning("skill_push_failed: %s", share_exc)
-                            except Exception as artifact_exc:
+                            except (ValueError, TypeError, OSError) as artifact_exc:
                                 logger.warning("skill_artifact_generation_failed: %s", artifact_exc)
 
-                        except Exception as exc:
+                        except (OSError, RuntimeError, ValueError) as exc:
                             logger.warning("skill_outcome_event_write_failed: %s", exc)
                         self.engine.state_io.save_global_state(state)
                         self.engine.commander.next_step(status="completed", state=state)
@@ -898,7 +898,7 @@ class NexusPipeline:
                                 metadata={"status": "FAILED", "audit_status": "REJECTED", "source": "pipeline.crystallize"},
                             )
                             append_skill_outcome_event(self.engine.project_root, fail_event)
-                        except Exception as exc:
+                        except (OSError, RuntimeError, ValueError) as exc:
                             logger.warning("skill_outcome_event_write_failed: %s", exc)
 
                     # Health Evaluation

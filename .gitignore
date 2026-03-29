@@ -9,6 +9,9 @@ __pycache__/
 .drclaw_session.json
 drclaw_audit.log
 
+# Nexus Data
+.nexus/records/auto-repair/
+
 # Nexus Runtime Artifacts
 .nexus/
 .musestate

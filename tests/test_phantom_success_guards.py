@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import ANY, MagicMock, call
+from unittest.mock import ANY, MagicMock, call, patch
 
 from nexus.engine.pipeline import NexusPipeline
 from nexus.services.reviewer import CodexLoopV2
@@ -83,7 +83,8 @@ def test_reviewer_rejects_when_patch_apply_succeeds_but_missing_proof():
     patcher.apply.assert_called_once()
 
 
-def test_pipeline_blocks_audit_pass_when_patch_apply_failed():
+@patch("nexus.learning.knowledge_index.KnowledgeIndex")
+def test_pipeline_blocks_audit_pass_when_patch_apply_failed(mock_ki):
     engine = MagicMock()
     engine.hub.make_pre_routing_decision.return_value = {}
     engine.hub.assemble_diag_pack.return_value = {"task": "t"}
@@ -137,7 +138,8 @@ def test_reviewer_bypass_carries_no_change_reason():
     assert result["no_change_reason"] == "audit_level=bypass"
 
 
-def test_pipeline_forces_x_phase_when_benchmark_force_research_enabled():
+@patch("nexus.learning.knowledge_index.KnowledgeIndex")
+def test_pipeline_forces_x_phase_when_benchmark_force_research_enabled(mock_ki):
     engine = MagicMock()
     engine.hub.make_pre_routing_decision.return_value = {}
     engine.hub.assemble_diag_pack.return_value = {"task": "t"}
@@ -178,7 +180,8 @@ def test_pipeline_forces_x_phase_when_benchmark_force_research_enabled():
     researcher.run.assert_called_once()
 
 
-def test_pipeline_records_c_before_commander_completion():
+@patch("nexus.learning.knowledge_index.KnowledgeIndex")
+def test_pipeline_records_c_before_commander_completion(mock_ki):
     engine = MagicMock()
     engine.hub.make_pre_routing_decision.return_value = {}
     engine.hub.assemble_diag_pack.return_value = {"task": "t"}

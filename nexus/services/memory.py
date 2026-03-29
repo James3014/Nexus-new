@@ -37,7 +37,8 @@ class MemoryService:
             self.redis = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
             self.redis.ping()
             self.redis_available = True
-        except Exception:
+        except (ConnectionError, TimeoutError, ModuleNotFoundError) as e:
+            print(f"⚠️ [MemoryService] Redis init failed: {e}")
             self.redis_available = False
 
     def _get_db(self):
@@ -63,7 +64,7 @@ class MemoryService:
                             # 🧪 v9 M2: 建立 FTS 索引 (限制: 單一欄位)
                             tbl.create_fts_index("condition", replace=True)
                             print(f"✅ [MemoryService] Initialized 'policy' table with FTS index on 'condition'")
-                    except Exception as e:
+                    except (OSError, ValueError, RuntimeError) as e:
                         print(f"⚠️ [MemoryService] Auto-init failed: {e}")
         return self._db
 
@@ -80,7 +81,7 @@ class MemoryService:
             try:
                 # 💡 v9: 優先使用 FTS (Full Text Search)
                 results = table.search(query, query_type="fts").limit(limit).to_pandas()
-            except Exception as e:
+            except (ValueError, RuntimeError, KeyError) as e:
                 # 🛡️ Fallback: 如果 FTS 索引尚未就緒或失敗，使用 Pandas 關鍵字過濾
                 print(f"⚠️ [MemorySearch] FTS failed, using pandas fallback: {e}")
                 df = table.to_pandas()
@@ -104,7 +105,7 @@ class MemoryService:
                     "source": "lancedb-fts" if "_score" in row.index else "lancedb-fallback"
                 })
             return reminders
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             print(f"⚠️ [MemorySearch] Critical failure: {e}")
             return []
 
@@ -135,7 +136,7 @@ class MemoryService:
                         )
                         if len(reminders) >= limit:
                             return reminders
-            except Exception:
+            except (ValueError, KeyError, OSError, json.JSONDecodeError):
                 continue
         return reminders
 
@@ -176,7 +177,7 @@ class MemoryService:
                     deprecated_count = len(df[df['confidence'] < 0.3])
                     if deprecated_count > 0:
                         print(f"⚠️ [MemoryService] {deprecated_count} policies are now deprecated due to poor performance.")
-        except Exception as e:
+        except (ValueError, OSError, RuntimeError) as e:
             print(f"⚠️ [MemoryService] M3 Ingestion failed: {e}")
 
     def aggregate_memory(self, query: Optional[str] = None) -> Dict[str, Any]:
@@ -236,7 +237,7 @@ class MemoryService:
                         )
                     if reminders:
                         return reminders
-            except Exception:
+            except (RuntimeError, ValueError, KeyError):
                 pass
 
         # 2) Fallback to local JSONL.
@@ -265,7 +266,7 @@ class MemoryService:
                     )
                     if len(reminders) >= limit:
                         break
-        except Exception:
+        except (OSError, ValueError, json.JSONDecodeError):
             return []
         return reminders
 
@@ -307,7 +308,7 @@ class MemoryService:
                 return
             table = db.open_table("fault_lessons")
             table.add([entry])
-        except Exception:
+        except (RuntimeError, ValueError):
             pass
 
     def sync_route_phase_weights(

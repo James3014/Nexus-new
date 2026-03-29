@@ -1,5 +1,9 @@
 # Nexus v9 Autonomic: Zero-Drift Intelligence 🧬💎🚀
 
+> **⚠️ Nexus 不是 Agent。Nexus 是戰甲 (Battlesuit)。**
+> 任何 AI 模型穿上 Nexus 都會獲得 P-X-D-R-A-C 六階段自癒管線與學習系統。
+> 學習系統屬於 Nexus（戰甲），不屬於穿它的模型。經驗累積在戰甲裡，換模型也不會丟失。
+
 > **Beyond loops. Autonomic evolution, experience crystallization, and fallback resilience.**
 > **超越循環。自主演進、經驗結晶與備援韌性。**
 
