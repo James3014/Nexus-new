@@ -45,10 +45,16 @@ bash /path/to/nexus/scripts/ops/install_nexus_pilot_friend.sh
 常用指令（朋友版）：
 
 - `/status`：查看目前連線狀態（Tenant / Gateway / Provider / Model）。
+- `/mode [remote|local]`：切換執行模式。
+  - `remote`：走 Gateway（一般聊天/治理）
+  - `local`：可讀取你自己的本機 workspace 內容做分析/修補建議
+- `/workspace <path>`：設定 local 模式要操作的本機專案路徑。
+- `/apply [on|off]`：local 模式下是否自動套用模型回傳的檔案修改。
 - `/gateway <url>`：切換後端 Gateway。
 - `/provider <name>`：切換供應商名稱（例如 Gemini）。
-- `/model <name>`：切換模型名稱。
-- `/govern <task>`：把任務送入治理流程。
+- `/model`：打開模型清單，用數字選模型。
+- `/model <name>`：手動切換模型名稱。
+- `/govern` 或 `/govern <task>`：把任務送入治理流程。
 - `/help`：顯示指令說明。
 - `/exit`：離開 CLI。
 
@@ -56,14 +62,20 @@ bash /path/to/nexus/scripts/ops/install_nexus_pilot_friend.sh
 
 ```text
 /status
-/model gemini-2.5-flash
+/mode local
+/workspace ~/project/my-repo
+/apply off
+/model
+/model gemini-3-flash-preview
+/govern
+（下一行輸入任務內容）
 /govern 幫我分析這段錯誤堆疊並給修復步驟
 ```
 
 ## 4) 兩種工作方式
 
-1. 聊天模式：直接問答、貼 bug、貼 log。  
-2. 治理模式：輸入 `/govern <任務內容>`，進入任務導向流程（分析、修復、回報）。
+1. `remote` 聊天/治理：直接問答、貼 bug、貼 log，或用 `/govern` 任務流。  
+2. `local` 本機工作區：讓 CLI 讀你的本機專案內容（先 `/workspace`），再做分析與修補建議。
 
 ## 5) 連到遠端 Gateway（如果有提供）
 
@@ -100,7 +112,27 @@ nexus-pilot-friend <tenant_id>
 ### Q3. `govern` 和直接聊天差在哪裡？
 
 - 直接聊天：拿來問問題、要建議、快速查錯。
-- `/govern <task>`：拿來送正式任務，讓 Gateway 走治理流程。
+- `/govern` 或 `/govern <task>`：拿來送正式任務，讓 Gateway 走治理流程。
+
+### Q4. 朋友說「它不能讀我本機檔案」
+
+要用 `local` 模式，並設定 workspace：
+
+```text
+/mode local
+/workspace /你的專案路徑
+/apply off
+```
+
+之後直接提問，CLI 會在該 workspace 內挑選相關檔案當上下文處理。
+
+### Q5. 朋友安裝後還是舊版（例如沒有 `/govern` 或 `/mode`）
+
+直接重跑安裝即可：
+
+```bash
+curl -fsSL http://100.82.155.88:5005/install/nexus-pilot-friend.sh | bash
+```
 
 ## 7) 安全說明
 
