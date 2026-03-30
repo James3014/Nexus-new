@@ -24,6 +24,16 @@ class PipelineCrystalMixin:
         """主入口：執行 C 階段結晶邏輯。"""
         signals = self._collect_crystal_signals(ctx, success, tracer)
         
+        # 🔧 FIX: 先觸發 LearningScorer 計算 pattern_reuse_rate / next_run_hit_rate，
+        # 再寫入 outcome event，否則 learning signal 永遠為 0.0。
+        try:
+            from nexus.core.learning_evidence import LearningEvidenceBuilder
+            from nexus.core.learning_scorer import LearningScorer
+            evidence = LearningEvidenceBuilder.build(ctx.state)
+            LearningScorer.apply(ctx.state, evidence)
+        except Exception as exc:
+            logger.warning("pre_crystallize_learning_score_failed: %s", exc)
+        
         if success:
             self._handle_crystallize_success(ctx, signals)
         else:

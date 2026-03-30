@@ -23,11 +23,14 @@ def main() -> int:
         print(f"\n[Run {i}/{args.runs}] Executing {args.case_type} benchmark...")
         start_time = time.time()
         
-        cmd = ["uv", "run", "python", "-m", "pytest", "tests/"] if args.case_type == "regression" else ["uv", "run", "python", "-m", "pytest", "tests/integration/test_incident_replay.py"]
-        
-        # In a real calibration, we'd trigger the actual workload.
-        # We'll just run pytest as a placeholder if case_type isn't specified, 
-        # or another script. For simplicity, we'll assume `scripts/replay_case.py` or similar is used.
+        if args.case_type == "self-heal":
+            cmd = ["uv", "run", "python", "scripts/nexus_cli.py", "nexus:self-heal", "--mode", "standard"]
+        elif args.case_type == "benchmark":
+            cmd = ["uv", "run", "python", "scripts/nexus_cli.py", "nexus:benchmark", "--framework", "pytest", "--tasks", "1", "--output", "ci_calibration.csv"]
+        elif args.case_type == "regression" or args.case_type == "acceptance":
+            cmd = ["uv", "run", "python", "-m", "pytest", "tests/contracts/"]
+        else:
+            cmd = ["uv", "run", "python", "-m", "pytest", "tests/integration/test_incident_replay.py"]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
             warning_count = result.stderr.count("WARNING")
