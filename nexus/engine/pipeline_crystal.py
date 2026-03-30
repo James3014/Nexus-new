@@ -3,6 +3,7 @@ import dataclasses
 import os
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from nexus.core.protocols import PipelineContextProtocol
 from nexus.learning.cycle_analyzer import analyze_cycle
@@ -165,8 +166,11 @@ class PipelineCrystalMixin:
                 metadata={"status": "COMPLETED", "audit_status": "APPROVED", "source": "pipeline.crystallize"},
             )
             c_event = build_outcome_event(payload)
-            append_skill_outcome_event(self.engine.project_root, c_event)
+            root_path = Path(getattr(self.engine, "project_root", ".")) if hasattr(self, "engine") else Path(".")
+            print(f"DEBUG: writing outcome event to {root_path.resolve()}")
+            append_skill_outcome_event(root_path, c_event)
             self._build_and_share_skill(ctx, c_event)
+
 
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("skill_outcome_event_write_failed: %s", exc)
@@ -251,6 +255,7 @@ class PipelineCrystalMixin:
                 metadata={"status": "FAILED", "audit_status": "REJECTED", "source": "pipeline.crystallize"}
             )
             fail_event = build_outcome_event(payload)
-            append_skill_outcome_event(self.engine.project_root, fail_event)
+            root_path = Path(getattr(self.engine, "project_root", ".")) if hasattr(self, "engine") else Path(".")
+            append_skill_outcome_event(root_path, fail_event)
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("skill_outcome_event_write_failed: %s", exc)

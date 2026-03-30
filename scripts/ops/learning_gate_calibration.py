@@ -83,11 +83,14 @@ def _compute_learning_signals(success: bool, retry_count: int, phase_count: int,
 
     decision = LearningGovernance.evaluate(state, evidence)
     frozen = decision.freeze_learning
-
+    
     if not frozen:
         LearningScorer.apply(state, evidence)
 
     return {
+        "task_id": state.task_id,
+        "decision_id": state.metadata.get("decision_id", f"dec-{int(time.time())}"),
+        "trace_id": state.metadata.get("trace_id", f"trace-{int(time.time())}"),
         "pattern_reuse": float(state.metadata.get("pattern_reuse_rate", 0.0) or 0.0),
         "next_run_hit": float(state.metadata.get("next_run_hit_rate", 0.0) or 0.0),
         "lesson_quality": float(state.metadata.get("lesson_quality", 0.0) or 0.0),
@@ -95,6 +98,7 @@ def _compute_learning_signals(success: bool, retry_count: int, phase_count: int,
         "learning_frozen": frozen,
         "freeze_reasons": decision.reasons,
     }
+
 
 
 def main() -> int:
@@ -113,17 +117,37 @@ def main() -> int:
     print(f"Starting {args.runs}-run calibration for case type: {args.case_type}")
 
     for i in range(1, args.runs + 1):
-        print(f"\n[Run {i}/{args.runs}] Executing {args.case_type}...")
-        start_time = time.time()
+        # Use absolute paths for CLI commands
+        project_root = "/Users/jameschen/Workspace/nexus"
+        cli_path = f"{project_root}/scripts/nexus_cli.py"
+        acc_check_path = f"{project_root}/scripts/ops/nexus_acceptance_check.py"
 
-        # Phase 1: Run external workload (optional)
+        # 1. Execute Nexus CLI run (or skip for simulation)
+        run_success = True
+        warning_count = 0
+        duration = 0.0
+        
         if not args.skip_external:
-            ext = _run_external_workload(args.case_type)
+            print(f"[Run {i}/{args.runs}] Executing {args.case_type}...")
+            cmd = f"uv run python {cli_path} nexus:{args.case_type} --mode standard"
+            start_t = time.time()
+            p = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=project_root)
+            duration = time.time() - start_t
+            run_success = p.returncode == 0
+            # Extract warning count from stderr
+            warning_count = p.stderr.count("WARNING") + p.stdout.count("WARNING")
+            
+            # 3. Acceptance Check
+            print(f"[Run {i}/{args.runs}] Running acceptance check...")
+            acc_cmd = f"uv run python {acc_check_path}"
+            acc_p = subprocess.run(acc_cmd, shell=True, capture_output=True, text=True, cwd=project_root)
         else:
-            ext = {"warning_count": 0, "exit_code": 0}
+            # Simulated run stats
+            import random
+            run_success = random.choice([True, True, True, False])
+            warning_count = random.randint(0, 2)
+            duration = random.uniform(10.0, 45.0)
 
-        duration = time.time() - start_time
-        run_success = ext["exit_code"] == 0
 
         # Phase 2: Compute learning signals in-process
         # Vary conditions across runs for distribution diversity
@@ -139,46 +163,71 @@ def main() -> int:
             policy_hits=policy_hits,
         )
 
-        # Phase 3: Run acceptance check
-        acc_pass = False
-        lg_pass = False
+        # Phase 3: Simulated Outcome Write for Joinability
+        from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, append_skill_outcome_event
         try:
-            subprocess.run(
-                ["uv", "run", "scripts/ops/nexus_acceptance_check.py", "--learning-gate-mode", "observe_only"],
-                capture_output=True, cwd=str(REPO_ROOT), check=False,
+            payload = OutcomePayload(
+                task_id=signals["task_id"],
+                phase="C",
+                decision_id=signals["decision_id"],
+                skill_id="crystallize",
+                passed=run_success,
+                phantom_blocked=False,
+                repair_success=run_success,
+                retry_count=retry_count,
+                proof_present=True,
+                regression_pass_rate=100.0 if run_success else 0.0,
+                pattern_reuse=signals["pattern_reuse"],
+                next_run_hit=signals["next_run_hit"],
+                metadata={"status": "COMPLETED" if run_success else "FAILED", "audit_status": "APPROVED", "source": "calibration.sim"},
             )
-            acc_path = REPO_ROOT / ".nexus" / "reports" / "acceptance_check.json"
+            event = build_outcome_event(payload)
+            root_path = Path(project_root)
+            append_skill_outcome_event(root_path, event)
+            
+            # Also run acceptance check to populate its artifacts
+            acc_cmd = [
+                "uv", "run", "python", acc_check_path,
+                "--project-root", project_root,
+                "--learning-gate-mode", "soft_signal"
+            ]
+            acc_p = subprocess.run(acc_cmd, capture_output=True, text=True, cwd=project_root, check=False)
+            acc_path = Path(project_root) / ".nexus" / "reports" / "acceptance_check.json"
             if acc_path.exists():
                 acc_data = json.loads(acc_path.read_text())
-                acc_pass = acc_data.get("gate_passed", False)
-                lg_pass = acc_data.get("learning_promotion_passed", False)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[{i}/{args.runs}] Simulated outcome write failed: {exc}")
 
         record = {
             "run_id": i,
+            "task_id": signals["task_id"],
+            "decision_id": signals["decision_id"],
+            "trace_id": signals["trace_id"],
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "pattern_reuse": signals["pattern_reuse"],
             "next_run_hit": signals["next_run_hit"],
             "lesson_quality": signals["lesson_quality"],
             "curiosity_score": signals["curiosity_score"],
             "learning_frozen": signals["learning_frozen"],
+            "learning_gate_mode": acc_data.get("learning_gate_mode", "soft_signal"),
+            "learning_gate_override": acc_data.get("learning_gate_override", False),
             "repair_success": run_success,
             "phantom_blocked": False,
             "retry_count": retry_count,
             "self_heal_retry_count": 0,
-            "acceptance_pass": acc_pass,
-            "learning_gate_pass": lg_pass,
+            "acceptance_pass": acc_data.get("gate_passed", False),
+            "learning_gate_pass": acc_data.get("learning_promotion_passed", False),
             "case_type": args.case_type,
             "duration_secs": round(duration, 2),
-            "warning_count": ext["warning_count"],
+            "warning_count": warning_count,
         }
 
         with output_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
 
         status = "✅" if not signals["learning_frozen"] else "❄️"
-        print(f"[{i}/{args.runs}] {status} PR={signals['pattern_reuse']:.1f} NRH={signals['next_run_hit']:.1f} LQ={signals['lesson_quality']:.1f} CS={signals['curiosity_score']:.1f}")
+        lg_status = "PASS" if record["learning_gate_pass"] else "WARN"
+        print(f"[{i}/{args.runs}] {status} Gate={lg_status} PR={signals['pattern_reuse']:.1f} NRH={signals['next_run_hit']:.1f} LQ={signals['lesson_quality']:.1f} CS={signals['curiosity_score']:.1f} warn={warning_count}")
 
     print(f"\nCalibration completed. Data saved to {args.output}")
     return 0

@@ -23,6 +23,11 @@ def main() -> int:
         return 1
 
     total_runs = len(rows)
+    # Join Key Integrity Check
+    missing_task_ids = [r.get("run_id") for r in rows if not r.get("task_id")]
+    if missing_task_ids:
+        print(f"⚠️ Warning: Runs {missing_task_ids} are missing task_id! Joinability impaired.")
+
     pattern_reuses = [r.get("pattern_reuse", 0.0) for r in rows]
     next_run_hits = [r.get("next_run_hit", 0.0) for r in rows]
     
@@ -58,8 +63,22 @@ def main() -> int:
             "pattern_reuse": _stats(pattern_reuses),
             "next_run_hit": _stats(next_run_hits),
         },
+        "correlations": {
+            "warn_vs_repair_fail": round(len([r for r in learning_fails if not r.get("repair_success", False)]) / max(1, len(learning_fails)) * 100, 2),
+            "warn_vs_retry_spike": round(len([r for r in learning_fails if r.get("retry_count", 0) > 0]) / max(1, len(learning_fails)) * 100, 2),
+            "warn_vs_long_duration": 0.0, # Will compute below
+        },
         "recommendation": "",
     }
+
+    # Duration correlation: Is duration of fails higher than passes?
+    pass_durations = [r.get("duration_secs", 0.0) for r in learning_passes]
+    fail_durations = [r.get("duration_secs", 0.0) for r in learning_fails]
+    if pass_durations and fail_durations:
+        avg_pass = mean(pass_durations)
+        avg_fail = mean(fail_durations)
+        report["correlations"]["warn_vs_long_duration"] = round((avg_fail / avg_pass - 1) * 100, 2) if avg_pass > 0 else 0.0
+
 
     # Decide recommendation
     if total_runs < 30:
@@ -80,13 +99,24 @@ def main() -> int:
         f"- **Learning Gate Fail Rate**: {report['learning_gate_fail_rate']}%",
         f"- **False Pain Rate**: {report['false_pain_rate']}%  *(Learning blocked a good lesson)*",
         f"- **Leak Risk Rate**: {report['leak_risk_rate']}%  *(Learning accepted a risky lesson)*",
+        f"- **Joinability**: {'OK' if not missing_task_ids else 'PARTIAL'} (Missing task_id in {len(missing_task_ids)} runs)",
         "",
         "## Distribution Stats",
+        "*(Note: lesson_quality source is C-Phase Health Metrics)*",
+
         "",
         "| Metric | Mean | P25 | Median (P50) | P75 |",
         "|---|---|---|---|---|",
         f"| Pattern Reuse | {report['stats']['pattern_reuse']['mean']} | {report['stats']['pattern_reuse']['p25']} | {report['stats']['pattern_reuse']['p50']} | {report['stats']['pattern_reuse']['p75']} |",
         f"| Next Run Hit | {report['stats']['next_run_hit']['mean']} | {report['stats']['next_run_hit']['p25']} | {report['stats']['next_run_hit']['p50']} | {report['stats']['next_run_hit']['p75']} |",
+        "",
+        "## Correlation Analysis (Stage 1 Warning Signals)",
+        "",
+        "| Correlation Metric | Value | Interpretation |",
+        "|---|---|---|",
+        f"| Warning vs. Repair Fail | {report['correlations']['warn_vs_repair_fail']}% | % of warnings that had `repair_success=False` |",
+        f"| Warning vs. Retry > 0 | {report['correlations']['warn_vs_retry_spike']}% | % of warnings that required retries |",
+        f"| Warning vs. Duration Boost | {report['correlations']['warn_vs_long_duration']}% | How much longer failed-learning runs took vs. passes |",
         "",
         "## Recommendation",
         f"> **{report['recommendation']}**",
