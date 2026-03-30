@@ -5,6 +5,7 @@ import json
 from nexus.core.state_contracts import NexusState, HealthMetrics
 from nexus.health.models import HealthDiagnosis, HealthSnapshot, HealthTrigger, PhaseScore, RepairExecutionResult
 from nexus.health.service import SelfHealService
+from nexus.services.memory import FaultLesson
 
 
 class _ExecutorStub:
@@ -276,7 +277,7 @@ ModuleNotFoundError: No module named 'non_existent_pkg'
     )
 
     service = SelfHealService(Path(tmp_path), executor=executor)
-    service.memory_service.record_fault_lesson(
+    service.memory_service.record_fault_lesson(FaultLesson(
         fault_hash="preseed",
         error_type="ModuleNotFoundError",
         diagnosis_kind="environment_failure",
@@ -284,7 +285,7 @@ ModuleNotFoundError: No module named 'non_existent_pkg'
         repair_patch="auto.repair.environment",
         audit_pass_rate=1.0,
         metadata={},
-    )
+    ))
 
     # Run once to generate real hash and persist a lesson.
     cycle = service.run_cycle(state)

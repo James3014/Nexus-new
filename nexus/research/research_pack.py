@@ -11,44 +11,49 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def build_research_pack(
-    *,
-    task: str,
-    mode: str,
-    source: str,
-    reason: str,
-    hypotheses: List[Dict[str, Any]] | None = None,
-    experiments: List[Dict[str, Any]] | None = None,
-    winner: Dict[str, Any] | None = None,
-    eliminated: List[str] | None = None,
-    rounds: int = 0,
-    time_sec: float = 0.0,
-    status: str = "SUCCESS",
-    findings: List[str] | None = None,
-    raw: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    hypotheses = hypotheses or []
-    experiments = experiments or []
-    winner = winner or {}
-    eliminated = eliminated or []
-    findings = findings or []
-    raw = raw or {}
+from dataclasses import dataclass, field
+
+@dataclass
+class ResearchContext:
+    """R1: build_research_pack 的參數物件。"""
+    task: str
+    mode: str
+    source: str
+    reason: str
+    hypotheses: List[Dict[str, Any]] = field(default_factory=list)
+    experiments: List[Dict[str, Any]] = field(default_factory=list)
+    winner: Dict[str, Any] = field(default_factory=dict)
+    eliminated: List[str] = field(default_factory=list)
+    rounds: int = 0
+    time_sec: float = 0.0
+    status: str = "SUCCESS"
+    findings: List[str] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+def build_research_pack(ctx: ResearchContext) -> Dict[str, Any]:
+    hypotheses = ctx.hypotheses or []
+    experiments = ctx.experiments or []
+    winner = ctx.winner or {}
+    eliminated = ctx.eliminated or []
+    findings = ctx.findings or []
+    raw = ctx.raw or {}
 
     return {
         "schema_version": "research_pack.v1",
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "task": task,
-        "mode": mode,
-        "source": source,
-        "status": status,
-        "reason": reason,
+        "task": ctx.task,
+        "mode": ctx.mode,
+        "source": ctx.source,
+        "status": ctx.status,
+        "reason": ctx.reason,
         "hypotheses": hypotheses,
         "experiments": experiments,
         "winner": winner,
         "eliminated": eliminated,
         "budget_used": {
-            "rounds": int(rounds),
-            "time_sec": _as_float(time_sec, 0.0),
+            "rounds": int(ctx.rounds),
+            "time_sec": _as_float(ctx.time_sec, 0.0),
         },
         # Backward-compatible fields for existing consumers.
         "findings": findings,

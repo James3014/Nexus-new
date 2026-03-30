@@ -1,8 +1,8 @@
-from nexus.research.research_pack import build_research_pack
+from nexus.research.research_pack import build_research_pack, ResearchContext
 
 
 def test_build_research_pack_contract_shape():
-    pack = build_research_pack(
+    pack = build_research_pack(ResearchContext(
         task="fix race condition",
         mode="experimental",
         source="AUTORESEARCH_PHASE7_LOOP",
@@ -16,7 +16,7 @@ def test_build_research_pack_contract_shape():
         status="SUCCESS",
         findings=["ok"],
         raw={"tokens_used": 33},
-    )
+    ))
     assert pack["schema_version"] == "research_pack.v1"
     assert pack["budget_used"]["rounds"] == 3
     assert pack["winner"]["hypothesis_id"] == "H1"
@@ -25,12 +25,12 @@ def test_build_research_pack_contract_shape():
     assert "created_at" in pack
 
 def test_build_research_pack_edge_cases():
-    pack = build_research_pack(
+    pack = build_research_pack(ResearchContext(
         task="",
         mode="",
         source="",
         reason="",
-    )
+    ))
     assert pack["schema_version"] == "research_pack.v1"
     assert pack["budget_used"]["rounds"] == 0
     assert pack["budget_used"]["time_sec"] == 0.0

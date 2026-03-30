@@ -3,13 +3,15 @@ from unittest.mock import MagicMock
 from nexus.engine.coordinator import NexusEngine
 from nexus.core.state_contracts import NexusState
 
+from nexus.engine.config import EngineConfig
+
 @pytest.fixture
 def engine(tmp_path):
     # Setup a mock project root and engine
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "cases").mkdir()
-    return NexusEngine(project_root=project_root, run_dir=tmp_path / "run")
+    return NexusEngine(EngineConfig(project_root=project_root))
 
 def test_pipeline_bug_flow(engine, monkeypatch):
     # Mock handlers and state_io to simulate a bug run

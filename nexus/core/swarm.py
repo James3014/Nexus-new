@@ -78,7 +78,8 @@ class NexusSwarmOrchestrator:
         try:
             tree = subprocess.check_output(["find", ".", "-maxdepth", "2", "-not", "-path", "*/.*"], 
                                           cwd=p_root, text=True)
-        except:
+        except Exception as e:
+            logger.warning("Swarm tree analysis failed: %s", e)
             tree = "Tree analysis failed."
             
         # 🧪 Step 2: 模擬分析內容。

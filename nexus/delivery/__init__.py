@@ -5,7 +5,6 @@ from nexus.delivery.models import CompletionRequest
 from nexus.delivery.models import CompletionResult
 from nexus.delivery.models import CompletionStatus
 from nexus.delivery.models import TaskLevel
-from nexus.delivery.phantom_guard import compute_phantom_success
 from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.delivery.interactive import resolve_delivery_mode
 from nexus.delivery.report import render_markdown_report
@@ -20,7 +19,6 @@ __all__ = [
     "DeliveryContract",
     "TaskLevel",
     "contract_for_level",
-    "compute_phantom_success",
     "detect_inconclusive_success",
     "evaluate_completion",
     "resolve_delivery_mode",

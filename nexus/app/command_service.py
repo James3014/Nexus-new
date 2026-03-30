@@ -1,6 +1,6 @@
+from dataclasses import dataclass
 from pathlib import Path
-from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 from nexus.delivery.gate import evaluate_completion
 from nexus.delivery.models import CompletionRequest
@@ -11,6 +11,19 @@ from nexus.delivery.suggestions import suggest_verification_commands
 from nexus.health.ops import run_self_check
 from nexus.health.ops import run_health_explain
 from nexus.health.ops import run_self_heal
+
+@dataclass
+class TaskRequest:
+    """任務下發的參數封裝。"""
+    task: str
+    task_id: Optional[str] = None
+    plan_only: bool = False
+    delivery_mode: str = "standard"
+    verify_commands: Optional[List[str]] = None
+    artifact_paths: Optional[List[str]] = None
+    domain: Optional[str] = None
+    skill: Optional[str] = None
+    execution_context: Optional[Dict[str, Any]] = None
 
 class NexusCommandService:
     """🧬 v9 Command Service: CLI 授權的業務邏輯層。
@@ -69,68 +82,49 @@ class NexusCommandService:
             self.last_completion_error = result.status.value
         return result.gate_passed
         
-    def execute_bug(
-        self,
-        task: str,
-        plan_only: bool = False,
-        delivery_mode: str = "standard",
-        verify_commands: Optional[list[str]] = None,
-        artifact_paths: Optional[list[str]] = None,
-        bug_id: Optional[str] = None,
-        execution_context: Optional[dict] = None,
-    ):
+    def execute_bug(self, request: TaskRequest):
         """Execute a bug task through the sole delivery-aware service boundary."""
         import time
-        bug_id = bug_id or f"bug-{int(time.time())}"
-        merged_context = dict(execution_context or {})
-        if plan_only:
-            # Dry-run should be deterministic and fast:
-            # skip self-heal/task-runner side loops by marking benchmark_run.
+        bug_id = request.task_id or f"bug-{int(time.time())}"
+        merged_context = dict(request.execution_context or {})
+        if request.plan_only:
+            # Dry-run should be deterministic and fast
             merged_context.setdefault("benchmark_run", True)
             merged_context.setdefault("auto_repair_enabled", False)
+        
         success = self.engine.run_bug(
             bug_id=bug_id,
-            desc=task,
-            plan_only=plan_only,
-            context={"delivery_mode": delivery_mode, **merged_context},
+            desc=request.task,
+            plan_only=request.plan_only,
+            context={"delivery_mode": request.delivery_mode, **merged_context},
         )
         if not success:
             return False
         return self._run_completion_gate(
             task_name=bug_id,
             task_level=TaskLevel.SMALL_FIX,
-            delivery_mode=delivery_mode,
-            verify_commands=verify_commands,
-            artifact_paths=artifact_paths,
+            delivery_mode=request.delivery_mode,
+            verify_commands=request.verify_commands,
+            artifact_paths=request.artifact_paths,
         )
         
-    def execute_feature(
-        self,
-        task: str,
-        domain: Optional[str] = None,
-        dry_run: bool = False,
-        skill: Optional[str] = None,
-        delivery_mode: str = "standard",
-        verify_commands: Optional[list[str]] = None,
-        artifact_paths: Optional[list[str]] = None,
-        execution_context: Optional[dict] = None,
-    ):
+    def execute_feature(self, request: TaskRequest):
         """Execute a feature task through the sole delivery-aware service boundary."""
         success = self.engine.run_feature(
-            task=task,
-            context={"delivery_mode": delivery_mode, **(execution_context or {})},
-            domain=domain,
-            dry_run=dry_run,
-            skill=skill
+            task=request.task,
+            context={"delivery_mode": request.delivery_mode, **(request.execution_context or {})},
+            domain=request.domain,
+            dry_run=request.plan_only,  # 映射 dry_run 到 plan_only
+            skill=request.skill
         )
         if not success:
             return False
         return self._run_completion_gate(
-            task_name=task,
+            task_name=request.task,
             task_level=TaskLevel.FEATURE,
-            delivery_mode=delivery_mode,
-            verify_commands=verify_commands,
-            artifact_paths=artifact_paths,
+            delivery_mode=request.delivery_mode,
+            verify_commands=request.verify_commands,
+            artifact_paths=request.artifact_paths,
         )
         
     def execute_benchmark(self, framework: str, tasks: int, output: str, model: Optional[str] = None, target: Optional[str] = None):

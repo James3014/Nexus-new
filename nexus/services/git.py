@@ -75,7 +75,7 @@ class GitManager:
                                 + "\n".join([f"+{line}" for line in lines])
                                 + ("\n" if lines else "")
                             )
-                        except:
+                        except (UnicodeDecodeError, IOError):
                             pass
 
                 all_files_out = _git_run(

@@ -4,7 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .state_contracts import NexusState
+from nexus.core.state_contracts import NexusState
 from nexus.health.diagnostics import HealthDiagnostics
 from nexus.health.executor import RepairExecutor
 from nexus.health.planner import RepairPlanner

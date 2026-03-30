@@ -1,6 +1,6 @@
 import json
 import pytest
-from nexus.learning.retrieval_audit import log_retrieval_audit
+from nexus.learning.retrieval_audit import log_retrieval_audit, AuditEntry
 
 def test_retrieval_audit_logger(tmp_path):
     project_root = tmp_path / "project"
@@ -8,15 +8,17 @@ def test_retrieval_audit_logger(tmp_path):
     
     # 執行 logging
     log_retrieval_audit(
-        project_root=project_root,
-        query="test query for python error",
-        threshold=0.1,
-        top_k=3,
-        embedding_version="v2.0",
-        hits=[("skill_abc", 0.95), ("skill_def", 0.88)],
-        task_type="bug",
-        task_id="feat-123",
-        trace_id="trace-001"
+        AuditEntry(
+            query="test query for python error",
+            threshold=0.1,
+            top_k=3,
+            embedding_version="v2.0",
+            hits=[("skill_abc", 0.95), ("skill_def", 0.88)],
+            task_type="bug",
+            task_id="feat-123",
+            trace_id="trace-001"
+        ),
+        project_root=project_root
     )
     
     log_file = project_root / ".nexus" / "audit" / "retrieval_log.jsonl"

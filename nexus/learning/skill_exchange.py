@@ -104,22 +104,22 @@ class SkillExchange:
         """Hydrate SQLite row to SkillFrontmatter object."""
         try:
             kw = json.loads(row.get("keywords", "[]"))
-        except:
+        except (json.JSONDecodeError, TypeError):
             kw = []
             
         try:
             pp = json.loads(row.get("phantom_patterns", "[]"))
-        except:
+        except (json.JSONDecodeError, TypeError):
             pp = []
             
         try:
             vc = json.loads(row.get("verification_commands", "[]"))
-        except:
+        except (json.JSONDecodeError, TypeError):
             vc = []
             
         try:
             vec = json.loads(row.get("verification_exit_codes", "[]"))
-        except:
+        except (json.JSONDecodeError, TypeError):
             vec = []
 
         metric = SkillSuccessMetric(

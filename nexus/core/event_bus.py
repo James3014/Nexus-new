@@ -34,8 +34,8 @@ class NexusEventBus:
                     if line.strip()
                 ]
                 signal_file.write_text("", encoding="utf-8")  # 消費後清空
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("signal_inbox load failed: %s", e)
 
     @classmethod
     def subscribe(cls, event_type: str, handler: Callable[[Dict[str, Any]], None]) -> None:
@@ -49,8 +49,8 @@ class NexusEventBus:
             from nexus.telemetry.tracer import NexusTracer
             payload.setdefault("_trace_id", NexusTracer.current_trace_id())
             payload.setdefault("_span_id", NexusTracer.current_span_id())
-        except Exception:
-            pass  # OTel 未初始化時靜默跳過
+        except Exception as e:
+            logger.debug("OTel context injection skipped: %s", e)
 
         record = {
             "event_type": event_type,

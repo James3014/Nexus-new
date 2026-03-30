@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from nexus.core.auto_repair import AutoRepairEngine
+from nexus.health.auto_repair import AutoRepairEngine
 from nexus.core.state_contracts import NexusState
 from nexus.health.models import RepairExecutionResult
 

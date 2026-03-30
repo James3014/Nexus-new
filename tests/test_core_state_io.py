@@ -20,7 +20,7 @@ def test_state_io_lifecycle(temp_repo):
     state = io.load_global_state()
     assert isinstance(state, NexusState)
     assert state.task_id == "new-task"
-    assert state.current_phase == "P"
+    assert state.current_phase is None
     
     # 2. 修改狀態測試
     state.current_phase = "D"

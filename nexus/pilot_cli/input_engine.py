@@ -58,93 +58,126 @@ def collect_cbreak_text(
     has_pending_input_fn=None,
     reset_line_fn=None,
 ) -> str:
-    buffer = []
-    decoder = codecs.getincrementaldecoder("utf-8")()
-    has_pending_input_fn = has_pending_input_fn or (lambda: False)
-    reset_line_fn = reset_line_fn or (lambda: None)
-    saw_newline = False
-    escape_buffer = bytearray()
-    pending_escape = False
+    """採集 cbreak 模式下的輸入，處理多行貼上與逸出序列。"""
+    ctx = _CBreakContext(
+        decoder=codecs.getincrementaldecoder("utf-8")(),
+        has_pending_input_fn=has_pending_input_fn or (lambda: False),
+        reset_line_fn=reset_line_fn or (lambda: None),
+        write_fn=write_fn
+    )
 
     while True:
         chunk = read_byte_fn()
         if chunk is None:
-            if pending_escape:
-                buffer = []
-                decoder = codecs.getincrementaldecoder("utf-8")()
-                saw_newline = False
-                pending_escape = False
-                escape_buffer.clear()
-                reset_line_fn()
-                continue
-            if buffer and saw_newline:
+            if ctx.handle_timeout(): continue
+            if ctx.buffer and ctx.saw_newline:
                 write_fn("\n")
-                return "".join(buffer)
+                return "".join(ctx.buffer)
             continue
         if not chunk:
-            if buffer:
+            if ctx.buffer:
                 write_fn("\n")
-                return "".join(buffer)
+                return "".join(ctx.buffer)
             raise EOFError
 
+        # 1. 處理控制字元與換行
+        result = ctx.process_chunk(chunk)
+        if result is not None:
+            return result
+
+class _CBreakContext:
+    """維護 cbreak 輸入狀態的內部上下文。"""
+    def __init__(self, decoder, has_pending_input_fn, reset_line_fn, write_fn):
+        self.buffer = []
+        self.decoder = decoder
+        self.has_pending_input_fn = has_pending_input_fn
+        self.reset_line_fn = reset_line_fn
+        self.write_fn = write_fn
+        self.saw_newline = False
+        self.escape_buffer = bytearray()
+        self.pending_escape = False
+
+    def handle_timeout(self) -> bool:
+        """處理讀取逾時。若在逸出序列中逾時則重設。"""
+        if self.pending_escape:
+            self._reset_state()
+            self.reset_line_fn()
+            return True
+        return False
+
+    def process_chunk(self, chunk: bytes) -> Optional[str]:
+        """處理單個位元組區塊。"""
         if chunk in (b"\r", b"\n"):
-            write_fn("\n")
-            saw_newline = True
-            if has_pending_input_fn():
-                buffer.append("\n")
-                continue
-            return "".join(buffer)
+            return self._handle_newline()
+        if chunk == b"\x04": # Ctrl-D
+            return self._finalize()
+        if chunk in (b"\x7f", b"\b"): # Backspace
+            self._handle_backspace()
+            return None
+        if self.escape_buffer or chunk == b"\x1b":
+            return self._handle_escape(chunk)
+        
+        return self._handle_text(chunk)
 
-        if chunk == b"\x04":
-            if buffer:
-                write_fn("\n")
-                return "".join(buffer)
-            raise EOFError
+    def _reset_state(self):
+        self.buffer = []
+        self.decoder = codecs.getincrementaldecoder("utf-8")()
+        self.saw_newline = False
+        self.pending_escape = False
+        self.escape_buffer.clear()
 
-        if chunk in (b"\x7f", b"\b"):
-            if buffer:
-                buffer.pop()
-                write_fn("\b \b")
-            continue
+    def _handle_newline(self) -> Optional[str]:
+        self.write_fn("\n")
+        self.saw_newline = True
+        if self.has_pending_input_fn():
+            self.buffer.append("\n")
+            return None
+        return "".join(self.buffer)
 
-        if escape_buffer or chunk == b"\x1b":
-            escape_buffer.extend(chunk)
-            if bytes(escape_buffer) == b"\x1b":
-                pending_escape = True
-                continue
-            if bytes(escape_buffer) == BRACKETED_PASTE_START:
-                pending_escape = False
-                escape_buffer.clear()
-                continue
-            if bytes(escape_buffer) == BRACKETED_PASTE_END:
-                pending_escape = False
-                escape_buffer.clear()
-                write_fn("\n")
-                return "".join(buffer)
-            if BRACKETED_PASTE_START.startswith(bytes(escape_buffer)) or BRACKETED_PASTE_END.startswith(bytes(escape_buffer)):
-                continue
-            if bytes(escape_buffer).startswith(b"\x1b["):
-                pending_escape = False
-                escape_buffer.clear()
-                continue
-            buffer = []
-            decoder = codecs.getincrementaldecoder("utf-8")()
-            saw_newline = False
-            pending_escape = False
-            escape_buffer.clear()
-            reset_line_fn()
-            continue
+    def _finalize(self) -> str:
+        if self.buffer: self.write_fn("\n")
+        else: raise EOFError
+        return "".join(self.buffer)
 
+    def _handle_backspace(self):
+        if self.buffer:
+            self.buffer.pop()
+            self.write_fn("\b \b")
+
+    def _handle_escape(self, chunk: bytes) -> Optional[str]:
+        self.escape_buffer.extend(chunk)
+        eb = bytes(self.escape_buffer)
+        if eb == b"\x1b":
+            self.pending_escape = True
+            return None
+        if eb == BRACKETED_PASTE_START:
+            self.pending_escape = False
+            self.escape_buffer.clear()
+            return None
+        if eb == BRACKETED_PASTE_END:
+            self.pending_escape = False
+            self.escape_buffer.clear()
+            self.write_fn("\n")
+            return "".join(self.buffer)
+        if BRACKETED_PASTE_START.startswith(eb) or BRACKETED_PASTE_END.startswith(eb):
+            return None
+        if eb.startswith(b"\x1b["): # ANSI escape
+            self.pending_escape = False
+            self.escape_buffer.clear()
+            return None
+        # 未知逸出序列，視為非法並重設
+        self._reset_state()
+        self.reset_line_fn()
+        return None
+
+    def _handle_text(self, chunk: bytes) -> Optional[str]:
         try:
-            text = decoder.decode(chunk)
-        except UnicodeDecodeError:
-            continue
-
-        if not text:
-            continue
-
-        buffer.append(text)
-        write_fn(text)
+            text = self.decoder.decode(chunk)
+            if text:
+                self.buffer.append(text)
+                self.write_fn(text)
+        except UnicodeDecodeError: pass
+        return None
 
 
 def collect_cbreak_line(read_byte_fn, write_fn) -> str:

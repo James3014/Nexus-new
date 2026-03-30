@@ -19,7 +19,7 @@ class RepairPhaseHandler(BasePhaseHandler):
         router: Any = None,
         orchestrator_factory: Any = None,
     ):
-        super().__init__(project_root, run_dir)
+        super().__init__(project_root, run_dir, name="R", priority=300)
         self.router = router
         self.orchestrator_factory = orchestrator_factory
 

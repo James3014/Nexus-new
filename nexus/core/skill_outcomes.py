@@ -16,43 +16,48 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def build_outcome_event(
-    *,
-    task_id: str,
-    phase: str,
-    decision_id: str,
-    skill_id: str,
-    passed: bool,
-    phantom_blocked: bool,
-    repair_success: bool,
-    retry_count: int,
-    proof_present: bool,
-    regression_pass_rate: float,
-    pattern_reuse: float,
-    next_run_hit: float,
-    metadata: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    md = metadata or {}
-    fail = not passed
+from dataclasses import dataclass
+
+@dataclass
+class OutcomePayload:
+    """R1: build_outcome_event 的參數物件。"""
+    task_id: str
+    phase: str
+    decision_id: str
+    skill_id: str
+    passed: bool
+    phantom_blocked: bool = False
+    repair_success: bool = False
+    retry_count: int = 0
+    proof_present: bool = False
+    regression_pass_rate: float = 0.0
+    pattern_reuse: float = 0.0
+    next_run_hit: float = 0.0
+    metadata: Dict[str, Any] | None = None
+
+
+def build_outcome_event(payload: OutcomePayload) -> Dict[str, Any]:
+    md = payload.metadata or {}
+    fail = not payload.passed
     return {
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "task_id": str(task_id),
-        "phase": str(phase),
-        "decision_id": str(decision_id),
-        "skill_id": str(skill_id),
-        "pass": bool(passed),
+        "task_id": str(payload.task_id),
+        "phase": str(payload.phase),
+        "decision_id": str(payload.decision_id),
+        "skill_id": str(payload.skill_id),
+        "pass": bool(payload.passed),
         "fail": bool(fail),
-        "phantom_blocked": bool(phantom_blocked),
-        "regression_pass_rate": _safe_float(regression_pass_rate),
-        "self_heal_retry_count": int(max(0, retry_count)),
+        "phantom_blocked": bool(payload.phantom_blocked),
+        "regression_pass_rate": _safe_float(payload.regression_pass_rate),
+        "self_heal_retry_count": int(max(0, payload.retry_count)),
         # Anti-hallucination signals
-        "proof_present": bool(proof_present),
+        "proof_present": bool(payload.proof_present),
         # Self-healing signals
-        "repair_success": bool(repair_success),
-        "retry_count": int(max(0, retry_count)),
+        "repair_success": bool(payload.repair_success),
+        "retry_count": int(max(0, payload.retry_count)),
         # Learning signals
-        "pattern_reuse": _safe_float(pattern_reuse),
-        "next_run_hit": _safe_float(next_run_hit),
+        "pattern_reuse": _safe_float(payload.pattern_reuse),
+        "next_run_hit": _safe_float(payload.next_run_hit),
         # Optional enrichments
         "status": str(md.get("status", "")),
         "audit_status": str(md.get("audit_status", "")),

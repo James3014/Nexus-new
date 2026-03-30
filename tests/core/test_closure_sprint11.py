@@ -43,16 +43,16 @@ def test_describe_returns_non_empty_for_all_codes():
 # ────────── Closure #2: Handoff Bundle — Retention + trace_id ─────────────
 
 def test_handoff_bundle_with_trace_and_decision_id(tmp_path: Path):
-    from nexus.core.handoff_bundle import HandoffBundleWriter, HandoffRetentionPolicy
+    from nexus.core.handoff_bundle import HandoffBundleWriter, HandoffRetentionPolicy, HandoffRequest
     policy = HandoffRetentionPolicy(retention_days=30, compress=False, max_bundles=10)
     writer = HandoffBundleWriter(tmp_path, policy=policy)
-    bundle_path = writer.create(
+    bundle_path = writer.create(HandoffRequest(
         triggering_phase="audit",
         reason="Test escalation",
         task_id="task-001",
         trace_id="abc123",
         decision_id="decision-xyz",
-    )
+    ))
     assert bundle_path.exists()
     data = json.loads(bundle_path.read_text())
     assert data["trace_id"] == "abc123"
@@ -60,25 +60,25 @@ def test_handoff_bundle_with_trace_and_decision_id(tmp_path: Path):
     assert data["retention_policy"]["retention_days"] == 30
 
 def test_handoff_bundle_gzip_compression(tmp_path: Path):
-    from nexus.core.handoff_bundle import HandoffBundleWriter, HandoffRetentionPolicy
+    from nexus.core.handoff_bundle import HandoffBundleWriter, HandoffRetentionPolicy, HandoffRequest
     policy = HandoffRetentionPolicy(retention_days=30, compress=True, max_bundles=10)
     writer = HandoffBundleWriter(tmp_path, policy=policy)
-    bundle_path = writer.create(
+    bundle_path = writer.create(HandoffRequest(
         triggering_phase="plan",
         reason="Compression test",
         task_id="task-002",
-    )
+    ))
     assert bundle_path.suffix == ".gz"
     with gzip.open(bundle_path, "rt") as f:
         data = json.load(f)
     assert data["task_id"] == "task-002"
 
 def test_handoff_bundle_max_cap_prune(tmp_path: Path):
-    from nexus.core.handoff_bundle import HandoffBundleWriter, HandoffRetentionPolicy
+    from nexus.core.handoff_bundle import HandoffBundleWriter, HandoffRetentionPolicy, HandoffRequest
     policy = HandoffRetentionPolicy(retention_days=365, compress=False, max_bundles=3)
     writer = HandoffBundleWriter(tmp_path, policy=policy)
     for i in range(5):
-        writer.create(triggering_phase="test", reason=f"bundle-{i}", task_id=f"t{i}")
+        writer.create(HandoffRequest(triggering_phase="test", reason=f"bundle-{i}", task_id=f"t{i}"))
     remaining = list((tmp_path / ".nexus" / "handoff").glob("handoff_*.json"))
     assert len(remaining) <= 3
 

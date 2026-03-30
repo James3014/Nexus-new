@@ -98,61 +98,81 @@ def build_skill_artifact(
 ) -> Optional[str]:
     """
     Builds a SKILL.md artifact string from a successful task context.
-    Returns None if the task does not meet the criteria for skill generation.
+    R8-2: 已拆分邏輯以符合 Clean Code SRP。
     """
-    passed = outcome_event.get("passed", False)
-    if not passed:
+    # 1. 門檻過濾 (Step 1)
+    if not _should_generate_skill(outcome_event, repair_result, research_pack):
         return None
+        
+    # 2. 構建 Frontmatter (Step 2)
+    fm = _build_skill_frontmatter_obj(task_id, task_desc, repair_result, outcome_event, research_pack)
+    yaml_header = _build_yaml_frontmatter(fm)
+    
+    # 3. 構建 Markdown Body (Step 3)
+    body = _build_markdown_body(task_desc, repair_result, research_pack)
+    
+    return yaml_header + "\n" + body
+
+def _should_generate_skill(
+    outcome_event: Dict[str, Any],
+    repair_result: Dict[str, Any],
+    research_pack: Optional[Dict[str, Any]],
+) -> bool:
+    """判斷是否符合 Skill 生成條件（passed + 非平凡 + 低複用）。"""
+    if not outcome_event.get("passed", False):
+        return False
         
     metrics_dict = repair_result.get("metrics", {})
     retry_count = metrics_dict.get("retry_count", 0)
     has_research = bool(research_pack)
     
-    # If the outcome event has its own metrics, use them, otherwise fallback to 0.0
+    # 判定基準：必須是非平凡任務（有重試或有研究）
+    if not (retry_count > 0 or has_research):
+        return False
+        
     outcome_metrics = outcome_event.get("metrics", {})
     pattern_reuse_rate = outcome_metrics.get("pattern_reuse_rate", 0.0)
     
-    # Criteria: must be non-trivial (retry > 0 or research based) and novel enough (reuse < 0.5)
-    if not (retry_count > 0 or has_research):
-        return None
-    if pattern_reuse_rate >= 0.5:
-        return None
-        
-    # Extract insights for description
-    diag_summary = repair_result.get("diagnosis", "未提供診斷資訊")
-    
-    # Clean task desc for name
+    # 新穎性檢查：複用率需 < 0.5
+    return pattern_reuse_rate < 0.5
+
+def _build_skill_frontmatter_obj(
+    task_id: str, task_desc: str,
+    repair_result: Dict, outcome_event: Dict,
+    research_pack: Optional[Dict],
+) -> SkillFrontmatter:
+    """從任務上下文構建 SkillFrontmatter 物件。"""
     name_slug = task_id
     if task_desc:
+        # 生成 slug
         words = "".join(c if c.isalnum() or c.isspace() else " " for c in task_desc[:50]).split()
         if words:
             name_slug = ("-".join(words)).lower()
             
     success_metric = SkillSuccessMetric(
         repair_success=True,
-        retry_count=retry_count,
-        pattern_reuse_rate=pattern_reuse_rate
+        retry_count=repair_result.get("metrics", {}).get("retry_count", 0),
+        pattern_reuse_rate=outcome_event.get("metrics", {}).get("pattern_reuse_rate", 0.0)
     )
     
-    task_type = outcome_event.get("task_type", "unknown")
-    
-    fm = SkillFrontmatter(
+    return SkillFrontmatter(
         name=name_slug,
-        description=diag_summary[:100].replace('\n', ' '),
+        description=repair_result.get("diagnosis", "未提供")[:100].replace('\n', ' '),
         task_id=task_id,
         success_metric=success_metric,
-        task_type=task_type,
-        keywords=[task_type] + (["research"] if research_pack else []),
+        task_type=outcome_event.get("task_type", "unknown"),
+        keywords=[outcome_event.get("task_type", "unknown")] + (["research"] if research_pack else []),
         plan_strategy=outcome_event.get("plan_strategy_used", ""),
         winning_hypothesis=str(research_pack.get("winner", {}).get("hypothesis_id", "")) if research_pack else "",
         phantom_patterns=list(outcome_event.get("phantom_pattern_history", [])),
         cycle_count=int(outcome_event.get("retry_count", 0)),
         cycle_root_cause=str(outcome_event.get("cycle_root_cause", ""))
     )
-    
-    yaml_header = _build_yaml_frontmatter(fm)
-    
-    # Build markdown body
+
+def _build_markdown_body(
+    task_desc: str, repair_result: Dict, research_pack: Optional[Dict]
+) -> str:
+    """構建 SKILL.md 的 Markdown 正文。"""
     body_lines = [
         "",
         "# 任務描述",
@@ -177,6 +197,5 @@ def build_skill_artifact(
             json.dumps(research_pack.get('winner', {}), indent=2, ensure_ascii=False),
             "```"
         ])
-
     
-    return yaml_header + "\n" + "\n".join(body_lines) + "\n"
+    return "\n".join(body_lines) + "\n"

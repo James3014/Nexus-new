@@ -22,6 +22,17 @@ logger = logging.getLogger(__name__)
 HANDOFF_SCHEMA_VERSION = "handoff_v1"
 
 @dataclass
+class HandoffRequest:
+    """交接請求的參數封裝。"""
+    triggering_phase: str
+    reason: str
+    task_id: str = ""
+    trace_id: str = ""
+    decision_id: str = ""
+    agent_history: Optional[List[str]] = None
+    state_variables: Optional[Dict[str, Any]] = None
+
+@dataclass
 class HandoffRetentionPolicy:
     """
     Governs how long HandoffBundles are retained and whether they can be compressed.
@@ -63,16 +74,7 @@ class HandoffBundleWriter:
         self.handoff_dir.mkdir(parents=True, exist_ok=True)
         self.policy = policy or self.DEFAULT_POLICY
 
-    def create(
-        self,
-        triggering_phase: str,
-        reason: str,
-        task_id: str = "",
-        trace_id: str = "",
-        decision_id: str = "",
-        agent_history: Optional[List[str]] = None,
-        state_variables: Optional[Dict[str, Any]] = None,
-    ) -> Path:
+    def create(self, request: HandoffRequest) -> Path:
         """
         Creates and writes a HandoffBundle JSON file.
         Returns the path to the written bundle.
@@ -81,13 +83,13 @@ class HandoffBundleWriter:
         timestamp = datetime.now(timezone.utc).isoformat()
 
         bundle = HandoffBundle(
-            triggering_phase=triggering_phase,
-            reason=reason,
-            task_id=task_id,
-            trace_id=trace_id,
-            decision_id=decision_id,
-            agent_history_summary=agent_history or [],
-            state_variables=state_variables or {},
+            triggering_phase=request.triggering_phase,
+            reason=request.reason,
+            task_id=request.task_id,
+            trace_id=request.trace_id,
+            decision_id=request.decision_id,
+            agent_history_summary=request.agent_history or [],
+            state_variables=request.state_variables or {},
             workspace_diff=diff,
             timestamp=timestamp,
             retention_policy={
@@ -98,7 +100,7 @@ class HandoffBundleWriter:
         )
 
         ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        bundle_path = self.handoff_dir / f"handoff_{task_id or 'unknown'}_{ts_str}.json"
+        bundle_path = self.handoff_dir / f"handoff_{request.task_id or 'unknown'}_{ts_str}.json"
         bundle_path.write_text(json.dumps(asdict(bundle), indent=2))
 
         if self.policy.compress:
@@ -117,8 +119,8 @@ class HandoffBundleWriter:
             "   Reason: %s\n"
             "   Triggering Phase: %s",
             bundle_path.relative_to(self.project_root),
-            reason,
-            triggering_phase,
+            request.reason,
+            request.triggering_phase,
         )
         return bundle_path
 

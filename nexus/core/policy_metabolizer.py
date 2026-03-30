@@ -5,7 +5,10 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .memory_coordinator import MemoryCoordinator
 
@@ -48,58 +51,25 @@ class PolicyMetabolizer:
 
     def metabolize(self, force: bool = False) -> MetabolizeResult:
         if not self.policy_file.exists():
-            return MetabolizeResult(
-                scanned=0,
-                archived=0,
-                active=0,
-                memory_health_current=100.0,
-                negative_transfer_rate=0.0,
-                snapshot_path=None,
-                archive_path=self.archive_file,
-            )
+            return self._get_empty_result()
 
         with self.coordinator.lock(self.policy_file):
             records = self._read_jsonl(self.policy_file)
             if not force and not records:
-                return MetabolizeResult(
-                    scanned=0,
-                    archived=0,
-                    active=0,
-                    memory_health_current=100.0,
-                    negative_transfer_rate=0.0,
-                    snapshot_path=None,
-                    archive_path=self.archive_file,
-                )
+                return self._get_empty_result()
 
             snapshot_path = self._snapshot_policy_file()
-            kept: List[Dict[str, Any]] = []
-            archived: List[Dict[str, Any]] = []
-
-            for record in records:
-                if self._is_zero_decay(record):
-                    kept.append(record)
-                    continue
-                decay = self._decay_score(record)
-                if decay > self.archive_threshold:
-                    out = dict(record)
-                    out["archived_at"] = datetime.now(timezone.utc).isoformat()
-                    out["decay_score"] = round(decay, 2)
-                    archived.append(out)
-                else:
-                    kept.append(record)
-
+            kept, archived = self._process_records(records)
+            
             self._write_jsonl(self.policy_file, kept)
-            if archived:
-                self.archive_file.parent.mkdir(parents=True, exist_ok=True)
-                with self.archive_file.open("a", encoding="utf-8") as handle:
-                    for row in archived:
-                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            self._persist_archived_records(archived)
 
             scanned = len(records)
             archived_count = len(archived)
             active_count = len(kept)
             memory_health = 100.0 if scanned == 0 else max(0.0, (active_count / scanned) * 100.0)
             ntr = 0.0 if scanned == 0 else (archived_count / scanned) * 100.0
+            
             return MetabolizeResult(
                 scanned=scanned,
                 archived=archived_count,
@@ -109,6 +79,43 @@ class PolicyMetabolizer:
                 snapshot_path=snapshot_path,
                 archive_path=self.archive_file,
             )
+
+    def _get_empty_result(self) -> MetabolizeResult:
+        return MetabolizeResult(
+            scanned=0,
+            archived=0,
+            active=0,
+            memory_health_current=100.0,
+            negative_transfer_rate=0.0,
+            snapshot_path=None,
+            archive_path=self.archive_file,
+        )
+
+    def _process_records(self, records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        kept: List[Dict[str, Any]] = []
+        archived: List[Dict[str, Any]] = []
+
+        for record in records:
+            if self._is_zero_decay(record):
+                kept.append(record)
+                continue
+            decay = self._decay_score(record)
+            if decay > self.archive_threshold:
+                out = dict(record)
+                out["archived_at"] = datetime.now(timezone.utc).isoformat()
+                out["decay_score"] = round(decay, 2)
+                archived.append(out)
+            else:
+                kept.append(record)
+        return kept, archived
+
+    def _persist_archived_records(self, archived: List[Dict[str, Any]]) -> None:
+        if not archived:
+            return
+        self.archive_file.parent.mkdir(parents=True, exist_ok=True)
+        with self.archive_file.open("a", encoding="utf-8") as handle:
+            for row in archived:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def _snapshot_policy_file(self) -> Path:
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -148,8 +155,8 @@ class PolicyMetabolizer:
         try:
             confidence_f = float(confidence)
             score += max(0.0, (0.4 - confidence_f) * 50.0)
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as e:
+            logger.warning("policy metabolize confidence parse failed: %s", e)
         return min(100.0, max(0.0, score))
 
     @staticmethod

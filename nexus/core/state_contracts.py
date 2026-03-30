@@ -1,7 +1,9 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, model_validator
+from .state_legacy import NexusStateLegacyMixin
 from datetime import datetime
 from enum import Enum
+from nexus.core.pipeline_metadata import PipelineMetadata
 
 class TddStatus(str, Enum):
     RED = "red"
@@ -67,7 +69,7 @@ class AuditResult(BaseModel):
     prior_audit_failures: List[str] = []
     code_quality_score: Optional[float] = None
     summary: str
-    metadata: Dict[str, Any] = {}
+    metadata: PipelineMetadata = {}
 
 # --- B 階段: Batch Management (v7 Night Factory) ---
 
@@ -88,7 +90,7 @@ class NexusIssue(BaseModel):
     domain: Optional[str] = "general"
     priority: int = 1
     config: TaskConfig = Field(default_factory=TaskConfig)
-    metadata: Dict[str, Any] = {}
+    metadata: PipelineMetadata = {}
 
 class NexusBatch(BaseModel):
     batch_id: str
@@ -99,7 +101,7 @@ class NexusBatch(BaseModel):
     total_token_usage: int = 0
     schedule_cron: Optional[str] = None
     status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED, MELTED
-    metadata: Dict[str, Any] = {}
+    metadata: PipelineMetadata = {}
 
 class StepRecord(BaseModel):
     phase: str  # P, D, X, R, A, C
@@ -107,7 +109,7 @@ class StepRecord(BaseModel):
     status: str # pending, in_progress, completed, failed
     started_at: datetime
     ended_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展
+    metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展 # 支援自省等靈活擴展
     summary: Optional[str] = None
 
 # --- H 階段: Health & Self-Check (CHK-001) ---
@@ -180,14 +182,14 @@ class NexusWeights(BaseModel):
     trauma_records: List[TraumaRecord] = Field(default_factory=list)
 
 
-class NexusState(BaseModel):
+class NexusState(BaseModel, NexusStateLegacyMixin):
     schema_version: str = "2.0.0"
     task_id: str
     batch_id: Optional[str] = None
     config: TaskConfig = Field(default_factory=TaskConfig)
     
     # Execution
-    current_phase: str = "P"
+    current_phase: Optional[str] = None
     current_step_id: Optional[str] = None
     steps_history: List[StepRecord] = Field(default_factory=list)
     external_needed: bool = False
@@ -209,174 +211,8 @@ class NexusState(BaseModel):
     autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
     policy_hit_ids: List[str] = Field(default_factory=list)
     policy_applied: bool = False
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: PipelineMetadata = Field(default_factory=dict)
     
-    # === Backward Compatibility Properties ===
-
-    # TokenAccounting
-    @property
-    def total_token_usage(self) -> int:
-        return self.tokens.total_usage
-
-    @total_token_usage.setter
-    def total_token_usage(self, v: int):
-        self.tokens.total_usage = v
-
-    @property
-    def token_raw_model(self) -> int:
-        return self.tokens.raw_model
-
-    @token_raw_model.setter
-    def token_raw_model(self, v: int):
-        self.tokens.raw_model = v
-
-    @property
-    def token_fallback_est(self) -> int:
-        return self.tokens.fallback_est
-
-    @token_fallback_est.setter
-    def token_fallback_est(self, v: int):
-        self.tokens.fallback_est = v
-
-    @property
-    def token_system_overhead(self) -> int:
-        return self.tokens.system_overhead
-
-    @token_system_overhead.setter
-    def token_system_overhead(self, v: int):
-        self.tokens.system_overhead = v
-
-    @property
-    def token_capture_status(self) -> str:
-        return self.tokens.capture_status
-
-    @token_capture_status.setter
-    def token_capture_status(self, v: str):
-        self.tokens.capture_status = v
-
-    @property
-    def phase_tokens(self) -> Dict[str, int]:
-        return self.tokens.phase_tokens
-
-    @phase_tokens.setter
-    def phase_tokens(self, v: Dict[str, int]):
-        self.tokens.phase_tokens = v
-
-    # ObservabilityContext
-    @property
-    def trace_id(self) -> str:
-        return self.observability.trace_id
-
-    @trace_id.setter
-    def trace_id(self, v: str):
-        self.observability.trace_id = v
-
-    @property
-    def span_id(self) -> str:
-        return self.observability.span_id
-
-    @span_id.setter
-    def span_id(self, v: str):
-        self.observability.span_id = v
-
-    @property
-    def auto_actions(self) -> List[Dict[str, Any]]:
-        return self.observability.auto_actions
-
-    @auto_actions.setter
-    def auto_actions(self, v: List[Dict[str, Any]]):
-        self.observability.auto_actions = v
-
-    # AuditCounters
-    @property
-    def audit_pass_count(self) -> int:
-        return self.audit.audit_pass_count
-
-    @audit_pass_count.setter
-    def audit_pass_count(self, v: int):
-        self.audit.audit_pass_count = v
-
-    @property
-    def retry_count(self) -> int:
-        return self.audit.retry_count
-
-    @retry_count.setter
-    def retry_count(self, v: int):
-        self.audit.retry_count = v
-
-    @property
-    def turn_count(self) -> int:
-        return self.audit.turn_count
-
-    @turn_count.setter
-    def turn_count(self, v: int):
-        self.audit.turn_count = v
-
-    @property
-    def clarification_count(self) -> int:
-        return self.audit.clarification_count
-
-    @clarification_count.setter
-    def clarification_count(self, v: int):
-        self.audit.clarification_count = v
-
-    @property
-    def correction_count(self) -> int:
-        return self.audit.correction_count
-
-    @correction_count.setter
-    def correction_count(self, v: int):
-        self.audit.correction_count = v
-
-    @property
-    def unresolved_count(self) -> int:
-        return self.audit.unresolved_count
-
-    @unresolved_count.setter
-    def unresolved_count(self, v: int):
-        self.audit.unresolved_count = v
-
-    # PhaseHealthSnapshot
-    @property
-    def health_score(self) -> float:
-        return self.phase_health.health_score
-
-    @health_score.setter
-    def health_score(self, v: float):
-        self.phase_health.health_score = v
-
-    @property
-    def health_metrics(self) -> HealthMetrics:
-        return self.phase_health.health_metrics
-
-    @health_metrics.setter
-    def health_metrics(self, v: HealthMetrics):
-        self.phase_health.health_metrics = v
-
-    @property
-    def pipeline_health(self) -> float:
-        return self.phase_health.pipeline_health
-
-    @pipeline_health.setter
-    def pipeline_health(self, v: float):
-        self.phase_health.pipeline_health = v
-
-    @property
-    def learning_velocity(self) -> float:
-        return self.phase_health.learning_velocity
-
-    @learning_velocity.setter
-    def learning_velocity(self, v: float):
-        self.phase_health.learning_velocity = v
-
-    @property
-    def phase_metrics(self) -> Dict[str, PhaseMetric]:
-        return self.phase_health.phase_metrics
-
-    @phase_metrics.setter
-    def phase_metrics(self, v: Dict[str, PhaseMetric]):
-        self.phase_health.phase_metrics = v
-
     # ----------------------------------------------------
 
     def get_conversation_metadata(self) -> Dict[str, Any]:
@@ -415,95 +251,11 @@ class NexusState(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def map_legacy_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-            
-        # mapping token fields
-        tokens = data.get('tokens', {})
-        if not isinstance(tokens, dict):
-            tokens = tokens.model_dump() if hasattr(tokens, 'model_dump') else {}
-        for legacy_key, new_key in [
-            ('total_token_usage', 'total_usage'),
-            ('token_raw_model', 'raw_model'),
-            ('token_fallback_est', 'fallback_est'),
-            ('token_system_overhead', 'system_overhead'),
-            ('token_capture_status', 'capture_status'),
-            ('phase_tokens', 'phase_tokens'),
-        ]:
-            if legacy_key in data:
-                tokens[new_key] = data.pop(legacy_key)
-        if tokens:
-            data['tokens'] = tokens
-
-        # mapping observability
-        observability = data.get('observability', {})
-        if not isinstance(observability, dict):
-            observability = observability.model_dump() if hasattr(observability, 'model_dump') else {}
-        for legacy_key, new_key in [
-            ('trace_id', 'trace_id'),
-            ('span_id', 'span_id'),
-            ('auto_actions', 'auto_actions'),
-        ]:
-            if legacy_key in data:
-                observability[new_key] = data.pop(legacy_key)
-        if observability:
-            data['observability'] = observability
-
-        # mapping audit
-        audit = data.get('audit', {})
-        if not isinstance(audit, dict):
-            audit = audit.model_dump() if hasattr(audit, 'model_dump') else {}
-        for legacy_key, new_key in [
-            ('audit_pass_count', 'audit_pass_count'),
-            ('retry_count', 'retry_count'),
-            ('turn_count', 'turn_count'),
-            ('clarification_count', 'clarification_count'),
-            ('correction_count', 'correction_count'),
-            ('unresolved_count', 'unresolved_count'),
-        ]:
-            if legacy_key in data:
-                audit[new_key] = data.pop(legacy_key)
-        if audit:
-            data['audit'] = audit
-
-        # mapping phase_health
-        phase_health = data.get('phase_health', {})
-        if not isinstance(phase_health, dict):
-            phase_health = phase_health.model_dump() if hasattr(phase_health, 'model_dump') else {}
-        for legacy_key, new_key in [
-            ('health_score', 'health_score'),
-            ('health_metrics', 'health_metrics'),
-            ('pipeline_health', 'pipeline_health'),
-            ('learning_velocity', 'learning_velocity'),
-            ('phase_metrics', 'phase_metrics'),
-        ]:
-            if legacy_key in data:
-                phase_health[new_key] = data.pop(legacy_key)
-        if phase_health:
-            data['phase_health'] = phase_health
-
-        return data
+        from nexus.core.state_migrator import StateMigrator
+        return StateMigrator.migrate(data)
 
     @model_validator(mode='after')
     def validate_nexus_protocols(self) -> 'NexusState':
-        """
-        🚫 Nexus Soul Protocols: Forbidden Transitions & Guardrails
-        """
-        # 1. Batch Mode 預算守門員
-        if self.batch_id and self.current_phase == "P":
-            if self.config.budget_token <= 0:
-                raise ValueError(f"Soul Protocol Violation: Batch {self.batch_id} at Phase P must have budget_token > 0")
-        
-        # 2. 狀態轉移禁地 (Forbidden Transitions Matrix)
-        if self.steps_history:
-            last_phase = self.steps_history[-1].phase
-            # 案例：禁止從 P 直接跳到 R (必須經過 D)
-            forbidden = {
-                "P": ["R", "A", "C"],
-                "D": ["A", "C"],
-                "X": ["A", "C"]
-            }
-            if self.current_phase in forbidden.get(last_phase, []):
-                raise ValueError(f"Forbidden Transition: Illegal shortcut detected from {last_phase} to {self.current_phase}. Contract v1.5.2 enforces P->D->(X)->R pipeline.")
-            
+        from nexus.core.state_validator import StateValidator
+        StateValidator.validate_protocols(self)
         return self

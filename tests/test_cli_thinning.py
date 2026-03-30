@@ -7,6 +7,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
+from nexus.app.command_service import TaskRequest
+from nexus.engine.config import EngineConfig
 from scripts.nexus_cli import NexusCLI
 
 
@@ -48,13 +50,15 @@ def test_cli_feature_dispatch(tmp_path):
     )
 
     mock_service.execute_feature.assert_called_once_with(
-        "新增購物車功能",
-        None,
-        False,
-        None,
-        delivery_mode="high",
-        verify_commands=["/bin/echo ok"],
-        artifact_paths=None,
+        TaskRequest(
+            task="新增購物車功能",
+            domain=None,
+            plan_only=False,
+            skill=None,
+            delivery_mode="high",
+            verify_commands=["/bin/echo ok"],
+            artifact_paths=None,
+        )
     )
 
 
@@ -88,7 +92,7 @@ def test_command_service_bridges_engine(tmp_path):
     mock_engine.run_dir = tmp_path / "runs"
     svc = NexusCommandService(engine=mock_engine)
 
-    svc.execute_bug(task="修復 DB 連線問題")
+    svc.execute_bug(TaskRequest(task="修復 DB 連線問題"))
 
     mock_engine.run_bug.assert_called_once()
 
@@ -102,7 +106,7 @@ def test_command_service_feature_params(tmp_path):
     mock_engine.run_dir = tmp_path / "runs"
     svc = NexusCommandService(engine=mock_engine)
 
-    svc.execute_feature(task="新增 SSO", domain="auth", dry_run=True, skill="coding")
+    svc.execute_feature(TaskRequest(task="新增 SSO", domain="auth", plan_only=True, skill="coding"))
 
     mock_engine.run_feature.assert_called_once_with(
         task="新增 SSO",
@@ -139,9 +143,11 @@ def test_command_service_high_delivery_requires_verify_commands(tmp_path):
              return_value=(tmp_path / "r.json", tmp_path / "r.md"),
          ):
         ok = svc.execute_bug(
-            task="修復 DB 連線問題",
-            delivery_mode="high",
-            verify_commands=[],
+            TaskRequest(
+                task="修復 DB 連線問題",
+                delivery_mode="high",
+                verify_commands=[],
+            )
         )
 
         assert ok is True
@@ -181,9 +187,11 @@ def test_command_service_high_delivery_uses_rust_suggestions(tmp_path):
              return_value=(tmp_path / "r.json", tmp_path / "r.md"),
          ):
         ok = svc.execute_feature(
-            task="fix rust leak in nexus-core",
-            delivery_mode="high",
-            verify_commands=[],
+            TaskRequest(
+                task="fix rust leak in nexus-core",
+                delivery_mode="high",
+                verify_commands=[],
+            )
         )
 
         assert ok is False

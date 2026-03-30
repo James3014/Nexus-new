@@ -8,7 +8,7 @@ import typing
 from pathlib import Path
 
 # 🔗 核心技能路徑 (Phase 3 & 6)
-KB_DIR = "/Users/jameschen/Downloads/obsidian/知識庫"
+KB_DIR = os.getenv("NEXUS_KB_DIR", "/Users/jameschen/Downloads/obsidian/知識庫")
 CONTEXT_INJECTOR_BIN = os.getenv("MUSE_CORE_CONTEXT_INJECTOR", "")
 FLASH_INGEST_BIN = os.getenv("MUSE_CORE_FLASH_INGEST", "")
 UV_BIN = shutil.which("uv") or "uv"
@@ -22,9 +22,9 @@ class WorkspaceManager:
 
     def __init__(self, project_root):
         self.project_root = Path(project_root).resolve()
-        self.workspace_base = Path("/tmp/codex-workspaces")
+        self.workspace_base = Path(os.getenv("NEXUS_WORKSPACE_BASE", "/tmp/codex-workspaces"))
         self.workspace_base.mkdir(parents=True, exist_ok=True)
-        self.lock_file = Path("/tmp/codex-loop-merge.lock")
+        self.lock_file = Path(os.getenv("NEXUS_WORKSPACE_LOCK", "/tmp/codex-loop-merge.lock"))
         self.lock_file.touch(exist_ok=True)
 
     def lease(self, task_id: typing.Optional[str] = None,
@@ -70,7 +70,7 @@ class WorkspaceManager:
 
     def sync_staged_to_sandbox(self, sandbox_path):
         """將主工作區的 Staged 內容同步至沙盒。"""
-        patch_file = Path("/tmp/codex_sync.patch")
+        patch_file = Path(os.getenv("NEXUS_SYNC_PATCH", "/tmp/codex_sync.patch"))
         try:
             # 1. 在主工作區產出 Patch
             with open(patch_file, "w") as f:
@@ -97,88 +97,65 @@ class WorkspaceManager:
         """原子化收割：排隊合併回主幹。"""
         print(f"🚜 [Harvesting] Attempting to merge {branch_name}...")
 
-        # 使用 fcntl 進行實體鎖定，防止並行 Merge 衝突
+        # 使用 fcntl 進行實體鎖定
         lock_f = open(self.lock_file, "w")
         try:
             fcntl.flock(lock_f, fcntl.LOCK_EX)
             print("🔒 [Lock] Acquired Merge Lock. Procedding with Atomic Harvest.")
 
-            # 1. 確保隔離區已 Commit (若有 Staged)
-            subprocess.run(
-                ["git", "commit", "-m", "fix(isolation): automated audit pass"],
-                cwd=sandbox_path,
-                capture_output=True,
-            )
+            # 1. 確保隔離區已 Commit (R8-3 Step 1)
+            self._ensure_sandbox_committed(sandbox_path)
 
-            # 2. 🛡️ 戰略準備：合併前先獲取主分支最新狀態並 Rebase (原子化對齊)
-            print("🔄 [Harvest] Reversing parity check (Fetching latest main)...")
-            # 強制切換回 main 並拉取最新，確保合併目標正確
-            subprocess.run(
-                ["git", "checkout", "main"], cwd=self.project_root, capture_output=True
-            )
-            subprocess.run(
-                ["git", "fetch", "origin", "main"],
-                cwd=self.project_root,
-                capture_output=True,
-            )
-            subprocess.run(
-                ["git", "rebase", "origin/main"],
-                cwd=self.project_root,
-                capture_output=True,
-            )
+            # 2. 🛡️ 生產準備：獲取主分支最新狀態 (R8-3 Step 2)
+            self._prepare_main_for_merge()
 
-            # 3. 執行原子化合併
-            res = subprocess.run(
-                [
-                    "git",
-                    "merge",
-                    branch_name,
-                    "--no-ff",
-                    "-m",
-                    f"Merge isolated task: {branch_name}",
-                ],
-                cwd=self.project_root,
-                capture_output=True,
-                text=True,
-            )
+            # 3. 執行原子化合併 (R8-3 Step 3)
+            merge_success = self._execute_merge(branch_name)
 
-            if res.returncode == 0:
-                print(f"✅ [SUCCESS] Task {branch_name} harvested and merged.")
-
-                # 🛡️ Lvl 18 Phase 6: 閃電記憶對位 (Flash Crystallization)
-                flash_bin = FLASH_INGEST_BIN or (
-                    Path(KB_DIR) / "01_Operations/scripts/flash_ingest_v2.py"
-                )
-                if flash_bin and os.path.exists(flash_bin):
-                    print("💎 [Flash] Triggering asynchronous brain crystallization...")
-                    # 使用 nohup 背景執行，確保不阻塞主線
-                    cmd = [
-                        "nohup",
-                        UV_BIN,
-                        "run",
-                        "--with",
-                        "lancedb",
-                        "--with",
-                        "pandas",
-                        "--with",
-                        "requests",
-                        flash_bin,
-                    ]
-                    subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        preexec_fn=os.setpgrp,
-                    )
-
+            if merge_success:
+                # 🛡️ Lvl 18 Phase 6: 結晶任務委派 (R8-3 Step 4)
+                self._trigger_flash_crystallization()
                 return True
-            else:
-                print(f"❌ [CONFLICT] Merge failed: {res.stderr}")
-                subprocess.run(["git", "merge", "--abort"], cwd=self.project_root)
-                return False
+            return False
         finally:
             fcntl.flock(lock_f, fcntl.LOCK_UN)
             lock_f.close()
+
+    def _ensure_sandbox_committed(self, sandbox_path: Path):
+        """確保隔離工作區的所有變更都已提交。"""
+        subprocess.run(
+            ["git", "commit", "-m", "fix(isolation): automated audit pass"],
+            cwd=sandbox_path, capture_output=True,
+        )
+
+    def _prepare_main_for_merge(self):
+        """獲取主分支最新狀態並 Rebase，確保原子化對齊。"""
+        print("🔄 [Harvest] Reversing parity check (Fetching latest main)...")
+        subprocess.run(["git", "checkout", "main"], cwd=self.project_root, capture_output=True)
+        subprocess.run(["git", "fetch", "origin", "main"], cwd=self.project_root, capture_output=True)
+        subprocess.run(["git", "rebase", "origin/main"], cwd=self.project_root, capture_output=True)
+
+    def _execute_merge(self, branch_name: str) -> bool:
+        """執行正式合併。"""
+        res = subprocess.run(
+            ["git", "merge", branch_name, "--no-ff", "-m", f"Merge isolated task: {branch_name}"],
+            cwd=self.project_root, capture_output=True, text=True,
+        )
+        if res.returncode == 0:
+            print(f"✅ [SUCCESS] Task {branch_name} harvested and merged.")
+            return True
+        else:
+            print(f"❌ [CONFLICT] Merge failed: {res.stderr}")
+            subprocess.run(["git", "merge", "--abort"], cwd=self.project_root)
+            return False
+
+    def _trigger_flash_crystallization(self):
+        """觸發非同步經驗結晶。"""
+        flash_bin = FLASH_INGEST_BIN or (Path(KB_DIR) / "01_Operations/scripts/flash_ingest_v2.py")
+        if flash_bin and os.path.exists(flash_bin):
+            print("💎 [Flash] Triggering asynchronous brain crystallization...")
+            cmd = ["nohup", UV_BIN, "run", "--with", "lancedb", "--with", "pandas", "--with", "requests", flash_bin]
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=os.setpgrp)
 
     def cleanup(self, task_id, branch_name):
         """銷毀位面，回歸平靜。"""

@@ -31,41 +31,49 @@ class SelfHealService:
         self.memory_service = MemoryService(str(self.repo_root))
 
     def run_cycle(self, state: NexusState) -> SelfHealCycleResult:
+        """執行完整的自我修復循環。"""
+        diagnosis, triggers, before = self._prepare_cycle(state)
+        
+        planner = RepairPlanner(self.repo_root)
+        plan = planner.build_plan(diagnosis, state=state)
+        plan = self._reconcile_plan(planner, plan, triggers)
+        
+        execution = self.executor.execute(plan)
+        self._ingest_execution_evidence(state, plan, execution)
+        
+        after = HealthScorer.apply_snapshot(state)
+        after_diagnosis = HealthDiagnostics.diagnose(state, after)
+        
+        return self._finalize_cycle(state, before, diagnosis, plan, execution, after, after_diagnosis, triggers)
+
+    def _prepare_cycle(self, state: NexusState) -> tuple[HealthDiagnosis, list, HealthSnapshot]:
         self._attach_fault_signatures(state)
         self._inject_fault_lessons(state)
         before = HealthScorer.apply_snapshot(state)
         triggers = HealthTriggerPolicy.evaluate_and_record(state, before)
         diagnosis = HealthDiagnostics.diagnose(state, before)
         self._update_diagnosis_fidelity(state, diagnosis.kind)
-        planner = RepairPlanner(self.repo_root)
-        plan = planner.build_plan(diagnosis, state=state)
-        policy_actions = planner.build_policy_actions(triggers)
-        if policy_actions:
-            merged_actions = {action.id: action for action in plan.actions}
-            for action in policy_actions:
-                merged_actions.setdefault(action.id, action)
-            plan = RepairPlan(
-                diagnosis=plan.diagnosis,
-                actions=list(merged_actions.values()),
-                phase_route=list(plan.phase_route),
-            )
-        execution = self.executor.execute(plan)
-        self._ingest_execution_evidence(state, plan, execution)
-        after = HealthScorer.apply_snapshot(state)
-        after_diagnosis = HealthDiagnostics.diagnose(state, after)
+        return diagnosis, triggers, before
 
+    def _reconcile_plan(self, planner: RepairPlanner, plan: RepairPlan, triggers: list) -> RepairPlan:
+        policy_actions = planner.build_policy_actions(triggers)
+        if not policy_actions:
+            return plan
+        merged_actions = {action.id: action for action in plan.actions}
+        for action in policy_actions:
+            merged_actions.setdefault(action.id, action)
+        return RepairPlan(diagnosis=plan.diagnosis, actions=list(merged_actions.values()), phase_route=list(plan.phase_route))
+
+    def _finalize_cycle(self, state: NexusState, before: HealthSnapshot, diagnosis: HealthDiagnosis, 
+                        plan: RepairPlan, execution: RepairExecutionResult, after: HealthSnapshot, 
+                        after_diagnosis: HealthDiagnosis, triggers: list) -> SelfHealCycleResult:
         status, notes = self._classify(before, diagnosis, plan, execution, after, after_diagnosis)
         if triggers:
             notes.extend([f"trigger:{trigger.code}" for trigger in triggers])
+        
         result = SelfHealCycleResult(
-            status=status,
-            before=before,
-            diagnosis=diagnosis,
-            plan=plan,
-            execution=execution,
-            after=after,
-            after_diagnosis=after_diagnosis,
-            notes=notes,
+            status=status, before=before, diagnosis=diagnosis, plan=plan, 
+            execution=execution, after=after, after_diagnosis=after_diagnosis, notes=notes
         )
         self._update_route_weight_memory(state, result)
         self._record(state, result)
@@ -107,7 +115,9 @@ class SelfHealService:
         if not execution.success:
             return
 
-        self._apply_evidence_json(state)
+        from nexus.health.ops import TelemetryIngestor
+        TelemetryIngestor.apply_evidence_json(state, self.repo_root)
+        
         telemetry = execution.telemetry or {}
         if telemetry:
             if telemetry.get("sandbox_hit_rate") is not None:
@@ -121,37 +131,8 @@ class SelfHealService:
             for artifact in action.artifact_paths:
                 path = self.repo_root / artifact
                 if path.suffix == ".csv" and path.exists():
-                    self._apply_benchmark_csv(state, path)
+                    TelemetryIngestor.apply_benchmark_csv(state, path)
 
-    def _apply_benchmark_csv(self, state: NexusState, csv_path: Path) -> None:
-        with csv_path.open("r", encoding="utf-8", newline="") as handle:
-            rows = list(csv.DictReader(handle))
-        if not rows:
-            return
-
-        row = rows[-1]
-        state.health_score = float(row.get("health") or state.health_score or 0.0)
-        state.total_token_usage = int(float(row.get("tokens") or state.total_token_usage or 0))
-        state.token_raw_model = int(float(row.get("token_raw_model") or state.token_raw_model or 0))
-        state.token_fallback_est = int(float(row.get("token_fallback_est") or state.token_fallback_est or 0))
-        state.token_system_overhead = int(float(row.get("token_system_overhead") or state.token_system_overhead or 0))
-        state.phase_tokens["X"] = int(float(row.get("token_source_x") or state.phase_tokens.get("X", 0)))
-        state.phase_tokens["R"] = int(float(row.get("token_source_r") or state.phase_tokens.get("R", 0)))
-        state.token_capture_status = row.get("token_capture_status") or state.token_capture_status
-        state.metadata["last_review_status"] = row.get("review_status") or state.metadata.get("last_review_status")
-        state.health_metrics.test_pass_rate = 1.0 if row.get("status") == "PASS" else 0.0
-        state.health_metrics.drift_index = float(row.get("drift") or state.health_metrics.drift_index or 0.0)
-        state.health_metrics.error_rate = 0.0 if row.get("status") == "PASS" else 1.0
-        if row.get("status") == "PASS" and state.token_capture_status != "unknown":
-            state.health_metrics.token_efficiency = 1.0
-        elif state.total_token_usage > 0:
-            state.health_metrics.token_efficiency = max(
-                0.0,
-                1.0 - (state.token_system_overhead / max(state.total_token_usage, 1)),
-            )
-        state.health_metrics.last_check_at = datetime.now()
-        state.health_metrics.status = "HEALTHY" if row.get("status") == "PASS" else "WARNING"
-        state.metadata.pop("health_error_kind", None)
 
     def _record(self, state: NexusState, result: SelfHealCycleResult) -> None:
         self._update_self_heal_status_window(state, result.status)
@@ -203,19 +184,6 @@ class SelfHealService:
         window = window[-30:]
         metadata["self_heal_status_window"] = window
 
-    def _apply_evidence_json(self, state: NexusState) -> None:
-        path = self.repo_root / ".nexus" / "runs" / "latest" / "evidence.json"
-        if not path.exists():
-            return
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return
-        telemetry = payload.get("telemetry")
-        if isinstance(telemetry, dict):
-            state.metadata["evidence_telemetry"] = telemetry
-            if telemetry.get("sandbox_hit_rate") is not None:
-                state.metadata["sandbox_hit_rate"] = float(telemetry["sandbox_hit_rate"])
 
     def _attach_fault_signatures(self, state: NexusState) -> None:
         text = self._get_fault_text(state)
@@ -280,7 +248,8 @@ class SelfHealService:
         if audit_score is not None:
             audit_pass_rate = max(0.0, min(1.0, float(audit_score.score) / 100.0))
 
-        self.memory_service.record_fault_lesson(
+        from nexus.services.memory import FaultLesson
+        self.memory_service.record_fault_lesson(FaultLesson(
             fault_hash=fault_hash,
             error_type=error_type,
             diagnosis_kind=diagnosis_kind,
@@ -293,49 +262,36 @@ class SelfHealService:
                 "notes": list(result.notes),
                 "phase_route": list(result.plan.phase_route),
             },
-        )
+        ))
 
     def _update_route_weight_memory(self, state: NexusState, result: SelfHealCycleResult) -> None:
+        """更新自我修復路徑的權重記錄。"""
         metadata = state.metadata
         route = [str(p).upper() for p in (result.plan.phase_route or []) if str(p).upper() in {"P", "X", "D", "R", "A", "C"}]
         if not route:
             return
 
-        decay = float(metadata.get("self_heal_route_weight_decay", 0.92) or 0.92)
-        decay = min(0.99, max(0.5, decay))
-        reward_map = {
-            "healthy": 8.0,
-            "repaired": 12.0,
-            "noop": 0.0,
-            "degraded": -4.0,
-            "failed": -10.0,
-        }
-        reward = reward_map.get(str(result.status), 0.0)
-        old_weights = metadata.get("self_heal_route_phase_weights")
-        if not isinstance(old_weights, dict):
-            old_weights = {}
-
-        new_weights: dict[str, float] = {}
-        for phase in ["P", "X", "D", "R", "A", "C"]:
-            base = float(old_weights.get(phase, 0.0) or 0.0) * decay
-            if phase in route:
-                pos = route.index(phase)
-                position_weight = max(0.4, 1.0 - (0.15 * float(pos)))
-                base += reward * position_weight
-            new_weights[phase] = max(-100.0, min(100.0, round(base, 2)))
-
-        metadata["self_heal_route_phase_weights"] = new_weights
-        metadata["self_heal_route_weight_last_update"] = datetime.now().isoformat()
-        metadata["self_heal_route_weight_status"] = str(result.status)
+        reward = HealthScorer.calculate_reward(result.status)
+        old_weights = metadata.get("self_heal_route_phase_weights") or {}
+        decay = min(0.99, max(0.5, float(metadata.get("self_heal_route_weight_decay", 0.92) or 0.92)))
+        
+        new_weights = HealthScorer.apply_decay_and_rewards(old_weights, route, reward, decay)
+        
+        metadata.update({
+            "self_heal_route_phase_weights": new_weights,
+            "self_heal_route_weight_last_update": datetime.now().isoformat(),
+            "self_heal_route_weight_status": str(result.status)
+        })
+        
         try:
             self.memory_service.sync_route_phase_weights(
-                new_weights,
-                cycle_status=str(result.status),
-                fault_hash=str(state.metadata.get("fault_hash", "") or ""),
+                new_weights, cycle_status=str(result.status),
+                fault_hash=str(state.metadata.get("fault_hash", "") or "")
             )
-            metadata["self_heal_route_policy_sync"] = "ok"
+            state.metadata["self_heal_route_policy_sync"] = "ok"
         except Exception:
-            metadata["self_heal_route_policy_sync"] = "failed"
+            state.metadata["self_heal_route_policy_sync"] = "failed"
+
 
     @staticmethod
     def _snapshot_dict(snapshot: HealthSnapshot) -> dict:

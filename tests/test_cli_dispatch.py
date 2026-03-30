@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from scripts.nexus_cli import NexusCLI
+from nexus.app.command_service import TaskRequest
 
 @pytest.fixture
 def cli(tmp_path):
@@ -16,13 +17,13 @@ def test_cli_bug_dispatch(cli):
     cli.run_bug(task="test-bug", delivery_mode="high", verify_commands=["/bin/echo ok"])
     
     # Verify dispatch
-    mock_service.execute_bug.assert_called_once_with(
-        "test-bug",
-        False,
-        delivery_mode="high",
-        verify_commands=["/bin/echo ok"],
-        artifact_paths=None,
-    )
+    mock_service.execute_bug.assert_called_once()
+    args, _ = mock_service.execute_bug.call_args
+    req = args[0]
+    assert isinstance(req, TaskRequest)
+    assert req.task == "test-bug"
+    assert req.delivery_mode == "high"
+    assert req.verify_commands == ["/bin/echo ok"]
 
 def test_command_service_exists():
     from nexus.app.command_service import NexusCommandService

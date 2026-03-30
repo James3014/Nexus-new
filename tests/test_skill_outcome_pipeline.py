@@ -52,16 +52,54 @@ class _DummyResearchPolicy:
 
 
 class _DummyPlanner:
+    def __init__(self):
+        self.name = "P"
+        self.priority = 10
+    
+    def should_run(self, ctx):
+        return True
+
+    def execute(self, pipeline, ctx):
+        res = self.run(ctx.state, ctx.kwargs)
+        from nexus.engine.phase_plugin import PhaseResult
+        return PhaseResult(status="success", mutations=res, events=[])
+
     def run(self, state, context):
         return {"intent_pass": True, "risk_score": 0.1, "tokens_used": 1}
 
 
 class _DummyResearch:
+    def __init__(self):
+        self.name = "X"
+        self.priority = 20
+
+    def should_run(self, ctx):
+        return True
+
+    def execute(self, pipeline, ctx):
+        res = self.run(ctx.state, ctx.kwargs)
+        from nexus.engine.phase_plugin import PhaseResult
+        # Convert SUCCESS to success for Literal match
+        status = res.get("status", "success").lower()
+        return PhaseResult(status=status, mutations=res, events=[])
+
     def run(self, state, context):
         return {"status": "SUCCESS", "findings": [], "tokens_used": 0}
 
 
 class _DummyRepair:
+    def __init__(self):
+        self.name = "R"
+        self.priority = 30
+
+    def should_run(self, ctx):
+        return True
+
+    def execute(self, pipeline, ctx):
+        res = self.run(ctx.state, ctx.kwargs)
+        from nexus.engine.phase_plugin import PhaseResult
+        return PhaseResult(status="success", mutations=res, events=[])
+
     def run(self, state, pack):
         return {
             "status": "APPROVED",

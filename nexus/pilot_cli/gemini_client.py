@@ -117,8 +117,9 @@ def coerce_long_gemini_answer(
         parsed = json.loads(raw_text)
         if isinstance(parsed, dict):
             return format_gemini_fastlane_response(raw_text)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("gemini_json_coercion_failed: %s", e)
 
     if finish_reason == "MAX_TOKENS" or len(raw_text) > 500:
         try:

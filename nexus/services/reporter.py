@@ -33,7 +33,7 @@ class Reporter:
             if script_path.exists():
                 return [sys.executable, str(script_path), message]
 
-        default_script = Path("/Users/jameschen/.openclaw/skills/audio-notify/scripts/notify.py")
+        default_script = Path(os.getenv("NEXUS_NOTIFY_SCRIPT", "/Users/jameschen/.openclaw/skills/audio-notify/scripts/notify.py"))
         if default_script.exists():
             return [sys.executable, str(default_script), message]
 

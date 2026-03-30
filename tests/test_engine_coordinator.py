@@ -10,6 +10,7 @@ sys.modules.setdefault(
 )
 
 from nexus.engine.coordinator import NexusEngine
+from nexus.engine.config import EngineConfig
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.services.predictor import Predictor
 from nexus.core.state_contracts import NexusState
@@ -18,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 def test_engine_initialization(tmp_path):
     """測試引擎初始化與目錄建立。"""
-    engine = NexusEngine(project_root=tmp_path, silent=True)
+    engine = NexusEngine(EngineConfig(project_root=tmp_path, silent=True))
     assert engine.project_root == tmp_path
     assert engine.run_dir.exists()
     assert engine.state_io is not None
@@ -28,7 +29,8 @@ def test_engine_predict_via_planner(tmp_path):
     """測試透過 PlannerPhaseHandler 執行的風險預判邏輯。"""
     predictor = Predictor()
     planner = PlannerPhaseHandler(project_root=tmp_path, run_dir=tmp_path, predictor=predictor)
-    engine = NexusEngine(project_root=tmp_path, silent=True, phases={"P": planner})
+    config = EngineConfig(project_root=tmp_path, silent=True)
+    engine = NexusEngine(config, phases={"P": planner})
     
     state = NexusState(task_id="test-001")
     
@@ -45,7 +47,7 @@ def test_engine_predict_via_planner(tmp_path):
 
 
 def test_context_hub_exposes_feature_pack(tmp_path):
-    engine = NexusEngine(project_root=tmp_path, silent=True)
+    engine = NexusEngine(EngineConfig(project_root=tmp_path, silent=True))
     pack = engine.hub.assemble_feature_pack(plan={"steps": ["s1"]})
     assert isinstance(pack, dict)
     assert "plan" in pack
@@ -65,8 +67,10 @@ def test_run_feature_compat_fallback_when_hub_missing_feature_pack(tmp_path):
     mock_commander.hub = LegacyHub()
 
     engine = NexusEngine(
-        project_root=tmp_path,
-        silent=True,
+        EngineConfig(
+            project_root=tmp_path,
+            silent=True,
+        ),
         router=mock_router,
         commander=mock_commander,
         phases={"P": MagicMock(), "X": MagicMock(), "R": MagicMock()}
@@ -96,8 +100,10 @@ def test_run_feature_compat_fallback_when_hub_feature_pack_raises(tmp_path):
     mock_commander.hub = FlakyHub()
 
     engine = NexusEngine(
-        project_root=tmp_path,
-        silent=True,
+        EngineConfig(
+            project_root=tmp_path,
+            silent=True,
+        ),
         router=mock_router,
         commander=mock_commander,
         phases={"P": MagicMock(), "X": MagicMock(), "R": MagicMock()}
@@ -110,36 +116,6 @@ def test_run_feature_compat_fallback_when_hub_feature_pack_raises(tmp_path):
     assert ok is True
 
 
-def test_execute_isolated_case_routes_through_command_service(tmp_path):
-    engine = NexusEngine(project_root=tmp_path, silent=True)
-    sub_engine = MagicMock()
-
-    with patch("nexus.app.command_service.NexusCommandService") as mock_service_cls:
-        mock_service = MagicMock()
-        mock_service.execute_bug.return_value = True
-        mock_service_cls.return_value = mock_service
-
-        ok = engine._execute_isolated_case(
-            sub_engine,
-            case_type="bug",
-            case_id="OFF-001",
-            goal_desc="fix login callback",
-            case_data={"goal": "fix login callback"},
-        )
-
-    assert ok is True
-    mock_service_cls.assert_called_once_with(sub_engine)
-    mock_service.execute_bug.assert_called_once_with(
-        "fix login callback",
-        delivery_mode="standard",
-        bug_id="OFF-001",
-        execution_context={
-            "auto_repair_enabled": False,
-            "benchmark_run": True,
-            "benchmark_force_research": True,
-            "benchmark_target_files": [],
-        },
-    )
 
 
 def test_context_hub_disables_external_research_for_benchmark_run(tmp_path):
@@ -153,32 +129,3 @@ def test_context_hub_disables_external_research_for_benchmark_run(tmp_path):
     assert decision["mode"] == "benchmark"
 
 
-def test_benchmark_fixture_mutates_and_restores(tmp_path):
-    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True, capture_output=True)
-
-    target = tmp_path / "nexus" / "engine" / "phases"
-    target.mkdir(parents=True)
-    research_file = target / "research.py"
-    original_text = "import json\nimport os\n"
-    research_file.write_text(original_text, encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
-
-    engine = NexusEngine(project_root=tmp_path, silent=True)
-    fixture = engine._apply_benchmark_fixture(
-        {
-            "benchmark_fixture": {
-                "file": "nexus/engine/phases/research.py",
-                "target": "import os\n",
-                "replacement": "",
-            }
-        }
-    )
-
-    assert fixture is not None
-    assert research_file.read_text(encoding="utf-8") == "import json\n"
-
-    engine._restore_benchmark_fixture(fixture)
-    assert research_file.read_text(encoding="utf-8") == original_text

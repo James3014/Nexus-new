@@ -21,6 +21,10 @@ from datetime import datetime, timezone
 from nexus.learning.skill_scanner import scan_skill
 from nexus.learning.disk_janitor import DiskJanitor
 from nexus.learning.disk_policy import DiskPolicy
+from nexus.core.errors import NexusError, ValidationError, PhaseError
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 TRUST_LEVELS = ["auto-generated", "reviewed", "tested", "production"]
@@ -101,18 +105,16 @@ def count_successful_uses(skills_dir: Path, skill_id: str) -> int:
                         count += 1
                 except json.JSONDecodeError:
                     continue
+    except OSError as exc:
+        logger.warning("usage_log_read_failed skill_id=%s: %s", skill_id, exc)
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("usage_log_read_failed task_id=unknown skill_id=unknown trace_id=unknown: %s", exc)
+        logger.error("unexpected_error_during_usage_count skill_id=%s: %s", skill_id, exc)
+        raise NexusError(f"Failed to count usage for {skill_id}") from exc
     return count
 
 
 def promote_skill(skills_dir: Path, skill_id: str, target_level: str) -> Dict[str, Any]:
-    """Promote a skill to the target trust level.
-
-    Returns a result dict with success status and message.
-    Enforces sequential promotion (no skipping levels).
-    """
+    """Promote a skill to the target trust level with atomic backup/rollback."""
     filename = f"{skill_id}.md" if not skill_id.endswith(".md") else skill_id
     skill_path = skills_dir / filename
     if not skill_path.exists():
@@ -122,15 +124,16 @@ def promote_skill(skills_dir: Path, skill_id: str, target_level: str) -> Dict[st
         return {"success": False, "message": f"無效的信任等級: {target_level}"}
 
     content = skill_path.read_text(encoding="utf-8")
-
-    # Extract current trust level from frontmatter
     current_level = "auto-generated"
     trust_match = re.search(r"trust_level:\s*(.+)", content)
     if trust_match:
         current_level = trust_match.group(1).strip().strip('"').strip("'")
 
-    current_idx = TRUST_LEVELS.index(current_level) if current_level in TRUST_LEVELS else 0
-    target_idx = TRUST_LEVELS.index(target_level)
+    try:
+        current_idx = TRUST_LEVELS.index(current_level)
+        target_idx = TRUST_LEVELS.index(target_level)
+    except ValueError:
+        return {"success": False, "message": f"格式異常或未知等級: {current_level}"}
 
     if target_idx <= current_idx:
         return {"success": False, "message": f"目標等級 ({target_level}) 必須高於當前等級 ({current_level})"}
@@ -138,55 +141,41 @@ def promote_skill(skills_dir: Path, skill_id: str, target_level: str) -> Dict[st
     if target_idx != current_idx + 1:
         return {"success": False, "message": f"只能逐級升級: {current_level} → {TRUST_LEVELS[current_idx + 1]}"}
 
-    # Security scan for tested/production promotion
     if target_level in ("tested", "production"):
         scan_result = scan_skill(content)
         if not scan_result.safe:
-            return {
-                "success": False,
-                "message": f"安全掃描未通過，無法晉升: {scan_result.blocked_reasons}",
-            }
-        # Check usage count for tested/production
+            return {"success": False, "message": f"安全掃描未通過: {scan_result.blocked_reasons}"}
         usage_count = count_successful_uses(skills_dir, skill_id)
         required_uses = 1 if target_level == "tested" else 3
         if usage_count < required_uses:
-            return {
-                "success": False,
-                "message": f"使用次數不足: 需要 {required_uses} 次成功使用，目前 {usage_count} 次",
-            }
+            return {"success": False, "message": f"使用次數不足 (目前 {usage_count}/{required_uses})"}
 
-    # Perform promotion: update trust_level in frontmatter
-    parts = content.split("---", 2)
-    if len(parts) >= 3:
-        frontmatter = parts[1]
-        
-        if re.search(r"^trust_level:\s*.+$", frontmatter, re.MULTILINE):
-            frontmatter = re.sub(
-                r"^trust_level:\s*.+$",
-                f"trust_level: {target_level}",
-                frontmatter,
-                count=1,
-                flags=re.MULTILINE,
-            )
+    # Transactional Update
+    backup_path = skill_path.with_suffix(".md.bak")
+    shutil.copy2(skill_path, backup_path)
+    
+    try:
+        parts = content.split("---", 2)
+        if len(parts) >= 3:
+            frontmatter = parts[1]
+            if re.search(r"^trust_level:\s*.+$", frontmatter, re.MULTILINE):
+                frontmatter = re.sub(r"^trust_level:\s*.+$", f"trust_level: {target_level}", frontmatter, count=1, flags=re.MULTILINE)
+            else:
+                frontmatter = frontmatter.rstrip("\n") + f"\ntrust_level: {target_level}\n"
+            new_content = f"---{frontmatter}---{parts[2]}"
         else:
-            frontmatter = frontmatter.rstrip("\n") + f"\ntrust_level: {target_level}\n"
-            
-        new_content = f"---{frontmatter}---{parts[2]}"
-    else:
-        # Fallback to safe regex if file format is broken
-        new_content = re.sub(
-            r"^trust_level:\s*.+$",
-            f"trust_level: {target_level}",
-            content,
-            count=1,
-            flags=re.MULTILINE,
-        )
-
-    skill_path.write_text(new_content, encoding="utf-8")
-    return {
-        "success": True,
-        "message": f"✅ 技能 {skill_id} 已從 {current_level} 升級到 {target_level}",
-    }
+            new_content = re.sub(r"^trust_level:\s*.+$", f"trust_level: {target_level}", content, count=1, flags=re.MULTILINE)
+        
+        skill_path.write_text(new_content, encoding="utf-8")
+        backup_path.unlink(missing_ok=True)
+        return {
+            "success": True,
+            "message": f"✅ 技能 {skill_id} 已從 {current_level} 升級到 {target_level}",
+        }
+    except Exception as exc:
+        shutil.move(str(backup_path), str(skill_path))
+        logger.error("promotion_failed_restored skill_id=%s: %s", skill_id, exc)
+        return {"success": False, "message": f"寫入失敗，已還原備份: {exc}"}
 
 
 def archive_skill(skills_dir: Path, skill_id: str) -> Dict[str, Any]:

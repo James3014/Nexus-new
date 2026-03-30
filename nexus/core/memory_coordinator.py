@@ -7,6 +7,9 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Iterator, List, Set, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LockTimeoutError(TimeoutError):
@@ -95,7 +98,7 @@ class MemoryCoordinator:
             try:
                 stack.remove(lock_key)
             except ValueError:
-                pass
+                logger.debug("lock_order_release_missing: %s", lock_key)
         cls._thread_local.held_locks = stack
 
     def _record_wait(self, wait_ms: float) -> None:

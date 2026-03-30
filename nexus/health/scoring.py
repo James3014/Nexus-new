@@ -184,3 +184,21 @@ class HealthScorer:
         if score > 0.0:
             return "CRITICAL"
         return "UNKNOWN"
+    @staticmethod
+    def calculate_reward(status: str) -> float:
+        """計算自我修復循後的獎勵值。"""
+        reward_map = {"healthy": 8.0, "repaired": 12.0, "noop": 0.0, "degraded": -4.0, "failed": -10.0}
+        return reward_map.get(str(status), 0.0)
+
+    @staticmethod
+    def apply_decay_and_rewards(old_weights: dict, route: list, reward: float, decay: float) -> dict[str, float]:
+        """應用權重衰減與路徑獎勵。"""
+        new_weights = {}
+        for phase in ["P", "X", "D", "R", "A", "C"]:
+            base = float(old_weights.get(phase, 0.0) or 0.0) * decay
+            if phase in route:
+                pos = route.index(phase)
+                position_weight = max(0.4, 1.0 - (0.15 * float(pos)))
+                base += reward * position_weight
+            new_weights[phase] = max(-100.0, min(100.0, round(base, 2)))
+        return new_weights

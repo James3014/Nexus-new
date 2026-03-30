@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from nexus.services.memory import MemoryService
+from nexus.services.memory import MemoryService, FaultLesson
 
 class TestMemoryService(unittest.TestCase):
     def setUp(self):
@@ -52,38 +52,22 @@ class TestMemoryService(unittest.TestCase):
         mock_r.setex.assert_called_once()
 
     def test_semantic_search_returns_rows_instead_of_empty(self):
+        import pandas as pd
         service = MemoryService(project_root=str(self.project_root))
-
-        class _FakeResults:
-            def to_pandas(self):
-                import pandas as pd
-                return pd.DataFrame(
-                    [{"rule_id": "POL-001", "action": "use os.path", "_score": 1.0}]
-                )
-
-        class _FakeSearch:
-            def limit(self, _limit):
-                return _FakeResults()
-
-        class _FakeTable:
-            def search(self, _query, query_type="fts"):
-                return _FakeSearch()
-
-        class _FakeDB:
-            def table_names(self):
-                return ["policy"]
-
-            def open_table(self, _name):
-                return _FakeTable()
-
-        service._get_db = lambda: _FakeDB()
+        
+        mock_repo = MagicMock()
+        mock_repo.search_fts.return_value = pd.DataFrame(
+            [{"rule_id": "POL-001", "action": "use os.path", "_score": 1.0}]
+        )
+        service.repo = mock_repo
+        
         rows = service.semantic_search("os.path")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], "POL-001")
 
     def test_fault_lessons_roundtrip_jsonl(self):
         fault_hash = "abc123hash"
-        self.service.record_fault_lesson(
+        self.service.record_fault_lesson(FaultLesson(
             fault_hash=fault_hash,
             error_type="ModuleNotFoundError",
             diagnosis_kind="environment_failure",
@@ -91,7 +75,7 @@ class TestMemoryService(unittest.TestCase):
             repair_patch="auto.repair.environment",
             audit_pass_rate=0.91,
             metadata={"k": "v"},
-        )
+        ))
         hits = self.service.lookup_fault_lessons(fault_hash, limit=2)
         self.assertTrue(hits)
         self.assertEqual(hits[0]["source"], "jsonl-fault-lessons")

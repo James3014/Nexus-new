@@ -1,7 +1,10 @@
 import subprocess
 import sys
 import time
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from nexus.pilot_cli.http_client import curl_request
 from nexus.pilot_cli.session import PilotSession
@@ -65,8 +68,9 @@ def ensure_local_gateway_running(
         response = get_fn(status_url, timeout=1.0)
         if getattr(response, "status_code", None) == 200:
             return False
-    except Exception:
-        pass
+    except Exception as e:
+        # Gateway is not responding, normal if not yet spawned
+        logger.debug("gateway_availability_check_failed (expected if not spawned): %s", e)
 
     spawn_fn()
     for _ in range(retries):

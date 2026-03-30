@@ -116,3 +116,12 @@ class HealthDiagnostics:
                 reasons=reasons,
             )
         return None
+    @staticmethod
+    def classify(status: str) -> str:
+        """將周期的狀態轉化為高層級的 SUCCESS/FAILURE 分類。"""
+        s = str(status).lower()
+        if "healthy" in s or "pass" in s or "repaired" in s:
+            return "SUCCESS"
+        if "failed" in s or "critical" in s or "degraded" in s:
+            return "FAILURE"
+        return "UNKNOWN"

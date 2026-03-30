@@ -21,7 +21,7 @@ from nexus.delivery.interactive import (
     resolve_self_heal_mode,
 )
 
-
+from nexus.app.command_service import TaskRequest
 class NexusCLI:
     """
     🧬 Nexus v9 CLI Shell
@@ -82,14 +82,16 @@ class NexusCLI:
                 if exc.name != "dependency_injector":
                     raise
                 from nexus.engine.coordinator import NexusEngine
+                from nexus.engine.config import EngineConfig
 
-                self._engine = NexusEngine(
+                config = EngineConfig(
                     project_root=self.project_root,
                     run_dir=self.run_dir,
                     silent=self.silent,
                     fast_mode=self.fast_mode,
                     audit_level=self.audit_level,
                 )
+                self._engine = NexusEngine(config=config)
         return self._engine
 
     @property
@@ -130,9 +132,11 @@ class NexusCLI:
         if execution_context:
             execute_kwargs["execution_context"] = execution_context
         success = self.service.execute_bug(
-            task,
-            dry_run,
-            **execute_kwargs,
+            TaskRequest(
+                task=task,
+                plan_only=dry_run,
+                **execute_kwargs
+            )
         )
         if success:
             success = self._enforce_release_gate_for_prod(skip_gate=dry_run)
@@ -191,11 +195,13 @@ class NexusCLI:
         if execution_context:
             execute_kwargs["execution_context"] = execution_context
         success = self.service.execute_feature(
-            task,
-            domain,
-            dry_run,
-            skill,
-            **execute_kwargs,
+            TaskRequest(
+                task=task,
+                domain=domain,
+                plan_only=dry_run,
+                skill=skill,
+                **execute_kwargs
+            )
         )
         if success:
             success = self._enforce_release_gate_for_prod(skip_gate=dry_run)

@@ -1,8 +1,11 @@
-#!/usr/bin/env python3
+import os
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 class CrystalAnalyzer:
     """
@@ -13,8 +16,8 @@ class CrystalAnalyzer:
         self.project_root = Path(project_root)
         self.tracelog_path = self.project_root / "tracelog.jsonl"
         self.weights_path = self.project_root / "scripts" / "core" / "autonomic_weights.json"
-        self.adjustment_step = 0.2  # 每次成功加 0.2
-        self.penalty_step = 0.5    # 每次失敗扣 0.5 (懲罰較重以快速收斂)
+        self.adjustment_step = 0.2  # 權重修正步進值
+        self.penalty_step = 0.5    # 懲罰步進值
 
     def analyze(self):
         print("💎 [Crystal] Initiating experience crystallization...")
@@ -52,7 +55,8 @@ class CrystalAnalyzer:
                                 stats[skill_key]["success"] += 1
                             else:
                                 stats[skill_key]["fail"] += 1
-                except:
+                except (KeyError, ValueError, TypeError) as e:
+                    logger.debug("Crystal stat parse skip: %s", e)
                     continue
 
         # 3. 計算修正值
@@ -83,5 +87,6 @@ class CrystalAnalyzer:
             print("ℹ️ [Crystal] No significant experience update needed.")
 
 if __name__ == "__main__":
-    analyzer = CrystalAnalyzer("/Users/jameschen/Downloads/Muse-Nexus")
+    _DEFAULT_ROOT = os.getenv("NEXUS_PROJECT_ROOT", "/Users/jameschen/Downloads/Muse-Nexus")
+    analyzer = CrystalAnalyzer(_DEFAULT_ROOT)
     analyzer.analyze()

@@ -39,15 +39,15 @@ def test_outcome_v1_to_v2_upgrade():
 # ────────────────────────── 11c: Handoff Bundle ──────────────────────────────
 
 def test_handoff_bundle_is_created(tmp_path: Path):
-    from nexus.core.handoff_bundle import HandoffBundleWriter, HANDOFF_SCHEMA_VERSION
+    from nexus.core.handoff_bundle import HandoffBundleWriter, HANDOFF_SCHEMA_VERSION, HandoffRequest
     writer = HandoffBundleWriter(tmp_path)
-    bundle_path = writer.create(
+    bundle_path = writer.create(HandoffRequest(
         triggering_phase="audit",
         reason="Max retries exceeded",
         task_id="task-xyz",
         agent_history=["Plan approved", "Repair loop 1 failed"],
         state_variables={"tokens_spent": 5000},
-    )
+    ))
     assert bundle_path.exists()
     import gzip
     with gzip.open(bundle_path, "rt", encoding="utf-8") as f:

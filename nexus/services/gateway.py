@@ -1,5 +1,6 @@
 import subprocess
 import json
+import logging
 import fcntl
 import shutil
 import re
@@ -8,6 +9,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # 🛡️ Nexus v16 Battlesuit Gateway (De-LLM-ized Edition)
 # This module is strictly PASSIVE. It handles physical handoffs to the agent.
@@ -31,7 +34,7 @@ class BattlesuitGateway:
     """
 
     def __init__(self, bin_path=None, lock_file=None, project_root=None):
-        self.lock_file = lock_file or "/tmp/nexus_battlesuit.lock"
+        self.lock_file = lock_file or os.getenv("NEXUS_LOCK_FILE", "/tmp/nexus_battlesuit.lock")
         self.project_root = Path(project_root or ".")
         
         # 🛡️ Battlesuit Origin: 僅支援 OAuth CLI 與物理 Handoff
@@ -57,7 +60,8 @@ class BattlesuitGateway:
             for f in log_folder.glob("*.md"):
                 total += len(f.read_text()) // 4
             return total
-        except:
+        except Exception as e:
+            logger.debug("Token estimation failed: %s", e)
             return 0
 
     OUTPUT_SCHEMA = {
