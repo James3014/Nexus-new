@@ -247,7 +247,9 @@ def main() -> int:
     parser.add_argument("--retry-abs-max", type=float, default=1.0)
     parser.add_argument("--pattern-reuse-min", type=float, default=30.0)
     parser.add_argument("--next-run-hit-min", type=float, default=20.0)
-    parser.add_argument("--learning-gate-mode", choices=["observe_only", "soft_signal", "soft_block", "hard_block"], default="soft_signal")
+    parser.add_argument("--learning-gate-mode", default="soft_signal",
+                        choices=["observe_only", "soft_signal", "soft_block", "hard_block"],
+                        help="Mode for learning gate governance")
     parser.add_argument("--learning-gate-override", action="store_true")
     args = parser.parse_args()
 
