@@ -20,7 +20,15 @@ from dataclasses import dataclass
 
 @dataclass
 class OutcomePayload:
-    """R1: build_outcome_event 的參數物件。"""
+    """R1: build_outcome_event 的參數物件。
+
+    標準來源值集合 (source registry):
+    - pipeline.crystallize: 正式結晶生產路徑 (預設)
+    - pipeline.repair: 正式修復生產路徑
+    - pipeline.repair_audit: 治理層 audit 產出 (如 Phantom Gate)
+    - calibration.sim: 校準、Soak Test 或模擬訊號
+    - research.eval: 基準測試或實驗評估
+    """
     task_id: str
     phase: str
     decision_id: str
@@ -33,6 +41,7 @@ class OutcomePayload:
     regression_pass_rate: float = 0.0
     pattern_reuse: float = 0.0
     next_run_hit: float = 0.0
+    source: str = "pipeline.crystallize"
     metadata: Dict[str, Any] | None = None
 
 
@@ -61,7 +70,7 @@ def build_outcome_event(payload: OutcomePayload) -> Dict[str, Any]:
         # Optional enrichments
         "status": str(md.get("status", "")),
         "audit_status": str(md.get("audit_status", "")),
-        "source": str(md.get("source", "pipeline")),
+        "source": str(payload.source or md.get("source", "pipeline.crystallize")),
     }
 
 

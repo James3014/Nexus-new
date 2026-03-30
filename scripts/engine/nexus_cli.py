@@ -683,7 +683,13 @@ class NexusCLI:
         print(f"  - path: {self.profile_path}")
         return 0
 
-    def run_release_ready(self) -> int:
+    def run_release_ready(
+        self,
+        window: int = 50,
+        include_sources: str = "pipeline.crystallize,pipeline.repair,pipeline.repair_audit",
+        exclude_sources: str = "calibration.sim",
+        exclude_tasks: str = "",
+    ) -> int:
         gate_script = self.project_root / "scripts" / "ops" / "nexus_release_gate.sh"
         if not gate_script.exists():
             print(f"❌ [Nexus:Release] missing gate script: {gate_script}")
@@ -692,7 +698,12 @@ class NexusCLI:
         if gate_rc != 0:
             return gate_rc
         print("== Release Gate: acceptance check ==")
-        return self.run_acceptance_check()
+        return self.run_acceptance_check(
+            window=window,
+            include_sources=include_sources,
+            exclude_sources=exclude_sources,
+            exclude_tasks=exclude_tasks,
+        )
 
     def run_acceptance_check(
         self,
@@ -703,6 +714,9 @@ class NexusCLI:
         retry_spike_factor: float = 2.0,
         retry_abs_max: float = 1.0,
         output_dir: str = ".nexus/reports",
+        include_sources: str = "pipeline.crystallize,pipeline.repair,pipeline.repair_audit",
+        exclude_sources: str = "calibration.sim",
+        exclude_tasks: str = "",
     ) -> int:
         script_path = self.project_root / "scripts" / "ops" / "nexus_acceptance_check.py"
         if not script_path.exists():
@@ -711,23 +725,21 @@ class NexusCLI:
         cmd = [
             sys.executable,
             str(script_path),
-            "--project-root",
-            str(self.project_root),
-            "--window",
-            str(window),
-            "--repair-success-min",
-            str(repair_success_min),
-            "--phantom-fp-max",
-            str(phantom_fp_max),
-            "--regression-pass-min",
-            str(regression_pass_min),
-            "--retry-spike-factor",
-            str(retry_spike_factor),
-            "--retry-abs-max",
-            str(retry_abs_max),
-            "--output-dir",
-            output_dir,
+            "--project-root", str(self.project_root),
+            "--window", str(window),
+            "--repair-success-min", str(repair_success_min),
+            "--phantom-fp-max", str(phantom_fp_max),
+            "--regression-pass-min", str(regression_pass_min),
+            "--retry-spike-factor", str(retry_spike_factor),
+            "--retry-abs-max", str(retry_abs_max),
+            "--output-dir", output_dir,
+            "--include-sources", include_sources,
+            "--exclude-sources", exclude_sources,
         ]
+        if exclude_tasks:
+            cmd.extend(["--exclude-tasks", exclude_tasks])
+            
+        print(f"-> Running acceptance check: {' '.join(cmd)}")
         return subprocess.call(cmd)
 
     def run_skills_autotune(
@@ -1026,7 +1038,11 @@ def main():
     profile_parser.add_argument("--name", choices=["prod"], default="prod")
 
     # nexus:release-ready
-    subparsers.add_parser("nexus:release-ready")
+    release_parser = subparsers.add_parser("nexus:release-ready")
+    release_parser.add_argument("--window", type=int, default=50)
+    release_parser.add_argument("--include-sources", default="pipeline.crystallize,pipeline.repair,pipeline.repair_audit")
+    release_parser.add_argument("--exclude-sources", default="calibration.sim")
+    release_parser.add_argument("--exclude-tasks", default="")
 
     # nexus:acceptance-check
     acceptance_parser = subparsers.add_parser("nexus:acceptance-check")
@@ -1037,6 +1053,9 @@ def main():
     acceptance_parser.add_argument("--retry-spike-factor", type=float, default=2.0)
     acceptance_parser.add_argument("--retry-abs-max", type=float, default=1.0)
     acceptance_parser.add_argument("--output-dir", default=".nexus/reports")
+    acceptance_parser.add_argument("--include-sources", default="pipeline.crystallize,pipeline.repair,pipeline.repair_audit")
+    acceptance_parser.add_argument("--exclude-sources", default="calibration.sim")
+    acceptance_parser.add_argument("--exclude-tasks", default="")
 
     # nexus:skills-autotune
     autotune_parser = subparsers.add_parser("nexus:skills-autotune")
@@ -1233,7 +1252,12 @@ def main():
         rc = cli.run_profile(action=args.action, name=args.name)
         sys.exit(rc)
     elif args.command == "nexus:release-ready":
-        rc = cli.run_release_ready()
+        rc = cli.run_release_ready(
+            window=args.window,
+            include_sources=args.include_sources,
+            exclude_sources=args.exclude_sources,
+            exclude_tasks=args.exclude_tasks,
+        )
         sys.exit(rc)
     elif args.command == "nexus:acceptance-check":
         rc = cli.run_acceptance_check(
@@ -1244,6 +1268,9 @@ def main():
             retry_spike_factor=args.retry_spike_factor,
             retry_abs_max=args.retry_abs_max,
             output_dir=args.output_dir,
+            include_sources=args.include_sources,
+            exclude_sources=args.exclude_sources,
+            exclude_tasks=args.exclude_tasks,
         )
         sys.exit(rc)
     elif args.command == "nexus:skills-autotune":
