@@ -211,6 +211,8 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
     lines.append(f"- status: {report['status']}")
     lines.append(f"- gate_passed: {str(report['gate_passed']).lower()}")
     lines.append(f"- generated_at_utc: {report['generated_at_utc']}")
+    lines.append(f"- learning_gate_mode: {report.get('learning_gate_mode', 'N/A')}")
+    lines.append(f"- learning_gate_override: {str(report.get('learning_gate_override', False)).lower()}")
     lines.append("")
     lines.append("## Criteria")
     lines.append("")
@@ -233,6 +235,8 @@ def main() -> int:
     parser.add_argument("--retry-abs-max", type=float, default=1.0)
     parser.add_argument("--pattern-reuse-min", type=float, default=30.0)
     parser.add_argument("--next-run-hit-min", type=float, default=20.0)
+    parser.add_argument("--learning-gate-mode", choices=["observe_only", "soft_signal", "soft_block", "hard_block"], default="observe_only")
+    parser.add_argument("--learning-gate-override", action="store_true")
     args = parser.parse_args()
 
     project_root = Path(args.project_root).resolve()
@@ -278,6 +282,8 @@ def main() -> int:
         "status": "PASS" if gate_passed else "FAIL",
         "gate_passed": gate_passed,
         "learning_promotion_passed": learning_check.passed,
+        "learning_gate_mode": args.learning_gate_mode,
+        "learning_gate_override": args.learning_gate_override,
         "project_root": str(project_root),
         "input": {
             "window": args.window,
@@ -286,6 +292,8 @@ def main() -> int:
             "regression_pass_min": args.regression_pass_min,
             "retry_spike_factor": args.retry_spike_factor,
             "retry_abs_max": args.retry_abs_max,
+            "learning_gate_mode": args.learning_gate_mode,
+            "learning_gate_override": args.learning_gate_override,
         },
         "sources": {
             "skills_optimization_runs": str(metrics_dir / "skills_optimization_runs.jsonl"),
