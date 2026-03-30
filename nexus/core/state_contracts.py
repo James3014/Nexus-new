@@ -197,6 +197,7 @@ class NexusState(BaseModel, NexusStateLegacyMixin):
     skills_used: List[Dict[str, Any]] = Field(default_factory=list)
     execution_mode: str = "one-shot"
     trigger_reason: str = "user"
+    trust_level: str = "standard"
 
     # Sub-objects (Composition)
     tokens: TokenAccounting = Field(default_factory=TokenAccounting)

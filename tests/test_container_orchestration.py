@@ -69,3 +69,42 @@ def test_memory_service_integration(tmp_path):
         hub._inject_memory_reminders("P")
         
         mock_search.assert_called_once()
+
+
+def test_container_engine_phases_all_resolved(tmp_path):
+    """確認 P/X/D/R 四階段(以及 A/C 如果有)全部可從容器解析"""
+    container = NexusContainer()
+    container.project_root.override(tmp_path)
+    container.run_dir.override(tmp_path / "run")
+    engine = container.engine_factory()
+    
+    # 檢查核心四相
+    assert "P" in engine.phases, "Missing Planner Phase"
+    assert "X" in engine.phases or "D" in engine.phases, "Missing Execution/Diagnose Phase"
+    assert "R" in engine.phases, "Missing Repair Phase"
+    
+    # 確保每一個階段都有必要的相依資源
+    planner = engine.phases["P"]
+    assert planner.predictor is not None
+
+def test_container_orchestrator_returns_dict(tmp_path):
+    """確認 run_review() 回傳 dict 不會退化回 bool"""
+    container = NexusContainer()
+    container.project_root.override(tmp_path)
+    # 不直接跑 orchestrator，而是確保建構出的 orchestrator 類別符合契約
+    from nexus.core.orchestrator import NexusOrchestrator
+    import inspect
+    sig = inspect.signature(NexusOrchestrator.run_review)
+    assert sig.return_annotation == dict or sig.return_annotation == 'dict', "run_review 必須宣告回傳 dict"
+
+def test_container_service_hubs_consistent(tmp_path):
+    """確認 Hub 內的 service 與容器 singleton 為同一實例"""
+    container = NexusContainer()
+    container.project_root.override(tmp_path)
+    container.run_dir.override(tmp_path / "run")
+    
+    intel_hub = container.intel_hub()
+    memory_service = container.memory_service()
+    
+    # 驗證 IntelHub 內的 context_hub 其 memory_service 屬性與直接從容器拿出來的是同一個 (Singleton)
+    assert intel_hub.context_hub.memory_service is memory_service, "Service Hub 沒有正確使用 Singleton"

@@ -1,0 +1,17 @@
+{
+  "fields": [
+    "task_id",
+    "phase",
+    "decision_id",
+    "skill_id",
+    "passed",
+    "phantom_blocked",
+    "repair_success",
+    "retry_count",
+    "proof_present",
+    "regression_pass_rate",
+    "pattern_reuse",
+    "next_run_hit",
+    "metadata"
+  ]
+}

@@ -200,7 +200,17 @@ class NexusPipeline(
         logger.info(f"📊 Final Health: {health_score:.1f}% | Success: {success}")
 
         self.engine.state_io.save_global_state(ctx.state)
-        if ctx.state.metadata.get("pipeline_terminal_state") == "HUMAN_REVIEW":
+        
+        terminal_state = ctx.state.metadata.get("pipeline_terminal_state", "UNKNOWN")
+        
+        if not success or terminal_state in ("FAILED", "HUMAN_REVIEW", "ESCALATED"):
+            try:
+                from nexus.delivery.incident_pack import collect_incident_pack
+                collect_incident_pack(self.engine.run_dir, ctx.task_id, ctx.task_desc, terminal_state, self.engine.project_root)
+            except Exception as e:
+                logger.error(f"Failed to collect incident pack: {e}")
+
+        if terminal_state == "HUMAN_REVIEW":
             logger.error("🛑 Pipeline 終止於 HUMAN_REVIEW，需人工介入")
             from nexus.core.handoff_bundle import HandoffBundleWriter
             writer = HandoffBundleWriter(self.engine.project_root)

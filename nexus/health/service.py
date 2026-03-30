@@ -50,7 +50,7 @@ class SelfHealService:
         self._attach_fault_signatures(state)
         self._inject_fault_lessons(state)
         before = HealthScorer.apply_snapshot(state)
-        triggers = HealthTriggerPolicy.evaluate_and_record(state, before)
+        triggers = HealthTriggerPolicy.evaluate_and_record(state, before, self.repo_root)
         diagnosis = HealthDiagnostics.diagnose(state, before)
         self._update_diagnosis_fidelity(state, diagnosis.kind)
         return diagnosis, triggers, before

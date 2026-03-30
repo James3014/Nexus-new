@@ -42,28 +42,46 @@ def replay_case(
     delivery_mode: str = "standard",
     verify_commands: list[str] | None = None,
     artifact_paths: list[str] | None = None,
+    from_incident: bool = False,
 ):
     project_root = Path.cwd()
-    catalog_path = project_root / "cases" / "catalog.json"
+    
+    # 支援來自 Incident Pack
+    if from_incident:
+        incident_file = project_root / ".nexus" / "incidents" / f"incident_{case_id}.json"
+        if not incident_file.exists():
+            print(f"❌ Incident pack not found at {incident_file}")
+            return
+        incident = json.loads(incident_file.read_text())
+        
+        # 建立假的 case_meta 與 case_data
+        case_meta = {"type": "bug"}
+        case_data = {
+            "goal": incident["task_desc"],
+            "expected_outcome": {"phases": ["P", "X", "D", "R"]},
+            "metadata": {"baseline": {"tokens": 1000, "phases": ["P", "X", "D", "R"]}}
+        }
+        print(f"🎬 [Replay] Starting Incident: {case_id} ({case_data['goal']})")
+    else:
+        catalog_path = project_root / "cases" / "catalog.json"
+        if not catalog_path.exists():
+            print(f"❌ Catalog not found at {catalog_path}")
+            return
 
-    if not catalog_path.exists():
-        print(f"❌ Catalog not found at {catalog_path}")
-        return
+        catalog = json.loads(catalog_path.read_text())
+        case_meta = next((c for c in catalog["cases"] if c["id"] == case_id), None)
 
-    catalog = json.loads(catalog_path.read_text())
-    case_meta = next((c for c in catalog["cases"] if c["id"] == case_id), None)
+        if not case_meta:
+            print(f"❌ Case {case_id} not found in catalog.")
+            return
 
-    if not case_meta:
-        print(f"❌ Case {case_id} not found in catalog.")
-        return
+        case_file = project_root / "cases" / case_meta["file"]
+        if not case_file.exists():
+            print(f"❌ Case file {case_file} missing.")
+            return
 
-    case_file = project_root / "cases" / case_meta["file"]
-    if not case_file.exists():
-        print(f"❌ Case file {case_file} missing.")
-        return
-
-    case_data = json.loads(case_file.read_text())
-    print(f"🎬 [Replay] Starting Case: {case_id} ({case_data['goal']})")
+        case_data = json.loads(case_file.read_text())
+        print(f"🎬 [Replay] Starting Case: {case_id} ({case_data['goal']})")
 
     # Setup isolated run directory
     run_dir = project_root / ".nexus" / "replays" / case_id
@@ -158,7 +176,7 @@ def replay_case(
         print(f"\n❌ [GATE-FAIL] Missing phases: {missing_phases}")
         gate_failed = True
 
-    drift_threshold = catalog.get("config", {}).get(
+    drift_threshold = 0.2 if from_incident else catalog.get("config", {}).get(
         "default_token_drift_threshold", 0.2
     )
     if drift_index > drift_threshold:
@@ -184,8 +202,11 @@ if __name__ == "__main__":
         default="standard",
         help="Prompt or choose whether replay must satisfy high-standard delivery verification.",
     )
-    parser.add_argument("--verify", action="append", default=[])
-    parser.add_argument("--artifact", action="append", default=[])
+    parser.add_argument(
+        "--from-incident",
+        action="store_true",
+        help="Replay directly from an incident pack (.nexus/incidents/incident_<case_id>.json)"
+    )
     args = parser.parse_args()
 
     replay_case(
@@ -193,4 +214,5 @@ if __name__ == "__main__":
         delivery_mode=args.delivery_mode,
         verify_commands=args.verify,
         artifact_paths=args.artifact,
+        from_incident=args.from_incident,
     )

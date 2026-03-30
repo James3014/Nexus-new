@@ -1,0 +1,26 @@
+{
+  "schema_version": "v2.1",
+  "allowed_fields": [
+    "outcome_version",
+    "task_id",
+    "trace_id",
+    "span_id",
+    "terminal_state",
+    "exit_code",
+    "sandbox_mode",
+    "pregate_skip",
+    "pregate_skip_reason",
+    "trust_level",
+    "escalation_count",
+    "verification_commands",
+    "verification_exit_codes",
+    "cycle_root_cause",
+    "rejection_history",
+    "phantom_patterns",
+    "commit_sha",
+    "model_version",
+    "timestamp",
+    "benchmark_version",
+    "problem_set_version"
+  ]
+}

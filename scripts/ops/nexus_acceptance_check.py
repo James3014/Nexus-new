@@ -165,6 +165,45 @@ def _evaluate_regression_and_side_effects(
     )
 
 
+def _evaluate_learning_promotion(
+    outcome_rows: list[dict[str, Any]],
+    *,
+    window: int,
+    pattern_reuse_min: float,
+    next_run_hit_min: float,
+) -> CriterionResult:
+    recent, _ = _window_pair(outcome_rows, window)
+    
+    def _extract(row: dict[str, Any], key: str) -> float:
+        val = row.get(key)
+        if val is None:
+            val = row.get("metadata", {}).get(key, 0.0)
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return 0.0
+
+    recent_pr = _avg([_extract(r, "pattern_reuse") for r in recent])
+    recent_nrh = _avg([_extract(r, "next_run_hit") for r in recent])
+    recent_lq = _avg([_extract(r, "lesson_quality") for r in recent])
+
+    passed = recent_pr >= pattern_reuse_min and recent_nrh >= next_run_hit_min
+    
+    detail = {
+        "recent_window_rows": len(recent),
+        "recent_pattern_reuse_avg": recent_pr,
+        "pattern_reuse_threshold": pattern_reuse_min,
+        "recent_next_run_hit_avg": recent_nrh,
+        "next_run_hit_threshold": next_run_hit_min,
+        "recent_lesson_quality_avg": recent_lq,
+    }
+    
+    return CriterionResult(
+        name="learning_promotion_gate",
+        passed=passed,
+        detail=detail,
+    )
+
 def _write_markdown(report: dict[str, Any], path: Path) -> None:
     lines: list[str] = []
     lines.append("# Nexus Acceptance Check")
@@ -192,6 +231,8 @@ def main() -> int:
     parser.add_argument("--regression-pass-min", type=float, default=95.0)
     parser.add_argument("--retry-spike-factor", type=float, default=2.0)
     parser.add_argument("--retry-abs-max", type=float, default=1.0)
+    parser.add_argument("--pattern-reuse-min", type=float, default=30.0)
+    parser.add_argument("--next-run-hit-min", type=float, default=20.0)
     args = parser.parse_args()
 
     project_root = Path(args.project_root).resolve()
@@ -221,12 +262,22 @@ def main() -> int:
             retry_abs_max=args.retry_abs_max,
         ),
     ]
+    
+    learning_check = _evaluate_learning_promotion(
+        outcome_rows,
+        window=args.window,
+        pattern_reuse_min=args.pattern_reuse_min,
+        next_run_hit_min=args.next_run_hit_min,
+    )
 
     gate_passed = all(check.passed for check in checks)
+    all_criteria = checks + [learning_check]
+    
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if gate_passed else "FAIL",
         "gate_passed": gate_passed,
+        "learning_promotion_passed": learning_check.passed,
         "project_root": str(project_root),
         "input": {
             "window": args.window,
@@ -242,8 +293,11 @@ def main() -> int:
         },
         "criteria": [
             {"name": check.name, "passed": check.passed, "detail": check.detail}
-            for check in checks
+            for check in all_criteria
         ],
+        "notes": [
+            "learning_promotion_gate is currently in observe-only phase and does not block release."
+        ]
     }
 
     json_path = output_dir / "acceptance_check.json"
