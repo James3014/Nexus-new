@@ -220,6 +220,18 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         lines.append(f"- {item['name']}: {'PASS' if item['passed'] else 'FAIL'}")
         for key, value in item["detail"].items():
             lines.append(f"  - {key}: {value}")
+    if report.get("warnings"):
+        lines.append("")
+        lines.append("## Warnings")
+        lines.append("")
+        for w in report["warnings"]:
+            lines.append(f"- ⚠️ {w}")
+    if report.get("notes"):
+        lines.append("")
+        lines.append("## Notes")
+        lines.append("")
+        for n in report["notes"]:
+            lines.append(f"- {n}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -235,7 +247,7 @@ def main() -> int:
     parser.add_argument("--retry-abs-max", type=float, default=1.0)
     parser.add_argument("--pattern-reuse-min", type=float, default=30.0)
     parser.add_argument("--next-run-hit-min", type=float, default=20.0)
-    parser.add_argument("--learning-gate-mode", choices=["observe_only", "soft_signal", "soft_block", "hard_block"], default="observe_only")
+    parser.add_argument("--learning-gate-mode", choices=["observe_only", "soft_signal", "soft_block", "hard_block"], default="soft_signal")
     parser.add_argument("--learning-gate-override", action="store_true")
     args = parser.parse_args()
 
@@ -276,7 +288,31 @@ def main() -> int:
 
     gate_passed = all(check.passed for check in checks)
     all_criteria = checks + [learning_check]
-    
+
+    # --- Stage 1 Soft Signal: learning gate warn but don't block ---
+    warnings = []
+    if not learning_check.passed and args.learning_gate_mode == "soft_signal":
+        warnings.append("LEARNING_GATE_WARN: learning promotion gate did not pass, but soft_signal mode does not block release.")
+    elif not learning_check.passed and args.learning_gate_mode == "soft_block":
+        if not args.learning_gate_override:
+            gate_passed = False
+            warnings.append("LEARNING_GATE_BLOCK: learning promotion gate failed in soft_block mode. Use --learning-gate-override to bypass.")
+        else:
+            warnings.append("LEARNING_GATE_OVERRIDE: learning gate failed but override is active.")
+    elif not learning_check.passed and args.learning_gate_mode == "hard_block":
+        gate_passed = False
+        warnings.append("LEARNING_GATE_HARD_BLOCK: learning promotion gate failed. Hard block cannot be overridden.")
+
+    notes = []
+    if args.learning_gate_mode == "observe_only":
+        notes.append("learning_promotion_gate is in observe-only phase and does not block release.")
+    elif args.learning_gate_mode == "soft_signal":
+        notes.append("learning_promotion_gate is in soft_signal phase: warnings are visible but do not block release.")
+    elif args.learning_gate_mode == "soft_block":
+        notes.append("learning_promotion_gate is in soft_block phase: failures block release unless overridden.")
+    elif args.learning_gate_mode == "hard_block":
+        notes.append("learning_promotion_gate is in hard_block phase: failures block release unconditionally.")
+
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if gate_passed else "FAIL",
@@ -303,9 +339,8 @@ def main() -> int:
             {"name": check.name, "passed": check.passed, "detail": check.detail}
             for check in all_criteria
         ],
-        "notes": [
-            "learning_promotion_gate is currently in observe-only phase and does not block release."
-        ]
+        "warnings": warnings,
+        "notes": notes,
     }
 
     json_path = output_dir / "acceptance_check.json"
@@ -315,6 +350,9 @@ def main() -> int:
 
     print(f"[acceptance-check] status={report['status']}")
     print(f"[acceptance-check] gate_passed={str(report['gate_passed']).lower()}")
+    print(f"[acceptance-check] learning_gate_mode={args.learning_gate_mode}")
+    for w in warnings:
+        print(f"[acceptance-check] ⚠️  {w}")
     print(f"[acceptance-check] json={json_path}")
     print(f"[acceptance-check] report={md_path}")
     return 0 if gate_passed else 1
