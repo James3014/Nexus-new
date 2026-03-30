@@ -24,6 +24,20 @@ def run_step(name, cmd):
 def main():
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
     
+    # 0. Contract Regression & E2E DI Gate
+    success, _ = run_step(
+        "DI & Contract Regression",
+        f'"{VENV_PYTHON}" -m pytest tests/contracts/ tests/test_container_orchestration.py -q',
+    )
+    if not success: sys.exit(1)
+    
+    # 0.5 Warning Budget Gate
+    success, _ = run_step(
+        "Warning Budget",
+        f'"{VENV_PYTHON}" scripts/ops/warning_budget_check.py --threshold 70',
+    )
+    if not success: sys.exit(1)
+    
     # 1. Pytest Regression
     success, _ = run_step(
         "Regression Tests",

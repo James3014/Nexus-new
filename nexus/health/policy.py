@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from nexus.core.state_contracts import NexusState
 
@@ -17,7 +17,7 @@ class HealthTriggerPolicy:
     LEARNING_STREAK_TARGET = 3
 
     @classmethod
-    def evaluate_and_record(cls, state: NexusState, snapshot: HealthSnapshot) -> List[HealthTrigger]:
+    def evaluate_and_record(cls, state: NexusState, snapshot: HealthSnapshot, project_root: "Optional[Path]" = None) -> List[HealthTrigger]:
         triggers: List[HealthTrigger] = []
         streaks = cls._phase_streaks(state)
 
@@ -82,6 +82,20 @@ class HealthTriggerPolicy:
                     severity="MEDIUM",
                 )
             )
+
+        if project_root is not None:
+            from nexus.governance.learning_gate import evaluate_learning_gate
+            run_dir = project_root / ".nexus" / "runs" / state.task_id
+            gate_result = evaluate_learning_gate(run_dir, project_root)
+            if not gate_result.passed:
+                state.trust_level = "restricted"
+                triggers.append(
+                    HealthTrigger(
+                        code="learning_gate_failed",
+                        reason=f"Learning gate failed: {', '.join(gate_result.failure_reasons)}",
+                        severity="MEDIUM",
+                    )
+                )
 
         cls._record(state, triggers, pipeline_health)
         return triggers

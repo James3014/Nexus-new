@@ -175,7 +175,7 @@ def test_self_heal_service_executes_policy_actions_even_when_healthy(monkeypatch
     )
     monkeypatch.setattr(
         "nexus.health.service.HealthTriggerPolicy.evaluate_and_record",
-        lambda _state, _snap: [
+        lambda _state, _snap, *args: [
             HealthTrigger(
                 code="learning_velocity_stalled",
                 reason="velocity stalled",
@@ -211,7 +211,7 @@ def test_self_heal_service_preserves_phase_route_when_merging_policy_actions(mon
     )
     monkeypatch.setattr(
         "nexus.health.service.HealthTriggerPolicy.evaluate_and_record",
-        lambda _state, _snap: [
+        lambda _state, _snap, *args: [
             HealthTrigger(code="pipeline_health_low", reason="pipeline below 88", severity="HIGH")
         ],
     )
@@ -242,7 +242,7 @@ ModuleNotFoundError: No module named 'non_existent_pkg'
     monkeypatch.setattr("nexus.health.service.HealthScorer.apply_snapshot", lambda _state: snapshots.pop(0))
     monkeypatch.setattr(
         "nexus.health.service.HealthTriggerPolicy.evaluate_and_record",
-        lambda _state, _snap: [],
+        lambda _state, _snap, *args: [],
     )
 
     cycle = SelfHealService(Path(tmp_path), executor=executor).run_cycle(state)
@@ -273,7 +273,7 @@ ModuleNotFoundError: No module named 'non_existent_pkg'
     monkeypatch.setattr("nexus.health.service.HealthScorer.apply_snapshot", lambda _state: snapshots.pop(0))
     monkeypatch.setattr(
         "nexus.health.service.HealthTriggerPolicy.evaluate_and_record",
-        lambda _state, _snap: [],
+        lambda _state, _snap, *args: [],
     )
 
     service = SelfHealService(Path(tmp_path), executor=executor)

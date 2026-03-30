@@ -93,7 +93,8 @@ def init_otel(project_root: Optional[pathlib.Path] = None, service_name: str = "
 
     # 無論是否有 OTLP/Console，總是附加 JSONL exporter 作為持久化兜底
     if project_root:
-        jsonl_path = project_root / ".nexus" / "traces" / "traces.jsonl"
+        project_root_path = pathlib.Path(project_root)
+        jsonl_path = project_root_path / ".nexus" / "traces" / "traces.jsonl"
         provider.add_span_processor(SimpleSpanProcessor(JsonlSpanExporter(jsonl_path)))
         logger.info("OTel: JSONL exporter → %s", jsonl_path)
 

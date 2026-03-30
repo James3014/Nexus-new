@@ -84,7 +84,8 @@ def test_reviewer_rejects_when_patch_apply_succeeds_but_missing_proof():
 
 
 @patch("nexus.learning.knowledge_index.KnowledgeIndex")
-def test_pipeline_blocks_audit_pass_when_patch_apply_failed(mock_ki):
+@patch("nexus.engine.pipeline_repair._auto_detect_verify_commands", return_value=[])
+def test_pipeline_blocks_audit_pass_when_patch_apply_failed(mock_auto_detect, mock_ki):
     engine = MagicMock()
     engine.hub.make_pre_routing_decision.return_value = {}
     engine.hub.assemble_diag_pack.return_value = {"task": "t"}
@@ -98,6 +99,7 @@ def test_pipeline_blocks_audit_pass_when_patch_apply_failed(mock_ki):
     engine.commander.crystallize.return_value = None
     engine.state_io.save_global_state.return_value = None
     engine.run_dir = Path(".")
+    engine.project_root = Path(".")
 
     planner = MagicMock()
     planner.run.return_value = {"ok": True}
