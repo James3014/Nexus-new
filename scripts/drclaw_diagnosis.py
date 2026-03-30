@@ -4,7 +4,7 @@ import json
 import argparse
 import logging
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class DrClawDiagnosis:
@@ -128,7 +128,7 @@ class DrClawDiagnosis:
             "quality": "A",
         }
 
-    def diagnostic_loop(self, user_input: str = None, mode: str = "normal"):
+    def diagnostic_loop(self, user_input: Optional[str] = None, mode: str = "normal"):
         if self.session["status"] == "diagnosed" and mode != "audit":
             return self.session["diagnosis"]
 

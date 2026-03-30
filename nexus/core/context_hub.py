@@ -7,35 +7,7 @@ from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
 
 
-class ToonRenderer:
-    """👾 TOON (Trinity Output Optimization Network) 語義壓縮器 (PHA-020)"""
-    @staticmethod
-    def render(state: NexusState) -> str:
-        """將長篇歷史、日誌壓縮為 Markdown 表格摘要"""
-        summary = ["| Phase | ID | Status | Summary |", "|---|---|---|---|"]
-        
-        # 只取最後 3 筆詳細記錄
-        for step in state.steps_history[-3:]:
-            summary.append(f"| {step.phase} | {step.step_id} | {step.status} | {step.summary or 'none'} |")
-            
-        # 其他補上計數
-        if len(state.steps_history) > 3:
-            summary.append(f"| ... | ({len(state.steps_history)-3} others) | ... | (Compressed) |")
-            
-        return "\n".join(summary)
-
-class ContextScorer:
-    """🎯 Trinity Context Scorer: 依階段決定檔案權重 (PHA-021)"""
-    @staticmethod
-    def get_relevance(phase: str, file_path: str) -> float:
-        path = file_path.lower()
-        if phase == "P":
-            return 1.0 if any(k in path for k in ["index", "manifest", "todo"]) else 0.5
-        if phase == "D":
-            return 1.0 if any(k in path for k in ["test", "log", "trace"]) else 0.4
-        if phase in ["R", "A"]:
-            return 1.0 if path.endswith(".py") or path.endswith(".js") else 0.3
-        return 0.5
+from nexus.core.context_compression import ToonRenderer, ContextScorer
 
 class ContextHub:
     """
@@ -70,46 +42,40 @@ class ContextHub:
         except Exception as e:
             return f"# Error loading rules: {e}"
 
-    def make_pre_routing_decision(
-        self, task_id: str, context: Optional[Dict] = None
-    ) -> Dict[str, Any]:
-        """🧠 Pre-routing: 決定是否需要外部研究、特定模式或審核層級。"""
+    def make_pre_routing_decision(self, task_id: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+        """🧠 Pre-routing: 決定是否需要外部 research、特定模式或審核層級。"""
         context = context or {}
+        if self._is_benchmark_run(context):
+            return {"external_needed": False, "mode": "benchmark", "priority": "normal", "audit_level": "full"}
+            
         state = self.state_io.load_global_state()
         task_type = state.metadata.get("task_type", "standard")
-
-        external_needed = context.get("force_external", False)
-        task_lower = task_id.lower()
-        if (
-            any(kw in task_lower for kw in ["fix", "error", "bug", "issue"])
-            or "sdk" in task_lower
-        ):
-            external_needed = True
-
+        
         decision = {
-            "external_needed": external_needed,
-            "mode": task_type,
-            "priority": "normal",
-            "audit_level": "full",  # Default
+            "external_needed": self._determine_external_needed(task_id, context),
+            "mode": task_type, "priority": "normal",
+            "audit_level": self._determine_audit_level(task_type, state),
         }
-
-        # 🧬 v0.7 Spec: Conversation Risk-Based Audit Level
-        if task_type == "conversation":
-            conv_meta = state.get_conversation_metadata()
-            # 判斷風險等級 (skip | light | full)
-            if not conv_meta.get("key_context_facts") and not conv_meta.get(
-                "user_corrections"
-            ):
-                decision["audit_level"] = "skip"
-            elif (
-                not conv_meta.get("needs_research")
-                and conv_meta.get("answer_draft_status") == "partial"
-            ):
-                decision["audit_level"] = "light"
-            else:
-                decision["audit_level"] = "full"
-
         return decision
+
+    def _is_benchmark_run(self, context: Dict) -> bool:
+        return bool(context.get("benchmark_run"))
+
+    def _determine_external_needed(self, task_id: str, context: Dict) -> bool:
+        if context.get("force_external", False):
+            return True
+        task_lower = task_id.lower()
+        return any(kw in task_lower for kw in ["fix", "error", "bug", "issue"]) or "sdk" in task_lower
+
+    def _determine_audit_level(self, task_type: str, state: NexusState) -> str:
+        if task_type != "conversation":
+            return "full"
+        conv_meta = state.get_conversation_metadata()
+        if not conv_meta.get("key_context_facts") and not conv_meta.get("user_corrections"):
+            return "skip"
+        if not conv_meta.get("needs_research") and conv_meta.get("answer_draft_status") == "partial":
+            return "light"
+        return "full"
 
     def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
         """🔌 Hook: 呼叫 MemoryService 取得 per-round 記憶。"""
@@ -168,23 +134,10 @@ class ContextHub:
         }
 
     def assemble_conversation_pack(self, audit_mode: bool = False) -> Dict[str, Any]:
-        """
-        組裝對話專用 Context Pack (v0.7 Spec)。
-        audit_mode=True 時啟用壓縮策略，節省 A 階段 token 消耗。
-        """
+        """組裝對話專用 Context Pack (v0.7 Spec)。"""
         state = self.state_io.load_global_state()
         conv_meta = state.get_conversation_metadata()
-
-        # 🧬 v2: 壓縮策略
-        if audit_mode:
-            # 只保留最近 2 回合摘要，不含詳細內容
-            steps_ctx = [
-                {"phase": s.phase, "summary": s.summary}
-                for s in state.steps_history[-2:]
-            ]
-        else:
-            steps_ctx = [s.summary for s in state.steps_history[-5:]]
-
+        
         pack = {
             "conversation_id": conv_meta.get("conversation_id"),
             "user_goal": conv_meta.get("user_goal"),
@@ -194,23 +147,28 @@ class ContextHub:
             "user_corrections": conv_meta.get("user_corrections", []),
             "unresolved_points": conv_meta.get("unresolved_points", []),
             "answer_draft_status": conv_meta.get("answer_draft_status"),
-            "steps_history_summary": steps_ctx,
+            "steps_history_summary": self._summarize_steps_history(state, audit_mode),
             "memory_reminders": self._inject_memory_reminders("conversation"),
             "timestamp": datetime.now().isoformat(),
         }
 
-        # 注入最近的審核反饋 (如果有)
         if "last_audit_feedback" in state.metadata:
             pack["prior_audit_feedback"] = state.metadata["last_audit_feedback"]
 
-        # 注入研究結果 (非壓縮模式)
+        self._inject_research_findings(state, conv_meta, pack, audit_mode)
+        return pack
+
+    def _summarize_steps_history(self, state: NexusState, audit_mode: bool) -> List:
+        if audit_mode:
+            return [{"phase": s.phase, "summary": s.summary} for s in state.steps_history[-2:]]
+        return [s.summary for s in state.steps_history[-5:]]
+
+    def _inject_research_findings(self, state: NexusState, conv_meta: Dict, pack: Dict, audit_mode: bool) -> None:
         if not audit_mode and conv_meta.get("needs_research") and state.steps_history:
             for step in reversed(state.steps_history):
                 if step.phase == "X" and step.status == "completed":
                     pack["research_findings"] = step.metadata.get("findings", [])
                     break
-
-        return pack
 
     def assemble_repair_pack(
         self,

@@ -1,9 +1,13 @@
 {
   "case_id": "OFF-001",
   "goal": "Fix missing 'os' import in research.py",
-    "force_external": true,
-    "initial_state": {
+  "initial_state": {
     "files": ["nexus/engine/phases/research.py"]
+  },
+  "benchmark_fixture": {
+    "file": "nexus/engine/phases/research.py",
+    "target": "import os\n",
+    "replacement": ""
   },
   "expected_outcome": {
     "phases": ["P", "D", "R", "A", "C"],

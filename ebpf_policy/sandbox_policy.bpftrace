@@ -1,0 +1,22 @@
+/* 
+ * Nexus Sandbox Security Policy (eBPF/bpftrace)
+ * Monotoring of 'openat' syscalls to prevent filesystem escape.
+ * Targets: Linux Production Environment.
+ */
+
+tracepoint:syscalls:sys_enter_openat {
+    $filename = str(args->filename);
+    
+    /* Whitelist: Allow /tmp/nexus/ and relative workspace access */
+    if ($filename !~ "/tmp/nexus/.*" && $filename !~ "./.*" && $filename !~ "/workspace/.*") {
+        printf("🚨 SECURITY_VIO: PID %d (%s) attempted to access unauthorized path: %s\n", pid, comm, $filename);
+        
+        /* Optional: Signal the process to terminate */
+        /* signal(5); // SIGTRAP */
+    }
+}
+
+tracepoint:syscalls:sys_enter_execve {
+    $comm = str(args->filename);
+    printf("🔍 Audit: %s is executing %s\n", comm, $comm);
+}

@@ -1,7 +1,9 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from .state_legacy import NexusStateLegacyMixin
 from datetime import datetime
 from enum import Enum
+from nexus.core.pipeline_metadata import PipelineMetadata
 
 class TddStatus(str, Enum):
     RED = "red"
@@ -67,7 +69,7 @@ class AuditResult(BaseModel):
     prior_audit_failures: List[str] = []
     code_quality_score: Optional[float] = None
     summary: str
-    metadata: Dict[str, Any] = {}
+    metadata: PipelineMetadata = {}
 
 # --- B 階段: Batch Management (v7 Night Factory) ---
 
@@ -88,7 +90,7 @@ class NexusIssue(BaseModel):
     domain: Optional[str] = "general"
     priority: int = 1
     config: TaskConfig = Field(default_factory=TaskConfig)
-    metadata: Dict[str, Any] = {}
+    metadata: PipelineMetadata = {}
 
 class NexusBatch(BaseModel):
     batch_id: str
@@ -99,7 +101,7 @@ class NexusBatch(BaseModel):
     total_token_usage: int = 0
     schedule_cron: Optional[str] = None
     status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED, MELTED
-    metadata: Dict[str, Any] = {}
+    metadata: PipelineMetadata = {}
 
 class StepRecord(BaseModel):
     phase: str  # P, D, X, R, A, C
@@ -107,7 +109,7 @@ class StepRecord(BaseModel):
     status: str # pending, in_progress, completed, failed
     started_at: datetime
     ended_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展
+    metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展 # 支援自省等靈活擴展
     summary: Optional[str] = None
 
 # --- H 階段: Health & Self-Check (CHK-001) ---
@@ -125,65 +127,36 @@ class PhaseMetric(BaseModel):
     signals: Dict[str, Any] = Field(default_factory=dict)
      # HEALTHY, WARNING, CRITICAL
 
-# --- T 階段: Trinity & Learning ---
+# --- R02 Decomposed Sub-objects ---
 
-class TraumaRecord(BaseModel):
-    failure_signature: str
-    penalty: float = -0.5
-    expiry: Optional[datetime] = None
-
-class NexusWeights(BaseModel):
-    skill_weights: Dict[str, float] = Field(default_factory=lambda: {"generalist": 1.0})
-    trauma_records: List[TraumaRecord] = Field(default_factory=list)
-
-from pydantic import model_validator
-
-class NexusState(BaseModel):
-    schema_version: str = "1.9.0"
-    task_id: str
-    batch_id: Optional[str] = None
-    config: TaskConfig = Field(default_factory=TaskConfig)
-    current_phase: str = "P"
-    current_step_id: Optional[str] = None
-    steps_history: List[StepRecord] = []
-    external_needed: bool = False
-    external_used: List[Dict[str, Any]] = []
-    skills_used: List[Dict[str, Any]] = []
-    
-    # --- Superpowers v5.0.2 Extensions ---
-    superpowers_plan: Dict[str, Any] = Field(default_factory=dict)
-    tdd_status: TddStatus = TddStatus.NONE
-    subagents_active: bool = False
-    
-    # --- Trinity v9.0 Extensions ---
-    autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
-    learning_velocity: float = 1.0
-    policy_hit_ids: List[str] = Field(default_factory=list)
-    policy_applied: bool = False
-    execution_mode: str = "one-shot"
-    trigger_reason: str = "user"
-    
-    # --- Observability & Metrics ---
-    total_token_usage: int = 0
-    token_raw_model: int = 0
-    token_fallback_est: int = 0
-    token_system_overhead: int = 0
-    token_capture_status: str = "unknown"
+class TokenAccounting(BaseModel):
+    """Token 使用量追蹤"""
+    total_usage: int = 0
+    raw_model: int = 0
+    fallback_est: int = 0
+    system_overhead: int = 0
+    capture_status: str = "unknown"
     phase_tokens: Dict[str, int] = Field(default_factory=dict)
+
+class ObservabilityContext(BaseModel):
+    """追蹤與可觀測性"""
+    trace_id: str = ""
+    span_id: str = ""
+    auto_actions: List[Dict[str, Any]] = Field(default_factory=list)
+
+class AuditCounters(BaseModel):
+    """審計與重試計數器"""
     audit_pass_count: int = 0
     retry_count: int = 0
-    
-    # --- Conversation Specific Metrics (CONV-001) ---
     turn_count: int = 0
     clarification_count: int = 0
     correction_count: int = 0
     unresolved_count: int = 0
-    
-    # --- Health & Self-Check (CHK-001) ---
+
+class PhaseHealthSnapshot(BaseModel):
+    """階段健康快照"""
     health_score: float = 100.0
     health_metrics: HealthMetrics = Field(default_factory=HealthMetrics)
-    
-    # --- Phase Health Autonomy (PHA-001) ---
     pipeline_health: float = 100.0
     learning_velocity: float = 0.0
     phase_metrics: Dict[str, PhaseMetric] = Field(
@@ -196,30 +169,53 @@ class NexusState(BaseModel):
             "C": PhaseMetric()
         }
     )
-    auto_actions: List[Dict[str, Any]] = []
 
-    metadata: Dict[str, Any] = {}
+# --- T 階段: Trinity & Learning ---
+
+class TraumaRecord(BaseModel):
+    failure_signature: str
+    penalty: float = -0.5
+    expiry: Optional[datetime] = None
+
+class NexusWeights(BaseModel):
+    skill_weights: Dict[str, float] = Field(default_factory=lambda: {"generalist": 1.0})
+    trauma_records: List[TraumaRecord] = Field(default_factory=list)
+
+
+class NexusState(BaseModel, NexusStateLegacyMixin):
+    schema_version: str = "2.0.0"
+    task_id: str
+    batch_id: Optional[str] = None
+    config: TaskConfig = Field(default_factory=TaskConfig)
     
-    def calculate_health(self):
-        """計算系統健康得分 (0-100)"""
-        m = self.health_metrics
-        # 權重分配: Pass Rate (40%), Drift (20%), Error Rate (20%), Token Eff (20%)
-        score = (m.test_pass_rate * 40) + \
-                (max(0, 1 - m.drift_index) * 20) + \
-                (max(0, 1 - m.error_rate) * 20) + \
-                (min(1.0, m.token_efficiency) * 20)
-        self.health_score = round(score, 2)
-        
-        if self.health_score >= 80:
-            m.status = "HEALTHY"
-        elif self.health_score >= 50:
-            m.status = "WARNING"
-        else:
-            m.status = "CRITICAL"
-        
-        m.last_check_at = datetime.now()
-        return self.health_score
+    # Execution
+    current_phase: Optional[str] = None
+    current_step_id: Optional[str] = None
+    steps_history: List[StepRecord] = Field(default_factory=list)
+    external_needed: bool = False
+    external_used: List[Dict[str, Any]] = Field(default_factory=list)
+    skills_used: List[Dict[str, Any]] = Field(default_factory=list)
+    execution_mode: str = "one-shot"
+    trigger_reason: str = "user"
+    trust_level: str = "standard"
+
+    # Sub-objects (Composition)
+    tokens: TokenAccounting = Field(default_factory=TokenAccounting)
+    observability: ObservabilityContext = Field(default_factory=ObservabilityContext)
+    audit: AuditCounters = Field(default_factory=AuditCounters)
+    phase_health: PhaseHealthSnapshot = Field(default_factory=PhaseHealthSnapshot)
+
+    # Legacy (保持)
+    superpowers_plan: Dict[str, Any] = Field(default_factory=dict)
+    tdd_status: TddStatus = TddStatus.NONE
+    subagents_active: bool = False
+    autonomic_weights: NexusWeights = Field(default_factory=NexusWeights)
+    policy_hit_ids: List[str] = Field(default_factory=list)
+    policy_applied: bool = False
+    metadata: PipelineMetadata = Field(default_factory=dict)
     
+    # ----------------------------------------------------
+
     def get_conversation_metadata(self) -> Dict[str, Any]:
         """安全獲取對話元數據容器"""
         return self.metadata.get("conversation", {})
@@ -253,26 +249,14 @@ class NexusState(BaseModel):
         """獲取當前響應模式"""
         return self.metadata.get("response_mode", "standard")
 
+    @model_validator(mode='before')
+    @classmethod
+    def map_legacy_fields(cls, data: Any) -> Any:
+        from nexus.core.state_migrator import StateMigrator
+        return StateMigrator.migrate(data)
+
     @model_validator(mode='after')
     def validate_nexus_protocols(self) -> 'NexusState':
-        """
-        🚫 Nexus Soul Protocols: Forbidden Transitions & Guardrails
-        """
-        # 1. Batch Mode 預算守門員
-        if self.batch_id and self.current_phase == "P":
-            if self.config.budget_token <= 0:
-                raise ValueError(f"Soul Protocol Violation: Batch {self.batch_id} at Phase P must have budget_token > 0")
-        
-        # 2. 狀態轉移禁地 (Forbidden Transitions Matrix)
-        if self.steps_history:
-            last_phase = self.steps_history[-1].phase
-            # 案例：禁止從 P 直接跳到 R (必須經過 D)
-            forbidden = {
-                "P": ["R", "A", "C"],
-                "D": ["A", "C"],
-                "X": ["A", "C"]
-            }
-            if self.current_phase in forbidden.get(last_phase, []):
-                raise ValueError(f"Forbidden Transition: Illegal shortcut detected from {last_phase} to {self.current_phase}. Contract v1.5.2 enforces P->D->(X)->R pipeline.")
-            
+        from nexus.core.state_validator import StateValidator
+        StateValidator.validate_protocols(self)
         return self

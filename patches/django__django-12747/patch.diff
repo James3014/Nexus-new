@@ -1,0 +1,5 @@
+--- a/django/db/models/query.py
++++ b/django/db/models/query.py
+@@ -100,1 +100,1 @@
+-        return deleted, {self.model._meta.label: deleted}
++        return deleted, {self.model._meta.label: deleted} if deleted else {}

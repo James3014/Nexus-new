@@ -3,22 +3,38 @@ from pathlib import Path
 
 # 延遲導入服務，避免循環依賴
 from nexus.services.git import GitManager
-from nexus.services.llm import LLMClient
+from nexus.services.gateway import BattlesuitGateway as LLMClient
 from nexus.services.linter import Linter
 from nexus.services.patcher import SafePatcher
 from nexus.services.reporter import Reporter
 from nexus.services.workspace import WorkspaceManager
 from nexus.services.prompt_builder import PromptBuilder
-from nexus.services.reviewer import CodexLoopV2
+from nexus.services.reviewer import GatewayReviewLoop
 from nexus.core.commander import Commander
 from nexus.core.context_hub import ContextHub
 from nexus.core.state_io import StateIO
 from nexus.core.router import SkillsRouter
+from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
 from nexus.services.memory import MemoryService
 from nexus.services.predictor import Predictor
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.engine.phases.research import ResearchPhaseHandler
 from nexus.engine.phases.repair import RepairPhaseHandler
+
+def _create_nexus_engine(**kwargs):
+    from nexus.engine.coordinator import NexusEngine
+    from nexus.engine.config import EngineConfig
+    
+    # 提取 EngineConfig 所需的參數
+    import inspect
+    sig = inspect.signature(EngineConfig)
+    config_keys = sig.parameters.keys()
+    
+    config_args = {k: kwargs.pop(k) for k in config_keys if k in kwargs}
+    config = EngineConfig(**config_args)
+    
+    return NexusEngine(config=config, **kwargs)
+
 
 class NexusContainer(containers.DeclarativeContainer):
     """
@@ -99,22 +115,49 @@ class NexusContainer(containers.DeclarativeContainer):
     )
 
     # 引擎工廠 (Factory for Orchestrator/Engine)
-    from nexus.core.orchestrator import NexusOrchestrator
-    from nexus.engine.coordinator import NexusEngine
-    
-    orchestrator_factory = providers.Factory(
-        CodexLoopV2,
-        project_root=project_root,
+
+    def _create_orchestrator(**kwargs):
+        from nexus.core.orchestrator import NexusOrchestrator
+        from nexus.core.config import OrchestratorConfig
+        import inspect
+        sig = inspect.signature(OrchestratorConfig)
+        config_keys = sig.parameters.keys()
+        config_args = {k: kwargs.pop(k) for k in config_keys if k in kwargs}
+        config = OrchestratorConfig(**config_args)
+        # 過濾 DI 框架注入的非業務參數 (如 scope)
+        import inspect
+        orchestrator_sig = inspect.signature(NexusOrchestrator.__init__)
+        valid_keys = set(orchestrator_sig.parameters.keys()) - {"self"}
+        extra_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
+        return NexusOrchestrator(config=config, **extra_kwargs)
+
+    infra_hub = providers.Factory(
+        NexusInfraHub,
         git=git,
-        llm=llm,
-        linter=linter,
-        patcher=patcher,
-        reporter=reporter,
         workspace=workspace,
-        router=router,
-        commander=commander,
+        linter=linter,
+        patcher=patcher
+    )
+
+    intel_hub = providers.Factory(
+        NexusIntelHub,
+        llm=llm,
         context_hub=context_hub,
+        commander=commander
+    )
+
+    gov_hub = providers.Factory(
+        NexusGovHub,
+        router=router,
+        reporter=reporter,
         state_io=state_io
+    )
+
+    orchestrator_factory = providers.Factory(
+        _create_orchestrator,
+        infra=infra_hub,
+        intel=intel_hub,
+        gov=gov_hub
     )
 
     research_phase = providers.Factory(
@@ -138,8 +181,16 @@ class NexusContainer(containers.DeclarativeContainer):
         predictor=predictor
     )
 
+    from nexus.engine.phases.diagnose import DiagnosticPhaseHandler
+    diagnostic_phase = providers.Factory(
+        DiagnosticPhaseHandler,
+        project_root=project_root,
+        run_dir=run_dir,
+        hub=context_hub
+    )
+
     engine_factory = providers.Factory(
-        NexusEngine,
+        _create_nexus_engine,
         project_root=project_root,
         run_dir=run_dir,
         state_io=state_io,
@@ -149,6 +200,7 @@ class NexusContainer(containers.DeclarativeContainer):
         phases=providers.Dict(
             P=planner_phase,
             X=research_phase,
+            D=diagnostic_phase,
             R=repair_phase
         )
     )

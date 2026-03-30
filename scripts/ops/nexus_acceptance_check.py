@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+@dataclass(frozen=True)
+class CriterionResult:
+    name: str
+    passed: bool
+    detail: dict[str, Any]
+
+
+def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def _pct(numerator: float, denominator: float) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round((numerator / denominator) * 100.0, 2)
+
+
+def _window_pair(rows: list[dict[str, Any]], window: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if window <= 0:
+        return rows, []
+    recent = rows[-window:]
+    previous = rows[-(window * 2) : -window] if len(rows) > window else []
+    return recent, previous
+
+
+def _evaluate_repair_success(
+    optimization_rows: list[dict[str, Any]],
+    *,
+    window: int,
+    success_min: float,
+) -> CriterionResult:
+    recent = optimization_rows[-window:] if window > 0 else optimization_rows
+    total = len(recent)
+    success = sum(1 for row in recent if bool(row.get("success", False)))
+    rate = _pct(success, total)
+    passed = total > 0 and rate >= success_min
+    detail = {
+        "window_rows": total,
+        "success_count": success,
+        "success_rate": rate,
+        "threshold": success_min,
+    }
+    return CriterionResult(
+        name="auto_repair_success_rate",
+        passed=passed,
+        detail=detail,
+    )
+
+
+def _phantom_fp_rate(rows: list[dict[str, Any]]) -> tuple[float, int]:
+    phantom_blocked = [row for row in rows if bool(row.get("phantom_blocked", False))]
+    blocked_count = len(phantom_blocked)
+    if blocked_count == 0:
+        return 0.0, 0
+    false_positive = sum(1 for row in phantom_blocked if bool(row.get("pass", False)))
+    return _pct(false_positive, blocked_count), blocked_count
+
+
+def _evaluate_phantom_false_positive(
+    outcome_rows: list[dict[str, Any]],
+    *,
+    window: int,
+    fp_max: float,
+) -> CriterionResult:
+    recent, previous = _window_pair(outcome_rows, window)
+    recent_rate, recent_blocked = _phantom_fp_rate(recent)
+    prev_rate, prev_blocked = _phantom_fp_rate(previous)
+
+    trend_ok = recent_rate <= prev_rate if previous else True
+    threshold_ok = recent_rate <= fp_max
+    passed = trend_ok and threshold_ok
+    detail = {
+        "recent_window_rows": len(recent),
+        "previous_window_rows": len(previous),
+        "recent_phantom_blocked": recent_blocked,
+        "previous_phantom_blocked": prev_blocked,
+        "recent_false_positive_rate": recent_rate,
+        "previous_false_positive_rate": prev_rate,
+        "threshold": fp_max,
+    }
+    return CriterionResult(
+        name="phantom_false_positive_rate",
+        passed=passed,
+        detail=detail,
+    )
+
+
+def _avg(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 2)
+
+
+def _evaluate_regression_and_side_effects(
+    outcome_rows: list[dict[str, Any]],
+    *,
+    window: int,
+    regression_min: float,
+    retry_spike_factor: float,
+    retry_abs_max: float,
+) -> CriterionResult:
+    recent, previous = _window_pair(outcome_rows, window)
+    recent_reg = _avg([float(row.get("regression_pass_rate", 0.0) or 0.0) for row in recent])
+    prev_reg = _avg([float(row.get("regression_pass_rate", 0.0) or 0.0) for row in previous])
+
+    recent_retry = _avg(
+        [
+            float(row.get("retry_count", 0.0) or 0.0)
+            + float(row.get("self_heal_retry_count", 0.0) or 0.0)
+            for row in recent
+        ]
+    )
+    prev_retry = _avg(
+        [
+            float(row.get("retry_count", 0.0) or 0.0)
+            + float(row.get("self_heal_retry_count", 0.0) or 0.0)
+            for row in previous
+        ]
+    )
+
+    regression_ok = recent_reg >= regression_min
+    if previous:
+        side_effect_spike = recent_retry > max(retry_abs_max, prev_retry * retry_spike_factor)
+    else:
+        side_effect_spike = recent_retry > retry_abs_max
+
+    passed = regression_ok and not side_effect_spike
+    detail = {
+        "recent_window_rows": len(recent),
+        "previous_window_rows": len(previous),
+        "recent_regression_pass_rate_avg": recent_reg,
+        "previous_regression_pass_rate_avg": prev_reg,
+        "regression_threshold": regression_min,
+        "recent_retry_avg": recent_retry,
+        "previous_retry_avg": prev_retry,
+        "retry_abs_max": retry_abs_max,
+        "retry_spike_factor": retry_spike_factor,
+        "side_effect_spike": side_effect_spike,
+    }
+    return CriterionResult(
+        name="regression_and_side_effect",
+        passed=passed,
+        detail=detail,
+    )
+
+
+def _evaluate_learning_promotion(
+    outcome_rows: list[dict[str, Any]],
+    *,
+    window: int,
+    pattern_reuse_min: float,
+    next_run_hit_min: float,
+) -> CriterionResult:
+    recent, _ = _window_pair(outcome_rows, window)
+    
+    def _extract(row: dict[str, Any], key: str) -> float:
+        val = row.get(key)
+        if val is None:
+            val = row.get("metadata", {}).get(key, 0.0)
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return 0.0
+
+    recent_pr = _avg([_extract(r, "pattern_reuse") for r in recent])
+    recent_nrh = _avg([_extract(r, "next_run_hit") for r in recent])
+    recent_lq = _avg([_extract(r, "lesson_quality") for r in recent])
+
+    passed = recent_pr >= pattern_reuse_min and recent_nrh >= next_run_hit_min
+    
+    detail = {
+        "recent_window_rows": len(recent),
+        "recent_pattern_reuse_avg": recent_pr,
+        "pattern_reuse_threshold": pattern_reuse_min,
+        "recent_next_run_hit_avg": recent_nrh,
+        "next_run_hit_threshold": next_run_hit_min,
+        "recent_lesson_quality_avg": recent_lq,
+    }
+    
+    return CriterionResult(
+        name="learning_promotion_gate",
+        passed=passed,
+        detail=detail,
+    )
+
+def _write_markdown(report: dict[str, Any], path: Path) -> None:
+    lines: list[str] = []
+    lines.append("# Nexus Acceptance Check")
+    lines.append("")
+    lines.append(f"- status: {report['status']}")
+    lines.append(f"- gate_passed: {str(report['gate_passed']).lower()}")
+    lines.append(f"- generated_at_utc: {report['generated_at_utc']}")
+    lines.append(f"- learning_gate_mode: {report.get('learning_gate_mode', 'N/A')}")
+    lines.append(f"- learning_gate_override: {str(report.get('learning_gate_override', False)).lower()}")
+    lines.append("")
+    lines.append("## Criteria")
+    lines.append("")
+    for item in report["criteria"]:
+        lines.append(f"- {item['name']}: {'PASS' if item['passed'] else 'FAIL'}")
+        for key, value in item["detail"].items():
+            lines.append(f"  - {key}: {value}")
+    if report.get("warnings"):
+        lines.append("")
+        lines.append("## Warnings")
+        lines.append("")
+        for w in report["warnings"]:
+            lines.append(f"- ⚠️ {w}")
+    if report.get("notes"):
+        lines.append("")
+        lines.append("## Notes")
+        lines.append("")
+        for n in report["notes"]:
+            lines.append(f"- {n}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run fixed 3-rule acceptance checks and emit reports.")
+    parser.add_argument("--project-root", default=str(Path(__file__).resolve().parents[2]))
+    parser.add_argument("--output-dir", default=".nexus/reports")
+    parser.add_argument("--window", type=int, default=50)
+    parser.add_argument("--repair-success-min", type=float, default=80.0)
+    parser.add_argument("--phantom-fp-max", type=float, default=3.0)
+    parser.add_argument("--regression-pass-min", type=float, default=95.0)
+    parser.add_argument("--retry-spike-factor", type=float, default=2.0)
+    parser.add_argument("--retry-abs-max", type=float, default=1.0)
+    parser.add_argument("--pattern-reuse-min", type=float, default=30.0)
+    parser.add_argument("--next-run-hit-min", type=float, default=20.0)
+    parser.add_argument("--learning-gate-mode", default="soft_signal",
+                        choices=["observe_only", "soft_signal", "soft_block", "hard_block"],
+                        help="Mode for learning gate governance")
+    parser.add_argument("--learning-gate-override", action="store_true")
+    args = parser.parse_args()
+
+    project_root = Path(args.project_root).resolve()
+    output_dir = (project_root / args.output_dir).resolve() if not str(args.output_dir).startswith("/") else Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    metrics_dir = project_root / ".nexus" / "metrics"
+    optimization_rows = _load_jsonl(metrics_dir / "skills_optimization_runs.jsonl")
+    outcome_rows = _load_jsonl(metrics_dir / "skill_outcome_events.jsonl")
+
+    checks = [
+        _evaluate_repair_success(
+            optimization_rows,
+            window=args.window,
+            success_min=args.repair_success_min,
+        ),
+        _evaluate_phantom_false_positive(
+            outcome_rows,
+            window=args.window,
+            fp_max=args.phantom_fp_max,
+        ),
+        _evaluate_regression_and_side_effects(
+            outcome_rows,
+            window=args.window,
+            regression_min=args.regression_pass_min,
+            retry_spike_factor=args.retry_spike_factor,
+            retry_abs_max=args.retry_abs_max,
+        ),
+    ]
+    
+    learning_check = _evaluate_learning_promotion(
+        outcome_rows,
+        window=args.window,
+        pattern_reuse_min=args.pattern_reuse_min,
+        next_run_hit_min=args.next_run_hit_min,
+    )
+
+    gate_passed = all(check.passed for check in checks)
+    all_criteria = checks + [learning_check]
+
+    # --- Stage 1 Soft Signal: learning gate warn but don't block ---
+    warnings = []
+    if not learning_check.passed and args.learning_gate_mode == "soft_signal":
+        warnings.append("LEARNING_GATE_WARN: learning promotion gate did not pass, but soft_signal mode does not block release.")
+    elif not learning_check.passed and args.learning_gate_mode == "soft_block":
+        if not args.learning_gate_override:
+            gate_passed = False
+            warnings.append("LEARNING_GATE_BLOCK: learning promotion gate failed in soft_block mode. Use --learning-gate-override to bypass.")
+        else:
+            warnings.append("LEARNING_GATE_OVERRIDE: learning gate failed but override is active.")
+    elif not learning_check.passed and args.learning_gate_mode == "hard_block":
+        gate_passed = False
+        warnings.append("LEARNING_GATE_HARD_BLOCK: learning promotion gate failed. Hard block cannot be overridden.")
+
+    notes = []
+    if args.learning_gate_mode == "observe_only":
+        notes.append("learning_promotion_gate is in observe-only phase and does not block release.")
+    elif args.learning_gate_mode == "soft_signal":
+        notes.append("learning_promotion_gate is in soft_signal phase: warnings are visible but do not block release.")
+    elif args.learning_gate_mode == "soft_block":
+        notes.append("learning_promotion_gate is in soft_block phase: failures block release unless overridden.")
+    elif args.learning_gate_mode == "hard_block":
+        notes.append("learning_promotion_gate is in hard_block phase: failures block release unconditionally.")
+
+    report = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "PASS" if gate_passed else "FAIL",
+        "gate_passed": gate_passed,
+        "learning_promotion_passed": learning_check.passed,
+        "learning_gate_mode": args.learning_gate_mode,
+        "learning_gate_override": args.learning_gate_override,
+        "project_root": str(project_root),
+        "input": {
+            "window": args.window,
+            "repair_success_min": args.repair_success_min,
+            "phantom_fp_max": args.phantom_fp_max,
+            "regression_pass_min": args.regression_pass_min,
+            "retry_spike_factor": args.retry_spike_factor,
+            "retry_abs_max": args.retry_abs_max,
+            "learning_gate_mode": args.learning_gate_mode,
+            "learning_gate_override": args.learning_gate_override,
+        },
+        "sources": {
+            "skills_optimization_runs": str(metrics_dir / "skills_optimization_runs.jsonl"),
+            "skill_outcome_events": str(metrics_dir / "skill_outcome_events.jsonl"),
+        },
+        "criteria": [
+            {"name": check.name, "passed": check.passed, "detail": check.detail}
+            for check in all_criteria
+        ],
+        "warnings": warnings,
+        "notes": notes,
+    }
+
+    json_path = output_dir / "acceptance_check.json"
+    md_path = output_dir / "acceptance_check.md"
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_markdown(report, md_path)
+
+    print(f"[acceptance-check] status={report['status']}")
+    print(f"[acceptance-check] gate_passed={str(report['gate_passed']).lower()}")
+    print(f"[acceptance-check] learning_gate_mode={args.learning_gate_mode}")
+    for w in warnings:
+        print(f"[acceptance-check] ⚠️  {w}")
+    print(f"[acceptance-check] json={json_path}")
+    print(f"[acceptance-check] report={md_path}")
+    return 0 if gate_passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

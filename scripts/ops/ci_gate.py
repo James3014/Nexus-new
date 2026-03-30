@@ -4,7 +4,10 @@ import sys
 import json
 from pathlib import Path
 
+from nexus.delivery.phantom_guard import compute_phantom_success
+
 ROOT = Path(__file__).resolve().parents[2]
+VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
@@ -21,12 +24,32 @@ def run_step(name, cmd):
 def main():
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
     
+    # 0. Contract Regression & E2E DI Gate
+    success, _ = run_step(
+        "DI & Contract Regression",
+        f'"{VENV_PYTHON}" -m pytest tests/contracts/ tests/test_container_orchestration.py -q',
+    )
+    if not success: sys.exit(1)
+    
+    # 0.5 Warning Budget Gate
+    success, _ = run_step(
+        "Warning Budget",
+        f'"{VENV_PYTHON}" scripts/ops/warning_budget_check.py --threshold 70',
+    )
+    if not success: sys.exit(1)
+    
     # 1. Pytest Regression
-    success, _ = run_step("Regression Tests", "uv run pytest tests/test_v9_regression_p1.py -q")
+    success, _ = run_step(
+        "Regression Tests",
+        f'"{VENV_PYTHON}" -m pytest tests/test_v9_regression_p1.py -q',
+    )
     if not success: sys.exit(1)
     
     # 2. Benchmark Replay (Mini-lane)
-    benchmark_cmd = "uv run scripts/nexus_cli.py nexus:benchmark --tasks 10 --output ci_benchmark.csv"
+    benchmark_cmd = (
+        f'"{VENV_PYTHON}" scripts/nexus_cli.py '
+        "nexus:benchmark --tasks 10 --output ci_benchmark.csv"
+    )
     success, _ = run_step("Benchmark Replay", benchmark_cmd)
     if not success: sys.exit(1)
     

@@ -1,5 +1,5 @@
 import os
-from nexus.services.llm import LLMClient
+from nexus.services.gateway import BattlesuitGateway as LLMClient
 client = LLMClient()
 print(f"Use OAuth: {client.use_oauth}")
 # Attempt a small ask

@@ -1,5 +1,9 @@
 # Nexus v9 Autonomic: Zero-Drift Intelligence 🧬💎🚀
 
+> **⚠️ Nexus 不是 Agent。Nexus 是戰甲 (Battlesuit)。**
+> 任何 AI 模型穿上 Nexus 都會獲得 P-X-D-R-A-C 六階段自癒管線與學習系統。
+> 學習系統屬於 Nexus（戰甲），不屬於穿它的模型。經驗累積在戰甲裡，換模型也不會丟失。
+
 > **Beyond loops. Autonomic evolution, experience crystallization, and fallback resilience.**
 > **超越循環。自主演進、經驗結晶與備援韌性。**
 
@@ -41,16 +45,52 @@
 ```bash
 # Fix a bug with v9 Autonomic Precision
 # 以 v9 自主精度修復 Bug
-nexus:bug --task "fix hydration error on dynamic routes" --silent
+python3 scripts/engine/nexus_cli.py nexus:bug --task "fix hydration error on dynamic routes" --delivery-mode ask --silent
 
 # Build a feature with top-tier resilience
 # 具備高韌性的新功能開發
-nexus:feature --task "migrate session storage to redis" --domain django
+python3 scripts/engine/nexus_cli.py nexus:feature --task "migrate session storage to redis" --domain django --delivery-mode ask
 
 # Trigger autonomic learning cycle
 # 啟動自主演進學習循環
-nexus:crystal
+python3 scripts/engine/nexus_cli.py nexus:crystal
 ```
+
+---
+
+## 🛡️ Verified Delivery | 高標交付
+
+**[EN]** Nexus now supports a delivery gate across `bug`, `feature`, and `runner` flows. Use `--delivery-mode ask` to let the operator choose whether the current task requires high-standard delivery before completion is reported.
+
+**[ZH]** Nexus 現在已在 `bug`、`feature`、`runner` 三條任務流接上交付門。使用 `--delivery-mode ask`，系統會在任務開始時主動詢問操作者，是否要啟用高標交付。
+
+```bash
+# Ask the operator whether this bugfix needs high-standard delivery
+# 主動詢問這次 bug 修復是否需要高標交付
+python3 scripts/engine/nexus_cli.py nexus:bug \
+  --task "fix login callback regression" \
+  --delivery-mode ask
+
+# Ask the operator whether this feature needs high-standard delivery
+# 主動詢問這次功能開發是否需要高標交付
+python3 scripts/engine/nexus_cli.py nexus:feature \
+  --task "add SSO audit trail" \
+  --delivery-mode ask
+
+# Run the task runner and ask before enforcing completion gate
+# 在任務編排前先詢問是否啟用 completion gate
+python3 scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
+```
+
+**[EN]** If the operator selects `high`, Nexus will enforce the completion gate before marking the task as delivered. For `bug` and `feature`, Nexus can auto-suggest verification commands for Python, Rust, and Go projects when `--verify` is omitted. The CLI also prints the verification commands it used and the generated delivery report paths.
+
+**[ZH]** 若操作者選擇 `high`，Nexus 會在任務標記完成前強制通過 completion gate。對 `bug` 與 `feature` 而言，如果沒有提供 `--verify`，Nexus 會自動推建議驗證命令，支援 Python、Rust、Go 專案。CLI 也會直接輸出本次實際採用的驗證命令與生成的交付報告路徑。
+
+更多規則請見 [`docs/DELIVERY_CONTRACT_CN.md`](docs/DELIVERY_CONTRACT_CN.md)。
+
+For pilot chat usage, the canonical entry is now `scripts/nexus_pilot_cli.py`; `scripts/nexus_chat_cli.py` remains only as a compatibility shim.
+
+Pilot 聊天入口現在以 `scripts/nexus_pilot_cli.py` 為正式名稱；`scripts/nexus_chat_cli.py` 僅保留相容 shim 角色。
 
 ---
 

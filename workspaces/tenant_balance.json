@@ -1,0 +1,27 @@
+{
+  "A": {
+    "nexus_tokens": 1195,
+    "earned_from": [
+      {
+        "reason": "wisdom_distillation_reward",
+        "amount": 15,
+        "timestamp": "2026-03-26T09:24:25.332711"
+      },
+      {
+        "reason": "crystal_sale:crystal_A_v1",
+        "amount": 180,
+        "buyer_id": "B"
+      }
+    ],
+    "redeemable_for": [
+      "priority"
+    ]
+  },
+  "B": {
+    "nexus_tokens": 800,
+    "earned_from": [],
+    "redeemable_for": [
+      "priority"
+    ]
+  }
+}

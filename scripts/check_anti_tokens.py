@@ -4,7 +4,7 @@ from pathlib import Path
 # Ensure we can import from the project
 sys.path.append(os.getcwd())
 
-from nexus.services.llm import LLMClient
+from nexus.services.gateway import BattlesuitGateway as LLMClient
 
 def report_metrics():
     client = LLMClient(project_root=os.getcwd())

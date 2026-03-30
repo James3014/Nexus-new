@@ -1,4 +1,5 @@
 from nexus.core.state_contracts import NexusState
+from nexus.health.scoring import HealthScorer
 
 class HealthEvaluator:
     def evaluate(self, state: NexusState, success: bool) -> float:
@@ -18,5 +19,5 @@ class HealthEvaluator:
         # 4. Drift Index
         m.drift_index = 0.0
 
-        score = state.calculate_health()
-        return score
+        snapshot = HealthScorer.apply_snapshot(state)
+        return snapshot.overall_score

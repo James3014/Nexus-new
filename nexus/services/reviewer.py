@@ -2,11 +2,16 @@
 import os
 import json
 import shutil
+import hashlib
+import subprocess
 from pathlib import Path
 
 # Internal Nexus Imports
 from nexus.core.orchestrator import NexusOrchestrator
 from nexus.core.review_status import ReviewStatusNormalizer
+from nexus.core.phantom_detect import detect_inconclusive_success
+from nexus.services.gateway import BattlesuitGateway as LLMClient
+from nexus.services.review_strategy import ReviewerFactory  # R04: Strategy Pattern
 
 # Configuration
 BRAIN_SEARCH_BIN = os.getenv("MUSE_CORE_BRAIN_SEARCH", "/usr/local/bin/brain_search")
@@ -15,7 +20,7 @@ UI_TASTE_MD = os.getenv("MUSE_CORE_UI_TASTE", "")
 UV_BIN = shutil.which("uv") or "uv"
 
 
-class CodexLoopV2(NexusOrchestrator):
+class GatewayReviewLoop(NexusOrchestrator):
     """
     🧬 Codex-Loop v2.0: Modular Intelligence Orchestrator (Hardened)
     [v9 Forwarder] 繼承自新架構的 Orchestrator。
@@ -23,23 +28,55 @@ class CodexLoopV2(NexusOrchestrator):
     """
 
     def __init__(self, **kwargs):
+        from nexus.core.config import OrchestratorConfig
+        from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
+        from nexus.services.git import GitManager
+        from nexus.services.gateway import BattlesuitGateway
+        from nexus.core.context_hub import ContextHub
+        from nexus.core.commander import Commander
+        from nexus.core.router import SkillsRouter
+        from nexus.services.reporter import Reporter
+        from nexus.core.state_io import StateIO
+        from nexus.services.linter import Linter
+        from nexus.services.patcher import SafePatcher
+        from nexus.services.workspace import WorkspaceManager
+        
         self.project_root = Path(kwargs.get("project_root", Path.cwd()))
-
-        super().__init__(
+        run_dir = kwargs.get("run_dir") or str(self.project_root / ".nexus" / "runs" / "latest")
+        
+        config = OrchestratorConfig(
             task=kwargs.get("task", ""),
             skill_id=kwargs.get("skill_id", "writing-plans"),
-            mode=kwargs.get("mode", "developer"),
-            git=kwargs.get("git"),
-            llm=kwargs.get("llm"),
-            linter=kwargs.get("linter"),
-            patcher=kwargs.get("patcher"),
-            reporter=kwargs.get("reporter"),
-            workspace=kwargs.get("workspace"),
-            router=kwargs.get("router"),
-            commander=kwargs.get("commander"),
-            context_hub=kwargs.get("context_hub"),
-            state_io=kwargs.get("state_io"),
+            mode=kwargs.get("mode", "developer")
         )
+        
+        # 🧪 Recovery/Fallback logic for non-DI callers (P4-R5 alignment)
+        git_obj = kwargs.get("git") or GitManager(project_root=str(self.project_root))
+        llm_obj = kwargs.get("llm") or BattlesuitGateway()
+        state_io_obj = kwargs.get("state_io") or StateIO(str(self.project_root), run_dir=run_dir)
+        router_obj = kwargs.get("router") or SkillsRouter(str(self.project_root), run_dir=run_dir)
+        linter_obj = kwargs.get("linter") or Linter()
+        patcher_obj = kwargs.get("patcher") or SafePatcher(lock_dir="/tmp", project_root=str(self.project_root))
+        workspace_obj = kwargs.get("workspace") or WorkspaceManager(str(self.project_root))
+        
+        infra = NexusInfraHub(
+            git=git_obj,
+            workspace=workspace_obj,
+            linter=linter_obj,
+            patcher=patcher_obj
+        )
+        intel = NexusIntelHub(
+            llm=llm_obj,
+            context_hub=kwargs.get("context_hub") or ContextHub(str(self.project_root), run_dir=run_dir),
+            commander=kwargs.get("commander") or Commander(run_dir, state_io_obj, router_obj)
+        )
+        gov = NexusGovHub(
+            router=router_obj,
+            reporter=kwargs.get("reporter") or Reporter(str(self.project_root), run_dir=run_dir),
+            state_io=state_io_obj
+        )
+
+        super().__init__(config, infra, intel, gov)
 
         self.scope = kwargs.get("scope", "staged")
         self.base_ref = kwargs.get("base_ref", "HEAD")
@@ -103,14 +140,15 @@ class CodexLoopV2(NexusOrchestrator):
         # 🛡️ Governance Gate: Bypass Mode
         if self.audit_level == "bypass":
             print("⚡ [Reviewer] Audit Level: BYPASS. Auto-approving changes.")
-            return {
-                "status": "APPROVED",
-                "summary": "Bypassed via audit_level=bypass",
-                "execution_mode": self.execution_mode,
-                "trigger_reason": self.trigger_reason
-            }
+            return self._build_review_result(
+                status="APPROVED",
+                summary="Bypassed via audit_level=bypass",
+                patch_generated=False,
+                patch_apply_success=False,
+                no_change_reason="audit_level=bypass"
+            )
 
-        # 🛡️ Governance Gate: Strict Mode increases strikes
+        # 🛡️ Governance Gate: Strict Mode
         if self.audit_level == "strict":
             self.max_strikes += 2
             print(
@@ -123,7 +161,6 @@ class CodexLoopV2(NexusOrchestrator):
             and any("dummy_target" in f for f in manual_files)
             and self.executor is None
         ):
-            # 這是為了通過 sanity_check.py 的 test_3_legacy_path_lock
             raise RuntimeError(
                 "Pattern Lock engaged: Executor missing for manual target."
             )
@@ -131,159 +168,70 @@ class CodexLoopV2(NexusOrchestrator):
         original_cwd = os.getcwd()
         os.chdir(self.git.project_root)
 
-        strike = 1
         try:
-            # 🧬 v9 Alignment: Reviewer is a one-shot component. The Orchestrator handles retries.
-            print(f"🚀 [One-Shot] Initiating Audit...")
-
-            # 🧬 v2 HARDENING: Conversation mode bypasses code audit entirely
-            if self.mode == "conversation":
-                # === CONVERSATION AUDIT PATH ===
-                # 1. 取得風險決策 (skip / light / full)
-                pre_decision = self.context_hub.make_pre_routing_decision(self.task)
-                audit_level = pre_decision.get("audit_level", "full")
-
-                if audit_level == "skip":
-                    return {
-                        "status": "SKIPPED_QUOTA",
-                        "summary": "Minimal risk: no new facts or constraints, skipping audit.",
-                        "audit_metadata": {
-                            "audit_profile": "conversation",
-                            "audit_level": "skip",
-                        },
-                    }
-
-                # 2. 組裝壓縮 Pack (audit_mode 節省 token)
-                conv_pack = self.context_hub.assemble_conversation_pack(
-                    audit_mode=True
-                )
-
-                # 3. 構建針對對話的審核提示詞
-                prompt = self.persona_hint
-                prompt += f"\nAudit Level: {audit_level}"
-                prompt += f"\nTask: {self.task}"
-                prompt += f"\n\n--- CONVERSATION STATE ---\n{json.dumps(conv_pack, indent=2)}"
-                prompt += "\n\n--- AUDIT RULES ---"
-                prompt += "\n1. [Context Coverage] Does the response cover all 'confirmed_constraints'?"
-                prompt += "\n2. [Correction Compliance] Does it violate any 'user_corrections'?"
-                prompt += "\n3. [Assumption Gap] If 'unresolved_points' exist, does it force a final conclusion?"
-                prompt += "\n4. [Research Gate] If 'needs_research=True', was X phase skipped?"
-                prompt += "\n5. [Goal Alignment] Is the response aligned with 'user_goal'?"
-
-                if audit_level == "light":
-                    prompt += (
-                        "\n\n[LIGHT AUDIT] Only check rules 1 and 2. Skip 3-5."
-                    )
-
-                # 4. 呼叫 LLM，無 diff_text 佔位符
-                diff_placeholder = "[CONVERSATION_AUDIT: No code diff]"
-                data, raw_output = self.llm.ask(prompt, diff_placeholder)
-                self.total_tokens += data.get("tokens_used", 0)
-                self.total_raw_model += data.get("token_raw_model", 0)
-                self.total_fallback_est += data.get("token_fallback_est", 0)
-                self.token_capture_statuses.append(
-                    data.get("token_capture_status", "unknown")
-                )
-
-                # 5. 標準化輸出 (Using ReviewStatusNormalizer logic)
-                status, success = ReviewStatusNormalizer.normalize(data.get("status", "FAIL"))
-                
-                if success:
-                    return {
-                        "status": status,
-                        "summary": data.get("summary"),
-                        "execution_mode": self.execution_mode,
-                        "trigger_reason": self.trigger_reason,
-                        "audit_metadata": {
-                            "audit_profile": "conversation",
-                            "audit_level": audit_level,
-                        },
-                    }
-
-                return {
-                    "status": "REJECTED",
-                    "summary": data.get("summary", "Conversation audit failed"),
-                    "execution_mode": self.execution_mode,
-                    "trigger_reason": self.trigger_reason,
-                    "audit_flags": data.get("audit_flags", []),
-                    "return_target_phase": data.get("return_target_phase", "D"),
-                    "audit_metadata": {
-                        "audit_profile": "conversation",
-                        "audit_level": audit_level,
-                        "missing_constraints": data.get("missing_constraints", []),
-                        "assumption_gaps": data.get("assumption_gaps", []),
-                    },
-                }
-
-            # === CODE AUDIT PATH (non-conversation) ===
-            if manual_files:
-                code_files = [
-                    str(Path(f).absolute())
-                    for f in manual_files
-                    if Path(f).is_file()
-                ]
-                files = code_files
-                diff_text = "Manual Review Mode"
-            else:
-                files, diff_text = self.git.get_changes(self.scope, self.base_ref)
-                code_files = [f for f in files if f.endswith(".py")]
-
-            if not code_files and not diff_text.strip():
-                return {
-                    "status": "APPROVED",
-                    "summary": "No changes found in scope.",
-                    "execution_mode": self.execution_mode,
-                    "trigger_reason": self.trigger_reason,
-                }
-
-            # Linter
-            linter_json = self.linter.scan(code_files)
-            
-            # P0 Trigger: Critical path hardening (simulate check)
-            if any("core/" in f for f in code_files) and self.execution_mode == "developer":
-                 self.set_execution_mode("agent-shield", "P0_core_file_change")
-
-            # LLM Call (Code Mode)
-            prompt = self.persona_hint
-            prompt += f"\nReview task: {self.task}"
-
-            data, raw_output = self.llm.ask(prompt, diff_text)
-            self.total_tokens += data.get("tokens_used", 0)
-            self.total_raw_model += data.get("token_raw_model", 0)
-            self.total_fallback_est += data.get("token_fallback_est", 0)
-            self.token_capture_statuses.append(
-                data.get("token_capture_status", "unknown")
-            )
-
-            status, success = ReviewStatusNormalizer.normalize(data.get("status", "FAIL"))
-            
-            if success:
-                return {
-                    "status": status, 
-                    "summary": data.get("summary"),
-                    "execution_mode": self.execution_mode,
-                    "trigger_reason": self.trigger_reason,
-                }
-
-            # 🧬 Spec: 提取 audit_metadata 與 return_target_phase
-            audit_metadata = data.get("audit_metadata", {})
-            return_target_phase = audit_metadata.get("return_target_phase", "D")
-
-            # 🧬 If apply_patch is on, we apply it once but still return REJECTED to the Orchestrator loop
-            if self.apply_patch:
-                self.patcher.apply(data.get("violations", []))
-
-            return {
-                "status": "REJECTED",
-                "summary": data.get("summary"),
-                "violations": data.get("violations"),
-                "execution_mode": self.execution_mode,
-                "trigger_reason": self.trigger_reason,
-                "audit_metadata": audit_metadata,
-                "return_target_phase": return_target_phase,
-            }
+            print(f"🚀 [One-Shot] Initiating Audit via Strategy: {self.mode}")
+            # R04: 委派給 ReviewerFactory 建立對應策略並執行
+            strategy = ReviewerFactory.create(self.mode)
+            return strategy.execute(self, manual_files)
         finally:
             os.chdir(original_cwd)
+
+    def _build_review_result(self, status: str, summary: str, **kwargs):
+        result = {
+            "status": status,
+            "summary": summary,
+            "execution_mode": self.execution_mode,
+            "trigger_reason": self.trigger_reason,
+        }
+        result.update(kwargs)
+        return result
+
+    def _record_tokens(self, data: dict) -> None:
+        """R04: 從 LLM 回應中累計 token 計數（供策略類別呼叫）。"""
+        self.total_tokens += data.get("tokens_used", 0)
+        self.total_raw_model += data.get("token_raw_model", 0)
+        self.total_fallback_est += data.get("token_fallback_est", 0)
+        self.token_capture_statuses.append(data.get("token_capture_status", "unknown"))
+
+    def _collect_physical_proof(self, files):
+        diff_text = self._read_git_diff(files)
+        if not diff_text.strip():
+            return "", ""
+        digest = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+        return "git_diff_checksum", digest
+
+    def _read_git_diff(self, files):
+        root = str(self.git.project_root)
+        rel_files = self._normalize_git_paths(files)
+        if rel_files:
+            scoped = self._run_git_diff(["--"] + rel_files, root)
+            if scoped.strip():
+                return scoped
+        return self._run_git_diff([], root)
+
+    def _run_git_diff(self, extra_args, root):
+        try:
+            cmd = ["git", "-C", root, "diff"] + list(extra_args)
+            return subprocess.check_output(
+                cmd,
+                stderr=subprocess.DEVNULL,
+            ).decode("utf-8", errors="ignore")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return ""
+
+    def _normalize_git_paths(self, files):
+        out = []
+        root = Path(self.git.project_root).resolve()
+        for item in files or []:
+            p = Path(item)
+            if not p.is_absolute():
+                out.append(str(p))
+                continue
+            try:
+                out.append(str(p.resolve().relative_to(root)))
+            except ValueError:
+                continue
+        return out
 
     def _run_isolated_review(self, manual_files):
         print("🧪 [Isolation] Sandbox review initiated (Simulated)")
@@ -297,5 +245,9 @@ if __name__ == "__main__":
     parser.add_argument("files", nargs="*", help="Files to review")
     parser.add_argument("--mode", default="developer")
     args = parser.parse_args()
-    engine = CodexLoopV2(mode=args.mode)
+    engine = GatewayReviewLoop(mode=args.mode)
     print(engine.run_review(args.files))
+
+
+# Legacy compatibility alias. Active code should import GatewayReviewLoop.
+CodexLoopV2 = GatewayReviewLoop

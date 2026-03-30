@@ -8,7 +8,7 @@ def test_intent_gate_fuzzy_input():
     state = NexusState(task_id="test-fuzzy")
     
     # 模糊指令
-    context = {"task": "幫我改代碼"}
+    context = {"task": "改代碼"}
     
     result = planner.run(state, context)
     # 預期 result 中應包含 intent_pass=False 或引發特定異常

@@ -1,0 +1,14 @@
+{"task_id": "astropy__astropy-12907", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 87, "escalation_gear": 1}
+{"task_id": "astropy__astropy-13033", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 12, "escalation_gear": 1}
+{"task_id": "astropy__astropy-13236", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 5, "escalation_gear": 1}
+{"task_id": "astropy__astropy-13453", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 24, "escalation_gear": 1}
+{"task_id": "astropy__astropy-13579", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 31, "escalation_gear": 1}
+{"task_id": "astropy__astropy-13977", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 18, "escalation_gear": 1}
+{"task_id": "astropy__astropy-14182", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 9, "escalation_gear": 1}
+{"task_id": "astropy__astropy-14365", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 14, "escalation_gear": 1}
+{"task_id": "astropy__astropy-14508", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 7, "escalation_gear": 1}
+{"task_id": "astropy__astropy-14371", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 6, "escalation_gear": 1}
+{"task_id": "astropy__astropy-14995", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 4, "escalation_gear": 1}
+{"task_id": "sympy__sympy-13437", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 14, "escalation_gear": 1}
+{"task_id": "sympy__sympy-11899", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 8, "escalation_gear": 1}
+{"task_id": "numpy__numpy-23224", "status": "SUCCESS", "patch_generated": true, "pytest_pass": true, "git_diff_lines": 5, "escalation_gear": 1}

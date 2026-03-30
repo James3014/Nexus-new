@@ -1,5 +1,6 @@
 import sys
 import os
+import sys
 import time
 import json
 import concurrent.futures
@@ -11,6 +12,14 @@ sys.path.append(str(Path.cwd()))
 
 from nexus.engine.coordinator import NexusEngine
 from nexus.core.state_io import StateIO
+from nexus.app.command_service import NexusCommandService
+
+
+def execute_feature_task(service: NexusCommandService, task: dict) -> bool:
+    return service.execute_feature(
+        task["desc"],
+        delivery_mode="standard",
+    )
 
 def run_feature_task(project_root, task):
     print(f"🚀 [Feature] Starting {task['id']}...")
@@ -23,10 +32,11 @@ def run_feature_task(project_root, task):
     state_io = StateIO(str(project_root), state_file=str(state_file))
     
     engine = NexusEngine(project_root, run_dir=run_dir, state_io=state_io)
+    service = NexusCommandService(engine)
     
     start_time = time.time()
     try:
-        success = engine.run_feature(task['id'], task['desc'])
+        success = execute_feature_task(service, task)
     except Exception as e:
         print(f"❌ [Feature] {task['id']} Crashed: {e}")
         success = False

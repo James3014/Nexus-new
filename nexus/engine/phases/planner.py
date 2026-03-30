@@ -9,7 +9,7 @@ class PlannerPhaseHandler(BasePhaseHandler):
     執行風險預判演算法。
     """
     def __init__(self, project_root: Any, run_dir: Any, predictor=None):
-        super().__init__(project_root, run_dir)
+        super().__init__(project_root, run_dir, name="P", priority=100)
         from nexus.services.predictor import Predictor
         self.predictor = predictor or Predictor()
 

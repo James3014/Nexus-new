@@ -1,0 +1,5 @@
+--- a/django/db/migrations/serializer.py
++++ b/django/db/migrations/serializer.py
+@@ -120,3 +120,6 @@
++            if hasattr(self.value, \"_decompose\"):
++                return self.value._decompose()

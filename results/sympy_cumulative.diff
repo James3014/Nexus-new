@@ -1,0 +1,30 @@
+diff --git a/sympy/core/numbers.py b/sympy/core/numbers.py
+index 4ff9170..cdd95b5 100644
+--- a/sympy/core/numbers.py
++++ b/sympy/core/numbers.py
+@@ -1141,6 +1141,8 @@ def __int__(self):
+     def __eq__(self, other):
+         if isinstance(other, float):
+             other = Float(other)
++        if isinstance(other, Float):
++            return self.p == other._mpf_[1] * (2**other._mpf_[2]) if other._mpf_[3] <= 53 else False # Simplified check
+         return Basic.__eq__(self, other)
+ 
+     def __ne__(self, other):
+diff --git a/sympy/matrices/matrixbase.py b/sympy/matrices/matrixbase.py
+index 79c2fc8..b603b3b 100644
+--- a/sympy/matrices/matrixbase.py
++++ b/sympy/matrices/matrixbase.py
+@@ -5047,7 +5047,11 @@ def log(self, simplify: Callable[[Self], Self] | Literal[False] = cancel) -> Sel
+         [ I*pi/2,       0,       0, -I*pi/2],
+         [      0,  I*pi/2, -I*pi/2,       0],
+         [      0, -I*pi/2,  I*pi/2,       0],
+-        [-I*pi/2,       0,       0,  I*pi/2]])
++        if not self.is_square:
++            raise NonSquareMatrixError("Operation not defined for non-square matrices")
++        from sympy.matrices.matrices import MatrixBase
++        if not isinstance(self, MatrixBase):
++            return self.applyfunc(lambda x: x.log() if hasattr(x, 'log') else log(x))
+         """
+         if not self.is_square:
+             raise NonSquareMatrixError(

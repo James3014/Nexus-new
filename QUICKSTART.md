@@ -35,7 +35,61 @@ python3 scripts/nexus_cli.py nexus:crystal
 
 ---
 
-## 3. Full-Chain Validation | 總合驗證
+## 3. Delivery Mode | 交付模式
+
+**[EN]** `nexus:bug`, `nexus:feature`, and `nexus:runner` now support a delivery gate. Start with `--delivery-mode ask` so Nexus explicitly asks whether the current task needs high-standard delivery.
+
+**[ZH]** `nexus:bug`、`nexus:feature`、`nexus:runner` 現在都支援交付門。建議從 `--delivery-mode ask` 開始，讓 Nexus 明確詢問這次任務是否需要高標交付。
+
+```bash
+# Ask before enforcing high-standard delivery on a bugfix
+# 修 bug 前先詢問是否啟用高標交付
+python3 scripts/engine/nexus_cli.py nexus:bug \
+  --task "fix hydration error on dynamic routes" \
+  --delivery-mode ask
+
+# Ask before enforcing high-standard delivery on a feature
+# 做功能前先詢問是否啟用高標交付
+python3 scripts/engine/nexus_cli.py nexus:feature \
+  --task "migrate session storage to redis" \
+  --delivery-mode ask
+
+# Run task orchestration with delivery confirmation
+# 啟動任務編排並先確認交付標準
+python3 scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
+```
+
+**[EN]** When `high` is selected, Nexus enforces completion verification before reporting delivery. For `bug` and `feature`, it can auto-suggest verification commands for Python, Rust, and Go projects when `--verify` is omitted, then prints the exact commands used and the delivery report paths.
+
+**[ZH]** 當使用者選擇 `high` 時，Nexus 會在交付前強制完成驗證。對 `bug` 與 `feature` 來說，如果沒有給 `--verify`，系統會自動推建議驗證命令，支援 Python、Rust、Go，並在 CLI 顯示本次實際採用的驗證命令與交付報告路徑。
+
+完整規則請見 [`docs/DELIVERY_CONTRACT_CN.md`](docs/DELIVERY_CONTRACT_CN.md)。
+
+---
+
+## 4. Self-Check / Self-Heal | 自檢與自癒
+
+**[EN]** `nexus:check` now supports graded health audits. Use `quick` for a local snapshot, `standard` for a single benchmark replay, `high` for a stricter single-case health gate, and `full` for the heaviest benchmark lane. `nexus:self-heal` supports `dry-run`, `standard`, and `strict`.
+
+**[ZH]** `nexus:check` 現在支援分級自檢。`quick` 只看本地健康快照，`standard` 會跑單 case benchmark，`high` 會用更嚴格門檻檢查單 case 健康，`full` 則走最重的 benchmark lane。`nexus:self-heal` 則支援 `dry-run`、`standard`、`strict`。
+
+```bash
+# Snapshot-only health check
+# 只看快照的快速自檢
+python3 scripts/engine/nexus_cli.py nexus:check --level quick
+
+# Single-case benchmark health audit
+# 單 case benchmark 健康審計
+python3 scripts/engine/nexus_cli.py nexus:check --level standard
+
+# Strict self-heal with health recovery requirement
+# 嚴格自癒，要求修後健康恢復
+python3 scripts/engine/nexus_cli.py nexus:self-heal --mode strict
+```
+
+---
+
+## 5. Full-Chain Validation | 總合驗證
 
 **[EN]** Use `--full-chain` to run a complete P-D-R-A cycle with integrated fallback support.
 **[ZH]** 使用 `--full-chain` 執行完整的 P-D-R-A 循環，內建備援支援。

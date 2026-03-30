@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package nexus.swarm.v1;
+
+option go_package = "nexus-swarm/api/proto";
+
+// SensingService 定義了 Nexus 節點的感知能力
+service SensingService {
+  // Sensing 執行 AST 物理審計與靜態分析
+  rpc Sensing(SensingRequest) returns (DiagnosticReport);
+
+  // StreamAudit 提供雙向串流能力的即時圖譜審計
+  rpc StreamAudit(stream SensingRequest) returns (stream DiagnosticReport);
+}
+
+message SensingRequest {
+  string task_id = 1;
+  string repo_url = 2;
+  string path = 3;
+  string task_type = 4;
+  string token = 5;
+  // W3C Trace Context (e.g., "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+  string traceparent = 6;
+}
+
+message DiagnosticReport {
+  string node_id = 1;
+  string status = 2;
+  string summary = 3;
+  Metrics metrics = 4;
+  string error = 5;
+
+  // 預留欄位供未來擴充 (如安全性特徵、資源消耗等)
+  reserved 10 to 20;
+}
+
+message Metrics {
+  int64 selection_latency_us = 1;
+  int64 network_latency_ms = 2;
+  int64 execution_ms = 3;
+  string region = 4;
+}

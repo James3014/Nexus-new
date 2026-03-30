@@ -1,0 +1,13 @@
+diff --git a/numpy/f2py/capi_maps.py b/numpy/f2py/capi_maps.py
+index 567bf3a..a2dad0d 100644
+--- a/numpy/f2py/capi_maps.py
++++ b/numpy/f2py/capi_maps.py
+@@ -105,7 +105,7 @@
+                     'long_long': 'L',
+                     'complex_float': 'N',
+                     'complex_double': 'N',
+-                    'complex_long_double': 'N',
++                    'complex_long_double': 'O', # Fix for complex_long_double
+                     'string': 'y',
+                     'character': 'c'}
+ 

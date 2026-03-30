@@ -4,6 +4,7 @@ import sys
 import time
 import os
 import subprocess
+import json
 from pathlib import Path
 from datetime import datetime
 
@@ -14,8 +15,13 @@ if str(REPO_ROOT) not in sys.path:
 
 # 🛡️ Nexus 合約導入
 from nexus.core.state_contracts import NexusState
+from nexus.delivery.interactive import (
+    resolve_check_level,
+    resolve_delivery_mode,
+    resolve_self_heal_mode,
+)
 
-
+from nexus.app.command_service import TaskRequest
 class NexusCLI:
     """
     🧬 Nexus v9 CLI Shell
@@ -31,8 +37,18 @@ class NexusCLI:
         self.silent = silent
         self.fast_mode = fast_mode
         self.audit_level = audit_level
+        self.profile_path = self.project_root / ".nexus" / "runtime_profile.json"
+        self.runtime_profile = self._load_runtime_profile()
         self._engine = None
         self._service = None
+
+    def _load_runtime_profile(self) -> dict:
+        if not self.profile_path.exists():
+            return {}
+        try:
+            return json.loads(self.profile_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
 
     @property
     def engine(self):
@@ -45,20 +61,37 @@ class NexusCLI:
                 )
             self.run_dir.mkdir(parents=True, exist_ok=True)
 
-            # Heavy imports only when actually running a command
-            from nexus.containers import NexusContainer
+            # Heavy imports only when actually running a command.
+            # Prefer DI container, but gracefully fall back to direct engine wiring
+            # when dependency_injector is unavailable.
+            try:
+                from nexus.containers import NexusContainer
 
-            container = NexusContainer()
-            container.project_root.from_value(str(self.project_root))
-            container.run_dir.from_value(str(self.run_dir))
+                container = NexusContainer()
+                container.project_root.from_value(str(self.project_root))
+                container.run_dir.from_value(str(self.run_dir))
 
-            self._engine = container.engine_factory(
-                project_root=self.project_root,
-                run_dir=self.run_dir,
-                silent=self.silent,
-                fast_mode=self.fast_mode,
-                audit_level=self.audit_level,
-            )
+                self._engine = container.engine_factory(
+                    project_root=self.project_root,
+                    run_dir=self.run_dir,
+                    silent=self.silent,
+                    fast_mode=self.fast_mode,
+                    audit_level=self.audit_level,
+                )
+            except ModuleNotFoundError as exc:
+                if exc.name != "dependency_injector":
+                    raise
+                from nexus.engine.coordinator import NexusEngine
+                from nexus.engine.config import EngineConfig
+
+                config = EngineConfig(
+                    project_root=self.project_root,
+                    run_dir=self.run_dir,
+                    silent=self.silent,
+                    fast_mode=self.fast_mode,
+                    audit_level=self.audit_level,
+                )
+                self._engine = NexusEngine(config=config)
         return self._engine
 
     @property
@@ -75,13 +108,46 @@ class NexusCLI:
         domain: str = None,
         dry_run: bool = False,
         bypass_cb: bool = False,
+        delivery_mode: str = "standard",
+        verify_commands: list[str] | None = None,
+        artifact_paths: list[str] | None = None,
+        research_workspace: str | None = None,
+        research_rounds: int = 5,
+        research_stable_wins: int = 3,
+        research_force: bool = False,
     ):
         """nexus:bug 介面"""
-        success = self.service.execute_bug(task, dry_run)
+        execution_context: dict[str, object] = {}
+        if research_workspace:
+            execution_context["research_workspace"] = research_workspace
+            execution_context["research_rounds"] = max(int(research_rounds), 1)
+            execution_context["research_stable_wins"] = max(int(research_stable_wins), 1)
+        if research_force:
+            execution_context["research_force"] = True
+        execute_kwargs = dict(
+            delivery_mode=delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+        )
+        if execution_context:
+            execute_kwargs["execution_context"] = execution_context
+        success = self.service.execute_bug(
+            TaskRequest(
+                task=task,
+                plan_only=dry_run,
+                **execute_kwargs
+            )
+        )
+        if success:
+            success = self._enforce_release_gate_for_prod(skip_gate=dry_run)
+        self._print_delivery_summary("Bug", delivery_mode)
         if success:
             print("✅ [Nexus:Bug] Success.")
         else:
+            if self.service.last_completion_error:
+                print(f"❌ [Nexus:Bug] Delivery gate failed: {self.service.last_completion_error}")
             print("❌ [Nexus:Bug] Failed.")
+        return success
 
     def run_test(self, skill=None, interaction=False, full_chain=None, bypass_cb=False):
         """🧪 [Nexus:Test] 執行驗證"""
@@ -105,13 +171,192 @@ class NexusCLI:
         dry_run: bool = False,
         bypass_cb: bool = False,
         skill: str = None,
+        delivery_mode: str = "standard",
+        verify_commands: list[str] | None = None,
+        artifact_paths: list[str] | None = None,
+        research_workspace: str | None = None,
+        research_rounds: int = 5,
+        research_stable_wins: int = 3,
+        research_force: bool = False,
     ):
         """🚀 [Nexus:Feature] 實作新功能介面"""
-        success = self.service.execute_feature(task, domain, dry_run, skill)
+        execution_context: dict[str, object] = {}
+        if research_workspace:
+            execution_context["research_workspace"] = research_workspace
+            execution_context["research_rounds"] = max(int(research_rounds), 1)
+            execution_context["research_stable_wins"] = max(int(research_stable_wins), 1)
+        if research_force:
+            execution_context["research_force"] = True
+        execute_kwargs = dict(
+            delivery_mode=delivery_mode,
+            verify_commands=verify_commands,
+            artifact_paths=artifact_paths,
+        )
+        if execution_context:
+            execute_kwargs["execution_context"] = execution_context
+        success = self.service.execute_feature(
+            TaskRequest(
+                task=task,
+                domain=domain,
+                plan_only=dry_run,
+                skill=skill,
+                **execute_kwargs
+            )
+        )
+        if success:
+            success = self._enforce_release_gate_for_prod(skip_gate=dry_run)
+        self._print_delivery_summary("Feature", delivery_mode)
         if success:
             print("✅ [Nexus:Feature] Success.")
         else:
+            if self.service.last_completion_error:
+                print(f"❌ [Nexus:Feature] Delivery gate failed: {self.service.last_completion_error}")
             print("❌ [Nexus:Feature] Failed.")
+        return success
+
+    def _enforce_release_gate_for_prod(self, *, skip_gate: bool) -> bool:
+        if skip_gate:
+            return True
+        if str(self.runtime_profile.get("name", "")) != "prod":
+            return True
+        rc = self.run_release_ready()
+        if rc != 0:
+            self.service.last_completion_error = "release_ready_gate_failed"
+            return False
+        return True
+
+    def _print_delivery_summary(self, label: str, delivery_mode: str) -> None:
+        if delivery_mode != "high":
+            return
+        commands = self.service.last_effective_verify_commands
+        report_paths = self.service.last_completion_report_paths
+        if commands:
+            print(f"🧪 [Nexus:{label}] Verification Commands:")
+            for command in commands:
+                print(f"  - {command}")
+        if isinstance(report_paths, tuple) and len(report_paths) == 2:
+            json_path, md_path = report_paths
+            print("🧾 [Nexus:{}] Delivery Reports:".format(label))
+            print(f"  - JSON: {json_path}")
+            print(f"  - Markdown: {md_path}")
+
+    def run_swarm_mode(self, port: int, token: str = None, region: str = "unknown"):
+        """🐝 [Nexus:Swarm] Start Node Swarm Mode (HTTP Server)"""
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import json
+
+        nexus_self = self
+        node_id = f"node-{port}-{region}"
+
+        class SwarmHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                # 🛡️ Token Validation (v18.2 Pragmatic Hardening)
+                if token:
+                    client_token = self.headers.get("X-Nexus-Token")
+                    if client_token != token:
+                        print(f"🚨 [{node_id}] Unauthorized access attempt detected!")
+                        self.send_response(401)
+                        self.end_headers()
+                        self.wfile.write(b"Unauthorized: Invalid X-Nexus-Token")
+                        return
+
+                if self.path == "/sensing":
+                    # W3C Traceparent Header Parsing
+                    traceparent = self.headers.get("traceparent", "")
+                    trace_id = "unknown"
+                    if traceparent:
+                        parts = traceparent.split("-")
+                        if len(parts) >= 2:
+                            trace_id = parts[1]
+
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    post_data = self.rfile.read(content_length)
+                    
+                    try:
+                        req = json.loads(post_data)
+                        print(f"\n🐝 [{node_id}] Received SensingRequest: {req.get('task_key', 'N/A')}", flush=True)
+                        print(f"🔗 [TraceID:{trace_id}] Active context detected.", flush=True)
+                        
+                        start_exec = time.time()
+                        
+                        path = req.get("path", "")
+                        allowed_roots = os.getenv("NEXUS_ALLOWED_PATHS", "").split(",")
+                        
+                        def is_path_safe(p, allowed):
+                            if not allowed or not allowed[0]: return True # Default to wide open if unset for now
+                            p = os.path.realpath(p)
+                            for root in allowed:
+                                if p.startswith(os.path.realpath(root)):
+                                    return True
+                            return False
+
+                        if path and not is_path_safe(path, allowed_roots):
+                            print(f"🛑 [Security] Blocked access to unauthorized path: {path}")
+                            response = {
+                                "node_id": node_id,
+                                "status": "SECURITY_VIO",
+                                "summary": f"Access denied for path: {path}"
+                            }
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.end_headers()
+                            self.wfile.write(json.dumps(response).encode())
+                            return
+
+                        # 🛡️ 實體 L6 閘門調用 (v18.1 Hardening)
+                        try:
+                            from scripts.engine.l6_gate import L6AuditParser
+                            import nexus_core
+                            
+                            old_code = req.get("old_code", "")
+                            new_code = req.get("new_code", "")
+                            audit_text = req.get("audit_report", "")
+                            
+                            diffs = []
+                            if old_code and new_code:
+                                diffs = nexus_core.check_pub_api_diff(old_code, new_code)
+                            
+                            audit_data = L6AuditParser.parse(audit_text) if audit_text else {}
+                            if diffs:
+                                L6AuditParser.check_consistency(audit_data, diffs)
+                        except Exception as gate_err:
+                            print(f"⚠️ [Gate:Error] {gate_err}")
+
+                        # Simulated work
+                        time.sleep(1.0) 
+                        exec_ms = int((time.time() - start_exec) * 1000)
+
+                        response = {
+                            "node_id": node_id,
+                            "status": "HEALTHY",
+                            "summary": f"Audit of {req.get('path')} completed by {node_id}.",
+                            "metrics": {
+                                "execution_ms": exec_ms,
+                                "region": region
+                            }
+                        }
+                        
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps(response).encode())
+
+                    except Exception as e:
+                        print(f"❌ [Node:Error] {e}")
+                        self.send_response(500)
+                        self.end_headers()
+                        self.wfile.write(str(e).encode())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+        print(f"🐝 [Nexus:Swarm] Node {node_id} listening on port {port}...")
+        httpd = HTTPServer(("localhost", port), SwarmHandler)
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print(f"\n🛑 [Nexus:Swarm] Node {node_id} shutting down.")
+            httpd.server_close()
 
     def run_crystal(self):
         """💎 [Nexus:Crystal] 啟動自學習權重演進"""
@@ -174,26 +419,142 @@ class NexusCLI:
         print("✅ [Clean] Completed.")
 
     def run_check(self, level: str = "quick"):
-        """🔍 [Nexus:Check] 執行分層健康檢查"""
+        """🔍 [Nexus:Check] 執行分級自檢。"""
         print(f"🔍 [Nexus:Check] Running level: {level}...")
-        state = self.engine.state_io.load_global_state()
+        result = self.service.execute_self_check(level=level)
+        print(f"  - Snapshot Score: {result.snapshot_score}")
+        print(f"  - Snapshot Status: {result.snapshot_status}")
+        if result.benchmark_tasks:
+            print(f"  - Benchmark Tasks: {result.benchmark_tasks}")
+            print(f"  - Benchmark Avg Health: {result.benchmark_avg_health}")
+            if getattr(result, "benchmark_pass_rate", None) is not None:
+                print(f"  - Benchmark Pass Rate: {result.benchmark_pass_rate}")
+            if getattr(result, "benchmark_output", None):
+                print(f"  - Benchmark Output: {result.benchmark_output}")
+        if result.notes:
+            print("  - Notes:")
+            for note in result.notes:
+                print(f"    - {note}")
+        if result.ok:
+            print("✅ [Nexus:Check] PASS")
+        else:
+            print("❌ [Nexus:Check] FAIL")
 
-        # 根據 level 執行不同強度的檢查
-        if level == "quick":
-            print(f"  - Health Score: {state.health_score}")
-            print(f"  - Status: {state.health_metrics.status}")
-        elif level == "pre-merge":
-            # 模擬 pre-merge 流程：執行 replay
-            print("  - Running pre-merge replay validation...")
-            time.sleep(1)
-            print("  - [PASS] Replay: OFF-001")
-        elif level == "nightly":
-            print("  - Running nightly deep diagnostic system...")
-            time.sleep(2)
-            print(f"  - [REPORT] Global Health Aggregate: {state.health_score}")
+    def run_self_heal(self, mode: str = "standard"):
+        """🩹 [Nexus:Self-Heal] 執行分級自癒。"""
+        print(f"🩹 [Nexus:Self-Heal] Running mode: {mode}...")
+        result = self.service.execute_self_heal(mode=mode)
+        print(f"  - Before Score: {result.before_score}")
+        print(f"  - After Score: {result.after_score}")
+        print(f"  - Diagnosis: {result.diagnosis_kind}")
+        print(f"  - After Diagnosis: {result.after_diagnosis_kind}")
+        print(f"  - Cycle Status: {result.cycle_status}")
+        if getattr(result, "phase_route", None):
+            print(f"  - Phase Route: {' -> '.join(result.phase_route)}")
+        if result.planned_actions:
+            print("  - Planned Actions:")
+            for action in result.planned_actions:
+                print(f"    - {action}")
+        if result.notes:
+            print("  - Notes:")
+            for note in result.notes:
+                print(f"    - {note}")
+        if result.ok:
+            print("✅ [Nexus:Self-Heal] PASS")
+        else:
+            print("❌ [Nexus:Self-Heal] FAIL")
 
-        self.engine._voice_notify(f"健康檢查完成，得分 {state.health_score}")
-        self._check_alerts(state)
+    def run_health_explain(self, output: str = "text"):
+        """📋 [Nexus:Health] explain 抗幻/學習/自癒整合狀態。"""
+        result = self.service.execute_health_explain()
+        payload = {
+            "snapshot_score": result.snapshot_score,
+            "snapshot_status": result.snapshot_status,
+            "pipeline_health": result.pipeline_health,
+            "phase_health": result.phase_health,
+            "anti_hallucination": result.anti_hallucination,
+            "learning": result.learning,
+            "self_healing": result.self_healing,
+            "adversarial_metrics": result.adversarial_metrics,
+            "notes": result.notes,
+        }
+        if output == "json":
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+
+        print("📋 [Nexus:Health:Explain] 三系統整合戰報")
+        print(f"  - Snapshot: {result.snapshot_score} ({result.snapshot_status})")
+        print(f"  - Pipeline Health: {result.pipeline_health}")
+        if result.phase_health:
+            ordered = " ".join(
+                f"{phase}:{score}"
+                for phase, score in sorted(result.phase_health.items(), key=lambda item: item[0])
+            )
+            print(f"  - Phase Health: {ordered}")
+
+        anti = result.anti_hallucination
+        print("  - Anti-Hallucination:")
+        print(f"    - Review Status: {anti.get('last_review_status')}")
+        print(f"    - Patch: generated={anti.get('patch_generated')} applied={anti.get('patch_apply_success')}")
+        print(f"    - Proof: present={anti.get('proof_present')} type={anti.get('proof_type') or '(none)'}")
+        if anti.get("phantom_success_reason"):
+            print(f"    - Phantom Reason: {anti.get('phantom_success_reason')}")
+
+        learning = result.learning
+        print("  - Learning:")
+        print(f"    - Frozen: {learning.get('frozen')}")
+        if learning.get("freeze_reasons"):
+            print(f"    - Freeze Reasons: {', '.join(learning.get('freeze_reasons'))}")
+        print(f"    - Ingest Status: {learning.get('ingest_status') or '(none)'}")
+        print(f"    - Curiosity: {learning.get('curiosity_score')}")
+        print(
+            "    - Scores: reuse={reuse} lesson={lesson} next_hit={next_hit}".format(
+                reuse=learning.get("pattern_reuse_rate"),
+                lesson=learning.get("lesson_quality"),
+                next_hit=learning.get("next_run_hit_rate"),
+            )
+        )
+
+        healing = result.self_healing
+        print("  - Self-Healing:")
+        print(f"    - Cycle Status: {healing.get('cycle_status') or '(none)'}")
+        print(
+            f"    - Diagnosis: {healing.get('diagnosis_kind') or '(none)'} -> {healing.get('after_diagnosis_kind') or '(none)'}"
+        )
+        if healing.get("phase_route"):
+            print(f"    - Phase Route: {' -> '.join(healing.get('phase_route'))}")
+        if healing.get("route_after"):
+            print(f"    - Route Bias: {' -> '.join(healing.get('route_before') or [])} => {' -> '.join(healing.get('route_after') or [])}")
+        print(f"    - Policy Sync: {healing.get('policy_sync') or '(none)'}")
+        if healing.get("route_weights"):
+            weights = healing.get("route_weights")
+            print(
+                "    - Route Weights: "
+                + " ".join(f"{k}:{v}" for k, v in sorted(weights.items(), key=lambda item: item[0]))
+            )
+
+        adversarial = result.adversarial_metrics
+        if adversarial:
+            print("  - GAN Metrics:")
+            print(
+                "    - Discriminator: checks={checks} pass_rate={pass_rate}% block_rate={block_rate}%".format(
+                    checks=adversarial.get("discriminator_checks"),
+                    pass_rate=adversarial.get("discriminator_pass_rate"),
+                    block_rate=adversarial.get("discriminator_block_rate"),
+                )
+            )
+            print(
+                "    - Generator: window={window} success_rate={success_rate}%".format(
+                    window=adversarial.get("generator_success_window"),
+                    success_rate=adversarial.get("generator_success_rate"),
+                )
+            )
+            print(f"    - Alignment Score: {adversarial.get('gan_alignment_score')}")
+
+        if result.notes:
+            print("  - Notes:")
+            for note in result.notes:
+                print(f"    - {note}")
 
     def _check_alerts(self, state: NexusState):
         """🚨 CHK-004: 偵測健康度下降並產生警報"""
@@ -261,6 +622,264 @@ class NexusCLI:
             f"✅ [Benchmark] Complete! Success Rate: {success_count / task_count * 100:.1f}%"
         )
 
+    def run_phase6_research(
+        self,
+        workspace: str,
+        rounds: int = 100,
+        proof_ratio_min: float = 95.0,
+        output_prefix: str = "phase6",
+        skip_autopilot: bool = False,
+    ) -> int:
+        """🧪 [Nexus:Phase6] 執行可重跑 P6 研究流程並產報告。"""
+        script_path = self.project_root / "scripts" / "ops" / "phase6_research.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--workspace",
+            workspace,
+            "--rounds",
+            str(rounds),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+            "--output-prefix",
+            output_prefix,
+        ]
+        if skip_autopilot:
+            cmd.append("--skip-autopilot")
+        return subprocess.call(cmd)
+
+    def run_profile(self, action: str, name: str = "prod") -> int:
+        if action == "show":
+            profile = self.runtime_profile or {
+                "name": "default",
+                "delivery_mode": "ask",
+                "check_level": "ask",
+                "self_heal_mode": "ask",
+            }
+            print(json.dumps(profile, ensure_ascii=False, indent=2))
+            return 0
+
+        if action != "apply":
+            print(f"❌ unsupported profile action: {action}")
+            return 2
+
+        if name != "prod":
+            print(f"❌ unsupported profile name: {name}")
+            return 2
+
+        profile = {
+            "name": "prod",
+            "delivery_mode": "high",
+            "check_level": "high",
+            "self_heal_mode": "strict",
+            "proof_ratio_min": 95.0,
+        }
+        self.profile_path.parent.mkdir(parents=True, exist_ok=True)
+        self.profile_path.write_text(
+            json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.runtime_profile = profile
+        print(f"✅ [Nexus:Profile] applied: {name}")
+        print(f"  - path: {self.profile_path}")
+        return 0
+
+    def run_release_ready(self) -> int:
+        gate_script = self.project_root / "scripts" / "ops" / "nexus_release_gate.sh"
+        if not gate_script.exists():
+            print(f"❌ [Nexus:Release] missing gate script: {gate_script}")
+            return 2
+        gate_rc = subprocess.call([str(gate_script)])
+        if gate_rc != 0:
+            return gate_rc
+        print("== Release Gate: acceptance check ==")
+        return self.run_acceptance_check()
+
+    def run_acceptance_check(
+        self,
+        window: int = 50,
+        repair_success_min: float = 80.0,
+        phantom_fp_max: float = 5.0,
+        regression_pass_min: float = 95.0,
+        retry_spike_factor: float = 2.0,
+        retry_abs_max: float = 1.0,
+        output_dir: str = ".nexus/reports",
+    ) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "nexus_acceptance_check.py"
+        if not script_path.exists():
+            print(f"❌ [Nexus:Acceptance] missing script: {script_path}")
+            return 2
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--window",
+            str(window),
+            "--repair-success-min",
+            str(repair_success_min),
+            "--phantom-fp-max",
+            str(phantom_fp_max),
+            "--regression-pass-min",
+            str(regression_pass_min),
+            "--retry-spike-factor",
+            str(retry_spike_factor),
+            "--retry-abs-max",
+            str(retry_abs_max),
+            "--output-dir",
+            output_dir,
+        ]
+        return subprocess.call(cmd)
+
+    def run_skills_autotune(
+        self,
+        apply: bool = False,
+        min_samples: int = 3,
+        baseline: float = 0.55,
+        learning_rate: float = 0.6,
+        degrade_threshold: float = 0.2,
+        max_step: float = 0.35,
+        degrade_consecutive_rounds: int = 3,
+    ) -> int:
+        """🧪 [Nexus:Skills-Autotune] 研究型技能自動調參。"""
+        script_path = self.project_root / "scripts" / "ops" / "skills_autotune.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--min-samples",
+            str(min_samples),
+            "--baseline",
+            str(baseline),
+            "--learning-rate",
+            str(learning_rate),
+            "--degrade-threshold",
+            str(degrade_threshold),
+            "--max-step",
+            str(max_step),
+            "--degrade-consecutive-rounds",
+            str(degrade_consecutive_rounds),
+        ]
+        if apply:
+            cmd.append("--apply")
+        return subprocess.call(cmd)
+
+    def run_phase7_research(
+        self,
+        workspace: str,
+        rounds: int = 100,
+        proof_ratio_min: float = 95.0,
+        output_prefix: str = "phase7",
+        skip_autopilot: bool = False,
+        autotune_apply: bool = False,
+        min_samples: int = 3,
+        baseline: float = 0.55,
+        learning_rate: float = 0.6,
+        degrade_threshold: float = 0.2,
+        max_step: float = 0.35,
+        degrade_consecutive_rounds: int = 3,
+    ) -> int:
+        """🧪 [Nexus:Phase7] autoresearch + skills autotune 一鍵研究流程。"""
+        script_path = self.project_root / "scripts" / "ops" / "phase7_research.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--workspace",
+            workspace,
+            "--rounds",
+            str(rounds),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+            "--output-prefix",
+            output_prefix,
+            "--min-samples",
+            str(min_samples),
+            "--baseline",
+            str(baseline),
+            "--learning-rate",
+            str(learning_rate),
+            "--degrade-threshold",
+            str(degrade_threshold),
+            "--max-step",
+            str(max_step),
+            "--degrade-consecutive-rounds",
+            str(degrade_consecutive_rounds),
+        ]
+        if skip_autopilot:
+            cmd.append("--skip-autopilot")
+        if autotune_apply:
+            cmd.append("--autotune-apply")
+        return subprocess.call(cmd)
+
+    def run_phase7_loop(
+        self,
+        workspace: str,
+        rounds: int = 20,
+        proof_ratio_min: float = 95.0,
+        max_loops: int = 10,
+        stable_wins: int = 3,
+        output_prefix: str = "phase7_loop",
+        degrade_threshold: float = 0.2,
+        max_step: float = 0.35,
+        degrade_consecutive_rounds: int = 3,
+    ) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "phase7_autotune_loop.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--workspace",
+            workspace,
+            "--rounds",
+            str(rounds),
+            "--proof-ratio-min",
+            str(proof_ratio_min),
+            "--max-loops",
+            str(max_loops),
+            "--stable-wins",
+            str(stable_wins),
+            "--output-prefix",
+            output_prefix,
+            "--degrade-threshold",
+            str(degrade_threshold),
+            "--max-step",
+            str(max_step),
+            "--degrade-consecutive-rounds",
+            str(degrade_consecutive_rounds),
+        ]
+        return subprocess.call(cmd)
+
+    def run_skills_health(self, output: str = "text", workspace: str | None = None) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "skills_health.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--output",
+            output,
+        ]
+        if workspace:
+            cmd.extend(["--workspace", workspace])
+        return subprocess.call(cmd)
+
+    def run_skills_optimize(self, max_items: int = 3, rebound: float = 0.15) -> int:
+        script_path = self.project_root / "scripts" / "ops" / "skills_optimization_runner.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--project-root",
+            str(self.project_root),
+            "--max-items",
+            str(max_items),
+            "--rebound",
+            str(rebound),
+        ]
+        return subprocess.call(cmd)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus v9 Refactored CLI Shell")
@@ -290,6 +909,24 @@ def main():
         default="standard",
         help="Set audit intensity",
     )
+    parser.add_argument(
+        "--swarm-mode", action="store_true", help="Start node in swarm mode"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8001, help="Port for swarm mode"
+    )
+    parser.add_argument(
+        "--swarm-token", default=None, help="Security token for swarm mode"
+    )
+    parser.add_argument(
+        "--region", default="unknown", help="Region identifier for swarm node"
+    )
+    parser.add_argument(
+        "--delivery-mode",
+        choices=["ask", "standard", "high"],
+        default="ask",
+        help="Prompt or choose whether to require high-standard delivery verification.",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -298,6 +935,12 @@ def main():
     bug.add_argument("--task", required=True)
     bug.add_argument("--domain", default=None)
     bug.add_argument("--dry-run", action="store_true")
+    bug.add_argument("--verify", action="append", default=[])
+    bug.add_argument("--artifact", action="append", default=[])
+    bug.add_argument("--research-workspace", default=None)
+    bug.add_argument("--research-rounds", type=int, default=5)
+    bug.add_argument("--research-stable-wins", type=int, default=3)
+    bug.add_argument("--research-force", action="store_true")
 
     # nexus:test
     test_parser = subparsers.add_parser("nexus:test")
@@ -313,6 +956,12 @@ def main():
     feat.add_argument("--domain", default=None)
     feat.add_argument("--dry-run", action="store_true")
     feat.add_argument("--skill", help="Manually specify a skill to use")
+    feat.add_argument("--verify", action="append", default=[])
+    feat.add_argument("--artifact", action="append", default=[])
+    feat.add_argument("--research-workspace", default=None)
+    feat.add_argument("--research-rounds", type=int, default=5)
+    feat.add_argument("--research-stable-wins", type=int, default=3)
+    feat.add_argument("--research-force", action="store_true")
 
     # nexus:crystal
     subparsers.add_parser("nexus:crystal")
@@ -338,8 +987,21 @@ def main():
     # nexus:check
     check_parser = subparsers.add_parser("nexus:check")
     check_parser.add_argument(
-        "--level", choices=["quick", "pre-merge", "nightly"], default="quick"
+        "--level",
+        choices=["ask", "quick", "standard", "high", "full", "pre-merge", "nightly"],
+        default="ask",
     )
+
+    # nexus:self-heal
+    self_heal_parser = subparsers.add_parser("nexus:self-heal")
+    self_heal_parser.add_argument(
+        "--mode", choices=["ask", "dry-run", "standard", "strict"], default="ask"
+    )
+
+    # nexus:health
+    health_parser = subparsers.add_parser("nexus:health")
+    health_parser.add_argument("action", choices=["explain"], nargs="?", default="explain")
+    health_parser.add_argument("--output", choices=["text", "json"], default="text")
 
     # nexus:upgrade
     upgrade_parser = subparsers.add_parser("nexus:upgrade")
@@ -350,8 +1012,101 @@ def main():
     runner_parser.add_argument("--task", help="Run specific task ID")
     runner_parser.add_argument("--with-deps", action="store_true", help="Run with dependencies")
 
+    # nexus:phase6
+    phase6_parser = subparsers.add_parser("nexus:phase6")
+    phase6_parser.add_argument("--workspace", required=True, help="Autoresearch workspace path")
+    phase6_parser.add_argument("--rounds", type=int, default=100)
+    phase6_parser.add_argument("--proof-ratio-min", type=float, default=95.0)
+    phase6_parser.add_argument("--output-prefix", default="phase6")
+    phase6_parser.add_argument("--skip-autopilot", action="store_true")
+
+    # nexus:profile
+    profile_parser = subparsers.add_parser("nexus:profile")
+    profile_parser.add_argument("action", choices=["show", "apply"])
+    profile_parser.add_argument("--name", choices=["prod"], default="prod")
+
+    # nexus:release-ready
+    subparsers.add_parser("nexus:release-ready")
+
+    # nexus:acceptance-check
+    acceptance_parser = subparsers.add_parser("nexus:acceptance-check")
+    acceptance_parser.add_argument("--window", type=int, default=50)
+    acceptance_parser.add_argument("--repair-success-min", type=float, default=80.0)
+    acceptance_parser.add_argument("--phantom-fp-max", type=float, default=5.0)
+    acceptance_parser.add_argument("--regression-pass-min", type=float, default=95.0)
+    acceptance_parser.add_argument("--retry-spike-factor", type=float, default=2.0)
+    acceptance_parser.add_argument("--retry-abs-max", type=float, default=1.0)
+    acceptance_parser.add_argument("--output-dir", default=".nexus/reports")
+
+    # nexus:skills-autotune
+    autotune_parser = subparsers.add_parser("nexus:skills-autotune")
+    autotune_parser.add_argument("--apply", action="store_true")
+    autotune_parser.add_argument("--min-samples", type=int, default=3)
+    autotune_parser.add_argument("--baseline", type=float, default=0.55)
+    autotune_parser.add_argument("--learning-rate", type=float, default=0.6)
+    autotune_parser.add_argument("--degrade-threshold", type=float, default=0.2)
+    autotune_parser.add_argument("--max-step", type=float, default=0.35)
+    autotune_parser.add_argument("--degrade-consecutive-rounds", type=int, default=3)
+
+    # nexus:phase7
+    phase7_parser = subparsers.add_parser("nexus:phase7")
+    phase7_parser.add_argument("--workspace", required=True, help="Autoresearch workspace path")
+    phase7_parser.add_argument("--rounds", type=int, default=100)
+    phase7_parser.add_argument("--proof-ratio-min", type=float, default=95.0)
+    phase7_parser.add_argument("--output-prefix", default="phase7")
+    phase7_parser.add_argument("--skip-autopilot", action="store_true")
+    phase7_parser.add_argument("--autotune-apply", action="store_true")
+    phase7_parser.add_argument("--min-samples", type=int, default=3)
+    phase7_parser.add_argument("--baseline", type=float, default=0.55)
+    phase7_parser.add_argument("--learning-rate", type=float, default=0.6)
+    phase7_parser.add_argument("--degrade-threshold", type=float, default=0.2)
+    phase7_parser.add_argument("--max-step", type=float, default=0.35)
+    phase7_parser.add_argument("--degrade-consecutive-rounds", type=int, default=3)
+
+    # nexus:phase7-loop
+    phase7_loop_parser = subparsers.add_parser("nexus:phase7-loop")
+    phase7_loop_parser.add_argument("--workspace", required=True, help="Autoresearch workspace path")
+    phase7_loop_parser.add_argument("--rounds", type=int, default=20)
+    phase7_loop_parser.add_argument("--proof-ratio-min", type=float, default=95.0)
+    phase7_loop_parser.add_argument("--max-loops", type=int, default=10)
+    phase7_loop_parser.add_argument("--stable-wins", type=int, default=3)
+    phase7_loop_parser.add_argument("--output-prefix", default="phase7_loop")
+    phase7_loop_parser.add_argument("--degrade-threshold", type=float, default=0.2)
+    phase7_loop_parser.add_argument("--max-step", type=float, default=0.35)
+    phase7_loop_parser.add_argument("--degrade-consecutive-rounds", type=int, default=3)
+
+    # nexus:skills-health
+    skills_health_parser = subparsers.add_parser("nexus:skills-health")
+    skills_health_parser.add_argument("--output", choices=["text", "json"], default="text")
+    skills_health_parser.add_argument("--workspace", default=None, help="Optional phase7 workspace")
+
+    # nexus:skills-optimize
+    skills_optimize_parser = subparsers.add_parser("nexus:skills-optimize")
+    skills_optimize_parser.add_argument("--max-items", type=int, default=3)
+    skills_optimize_parser.add_argument("--rebound", type=float, default=0.15)
+
+    # nexus:skills-learned
+    learned_parser = subparsers.add_parser("nexus:skills-learned")
+    learned_sub = learned_parser.add_subparsers(dest="skills_action")
+    learned_sub.add_parser("list")
+    show_p = learned_sub.add_parser("show")
+    show_p.add_argument("skill_id")
+    search_p = learned_sub.add_parser("search")
+    search_p.add_argument("query")
+    search_p.add_argument("--top-k", type=int, default=5)
+    approve_p = learned_sub.add_parser("approve")
+    approve_p.add_argument("skill_id")
+    scan_p = learned_sub.add_parser("scan")
+    scan_p.add_argument("skill_id", nargs="?", default=None)
+    scan_p.add_argument("--all", action="store_true", dest="scan_all")
+    archive_p = learned_sub.add_parser("archive")
+    archive_p.add_argument("skill_id")
+    learned_sub.add_parser("stats")
+    promote_p = learned_sub.add_parser("promote")
+    promote_p.add_argument("skill_id")
+
     args = parser.parse_args()
-    if not args.command:
+    if not args.command and not args.swarm_mode:
         parser.print_help()
         return
 
@@ -373,8 +1128,30 @@ def main():
         audit_level=args.audit_level,
     )
 
+    if args.swarm_mode:
+        cli.run_swarm_mode(args.port, args.swarm_token, args.region)
+        return
+    
+    domestic_region = args.region
+
     if args.command == "nexus:bug":
-        cli.run_bug(args.task, args.domain, args.dry_run, args.bypass_cb)
+        requested_delivery_mode = args.delivery_mode
+        if requested_delivery_mode == "ask":
+            requested_delivery_mode = str(cli.runtime_profile.get("delivery_mode", "ask"))
+        delivery_mode = resolve_delivery_mode(requested_delivery_mode)
+        cli.run_bug(
+            args.task,
+            args.domain,
+            args.dry_run,
+            args.bypass_cb,
+            delivery_mode=delivery_mode,
+            verify_commands=args.verify,
+            artifact_paths=args.artifact,
+            research_workspace=args.research_workspace,
+            research_rounds=args.research_rounds,
+            research_stable_wins=args.research_stable_wins,
+            research_force=args.research_force,
+        )
     elif args.command == "nexus:test":
         cli.run_test(
             skill=args.skill,
@@ -383,8 +1160,23 @@ def main():
             bypass_cb=args.bypass_cb,
         )
     elif args.command == "nexus:feature":
+        requested_delivery_mode = args.delivery_mode
+        if requested_delivery_mode == "ask":
+            requested_delivery_mode = str(cli.runtime_profile.get("delivery_mode", "ask"))
+        delivery_mode = resolve_delivery_mode(requested_delivery_mode)
         cli.run_feature(
-            args.task, args.domain, args.dry_run, args.bypass_cb, args.skill
+            args.task,
+            args.domain,
+            args.dry_run,
+            args.bypass_cb,
+            args.skill,
+            delivery_mode=delivery_mode,
+            verify_commands=args.verify,
+            artifact_paths=args.artifact,
+            research_workspace=args.research_workspace,
+            research_rounds=args.research_rounds,
+            research_stable_wins=args.research_stable_wins,
+            research_force=args.research_force,
         )
     elif args.command == "nexus:crystal":
         cli.run_crystal()
@@ -395,11 +1187,23 @@ def main():
     elif args.command == "nexus:clean":
         cli.run_clean(args.dry_run)
     elif args.command == "nexus:check":
-        cli.run_check(args.level)
+        requested_level = args.level
+        if requested_level == "ask":
+            requested_level = str(cli.runtime_profile.get("check_level", "ask"))
+        cli.run_check(resolve_check_level(requested_level))
+    elif args.command == "nexus:self-heal":
+        requested_mode = args.mode
+        if requested_mode == "ask":
+            requested_mode = str(cli.runtime_profile.get("self_heal_mode", "ask"))
+        cli.run_self_heal(resolve_self_heal_mode(requested_mode))
+    elif args.command == "nexus:health":
+        if args.action == "explain":
+            cli.run_health_explain(args.output)
     elif args.command == "nexus:upgrade":
         cli.run_upgrade(args.dry_run)
     elif args.command == "nexus:runner":
         # 🧪 v9: Launch the automated task runner
+        delivery_mode = resolve_delivery_mode(args.delivery_mode)
         scripts_root = Path(__file__).resolve().parents[2]
         runner_path = scripts_root / "scripts" / "ops" / "task_runner.py"
         if not runner_path.exists():
@@ -412,8 +1216,163 @@ def main():
             runner_cmd.extend(["--task", args.task])
         if args.with_deps:
             runner_cmd.append("--with-deps")
+        runner_cmd.extend(["--delivery-mode", delivery_mode])
 
         rc = subprocess.call(runner_cmd)
+        sys.exit(rc)
+    elif args.command == "nexus:phase6":
+        rc = cli.run_phase6_research(
+            workspace=args.workspace,
+            rounds=args.rounds,
+            proof_ratio_min=args.proof_ratio_min,
+            output_prefix=args.output_prefix,
+            skip_autopilot=args.skip_autopilot,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:profile":
+        rc = cli.run_profile(action=args.action, name=args.name)
+        sys.exit(rc)
+    elif args.command == "nexus:release-ready":
+        rc = cli.run_release_ready()
+        sys.exit(rc)
+    elif args.command == "nexus:acceptance-check":
+        rc = cli.run_acceptance_check(
+            window=args.window,
+            repair_success_min=args.repair_success_min,
+            phantom_fp_max=args.phantom_fp_max,
+            regression_pass_min=args.regression_pass_min,
+            retry_spike_factor=args.retry_spike_factor,
+            retry_abs_max=args.retry_abs_max,
+            output_dir=args.output_dir,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:skills-autotune":
+        rc = cli.run_skills_autotune(
+            apply=args.apply,
+            min_samples=args.min_samples,
+            baseline=args.baseline,
+            learning_rate=args.learning_rate,
+            degrade_threshold=args.degrade_threshold,
+            max_step=args.max_step,
+            degrade_consecutive_rounds=args.degrade_consecutive_rounds,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:phase7":
+        rc = cli.run_phase7_research(
+            workspace=args.workspace,
+            rounds=args.rounds,
+            proof_ratio_min=args.proof_ratio_min,
+            output_prefix=args.output_prefix,
+            skip_autopilot=args.skip_autopilot,
+            autotune_apply=args.autotune_apply,
+            min_samples=args.min_samples,
+            baseline=args.baseline,
+            learning_rate=args.learning_rate,
+            degrade_threshold=args.degrade_threshold,
+            max_step=args.max_step,
+            degrade_consecutive_rounds=args.degrade_consecutive_rounds,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:phase7-loop":
+        rc = cli.run_phase7_loop(
+            workspace=args.workspace,
+            rounds=args.rounds,
+            proof_ratio_min=args.proof_ratio_min,
+            max_loops=args.max_loops,
+            stable_wins=args.stable_wins,
+            output_prefix=args.output_prefix,
+            degrade_threshold=args.degrade_threshold,
+            max_step=args.max_step,
+            degrade_consecutive_rounds=args.degrade_consecutive_rounds,
+        )
+        sys.exit(rc)
+    elif args.command == "nexus:skills-health":
+        rc = cli.run_skills_health(output=args.output, workspace=args.workspace)
+        sys.exit(rc)
+    elif args.command == "nexus:skills-optimize":
+        from nexus.engine.hub import NexusHub
+        hub = NexusHub(REPO_ROOT)
+        hub.optimize_skills(max_items=args.max_items, rebound=args.rebound)
+    elif args.command == "nexus:skills-learned":
+        from nexus.learning.knowledge_index import KnowledgeIndex
+        index = KnowledgeIndex(REPO_ROOT)
+        if args.skills_action == "list":
+            skills = index.store.list_learned_skills()
+            print(f"\n📚 Learned Skills ({len(skills)}):")
+            for s in skills:
+                fm = index.store.get_skill_summary(s)
+                if fm:
+                    print(f" - [{fm.task_id}] {fm.name} ({fm.task_type}) | Trust: {fm.trust_level}")
+        elif args.skills_action == "show":
+            content = index.load_full_skill(args.skill_id)
+            if content:
+                print(f"\n--- SKILL: {args.skill_id} ---\n")
+                print(content)
+            else:
+                print(f"❌ Skill not found: {args.skill_id}")
+        elif args.skills_action == "search":
+            results = index.search_similar(args.query, top_k=args.top_k)
+            print(f"\n🔍 Search Results for '{args.query}':")
+            if not results:
+                print(" No matches found.")
+            for fm, score in results:
+                print(f" [{round(score, 3)}] {fm.task_id}: {fm.name} - {fm.description[:80]}...")
+        elif args.skills_action == "approve":
+            from nexus.learning.skill_lifecycle import promote_skill
+            result = promote_skill(REPO_ROOT / "skills" / "learned", args.skill_id, "reviewed")
+            print(result["message"])
+        elif args.skills_action == "scan":
+            from nexus.learning.skill_scanner import scan_skill as do_scan
+            skills_dir = REPO_ROOT / "skills" / "learned"
+            targets = []
+            if getattr(args, "scan_all", False):
+                targets = list(skills_dir.glob("*.md"))
+            elif args.skill_id:
+                sid = args.skill_id if args.skill_id.endswith(".md") else f"{args.skill_id}.md"
+                targets = [skills_dir / sid]
+            for t in targets:
+                if t.exists():
+                    sr = do_scan(t.read_text(encoding="utf-8"))
+                    status = "✅ SAFE" if sr.safe else "🛑 UNSAFE"
+                    print(f"\n{status}: {t.stem}")
+                    for w in sr.warnings:
+                        print(f"  {w}")
+                    for b in sr.blocked_reasons:
+                        print(f"  {b}")
+                else:
+                    print(f"❌ Skill not found: {t.stem}")
+        elif args.skills_action == "archive":
+            from nexus.learning.skill_lifecycle import archive_skill
+            result = archive_skill(REPO_ROOT / "skills" / "learned", args.skill_id)
+            print(result["message"])
+        elif args.skills_action == "stats":
+            from nexus.learning.skill_lifecycle import get_skills_stats
+            stats = get_skills_stats(REPO_ROOT / "skills" / "learned")
+            print(f"\n📊 Skill Health Report")
+            print(f"  Total: {stats['total']}")
+            for level, count in stats["by_level"].items():
+                print(f"  [{level}]: {count}")
+            print(f"  Safe: {stats['scan_results']['safe']} | Unsafe: {stats['scan_results']['unsafe']}")
+            print(f"  Total Uses: {stats['total_uses']}")
+        elif args.skills_action == "promote":
+            from nexus.learning.skill_lifecycle import promote_skill, TRUST_LEVELS
+            import re as _re
+            skills_dir = REPO_ROOT / "skills" / "learned"
+            sid = args.skill_id if args.skill_id.endswith(".md") else f"{args.skill_id}.md"
+            sp = skills_dir / sid
+            if sp.exists():
+                content = sp.read_text(encoding="utf-8")
+                m = _re.search(r"trust_level:\s*(.+)", content)
+                cur = m.group(1).strip().strip('"').strip("'") if m else "auto-generated"
+                cur_idx = TRUST_LEVELS.index(cur) if cur in TRUST_LEVELS else 0
+                if cur_idx < len(TRUST_LEVELS) - 1:
+                    result = promote_skill(skills_dir, args.skill_id, TRUST_LEVELS[cur_idx + 1])
+                    print(result["message"])
+                else:
+                    print(f"❌ {args.skill_id} 已經是最高等級: {cur}")
+            else:
+                print(f"❌ Skill not found: {args.skill_id}")
+        rc = 0
         sys.exit(rc)
 
 

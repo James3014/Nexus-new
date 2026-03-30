@@ -1,0 +1,68 @@
+from typing import TypedDict, Optional, List, Dict, Any
+
+class PipelineMetadata(TypedDict, total=False):
+    # --- Pipeline 執行狀態 ---
+    task_description: str
+    pipeline_success: bool
+    pipeline_outcome: Dict[str, Any]
+    pipeline_terminal_state: str
+
+    # --- 階段決策 ---
+    phase_decisions: Dict[str, str]
+    phase_skills: Dict[str, str]
+    inherited_plan_strategy: str
+    research_route: Dict[str, Any]
+
+    # --- 審計結果 ---
+    last_review_status: str
+    last_patch_generated: bool
+    last_patch_apply_success: bool
+    last_no_change_reason: str
+    last_proof_type: str
+    last_proof_value: str
+    sandbox_mode: str
+    rejection_history: List[str]
+    last_audit_failure: str
+    conversation: Dict[str, Any]
+    task_type: str
+    response_mode: str
+
+    # --- Phantom Guard ---
+    phantom_success_reason: str
+    known_phantom_patterns: List[str]
+    phantom_pattern_history: List[str]
+    require_strict_proof: bool
+    anti_hallucination_checks: int
+    anti_hallucination_block_count: int
+    anti_hallucination_pass_count: int
+
+    # --- Escalation ---
+    escalation_count: int
+    escalation_triggered: bool
+    escalation_root_cause: str
+    human_review_required: bool
+    human_review_reason: str
+
+    # --- Pregate ---
+    pregate_skip: bool
+    pregate_skip_reason: str
+    cli_pregate_results: List[Dict[str, Any]]
+    verification_commands: List[str]
+    verification_exit_codes: List[int]
+
+    # --- Learning ---
+    matched_skills_count: int
+    skill_context_loaded: str
+    prior_winning_hypotheses: List[str]
+    research_pack_path: str
+
+    # --- Health ---
+    health_snapshot: Dict[str, Any]
+    self_heal_cycle: Dict[str, Any]
+    auto_repair_last_result: Dict[str, Any]
+
+    # --- Outcome ---
+    nexus_outcome_v2: Dict[str, Any]
+    plan_strategy_used: str
+    cycle_root_cause: str
+    cycle_analysis: Dict[str, Any]

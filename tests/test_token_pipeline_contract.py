@@ -2,7 +2,7 @@ import pytest
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from nexus.services.llm import LLMClient
+from nexus.services.gateway import BattlesuitGateway as LLMClient
 from nexus.engine.phases.research import ResearchPhaseHandler
 from nexus.engine.phases.repair import RepairPhaseHandler
 from nexus.core.orchestrator import NexusOrchestrator
@@ -10,16 +10,10 @@ from nexus.core.state_contracts import NexusState
 
 @pytest.fixture
 def mock_llm_output():
-    return """
-    Hello, here is the result.
-    Total Session Tokens: 1,420
-    ```json
-    {
-      "status": "PASS",
-      "summary": "Everything looks good"
-    }
-    ```
-    """
+    return json.dumps({
+        "output": '{"status": "PASS", "summary": "Everything looks good"}',
+        "stats": {"models": {"default": {"tokens": {"total": 1420}}}}
+    })
 
 def test_llm_client_token_capture(mock_llm_output):
     client = LLMClient(project_root=".")

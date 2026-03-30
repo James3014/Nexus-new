@@ -37,3 +37,20 @@ def test_compute_phantom_success_accepts_no_change_reason():
     out = mod.compute_phantom_success(rows)
     assert out["phantom_count"] == 0
     assert out["inconclusive_count"] == 0
+
+
+def test_compute_phantom_success_marks_missing_physical_proof_inconclusive():
+    mod = _load_ci_gate_module()
+    rows = [
+        {
+            "status": "PASS",
+            "patch_generated": "true",
+            "patch_apply_success": "true",
+            "proof_type": "",
+            "proof_value": "",
+            "no_change_reason": "",
+        }
+    ]
+    out = mod.compute_phantom_success(rows)
+    assert out["phantom_count"] == 0
+    assert out["inconclusive_count"] == 1

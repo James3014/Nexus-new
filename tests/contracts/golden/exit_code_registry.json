@@ -1,0 +1,8 @@
+{
+  "terminal_states": {
+    "SUCCESS": 0,
+    "FAILED": 1,
+    "ESCALATED": 2,
+    "HUMAN_REVIEW": 3
+  }
+}

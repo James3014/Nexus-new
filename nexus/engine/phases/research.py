@@ -19,7 +19,7 @@ class ResearchPhaseHandler(BasePhaseHandler):
     """
 
     def __init__(self, project_root: Any, run_dir: Any):
-        super().__init__(project_root, run_dir)
+        super().__init__(project_root, run_dir, name="X", priority=200)
 
     def run(self, state: NexusState, context: Dict[str, Any]) -> Dict[str, Any]:
         task = str(context.get("task") or "").strip()

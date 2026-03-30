@@ -5,7 +5,7 @@ from pathlib import Path
 # Add current dir to path
 sys.path.append(str(Path.cwd()))
 
-from nexus.services.llm import LLMClient
+from nexus.services.gateway import BattlesuitGateway as LLMClient
 
 def probe():
     bin_path = "/Users/jameschen/.npm-global/bin/codex"

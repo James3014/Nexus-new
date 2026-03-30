@@ -20,6 +20,13 @@ from dateutil import parser
 from rich.console import Console
 from rich.panel import Panel
 
+# 🛡️ Nexus Integration
+try:
+    from nexus.services.gateway import BattlesuitGateway as LLMClient
+except ImportError:
+    # 支援獨立運行
+    LLMClient = None
+
 console = Console(force_terminal=True)
 
 # ---------------------------------------------------------------------------
@@ -108,7 +115,22 @@ def ask_gemini_for_crystallization(raw_json):
     ]
 
     prompt = f"分析 Gmail Thread。若純系統通知，則 skip: true。否則產出 YAML：skip, case_id, order_id, student_name, student_email, coach, trigger_event, urgency, sentiment, resolution_status, summary (20字摘要)。Thread ID: {t_id}\n{json.dumps(summary_data, ensure_ascii=False)}"
+    
+    # 🛡️ Nexus Battlesuit Gateway Integration
+    if LLMClient:
+        client = LLMClient(project_root=os.getcwd())
+        data, raw_output = client.ask(prompt, "", phase="C")
+        if data.get("status") == "FAIL": return None
+        
+        # 提取 YAML 部分 (相容原有邏輯)
+        match = re.search(r"```yaml\s*(crystallized:.*?)\s*```", raw_output, re.DOTALL)
+        if match:
+            c_data = yaml.safe_load(match.group(1).strip()).get("crystallized")
+            return "SKIP" if c_data and c_data.get("skip") is True else c_data
+        return None
+        
     try:
+        # Fallback to direct CLI if Nexus is missing
         res = subprocess.run(
             ["gemini", "-p", "CRM 結晶化："],
             input=prompt,

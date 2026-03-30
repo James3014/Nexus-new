@@ -8,12 +8,15 @@ from pathlib import Path
 from nexus.engine.coordinator import NexusEngine
 
 
+from nexus.engine.config import EngineConfig
+
+
 @pytest.fixture
 def engine(tmp_path):
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "cases").mkdir()
-    return NexusEngine(project_root=project_root, run_dir=tmp_path / "run")
+    return NexusEngine(EngineConfig(project_root=project_root))
 
 
 def test_run_bug_delegates_to_pipeline(engine):

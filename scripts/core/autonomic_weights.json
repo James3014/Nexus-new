@@ -1,18 +1,23 @@
 {
-    "base_weights": {
-        "tdd_weight": 2.5,
-        "subagent_bias": 1.8,
-        "refactor_weight": 3.0,
-        "investigate_weight": 4.5
-    },
-    "skill_adjustments": {
-        "nexus-bdd-automation": 1.2,
-        "nexus-planner-expert": 0.0,
-        "nexus-design-polish": 1.2,
-        "nexus-debug-expert": 5.0,
-        "openui-ui-gen": 2.4,
-        "ui-validator": 0.0
-    },
-    "last_updated": "2026-03-14T22:30:02.323821",
-    "total_sessions_analyzed": 400
+  "base_weights": {
+    "tdd_weight": 2.5,
+    "subagent_bias": 1.8,
+    "refactor_weight": 3.0,
+    "investigate_weight": 4.5
+  },
+  "skill_adjustments": {
+    "nexus-bdd-automation": 1.2,
+    "nexus-planner-expert": 0.0,
+    "nexus-design-polish": 1.2,
+    "nexus-debug-expert": 8.0,
+    "openui-ui-gen": 2.4,
+    "ui-validator": 0.0,
+    "felo-cli": 0.15,
+    "superpowers": 0.15,
+    "skill-creator-advanced": 0.15,
+    "git-manager": 0.15,
+    "self-healer": 0.15
+  },
+  "last_updated": "2026-03-28T01:03:24.804212+00:00",
+  "total_sessions_analyzed": 436
 }

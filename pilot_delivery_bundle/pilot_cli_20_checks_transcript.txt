@@ -1,0 +1,1 @@
+/Users/jameschen/Workspace/nexus/logs/pilot/pilot_cli_20_checks_transcript.txt

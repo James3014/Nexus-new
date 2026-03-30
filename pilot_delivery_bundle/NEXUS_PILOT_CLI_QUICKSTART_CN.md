@@ -1,0 +1,1 @@
+/Users/jameschen/Workspace/nexus/docs/NEXUS_PILOT_CLI_QUICKSTART_CN.md

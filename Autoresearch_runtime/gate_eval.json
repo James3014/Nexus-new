@@ -1,0 +1,21 @@
+{
+  "global_converged": true,
+  "gate_pass_rate": 100.0,
+  "max_consecutive_windows": 40,
+  "required_consecutive_windows": 3,
+  "window_size": 20,
+  "thresholds": {
+    "check_ratio_min": 70.0,
+    "proof_ratio_min": 95.0,
+    "freeze_ratio_max": 20.0,
+    "fail_fast_proof_floor": 90.0,
+    "fail_fast_freeze_ceiling": 35.0,
+    "min_generated_patches": 10,
+    "window_size": 20,
+    "required_consecutive_windows": 3,
+    "global_gate_pass_rate_min": 80.0,
+    "conservative_warmup_rounds": 30
+  },
+  "fail_bucket_counts": {},
+  "top_fail_reasons": []
+}

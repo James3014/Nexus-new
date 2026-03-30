@@ -1,0 +1,5 @@
+--- a/lib/mpl_toolkits/mplot3d/art3d.py
++++ b/lib/mpl_toolkits/mplot3d/art3d.py
+@@ -634,0 +634,2 @@
++    def __init__(self, *args, **kwargs):
++        self._facecolors2d = []

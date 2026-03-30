@@ -1,0 +1,16 @@
+{
+  "A": [
+    "/workspaces/A/repo_0",
+    "/workspaces/A/repo_1",
+    "/workspaces/A/repo_2",
+    "/workspaces/A/repo_3",
+    "/workspaces/A/repo_4"
+  ],
+  "B": [
+    "/workspaces/B/repo_0",
+    "/workspaces/B/repo_1",
+    "/workspaces/B/repo_2",
+    "/workspaces/B/repo_3",
+    "/workspaces/B/repo_4"
+  ]
+}

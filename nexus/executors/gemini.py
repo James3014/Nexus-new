@@ -18,10 +18,10 @@ class GeminiExecutor(BaseExecutor):
     不再主動啟動 CLI，僅負責解析外部 Agent（如 antigravity）產生的標準輸出。
     """
     
-    def __init__(self, output_source: str = "/tmp/nexus_agent_output.txt"):
+    def __init__(self, output_source: str = os.getenv("NEXUS_AGENT_OUTPUT", "/tmp/nexus_agent_output.txt")):
         self.output_source = Path(output_source)
         self.model_name = "gemini-2.0-flash-exp" # Default for v9
-        self.sandbox_dir = Path("/tmp/nexus_sandbox")
+        self.sandbox_dir = Path(os.getenv("NEXUS_SANDBOX_DIR", "/tmp/nexus_sandbox"))
         self.sandbox_dir.mkdir(parents=True, exist_ok=True)
         
     def execute(self, input_data: ExecutorInput, timeout: int = 0) -> ExecutorOutput:

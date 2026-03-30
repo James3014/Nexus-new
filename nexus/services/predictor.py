@@ -20,7 +20,7 @@ class Predictor:
         # 🌐 Domain-specific risks (UI/Frontend)
         # 使用更精確的匹配以避免誤判 (如 readme)
         words = set(task_lower.split())
-        if "html" in words or "js" in words:
+        if any(ext in task_lower for ext in [".html", ".js"]) or "html" in words or "js" in words:
             score += 0.3
             reasons.append("JS conflict risk (Potential DOM listener conflicts)")
         if any(k in words for k in ["layout", "grid", "三欄"]):

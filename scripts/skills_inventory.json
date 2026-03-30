@@ -1,4 +1,8 @@
 {
+  "router": {
+    "canonical_impl": "nexus/core/router.py",
+    "legacy_shim": "scripts/core/skills_router.py"
+  },
   "skills": {
     "codebase_investigator": {
       "phases": ["D"],
@@ -35,6 +39,24 @@
       "langs": ["*"],
       "triggers": ["hard_to_read_logic"],
       "description": "Generate readable pseudo-code for complex logic blocks."
+    },
+    "superpowers": {
+      "phases": ["P", "D", "R", "A", "C"],
+      "langs": ["*"],
+      "triggers": ["superpower", "hard_mode", "strict_delivery", "high_standard"],
+      "description": "High-rigor engineering operating protocol and task quality discipline."
+    },
+    "felo-cli": {
+      "phases": ["X", "D"],
+      "langs": ["*"],
+      "triggers": ["felo", "market_research", "search_context"],
+      "description": "Felo CLI bridge for external research and promptable retrieval."
+    },
+    "skill-creator-advanced": {
+      "phases": ["P", "D", "R", "A", "C"],
+      "langs": ["markdown", "python", "json"],
+      "triggers": ["skill_review", "skill_refactor", "skill_trigger_eval", "skill_quality"],
+      "description": "Advanced protocol to design, refactor, and validate skills with measurable triggers."
     },
     "openui-ui-gen": {
       "phases": ["P", "D"],

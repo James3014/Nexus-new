@@ -1,2 +1,8 @@
 nexus
+nexus-core
+nexus-reflex
+nexus-rust-v16
+nexus-swarm
+nexus_github_pr_vault
+nexus_sota_records
 scripts

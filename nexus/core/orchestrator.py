@@ -2,7 +2,11 @@
 import json
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
+
+from nexus.core.config import OrchestratorConfig
+from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
 
 class NexusOrchestrator:
     """
@@ -12,38 +16,36 @@ class NexusOrchestrator:
 
     def __init__(
         self,
-        task: str,
-        skill_id: str,
-        mode: str = "developer",
-        git=None,
-        llm=None,
-        linter=None,
-        patcher=None,
-        reporter=None,
-        workspace=None,
-        router=None,
-        commander=None,
-        context_hub=None,
-        state_io=None,
+        config: OrchestratorConfig,
+        infra: Optional[NexusInfraHub] = None,
+        intel: Optional[NexusIntelHub] = None,
+        gov: Optional[NexusGovHub] = None,
     ):
-        self.task = task
-        self.skill_id = skill_id
-        self.mode = mode
+        self.task = config.task
+        self.skill_id = config.skill_id
+        self.mode = config.mode
         self.project_root = Path.cwd()
 
-        # 🛠️ Service Injection (Provided by NexusContainer)
-        self.git = git
-        self.llm = llm
-        self.linter = linter
-        self.patcher = patcher
-        self.reporter = reporter
-        self.workspace = workspace
-        self.router = router
-        self.commander = commander
-        self.context_hub = context_hub
-        self.state_io = state_io
+        # 🛠️ Hubs (Engine Fan-out Reduction P4-R5)
+        self.infra = infra
+        self.intel = intel
+        self.gov = gov
 
-        self.execution_mode = mode
+        # ⚡ Shortcuts for internal logic
+        self.git = infra.git if infra else None
+        self.workspace = infra.workspace if infra else None
+        self.linter = infra.linter if infra else None
+        self.patcher = infra.patcher if infra else None
+        
+        self.llm = intel.llm if intel else None
+        self.context_hub = intel.context_hub if intel else None
+        self.commander = intel.commander if intel else None
+        
+        self.router = gov.router if gov else None
+        self.reporter = gov.reporter if gov else None
+        self.state_io = gov.state_io if gov else None
+
+        self.execution_mode = self.mode
         self.trigger_reason = "initial_launch"
         self.mode_history = []
 
@@ -51,7 +53,7 @@ class NexusOrchestrator:
         self.total_raw_model = 0
         self.total_fallback_est = 0
         self.token_capture_statuses = []
-        self.max_strikes = 3 if mode != "audit" else 1
+        self.max_strikes = 3 if self.mode != "audit" else 1
 
     def set_execution_mode(self, mode: str, reason: str):
         """🛡️ 模式切換入口，並記錄原因。"""
@@ -65,16 +67,21 @@ class NexusOrchestrator:
             })
             self.execution_mode = mode
             self.trigger_reason = reason
-            # Update constraints based on new mode
-            self.max_strikes = 3 if mode != "audit" else 1
+            # Update constraints based on new self.mode
+            self.max_strikes = 3 if self.mode != "audit" else 1
 
-    def run_review(self) -> bool:
+    def run_review(self) -> dict:
         """核心門禁審核邏輯"""
         print(f"🎭 [Orchestrator] Reviewing task: {self.task} | Mode: {self.execution_mode}")
 
         # 1. Setup Environment
         # 2. Strike Loop
-        return self._do_loop()
+        success = self._do_loop()
+        return {
+            "status": "PASS" if success else "FAIL",
+            "summary": "Orchestrator loop finished",
+            "success": success
+        }
 
     def _do_loop(self) -> bool:
         strike = 0

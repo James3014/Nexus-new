@@ -1,0 +1,18 @@
+{
+  "description": "Nexus Benchmark CI Smoke Test — 5 cases covering diverse Python repos",
+  "version": "1.0",
+  "task_ids": [
+    "django__django-11133",
+    "sympy__sympy-14024",
+    "sphinx-doc__sphinx-8282",
+    "matplotlib__matplotlib-23562",
+    "django__django-16379"
+  ],
+  "justification": {
+    "django__django-11133": "Core ORM query regression — high signal, deterministic",
+    "sympy__sympy-14024": "Math computation correctness — tests symbolic reasoning",
+    "sphinx-doc__sphinx-8282": "Documentation build logic — covers text transformation",
+    "matplotlib__matplotlib-23562": "Plotting geometry — good for patch & test coverage",
+    "django__django-16379": "HTTP response header handling — common backend bug pattern"
+  }
+}

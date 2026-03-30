@@ -1,0 +1,193 @@
+"""Shared Skill Registry using SQLite.
+
+Pillar 1 of the Cross-Agent Skill Sharing Architecture.
+Handles persistence, deduplication, and search for both local and remote skills.
+Utilizes WAL mode to support concurrent reads while a node is writing.
+"""
+
+import sqlite3
+import json
+import logging
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+from dataclasses import asdict
+
+from nexus.learning.skill_schema import SkillFrontmatter
+
+logger = logging.getLogger(__name__)
+
+class SkillRegistry:
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self._init_db()
+
+    def _init_db(self):
+        """Initialize the SQLite database schema and enable WAL mode."""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS skills (
+                    id              TEXT PRIMARY KEY,
+                    task_id         TEXT NOT NULL,
+                    origin_node_id  TEXT NOT NULL DEFAULT 'local',
+                    trust_level     TEXT NOT NULL DEFAULT 'auto-generated',
+                    task_type       TEXT,
+                    keywords        TEXT,
+                    description     TEXT,
+                    name            TEXT,
+                    source          TEXT,
+                    plan_strategy   TEXT,
+                    winning_hypothesis TEXT,
+                    phantom_patterns TEXT,
+                    cycle_count     INTEGER DEFAULT 0,
+                    cycle_root_cause TEXT,
+                    verification_commands TEXT,
+                    verification_exit_codes TEXT,
+                    embedding_model_version TEXT,
+                    repair_success  INTEGER DEFAULT 0,
+                    retry_count     INTEGER DEFAULT 0,
+                    pattern_reuse_rate REAL DEFAULT 0.0,
+                    created_at      TEXT NOT NULL,
+                    updated_at      TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_type ON skills(task_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_trust_level ON skills(trust_level)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_origin ON skills(origin_node_id)")
+
+    def upsert(self, skill: SkillFrontmatter, origin_node_id: str = "local") -> None:
+        """Insert or replace a skill in the registry."""
+        skill_id = f"{origin_node_id}::{skill.task_id}"
+        metric = skill.success_metric
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        
+        try:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO skills (
+                        id, task_id, origin_node_id, trust_level, task_type, keywords,
+                        description, name, source, plan_strategy, winning_hypothesis,
+                        phantom_patterns, cycle_count, cycle_root_cause, verification_commands,
+                        verification_exit_codes, embedding_model_version, repair_success,
+                        retry_count, pattern_reuse_rate, created_at, updated_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                """, (
+                    skill_id,
+                    skill.task_id,
+                    origin_node_id,
+                    skill.trust_level,
+                    skill.task_type,
+                    json.dumps(skill.keywords),
+                    skill.description,
+                    skill.name,
+                    skill.source,
+                    skill.plan_strategy,
+                    skill.winning_hypothesis,
+                    json.dumps(skill.phantom_patterns),
+                    skill.cycle_count,
+                    skill.cycle_root_cause,
+                    json.dumps(skill.verification_commands),
+                    json.dumps(skill.verification_exit_codes),
+                    skill.embedding_model_version,
+                    int(metric.repair_success),
+                    metric.retry_count,
+                    metric.pattern_reuse_rate,
+                    skill.created_at,
+                    now
+                ))
+        except sqlite3.Error as exc:
+            logger.error("skill_registry_upsert_failed [%s]: %s", skill_id, exc)
+
+    def search(
+        self,
+        query_tokens: set,
+        task_type: Optional[str] = None,
+        max_results: int = 5,
+        exclude_origin: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Search skills natively using B-Tree index and LIKE expressions."""
+        if not query_tokens and not task_type:
+            return []
+            
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            
+            conditions = []
+            params = []
+            
+            if task_type:
+                conditions.append("task_type = ?")
+                params.append(task_type)
+                
+            if query_tokens:
+                # Require at least one matching token in name, desc, or keywords
+                likes = []
+                for token in query_tokens:
+                    # Simple case-insensitive matching in text fields
+                    lk = f"%{token}%"
+                    likes.extend(["name LIKE ?", "description LIKE ?", "keywords LIKE ?"])
+                    params.extend([lk, lk, lk])
+                conditions.append(f"({' OR '.join(likes)})")
+                
+            if exclude_origin:
+                conditions.append("origin_node_id != ?")
+                params.append(exclude_origin)
+                
+            query = "SELECT * FROM skills"
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+                
+            # Prefer higher trust level and recently created
+            query += """ 
+                ORDER BY 
+                  CASE trust_level
+                    WHEN 'production' THEN 4
+                    WHEN 'tested' THEN 3
+                    WHEN 'reviewed' THEN 2
+                    ELSE 1
+                  END DESC,
+                  created_at DESC
+                LIMIT ?
+            """
+            params.append(max_results)
+            
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+            
+        return [dict(row) for row in rows]
+        
+    def get_by_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch all node variants of a skill by its task_id (favoring local first)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            # Ordering ensures 'local' origin comes first (since 'local' < 'node-xxx')
+            cursor = conn.execute(
+                "SELECT * FROM skills WHERE task_id = ? ORDER BY origin_node_id ASC LIMIT 1",
+                (task_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Fast aggregation without scanning file system."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT 
+                        COUNT(*) as total,
+                        SUM(CASE WHEN trust_level='production' THEN 1 ELSE 0 END) as production_skills,
+                        SUM(CASE WHEN origin_node_id != 'local' THEN 1 ELSE 0 END) as remote_skills
+                    FROM skills
+                """)
+                row = cursor.fetchone()
+                return {
+                    "total_skills": row[0] or 0,
+                    "production_skills": row[1] or 0,
+                    "remote_skills": row[2] or 0
+                }
+        except sqlite3.Error:
+            return {"total_skills": 0, "production_skills": 0, "remote_skills": 0}

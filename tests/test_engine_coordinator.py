@@ -1,12 +1,25 @@
+import sys
+import types
+import subprocess
+from pathlib import Path
+
+sys.modules.setdefault("lancedb", types.SimpleNamespace(connect=lambda *args, **kwargs: None))
+sys.modules.setdefault(
+    "redis",
+    types.SimpleNamespace(Redis=lambda *args, **kwargs: types.SimpleNamespace(ping=lambda: True)),
+)
+
 from nexus.engine.coordinator import NexusEngine
+from nexus.engine.config import EngineConfig
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.services.predictor import Predictor
 from nexus.core.state_contracts import NexusState
+from nexus.core.context_hub import ContextHub
 from unittest.mock import MagicMock, patch
 
 def test_engine_initialization(tmp_path):
     """測試引擎初始化與目錄建立。"""
-    engine = NexusEngine(project_root=tmp_path, silent=True)
+    engine = NexusEngine(EngineConfig(project_root=tmp_path, silent=True))
     assert engine.project_root == tmp_path
     assert engine.run_dir.exists()
     assert engine.state_io is not None
@@ -16,7 +29,8 @@ def test_engine_predict_via_planner(tmp_path):
     """測試透過 PlannerPhaseHandler 執行的風險預判邏輯。"""
     predictor = Predictor()
     planner = PlannerPhaseHandler(project_root=tmp_path, run_dir=tmp_path, predictor=predictor)
-    engine = NexusEngine(project_root=tmp_path, silent=True, phases={"P": planner})
+    config = EngineConfig(project_root=tmp_path, silent=True)
+    engine = NexusEngine(config, phases={"P": planner})
     
     state = NexusState(task_id="test-001")
     
@@ -33,7 +47,7 @@ def test_engine_predict_via_planner(tmp_path):
 
 
 def test_context_hub_exposes_feature_pack(tmp_path):
-    engine = NexusEngine(project_root=tmp_path, silent=True)
+    engine = NexusEngine(EngineConfig(project_root=tmp_path, silent=True))
     pack = engine.hub.assemble_feature_pack(plan={"steps": ["s1"]})
     assert isinstance(pack, dict)
     assert "plan" in pack
@@ -53,8 +67,10 @@ def test_run_feature_compat_fallback_when_hub_missing_feature_pack(tmp_path):
     mock_commander.hub = LegacyHub()
 
     engine = NexusEngine(
-        project_root=tmp_path,
-        silent=True,
+        EngineConfig(
+            project_root=tmp_path,
+            silent=True,
+        ),
         router=mock_router,
         commander=mock_commander,
         phases={"P": MagicMock(), "X": MagicMock(), "R": MagicMock()}
@@ -63,8 +79,7 @@ def test_run_feature_compat_fallback_when_hub_missing_feature_pack(tmp_path):
     engine.pipeline = MagicMock()
     engine.pipeline.run.return_value = True
 
-    with patch("nexus.engine.coordinator.CodexLoopV2.run_review", return_value={"status": "APPROVED"}):
-        ok = engine.run_feature("compat fallback smoke", dry_run=True)
+    ok = engine.run_feature("compat fallback smoke", dry_run=True)
     assert ok is True
 
 
@@ -85,8 +100,10 @@ def test_run_feature_compat_fallback_when_hub_feature_pack_raises(tmp_path):
     mock_commander.hub = FlakyHub()
 
     engine = NexusEngine(
-        project_root=tmp_path,
-        silent=True,
+        EngineConfig(
+            project_root=tmp_path,
+            silent=True,
+        ),
         router=mock_router,
         commander=mock_commander,
         phases={"P": MagicMock(), "X": MagicMock(), "R": MagicMock()}
@@ -95,6 +112,20 @@ def test_run_feature_compat_fallback_when_hub_feature_pack_raises(tmp_path):
     engine.pipeline = MagicMock()
     engine.pipeline.run.return_value = True
 
-    with patch("nexus.engine.coordinator.CodexLoopV2.run_review", return_value={"status": "APPROVED"}):
-        ok = engine.run_feature("compat fallback raise smoke", dry_run=True)
+    ok = engine.run_feature("compat fallback raise smoke", dry_run=True)
     assert ok is True
+
+
+
+
+def test_context_hub_disables_external_research_for_benchmark_run(tmp_path):
+    hub = ContextHub(str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "bench"))
+    decision = hub.make_pre_routing_decision(
+        "OFF-001",
+        {"type": "bug", "benchmark_run": True},
+    )
+
+    assert decision["external_needed"] is False
+    assert decision["mode"] == "benchmark"
+
+

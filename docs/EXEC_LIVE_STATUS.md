@@ -1,14 +1,26 @@
 # EXEC LIVE STATUS
 
-Last Update: 2026-03-19 16:57:25
+Last Update: 2026-03-27 17:51:44
 
 | Task | Status | Retry | Last Update | Note |
 |---|---|---:|---|---|
-| bench.replay.hourly | done | 0 | 2026-03-19 16:55:23 | command_rc=0 |
-| docs.sync.hourly | done | 0 | 2026-03-19 16:55:11 | command_rc=0 |
-| gate.ci.hourly | done | 0 | 2026-03-19 16:55:10 | command_rc=0 |
-| preflight.read_index | done | 0 | 2026-03-19 16:54:14 | command_rc=0 |
-| verify.phase_health.v1 | done | 0 | 2026-03-19 16:57:25 | rc=0 |
-| wp4.optimize.loop | done | 0 | 2026-03-19 16:54:15 | command_rc=0 |
 
 Rule: pause only on destructive/credential/spec_conflict.
+
+<!-- NEXUS_PHASE_METRICS:START -->
+## Nexus Phase Metrics (Auto Sync)
+- Updated: `2026-03-27T16:30:42.940084`
+- Task: `bench-20261630`
+- Pipeline Health: `100.00`
+- Lowest Phase Health: `0.00`
+- Learning Velocity: `+49.74`
+
+| Phase | Health |
+| --- | ---: |
+| `P` | `0.00` |
+| `X` | `0.00` |
+| `D` | `0.00` |
+| `R` | `0.00` |
+| `A` | `0.00` |
+| `C` | `0.00` |
+<!-- NEXUS_PHASE_METRICS:END -->

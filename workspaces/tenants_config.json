@@ -1,0 +1,10 @@
+{
+  "A": {
+    "share_wisdom": true,
+    "share_categories": ["fragility_fixes", "best_practices"]
+  },
+  "B": {
+    "share_wisdom": false,
+    "share_categories": []
+  }
+}

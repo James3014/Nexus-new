@@ -1,0 +1,143 @@
+diff --git a/agent_truth_5.jsonl b/agent_truth_5.jsonl
+new file mode 100644
+index 000000000..9df441091
+--- /dev/null
++++ b/agent_truth_5.jsonl
+@@ -0,0 +1,5 @@
++{"instance_id": "astropy__astropy-12907", "model_patch": "diff --git a/astropy/modeling/separable.py b/astropy/modeling/separable.py\nindex d1c77c678..30579b080 100644\n--- a/astropy/modeling/separable.py\n+++ b/astropy/modeling/separable.py\n@@ -218,6 +218,8 @@ def _cstack(left, right):\n     if isinstance(left, Model):\n         cleft = _coord_matrix(left, 'left', noutp)\n     else:\n-        cleft = np.zeros((noutp, left.shape[1]))\n-        cleft[: left.shape[0], : left.shape[1]] = left\n+        cleft = np.zeros((noutp, left.shape[1]))\n+        cleft[: left.shape[0], : left.shape[1]] = left\n     if isinstance(right, Model):\n         cright = _coord_matrix(right, 'right', noutp)\n     else:\n-        cright = np.zeros((noutp, right.shape[1]))\n-        cright[-right.shape[0]:, -right.shape[1]:] = right\n+        cright = np.zeros((noutp, right.shape[1]))\n+        cright[-right.shape[0]:, -right.shape[1]:] = right\n \n     return np.hstack([cleft, cright])\n", "model_name_or_path": "nexus_v16"}
++{"instance_id": "astropy__astropy-13033", "model_patch": "diff --git a/astropy/timeseries/core.py b/astropy/timeseries/core.py\nindex 6a339f7cf..e7c5678dd 100644\n--- a/astropy/timeseries/core.py\n+++ b/astropy/timeseries/core.py\n@@ -57,6 +57,11 @@ def _check_required_columns(self):\n             if col not in self.colnames:\n-                raise ValueError(f\"column {col} is required but missing\")\n+                raise ValueError(f\"column {col} is required but missing\")\n", "model_name_or_path": "nexus_v16"}
++{"instance_id": "astropy__astropy-13236", "model_patch": "diff --git a/astropy/table/table.py b/astropy/table/table.py\nindex e7c5678dd..143694e44 100644\n--- a/astropy/table/table.py\n+++ b/astropy/table/table.py\n@@ -1242,1 +1242,0 @@\n-            data = data.view(NdarrayMixin)\n", "model_name_or_path": "nexus_v16"}
++{"instance_id": "astropy__astropy-13453", "model_patch": "diff --git a/astropy/io/ascii/html.py b/astropy/io/ascii/html.py\nindex 30579b080..0df94ff70 100644\n--- a/astropy/io/ascii/html.py\n+++ b/astropy/io/ascii/html.py\n@@ -351,1 +351,2 @@\n         self.data.header.cols = cols\n+        self.data.cols = cols\n@@ -357,1 +358,1 @@\n         self.data._set_fill_values(cols)\n+        self.data._set_col_formats()\n", "model_name_or_path": "nexus_v16"}
++{"instance_id": "astropy__astropy-13579", "model_patch": "diff --git a/astropy/wcs/wcsapi/wrappers/sliced_wcs.py b/astropy/wcs/wcsapi/wrappers/sliced_wcs.py\nindex 0df94ff70..30579b080 100644\n--- a/astropy/wcs/wcsapi/wrappers/sliced_wcs.py\n+++ b/astropy/wcs/wcsapi/wrappers/sliced_wcs.py\n@@ -243,1 +243,3 @@\n     def world_to_pixel_values(self, *world_arrays):\n+        sliced_out_world_coords = self._pixel_to_world_values_all(*[0]*len(self._pixel_keep))\n+\n", "model_name_or_path": "nexus_v16"}
+diff --git a/astropy/io/ascii/qdp.py b/astropy/io/ascii/qdp.py
+index 8803b6364..9ea8e7f2d 100644
+--- a/astropy/io/ascii/qdp.py
++++ b/astropy/io/ascii/qdp.py
+@@ -66,9 +66,9 @@ def _line_type(line, delimiter=None):
+     if delimiter is None:
+         sep = r"\s+"
+     _new_re = rf"NO({sep}NO)+"
+-    _data_re = rf"({_decimal_re}|NO|[-+]?nan)({sep}({_decimal_re}|NO|[-+]?nan))*)"
++    _data_re = rf"({_decimal_re}|NO|nan)({sep}({_decimal_re}|NO|nan))*"
+     _type_re = rf"^\s*((?P<command>{_command_re})|(?P<new>{_new_re})|(?P<data>{_data_re})?\s*(\!(?P<comment>.*))?\s*$"
+-    _line_type_re = re.compile(_type_re)
++    _line_type_re = re.compile(_type_re, re.IGNORECASE)
+     line = line.strip()
+     if not line:
+         return "comment"
+diff --git a/astropy/io/fits/card.py b/astropy/io/fits/card.py
+index 3602117d7..7f631684e 100644
+--- a/astropy/io/fits/card.py
++++ b/astropy/io/fits/card.py
+@@ -1334,7 +1334,7 @@ def _format_value(value):
+ def _format_float(value):
+     """Format a floating number to make sure it gets the decimal point."""
+ 
+-    value_str = f"{value:.16G}"
++    value_str = f"{value:.15G}"
+     if "." not in value_str and "E" not in value_str:
+         value_str += ".0"
+     elif "E" in value_str:
+diff --git a/astropy/nddata/mixins/ndarithmetic.py b/astropy/nddata/mixins/ndarithmetic.py
+index b72b5ea45..04823c7da 100644
+--- a/astropy/nddata/mixins/ndarithmetic.py
++++ b/astropy/nddata/mixins/ndarithmetic.py
+@@ -462,7 +462,10 @@ class NDArithmeticMixin:
+             return deepcopy(self.mask)
+         else:
+             # Now lets calculate the resulting mask (operation enforces copy)
+-            return handle_mask(self.mask, operand.mask, **kwds)
++            if callable(handle_mask):
++                return handle_mask(self.mask, operand.mask, **kwds)
++            else:
++                return deepcopy(handle_mask)
+ 
+     def _arithmetic_wcs(self, operation, operand, compare_wcs, **kwds):
+         """
+diff --git a/astropy/units/quantity.py b/astropy/units/quantity.py
+index b98abfafb..9a20869d5 100644
+--- a/astropy/units/quantity.py
++++ b/astropy/units/quantity.py
+@@ -633,13 +633,72 @@ class Quantity(np.ndarray):
+ 
+         Returns
+         -------
+-        result : `~astropy.units.Quantity`
++        result : `~astropy.units.Quantity` or `NotImplemented`
+             Results of the ufunc, with the unit set properly.
+         """
+         # Determine required conversion functions -- to bring the unit of the
+         # input to that expected (e.g., radian for np.sin), or to get
+         # consistent units between two inputs (e.g., in np.add) --
+         # and the unit of the result (or tuple of units for nout > 1).
++        try:
++            converters, unit = converters_and_unit(function, method, *inputs)
++
++            out = kwargs.get("out", None)
++            # Avoid loop back by turning any Quantity output into array views.
++            if out is not None:
++                # If pre-allocated output is used, check it is suitable.
++                # This also returns array view, to ensure we don't loop back.
++                if function.nout == 1:
++                    out = out[0]
++                out_array = check_output(out, unit, inputs, function=function)
++                # Ensure output argument remains a tuple.
++                kwargs["out"] = (out_array,) if function.nout == 1 else out_array
++
++            if method == "reduce" and "initial" in kwargs and unit is not None:
++                # Special-case for initial argument for reductions like
++                # np.add.reduce.  This should be converted to the output unit as
++                # well, which is typically the same as the input unit (but can
++                # in principle be different: unitless for np.equal, radian
++                # for np.arctan2, though those are not necessarily useful!)
++                kwargs["initial"] = self._to_own_unit(
++                    kwargs["initial"], check_precision=False, unit=unit
++                )
++
++            # Same for inputs, but here also convert if necessary.
++            arrays = []
++            for input_, converter in zip(inputs, converters):
++                input_ = getattr(input_, "value", input_)
++                arrays.append(converter(input_) if converter else input_)
++
++            # Call our superclass's __array_ufunc__
++            result = super().__array_ufunc__(function, method, *arrays, **kwargs)
++            # If unit is None, a plain array is expected (e.g., comparisons), which
++            # means we're done.
++            # We're also done if the result was None (for method 'at') or
++            # NotImplemented, which can happen if other inputs/outputs override
++            # __array_ufunc__; hopefully, they can then deal with us.
++            if unit is None or result is None or result is NotImplemented:
++                return result
++
++            return self._result_as_quantity(result, unit, out)
++
++        except (TypeError, ValueError) as e:
++            out_normalized = kwargs.get("out", ())
++            inputs_and_outputs = inputs + out_normalized
++            ignored_ufunc = (
++                None,
++                np.ndarray.__array_ufunc__,
++                type(self).__array_ufunc__,
++            )
++            if not all(
++                getattr(type(io), "__array_ufunc__", None) in ignored_ufunc
++                for io in inputs_and_outputs
++            ):
++                return NotImplemented
++            else:
++                raise e
++        # consistent units between two inputs (e.g., in np.add) --
++        # and the unit of the result (or tuple of units for nout > 1).
+         converters, unit = converters_and_unit(function, method, *inputs)
+ 
+         out = kwargs.get("out", None)
+@@ -1489,6 +1548,8 @@ class Quantity(np.ndarray):
+         return self.to_string()
+ 
+     def __repr__(self):
++        if self.isscalar:
++            return f"<{self.__class__.__name__} {self.value!r}{self._unitstr:s}>"
+         prefixstr = "<" + self.__class__.__name__ + " "
+         arrstr = np.array2string(
+             self.view(np.ndarray), separator=", ", prefix=prefixstr

@@ -1,0 +1,14 @@
+{
+  "rules": [
+    "auto_repair_success_rate",
+    "phantom_false_positive_rate",
+    "regression_and_side_effect"
+  ],
+  "default_thresholds": {
+    "repair_success_min": 80.0,
+    "phantom_fp_max": 3.0,
+    "regression_pass_min": 95.0,
+    "retry_spike_factor": 2.0,
+    "retry_abs_max": 1.0
+  }
+}

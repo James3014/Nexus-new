@@ -1,0 +1,5 @@
+--- a/django/utils/html.py
++++ b/django/utils/html.py
+@@ -10,1 +10,1 @@
+-def json_script(value, element_id):
++def json_script(value, element_id, encoder=DjangoJSONEncoder):
