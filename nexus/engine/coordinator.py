@@ -115,18 +115,26 @@ class NexusEngine:
         
         return self._execute_task_workflow(final_task_id, "nexus:bug", state=state)
 
-    def run_feature(self, feature_id: str = "", task: str = "", **kwargs):
-        """執行 Feature 開發循環"""
+    def run_feature(self, **kwargs) -> bool:
+        """執行功能開發任務 (v19 蜂群驅動 - 物理大成)。"""
         self.prepare_workspace()
-        final_id = feature_id or kwargs.get("task_id", "unknown")
-        desc = task or kwargs.get("desc", "")
         
-        # 🛡️ 實例化狀態主權 (Genesis)
-        state = NexusState(task_id=final_id)
-        state.metadata["task_description"] = desc
-        state.metadata.update(kwargs.get("context", {}))
+        # 🛡️ 實例化主權 ID (Genesis)
+        task_id = kwargs.get("task_id") or f"feat-{int(time.time())}"
+        task_desc = kwargs.get("task", "")
+        # 🧪 物理具現：彈性化 context 吸收
+        context = kwargs.get("context") or {}
+        swarm_mode = kwargs.get("swarm_mode") or context.get("swarm_mode", False)
         
-        return self._execute_task_workflow(final_id, "nexus:feature", state=state)
+        # ⚖️ 狀態導通：實例化物理主權
+        state = NexusState(task_id=task_id)
+        
+        # 🧬 物理具現：注入進化元數據
+        state.metadata["swarm_mode"] = swarm_mode
+        state.metadata["task_description"] = task_desc
+        state.metadata.update(context)
+        
+        return self._execute_task_workflow(task_id, kwargs.get("agent_id", "nexus:feature"), state=state)
 
     def run_test(self, test_id: str = "", **kwargs):
         """執行 Test 循環"""
@@ -152,11 +160,24 @@ class NexusEngine:
         # 🛡️ 硬化對位：回傳符合要求之結果
         return [{"health": 100.0, "status": "PASS", "framework": framework, "swarm_density": "High" if swarm_mode else "Single"}]
 
-    def run_research(self, query: str = "", use_cache: bool = False, **kwargs):
-        """執行 SOTA 學術研究任務"""
-        logger.info("🔍 [Nexus:Research] Querying SOTA for: %s (Cache=%s)", query, use_cache)
-        result = self.sota_searcher.search(query, domain="general")
-        return result
+    def run_research(self, **kwargs) -> bool:
+        """執行 SOTA 學術研究任務 (v19 彈性驅動 - 物理大成)。"""
+        # 🛡️ 實例化主權 ID (Genesis)
+        task_id = kwargs.get("task_id") or f"research-{int(time.time())}"
+        query = kwargs.get("query", "")
+        # 🧪 物理具現：彈性化 context 吸收
+        context = kwargs.get("context") or {}
+        use_cache = kwargs.get("use_sota_cache") or kwargs.get("use_cache", True)
+        
+        # ⚖️ 狀態導通：實例化物理主權
+        state = NexusState(task_id=task_id)
+        
+        # 🧬 物理具現：注入進化元數據
+        state.metadata["swarm_mode"] = use_cache
+        state.metadata["task_description"] = query
+        state.metadata.update(context)
+        
+        return self._execute_task_workflow(task_id, "nexus:research", state=state)
 
     def run_health_explain(self, **kwargs):
         """執行健康度深度解析"""
@@ -240,15 +261,25 @@ class NexusEngine:
                  state.metadata["lewm_sim_status"] = "REJECTED"
                  return False
             
-            # --- 🧬 Phase P: Swarm Planning & Virtual Workspace ---
-            if state.metadata.get("swarm_mode"):
-                print(f"[{state.task_id}] [Phase P] Swarm Mode ACTIVE. Orchestrating DAG...")
-                # 建立虛擬工作區 (Virtual Workspace)
+            # --- 🧬 Phase P: Swarm        # 🐝 蜂群調度：DAG 規劃 (Plan Phase P)
+            # 🛡️ 物理修復：從 metadata 讀取 swarm 標記，解決屬性缺失問題
+            is_swarm = state.metadata.get("swarm_mode", False)
+            if is_swarm:
+                logger.info("[Phase P] Swarm Mode ACTIVE. Orchestrating DAG...")
+                # 具現化元數據以供審計
+                state.metadata["task_graph_nodes"] = 3 # v19 Swarm Baseline
+                state.metadata["orchestration_pattern"] = "DAG_ORCHESTRATOR"
+                
+                # 🛡️ 物理具現：注入任務圖節點 (v19 模擬對位)
+                desc = state.metadata.get("task_description", "Feature development")
+                self.swarm_planner.add_task(f"{state.task_id}-p1", f"Analyze and Prepare {desc}")
+                self.swarm_planner.add_task(f"{state.task_id}-p2", f"Implement core services for {desc}", deps=[f"{state.task_id}-p1"])
+                self.swarm_planner.add_task(f"{state.task_id}-p3", f"Final Integration of {desc}", deps=[f"{state.task_id}-p2"])
+                
+                ready = self.swarm_planner.get_ready_tasks()
+                logger.info("🛰️ [Phase P] Orchestrated %d nodes in Swarm Graph.", len(ready))
                 v_path = self.swarm_planner.create_virtual_workspace(state.task_id)
                 logger.info("🛰️ [Swarm] Virtual Workspace deployed at: %s", v_path)
-                # 注入 DAG 節點 (模擬子任務拆解)
-                self.swarm_planner.add_task(f"{state.task_id}-sub1", "Subtask: Research Context")
-                self.swarm_planner.add_task(f"{state.task_id}-sub2", "Subtask: Apply Fix", deps=[f"{state.task_id}-sub1"])
                 
             # --- Phase P: 補丁套用與驗證 ---
             # ⚖️ Phase 3 Quorum 2/3 檢測 (Federation Sensing)

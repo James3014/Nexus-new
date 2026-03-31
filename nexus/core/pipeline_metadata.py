@@ -6,6 +6,11 @@ class PipelineMetadata(TypedDict, total=False):
     pipeline_success: bool
     pipeline_outcome: Dict[str, Any]
     pipeline_terminal_state: str
+    
+    # --- Nexus v19 Evolution (Swarm & SOTA) ---
+    swarm_mode: bool
+    task_graph_nodes: int
+    orchestration_pattern: str
 
     # --- 階段決策 ---
     phase_decisions: Dict[str, str]
