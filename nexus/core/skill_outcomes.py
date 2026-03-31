@@ -41,7 +41,6 @@ class OutcomePayload:
     regression_pass_rate: float = 0.0
     pattern_reuse: float = 0.0
     next_run_hit: float = 0.0
-    source: str = "pipeline.crystallize"
     metadata: Dict[str, Any] | None = None
 
 
@@ -70,7 +69,7 @@ def build_outcome_event(payload: OutcomePayload) -> Dict[str, Any]:
         # Optional enrichments
         "status": str(md.get("status", "")),
         "audit_status": str(md.get("audit_status", "")),
-        "source": str(payload.source or md.get("source", "pipeline.crystallize")),
+        "source": str(md.get("source", "pipeline.crystallize")),
     }
 
 

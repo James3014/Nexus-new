@@ -93,7 +93,7 @@ def _evaluate_repair_success(
     )
 
 
-def _evaluate_phantom_fp(
+def _evaluate_phantom_false_positive(
     outcome_rows: List[Dict[str, Any]],
     *,
     window: int,
@@ -244,7 +244,7 @@ def main():
     
     checks = []
     checks.append(_evaluate_repair_success(opt_rows, outcome_rows, window=args.window, success_min=args.repair_success_min))
-    checks.append(_evaluate_phantom_fp(outcome_rows, window=args.window, fp_max=args.phantom_fp_max))
+    checks.append(_evaluate_phantom_false_positive(outcome_rows, window=args.window, fp_max=args.phantom_fp_max))
     
     reg_result, reg_audit = _evaluate_regression_and_side_effects(
         outcome_rows, window=args.window, 

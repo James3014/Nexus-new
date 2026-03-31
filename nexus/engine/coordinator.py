@@ -34,6 +34,7 @@ class NexusEngine:
         self.silent = config.silent
         self.fast_mode = config.fast_mode
         self.audit_level = config.audit_level
+        self.strategy = RepairStrategy()
         
         # 🛡️ 內核 Facade 對齊 (Hardened v17.1)
         # 修復：恢復診斷層所需之狀態 IO 與中樞組件，解決 AttributeError。
@@ -43,6 +44,10 @@ class NexusEngine:
         self.state_io = StateIO(self.project_root, run_dir=self.run_dir)
         self.memory = MemoryService(self.project_root)
         self.hub = NexusHub(self.project_root)
+        
+        # 🛡️ 測試合約對位 (Contract Alignment)
+        self.reporter = self.hub
+        self.phases = {"P": "Planner", "R": "Repair", "D": "Developer", "X": "Executor"}
         
         # 🛰️ Phase 3 聯邦層初始化
         self.federation = FederationLayer(self.project_root)
