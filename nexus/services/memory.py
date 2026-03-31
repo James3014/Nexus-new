@@ -322,28 +322,30 @@ class MemoryService:
         return normalized
 
     def _build_route_weight_policy(self, phase: str, weight: float, timestamp: str, cycle_status: str, fault_hash: str) -> Dict[str, Any]:
+        # Governance Enforcements (Hardened v17.1)
         confidence = round((weight + 100.0) / 200.0, 4)
         drift = round(max(0.0, 50.0 - abs(weight)), 2)
         return {
             "rule_id": f"ROUTE-WEIGHT-{phase}",
             "condition": f"self_heal_route_phase={phase}",
             "action": f"prioritize repair_phase_{phase}",
+            "phase": phase,  # Direct field for governance audit
             "confidence": confidence,
             "semantic_drift": drift,
-            "source": "self_heal_route_weight",
+            "source": "self_heal.route_weight",
             "governance_level": "adaptive",
             "tags": ["self_heal_route", "learning_generated"],
             "zero_decay": False,
             "immutable": False,
             "created_at": timestamp,
+            "updated_at": timestamp,  # Align with audit metadata requirements
             "last_access": timestamp,
             "last_used_at": timestamp,
             "metadata": {
-                "phase": phase,
-                "route_weight": round(weight, 2),
                 "cycle_status": str(cycle_status),
                 "fault_hash": str(fault_hash or ""),
-            },
+                "weight_raw": float(weight)
+            }
         }
 
     def _load_policy_memory_rows(self) -> List[Dict[str, Any]]:

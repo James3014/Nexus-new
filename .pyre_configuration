@@ -1,0 +1,23 @@
+{
+  "site_package_search_strategy": "all",
+  "search_path": [
+    ".venv/lib/python3.12/site-packages"
+  ],
+  "source_directories": [
+    "nexus",
+    "tests"
+  ],
+  "exclude": [
+    "sandbox_.*",
+    ".*\\.nexus/.*",
+    ".*\\.venv/.*",
+    ".*nexus/pilot_cli/.*",
+    ".*nexus/services/gateway.*",
+    ".*nexus/services/reviewer.*",
+    ".*nexus/security/.*",
+    ".*nexus/learning/.*",
+    ".*nexus/federation/.*",
+    ".*nexus/market/.*"
+  ],
+  "strict": false
+}

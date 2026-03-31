@@ -1,0 +1,37 @@
+2026-03-30 05:52:04 PERFORMANCE Initialized shared memory (heap size: 8589934592, dep table pow: 27, hash table pow: 26): 0.003s
+2026-03-30 05:52:04 PERFORMANCE Initialized multiprocessing workers (workers: 4): 0.025s
+2026-03-30 05:52:04 INFO Server has started listening on socket `/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_server_a2a10884d5b14570.sock`
+2026-03-30 05:52:04 INFO Initializing server state from scratch...
+2026-03-30 05:52:04 INFO Building module tracker...
+2026-03-30 05:52:04 PERFORMANCE Module tracker built: 0.021s
+2026-03-30 05:52:04 PERFORMANCE Full environment built: 0.022s
+2026-03-30 05:52:04 INFO Collecting all definitions...
+2026-03-30 05:52:04 WARNING Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:52:04 PERFORMANCE Collected definitions (defines: 1219): 0.492s
+2026-03-30 05:52:04 INFO Checking 1219 functions...
+2026-03-30 05:52:05 PROGRESS Processed 153 of 1219 functions
+2026-03-30 05:52:05 PROGRESS Processed 306 of 1219 functions
+2026-03-30 05:52:05 PROGRESS Processed 459 of 1219 functions
+2026-03-30 05:52:05 PROGRESS Processed 612 of 1219 functions
+2026-03-30 05:52:06 PROGRESS Processed 765 of 1219 functions
+2026-03-30 05:52:06 PROGRESS Processed 918 of 1219 functions
+2026-03-30 05:52:06 PROGRESS Processed 1071 of 1219 functions
+2026-03-30 05:52:06 PROGRESS Processed 1219 of 1219 functions
+2026-03-30 05:52:06 PERFORMANCE Check_TypeCheck: 2.056s
+2026-03-30 05:52:06 MEMORY Shared memory size post-typecheck (size: 3)
+2026-03-30 05:52:06 PROGRESS Postprocessing 219 sources...
+2026-03-30 05:52:07 PROGRESS Postprocessed 55 of 219 sources
+2026-03-30 05:52:07 PROGRESS Postprocessed 109 of 219 sources
+2026-03-30 05:52:07 PROGRESS Postprocessed 164 of 219 sources
+2026-03-30 05:52:07 PROGRESS Postprocessed 219 of 219 sources
+2026-03-30 05:52:07 PERFORMANCE Check_Postprocessing: 0.203s
+2026-03-30 05:52:07 PERFORMANCE Initialization (binary_version: 7873fbf76ce7a1f3b02a527f4e2ee8ac50ca6843, initialization method: cold start): 2.777s
+2026-03-30 05:52:07 INFO Server state initialized.
+2026-03-30 05:52:07 SERVER Connection established
+2026-03-30 05:52:07 SERVER Processing request (DisplayTypeError())...
+2026-03-30 05:52:07 PERFORMANCE Server request (binary_version: 7873fbf76ce7a1f3b02a527f4e2ee8ac50ca6843, request kind: DisplayTypeErrors): 0.050s
+2026-03-30 05:52:07 SERVER Request `(DisplayTypeError())` processed
+2026-03-30 05:52:07 SERVER Connection closed
+2026-03-30 17:55:43 INFO Server interrupted with signal `sigterm`
+2026-03-30 17:55:43 INFO Server is going down. Cleaning up...
+2026-03-30 17:55:43 INFO Server process get interrputed with signal sigterm

@@ -42,11 +42,15 @@ class MemoryRepository:
         if table_name not in table_names:
             if initial_data:
                 try:
+                    # Using mode="create" explicitly to ensure we don't accidentally overwrite if it exists now
                     tbl = db.create_table(table_name, data=initial_data)
                     if fts_column:
                         tbl.create_fts_index(fts_column, replace=True)
                     logger.info(f"Created table '{table_name}' with initial data.")
                 except Exception as e:
+                    if "already exists" in str(e).lower():
+                        logger.info(f"Table '{table_name}' appeared during creation, skipping.")
+                        return
                     logger.error(f"Failed to create table '{table_name}': {e}")
                     raise InfrastructureError(f"Table creation failed: {e}")
 

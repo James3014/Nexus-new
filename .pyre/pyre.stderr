@@ -1,0 +1,1458 @@
+2026-03-30 05:36:22,000 [PID 22044] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:36:22,002 [PID 22044] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:36:22,003 [PID 22044] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:36:22,004 [PID 22044] INFO No typeshed specified, looking for it...
+2026-03-30 05:36:22,004 [PID 22044] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:36:22,006 [PID 22044] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_rh1ngcpt.json...
+2026-03-30 05:36:22,006 [PID 22044] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:36:34,597 [PID 22044] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.003s
+2026-03-30 05:36:34,656 [PID 22044] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.048s
+2026-03-30 05:36:34,697 [PID 22044] INFO  Building module tracker...
+2026-03-30 05:36:38,505 [PID 22044] PERFORMANCE  Module tracker built: 3.849s
+2026-03-30 05:36:38,509 [PID 22044] PERFORMANCE  Full environment built: 3.851s
+2026-03-30 05:36:38,509 [PID 22044] INFO  Collecting all definitions...
+2026-03-30 05:36:38,796 [PID 22044] WARNING  Parser error in module `nexus.engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:36:38,949 [PID 22044] WARNING  Parser error in module `nexus.learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:36:38,986 [PID 22044] PERFORMANCE  Collected definitions (defines: 782): 0.480s
+2026-03-30 05:36:38,986 [PID 22044] INFO  Checking 782 functions...
+2026-03-30 05:36:39,083 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `model_selector` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,096 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_ask_via_cli` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,096 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `ask` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,097 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,097 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,097 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `ask` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,097 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,097 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,097 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,097 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `ask` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,110 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `ask_with_template` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,110 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,111 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `get_anti_token_estimate` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,111 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `model_selector` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,375 [PID 22044] INFO  Processed 98 of 782 functions
+2026-03-30 05:36:39,410 [PID 22044] INFO  Processed 196 of 782 functions
+2026-03-30 05:36:39,423 [PID 22044] INFO  Processed 294 of 782 functions
+2026-03-30 05:36:39,601 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `lock_file` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,602 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `lock_file` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,602 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `lock_file` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,602 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,613 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,614 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,615 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `use_oauth` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,617 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `use_oauth` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,618 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `use_oauth` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,618 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `llm_bin` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `llm_bin` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `llm_bin` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `client` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `client` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `client` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,619 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,620 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,620 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,620 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,620 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,620 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,621 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,621 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `__init__` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,621 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `OUTPUT_SCHEMA` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,621 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,634 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,634 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_parse_json_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,635 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_parse_json_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,635 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_build_error_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,635 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_ask_via_cli` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,635 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_build_error_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,646 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_build_error_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,646 [PID 22044] WARNING  Found untracked type `list` when checking for attribute `_parse_json_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:36:39,646 [PID 22044] INFO  Processed 392 of 782 functions
+2026-03-30 05:36:39,886 [PID 22044] INFO  Processed 490 of 782 functions
+2026-03-30 05:36:39,909 [PID 22044] INFO  Processed 588 of 782 functions
+2026-03-30 05:36:39,909 [PID 22044] INFO  Processed 686 of 782 functions
+2026-03-30 05:36:40,051 [PID 22044] INFO  Processed 782 of 782 functions
+2026-03-30 05:36:40,051 [PID 22044] PERFORMANCE  Check_TypeCheck: 1.061s
+2026-03-30 05:36:40,052 [PID 22044] MEMORY  Shared memory size post-typecheck (size: 5)
+2026-03-30 05:36:40,052 [PID 22044] INFO  Postprocessing 134 sources...
+2026-03-30 05:36:40,240 [PID 22044] INFO  Postprocessed 34 of 134 sources
+2026-03-30 05:36:40,252 [PID 22044] INFO  Postprocessed 68 of 134 sources
+2026-03-30 05:36:40,263 [PID 22044] INFO  Postprocessed 102 of 134 sources
+2026-03-30 05:36:40,264 [PID 22044] INFO  Postprocessed 134 of 134 sources
+2026-03-30 05:36:40,264 [PID 22044] PERFORMANCE  Check_Postprocessing: 0.221s
+2026-03-30 05:36:40,264 [PID 22044] PERFORMANCE  Check (request kind: FullCheck): 5.616s
+2026-03-30 05:36:40,473 [PID 22044] ERROR Found 1534 type errors!
+2026-03-30 05:37:09,761 [PID 22250] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:37:09,762 [PID 22250] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:37:09,762 [PID 22250] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:37:09,762 [PID 22250] INFO No typeshed specified, looking for it...
+2026-03-30 05:37:09,762 [PID 22250] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:37:09,763 [PID 22250] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_z7y5qi8l.json...
+2026-03-30 05:37:09,763 [PID 22250] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:37:10,090 [PID 22250] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.002s
+2026-03-30 05:37:10,115 [PID 22250] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.023s
+2026-03-30 05:37:10,115 [PID 22250] INFO  Building module tracker...
+2026-03-30 05:37:12,094 [PID 22250] PERFORMANCE  Module tracker built: 1.981s
+2026-03-30 05:37:12,094 [PID 22250] PERFORMANCE  Full environment built: 1.983s
+2026-03-30 05:37:12,094 [PID 22250] INFO  Collecting all definitions...
+2026-03-30 05:37:12,374 [PID 22250] WARNING  Parser error in module `nexus.engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:37:12,492 [PID 22250] WARNING  Parser error in module `nexus.learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:37:12,515 [PID 22250] PERFORMANCE  Collected definitions (defines: 782): 0.423s
+2026-03-30 05:37:12,515 [PID 22250] INFO  Checking 782 functions...
+2026-03-30 05:37:12,625 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `model_selector` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,625 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_ask_via_cli` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,625 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `ask` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,625 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,625 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,626 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `ask` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,626 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,626 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,626 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,626 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `ask` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,626 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `ask_with_template` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,639 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,639 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `get_anti_token_estimate` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,639 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `model_selector` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,843 [PID 22250] INFO  Processed 98 of 782 functions
+2026-03-30 05:37:12,867 [PID 22250] INFO  Processed 196 of 782 functions
+2026-03-30 05:37:12,880 [PID 22250] INFO  Processed 294 of 782 functions
+2026-03-30 05:37:12,962 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `lock_file` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `lock_file` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `lock_file` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `use_oauth` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `use_oauth` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `use_oauth` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `llm_bin` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `llm_bin` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `llm_bin` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `client` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `client` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,963 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `client` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `project_root` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,964 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `prompt_builder` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `__init__` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `OUTPUT_SCHEMA` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `oauth_provider` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_parse_json_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_parse_json_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_build_error_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_ask_via_cli` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_build_error_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_build_error_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,977 [PID 22250] WARNING  Found untracked type `list` when checking for attribute `_parse_json_result` of `nexus.services.gateway.BattlesuitGateway`.
+2026-03-30 05:37:12,978 [PID 22250] INFO  Processed 392 of 782 functions
+2026-03-30 05:37:13,150 [PID 22250] INFO  Processed 490 of 782 functions
+2026-03-30 05:37:13,163 [PID 22250] INFO  Processed 588 of 782 functions
+2026-03-30 05:37:13,163 [PID 22250] INFO  Processed 686 of 782 functions
+2026-03-30 05:37:13,237 [PID 22250] INFO  Processed 782 of 782 functions
+2026-03-30 05:37:13,238 [PID 22250] PERFORMANCE  Check_TypeCheck: 0.726s
+2026-03-30 05:37:13,238 [PID 22250] MEMORY  Shared memory size post-typecheck (size: 5)
+2026-03-30 05:37:13,238 [PID 22250] INFO  Postprocessing 134 sources...
+2026-03-30 05:37:13,427 [PID 22250] INFO  Postprocessed 34 of 134 sources
+2026-03-30 05:37:13,441 [PID 22250] INFO  Postprocessed 68 of 134 sources
+2026-03-30 05:37:13,441 [PID 22250] INFO  Postprocessed 102 of 134 sources
+2026-03-30 05:37:13,441 [PID 22250] INFO  Postprocessed 134 of 134 sources
+2026-03-30 05:37:13,441 [PID 22250] PERFORMANCE  Check_Postprocessing: 0.200s
+2026-03-30 05:37:13,441 [PID 22250] PERFORMANCE  Check (request kind: FullCheck): 3.334s
+2026-03-30 05:37:13,604 [PID 22250] ERROR Found 1534 type errors!
+2026-03-30 05:37:44,610 [PID 22384] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:37:44,611 [PID 22384] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:37:44,611 [PID 22384] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:37:44,611 [PID 22384] INFO No typeshed specified, looking for it...
+2026-03-30 05:37:44,612 [PID 22384] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:37:44,613 [PID 22384] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_g_gftwz8.json...
+2026-03-30 05:37:44,613 [PID 22384] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus",
+    "/Users/jameschen/Workspace/nexus/tests"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:37:44,948 [PID 22384] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.003s
+2026-03-30 05:37:44,985 [PID 22384] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.028s
+2026-03-30 05:37:44,985 [PID 22384] INFO  Building module tracker...
+2026-03-30 05:37:45,464 [PID 22384] PERFORMANCE  Module tracker built: 0.484s
+2026-03-30 05:37:45,464 [PID 22384] PERFORMANCE  Full environment built: 0.487s
+2026-03-30 05:37:45,464 [PID 22384] INFO  Collecting all definitions...
+2026-03-30 05:37:46,292 [PID 22384] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:37:46,412 [PID 22384] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:37:46,484 [PID 22384] PERFORMANCE  Collected definitions (defines: 1389): 1.011s
+2026-03-30 05:37:46,485 [PID 22384] INFO  Checking 1389 functions...
+2026-03-30 05:37:48,608 [PID 22384] INFO  Processed 174 of 1389 functions
+2026-03-30 05:37:49,085 [PID 22384] INFO  Processed 348 of 1389 functions
+2026-03-30 05:37:53,723 [PID 22384] INFO  Processed 522 of 1389 functions
+2026-03-30 05:37:54,298 [PID 22384] INFO  Processed 696 of 1389 functions
+2026-03-30 05:37:55,928 [PID 22384] INFO  Processed 870 of 1389 functions
+2026-03-30 05:37:55,985 [PID 22384] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:37:56,469 [PID 22384] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:37:56,505 [PID 22384] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:37:56,506 [PID 22384] PERFORMANCE  Check_TypeCheck: 10.029s
+2026-03-30 05:37:56,506 [PID 22384] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:37:56,506 [PID 22384] INFO  Postprocessing 246 sources...
+2026-03-30 05:37:56,649 [PID 22384] INFO  Postprocessed 60 of 246 sources
+2026-03-30 05:37:56,649 [PID 22384] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:37:56,650 [PID 22384] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:37:56,650 [PID 22384] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:37:56,650 [PID 22384] PERFORMANCE  Check_Postprocessing: 0.143s
+2026-03-30 05:37:56,650 [PID 22384] PERFORMANCE  Check (request kind: FullCheck): 11.673s
+2026-03-30 05:37:56,745 [PID 22384] ERROR Found 481 type errors!
+2026-03-30 05:38:02,467 [PID 22450] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:38:02,467 [PID 22450] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:38:02,467 [PID 22450] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:38:02,468 [PID 22450] INFO No typeshed specified, looking for it...
+2026-03-30 05:38:02,468 [PID 22450] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:38:02,469 [PID 22450] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_msv8hlq1.json...
+2026-03-30 05:38:02,469 [PID 22450] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus",
+    "/Users/jameschen/Workspace/nexus/tests"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:38:02,577 [PID 22450] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.001s
+2026-03-30 05:38:02,613 [PID 22450] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.032s
+2026-03-30 05:38:02,613 [PID 22450] INFO  Building module tracker...
+2026-03-30 05:38:03,157 [PID 22450] PERFORMANCE  Module tracker built: 0.542s
+2026-03-30 05:38:03,157 [PID 22450] PERFORMANCE  Full environment built: 0.543s
+2026-03-30 05:38:03,157 [PID 22450] INFO  Collecting all definitions...
+2026-03-30 05:38:03,657 [PID 22450] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:38:03,765 [PID 22450] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:38:03,825 [PID 22450] PERFORMANCE  Collected definitions (defines: 1389): 0.661s
+2026-03-30 05:38:03,825 [PID 22450] INFO  Checking 1389 functions...
+2026-03-30 05:38:06,171 [PID 22450] INFO  Processed 174 of 1389 functions
+2026-03-30 05:38:06,403 [PID 22450] INFO  Processed 348 of 1389 functions
+2026-03-30 05:38:07,465 [PID 22450] INFO  Processed 522 of 1389 functions
+2026-03-30 05:38:07,611 [PID 22450] INFO  Processed 696 of 1389 functions
+2026-03-30 05:38:08,185 [PID 22450] INFO  Processed 870 of 1389 functions
+2026-03-30 05:38:08,212 [PID 22450] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:38:08,599 [PID 22450] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:38:08,645 [PID 22450] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:38:08,646 [PID 22450] PERFORMANCE  Check_TypeCheck: 4.823s
+2026-03-30 05:38:08,647 [PID 22450] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:38:08,647 [PID 22450] INFO  Postprocessing 246 sources...
+2026-03-30 05:38:08,789 [PID 22450] INFO  Postprocessed 60 of 246 sources
+2026-03-30 05:38:08,790 [PID 22450] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:38:08,791 [PID 22450] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:38:08,791 [PID 22450] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:38:08,791 [PID 22450] PERFORMANCE  Check_Postprocessing: 0.150s
+2026-03-30 05:38:08,791 [PID 22450] PERFORMANCE  Check (request kind: FullCheck): 6.180s
+2026-03-30 05:38:08,885 [PID 22450] ERROR Found 481 type errors!
+2026-03-30 05:38:48,890 [PID 22634] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:38:48,890 [PID 22634] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:38:48,891 [PID 22634] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:38:48,891 [PID 22634] INFO No typeshed specified, looking for it...
+2026-03-30 05:38:48,891 [PID 22634] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:38:48,893 [PID 22634] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_5p9yxxh3.json...
+2026-03-30 05:38:48,893 [PID 22634] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/tests",
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:38:49,129 [PID 22634] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.002s
+2026-03-30 05:38:49,142 [PID 22634] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.018s
+2026-03-30 05:38:49,142 [PID 22634] INFO  Building module tracker...
+2026-03-30 05:38:49,730 [PID 22634] PERFORMANCE  Module tracker built: 0.576s
+2026-03-30 05:38:49,731 [PID 22634] PERFORMANCE  Full environment built: 0.578s
+2026-03-30 05:38:49,731 [PID 22634] INFO  Collecting all definitions...
+2026-03-30 05:38:50,191 [PID 22634] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:38:50,286 [PID 22634] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:38:50,335 [PID 22634] PERFORMANCE  Collected definitions (defines: 1389): 0.613s
+2026-03-30 05:38:50,335 [PID 22634] INFO  Checking 1389 functions...
+2026-03-30 05:38:52,735 [PID 22634] INFO  Processed 174 of 1389 functions
+2026-03-30 05:38:53,015 [PID 22634] INFO  Processed 348 of 1389 functions
+2026-03-30 05:38:54,431 [PID 22634] INFO  Processed 522 of 1389 functions
+2026-03-30 05:38:56,868 [PID 22634] INFO  Processed 696 of 1389 functions
+2026-03-30 05:38:59,036 [PID 22634] INFO  Processed 870 of 1389 functions
+2026-03-30 05:38:59,359 [PID 22634] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:39:00,344 [PID 22634] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:39:00,427 [PID 22634] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:39:00,452 [PID 22634] PERFORMANCE  Check_TypeCheck: 10.084s
+2026-03-30 05:39:00,458 [PID 22634] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:39:00,459 [PID 22634] INFO  Postprocessing 246 sources...
+2026-03-30 05:39:00,727 [PID 22634] INFO  Postprocessed 62 of 246 sources
+2026-03-30 05:39:00,765 [PID 22634] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:39:00,779 [PID 22634] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:39:00,781 [PID 22634] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:39:00,782 [PID 22634] PERFORMANCE  Check_Postprocessing: 0.339s
+2026-03-30 05:39:00,782 [PID 22634] PERFORMANCE  Check (request kind: FullCheck): 11.636s
+2026-03-30 05:39:00,960 [PID 22634] ERROR Found 479 type errors!
+2026-03-30 05:39:25,902 [PID 22743] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:39:25,904 [PID 22743] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:39:25,904 [PID 22743] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:39:25,904 [PID 22743] INFO No typeshed specified, looking for it...
+2026-03-30 05:39:25,904 [PID 22743] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:39:25,906 [PID 22743] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_hqhleomu.json...
+2026-03-30 05:39:25,906 [PID 22743] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus",
+    "/Users/jameschen/Workspace/nexus/tests"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:39:26,152 [PID 22743] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.003s
+2026-03-30 05:39:26,176 [PID 22743] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.024s
+2026-03-30 05:39:26,176 [PID 22743] INFO  Building module tracker...
+2026-03-30 05:39:26,952 [PID 22743] PERFORMANCE  Module tracker built: 0.769s
+2026-03-30 05:39:26,952 [PID 22743] PERFORMANCE  Full environment built: 0.773s
+2026-03-30 05:39:26,953 [PID 22743] INFO  Collecting all definitions...
+2026-03-30 05:39:27,370 [PID 22743] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:39:27,485 [PID 22743] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:39:27,558 [PID 22743] PERFORMANCE  Collected definitions (defines: 1389): 0.600s
+2026-03-30 05:39:27,559 [PID 22743] INFO  Checking 1389 functions...
+2026-03-30 05:39:30,317 [PID 22743] INFO  Processed 174 of 1389 functions
+2026-03-30 05:39:30,725 [PID 22743] INFO  Processed 348 of 1389 functions
+2026-03-30 05:39:32,242 [PID 22743] INFO  Processed 522 of 1389 functions
+2026-03-30 05:39:32,448 [PID 22743] INFO  Processed 696 of 1389 functions
+2026-03-30 05:39:33,427 [PID 22743] INFO  Processed 870 of 1389 functions
+2026-03-30 05:39:33,490 [PID 22743] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:39:34,055 [PID 22743] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:39:34,104 [PID 22743] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:39:34,104 [PID 22743] PERFORMANCE  Check_TypeCheck: 6.543s
+2026-03-30 05:39:34,105 [PID 22743] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:39:34,105 [PID 22743] INFO  Postprocessing 246 sources...
+2026-03-30 05:39:34,236 [PID 22743] INFO  Postprocessed 60 of 246 sources
+2026-03-30 05:39:34,248 [PID 22743] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:39:34,249 [PID 22743] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:39:34,259 [PID 22743] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:39:34,260 [PID 22743] PERFORMANCE  Check_Postprocessing: 0.157s
+2026-03-30 05:39:34,260 [PID 22743] PERFORMANCE  Check (request kind: FullCheck): 8.076s
+2026-03-30 05:39:34,352 [PID 22743] ERROR Found 476 type errors!
+2026-03-30 05:39:44,734 [PID 22874] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:39:44,735 [PID 22874] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:39:44,735 [PID 22874] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:39:44,735 [PID 22874] INFO No typeshed specified, looking for it...
+2026-03-30 05:39:44,735 [PID 22874] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:39:44,737 [PID 22874] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_chf47abr.json...
+2026-03-30 05:39:44,737 [PID 22874] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/tests",
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:39:44,992 [PID 22874] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.004s
+2026-03-30 05:39:45,017 [PID 22874] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.031s
+2026-03-30 05:39:45,017 [PID 22874] INFO  Building module tracker...
+2026-03-30 05:39:46,059 [PID 22874] PERFORMANCE  Module tracker built: 1.035s
+2026-03-30 05:39:46,062 [PID 22874] PERFORMANCE  Full environment built: 1.038s
+2026-03-30 05:39:46,062 [PID 22874] INFO  Collecting all definitions...
+2026-03-30 05:39:46,649 [PID 22874] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:39:47,077 [PID 22874] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:39:47,893 [PID 22874] PERFORMANCE  Collected definitions (defines: 1389): 1.824s
+2026-03-30 05:39:47,900 [PID 22874] INFO  Checking 1389 functions...
+2026-03-30 05:39:52,899 [PID 22874] INFO  Processed 174 of 1389 functions
+2026-03-30 05:39:53,240 [PID 22874] INFO  Processed 348 of 1389 functions
+2026-03-30 05:39:54,300 [PID 22874] INFO  Processed 522 of 1389 functions
+2026-03-30 05:39:54,519 [PID 22874] INFO  Processed 696 of 1389 functions
+2026-03-30 05:39:55,516 [PID 22874] INFO  Processed 870 of 1389 functions
+2026-03-30 05:39:55,576 [PID 22874] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:39:56,243 [PID 22874] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:39:56,303 [PID 22874] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:39:56,303 [PID 22874] PERFORMANCE  Check_TypeCheck: 8.411s
+2026-03-30 05:39:56,304 [PID 22874] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:39:56,307 [PID 22874] INFO  Postprocessing 246 sources...
+2026-03-30 05:39:56,458 [PID 22874] INFO  Postprocessed 62 of 246 sources
+2026-03-30 05:39:56,459 [PID 22874] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:39:56,473 [PID 22874] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:39:56,473 [PID 22874] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:39:56,474 [PID 22874] PERFORMANCE  Check_Postprocessing: 0.176s
+2026-03-30 05:39:56,474 [PID 22874] PERFORMANCE  Check (request kind: FullCheck): 11.452s
+2026-03-30 05:39:56,613 [PID 22874] ERROR Found 476 type errors!
+2026-03-30 05:40:19,558 [PID 22980] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:40:19,559 [PID 22980] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:40:19,559 [PID 22980] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:40:19,559 [PID 22980] INFO No typeshed specified, looking for it...
+2026-03-30 05:40:19,560 [PID 22980] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:40:19,562 [PID 22980] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_qfvfjbt4.json...
+2026-03-30 05:40:19,562 [PID 22980] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/tests",
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:40:19,880 [PID 22980] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.002s
+2026-03-30 05:40:19,905 [PID 22980] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.028s
+2026-03-30 05:40:19,905 [PID 22980] INFO  Building module tracker...
+2026-03-30 05:40:20,546 [PID 22980] PERFORMANCE  Module tracker built: 0.640s
+2026-03-30 05:40:20,546 [PID 22980] PERFORMANCE  Full environment built: 0.641s
+2026-03-30 05:40:20,546 [PID 22980] INFO  Collecting all definitions...
+2026-03-30 05:40:20,980 [PID 22980] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:40:21,076 [PID 22980] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:40:21,123 [PID 22980] PERFORMANCE  Collected definitions (defines: 1389): 0.579s
+2026-03-30 05:40:21,123 [PID 22980] INFO  Checking 1389 functions...
+2026-03-30 05:40:22,467 [PID 22980] INFO  Processed 174 of 1389 functions
+2026-03-30 05:40:22,592 [PID 22980] INFO  Processed 348 of 1389 functions
+2026-03-30 05:40:23,147 [PID 22980] INFO  Processed 522 of 1389 functions
+2026-03-30 05:40:23,254 [PID 22980] INFO  Processed 696 of 1389 functions
+2026-03-30 05:40:23,870 [PID 22980] INFO  Processed 870 of 1389 functions
+2026-03-30 05:40:23,896 [PID 22980] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:40:24,434 [PID 22980] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:40:24,516 [PID 22980] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:40:24,525 [PID 22980] PERFORMANCE  Check_TypeCheck: 3.384s
+2026-03-30 05:40:24,526 [PID 22980] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:40:24,526 [PID 22980] INFO  Postprocessing 246 sources...
+2026-03-30 05:40:24,681 [PID 22980] INFO  Postprocessed 62 of 246 sources
+2026-03-30 05:40:24,681 [PID 22980] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:40:24,694 [PID 22980] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:40:24,694 [PID 22980] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:40:24,695 [PID 22980] PERFORMANCE  Check_Postprocessing: 0.186s
+2026-03-30 05:40:24,695 [PID 22980] PERFORMANCE  Check (request kind: FullCheck): 4.793s
+2026-03-30 05:40:24,790 [PID 22980] ERROR Found 472 type errors!
+2026-03-30 05:40:56,410 [PID 23164] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:40:56,413 [PID 23164] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:40:56,417 [PID 23164] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:40:56,418 [PID 23164] INFO No typeshed specified, looking for it...
+2026-03-30 05:40:56,418 [PID 23164] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:40:56,423 [PID 23164] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_4n4g3u73.json...
+2026-03-30 05:40:56,424 [PID 23164] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus",
+    "/Users/jameschen/Workspace/nexus/tests"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:40:56,623 [PID 23164] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.003s
+2026-03-30 05:40:56,645 [PID 23164] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.020s
+2026-03-30 05:40:56,646 [PID 23164] INFO  Building module tracker...
+2026-03-30 05:40:57,165 [PID 23164] PERFORMANCE  Module tracker built: 0.526s
+2026-03-30 05:40:57,177 [PID 23164] PERFORMANCE  Full environment built: 0.527s
+2026-03-30 05:40:57,178 [PID 23164] INFO  Collecting all definitions...
+2026-03-30 05:40:57,561 [PID 23164] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:40:57,659 [PID 23164] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:40:57,709 [PID 23164] PERFORMANCE  Collected definitions (defines: 1389): 0.535s
+2026-03-30 05:40:57,709 [PID 23164] INFO  Checking 1389 functions...
+2026-03-30 05:40:59,428 [PID 23164] INFO  Processed 174 of 1389 functions
+2026-03-30 05:40:59,585 [PID 23164] INFO  Processed 348 of 1389 functions
+2026-03-30 05:41:00,304 [PID 23164] INFO  Processed 522 of 1389 functions
+2026-03-30 05:41:00,463 [PID 23164] INFO  Processed 696 of 1389 functions
+2026-03-30 05:41:01,255 [PID 23164] INFO  Processed 870 of 1389 functions
+2026-03-30 05:41:01,279 [PID 23164] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:41:01,633 [PID 23164] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:41:01,646 [PID 23164] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:41:01,647 [PID 23164] PERFORMANCE  Check_TypeCheck: 3.932s
+2026-03-30 05:41:01,647 [PID 23164] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:41:01,647 [PID 23164] INFO  Postprocessing 246 sources...
+2026-03-30 05:41:01,789 [PID 23164] INFO  Postprocessed 60 of 246 sources
+2026-03-30 05:41:01,789 [PID 23164] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:41:01,800 [PID 23164] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:41:01,813 [PID 23164] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:41:01,814 [PID 23164] PERFORMANCE  Check_Postprocessing: 0.165s
+2026-03-30 05:41:01,814 [PID 23164] PERFORMANCE  Check (request kind: FullCheck): 5.164s
+2026-03-30 05:41:01,885 [PID 23164] ERROR Found 475 type errors!
+2026-03-30 05:41:13,092 [PID 23259] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:41:13,093 [PID 23259] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:41:13,093 [PID 23259] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:41:13,093 [PID 23259] INFO No typeshed specified, looking for it...
+2026-03-30 05:41:13,093 [PID 23259] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:41:13,094 [PID 23259] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments__uhi700k.json...
+2026-03-30 05:41:13,094 [PID 23259] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    "\\.nexus/.*",
+    "\\.venv/.*",
+    "nexus/pilot_cli/.*",
+    "nexus/services/gateway.*",
+    "nexus/services/reviewer.*",
+    "nexus/security/.*",
+    "nexus/learning/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/tests",
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:41:13,359 [PID 23259] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.002s
+2026-03-30 05:41:13,372 [PID 23259] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.020s
+2026-03-30 05:41:13,373 [PID 23259] INFO  Building module tracker...
+2026-03-30 05:41:13,825 [PID 23259] PERFORMANCE  Module tracker built: 0.452s
+2026-03-30 05:41:13,837 [PID 23259] PERFORMANCE  Full environment built: 0.455s
+2026-03-30 05:41:13,837 [PID 23259] INFO  Collecting all definitions...
+2026-03-30 05:41:14,251 [PID 23259] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:41:14,344 [PID 23259] WARNING  Parser error in module `learning.knowledge_index`: expected 'except' or 'finally' block
+2026-03-30 05:41:14,381 [PID 23259] PERFORMANCE  Collected definitions (defines: 1389): 0.551s
+2026-03-30 05:41:14,381 [PID 23259] INFO  Checking 1389 functions...
+2026-03-30 05:41:16,309 [PID 23259] INFO  Processed 174 of 1389 functions
+2026-03-30 05:41:16,445 [PID 23259] INFO  Processed 348 of 1389 functions
+2026-03-30 05:41:17,020 [PID 23259] INFO  Processed 522 of 1389 functions
+2026-03-30 05:41:17,121 [PID 23259] INFO  Processed 696 of 1389 functions
+2026-03-30 05:41:17,804 [PID 23259] INFO  Processed 870 of 1389 functions
+2026-03-30 05:41:17,818 [PID 23259] INFO  Processed 1044 of 1389 functions
+2026-03-30 05:41:18,169 [PID 23259] INFO  Processed 1218 of 1389 functions
+2026-03-30 05:41:18,205 [PID 23259] INFO  Processed 1389 of 1389 functions
+2026-03-30 05:41:18,205 [PID 23259] PERFORMANCE  Check_TypeCheck: 3.821s
+2026-03-30 05:41:18,206 [PID 23259] MEMORY  Shared memory size post-typecheck (size: 9)
+2026-03-30 05:41:18,206 [PID 23259] INFO  Postprocessing 246 sources...
+2026-03-30 05:41:18,333 [PID 23259] INFO  Postprocessed 60 of 246 sources
+2026-03-30 05:41:18,345 [PID 23259] INFO  Postprocessed 122 of 246 sources
+2026-03-30 05:41:18,346 [PID 23259] INFO  Postprocessed 184 of 246 sources
+2026-03-30 05:41:18,358 [PID 23259] INFO  Postprocessed 246 of 246 sources
+2026-03-30 05:41:18,358 [PID 23259] PERFORMANCE  Check_Postprocessing: 0.148s
+2026-03-30 05:41:18,358 [PID 23259] PERFORMANCE  Check (request kind: FullCheck): 4.977s
+2026-03-30 05:41:18,424 [PID 23259] ERROR Found 475 type errors!
+2026-03-30 05:41:33,290 [PID 23359] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:41:33,291 [PID 23359] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:41:33,291 [PID 23359] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:41:33,291 [PID 23359] INFO No typeshed specified, looking for it...
+2026-03-30 05:41:33,291 [PID 23359] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:41:33,293 [PID 23359] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_rdmfz5ud.json...
+2026-03-30 05:41:33,293 [PID 23359] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    ".*\\.nexus/.*",
+    ".*\\.venv/.*",
+    ".*nexus/pilot_cli/.*",
+    ".*nexus/services/gateway.*",
+    ".*nexus/services/reviewer.*",
+    ".*nexus/security/.*",
+    ".*nexus/learning/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/tests",
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:41:33,562 [PID 23359] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.003s
+2026-03-30 05:41:33,574 [PID 23359] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.021s
+2026-03-30 05:41:33,586 [PID 23359] INFO  Building module tracker...
+2026-03-30 05:41:33,609 [PID 23359] PERFORMANCE  Module tracker built: 0.024s
+2026-03-30 05:41:33,609 [PID 23359] PERFORMANCE  Full environment built: 0.025s
+2026-03-30 05:41:33,609 [PID 23359] INFO  Collecting all definitions...
+2026-03-30 05:41:34,047 [PID 23359] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:41:34,108 [PID 23359] PERFORMANCE  Collected definitions (defines: 1196): 0.501s
+2026-03-30 05:41:34,108 [PID 23359] INFO  Checking 1196 functions...
+2026-03-30 05:41:34,516 [PID 23359] INFO  Processed 150 of 1196 functions
+2026-03-30 05:41:34,531 [PID 23359] INFO  Processed 300 of 1196 functions
+2026-03-30 05:41:34,609 [PID 23359] INFO  Processed 450 of 1196 functions
+2026-03-30 05:41:34,725 [PID 23359] INFO  Processed 600 of 1196 functions
+2026-03-30 05:41:34,951 [PID 23359] INFO  Processed 750 of 1196 functions
+2026-03-30 05:41:34,951 [PID 23359] INFO  Processed 900 of 1196 functions
+2026-03-30 05:41:34,999 [PID 23359] INFO  Processed 1050 of 1196 functions
+2026-03-30 05:41:35,073 [PID 23359] INFO  Processed 1196 of 1196 functions
+2026-03-30 05:41:35,074 [PID 23359] PERFORMANCE  Check_TypeCheck: 0.970s
+2026-03-30 05:41:35,074 [PID 23359] MEMORY  Shared memory size post-typecheck (size: 3)
+2026-03-30 05:41:35,074 [PID 23359] INFO  Postprocessing 214 sources...
+2026-03-30 05:41:35,236 [PID 23359] INFO  Postprocessed 54 of 214 sources
+2026-03-30 05:41:35,237 [PID 23359] INFO  Postprocessed 108 of 214 sources
+2026-03-30 05:41:35,237 [PID 23359] INFO  Postprocessed 160 of 214 sources
+2026-03-30 05:41:35,249 [PID 23359] INFO  Postprocessed 214 of 214 sources
+2026-03-30 05:41:35,249 [PID 23359] PERFORMANCE  Check_Postprocessing: 0.174s
+2026-03-30 05:41:35,249 [PID 23359] PERFORMANCE  Check (request kind: FullCheck): 1.671s
+2026-03-30 05:41:35,382 [PID 23359] ERROR Found 1752 type errors!
+2026-03-30 05:51:45,499 [PID 24472] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:51:45,500 [PID 24472] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:51:45,500 [PID 24472] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:51:45,500 [PID 24472] INFO No typeshed specified, looking for it...
+2026-03-30 05:51:45,500 [PID 24472] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:51:45,502 [PID 24472] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_b7p_bai1.json...
+2026-03-30 05:51:45,502 [PID 24472] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    ".*\\.nexus/.*",
+    ".*\\.venv/.*",
+    ".*nexus/pilot_cli/.*",
+    ".*nexus/services/gateway.*",
+    ".*nexus/services/reviewer.*",
+    ".*nexus/security/.*",
+    ".*nexus/learning/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus",
+    "/Users/jameschen/Workspace/nexus/tests"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:51:45,804 [PID 24472] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.002s
+2026-03-30 05:51:45,828 [PID 24472] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.024s
+2026-03-30 05:51:45,828 [PID 24472] INFO  Building module tracker...
+2026-03-30 05:51:45,851 [PID 24472] PERFORMANCE  Module tracker built: 0.028s
+2026-03-30 05:51:45,851 [PID 24472] PERFORMANCE  Full environment built: 0.029s
+2026-03-30 05:51:45,851 [PID 24472] INFO  Collecting all definitions...
+2026-03-30 05:51:46,357 [PID 24472] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:51:46,418 [PID 24472] PERFORMANCE  Collected definitions (defines: 1219): 0.560s
+2026-03-30 05:51:46,418 [PID 24472] INFO  Checking 1219 functions...
+2026-03-30 05:51:46,801 [PID 24472] INFO  Processed 153 of 1219 functions
+2026-03-30 05:51:46,814 [PID 24472] INFO  Processed 306 of 1219 functions
+2026-03-30 05:51:46,848 [PID 24472] INFO  Processed 459 of 1219 functions
+2026-03-30 05:51:46,919 [PID 24472] INFO  Processed 612 of 1219 functions
+2026-03-30 05:51:47,166 [PID 24472] INFO  Processed 765 of 1219 functions
+2026-03-30 05:51:47,166 [PID 24472] INFO  Processed 918 of 1219 functions
+2026-03-30 05:51:47,214 [PID 24472] INFO  Processed 1071 of 1219 functions
+2026-03-30 05:51:47,263 [PID 24472] INFO  Processed 1219 of 1219 functions
+2026-03-30 05:51:47,263 [PID 24472] PERFORMANCE  Check_TypeCheck: 0.849s
+2026-03-30 05:51:47,263 [PID 24472] MEMORY  Shared memory size post-typecheck (size: 3)
+2026-03-30 05:51:47,263 [PID 24472] INFO  Postprocessing 219 sources...
+2026-03-30 05:51:47,431 [PID 24472] INFO  Postprocessed 55 of 219 sources
+2026-03-30 05:51:47,431 [PID 24472] INFO  Postprocessed 110 of 219 sources
+2026-03-30 05:51:47,431 [PID 24472] INFO  Postprocessed 164 of 219 sources
+2026-03-30 05:51:47,444 [PID 24472] INFO  Postprocessed 219 of 219 sources
+2026-03-30 05:51:47,444 [PID 24472] PERFORMANCE  Check_Postprocessing: 0.180s
+2026-03-30 05:51:47,444 [PID 24472] PERFORMANCE  Check (request kind: FullCheck): 1.619s
+2026-03-30 05:51:47,571 [PID 24472] ERROR Found 1802 type errors!
+2026-03-30 05:52:04,084 [PID 24538] INFO Stopping classic server...
+2026-03-30 05:52:04,084 [PID 24538] INFO Socket is /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_server_a2a10884d5b14570.sock
+2026-03-30 05:52:04,085 [PID 24538] INFO No running Pyre server to stop.
+
+2026-03-30 05:52:04,085 [PID 24538] INFO Waiting for server...
+2026-03-30 05:52:04,085 [PID 24538] INFO Cannot find a running Pyre server. Starting a new one...
+2026-03-30 05:52:04,085 [PID 24538] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:52:04,085 [PID 24538] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:52:04,086 [PID 24538] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:52:04,086 [PID 24538] INFO No typeshed specified, looking for it...
+2026-03-30 05:52:04,086 [PID 24538] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:52:04,087 [PID 24538] WARNING Cannot find a watchman root. Incremental check will not be functional since no filesystem updates will be sent to the Pyre server.
+2026-03-30 05:52:04,087 [PID 24538] INFO Starting server at `/Users/jameschen/Workspace/nexus`...
+2026-03-30 05:52:04,087 [PID 24538] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_rzukkepa.json...
+2026-03-30 05:52:04,088 [PID 24538] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    ".*\\.nexus/.*",
+    ".*\\.venv/.*",
+    ".*nexus/pilot_cli/.*",
+    ".*nexus/services/gateway.*",
+    ".*nexus/services/reviewer.*",
+    ".*nexus/security/.*",
+    ".*nexus/learning/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/tests",
+    "/Users/jameschen/Workspace/nexus/nexus"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "strict": false,
+  "socket_path": "/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_server_a2a10884d5b14570.sock",
+  "show_error_traces": false,
+  "additional_logging_sections": [
+    "server"
+  ],
+  "taint_model_paths": [],
+  "store_type_check_resolution": false,
+  "critical_files": [
+    {
+      "full_path": "/Users/jameschen/Workspace/nexus/.pyre_configuration"
+    }
+  ],
+  "skip_initial_type_check": false,
+  "use_lazy_module_tracking": false,
+  "analyze_external_sources": false
+}
+2026-03-30 05:52:04,094 [PID 24538] INFO Server is starting in the background.
+
+2026-03-30 05:52:04,366 [PID 24538] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 27, hash table pow: 26): 0.003s
+2026-03-30 05:52:04,400 [PID 24538] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.025s
+2026-03-30 05:52:04,400 [PID 24538] INFO  Server has started listening on socket `/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_server_a2a10884d5b14570.sock`
+2026-03-30 05:52:04,400 [PID 24538] INFO  Initializing server state from scratch...
+2026-03-30 05:52:04,401 [PID 24538] INFO  Building module tracker...
+2026-03-30 05:52:04,413 [PID 24538] PERFORMANCE  Module tracker built: 0.021s
+2026-03-30 05:52:04,414 [PID 24538] PERFORMANCE  Full environment built: 0.022s
+2026-03-30 05:52:04,425 [PID 24538] INFO  Collecting all definitions...
+2026-03-30 05:52:04,863 [PID 24538] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:52:04,913 [PID 24538] PERFORMANCE  Collected definitions (defines: 1219): 0.492s
+2026-03-30 05:52:04,913 [PID 24538] INFO  Checking 1219 functions...
+2026-03-30 05:52:05,761 [PID 24538] INFO  Processed 153 of 1219 functions
+2026-03-30 05:52:05,762 [PID 24538] INFO  Processed 306 of 1219 functions
+2026-03-30 05:52:05,878 [PID 24538] INFO  Processed 459 of 1219 functions
+2026-03-30 05:52:05,928 [PID 24538] INFO  Processed 612 of 1219 functions
+2026-03-30 05:52:06,900 [PID 24538] INFO  Processed 765 of 1219 functions
+2026-03-30 05:52:06,901 [PID 24538] INFO  Processed 918 of 1219 functions
+2026-03-30 05:52:06,937 [PID 24538] INFO  Processed 1071 of 1219 functions
+2026-03-30 05:52:06,973 [PID 24538] INFO  Processed 1219 of 1219 functions
+2026-03-30 05:52:06,974 [PID 24538] PERFORMANCE  Check_TypeCheck: 2.056s
+2026-03-30 05:52:06,974 [PID 24538] MEMORY  Shared memory size post-typecheck (size: 3)
+2026-03-30 05:52:06,974 [PID 24538] INFO  Postprocessing 219 sources...
+2026-03-30 05:52:07,148 [PID 24538] INFO  Postprocessed 55 of 219 sources
+2026-03-30 05:52:07,161 [PID 24538] INFO  Postprocessed 109 of 219 sources
+2026-03-30 05:52:07,173 [PID 24538] INFO Waiting for server...
+2026-03-30 05:52:07,186 [PID 24538] SERVER  Connection established
+2026-03-30 05:52:07,187 [PID 24538] SERVER  Processing request (DisplayTypeError())...
+2026-03-30 05:52:07,241 [PID 24538] PERFORMANCE  Server request (binary_version: 7873fbf76ce7a1f3b02a527f4e2ee8ac50ca6843, request kind: DisplayTypeErrors): 0.050s
+2026-03-30 05:52:07,242 [PID 24538] SERVER  Request `(DisplayTypeError())` processed
+2026-03-30 05:52:07,242 [PID 24538] SERVER  Connection closed
+2026-03-30 05:52:07,295 [PID 24538] ERROR Found 1802 type errors!
+2026-03-30 05:54:13,571 [PID 24920] INFO No binary specified, looking for `pyre.bin` in PATH
+2026-03-30 05:54:13,572 [PID 24920] INFO Pyre binary is located at `/Users/jameschen/Workspace/nexus/.venv/bin/pyre.bin`
+2026-03-30 05:54:13,572 [PID 24920] INFO Could not determine the number of Pyre workers from configuration. Auto-set the value to 4.
+2026-03-30 05:54:13,572 [PID 24920] INFO No typeshed specified, looking for it...
+2026-03-30 05:54:13,572 [PID 24920] INFO Found: `/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed`
+2026-03-30 05:54:13,574 [PID 24920] INFO Writing arguments into /var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pyre_arguments_hsgwma_a.json...
+2026-03-30 05:54:13,574 [PID 24920] DEBUG Arguments:
+{
+  "source_paths": {
+    "kind": "simple",
+    "paths": [
+      "/Users/jameschen/Workspace/nexus/nexus",
+      "/Users/jameschen/Workspace/nexus/tests"
+    ]
+  },
+  "search_paths": [
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Library/Python/3.12/lib/python/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stdlib",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ExifRead",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyMySQL",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/PyYAML",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/aiofiles",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/chevron",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/colorama",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ldap3",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/mysqlclient",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/paramiko",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/psycopg2",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pycurl",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/python-dateutil",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/pytz",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/regex",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/requests",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/retry",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/tqdm",
+    "/Users/jameschen/Workspace/nexus/.venv/lib/pyre_check/typeshed/stubs/ujson"
+  ],
+  "excludes": [
+    "sandbox_.*",
+    ".*\\.nexus/.*",
+    ".*\\.venv/.*",
+    ".*nexus/pilot_cli/.*",
+    ".*nexus/services/gateway.*",
+    ".*nexus/services/reviewer.*",
+    ".*nexus/security/.*",
+    ".*nexus/learning/.*",
+    ".*nexus/federation/.*",
+    ".*nexus/market/.*"
+  ],
+  "checked_directory_allowlist": [
+    "/Users/jameschen/Workspace/nexus/nexus",
+    "/Users/jameschen/Workspace/nexus/tests"
+  ],
+  "checked_directory_blocklist": [],
+  "extensions": [],
+  "log_path": "/Users/jameschen/Workspace/nexus/.pyre",
+  "global_root": "/Users/jameschen/Workspace/nexus",
+  "debug": false,
+  "python_version": {
+    "major": 3,
+    "minor": 12,
+    "micro": 8
+  },
+  "system_platform": "darwin",
+  "shared_memory": {},
+  "parallel": true,
+  "number_of_workers": 4,
+  "additional_logging_sections": [],
+  "show_error_traces": false,
+  "strict": false
+}
+2026-03-30 05:54:13,719 [PID 24920] PERFORMANCE  Initialized shared memory (heap size: 8589934592, dep table pow: 1, hash table pow: 26): 0.001s
+2026-03-30 05:54:13,742 [PID 24920] PERFORMANCE  Initialized multiprocessing workers (workers: 4): 0.018s
+2026-03-30 05:54:13,743 [PID 24920] INFO  Building module tracker...
+2026-03-30 05:54:13,767 [PID 24920] PERFORMANCE  Module tracker built: 0.027s
+2026-03-30 05:54:13,767 [PID 24920] PERFORMANCE  Full environment built: 0.028s
+2026-03-30 05:54:13,767 [PID 24920] INFO  Collecting all definitions...
+2026-03-30 05:54:14,201 [PID 24920] WARNING  Parser error in module `engine.coordinator`: unindent does not match any outer indentation level
+2026-03-30 05:54:14,251 [PID 24920] PERFORMANCE  Collected definitions (defines: 1197): 0.479s
+2026-03-30 05:54:14,251 [PID 24920] INFO  Checking 1197 functions...
+2026-03-30 05:54:14,583 [PID 24920] INFO  Processed 150 of 1197 functions
+2026-03-30 05:54:14,617 [PID 24920] INFO  Processed 300 of 1197 functions
+2026-03-30 05:54:14,630 [PID 24920] INFO  Processed 450 of 1197 functions
+2026-03-30 05:54:14,724 [PID 24920] INFO  Processed 600 of 1197 functions
+2026-03-30 05:54:14,976 [PID 24920] INFO  Processed 750 of 1197 functions
+2026-03-30 05:54:15,029 [PID 24920] INFO  Processed 900 of 1197 functions
+2026-03-30 05:54:15,041 [PID 24920] INFO  Processed 1050 of 1197 functions
+2026-03-30 05:54:15,123 [PID 24920] INFO  Processed 1197 of 1197 functions
+2026-03-30 05:54:15,124 [PID 24920] PERFORMANCE  Check_TypeCheck: 0.877s
+2026-03-30 05:54:15,124 [PID 24920] MEMORY  Shared memory size post-typecheck (size: 3)
+2026-03-30 05:54:15,124 [PID 24920] INFO  Postprocessing 214 sources...
+2026-03-30 05:54:15,364 [PID 24920] INFO  Postprocessed 54 of 214 sources
+2026-03-30 05:54:15,365 [PID 24920] INFO  Postprocessed 108 of 214 sources
+2026-03-30 05:54:15,376 [PID 24920] INFO  Postprocessed 160 of 214 sources
+2026-03-30 05:54:15,400 [PID 24920] INFO  Postprocessed 214 of 214 sources
+2026-03-30 05:54:15,400 [PID 24920] PERFORMANCE  Check_Postprocessing: 0.271s
+2026-03-30 05:54:15,400 [PID 24920] PERFORMANCE  Check (request kind: FullCheck): 1.657s
+2026-03-30 05:54:15,582 [PID 24920] ERROR Found 1753 type errors!

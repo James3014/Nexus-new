@@ -124,7 +124,11 @@ def run_autotune(
     degrade_threshold: float,
     max_step: float,
     degrade_consecutive_rounds: int,
+    include_sources: list[str] | None = None,
 ) -> int:
+    if include_sources is None:
+        include_sources = ["pipeline.crystallize"]
+
     weights_path = project_root / "scripts" / "core" / "autonomic_weights.json"
     weights = _load_json(weights_path)
     if not weights:
@@ -164,7 +168,20 @@ def run_autotune(
     true_stats: dict[str, list[float]] = defaultdict(list)
     event_counts: dict[str, int] = defaultdict(int)
     negative_streak: dict[str, int] = defaultdict(int)
+    
+    # Audit counters
+    total_events_seen = 0
+    events_used_for_learning = 0
+    events_excluded_by_source = 0
+    neutralized_phantom_events = 0
+
     for event in outcome_events:
+        total_events_seen += 1
+        source = event.get("source", "unknown")
+        if source not in include_sources:
+            events_excluded_by_source += 1
+            continue
+
         decision_id = str(event.get("decision_id", "")).strip()
         skill_id = str(event.get("skill_id", "")).strip()
         mapped_skill = decision_skill_map.get(decision_id, "")
@@ -172,8 +189,20 @@ def run_autotune(
             skill_id = mapped_skill
         if not skill_id:
             continue
+        
+        events_used_for_learning += 1
         quality_pass = 1.0 if bool(event.get("pass", False)) else 0.0
-        phantom_penalty = 1.0 if bool(event.get("phantom_blocked", False)) else 0.0
+        
+        # Reward Recalibration: Neutralized phantom events don't get penalized
+        phantom_blocked = bool(event.get("phantom_blocked", False))
+        is_neutralized = bool(event.get("neutralized", False))
+        
+        if phantom_blocked and is_neutralized:
+            phantom_penalty = 0.0
+            neutralized_phantom_events += 1
+        else:
+            phantom_penalty = 1.0 if phantom_blocked else 0.0
+            
         retry_penalty = min(1.0, float(event.get("retry_count", 0.0) or 0.0) / 3.0)
         repair_success = 1.0 if bool(event.get("repair_success", False)) else 0.0
         proof_bonus = 0.2 if bool(event.get("proof_present", False)) else 0.0
@@ -257,6 +286,13 @@ def run_autotune(
         "max_step": max_step,
         "degrade_consecutive_rounds": degrade_consecutive_rounds,
         "reward_mode": "true_outcome" if used_true_outcome else "proxy",
+        "governance": {
+            "included_sources": include_sources,
+            "total_events_seen": total_events_seen,
+            "events_used_for_learning": events_used_for_learning,
+            "events_excluded_by_source": events_excluded_by_source,
+            "neutralized_phantom_events": neutralized_phantom_events,
+        },
         "suggestions": suggestions,
         "degraded_skills": degraded_queue,
         "applied": apply,
@@ -291,11 +327,9 @@ def run_autotune(
     print(f"✅ [skills:autotune] report: {report_path}")
     print(f"  - decision rows: {total_rows}")
     print(f"  - tuned skills: {len(suggestions)}")
-    print(f"  - degraded skills queued: {len(degraded_queue)}")
-    print(f"  - optimization queue: {queue_path}")
+    print(f"  - events excluded (source): {events_excluded_by_source}")
+    print(f"  - neutralized phantom events: {neutralized_phantom_events}")
     print(f"  - apply: {apply}")
-    if apply:
-        print(f"  - updated weights: {weights_path}")
     return 0
 
 
@@ -307,9 +341,14 @@ def main() -> int:
     parser.add_argument("--baseline", type=float, default=0.55)
     parser.add_argument("--learning-rate", type=float, default=0.6)
     parser.add_argument("--degrade-threshold", type=float, default=0.2)
-    parser.add_argument("--max-step", type=float, default=0.35)
+    parser.add_argument("--max-step", type=float, default=0.20)
     parser.add_argument("--degrade-consecutive-rounds", type=int, default=3)
+    parser.add_argument("--include-sources", help="Comma-separated sources to include (default: pipeline.crystallize)")
     args = parser.parse_args()
+
+    include_sources = None
+    if args.include_sources:
+        include_sources = [s.strip() for s in args.include_sources.split(",")]
 
     return run_autotune(
         project_root=Path(args.project_root),
@@ -320,6 +359,7 @@ def main() -> int:
         degrade_threshold=float(args.degrade_threshold),
         max_step=float(args.max_step),
         degrade_consecutive_rounds=int(args.degrade_consecutive_rounds),
+        include_sources=include_sources,
     )
 
 

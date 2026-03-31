@@ -42,10 +42,13 @@ def build_skills_health(project_root: Path, workspace: Path | None = None) -> di
     weights_path = project_root / "scripts" / "core" / "autonomic_weights.json"
     report_path = project_root / ".nexus" / "metrics" / "skills_autotune_report.json"
     queue_path = project_root / ".nexus" / "metrics" / "skills_optimization_queue.json"
+    baseline_path = project_root / ".nexus" / "archive" / "baselines" / "acceptance_check_recovery_sprint_pass.json"
 
     weights = _load_json(weights_path)
     report = _load_json(report_path)
     queue = _load_json(queue_path)
+    baseline_payload = _load_json(baseline_path)
+    
     adjustments = dict(weights.get("skill_adjustments", {}) or {})
     suggestions = dict(report.get("suggestions", {}) or {})
     queue_items = list(queue.get("items", []) or [])
@@ -79,6 +82,7 @@ def build_skills_health(project_root: Path, workspace: Path | None = None) -> di
                 "count": 0.0,
                 "pass_count": 0.0,
                 "phantom_count": 0.0,
+                "neutralized_count": 0.0,
                 "retry_sum": 0.0,
                 "pattern_sum": 0.0,
                 "next_hit_sum": 0.0,
@@ -86,7 +90,11 @@ def build_skills_health(project_root: Path, workspace: Path | None = None) -> di
         )
         bucket["count"] += 1.0
         bucket["pass_count"] += 1.0 if bool(row.get("pass", False)) else 0.0
-        bucket["phantom_count"] += 1.0 if bool(row.get("phantom_blocked", False)) else 0.0
+        
+        phantom_blocked = bool(row.get("phantom_blocked", False))
+        bucket["phantom_count"] += 1.0 if phantom_blocked else 0.0
+        bucket["neutralized_count"] += 1.0 if (phantom_blocked and bool(row.get("neutralized", False))) else 0.0
+        
         bucket["retry_sum"] += float(row.get("retry_count", 0.0) or 0.0)
         bucket["pattern_sum"] += float(row.get("pattern_reuse", 0.0) or 0.0)
         bucket["next_hit_sum"] += float(row.get("next_run_hit", 0.0) or 0.0)
@@ -100,10 +108,12 @@ def build_skills_health(project_root: Path, workspace: Path | None = None) -> di
                 -(item[1]["count"]),
             ),
         )[0][0]
+        
     if top_skill:
         skill_row = by_skill[top_skill]
         c = max(1.0, skill_row["count"])
         phantom_risk = round((skill_row["phantom_count"] / c) * 100.0, 2)
+        effective_phantom_risk = round(((skill_row["phantom_count"] - skill_row["neutralized_count"]) / c) * 100.0, 2)
         healing_efficiency = round(
             ((skill_row["pass_count"] / c) * 100.0) - min(25.0, skill_row["retry_sum"] / c * 10.0),
             2,
@@ -113,6 +123,7 @@ def build_skills_health(project_root: Path, workspace: Path | None = None) -> di
         fallback_top = top_boosted[0]["skill_id"] if top_boosted else None
         top_skill = fallback_top
         phantom_risk = 0.0
+        effective_phantom_risk = 0.0
         healing_efficiency = 0.0
         learning_gain = 0.0
 
@@ -144,6 +155,7 @@ def build_skills_health(project_root: Path, workspace: Path | None = None) -> di
         "weights_path": str(weights_path),
         "autotune_report_path": str(report_path),
         "optimization_queue_path": str(queue_path),
+        "governance_baseline_ref": baseline_payload.get("timestamp", "unknown"),
         "latest_phase7_loop_report": str(latest_phase7_loop) if latest_phase7_loop else None,
         "summary": {
             "skill_adjustment_count": len(adjustments),
@@ -157,6 +169,7 @@ def build_skills_health(project_root: Path, workspace: Path | None = None) -> di
                 "value": round(max_drop, 4),
             },
             "phantom_risk": phantom_risk,
+            "effective_phantom_risk": effective_phantom_risk,
             "healing_efficiency": healing_efficiency,
             "learning_gain": learning_gain,
         },
@@ -174,6 +187,7 @@ def _print_text(payload: dict[str, Any]) -> None:
     summary = payload["summary"]
     print("Nexus Skills Health")
     print(f"- project_root: {payload['project_root']}")
+    print(f"- governance_baseline: {payload.get('governance_baseline_ref')}")
     if payload.get("workspace"):
         print(f"- workspace: {payload['workspace']}")
     print(f"- tuned_skill_count: {summary['tuned_skill_count']}")
@@ -185,6 +199,7 @@ def _print_text(payload: dict[str, Any]) -> None:
     drop_risk = summary.get("drop_risk") or {}
     print(f"- drop_risk: {drop_risk.get('skill_id')}:{drop_risk.get('value')}")
     print(f"- phantom_risk: {summary.get('phantom_risk')}")
+    print(f"- effective_phantom_risk: {summary.get('effective_phantom_risk')}")
     print(f"- healing_efficiency: {summary.get('healing_efficiency')}")
     print(f"- learning_gain: {summary.get('learning_gain')}")
     print(f"- ready_for_formal_use: {str(payload['ready_for_formal_use']).lower()}")
