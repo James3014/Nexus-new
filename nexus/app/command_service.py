@@ -144,6 +144,10 @@ class NexusCommandService:
         self.last_self_heal_result = run_self_heal(self.engine, mode=mode)
         return self.last_self_heal_result
 
+    def execute_autopilot_accelerate(self, samples: int = 28, mode: str = "spst"):
+        """⚡ Phase 2.4 主動衝刺接口"""
+        return self.engine.run_autopilot_accelerate(samples=samples, mode=mode)
+
     def execute_health_explain(self):
         self.last_health_explain_result = run_health_explain(self.engine)
         return self.last_health_explain_result
