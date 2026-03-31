@@ -15,11 +15,14 @@ class NexusTaskNode:
     status: str = "pending"  # pending, ready, running, completed, failed
     agent_role: str = "general"
     result: Optional[Any] = None
+    # --- v20 Hierarchical Data ---
+    parent_id: Optional[str] = None
+    sub_tasks: List[str] = field(default_factory=list)
 
-class TacticalGraphPlanner:
-    """增強型蜂群計畫器 (Swarm Graph Planner)
+class HierarchicalGraphPlanner:
+    """分層蜂群計畫器 (Hierarchical Swarm Planner)
     
-    吸收 Automaton 的 Task Graph 基因，實現非線性任務調度與虛擬工作區隔離。
+    實現 v20 核心：Level-1 (Strategic) 與 Level-2 (Tactical) 嵌套調度。
     數據真值轉向 Nexus 生產環境。
     """
     
@@ -28,22 +31,30 @@ class TacticalGraphPlanner:
         self.nodes: Dict[str, NexusTaskNode] = {}
         self.worktree_paths: Dict[str, Path] = {}
 
-    def add_task(self, task_id: str, desc: str, deps: List[str] = None, role: str = "general"):
-        """物理注入一個任務節點及其依賴關係。"""
-        node = NexusTaskNode(id=task_id, description=desc, dependencies=deps or [], agent_role=role)
+    def add_task(self, task_id: str, desc: str, deps: List[str] = None, role: str = "general", parent_id: str = None):
+        """物理注入一個任務節點，支援父子層級關係。"""
+        node = NexusTaskNode(id=task_id, description=desc, dependencies=deps or [], agent_role=role, parent_id=parent_id)
         self.nodes[task_id] = node
-        logger.info("swarm_task_added [%s] deps=%s", task_id, deps)
+        if parent_id and parent_id in self.nodes:
+            self.nodes[parent_id].sub_tasks.append(task_id)
+        logger.info("swarm_task_added [%s] parent=%s deps=%s", task_id, parent_id, deps)
 
-    def get_ready_tasks(self) -> List[NexusTaskNode]:
-        """掃描 DAG 圖，提取所有依賴已滿足且可執行的「Ready」任務。"""
+    def get_ready_tasks(self, parent_id: str = None) -> List[NexusTaskNode]:
+        """掃描特定層級（或全局）的「Ready」任務。"""
         ready = []
         completed_ids = {n_id for n_id, n in self.nodes.items() if n.status == "completed"}
         
         for n_id, node in self.nodes.items():
             if node.status != "pending":
                 continue
+            if node.parent_id != parent_id:
+                continue
             
             if all(dep in completed_ids for dep in node.dependencies):
+                # 🛡️ v20 Check: 若父節點未啟動，不啟動子節點 (除了戰略層)
+                if parent_id and self.nodes[parent_id].status != "running":
+                    continue
+
                 node.status = "ready"
                 ready.append(node)
         

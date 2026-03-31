@@ -18,12 +18,14 @@ from nexus.learning.skill_store import SkillStore
 from nexus.learning.lewm_predictor import LeWMPredictor
 
 # 🧬 進化組件：蜂群、搜尋、壓縮、驗證
-from nexus.engine.planner_graph import TacticalGraphPlanner
+from nexus.engine.planner_graph import HierarchicalGraphPlanner
 from nexus.learning.sota_searcher import SOTASearcher
 from nexus.learning.vector_cache import VectorCache
 from nexus.core.neural_aggregator import NexusNeuralAggregator
-from nexus.core.hardened_validator import NexusHardenedValidator
 from nexus.engine.federation import FederationLayer
+from nexus.core.hardened_validator import NexusHardenedValidator
+from nexus.learning.latent_predictor_v20 import get_latent_forecaster
+from nexus.engine.self_healing_selector import get_self_healing_selector
 
 from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
@@ -55,6 +57,9 @@ class NexusEngine:
         from nexus.engine.hub import NexusHub
         
         self.state_io = StateIO(self.project_root, run_dir=self.run_dir)
+        self.validator = NexusHardenedValidator()
+        self.latent_forecaster = get_latent_forecaster(str(self.project_root))
+        self.ash_selector = get_self_healing_selector(str(self.project_root))
         self.memory = MemoryService(self.project_root)
         self.hub = NexusHub(self.project_root)
         
@@ -70,7 +75,7 @@ class NexusEngine:
         self.sota_searcher = SOTASearcher(self.vector_cache)
         self.neural_aggregator = NexusNeuralAggregator()
         self.hardened_validator = NexusHardenedValidator()
-        self.swarm_planner = TacticalGraphPlanner(self.project_root)
+        self.swarm_planner = HierarchicalGraphPlanner(self.project_root)
 
     def prepare_workspace(self):
         """
@@ -229,11 +234,30 @@ class NexusEngine:
     def _execute_task_workflow(self, task_id: str, skill_id: str, state: Optional[NexusState] = None):
         """
         🚀 任務統一工作流
-        包含 Pre-gate、模擬修復、結晶化與結晶後的重試邏輯。
+        包含 v20 預演器 ROI 檢測、Pre-gate、模擬修復與自癒邏輯。
         """
         if state is None:
             state = NexusState(task_id=task_id)
             
+        # --- 🧬 v20 Phase 0: Latent Forecast (JEPA Zero-token) ---
+        task_desc = state.metadata.get("task_description", "Unknown Task")
+        forecast = self.latent_forecaster.forecast_roi(task_desc)
+        risk = self.latent_forecaster.predict_risk(task_desc)
+        
+        state.metadata["forecast_tokens"] = forecast["est_tokens"]
+        state.metadata["forecast_roi"] = forecast["roi_score"]
+        
+        print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {forecast['est_tokens']}, ROI: {forecast['roi_score']:.2f}")
+        
+        # 🛡️ 治理攔截：ROI < 0.5 自動拒絕並觸發 ASH
+        if forecast["roi_score"] < 0.5 or risk["reject_prob"] > 0.8:
+            print(f"🚨 [v20:Reject] Low ROI or High Risk! Triggering Adaptive Self-Healing...")
+            repair_plan = self.ash_selector.trigger_ash(task_id, task_desc, str(risk))
+            state.metadata["last_rejection_reason"] = "low_roi_or_high_risk"
+            state.metadata["ash_selected_strategy"] = repair_plan["selected_strategy"]
+            self.state_io.save_global_state(state)
+            return  # 任務預防性終止
+
         # --- 🧬 Phase X: SOTA Search & Academic Anchoring ---
         print(f"[{state.task_id}] [Phase X] Extracting SOTA patterns...")
         sota_result = self.sota_searcher.search(state.metadata.get("task_description", ""), state.metadata.get("domain", "general"))

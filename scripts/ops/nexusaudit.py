@@ -104,10 +104,40 @@ def generate_swarm_stats(project_root: Path):
     else:
         print("ℹ️ No Swarm Mode data found in recent runs.")
 
+def generate_latent_report(project_root: Path):
+    """
+    🔮 Nexus v20 Latent Planning Report
+    對比 預演預測 (Forecast) 與 實際執行 (Actual) 的誤差率。
+    """
+    runs_dir = project_root / ".nexus" / "runs"
+    if not runs_dir.exists(): return
+
+    print(f"\n🔮 --- Nexus v20 Latent Forecast Audit ---")
+    print(f"{'Task ID':<25} | {'Forecast':<15} | {'Actual':<15} | {'Error'}")
+    print("-" * 75)
+
+    for run_path in sorted(runs_dir.iterdir(), reverse=True):
+        state_file = run_path / ".musestate"
+        if not state_file.exists(): continue
+        
+        try:
+            with open(state_file, 'r') as f:
+                state = json.loads(f.readlines()[-1])
+            
+            ext = state.get("metadata", {})
+            f_tokens = ext.get("forecast_tokens", 0)
+            a_tokens = state.get("tokens", {}).get("total_usage", 0)
+            
+            if f_tokens > 0 and a_tokens > 0:
+                error = abs(f_tokens - a_tokens) / a_tokens
+                print(f"{run_path.name:<25} | {f_tokens:<15} | {a_tokens:<15} | {error:.1%}")
+        except: continue
+
 def main():
     parser = argparse.ArgumentParser(description="Nexus Guard Audit")
     parser.add_argument("--lewm-report", action="store_true", help="Generate JEPA Latent Planning report")
     parser.add_argument("--swarm-stats", action="store_true", help="Generate Swarm Stats report")
+    parser.add_argument("--latent-forecast", action="store_true", help="Generate v20 Latent Forecast report")
     parser.add_argument("--project-root", default=".")
     
     args = parser.parse_args()
@@ -115,6 +145,8 @@ def main():
     
     if args.swarm_stats:
         generate_swarm_stats(root)
+    elif args.latent_forecast:
+        generate_latent_report(root)
     elif args.lewm_report:
         generate_lewm_report(root)
     else:
