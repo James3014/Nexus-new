@@ -28,15 +28,46 @@ class PlannerPhaseHandler(BasePhaseHandler):
                 "risk_level": "BLOCK"
             }
 
+        # 🚀 Autopilot v2.0 Dispatcher (High-Dim Routing)
+        node_id = self.route_to_node(task, context.get("codebase", ""))
+        print(f"🛰️ [NSP:Dispatch] Optimized Node Selection: {node_id}")
+
+        # 🔮 P10.2 VectorRAG Context Injection (Respect Ablation Switch)
+        memory_state = os.environ.get("NEXUS_MEMORY_STATE", "ON")
+        if memory_state == "ON":
+            try:
+                from nexus.core.vector_rag import VectorRAG
+                rag = VectorRAG()
+                history_hits = rag.query(task, k=5)
+                experience_block = rag.format_for_prompt(history_hits)
+                if experience_block:
+                    print(f"🧠 [RAG:Inject] Context Found. Boosting Pattern Reuse.")
+                    context["experience_context"] = experience_block
+            except Exception as e:
+                print(f"⚠️ [RAG:Fail] Could not inject context: {e}")
+        else:
+            print(f"⚪ [RAG:Off] Running Baseline (Ablation Mode).")
+
         prediction = self.predictor.predict(task, context)
         # ... 
         return {
             "intent_pass": True,
+            "best_node": node_id,
             "risk_score": prediction["risk_score"], 
             "risks": prediction["reasons"], 
             "risk_level": prediction["risk_level"],
             "tokens_used": prediction.get("tokens_used", 0)
         }
+
+    def route_to_node(self, task_desc: str, codebase: str = "") -> str:
+        """🛰️ 執行高維調度。"""
+        try:
+            from nexus.autopilot.v2_dispatcher import HighDimDispatcher
+            dispatcher = HighDimDispatcher(self.project_root)
+            return dispatcher.dispatch(task_desc, codebase)
+        except Exception as e:
+            print(f"⚠️ [Dispatcher] Fallback to LOCAL due to: {e}")
+            return "LOCAL_HARDENED"
 
     def _guard_intent(self, task: str) -> tuple[bool, str]:
         """🛡️ 檢查意圖是否模糊 (Heuristic)"""

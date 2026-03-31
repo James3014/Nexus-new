@@ -2,6 +2,7 @@
 import json
 import subprocess
 import time
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -112,8 +113,25 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="Run in live mode (apply changes)")
-    parser.add_argument("--live-only-failures", action="store_true", help="Only retest failed tasks from last report")
+    parser.add_argument("--memory-on", action="store_true", help="Enable Eternal Memory RAG")
+    parser.add_argument("--memory-off", action="store_true", help="Disable Eternal Memory RAG")
+    parser.add_argument("--tasks", type=int, default=15, help="Total number of tasks to run")
+    parser.add_argument("--bug-weight", type=float, default=0.67, help="Ratio of bugs in the suite")
+    parser.add_argument("--output", type=str, default="benchmark_report.json", help="Path to save report")
     args = parser.parse_args()
     
-    bench = NexusBenchmark(live=args.live, live_only_failures=args.live_only_failures)
+    # 擴充任務邏輯 (模擬 30 樣本)
+    bench = NexusBenchmark(live=args.live)
+    bench.report_path = Path(args.output)
+    
+    bug_count = int(args.tasks * args.bug_weight)
+    feat_count = args.tasks - bug_count
+    
+    # 從原始清單中進行採樣擴放 (P10.3)
+    bench.tasks = (bench.tasks[:10] * (bug_count // 10 + 1))[:bug_count] + \
+                  (bench.tasks[10:] * (feat_count // 5 + 1))[:feat_count]
+                  
+    # 注入記憶旗標至 CLI (簡化實裝：通過環境變數或參數)
+    os.environ["NEXUS_MEMORY_STATE"] = "ON" if args.memory_on else "OFF"
+    
     bench.execute_suite()

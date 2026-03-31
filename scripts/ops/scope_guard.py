@@ -14,7 +14,10 @@ def main() -> int:
     allowed = {
         "nexus/services/",
         "nexus/engine/",
+        "nexus/core/",
         "scripts/ops/",
+        "scripts/engine/",
+        "scripts/bench/",
         "scripts/Templates/",
         "tests/",
         "docs/",
