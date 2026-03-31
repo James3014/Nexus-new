@@ -80,6 +80,7 @@ def main():
     parser.add_argument("--output-dir")
     parser.add_argument("--fast", action="store_true")
     parser.add_argument("--audit-level", choices=["bypass", "standard", "strict"], default="standard")
+    parser.add_argument("--mode", choices=["single", "dual-engine"], default="dual-engine", help="Execution mode: ARC+AR chain")
     
     subparsers = parser.add_subparsers(dest="command")
     
@@ -96,6 +97,7 @@ def main():
     subparsers.add_parser("nexus:alignment-check")
     subparsers.add_parser("nexus:eternal-sync")
     subparsers.add_parser("nexus:eternal-reindex")
+    subparsers.add_parser("nexus:dual-report")
 
     args = parser.parse_args()
     if not args.command:
@@ -137,6 +139,26 @@ def main():
         # 邏輯: 檢查是否啟用了 9192 代理且與物理狀態對齊
         res = subprocess.run(["python3", "scripts/ops/phantom_guard_v2.py"], capture_output=False)
         if res.returncode != 0: sys.exit(1)
+    elif args.command == "nexus:dual-report":
+        # 產出雙引擎 AGI 效能報表
+        import pandas as pd
+        memory_file = cli.project_root / ".nexus" / "eternal_memory.jsonl"
+        if not memory_file.exists():
+            print("❌ [Report] No eternal memory found.")
+            return
+        
+        print("🔗 [AGI:Report] Synchronizing Dual-Engine Truth Data...")
+        try:
+            df = pd.read_json(str(memory_file), lines=True)
+            print("\n📊 --- Nexus v18.4 Dual-Engine Performance ---")
+            print(df[['mttr', 'accuracy_lift']].describe())
+            print("\n🚀 --- TOP-5 ARC Methodology Insights ---")
+            print(df['arc_stages'].tail(5).to_string())
+        except Exception as exc:
+            print(f"❌ [Report] Pandas error: {exc}")
+            # Fallback to simple listing
+            print(f"📄 Latest memory: {memory_file.read_text().splitlines()[-1]}")
+
     elif args.command == "nexus:acceptance-check":
         cli.run_acceptance_check()
     elif args.command == "nexus:release-ready": cli.run_release_ready()

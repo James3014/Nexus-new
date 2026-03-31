@@ -8,9 +8,9 @@ from datetime import datetime
 
 class NexusBenchmark:
     def __init__(self, live=False, live_only_failures=False):
-        self.project_root = Path(__file__).resolve().parents[1]
-        self.cli_path = self.project_root / "scripts" / "nexus_cli.py"
-        self.report_path = self.project_root / "benchmark_report.json"
+        self.project_root = Path(__file__).resolve().parents[2]
+        self.cli_path = self.project_root / "scripts" / "engine" / "nexus_cli.py"
+        self.report_path = self.project_root / ".nexus" / "reports" / "benchmark_report.json"
         self.live = live
         self.live_only_failures = live_only_failures
         
@@ -118,20 +118,32 @@ if __name__ == "__main__":
     parser.add_argument("--tasks", type=int, default=15, help="Total number of tasks to run")
     parser.add_argument("--bug-weight", type=float, default=0.67, help="Ratio of bugs in the suite")
     parser.add_argument("--output", type=str, default="benchmark_report.json", help="Path to save report")
+    parser.add_argument("--k8s", action="store_true", help="Run benchmark in Swarm K8s mode")
+    parser.add_argument("--dual", action="store_true", help="Enable dual-engine for ALL tasks")
+    parser.add_argument("--swe-bench", type=int, default=0, help="Explicitly run SWE-bench tasks")
     args = parser.parse_args()
     
-    # 擴充任務邏輯 (模擬 30 樣本)
+    # 擴充任務邏輯 (模擬 50 題 SWE-bench)
     bench = NexusBenchmark(live=args.live)
     bench.report_path = Path(args.output)
     
-    bug_count = int(args.tasks * args.bug_weight)
-    feat_count = args.tasks - bug_count
+    total_tasks = args.swe_bench if args.swe_bench > 0 else args.tasks
+    bug_count = int(total_tasks * args.bug_weight)
+    feat_count = total_tasks - bug_count
     
     # 從原始清單中進行採樣擴放 (P10.3)
     bench.tasks = (bench.tasks[:10] * (bug_count // 10 + 1))[:bug_count] + \
                   (bench.tasks[10:] * (feat_count // 5 + 1))[:feat_count]
                   
-    # 注入記憶旗標至 CLI (簡化實裝：通過環境變數或參數)
+    # 注入模式旗標
+    if args.dual:
+        os.environ["ENGINE_MODE"] = "dual"
+        print("🧬 [Bench:Dual] Dual-Engine Mode Active for all tasks.")
+        
+    if args.k8s:
+        os.environ["BENCHMARK_PLATFORM"] = "K8S_SWARM"
+        print("☁️ [Bench:K8S] Running in Swarm 10-Replicas simulation.")
+    
     os.environ["NEXUS_MEMORY_STATE"] = "ON" if args.memory_on else "OFF"
     
     bench.execute_suite()

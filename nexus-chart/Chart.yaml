@@ -1,0 +1,4 @@
+apiVersion: v2
+name: nexus
+description: Nexus Singularity OS v18.4 Cloud-Native (Ollama SOTA)
+version: 1.1.0

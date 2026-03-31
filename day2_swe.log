@@ -1,0 +1,506 @@
+🧬 [Bench:Dual] Dual-Engine Mode Active for all tasks.
+☁️ [Bench:K8S] Running in Swarm 10-Replicas simulation.
+🚀 [Benchmark] Starting Nexus v7 Suite (DRY-RUN)...
+🏁 [Bench] Running bug (DRY-RUN): fix login timeout in django auth
+❌ [Error] Command failed for fix login timeout in django auth:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve race condition in websocket handler
+❌ [Error] Command failed for resolve race condition in websocket handler:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix css glassmorphism blur on mobile
+❌ [Error] Command failed for fix css glassmorphism blur on mobile:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): correct sql injection vulnerability in search query
+❌ [Error] Command failed for correct sql injection vulnerability in search query:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix next.js hydration error on dynamic routes
+❌ [Error] Command failed for fix next.js hydration error on dynamic routes:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve memory leak in file processing daemon
+❌ [Error] Command failed for resolve memory leak in file processing daemon:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix cors error on cross-domain api calls
+❌ [Error] Command failed for fix cors error on cross-domain api calls:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): correct broken image paths in markdown renderer
+❌ [Error] Command failed for correct broken image paths in markdown renderer:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix jwt token expiration mismatch
+❌ [Error] Command failed for fix jwt token expiration mismatch:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve docker container restart loop
+❌ [Error] Command failed for resolve docker container restart loop:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix login timeout in django auth
+❌ [Error] Command failed for fix login timeout in django auth:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve race condition in websocket handler
+❌ [Error] Command failed for resolve race condition in websocket handler:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix css glassmorphism blur on mobile
+❌ [Error] Command failed for fix css glassmorphism blur on mobile:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): correct sql injection vulnerability in search query
+❌ [Error] Command failed for correct sql injection vulnerability in search query:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix next.js hydration error on dynamic routes
+❌ [Error] Command failed for fix next.js hydration error on dynamic routes:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve memory leak in file processing daemon
+❌ [Error] Command failed for resolve memory leak in file processing daemon:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix cors error on cross-domain api calls
+❌ [Error] Command failed for fix cors error on cross-domain api calls:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): correct broken image paths in markdown renderer
+❌ [Error] Command failed for correct broken image paths in markdown renderer:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix jwt token expiration mismatch
+❌ [Error] Command failed for fix jwt token expiration mismatch:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve docker container restart loop
+❌ [Error] Command failed for resolve docker container restart loop:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix login timeout in django auth
+❌ [Error] Command failed for fix login timeout in django auth:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve race condition in websocket handler
+❌ [Error] Command failed for resolve race condition in websocket handler:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix css glassmorphism blur on mobile
+❌ [Error] Command failed for fix css glassmorphism blur on mobile:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): correct sql injection vulnerability in search query
+❌ [Error] Command failed for correct sql injection vulnerability in search query:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix next.js hydration error on dynamic routes
+❌ [Error] Command failed for fix next.js hydration error on dynamic routes:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve memory leak in file processing daemon
+❌ [Error] Command failed for resolve memory leak in file processing daemon:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix cors error on cross-domain api calls
+❌ [Error] Command failed for fix cors error on cross-domain api calls:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): correct broken image paths in markdown renderer
+❌ [Error] Command failed for correct broken image paths in markdown renderer:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix jwt token expiration mismatch
+❌ [Error] Command failed for fix jwt token expiration mismatch:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve docker container restart loop
+❌ [Error] Command failed for resolve docker container restart loop:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix login timeout in django auth
+❌ [Error] Command failed for fix login timeout in django auth:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): resolve race condition in websocket handler
+❌ [Error] Command failed for resolve race condition in websocket handler:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running bug (DRY-RUN): fix css glassmorphism blur on mobile
+❌ [Error] Command failed for fix css glassmorphism blur on mobile:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:bug' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): implement user avatar upload with cloudinary
+❌ [Error] Command failed for implement user avatar upload with cloudinary:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): add dark mode toggle with system preference sync
+❌ [Error] Command failed for add dark mode toggle with system preference sync:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): migrate session storage from file to redis
+❌ [Error] Command failed for migrate session storage from file to redis:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): implement agent-shield circuit breaker log display
+❌ [Error] Command failed for implement agent-shield circuit breaker log display:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): add discord webhook notification for critical failures
+❌ [Error] Command failed for add discord webhook notification for critical failures:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): implement user avatar upload with cloudinary
+❌ [Error] Command failed for implement user avatar upload with cloudinary:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): add dark mode toggle with system preference sync
+❌ [Error] Command failed for add dark mode toggle with system preference sync:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): migrate session storage from file to redis
+❌ [Error] Command failed for migrate session storage from file to redis:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): implement agent-shield circuit breaker log display
+❌ [Error] Command failed for implement agent-shield circuit breaker log display:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): add discord webhook notification for critical failures
+❌ [Error] Command failed for add discord webhook notification for critical failures:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): implement user avatar upload with cloudinary
+❌ [Error] Command failed for implement user avatar upload with cloudinary:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): add dark mode toggle with system preference sync
+❌ [Error] Command failed for add dark mode toggle with system preference sync:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): migrate session storage from file to redis
+❌ [Error] Command failed for migrate session storage from file to redis:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): implement agent-shield circuit breaker log display
+❌ [Error] Command failed for implement agent-shield circuit breaker log display:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): add discord webhook notification for critical failures
+❌ [Error] Command failed for add discord webhook notification for critical failures:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): implement user avatar upload with cloudinary
+❌ [Error] Command failed for implement user avatar upload with cloudinary:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+🏁 [Bench] Running feature (DRY-RUN): add dark mode toggle with system preference sync
+❌ [Error] Command failed for add dark mode toggle with system preference sync:
+usage: nexus_cli.py [-h] [--silent] [--output-dir OUTPUT_DIR] [--fast]
+                    [--audit-level {bypass,standard,strict}]
+                    [--mode {single,dual-engine}]
+                    {nexus:check,nexus:swarm,nexus:acceptance-check,nexus:release-ready,nexus:autopilot-tune,nexus:phantom-guard-v2,nexus:alignment-check,nexus:eternal-sync,nexus:eternal-reindex,nexus:dual-report}
+                    ...
+nexus_cli.py: error: argument command: invalid choice: 'nexus:feature' (choose from nexus:check, nexus:swarm, nexus:acceptance-check, nexus:release-ready, nexus:autopilot-tune, nexus:phantom-guard-v2, nexus:alignment-check, nexus:eternal-sync, nexus:eternal-reindex, nexus:dual-report)
+
+
+
+🏆 [Benchmark] Suite Complete. Resolution Rate: 0.0%
+📊 Report saved to .nexus/reports/v18.4_day2_swe.json
