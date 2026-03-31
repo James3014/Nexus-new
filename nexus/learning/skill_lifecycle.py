@@ -47,9 +47,32 @@ class UsageEvent:
         }
 
 
+def _get_usage_log(skills_dir: Path) -> Path:
+    return skills_dir / USAGE_LOG_FILENAME
+
+def archive_to_eternal(project_root: Path, skills_dir: Path, deid: bool = True):
+    """🛰️ v22 Phase 1: 物理將本地日誌永恆化至 Arweave"""
+    log_path = _get_usage_log(skills_dir)
+    if not log_path.exists():
+        return
+
+    from nexus.learning.eternal_memory import EternalMemoryManager
+    manager = EternalMemoryManager(project_root, deid=deid)
+    
+    try:
+        with open(log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    lesson = json.loads(line.strip())
+                    manager.upload_lesson(lesson)
+                except: continue
+        logger.info("eternal_archive_completed [%s]", log_path.name)
+    except Exception as e:
+        logger.error("eternal_archive_physical_error_graceful_降級 [%s]", str(e))
+
 def record_usage(skills_dir: Path, skill_id: str, task_id: str, outcome: str = "success") -> None:
     """Append a usage event to the JSONL log, rotating if necessary."""
-    log_path = skills_dir / USAGE_LOG_FILENAME
+    log_path = _get_usage_log(skills_dir)
     
     # 1. Automatic Log Rotation Trigger
     try:

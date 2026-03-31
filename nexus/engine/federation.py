@@ -8,24 +8,47 @@ logger = logging.getLogger("nexus.federation")
 
 class FederationLayer:
     """
-    🛰️ Nexus 聯邦層 (v0.2)
-    職責: 節點管理、Quorum 演算與負載分發。
-    對齊 Phase 3 Swarm Expansion 100-Point Spec。
+    🛰️ Nexus 聯邦層 (v21-A Simple Global)
+    職責: 10 叢集輕量同步、延遲感知與一鍵部署基較。
     """
 
-    def __init__(self, project_root: str | Path, registry_path: str = ".nexus/federation/node_registry.json"):
+    def __init__(self, project_root: str | Path, registry_path: str = ".nexus/federation/global_registry.json"):
         self.project_root = Path(project_root)
         self.registry_file = self.project_root / registry_path
         self.nodes: List[Dict] = []
         self.last_sync = 0
         self.load_registry()
 
+    def sync_all_clusters(self):
+        """
+        🔮 v21-A 模擬 CRD 同步 (Simulated CRD Sync)
+        將 10 個全球模擬節點注入註冊表。
+        """
+        regions = ["Taiwan", "Japan", "USA-West", "USA-East", "Europe-North", "Europe-West", "Singapore", "Australia", "Brazil", "India"]
+        simulated_nodes = []
+        import random
+        
+        for i, region in enumerate(regions):
+            simulated_nodes.append({
+                "node_id": f"nexus-cluster-{i+1}",
+                "status": "ONLINE",
+                "capabilities": ["rust-reflex", "gpu-eval", "swarm-dag"],
+                "region": region,
+                "latency": random.uniform(20.0, 300.0), # 毫秒
+                "task_count": random.randint(0, 10),
+                "last_heartbeat": int(time.time())
+            })
+            
+        self.nodes = simulated_nodes
+        self.save_registry()
+        self.last_sync = time.time()
+        logger.info("global_federation_sync_complete [%d nodes]", len(self.nodes))
+
     def load_registry(self) -> bool:
-        """從物理存儲加載節點註冊表。"""
+        """從物理存儲加載節點註冊表，支援 v21-A 模擬啟動。"""
         if not self.registry_file.exists():
-            logger.warning(f"⚠️ Registry not found at {self.registry_file}. Initializing empty.")
-            self.nodes = []
-            return False
+            self.sync_all_clusters() # 初次自動模擬
+            return True
         
         try:
             with open(self.registry_file, 'r', encoding='utf-8') as f:

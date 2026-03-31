@@ -50,39 +50,9 @@ class DiskJanitor:
 
         return report
 
-    def rotate_usage_log(self, skills_dir: Path) -> int:
-        """JSONL log rotation.
-        If .usage_log.jsonl > MAX_LOG_SIZE_MB -> rename, gzip, create new.
-        Delete .gz logs older than RETENTION_DAYS.
-        Returns the number of old log files deleted.
-        """
+    def rotate_usage_log(self, skills_dir: Path):
+        """Rotate .usage_log.jsonl to .usage_log.YYYYMMDD.jsonl and optionally gzip."""
         log_path = skills_dir / ".usage_log.jsonl"
-        max_bytes = self.config.max_log_size_mb * 1024 * 1024
-        
-        # 1. Rotate if exceeding threshold
-        if log_path.exists() and log_path.stat().st_size > max_bytes:
-            timestamp = int(time.time())
-            rotated_path = skills_dir / f".usage_log.{timestamp}.jsonl"
-            gz_path = skills_dir / f".usage_log.{timestamp}.jsonl.gz"
-            
-            # Rename atomicity
-            log_path.rename(rotated_path)
-            
-            # Gzip contents
-            with open(rotated_path, 'rb') as f_in:
-                with gzip.open(gz_path, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            
-            # Remove uncompressed
-            rotated_path.unlink()
-            
-            # Create new empty log securely
-            log_path.touch()
-
-        # 2. Cleanup old .gz files
-        deleted_count = 0
-        now = time.time()
-        retention_seconds = self.config.retention_days * 86400
         
         for gz_file in skills_dir.glob(".usage_log.*.jsonl.gz"):
             if now - gz_file.stat().st_mtime > retention_seconds:

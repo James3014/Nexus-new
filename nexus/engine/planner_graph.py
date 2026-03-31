@@ -20,19 +20,46 @@ class NexusTaskNode:
     sub_tasks: List[str] = field(default_factory=list)
 
 class HierarchicalGraphPlanner:
-    """分層蜂群計畫器 (Hierarchical Swarm Planner)
+    """分層蜂群計畫器 (v21-A Simple Global)
     
-    實現 v20 核心：Level-1 (Strategic) 與 Level-2 (Tactical) 嵌套調度。
-    數據真值轉向 Nexus 生產環境。
+    實現 Level-0 (Global) 調度：根據延遲感知自動分發任務。
+    數據真值轉向 Nexus 全球聯邦。
     """
     
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.nodes: Dict[str, NexusTaskNode] = {}
         self.worktree_paths: Dict[str, Path] = {}
+        # v21-A: 全球叢集緩存
+        self.cluster_metadata: List[Dict] = []
+
+    def load_federation_context(self, fed_nodes: List[Dict]):
+        """從聯邦層載入全球節點上下文。"""
+        self.cluster_metadata = fed_nodes
+
+    def pick_closest_cluster(self, capability: str = "swarm-dag") -> Optional[str]:
+        """
+        🎯 延遲感知選擇演算法 (Latency-Aware Selection)
+        在具備能力的線上節點中，挑選延遲 (Latency) 最低的叢集。
+        """
+        candidates = [
+            n for n in self.cluster_metadata 
+            if n.get("status") == "ONLINE" and capability in n.get("capabilities", [])
+        ]
+        
+        if not candidates:
+            return "local-master"
+            
+        # 物理排序：延遲最低優先
+        sorted_nodes = sorted(candidates, key=lambda x: x.get("latency", 999.0))
+        best_node = sorted_nodes[0]
+        
+        logger.info("global_dispatch_selected [%s] region=%s latency=%.1fms", 
+                    best_node['node_id'], best_node['region'], best_node['latency'])
+        return best_node['node_id']
 
     def add_task(self, task_id: str, desc: str, deps: List[str] = None, role: str = "general", parent_id: str = None):
-        """物理注入一個任務節點，支援父子層級關係。"""
+        """物理注入一個任務節點，支援父子層級關係與全球派發。"""
         node = NexusTaskNode(id=task_id, description=desc, dependencies=deps or [], agent_role=role, parent_id=parent_id)
         self.nodes[task_id] = node
         if parent_id and parent_id in self.nodes:
@@ -40,24 +67,20 @@ class HierarchicalGraphPlanner:
         logger.info("swarm_task_added [%s] parent=%s deps=%s", task_id, parent_id, deps)
 
     def get_ready_tasks(self, parent_id: str = None) -> List[NexusTaskNode]:
-        """掃描特定層級（或全局）的「Ready」任務。"""
+        """掃描特定層級（或全局）的「Ready」任務，支援 v21-A 物理派發。"""
         ready = []
         completed_ids = {n_id for n_id, n in self.nodes.items() if n.status == "completed"}
         
         for n_id, node in self.nodes.items():
-            if node.status != "pending":
-                continue
-            if node.parent_id != parent_id:
-                continue
+            if node.status != "pending": continue
+            if node.parent_id != parent_id: continue
             
             if all(dep in completed_ids for dep in node.dependencies):
-                # 🛡️ v20 Check: 若父節點未啟動，不啟動子節點 (除了戰略層)
+                # 🛡️ v21-A Check: 延遲感知預檢
                 if parent_id and self.nodes[parent_id].status != "running":
                     continue
-
                 node.status = "ready"
                 ready.append(node)
-        
         return ready
 
     def create_virtual_workspace(self, task_id: str) -> Path:

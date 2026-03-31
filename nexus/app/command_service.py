@@ -115,30 +115,51 @@ class NexusCommandService:
             verify_commands=request.verify_commands,
             artifact_paths=request.artifact_paths,
         )
-        
+
     def execute_feature(self, request: TaskRequest):
         """Execute a feature task through the sole delivery-aware service boundary."""
+        import time
         success = self.engine.run_feature(
             task=request.task,
             context={
-                "delivery_mode": request.delivery_mode,
+                "delivery_mode": request.delivery_mode, 
                 "swarm_mode": request.swarm_mode,
                 "use_sota_cache": request.use_sota_cache,
                 **(request.execution_context or {})
             },
             domain=request.domain,
-            dry_run=request.plan_only,  # 映射 dry_run 到 plan_only
+            dry_run=request.plan_only,
             skill=request.skill
         )
         if not success:
             return False
         return self._run_completion_gate(
-            task_name=request.task,
+            task_name=request.task_id or f"feat-{int(time.time())}",
             task_level=TaskLevel.FEATURE,
             delivery_mode=request.delivery_mode,
             verify_commands=request.verify_commands,
             artifact_paths=request.artifact_paths,
         )
+
+    def execute_refactor(self, request: TaskRequest):
+        """🛰️ v22-Linus Phase 2: 執行漸進式重構指令"""
+        from nexus.services.refactor_engine import RefactorEngine
+        import time
+        refactor = RefactorEngine(self.engine.project_root)
+        
+        # 1. 物理生成重構 DAG 計畫
+        plan = refactor.generate_plan(request.task)
+        
+        # 2. 彙整計畫摘要
+        summary_lines = ["Progressive Refactor DAG Generated:"]
+        for node in plan:
+            summary_lines.append(f"- [{node['priority']}] {node['file']} -> {node['task']} (|linus-mode|)")
+            
+        return {
+            "task_id": f"refactor_dag_{int(time.time())}",
+            "summary": "\n".join(summary_lines),
+            "plan": plan
+        }
         
     def execute_research(self, request: TaskRequest):
         """執行 SOTA 學術錨定搜尋任務。"""
@@ -149,7 +170,8 @@ class NexusCommandService:
         )
         
     def execute_benchmark(self, framework: str, tasks: int, output: str, model: Optional[str] = None, target: Optional[str] = None, swarm_mode: bool = False):
-        return self.engine.run_benchmark(
+        """🛰️ v22-ARC Phase 3: 執行基準測試並產出價值對比報表"""
+        result = self.engine.run_benchmark(
             framework=framework,
             task_count=tasks,
             output_csv=output,
@@ -157,6 +179,25 @@ class NexusCommandService:
             target=target,
             swarm_mode=swarm_mode
         )
+        
+        # 🧪 物理導通：針對 ARC-AGI 輸出專屬結論
+        if framework == "arc-agi":
+            # 聚合結果 (如果是列表)
+            if isinstance(result, list) and len(result) > 0:
+                # 取最後一個點的聚合數據，或者從列表中提取
+                main_res = result[-1] if isinstance(result[-1], dict) else {}
+            else:
+                main_res = result if isinstance(result, dict) else {}
+                
+            score = main_res.get("score_pct", 0.0)
+            conclusion = main_res.get("conclusion", "N/A")
+            print(f"\n📊 [Benchmark] ARC-AGI Vision Stress Test Result")
+            print("-" * 50)
+            print(f"Score: {score:.2f}% (Human: 85%)")
+            print(f"Conclusion: {conclusion}")
+            print("-" * 50)
+            
+        return result
 
     def execute_self_check(self, level: str = "standard"):
         self.last_self_check_result = run_self_check(self.engine, level=level)

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexus-v21-global-config
+data:
+  master_region: "Taiwan"
+  workers: "10"
+  sync_mode: "JSON-CRD"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-federation-controller
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: nexus-agent
+        image: jameschen/nexus-v20:latest
