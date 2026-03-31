@@ -19,6 +19,9 @@ spec:
         env:
         - name: ENGINE_MODE
           value: {{ .Values.env.ENGINE_MODE | default "single" | quote }}
+        ports:
+        - name: metrics
+          containerPort: 8000
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
         volumeMounts:

@@ -99,3 +99,45 @@ def init_otel(project_root: Optional[pathlib.Path] = None, service_name: str = "
         logger.info("OTel: JSONL exporter → %s", jsonl_path)
 
     trace.set_tracer_provider(provider)
+
+# ── Nexus Prometheus Metrics ────────────────────────
+from opentelemetry import metrics
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+
+def init_metrics_prometheus(port: int = 8000) -> None:
+    """初始化 Prometheus 指標暴露服務。"""
+    try:
+        from opentelemetry.exporter.prometheus import PrometheusMetricExporter
+        from prometheus_client import start_http_server
+
+        exporter = PrometheusMetricExporter()
+        reader = PeriodicExportingMetricReader(exporter)
+        provider = MeterProvider(metric_readers=[reader])
+        metrics.set_meter_provider(provider)
+        
+        start_http_server(port=port)
+        logger.info("OTel: Prometheus metrics exporter active on port %d", port)
+    except ImportError:
+        logger.warning("OTel: opentelemetry-exporter-prometheus not installed. Metrics disabled.")
+
+# 全域 Meter 實例
+meter = metrics.get_meter("nexus.dual_engine")
+
+# 定義 v18.4 核型指標
+mttr_histogram = meter.create_histogram(
+    name="nexus_mttr",
+    description="Nexus Dual-Engine Mean Time To Repair (Seconds)",
+    unit="s",
+)
+
+accuracy_gauge = meter.create_gauge(
+    name="nexus_accuracy",
+    description="Nexus Cumulative Resolution Accuracy (Percentage)",
+    unit="%",
+)
+
+jepa_surprise_gauge = meter.create_gauge(
+    name="nexus_jepa_surprise",
+    description="LeWorldModel Prediction Surprise Rate (Placeholder for Phase 13)",
+)

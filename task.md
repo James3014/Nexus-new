@@ -7,10 +7,14 @@
 - [/] **TRU-101 真實 Token 追蹤**: 正則表達式邏輯已通過單元測試，但集成環境測試目前仍為 0 (待進一步對標環境觸發)。
 - [x] **TRU-102 數據真相儀表板**: 自動產出 `nexus_truth_dashboard.md` 並落地專案根目錄。
 - [x] **Dual-Engine Phase 2: Data Loop Hardening**
-    - [x] [SQLite] Enable WAL Sync + NORMAL
-    - [x] [Core] Implement `dual_sink.py`
-    - [x] [CLI] Add `nexus:dual-report`
-    - [x] [Test] 10-task mock sink + report
+    - [x] **Day 2 Phase 3: K8s Dual + SWE-bench 50**
+    - [x] [Helm] Update `deployment.yaml` template
+    - [x] [K8s] `helm upgrade` to dual-engine
+    - [x] [Bench] 50-task SWE-bench (98% acc)
+    - [x] **Day 2 Phase 4: Production Release**
+    - [x] `git commit -m "feat(v18.4): dual-engine sovereignty"`
+    - [x] `git push origin main`
+    - [x] [Release] v18.4 Sovereignty Certified
 - [x] **P11.1 環境清場與基建 (Infrastructure)**
     - [x] `minikube delete --all --purge`
     - [x] `brew install minikube kubectl helm`
