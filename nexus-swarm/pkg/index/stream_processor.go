@@ -11,37 +11,36 @@ type StreamProcessor struct {
 	// 這裡可以注入 Graph Engine 或 Rules Engine
 }
 
-// HandleStreamAudit 處理 SensingService.StreamAudit 調用
-func (p *StreamProcessor) HandleStreamAudit(stream pb.SensingService_StreamAuditServer) error {
-	log.Println("🌊 [NSP] New StreamAudit connection established")
+// HandleSensingStream 處理 SwarmManager.SensingStream 調用 (NSP v0.2)
+func (p *StreamProcessor) HandleSensingStream(stream pb.SwarmManager_SensingStreamServer) error {
+	log.Println("🌊 [NSP v0.2] New SensingStream connection established")
 
 	for {
 		// 1. 接收分片請求
 		req, err := stream.Recv()
 		if err == io.EOF {
-			log.Println("✅ [NSP] StreamAudit finished successfully")
+			log.Println("✅ [NSP v0.2] SensingStream finished successfully")
 			return nil
 		}
 		if err != nil {
-			log.Printf("❌ [NSP] StreamAudit error: %v", err)
+			log.Printf("❌ [NSP v0.2] SensingStream error: %v", err)
 			return err
 		}
 
-		log.Printf("📥 [NSP] Received chunk for task: %s", req.TaskId)
+		log.Printf("📥 [NSP v0.2] Received chunk for task: %s", req.TaskId)
 
 		// 2. 進行局部即時分析 (Mock Logic)
-		// 假設在這裡觸發 Fragility Check
 		if isHighRisk(req.Path) {
-			report := &pb.DiagnosticReport{
+			resp := &pb.SensingResp{
 				NodeId:  "MANAGER_PRIMARY",
 				Status:  "HIGH_RISK_ALERT",
 				Summary: "🚨 Real-time alert: Schema-UI binding detected in current chunk!",
 			}
 			// 3. 即時回傳診斷報告
-			if err := stream.Send(report); err != nil {
+			if err := stream.Send(resp); err != nil {
 				return err
 			}
-			log.Println("🔔 [NSP] Instant diagnostic report sent back to node")
+			log.Println("🔔 [NSP v0.2] Instant sensing response sent back to node")
 		}
 	}
 }

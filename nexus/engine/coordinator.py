@@ -13,6 +13,7 @@ from nexus.core.state_contracts import NexusState
 from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.services.memory import MemoryService
+from nexus.engine.federation import FederationLayer
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,9 @@ class NexusEngine:
         self.state_io = StateIO(self.project_root, run_dir=self.run_dir)
         self.memory = MemoryService(self.project_root)
         self.hub = NexusHub(self.project_root)
+        
+        # 🛰️ Phase 3 聯邦層初始化
+        self.federation = FederationLayer(self.project_root)
 
     def prepare_workspace(self):
         """
@@ -156,6 +160,14 @@ class NexusEngine:
         包含 Pre-gate、模擬修復、結晶化與結晶後的重試邏輯。
         """
         logger.info("🔮 [Nexus:Predict] Scanning environment for task: %s", task_id)
+        
+        # ⚖️ Phase 3 Quorum 2/3 檢測 (Federation Sensing)
+        if self.federation.quorum_check():
+            selected_node = self.federation.select_node()
+            logger.info("🛰️ [NSP:Sensing] Quorum PASS. Transition: ISOLATED -> DISPATCHED (Node: %s)", selected_node or "all")
+        else:
+            logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
+
         verify_cmds = _auto_detect_verify_commands(self.project_root)
         
         # 進入修復循環 (模擬)

@@ -1,1 +1,0 @@
-/Users/jameschen/Workspace/nexus/scripts/ops/install_nexus_pilot_friend.sh

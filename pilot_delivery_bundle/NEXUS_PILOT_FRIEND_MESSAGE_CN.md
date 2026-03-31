@@ -1,1 +1,0 @@
-/Users/jameschen/Workspace/nexus/docs/NEXUS_PILOT_FRIEND_MESSAGE_CN.md

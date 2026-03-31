@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/code_to_architecture_matrix.md",
+                "file": "MUSE-NEXUS：引擎實作規格書 (Engine Specification v17.1 Hardened).md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "code_to_architecture_matrix"
+              "title": "MUSE-NEXUS：引擎實作規格書 (Engine Specification v17.1 Hardened)"
             }
           },
           {
@@ -241,17 +241,19 @@
   },
   "active": "787f356ec3100ac6",
   "lastOpenFiles": [
-    "MagicMock/mock.workspace_root/5522379296",
-    "<MagicMock name='mock.run_dir.__truediv__()' id='4715302064'>",
-    "<MagicMock name='mock.run_dir.__truediv__()' id='4715627296'>",
-    "MagicMock/mock.workspace_root/4704740720",
-    "scripts/__pycache__/v1.8_feature_bench.cpython-312.pyc",
-    "scripts/__pycache__/v1.8_mega.cpython-312.pyc",
-    "<MagicMock name='mock.run_dir.__truediv__()' id='4984582896'>",
-    "<MagicMock name='mock.run_dir.__truediv__()' id='4982279968'>",
-    "scripts/core/__pycache__/migration_safety_validator.cpython-312.pyc",
-    "scripts/core/__pycache__",
-    "nexus/app/__pycache__/command_service.cpython-312.pyc",
+    "docs/code_to_architecture_matrix.md",
+    "MUSE-NEXUS：引擎實作規格書 (Engine Specification v17.1 Hardened).md",
+    "MUSE_ENGINE_SPEC_V17.1_HARDENED.md",
+    "<MagicMock name='mock.run_dir.__truediv__()' id='4733702112'>",
+    "MagicMock/mock.project_root/4733079040",
+    "<MagicMock name='mock.run_dir.__truediv__()' id='4732593856'>",
+    "MagicMock/mock.project_root/4732263440",
+    "MagicMock/mock.workspace_root/4727537440",
+    "<MagicMock name='mock.run_dir.__truediv__()' id='4803957520'>",
+    "MagicMock/mock.project_root/4803334592",
+    "<MagicMock name='mock.run_dir.__truediv__()' id='4802849360'>",
+    "MagicMock/mock.project_root/4802514096",
+    "MagicMock/mock.workspace_root/4800620896",
     "RELEASE_NOTES_V9.md",
     "evolution/docs/specs/NEXUS_PHANTOM_GUARD_SPEC.md",
     "docs/Chatgpt 評價.md",
@@ -274,8 +276,6 @@
     "pilot_delivery_bundle/PHASE6_NEXT_RESEARCH_TASKBOOK_CN.md",
     "pilot_delivery_bundle/PHASE5_RESEARCH_FREEZE_2026-03-28_CN.md",
     "Autoresearch/PHASE3_BASELINE_LOCK_AND_NEXT_STUDY_CN.md",
-    "Autoresearch/FORMAL_RESEARCH_HARDENING_CN.md",
-    "Autoresearch/data_sample.md",
-    "docs/NEXUS_GAN_LONGRUN_PLAYBOOK_CN.md"
+    "Autoresearch/FORMAL_RESEARCH_HARDENING_CN.md"
   ]
 }

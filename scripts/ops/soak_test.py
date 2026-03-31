@@ -40,10 +40,19 @@ def run_single_iteration(engine_clicript: Path, root_path: Path) -> dict:
     # Parse phase latency if possible
     # We will log successful completion and time
     
+    # Run acceptance check to see Stage 1 signals
+    acc_res = subprocess.run(
+        ["uv", "run", "python", "scripts/ops/nexus_acceptance_check.py"],
+        cwd=str(root_path), capture_output=True, text=True
+    )
+    
+    learning_gate_warn = "LEARNING_GATE_WARN" in acc_res.stdout or "LEARNING_GATE_WARN" in acc_res.stderr
+    
     return {
         "success": res.returncode == 0,
         "duration_sec": duration,
-        "memory_mb": get_process_memory()
+        "memory_mb": get_process_memory(),
+        "learning_warn": learning_gate_warn
     }
 
 def main():

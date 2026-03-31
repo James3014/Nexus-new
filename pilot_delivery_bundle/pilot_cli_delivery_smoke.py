@@ -1,1 +1,0 @@
-/Users/jameschen/Workspace/nexus/scripts/ops/pilot_cli_delivery_smoke.py

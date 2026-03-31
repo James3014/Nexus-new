@@ -1,1 +1,0 @@
-/Users/jameschen/Workspace/nexus/scripts/nexus_pilot_friend.py
