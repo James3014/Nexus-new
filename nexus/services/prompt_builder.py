@@ -1,7 +1,9 @@
 import json
 import yaml
+import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from nexus.core.capability_gate import CapabilityGate
 
 class PromptBuilder:
     """
@@ -27,6 +29,8 @@ class PromptBuilder:
                 "STRICTLY follow the defined TDD cycle (RED-GREEN-REFACTOR)",
             ]
         }
+        # 🟢 P3: SolidPrefixProtocol (Byte Cache)
+        self.prefix_hash = hashlib.sha256(json.dumps(self.NEXUS_PRIMER).encode()).hexdigest()[:16]
 
     def _load_config(self) -> Dict[str, Any]:
         """載入 models.yaml 配置。"""
@@ -52,17 +56,26 @@ class PromptBuilder:
         return relevant[:3]
 
     def build_system_prompt(self, phase: str, model_hint: str = "flash") -> str:
-        """建立系統層級的指導 Prompt。"""
+        """建立系統層級的指導 Prompt，並注入能力閘門工具清單。"""
         primer_section = "\n".join([f"  - {r}" for r in self.NEXUS_PRIMER["constitutional_rules"]])
         guard_section = "\n".join([f"  - {g}" for g in self.NEXUS_PRIMER["logic_guard"]])
         
-        return f"""### [Nexus v9 Constitution]
+        # 🛡️ P5.1: 注入動態能力閘門
+        gate = CapabilityGate()
+        tools_info = gate.build_tools_json(phase)
+        tools_section = f"Available Tools (Current Phase: {phase}):\n" + \
+                        "\n".join([f"  - {t}" for t in tools_info["available_tools"]])
+        
+        return f"""### [Nexus v22 Constitution]
 Phase: {phase}
 Rules:
 {primer_section}
 
 ### [Safety Guards]
 {guard_section}
+
+### [Capability Gate]
+{tools_section}
 """
 
     def build_task_prompt(self, task: str, context_brief: str, model_hint: str = "flash") -> str:
@@ -82,8 +95,11 @@ Rules:
         return prompt
 
     def build_full_payload(self, phase: str, task: str, diff: str, model_hint: str = "flash") -> str:
-        """生成最終發送給 LLM 的完整字串。"""
+        """生成最終發送給 LLM 的完整字串 (含 Byte Cache 標記)。"""
         system = self.build_system_prompt(phase, model_hint)
         task_p = self.build_task_prompt(task, "N/A", model_hint)
         
-        return f"{system}\n\n{task_p}\n\n### [Code Diff / State]\n{diff}"
+        # 🧼 P3: 注入 Solid Prefix 標記以觸發 Provider Cache
+        header = f"CACHE_KEY: {self.prefix_hash}\n"
+        return f"{header}{system}\n\n{task_p}\n\n### [Code Diff / State]\n{diff}"
+

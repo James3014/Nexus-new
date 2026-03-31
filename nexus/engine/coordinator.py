@@ -30,6 +30,7 @@ from nexus.engine.self_healing_selector import get_self_healing_selector
 from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.services.memory import MemoryService
+from scripts.engine.nexus_transaction import TransactionManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,9 @@ class NexusEngine:
         self.neural_aggregator = NexusNeuralAggregator()
         self.hardened_validator = NexusHardenedValidator()
         self.swarm_planner = HierarchicalGraphPlanner(self.project_root)
+        
+        # 🪙 P0: 交易管理器實例化 (Atomic Transaction)
+        self.transaction_mgr = TransactionManager(self.project_root)
 
     def prepare_workspace(self):
         """
@@ -275,11 +279,13 @@ class NexusEngine:
             return  # 任務預防性終止
 
         # --- 🧬 Phase X: SOTA Search & Academic Anchoring ---
+        state.current_phase = "X"
         print(f"[{state.task_id}] [Phase X] Extracting SOTA patterns...")
         sota_result = self.sota_searcher.search(state.metadata.get("task_description", ""), state.metadata.get("domain", "general"))
         state.metadata["sota_patterns"] = sota_result.get("data")
         
         # --- 🧬 Phase D: Neural Aggregator (Triage Compression) ---
+        state.current_phase = "D"
         print(f"[{state.task_id}] [Phase D] Aggregating neural context (Triage)...")
         history = state.metadata.get("history_events", [])
         condensed_context = self.neural_aggregator.triage_summarize(history)
@@ -292,6 +298,7 @@ class NexusEngine:
         
         try:
             # --- 🧬 Phase A: Hardened Validator (AST Security Scan) ---
+            state.current_phase = "A"
             print(f"[{state.task_id}] [Phase A] Hardening audit (AST X-Ray Scan)...")
             # Assuming generated_code is available in state or context
             generated_code = state.metadata.get("generated_code", "")
@@ -302,6 +309,7 @@ class NexusEngine:
                  return False
             
             # --- 🧬 Phase P: Swarm        # 🐝 蜂群調度：DAG 規劃 (Plan Phase P)
+            state.current_phase = "P"
             # 🛡️ 物理修復：從 metadata 讀取 swarm 標記，解決屬性缺失問題
             is_swarm = state.metadata.get("swarm_mode", False)
             if is_swarm:
@@ -332,6 +340,7 @@ class NexusEngine:
             verify_cmds = _auto_detect_verify_commands(self.project_root)
             
             # 進入修復循環 (模擬)
+            state.current_phase = "R"
             for attempt in range(1, 4):
                 logger.info("🛠️ [R-Stage] Executing %s Flow (Attempt %d)", skill_id, attempt)
                 
@@ -366,9 +375,13 @@ class NexusEngine:
                 
                 if passed:
                     logger.info("✅ [%s] Successful crystallization.", skill_id)
+                    # 💎 [Transaction: Commit] Audit 通過，物理鎖定變更
+                    self.transaction_mgr.commit_if_passed(task_id)
                     return True
                 else:
                     logger.info("🔄 Audit Rejected for %s. Retrying...", skill_id)
+                    # 🚨 [Transaction: Rollback] Audit 失敗，物理恢復真相
+                    self.transaction_mgr.audit_rollback(task_id)
             
             logger.info("❌ [%s] Mission Aborted after depletion of retries.", skill_id)
             return False
@@ -397,7 +410,41 @@ class NexusEngine:
                 "engine_version": "v17.1-hardened"
             }
         }
+        return payload
+
+    def receive_subagent_outcome(self, payload: Dict[str, Any], state: NexusState):
+        """⚖️ AOS-P5.3: 收攏子代理執行期補丁與知識"""
+        task_id = payload.get("taskid", "sub-task")
+        passed = payload.get("audit_passed", False)
+        worktree = payload.get("worktree")
         
+        logger.info(f"⚖️ [Nexus:Aggregator] Receiving outcome from {task_id}. Audit: {passed}")
+        
+        if not passed:
+            logger.warning(f"🚨 [Aggregator:REJECT] Sub-agent {task_id} failed audit. Discarding patch.")
+            return False
+
+        # 1. 物理合併補丁 (Git Merge Worktree)
+        try:
+            subprocess.run(["git", "merge", worktree], cwd=self.project_root, check=True)
+            logger.info(f"✅ [Aggregator:MERGE] Patch from {task_id} integrated to main chain.")
+        except:
+            logger.error(f"❌ [Aggregator:MERGE_ERROR] Conflict detected during sub-agent merge.")
+            return False
+
+        # 2. 知識結晶化 (Crystal Save Lesson)
+        # 確保分身學到的教訓不會因 worktree 刪除而消失
+        from nexus.core.crystal import Crystal
+        crystal = Crystal(self.project_root)
+        lesson_id = f"lesson-{task_id}-{int(datetime.now(timezone.utc).timestamp())}"
+        crystal.save_lesson(
+            lesson_id=lesson_id,
+            skill_id="sub-agent-repair",
+            payload=payload
+        )
+        logger.info(f"💎 [Aggregator:CRYSTAL] Lesson {lesson_id} persisted to LanceDB.")
+        
+        return True
         # 寫入 event log
         log_path = self.project_root / ".nexus/metrics/skill_outcome_events.jsonl"
         with open(log_path, "a") as f:

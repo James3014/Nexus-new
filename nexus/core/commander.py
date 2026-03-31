@@ -88,6 +88,8 @@ class Commander:
             return self._orchestrate_d(state)
         elif state.current_phase == "R":
             return self._orchestrate_r(state)
+        elif state.current_phase == "A":
+            return self._orchestrate_a(state)
 
         return "STALL"
 
@@ -109,7 +111,36 @@ class Commander:
     def _orchestrate_r(self, state):
         """R 階段：修復 (對接 v5 repair)"""
         print("🛠️ [Commander] Triggering R-stage: Execution...")
+        
+        # 💰 P5.9: 成本預判 Hook
+        from nexus.core.cost_hook import CostHook
+        hook = CostHook()
+        # 假設從 metadata 獲取即將執行的指令與參數
+        next_cmd = state.metadata.get("next_command", "safe_patch")
+        params = state.metadata.get("next_params", {"target_file": state.metadata.get("target_file")})
+        
+        predicted = hook.predict_cost(next_cmd, params)
+        remaining = state.metadata.get("budget_token", 5000) - state.total_token_usage
+        
+        status = hook.budget_check(predicted, remaining)
+        if status == "BLOCKED":
+            print(f"🛑 [Commander:COST] Task BLOCKED! Predicted {predicted} > {remaining}")
+            return "COST_EXCEEDED"
+            
         return "RUN_SKILL:repair"
+
+    def _orchestrate_a(self, state):
+        """A 階段：審計 (對接 v22 Parity Audit)"""
+        print("🔬 [Commander] Triggering A-stage: Phase Parity Audit...")
+        from nexus.engine.phases.audit import AuditPhaseHandler
+        handler = AuditPhaseHandler(self.project_root, self.project_root / ".nexus")
+        res = handler.run(state)
+        
+        if res["status"] == "COMPLETED":
+            state.current_phase = "C" # 轉導至結晶化 (C)
+            self.state_io.save_global_state(state)
+            return "SUCCESS"
+        return "STALL"
 
     def handle_nexus_command(self, args: dict):
         """🧬 Nexus v7: 映射 CLI 命令至 NexusState"""
@@ -140,3 +171,17 @@ class Commander:
                 f.write(json.dumps(lesson) + "\n")
         except Exception as e:
             print(f"⚠️ [Crystallize] Failed to save lesson: {e}")
+
+    def handle_ink_input(self, ink_content: str):
+        """🎨 P5.10: 處理 Ink 緊湊格式輸入"""
+        from nexus.core.ink_parser import InkParser
+        parser = InkParser()
+        commands = parser.parse(ink_content)
+        
+        results = []
+        for cmd in commands:
+            formal = parser.to_formal(cmd)
+            # 將正式指令轉發至處理器 (Mock)
+            results.append(f"Executed {formal['tool']} for {formal['args'].get('path')}")
+            
+        return results

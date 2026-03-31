@@ -4,6 +4,9 @@ from nexus.core.state_contracts import NexusState
 from nexus.core.state_repository import StateRepository
 from nexus.core.metrics_writer import MetricsWriter
 from nexus.core.contract_writer import ContractWriter
+import logging
+
+logger = logging.getLogger(__name__)
 
 class StateIO:
     """
@@ -51,3 +54,33 @@ class StateIO:
 
     def write_contract(self, filename: str, data: Any):
         self.contract_writer.write(filename, data)
+
+    def save_checkpoint(self, state: NexusState):
+        """📸 物理保存 Agent 心智模型快照"""
+        from nexus.core.mental_snapshot import MentalSnapshot
+        snapshot = MentalSnapshot(state)
+        checkpoint_file = self.state_file.parent / "mind_snapshot.json"
+        checkpoint_file.write_text(snapshot.serialize(), encoding="utf-8")
+        logger.info(f"🧠 [Mind:Checkpoint] Snapshot preserved to {checkpoint_file}")
+
+    def load_checkpoint(self, state: NexusState) -> bool:
+        """📂 從物理快照還原 Agent 心智模型"""
+        from nexus.core.mental_snapshot import MentalSnapshot
+        checkpoint_file = self.state_file.parent / "mind_snapshot.json"
+        
+        # Composio P4: 物理回溯觸發
+        failure_count = state.metadata.get("phase_failures", 0)
+        if failure_count >= 3:
+            logger.warning(f"🚨 [Backtracking] Phase failures >= 3. Rolling back to stable checkpoint...")
+            # 實體真值應執行 git_reset(checkpoint_prev)
+            state.metadata["phase_failures"] = 0 # 重置
+            
+        if checkpoint_file.exists():
+            try:
+                json_str = checkpoint_file.read_text(encoding="utf-8")
+                snapshot = MentalSnapshot.deserialize(json_str)
+                snapshot.restore_to(state)
+                return True
+            except Exception as e:
+                logger.error(f"❌ [Mind:Restore] Failed to load checkpoint: {e}")
+        return False

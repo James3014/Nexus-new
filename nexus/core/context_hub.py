@@ -5,6 +5,7 @@ from datetime import datetime
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
+from scripts.brain_de_entropy import prune_dialogue
 
 
 from nexus.core.context_compression import ToonRenderer, ContextScorer
@@ -148,6 +149,8 @@ class ContextHub:
             "unresolved_points": conv_meta.get("unresolved_points", []),
             "answer_draft_status": conv_meta.get("answer_draft_status"),
             "steps_history_summary": self._summarize_steps_history(state, audit_mode),
+            # 🧬 P2: 對話熵減 (v22 De-Entropy)
+            "pruned_history": prune_dialogue(state.metadata.get("chat_history", [])),
             "memory_reminders": self._inject_memory_reminders("conversation"),
             "timestamp": datetime.now().isoformat(),
         }

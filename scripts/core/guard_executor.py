@@ -1,7 +1,9 @@
-#!/usr/bin/env python3
 import sys
 import subprocess
 import random
+import logging
+from nexus.core.tool_lockdown import ToolLockdown, ToolLockedError
+from scripts.engine.speculative_hooks import SpeculativeToolHook
 
 
 def secure_execute():
@@ -45,16 +47,29 @@ def secure_execute():
                 print("❌ 驗證失敗，操作已取消。")
                 sys.exit(1)
         except Exception as e:
-            print(f"❌ 無法獲取人類輸入，操作取消。({e})")
+            print(f"❌ 無法獲獲人類輸入，操作取消。({e})")
             sys.exit(1)
 
         print("✅ 實體授權通過，執行中...")
 
-    # 執行原始指令
+    # 🧬 P3: 制度化工具鎖定 (v22 Guardian)
+    try:
+        ToolLockdown.validate_shell(cmd_str)
+    except ToolLockedError as e:
+        print(f"\n🛑 [Guard_Executor] 治理攔截: {e}")
+        print("💡 建議：請使用 'nexus:clean' 或專用 'Skill-Tool' 代替原生指令。")
+        sys.exit(1)
+
+    # 🧬 P5: 投機指令改寫 (Speculative Rewrite)
+    hook = SpeculativeToolHook()
+    cmd_str = hook.rewrite(cmd_str)
+
+    # 執行原始指令 (或重寫後的現代指令)
     try:
         subprocess.run(cmd_str, shell=True, check=True)
     except subprocess.CalledProcessError as e:
         sys.exit(e.returncode)
+
 
 
 if __name__ == "__main__":

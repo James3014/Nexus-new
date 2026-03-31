@@ -1,7 +1,10 @@
-#!/usr/bin/env python3
-from typing import Any, Dict
+import os
+from typing import Any, Dict, List
 from nexus.engine.phases.base import BasePhaseHandler
 from nexus.core.state_contracts import NexusState
+from scripts.engine.intent_classifier import IntentClassifier
+from nexus.refactor_governance import RefactorGovernance
+from nexus.core.dependency_probe import DependencyProbe
 
 class PlannerPhaseHandler(BasePhaseHandler):
     """
@@ -16,7 +19,20 @@ class PlannerPhaseHandler(BasePhaseHandler):
     def run(self, state: NexusState, context: Dict[str, Any]) -> Dict[str, Any]:
         task = context.get("task", "")
         print(f"🔮 [Nexus:Predict] Scanning environment for task: {task}")
+
+        # 🎯 P2: 意圖預分類 (Intent Classification)
+        classifier = IntentClassifier()
+        intent = classifier.classify(task)
+        context["intent"] = intent
         
+        if intent == "refactor_template":
+            print("🖋️ [Refactor:Bias] Applying Linus Mode Governance...")
+            context["refactor_plan"] = RefactorGovernance.generate_refactor_plan(
+                state.task_id if hasattr(state, "task_id") else "TASK_001", 
+                str(self.project_root)
+            )
+            context["system_bias"] = RefactorGovernance.get_linus_bias()
+
         # 🛡️ Trinity Intent Guard (PHA-010)
         intent_pass, refusal_reason = self._guard_intent(task)
         if not intent_pass:
@@ -28,7 +44,28 @@ class PlannerPhaseHandler(BasePhaseHandler):
                 "risk_level": "BLOCK"
             }
 
-        # 🚀 Autopilot v2.0 Dispatcher (High-Dim Routing)
+        # 🛰️ P5.2: 依賴圖探針 (DepProbe) 掃描
+        # 針對計畫中的 target_files 進行物理依賴感應
+        probe = DependencyProbe(str(self.project_root))
+        probe.build_index()
+        
+        # 假設從 context 中取得預計修改的檔案清單 (Mocked targets for P)
+        target_files = context.get("target_files", ["main.py"]) 
+        impact_map = {}
+        max_risk = "LOW"
+        
+        for t in target_files:
+            impact = probe.full_impact(t)
+            impact_map[t] = impact
+            if impact["risk_level"] == "HIGH":
+                max_risk = "HIGH"
+                print(f"⚠️ [DepProbe:HIGH] Critical dependency found for {t}. Force RESEARCH.")
+
+        state.metadata["impact_map"] = impact_map
+        state.metadata["max_risk_level"] = max_risk
+        
+        # 🛰️ [NSP:Dispatch] Optimized Node Selection: node_id
+        # ...
         node_id = self.route_to_node(task, context.get("codebase", ""))
         print(f"🛰️ [NSP:Dispatch] Optimized Node Selection: {node_id}")
 

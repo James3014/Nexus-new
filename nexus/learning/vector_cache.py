@@ -15,6 +15,7 @@ class VectorCache:
     具備 <1s 語義檢索與物化存儲能力，支撐學術錨定與蜂群調度計畫。
     數據真值轉向 Nexus 生產環境。
     """
+    TIERS = ["ephemeral", "local", "global", "eternal"]
     
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -31,12 +32,14 @@ class VectorCache:
                 pa.field("id", pa.string()),
                 pa.field("vector", pa.fixed_size_list(pa.float32(), 1024)),
                 pa.field("content", pa.string()),
+                pa.field("tier", pa.string()),
                 pa.field("metadata", pa.string())
             ])
             seed_data = [{
                 "id": "seed",
                 "vector": np.zeros(1024, dtype=np.float32),
                 "content": "seed_node",
+                "tier": "global",
                 "metadata": "{}"
             }]
             self.db.create_table(self.table_name, data=seed_data, schema=schema)
@@ -60,6 +63,22 @@ class VectorCache:
         vec = np.array(query_vector, dtype=np.float32)
         results = table.search(vec, vector_column_name="vector").limit(limit).to_list()
         return results
+
+    def weighted_retrieve(self, query_vector: Any, phase: str = "P", limit: int = 5) -> List[Dict[str, Any]]:
+        """🧬 P3: 權重檢索 (Weighted RAG)"""
+        weights = {"P": {"global": 1.0, "local": 0.8, "ephemeral": 0.5},
+                   "R": {"local": 1.0, "global": 0.8, "ephemeral": 0.5}}.get(phase, {"global": 1.0})
+        
+        raw_results = self.search(query_vector, limit=limit * 2)
+        
+        # 根據 Tier 進行物理加權排序
+        for res in raw_results:
+            tier = res.get("tier", "global")
+            res["weighted_score"] = res.get("_distance", 1.0) * weights.get(tier, 0.5)
+            
+        sorted_results = sorted(raw_results, key=lambda x: x["weighted_score"])
+        return sorted_results[:limit]
+
 
     def clear(self):
         """物理清除所有緩存數據，執行真值重置。"""
