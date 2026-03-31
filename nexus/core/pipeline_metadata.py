@@ -22,8 +22,16 @@ class PipelineMetadata(TypedDict, total=False):
     last_proof_value: str
     sandbox_mode: str
     rejection_history: List[str]
-    last_audit_failure: str
-    conversation: Dict[str, Any]
+    key_findings: List[str]
+    metadata: Dict[str, Any]
+    
+    # --- JEPA Governance (Elite P2) ---
+    sim_lewm: bool
+    lewm_sim_status: str
+    lewm_prediction_cost: float
+    lewm_rejected_cost: float
+    benchmark_run: bool
+    auto_repair_enabled: bool
     task_type: str
     response_mode: str
 

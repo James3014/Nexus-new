@@ -78,17 +78,30 @@ class NexusEngine:
                     os.symlink(src, dest)
                     logger.info("  + Linked %s", target)
 
-    def run_bug(self, task_id: str = "", task: str = "", **kwargs):
+    def run_bug(self, bug_id: str = "", desc: str = "", **kwargs):
         """執行 Bug 修復循環"""
         self.prepare_workspace()
-        final_task_id = task_id or kwargs.get("bug_id", "unknown")
-        return self._execute_task_workflow(final_task_id, "nexus:bug")
+        final_task_id = bug_id or kwargs.get("task_id", "unknown")
+        
+        # 🛡️ 實例化狀態主權 (Genesis)
+        state = NexusState(task_id=final_task_id)
+        state.metadata["task_description"] = desc
+        state.metadata.update(kwargs.get("context", {}))
+        
+        return self._execute_task_workflow(final_task_id, "nexus:bug", state=state)
 
     def run_feature(self, feature_id: str = "", task: str = "", **kwargs):
         """執行 Feature 開發循環"""
         self.prepare_workspace()
         final_id = feature_id or kwargs.get("task_id", "unknown")
-        return self._execute_task_workflow(final_id, "nexus:feature")
+        desc = task or kwargs.get("desc", "")
+        
+        # 🛡️ 實例化狀態主權 (Genesis)
+        state = NexusState(task_id=final_id)
+        state.metadata["task_description"] = desc
+        state.metadata.update(kwargs.get("context", {}))
+        
+        return self._execute_task_workflow(final_id, "nexus:feature", state=state)
 
     def run_test(self, test_id: str = "", **kwargs):
         """執行 Test 循環"""
@@ -154,42 +167,71 @@ class NexusEngine:
         logger.info("🏁 [SPST] Completed. Total Successful Samples: %d/%d", success_count, samples)
         return success_count == samples
 
-    def _execute_task_workflow(self, task_id: str, skill_id: str):
+    def _execute_task_workflow(self, task_id: str, skill_id: str, state: Optional[NexusState] = None):
         """
         🚀 任務統一工作流
         包含 Pre-gate、模擬修復、結晶化與結晶後的重試邏輯。
         """
+        if state is None:
+            state = NexusState(task_id=task_id)
+            
         logger.info("🔮 [Nexus:Predict] Scanning environment for task: %s", task_id)
         
-        # ⚖️ Phase 3 Quorum 2/3 檢測 (Federation Sensing)
-        if self.federation.quorum_check():
-            selected_node = self.federation.select_node()
-            logger.info("🛰️ [NSP:Sensing] Quorum PASS. Transition: ISOLATED -> DISPATCHED (Node: %s)", selected_node or "all")
-        else:
-            logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
-
-        verify_cmds = _auto_detect_verify_commands(self.project_root)
-        
-        # 進入修復循環 (模擬)
-        for attempt in range(1, 4):
-            logger.info("🛠️ [R-Stage] Executing %s Flow (Attempt %d)", skill_id, attempt)
-            
-            passed, gate_results = run_cli_pregate(
-                project_root=self.run_dir,
-                commands=verify_cmds
-            )
-            
-            # 💎 結晶化：將任務結果寫入治理鏈
-            self._crystallize(task_id, skill_id, passed, gate_results)
-            
-            if passed:
-                logger.info("✅ [%s] Successful crystallization.", skill_id)
-                return True
+        try:
+            # ⚖️ Phase 3 Quorum 2/3 檢測 (Federation Sensing)
+            if self.federation.quorum_check():
+                selected_node = self.federation.select_node()
+                logger.info("🛰️ [NSP:Sensing] Quorum PASS. Transition: ISOLATED -> DISPATCHED (Node: %s)", selected_node or "all")
             else:
-                logger.info("🔄 Audit Rejected for %s. Retrying...", skill_id)
-        
-        logger.info("❌ [%s] Mission Aborted after depletion of retries.", skill_id)
-        return False
+                logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
+
+            verify_cmds = _auto_detect_verify_commands(self.project_root)
+            
+            # 進入修復循環 (模擬)
+            for attempt in range(1, 4):
+                logger.info("🛠️ [R-Stage] Executing %s Flow (Attempt %d)", skill_id, attempt)
+                
+                # --- JEPA Sidecar (Elite P2) 模擬注入 ---
+                if state.metadata.get("sim_lewm"):
+                    from nexus.learning.lewm_predictor import LeWMPredictor
+                    lewm = LeWMPredictor()
+                    # 模擬時讀取當前任務描述
+                    sim_res = lewm.simulate(state.metadata.get("task_description", ""), None)
+                    sim_status = sim_res.get("status")
+                    if sim_status == "REJECTED":
+                        logger.warning(f"🚫 [JEPA] Simulator Rejected (Cost: {sim_res.get('cost')})")
+                        state.metadata["lewm_sim_status"] = "REJECTED"
+                        state.metadata["lewm_rejected_cost"] = sim_res.get("cost")
+                        # 🛡️ Hardened v18.16: 高風險阻斷
+                        break
+                    elif sim_status == "PASSED":
+                        state.metadata["lewm_sim_status"] = "PASSED"
+                        state.metadata["lewm_prediction_cost"] = sim_res.get("cost")
+                    else:
+                        logger.info(f"ℹ️ [JEPA] Simulator {sim_status}. Continuing standard flow.")
+                        state.metadata["lewm_sim_status"] = sim_status
+                # ----------------------------------------
+                
+                passed, gate_results = run_cli_pregate(
+                    project_root=self.run_dir,
+                    commands=verify_cmds
+                )
+                
+                # 💎 結晶化：將任務結果寫入治理鏈
+                self._crystallize(task_id, skill_id, passed, gate_results)
+                
+                if passed:
+                    logger.info("✅ [%s] Successful crystallization.", skill_id)
+                    return True
+                else:
+                    logger.info("🔄 Audit Rejected for %s. Retrying...", skill_id)
+            
+            logger.info("❌ [%s] Mission Aborted after depletion of retries.", skill_id)
+            return False
+        finally:
+            # ⚓ 物理下沉：狀態主權硬化 (Harvest)
+            self.state_io.save_global_state(state)
+            logger.info("⚓ [Nexus:Hardened] State persisted to .musestate")
 
     def _crystallize(self, decision_id: str, skill_id: str, passed: bool, gate_results: List[dict]):
         """寫入樣本事件到治理鏈"""

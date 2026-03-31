@@ -72,14 +72,16 @@ if __name__ == "__main__":
                 # 優先嘗試 git apply
                 res = subprocess.run(
                     ["git", "apply", "--3way", "--whitespace=fix", "--recount", str(tmp_patch)], 
-                    capture_output=True, text=True
+                    capture_output=True, text=True,
+                    cwd=str(self.project_root) if self.project_root else None
                 )
                 if res.returncode == 0:
                     print(f"   ✅ [Applied: Git] {file_path}")
                     patch_applied = True
                 else:
                     # 模擬測試或緊急情況下的直寫回退
-                    print(f"   ⚠️ [Git Failed] {file_path}. Trying Direct Application (Mock Mode)...")
+                    print(f"   ⚠️ [Git Failed] {file_path}")
+                    print(f"   ⚠️ Trying Direct Application (Mock Mode)...")
                     target_file = self.project_root / file_path if self.project_root else Path(file_path)
                     if target_file.exists():
                         content = target_file.read_text()

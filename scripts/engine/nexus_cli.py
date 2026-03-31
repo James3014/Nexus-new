@@ -74,6 +74,10 @@ class NexusCLI:
         if script.exists(): return subprocess.call([str(script)])
         return 0
 
+    def run_benchmark(self, tasks: int = 15, output: str = "benchmark_report.json"):
+        script = self.project_root / "scripts" / "bench" / "benchmark_suite.py"
+        return subprocess.call([sys.executable, str(script), "--tasks", str(tasks), "--output", output])
+
 def main():
     parser = argparse.ArgumentParser(description="Nexus v17.1 Hardened CLI")
     parser.add_argument("--silent", action="store_true")
@@ -92,6 +96,11 @@ def main():
     
     subparsers.add_parser("nexus:acceptance-check")
     subparsers.add_parser("nexus:release-ready")
+    
+    bench = subparsers.add_parser("nexus:benchmark")
+    bench.add_argument("--tasks", type=int, default=15)
+    bench.add_argument("--output", default="benchmark_report.json")
+    
     subparsers.add_parser("nexus:autopilot-tune")
     subparsers.add_parser("nexus:phantom-guard-v2")
     subparsers.add_parser("nexus:alignment-check")
@@ -162,6 +171,10 @@ def main():
     elif args.command == "nexus:acceptance-check":
         cli.run_acceptance_check()
     elif args.command == "nexus:release-ready": cli.run_release_ready()
+    elif args.command == "nexus:benchmark":
+        cli.run_benchmark(tasks=args.tasks, output=args.output)
+    elif args.command in ["nexus:bug", "nexus:feature"]:
+        pass
 
 if __name__ == "__main__":
     main()
