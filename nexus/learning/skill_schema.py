@@ -38,6 +38,10 @@ class SkillFrontmatter:
     embedding_model_version: str = ""
     last_used_at: str = ""
     
+    # 🧬 進化基因：調度模式與上下文指紋
+    orchestration_pattern: str = ""
+    context_fingerprint: str = ""
+    
     # --- VDD：驗證驅動信號 ---
     verification_commands: List[str] = field(default_factory=list)
     verification_exit_codes: List[int] = field(default_factory=list)

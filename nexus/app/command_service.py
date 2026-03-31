@@ -24,6 +24,9 @@ class TaskRequest:
     domain: Optional[str] = None
     skill: Optional[str] = None
     execution_context: Optional[Dict[str, Any]] = None
+    # 🧬 進化戰術參數
+    swarm_mode: bool = False
+    use_sota_cache: bool = False
 
 class NexusCommandService:
     """🧬 v9 Command Service: CLI 授權的業務邏輯層。
@@ -96,7 +99,12 @@ class NexusCommandService:
             bug_id=bug_id,
             desc=request.task,
             plan_only=request.plan_only,
-            context={"delivery_mode": request.delivery_mode, **merged_context},
+            context={
+                "delivery_mode": request.delivery_mode, 
+                "swarm_mode": request.swarm_mode,
+                "use_sota_cache": request.use_sota_cache,
+                **merged_context
+            },
         )
         if not success:
             return False
@@ -112,7 +120,12 @@ class NexusCommandService:
         """Execute a feature task through the sole delivery-aware service boundary."""
         success = self.engine.run_feature(
             task=request.task,
-            context={"delivery_mode": request.delivery_mode, **(request.execution_context or {})},
+            context={
+                "delivery_mode": request.delivery_mode,
+                "swarm_mode": request.swarm_mode,
+                "use_sota_cache": request.use_sota_cache,
+                **(request.execution_context or {})
+            },
             domain=request.domain,
             dry_run=request.plan_only,  # 映射 dry_run 到 plan_only
             skill=request.skill
@@ -127,13 +140,22 @@ class NexusCommandService:
             artifact_paths=request.artifact_paths,
         )
         
-    def execute_benchmark(self, framework: str, tasks: int, output: str, model: Optional[str] = None, target: Optional[str] = None):
+    def execute_research(self, request: TaskRequest):
+        """執行 SOTA 學術錨定搜尋任務。"""
+        return self.engine.run_research(
+            query=request.task,
+            use_cache=request.use_sota_cache,
+            context=request.execution_context
+        )
+        
+    def execute_benchmark(self, framework: str, tasks: int, output: str, model: Optional[str] = None, target: Optional[str] = None, swarm_mode: bool = False):
         return self.engine.run_benchmark(
             framework=framework,
             task_count=tasks,
             output_csv=output,
             model=model,
-            target=target
+            target=target,
+            swarm_mode=swarm_mode
         )
 
     def execute_self_check(self, level: str = "standard"):

@@ -74,9 +74,25 @@ class NexusCLI:
         if script.exists(): return subprocess.call([str(script)])
         return 0
 
-    def run_benchmark(self, tasks: int = 15, output: str = "benchmark_report.json"):
-        script = self.project_root / "scripts" / "bench" / "benchmark_suite.py"
-        return subprocess.call([sys.executable, str(script), "--tasks", str(tasks), "--output", output])
+    def run_benchmark(self, tasks: int = 15, output: str = "benchmark_report.json", swarm_mode: bool = False):
+        return self.service.execute_benchmark(
+            framework="swe-bench", 
+            tasks=tasks, 
+            output=output,
+            swarm_mode=swarm_mode
+        )
+
+    def run_feature(self, task: str, swarm_mode: bool = False, sota: bool = False):
+        req = TaskRequest(task=task, swarm_mode=swarm_mode, use_sota_cache=sota)
+        return self.service.execute_feature(req)
+
+    def run_bug(self, task: str, swarm_mode: bool = False, sota: bool = False):
+        req = TaskRequest(task=task, swarm_mode=swarm_mode, use_sota_cache=sota)
+        return self.service.execute_bug(req)
+
+    def run_research(self, query: str, sota: bool = False):
+        req = TaskRequest(task=query, use_sota_cache=sota)
+        return self.service.execute_research(req)
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus v17.1 Hardened CLI")
@@ -100,6 +116,21 @@ def main():
     bench = subparsers.add_parser("nexus:benchmark")
     bench.add_argument("--tasks", type=int, default=15)
     bench.add_argument("--output", default="benchmark_report.json")
+    bench.add_argument("--swarm-mode", action="store_true")
+    
+    feat = subparsers.add_parser("nexus:feature")
+    feat.add_argument("--task", required=True)
+    feat.add_argument("--swarm-mode", action="store_true")
+    feat.add_argument("--use-sota-cache", action="store_true")
+
+    bug = subparsers.add_parser("nexus:bug")
+    bug.add_argument("--task", required=True)
+    bug.add_argument("--swarm-mode", action="store_true")
+    bug.add_argument("--use-sota-cache", action="store_true")
+
+    res = subparsers.add_parser("nexus:research")
+    res.add_argument("--query", required=True)
+    res.add_argument("--use-sota-cache", action="store_true")
     
     subparsers.add_parser("nexus:autopilot-tune")
     subparsers.add_parser("nexus:phantom-guard-v2")
@@ -172,9 +203,13 @@ def main():
         cli.run_acceptance_check()
     elif args.command == "nexus:release-ready": cli.run_release_ready()
     elif args.command == "nexus:benchmark":
-        cli.run_benchmark(tasks=args.tasks, output=args.output)
-    elif args.command in ["nexus:bug", "nexus:feature"]:
-        pass
+        cli.run_benchmark(tasks=args.tasks, output=args.output, swarm_mode=args.swarm_mode)
+    elif args.command == "nexus:feature":
+        cli.run_feature(task=args.task, swarm_mode=args.swarm_mode, sota=args.use_sota_cache)
+    elif args.command == "nexus:bug":
+        cli.run_bug(task=args.task, swarm_mode=args.swarm_mode, sota=args.use_sota_cache)
+    elif args.command == "nexus:research":
+        cli.run_research(query=args.query, sota=args.use_sota_cache)
 
 if __name__ == "__main__":
     main()

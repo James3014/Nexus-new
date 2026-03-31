@@ -50,6 +50,8 @@ class SkillRegistry:
                     repair_success  INTEGER DEFAULT 0,
                     retry_count     INTEGER DEFAULT 0,
                     pattern_reuse_rate REAL DEFAULT 0.0,
+                    orchestration_pattern TEXT,
+                    context_fingerprint TEXT,
                     created_at      TEXT NOT NULL,
                     updated_at      TEXT NOT NULL
                 )
@@ -72,9 +74,10 @@ class SkillRegistry:
                         description, name, source, plan_strategy, winning_hypothesis,
                         phantom_patterns, cycle_count, cycle_root_cause, verification_commands,
                         verification_exit_codes, embedding_model_version, repair_success,
-                        retry_count, pattern_reuse_rate, created_at, updated_at
+                        retry_count, pattern_reuse_rate, orchestration_pattern, 
+                        context_fingerprint, created_at, updated_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                 """, (
                     skill_id,
@@ -97,6 +100,8 @@ class SkillRegistry:
                     int(metric.repair_success),
                     metric.retry_count,
                     metric.pattern_reuse_rate,
+                    skill.orchestration_pattern,
+                    skill.context_fingerprint,
                     skill.created_at,
                     now
                 ))
