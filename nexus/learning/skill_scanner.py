@@ -63,6 +63,15 @@ WARN_PATTERNS: List[Tuple[str, str]] = [
     (r"gem\s+install\s+", "未審核的 Ruby 套件安裝 (gem install)"),
 ]
 
+# --- Compliance Patterns (v2.0 Readiness Gate) ---
+
+COMPLIANCE_PATTERNS: List[Tuple[str, str, bool]] = [
+    (r"decision_boundary:\s*\{.*\}", "遺漏或格式錯誤之決策邊界 (Decision Boundary)", True),
+    (r"iaov_steps:\s*\[.*\]", "遺漏或格式錯誤之 IAOV 執行協議", True),
+    (r"readiness_checklist:\s*\{.*\}", "遺漏 Readiness Checklist 結晶標籤", False), # Optional for L0
+    (r"portability_markers:", "遺漏跨工具可攜性標記 (Portability Markers)", False),
+]
+
 
 def scan_skill(content: str) -> ScanResult:
     """Scan skill content for security threats.
@@ -85,6 +94,15 @@ def scan_skill(content: str) -> ScanResult:
         matches = re.findall(pattern, content, re.IGNORECASE)
         if matches:
             warnings.append(f"🟡 WARN: {reason} (偵測到 {len(matches)} 處)")
+
+    # --- Compliance Checks (v2.0 Readiness Gate) ---
+    for pattern, reason, is_block in COMPLIANCE_PATTERNS:
+        if not re.search(pattern, content, re.MULTILINE | re.DOTALL):
+            msg = f"📁 COMPLIANCE: {reason}"
+            if is_block:
+                blocked.append(f"🔴 BLOCK: {msg}")
+            else:
+                warnings.append(f"🟡 WARN: {msg}")
 
     safe = len(blocked) == 0
     if not safe:

@@ -37,6 +37,12 @@ def _build_yaml_frontmatter(fm: SkillFrontmatter) -> str:
     lines.append(f"cycle_count: {fm.cycle_count}")
     lines.append(f"cycle_root_cause: {fm.cycle_root_cause}")
     
+    # 🧬 v2.0 進化協議：結晶化決策邊界與 IAOV
+    lines.append(f"decision_boundary: {json.dumps(fm.decision_boundary, ensure_ascii=False)}")
+    lines.append(f"iaov_steps: {json.dumps(fm.iaov_steps, ensure_ascii=False)}")
+    lines.append(f"readiness_checklist: {json.dumps(fm.readiness_checklist, ensure_ascii=False)}")
+    lines.append(f"portability_markers: {json.dumps(fm.portability_markers, ensure_ascii=False)}")
+
     if fm.verification_commands:
         vc_str = ", ".join(f'"{c}"' for c in fm.verification_commands)
         lines.append(f"verification_commands: [{vc_str}]")

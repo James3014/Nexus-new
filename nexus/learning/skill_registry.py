@@ -52,10 +52,20 @@ class SkillRegistry:
                     pattern_reuse_rate REAL DEFAULT 0.0,
                     orchestration_pattern TEXT,
                     context_fingerprint TEXT,
+                    decision_boundary TEXT,
+                    iaov_steps      TEXT,
+                    readiness_checklist TEXT,
+                    portability_markers TEXT,
                     created_at      TEXT NOT NULL,
                     updated_at      TEXT NOT NULL
                 )
             """)
+            # Migration: Ensure v2.0 columns exist (Safe against duplicates via PRAGMA)
+            for col in ["decision_boundary", "iaov_steps", "readiness_checklist", "portability_markers"]:
+                try:
+                    conn.execute(f"ALTER TABLE skills ADD COLUMN {col} TEXT")
+                except sqlite3.OperationalError: pass # Already exists內容分析其性質及性能性能內容性能性能。內容且對量。性能分析。
+
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_type ON skills(task_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_trust_level ON skills(trust_level)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_origin ON skills(origin_node_id)")
@@ -75,9 +85,10 @@ class SkillRegistry:
                         phantom_patterns, cycle_count, cycle_root_cause, verification_commands,
                         verification_exit_codes, embedding_model_version, repair_success,
                         retry_count, pattern_reuse_rate, orchestration_pattern, 
-                        context_fingerprint, created_at, updated_at
+                        context_fingerprint, decision_boundary, iaov_steps,
+                        readiness_checklist, portability_markers, created_at, updated_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                 """, (
                     skill_id,
@@ -102,6 +113,10 @@ class SkillRegistry:
                     metric.pattern_reuse_rate,
                     skill.orchestration_pattern,
                     skill.context_fingerprint,
+                    json.dumps(skill.decision_boundary),
+                    json.dumps(skill.iaov_steps),
+                    json.dumps(skill.readiness_checklist),
+                    json.dumps(skill.portability_markers),
                     skill.created_at,
                     now
                 ))

@@ -42,6 +42,12 @@ class SkillFrontmatter:
     orchestration_pattern: str = ""
     context_fingerprint: str = ""
     
+    # 🧬 v2.0 戰甲硬化：決策邊界與 IAOV 協議 (L4.5)
+    decision_boundary: Dict[str, Any] = field(default_factory=dict)
+    iaov_steps: List[Dict[str, Any]] = field(default_factory=list)
+    readiness_checklist: Dict[str, str] = field(default_factory=dict) # {"gate": "PASS/FAIL/BLOCKED"}
+    portability_markers: List[str] = field(default_factory=list)
+    
     # --- VDD：驗證驅動信號 ---
     verification_commands: List[str] = field(default_factory=list)
     verification_exit_codes: List[int] = field(default_factory=list)

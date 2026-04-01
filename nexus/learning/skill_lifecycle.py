@@ -167,7 +167,15 @@ def promote_skill(skills_dir: Path, skill_id: str, target_level: str) -> Dict[st
     if target_level in ("tested", "production"):
         scan_result = scan_skill(content)
         if not scan_result.safe:
-            return {"success": False, "message": f"安全掃描未通過: {scan_result.blocked_reasons}"}
+            return {"success": False, "message": f"安全或規度掃描未通過: {scan_result.blocked_reasons}"}
+        
+        # 🧪 v2.0 Readiness Gate: 強制要求品質清單
+        checklist_path = skills_dir / "references" / f"{skill_id}_checklist.md"
+        if not checklist_path.exists():
+            # Fallback to generic checklist search in content
+            if "readiness_checklist:" not in content:
+                return {"success": False, "message": f"🔴 晉升攔截：遺漏 v2.0 Readiness Checklist 結晶標籤內容分析。"}
+        
         usage_count = count_successful_uses(skills_dir, skill_id)
         required_uses = 1 if target_level == "tested" else 3
         if usage_count < required_uses:
