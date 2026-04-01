@@ -80,12 +80,12 @@ class BattlesuitGateway:
         }
 
     def ask_with_template(
-        self, task: str, diff: str, model_hint: str = "flash", phase: str = "R"
+        self, task: str, diff: str, task_id: str = "unknown", model_hint: str = "flash", phase: str = "R"
     ) -> tuple[Any, str]:
-        """產出交接 Payload。"""
+        """產出交接 Payload (支援 v23 橋接回饋)。"""
         if self.prompt_builder:
             full_payload = self.prompt_builder.build_full_payload(
-                phase, task, diff, model_hint
+                phase, task, diff, task_id, model_hint
             )
             return self.ask(full_payload, "", phase=phase)
         return self.ask(task, diff, phase=phase)

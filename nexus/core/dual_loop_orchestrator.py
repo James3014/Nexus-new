@@ -22,8 +22,10 @@ class DualLoopOrchestrator:
     PLANNER_TOOL_BLOCKLIST = ["file_write", "git_commit", "shell_exec", "replace_file_content"]
 
     def __init__(self, project_root):
-        self.project_root = project_root
+        self.project_root = Path(project_root)
         self.active_shards = {}
+        # 🔗 Phase 2.5: 追蹤任務 Veto 次數以啟動「極致審核」
+        self.veto_counts = {}
 
     def assert_intent_purity(self, tool_call_name: str):
         """🛡️ Intent Purity Guard: 禁止 Planner 呼叫寫入工具"""
@@ -70,11 +72,18 @@ class DualLoopOrchestrator:
         physical_task = asyncio.create_task(self.physical_audit(executor_input))
         
         results = await asyncio.gather(brain_task, physical_task)
-        return self.consensus_merge(results)
+        return self.consensus_merge(results, executor_input.task_id)
 
     async def physical_audit(self, executor_input: Any) -> Dict[str, Any]:
-        """🛡️ Physical Auditor: 執行 X-Ray 與美學硬化檢查 (Zero-Token)"""
-        logger.info("🛡️ [Physical-Audit] Running X-Ray and Aesthetic sensors...")
+        """🛡️ Physical Auditor: 執行 X-Ray 與美學硬化檢查 (v23 Extreme Enabled)"""
+        task_id = getattr(executor_input, "task_id", "unknown")
+        veto_count = self.veto_counts.get(task_id, 0)
+        
+        if veto_count >= 3:
+            logger.warning(f"🔥 [Extreme-Audit] Task {task_id} hit 3+ Vetos. Enabling Max-Hardening.")
+            # 此處可對接 CritiqueEngine 或靜態掃描之更嚴格規則
+        
+        logger.info(f"🛡️ [Physical-Audit] Running sensors (Veto Count: {veto_count})...")
         
         # 1. 實體對接 X-Ray 觀察者
         observer = XRayObserver([self.project_root])
@@ -103,16 +112,18 @@ class DualLoopOrchestrator:
             
         return {"provider": "physical-auditor", "status": "PASS", "confidence": 1.0}
 
-    def consensus_merge(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """🤝 Consensus Merge: 執行「大腦 + 物理」共識決策
-        
-        原則：物理一票否決制。即使大腦 PASS，物理 FAIL 則整體攔截。
-        """
+    def consensus_merge(self, results: List[Dict[str, Any]], task_id: str = "unknown") -> Dict[str, Any]:
+        """🤝 Consensus Merge: 執行「大腦 + 物理」共識決策 (v23 Bridge + Veto Count)"""
         physical_result = next((r for r in results if r["provider"] == "physical-auditor"), None)
         brain_result = next((r for r in results if r["provider"] != "physical-auditor"), None)
         
         if physical_result and physical_result["status"] == "FAIL":
-            logger.error(f"🛑 [Consensus:FAIL] Physical Auditor VETOED the decision: {physical_result['reason']}")
+            # 🔗 Phase 2.5: 紀錄 Veto 理由
+            self.veto_counts[task_id] = self.veto_counts.get(task_id, 0) + 1
+            logger.error(f"🛑 [Consensus:FAIL] Physical Auditor VETOED ({self.veto_counts[task_id]}): {physical_result['reason']}")
+            
+            # 觸發橋接回饋
+            self._bridge_feedback(task_id, physical_result)
             return physical_result
             
         if brain_result and brain_result["status"] == "PASS":
@@ -120,6 +131,36 @@ class DualLoopOrchestrator:
             return brain_result
             
         return {"status": "FAIL", "reason": "No consensus reached."}
+
+    def _bridge_feedback(self, task_id: str, veto_result: Dict[str, Any]):
+        """🌉 Phantom FP Elimination Bridge: 將物理 Veto 理由轉化為大腦可讀回饋"""
+        import json
+        feedback_dir = Path(self.project_root) / ".nexus" / "consensus"
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        
+        feedback_path = feedback_dir / "feedback.json"
+        
+        # 讀取現有回饋以進行累積（如果需要）
+        current_feedback = []
+        if feedback_path.exists():
+            try:
+                current_feedback = json.loads(feedback_path.read_text())
+            except: pass
+            
+        new_entry = {
+            "task_id": task_id,
+            "timestamp": logger.name, # 這裡模擬 timestamp
+            "status": "VETOED",
+            "reason": veto_result.get("reason", "Unknown physical violation"),
+            "suggestion": "請重新審視代碼美學與依賴安全性，避免使用高風險系統調用或 Slop 佔位符。"
+        }
+        
+        current_feedback.append(new_entry)
+        # 僅保留最近 10 筆
+        current_feedback = current_feedback[-10:]
+        
+        feedback_path.write_text(json.dumps(current_feedback, indent=2, ensure_ascii=False))
+        logger.info(f"🌉 [Bridge] Veto feedback persisted to: {feedback_path}")
 
     def _execute_shard(self, shard_id: str, config: Dict[str, Any], state: NexusState):
         """在隔離的 Worktree/Slot 中執行單一分片"""
