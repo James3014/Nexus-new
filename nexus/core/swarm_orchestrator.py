@@ -10,14 +10,25 @@ class TypedHandoffAdapter:
     原則：重用既有契約，強化 Phase 核驗。
     """
     VALID_PHASES = {"P", "D", "X", "R", "A", "C"}
+    # 🧬 v22 Adaptive Mapping: 支援長名稱回退至核心字母
+    PHASE_MAP = {
+        "PLAN": "P", "PREPARE": "P",
+        "DEBUG": "D", "DEVELOP": "D",
+        "EXPLORE": "X", "X-RAY": "X", "OBSERVE": "X",
+        "RESEARCH": "R", "REVIEW": "R",
+        "AUDIT": "A", "ACCEPT": "A",
+        "CRYSTALLIZE": "C", "COMMIT": "C"
+    }
 
     def sync_output_to_state(self, state: NexusState, output: ExecutorOutput) -> NexusState:
         """將 ExecutorOutput 資料流對接至 NexusState 體系"""
         
         # 1. Phase 安全校核 (Gatekeeper)
-        phase = output.phase.upper()
+        raw_phase = output.phase.upper()
+        phase = self.PHASE_MAP.get(raw_phase, raw_phase) # 優先對應，否則維持原樣
+        
         if phase not in self.VALID_PHASES:
-            raise ValueError(f"Invalid phase: {phase}. Must be one of {self.VALID_PHASES}")
+            raise ValueError(f"Invalid phase: {raw_phase} (mapped to: {phase}). Must be one of {self.VALID_PHASES}")
 
         # 2. 狀態映射與枚舉轉譯
         # 將 ExecutorStatusEnum 映射至 StepRecord 狀態

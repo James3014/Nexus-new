@@ -28,7 +28,7 @@ class Plan(BaseModel):
 
 class NexusState(BaseModel):
     version: str = "v26.1"
-    aos_score: float = 135.2
+    aos_score: float = 131.5
     active_shards: Dict[str, str] = {} # shard_id -> worktree_path
     last_audit: Optional[Dict[str, Any]] = None
     soul_alignment: bool = True

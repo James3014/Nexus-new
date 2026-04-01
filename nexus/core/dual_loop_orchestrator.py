@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from nexus.core.state_contracts import NexusState, AestheticViolation
