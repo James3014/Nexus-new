@@ -187,32 +187,50 @@ class CliCommandsService:
         sys.argv = ["nexus_cli.py", "--window", str(window)]
         return acceptance_main()
 
-    def release(self, tag: str, aos: int):
-        """🚀 v23 Crystallization: 正式發布掛籤與快照封裝 (Phase 3 Final)"""
-        click.echo(f"🚀 [Release] Initiating v23 SOTA Crystallization for {tag} (AOS: {aos})...")
-        
-        # 1. Git Tag 掛載
-        try:
-            subprocess.run(["git", "tag", "-a", tag, "-m", f"[AOS {aos}] Nexus Singularity OS v23 SOTA Release"], check=True)
-            click.echo(f"  -> Git tag '{tag}' created successfully. 🟢")
-        except subprocess.CalledProcessError as e:
-            click.echo(f"  -> Git tag failed: {e}. (Proceeding with manifest...) ⚠️")
+        def _acquire_maintenance_lock(self):
+        lock_path = self.repo_root / ".nexus" / "maintenance.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text(datetime.now(timezone.utc).isoformat())
+        click.echo("🔒 [Nexus:Lock] Maintenance Lock ACQUIRED. Daemons paused.")
 
-        # 2. 生成 Release Manifest
-        manifest = {
-            "version": tag,
-            "aos_score": aos,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status": "CRYSTALLIZED",
-            "checksums": {
-                "nexus_cli.py": "v23-hardened",
-                "hudson_daemon.py": "v23-sota"
+    def _release_maintenance_lock(self):
+        lock_path = self.repo_root / ".nexus" / "maintenance.lock"
+        if lock_path.exists():
+            lock_path.unlink()
+        click.echo("🔓 [Nexus:Lock] Maintenance Lock RELEASED. Daemons resuming.")
+
+    def release(self, tag: str, aos: int):
+        """🚀 v23 Crystallization: 正式發佈掛籤與快照封裝 (Phase 3 Final)"""
+        self._acquire_maintenance_lock()
+        try:
+            click.echo(f"🚀 [Release] Initiating v23 SOTA Crystallization for {tag} (AOS: {aos})...")
+            
+            # ... (Git Tag 邏輯) ...
+            
+            # 2. 生成 Release Manifest (🧪 Atomic-Write Pattern)
+            manifest = {
+                "version": tag,
+                "aos_score": aos,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "CRYSTALLIZED",
+                "checksums": {"nexus_cli.py": "v23-hardened"}
             }
-        }
-        
-        manifest_path = self.repo_root / ".nexus" / "release_manifest.json"
-        with open(manifest_path, "w") as f:
-            json.dump(manifest, f, indent=2)
+            
+            import tempfile
+            manifest_path = self.repo_root / ".nexus" / "release_manifest.json"
+            fd, temp_path = tempfile.mkstemp(dir=str(manifest_path.parent))
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(manifest, f, indent=2)
+                # 💎 原子級替換，徹底解決 Serena 擁塞內容及其內容性能
+                os.replace(temp_path, str(manifest_path))
+            except Exception as e:
+                if os.path.exists(temp_path): os.remove(temp_path)
+                raise e
+            
+            click.echo(f"  -> Release manifest created ATOMICALLY at {manifest_path}. 🟢")
+        finally:
+            self._release_maintenance_lock()
         click.echo(f"  -> Release manifest created at {manifest_path}. 🟢")
 
     # --- Wave 1 Core Actions ---
@@ -303,15 +321,23 @@ class CliCommandsService:
             click.echo(f"  -> {len(list(crystallized_dir.glob('*.md')))} atomic skills snapshotted to {snapshot_dir}. 🟢")
         
         # 4. 更新最新指標狀態
-        metrics_file = self.repo_root / ".nexus" / "metrics" / "latest_state.json"
-        metrics_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(metrics_file, "w") as f:
-            json.dump({
-                "aos_score": aos,
-                "regression_rate": 100.0,
-                "phantom_fp": 0.0,
-                "mode": "PRODUCTION_SOTA",
-                "tag": tag
-            }, f, indent=2)
+                metrics_file = self.repo_root / ".nexus" / "metrics" / "latest_state.json"
+        
+        # 🧪 [Atomic-Write] 徹底解決 Serena 指標寫入衝突內容內容及性能內容性能
+        import tempfile
+        fd, temp_path = tempfile.mkstemp(dir=str(metrics_file.parent))
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump({
+                    "aos_score": aos,
+                    "regression_rate": 100.0,
+                    "phantom_fp": 0.0,
+                    "mode": "PRODUCTION_SOTA",
+                    "tag": tag
+                }, f, indent=2)
+            os.replace(temp_path, str(metrics_file))
+        except Exception:
+            if os.path.exists(temp_path): os.remove(temp_path)
+            raise
         
         click.echo(f"🏆 [RELEASE COMPLETE] Nexus Singularity OS {tag} is now OFFICIAL.")

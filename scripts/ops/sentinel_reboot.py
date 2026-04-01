@@ -20,9 +20,16 @@ class SentinelReboot:
 
     def monitor_and_respawn(self):
         """監控守護進程並自動重啟崩潰節點內容內容及性能"""
-        logger.info("🛡️ [Sentinel] Initiating daemon persistence audit...")
+        logger.info("🛡️ [Sentinel] Initiating daemon persistence audit (Pulse Mode)...")
+        lock_path = self.repo_root / ".nexus" / "maintenance.lock"
         
         while True:
+            # 🧪 [Hardening] 維護鎖檢查：若開發者正在操作，暫停自癒檢查以釋放 IO
+            if lock_path.exists():
+                logger.info("🛡️ [Sentinel] Maintenance lock DETECTED. Pausing audit...")
+                time.sleep(15)
+                continue
+                
             for name, path in self.daemons:
                 if not self._is_running(name):
                     logger.warning(f"🛡️ [Sentinel] ALERT: {name} is DEAD. Respawning...")
@@ -30,7 +37,8 @@ class SentinelReboot:
                 else:
                     logger.info(f"🛡️ [Sentinel] {name} is ALIVE. 🟢")
             
-            time.sleep(30)
+            # 🧪 [Pulse Mode] 降低更新頻率至 60s (原 30s)
+            time.sleep(60)
 
     def _is_running(self, name: str) -> bool:
         # 🚀 行動 20: 檢測進程 (使用 pgrep 簡化檢查)

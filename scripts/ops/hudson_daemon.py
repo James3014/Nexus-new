@@ -37,7 +37,15 @@ def get_status_line():
 def run_hud_daemon():
     # 使用 ANSI 指令鎖定底行 (v23 Hardened)
     # \033[s: Save cursor | \033[1000H: Move to bottom | \033[u: Restore cursor
+    repo_root = Path(__file__).resolve().parents[2]
+    lock_path = repo_root / ".nexus" / "maintenance.lock"
+    
     while True:
+        # 🧪 [Hardening] 維護鎖檢查：若開發者正在操作，暫停 HUD 渲染以釋放資源
+        if lock_path.exists():
+            time.sleep(10)
+            continue
+            
         status = get_status_line()
         # 🚀 行動 1: 定位鎖定與背景渲染
         sys.stdout.write("\033[s")           # Save
@@ -46,7 +54,9 @@ def run_hud_daemon():
         sys.stdout.write(f"\033[1;44m [v23] {status} \033[0m") # SOTA Status Line
         sys.stdout.write("\033[u")           # Restore
         sys.stdout.flush()
-        time.sleep(2)
+        
+        # 🧪 [Pulse Mode] 降低更新頻率至 5s (原 2s) 以減少 IO 競爭
+        time.sleep(5)
 
 if __name__ == "__main__":
     try:
