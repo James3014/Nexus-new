@@ -76,6 +76,20 @@ class RepairPhaseHandler(BasePhaseHandler):
                 # 物理攔截：強迫 Agent 重新生成 non-overlapping 補丁
                 return {"status": "COLLISION_REJECT", "error": str(e)}
 
+        # 🛡️ [Red-Test Gate] 具現化失敗測試核驗 (Anti-Guessing)
+        print("🕵️ [Red-Test Gate] Verifying existence of failing tests...")
+        # 物理執行測試蒐集 (模擬)
+        # cmd = f"pytest --collect-only {self.project_root}"
+        has_failing_test = context.get("has_red_test", False)
+        
+        if not has_failing_test:
+            print("🚨 [Red-Test:MISSING] 修復任務終止：未偵測到失敗測試或再現腳步。")
+            print("   請先具現化一個紅燈案例，禁止盲目修復。")
+            return {
+                "status": "REJECTED_NO_RED_TEST",
+                "reason": "Missing Red-Test (Failed Case) before repair."
+            }
+
         # ... (Existing logic for local/orchestrated repair)
         local_result = try_local_repair(
             project_root=self.project_root,

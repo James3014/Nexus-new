@@ -106,18 +106,35 @@ class PlannerPhaseHandler(BasePhaseHandler):
             print(f"⚠️ [Dispatcher] Fallback to LOCAL due to: {e}")
             return "LOCAL_HARDENED"
 
+    def calculate_ambiguity_score(self, task: str) -> float:
+        """⚖️ 計算指令歧義性 (Claude-Code Absorption)"""
+        score = 0.0
+        # 1. 缺乏路徑或檔案名稱
+        if "/" not in task and not any(ext in task for ext in [".py", ".ts", ".js", ".md"]):
+            score += 0.4
+        
+        # 2. 包含極度模糊的動詞
+        fuzzy_verbs = ["改一下", "修一下", "調整", "處理", "fix", "update", "change"]
+        if any(v in task.lower() for v in fuzzy_verbs):
+            score += 0.3
+        
+        # 3. 指令過短
+        if len(task) < 15:
+            score += 0.2
+            
+        return min(1.0, score)
+
     def _guard_intent(self, task: str) -> tuple[bool, str]:
-        """🛡️ 檢查意圖是否模糊 (Heuristic)"""
-        # 放寬長度限制並支援 OFF- 系列任務編號 (v9-Audit-Fix)
-        if len(task) < 5:
-            return False, "指令過於簡短，請描述具體目標。"
+        """🛡️ Clarification Gate: 攔截歧義指令"""
+        ambiguity = self.calculate_ambiguity_score(task)
+        
+        if ambiguity > 0.7:
+            msg = f"🛑 [ClarificationGate] 指令歧義度過高 ({ambiguity:.2f})。\n"
+            msg += "   Interview Required: 請回答：1. 具體檔案？ 2. 預期輸入輸出？ 3. 測試案例？"
+            return False, msg
         
         # 如果是明確的基準測試任務 ID，直接放行
         if task.startswith("OFF-") or task.startswith("FEAT-"):
             return True, ""
-
-        fuzzy_keywords = ["改一下", "改改", "修一下", "弄好"]
-        if any(kw in task for kw in fuzzy_keywords) and "/" not in task:
-            return False, "檢測到模糊指令且未指定路徑。"
             
         return True, ""

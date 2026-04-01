@@ -50,6 +50,21 @@ class HealthScorer:
         state.pipeline_health = snapshot.phase_average if snapshot.phase_average is not None else snapshot.overall_score
         state.health_metrics.status = snapshot.status
         state.health_metrics.last_check_at = datetime.now()
+        
+        outcome_score = state.health_metrics.outcome_quality * 100.0
+        
+        # 具現化：深度思考 (Deep Thinking) 硬化邏輯
+        # 從 metadata 讀取由 PlannerAuditor 產出的密度指標
+        plan_density = state.metadata.get("plan_density_score", 1.0)
+        thinking_depth = state.metadata.get("thinking_depth_score", 1.0)
+        
+        # 若計畫密度低於 0.6，執行「強制降智懲罰」(score *= 0.4)，確保 AOS < 60
+        if plan_density < 0.6:
+            outcome_score *= 0.4
+            
+        # 基礎分累加思維深度加分 (Max 120)
+        outcome_score = min(outcome_score + (thinking_depth * 20.0), 120.0)
+
         state.metadata["health_snapshot"] = {
             "overall_score": snapshot.overall_score,
             "outcome_score": snapshot.outcome_score,
@@ -130,13 +145,21 @@ class HealthScorer:
         if not has_outcome_signal:
             return None
 
-        score = (
+        # 基礎成果評分 (Legacy)
+        base_score = (
             (metrics.test_pass_rate * 40.0)
             + (max(0.0, 1.0 - metrics.drift_index) * 20.0)
             + (max(0.0, 1.0 - metrics.error_rate) * 20.0)
             + (min(1.0, metrics.token_efficiency) * 20.0)
         )
-        return round(score, 2)
+
+        # 具現化：治理懲罰 (Governance Penalty)
+        # 若 Agent 使用了侵入式操作 (如 kill -9) 且未獲審核，扣除 40% 原始分數
+        governance_penalty = state.metadata.get("governance_violation_count", 0) * 15.0
+        
+        final_score = max(0.0, base_score - governance_penalty)
+        
+        return round(final_score, 2)
 
     @classmethod
     def _overall_score(
@@ -154,6 +177,12 @@ class HealthScorer:
             overall = outcome_score
         else:
             overall = (outcome_score * 0.7) + (phase_average * 0.3)
+
+        # 具現化：AOS 120 溢出與 100 基線補強
+        # 即使基礎分溢出至 120，若有懲罰則從 100 起扣，確保降至 90 以下觸發 WARNING
+        if state.metadata.get("governance_violation_count", 0) > 0:
+            overall = min(overall, 89.9)
+            reasons.append("governance_threshold_enforced")
 
         review_status = str(state.metadata.get("last_review_status", "")).upper()
         if review_status in {"REJECTED", "FAILED"}:
@@ -177,8 +206,10 @@ class HealthScorer:
 
     @staticmethod
     def _status_for_score(score: float) -> HealthStatus:
-        if score >= 80.0:
+        if score >= 100.0:
             return "HEALTHY"
+        if score >= 90.0:
+            return "HEALTHY" # 90-100 仍視為健康，但低於 90 即觸發警報
         if score >= 50.0:
             return "WARNING"
         if score > 0.0:

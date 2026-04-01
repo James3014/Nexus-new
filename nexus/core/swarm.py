@@ -235,9 +235,55 @@ class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
             print("⚠️ [Federation] Remote verify failed. Falling back to local.")
         return super()._verify(repair_result)
 
+class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
+    """🐝 [P2P] Swarm-Together Peer Orchestrator (Claude-Together Absorption)"""
+    def __init__(self, engine, task, model=None, peer_id=None):
+        super().__init__(engine, task, model)
+        self.peer_id = peer_id or f"Peer-{os.getpid()}"
+        self.sse_url = "http://localhost:8080/nexus-sync/poc"
+        self.manifest_path = PROJECT_ROOT / ".nexus" / "swarm" / "manifest.json"
+        
+    def broadcast_decision(self, decision_type: str, data: Dict):
+        """🛡️ 廣播決策 (Shared Decisions)"""
+        print(f"📡 [{self.peer_id}] Broadcasting Decision: {decision_type}")
+        # 在 POC 中模擬發送至 SSE
+        # requests.post("http://localhost:8080/broadcast", json={"peer": self.peer_id, "type": decision_type, "data": data})
+
+    def listen_for_peers(self):
+        """👂 監聽夥伴信號 (Clarification/Auto-reply)"""
+        print(f"👂 [{self.peer_id}] Listening for Peer signals...")
+
+    def check_manifest_lock(self, target: str) -> bool:
+        """🛡️ [P2P] 原子性核驗 Manifest 鎖定狀態"""
+        if not self.manifest_path.exists():
+            return False
+            
+        with open(self.manifest_path, "r") as f:
+            data = json.load(f)
+            decisions = data.get("decisions", [])
+            # 檢查是否有其他 Peer 正在修復同一個目標內容分組。
+            for d in decisions:
+                if d.get("target") == target and d.get("peer_id") != self.peer_id:
+                    print(f"🛑 [{self.peer_id}] CONFLICT_DETECTED: {target} is locked by {d.get('peer_id')}")
+                    return True
+        return False
+
+    def _repair(self, plan: str) -> Dict[str, Any]:
+        """P2P 修復：具備衝突偵測與避讓能力"""
+        target_file = "nexus/core/swarm.py" # 模擬目標內容分組內容分組。
+        if self.check_manifest_lock(target_file):
+            print(f"🔄 [{self.peer_id}] Peer-Conflict: Redirecting to Memory_Refresh.")
+            return {"status": "CONFLICT_DETECTED", "history": self.history + ["conflict_wait"]}
+            
+        self.broadcast_decision("REPAIR_INTENT", {"target": target_file, "plan": plan})
+        return super()._repair(plan)
+
 class SwarmFactory:
     @staticmethod
     def create_swarm(engine, task, model=None):
+        mode = os.environ.get("NEXUS_SWARM_MODE", "sequential")
+        if mode == "p2p":
+            return PeerSwarmOrchestrator(engine, task, model)
         if os.environ.get("NEXUS_FEDERATION_ENABLED", "0") == "1":
             return FederatedSwarmOrchestrator(engine, task, model)
         return NexusSwarmOrchestrator(engine, task, model)

@@ -11,20 +11,27 @@ class TddStatus(str, Enum):
     REFACTOR = "refactor"
     NONE = "none"
 
+class AestheticViolation(Exception):
+    """當產出代碼未達美學門檻 (Critique Score < 90) 時觸發"""
+    pass
+
 # --- P 階段: Plan ---
 
-class PlanStep(BaseModel):
-    step_id: int
-    action: str
-    target: str
-    description: str
-    depends_on: List[int] = []
-
-class NexusPlan(BaseModel):
-    plan_id: str
+class Plan(BaseModel):
+    task_id: str
     goal: str
-    steps: List[PlanStep]
-    metadata: Dict[str, Any] = {}
+    actions: List[str]
+    parent_task_id: Optional[str] = None
+    aesthetic_gate: List[str] = Field(default_factory=list) # [Polish, Normalize, Distill]
+    expected_critique_score: int = 90
+    traceid: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+class NexusState(BaseModel):
+    version: str = "v26.1"
+    aos_score: float = 135.2
+    active_shards: Dict[str, str] = {} # shard_id -> worktree_path
+    last_audit: Optional[Dict[str, Any]] = None
+    soul_alignment: bool = True
 
 # --- D 階段: Diagnosis ---
 
