@@ -13,7 +13,10 @@ class CritiqueEngine:
     SLOP_KEYWORDS = [
         "placeholder", "TODO", "generic_function", "temp_list", "data1", 
         "modern", "clean", "minimal", "sleek", "dynamic", "user_auth_handler",
-        "boilerplate", "dummy", "implement_me", "logic_goes_here"
+        "boilerplate", "dummy", "implement_me", "logic_goes_here",
+        "implementation_pending", "fill_this_part", "logic_will_go_here",
+        "next_steps", "lorem_ipsum", "test_data_xyz", "FIXME_LATER",
+        "temp_fix", "hack_around", "ignore_this", "should_work_now"
     ]
 
     def __init__(self, soul_path: Path):
@@ -21,9 +24,24 @@ class CritiqueEngine:
 
     def analyze_node_density(self, content: str) -> float:
         """偵測代碼實體與 Slop 的密度比"""
-        words = content.split()
-        slop_count = sum(1 for w in words if w.lower() in self.SLOP_KEYWORDS)
+        words = re.findall(r'\b\w+\b', content.lower())
+        slop_count = sum(1 for w in words if w in self.SLOP_KEYWORDS)
         return slop_count / len(words) if words else 0
+
+    def detect_empty_nodes(self, tree: ast.AST) -> List[str]:
+        """🔍 偵測空函式或類別 (v23 Hardened)"""
+        violations = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                # 檢查 body 是否只有 pass 或只有 docstring + pass
+                body = node.body
+                if len(body) == 0:
+                    violations.append(f"❌ [Structural:Empty] {node.name} is completely empty.")
+                elif len(body) == 1 and isinstance(body[0], ast.Pass):
+                    violations.append(f"❌ [Structural:Empty] {node.name} contains only 'pass'.")
+                elif len(body) == 2 and isinstance(body[0], ast.Expr) and isinstance(body[1], ast.Pass):
+                     violations.append(f"❌ [Structural:Slop] {node.name} contains only docstring and 'pass'.")
+        return violations
 
     def critique_file(self, file_path: Path) -> Dict[str, Any]:
         with open(file_path, "r") as f:
@@ -39,9 +57,16 @@ class CritiqueEngine:
             score -= deduction
             issues.append(f"❌ [Slop-Density] 平庸度過高 ({density:.2%})，攔截 (-{deduction})")
 
-        # 2. AST Naming Audit (Strict)
+        # 2. AST Naming & Structural Audit (Strict)
         try:
             tree = ast.parse(content)
+            
+            # 生產環境：偵測空函式
+            structure_violations = self.detect_empty_nodes(tree)
+            for v in structure_violations:
+                score -= 10
+                issues.append(v)
+            
             long_names = 0
             total_vars = 0
             for node in ast.walk(tree):
