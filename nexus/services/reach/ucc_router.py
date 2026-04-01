@@ -3,9 +3,12 @@ import json
 import hashlib
 import time
 import os
+import logging
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from nexus.services.schema_loader import load_schema
+
+logger = logging.getLogger(__name__)
 
 class ReachResult(BaseModel):
     decision_id: str = ""
@@ -52,12 +55,28 @@ class UCCRouter:
                 result.tier = t
                 result.trace = trace
                 
+                # 🛡️ [Phase 2.3] 信心值核驗：若外部工具回傳 E404 或失效內容及其內容內容
+                if result.confidence < 0.5:
+                    trace.append(f"Tier {t} ({resolver_func.__name__}) returned low confidence: {result.markdown[:100]}")
+                    continue
+                    
                 # 🛡️ 寫入持久化快照 (Phase 1 要求)
                 self._persist_result(result)
                 return result
                 
             except Exception as e:
                 trace.append(f"Tier {t} ({self.resolvers.get(t).__name__ if self.resolvers.get(t) else 'N/A'}) failed: {str(e)}")
+        
+        # 🛡️ [Survival:Native] 如果所有預設工具都失敗，啟動原生感官對位內容內容及性能性能
+        logger.info("   ↳ [Reach:Native] All tiers failed or low confidence. Starting Native Resolve.")
+        try:
+            result = self._native_resolve(url)
+            result.decision_id = decision_id
+            result.trace = trace
+            self._persist_result(result)
+            return result
+        except Exception as e:
+            trace.append(f"Native resolve also failed: {e}")
         
         # 🚨 Fallback 模式內容性能及性能分析內容
         fallback_result = ReachResult(
@@ -159,9 +178,8 @@ class UCCRouter:
     def _scrapegraph(self, url: str) -> ReachResult:
         """Tier 3: ScrapeGraph (Structured Data)"""
         start = time.time()
-        # 物理對位：使用 crawl4ai 或類似工具性能性能性能性能性能內容
+        # 物理對位：使用 curl 做基礎獲取分組內容性能性能性能性能性能內容
         try:
-            # 由於 ScrapeGraph 通常需要 LLM Key，此處降級為 crawl4ai 或純文本抓取
             result = subprocess.run([
                 "curl", "-sL", url
             ], capture_output=True, text=True, timeout=30)
@@ -170,12 +188,44 @@ class UCCRouter:
                 url=url,
                 resolver="scrapegraph",
                 content_type="structured",
-                markdown=result.stdout[:5000], # 限制長度內容性能性能內容
+                markdown=result.stdout[:5000], 
                 confidence=0.7,
                 elapsed_ms=int((time.time() - start) * 1000)
             )
         except Exception as e:
             raise RuntimeError(f"ScrapeGraph/Fallback failed: {e}")
+
+    def _native_resolve(self, url: str) -> ReachResult:
+        """🧬 [Native Resolver] 使用 Python 實體直接獲取內容 (Phase 2.3 降級方案)"""
+        import requests
+        from bs4 import BeautifulSoup
+
+        start = time.time()
+        try:
+            # 物理觸達內容及其性能內容性能性能性能
+            headers = {"User-Agent": "Mozilla/5.0 (Nexus Neural Reach/v23)"}
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # 簡單清理內容性能性能性能
+            for script in soup(["script", "style"]):
+                script.decompose()
+            
+            text_blocks = [t.strip() for t in soup.stripped_strings if len(t.strip()) > 20]
+            md = "\n\n".join(text_blocks)
+            
+            return ReachResult(
+                url=url,
+                resolver="native_python",
+                content_type="markdown",
+                markdown=md[:10000],
+                confidence=0.85,
+                elapsed_ms=int((time.time() - start) * 1000)
+            )
+        except Exception as e:
+            raise RuntimeError(f"Native resolution physical failure: {e}")
 
 if __name__ == "__main__":
     # 單體測試入口內容及性能分析內容性能性能內容
