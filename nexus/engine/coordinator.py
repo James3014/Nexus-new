@@ -17,6 +17,9 @@ from nexus.learning.skill_registry import SkillRegistry
 from nexus.learning.skill_store import SkillStore
 from nexus.learning.lewm_predictor import LeWMPredictor
 
+# 🛰️ 空間與治理協調
+from nexus.services.workspace import WorkspaceManager, WorkspacePermissionError
+
 # 🧬 進化組件：蜂群、搜尋、壓縮、驗證
 from nexus.engine.planner_graph import HierarchicalGraphPlanner
 from nexus.learning.sota_searcher import SOTASearcher
@@ -32,6 +35,10 @@ from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_comman
 from nexus.services.memory import MemoryService
 from scripts.engine.nexus_transaction import TransactionManager
 
+# ⚖️ 治理中心組件 (Governance Matrix)
+from nexus.core.gate_evaluator import GateEvaluator, AcceptancePolicy
+from nexus.core.metrics_aggregator import MetricsAggregator
+
 logger = logging.getLogger(__name__)
 
 class RepairStrategy:
@@ -41,8 +48,8 @@ class RepairStrategy:
 
 class NexusEngine:
     """
-    ⚖️ NexusSingularity 核心執行引擎 (v17.1 Hardened)
-    負責任務調度、沙盒投影、回歸驗證與治理門檻檢查。
+    ⚖️ NexusSingularity 核心執行引擎 (v24.0 Refactored)
+    負責任務調度與 Phase Routing。物理工作空間與沙盒投影已解耦至 WorkspaceManager。
     """
     def __init__(self, config: EngineConfig, **kwargs):
         self.config = config
@@ -53,71 +60,46 @@ class NexusEngine:
         self.audit_level = config.audit_level
         self.strategy = RepairStrategy()
         
-        # 🛡️ 內核 Facade 對齊 (Hardened v17.1)
-        # 修復：恢復診斷層所需之狀態 IO 與中樞組件，解決 AttributeError。
+        # 🛡️ 治理對位 (DI Activation & Policy)
         from nexus.engine.hub import NexusHub
         
         self.state_io = StateIO(self.project_root, run_dir=self.run_dir)
+        self.workspace_mgr = WorkspaceManager(self.project_root)
+        
+        # Phase 1: 治理閘門與指標解耦
+        self.policy = AcceptancePolicy()
+        self.gate_eval = GateEvaluator(self.policy)
+        self.metrics_agg = MetricsAggregator()
+
         self.validator = NexusHardenedValidator()
         self.latent_forecaster = get_latent_forecaster(str(self.project_root))
         self.ash_selector = get_self_healing_selector(str(self.project_root))
         self.memory = MemoryService(self.project_root)
         self.hub = NexusHub(self.project_root)
         
-        # 🛡️ 測試合約對位 (Contract Alignment)
+        # 核心組件對位
         self.reporter = self.hub
         self.phases = {"P": "Planner", "R": "Repair", "D": "Developer", "X": "Executor"}
         
-        # 🛰️ Phase 3 聯邦層初始化
+        # 🛰️ 聯邦與進化底層
         self.federation = FederationLayer(self.project_root)
-        
-        # 🧬 進化底層：向量空間、搜尋器、驗證器、壓縮器
         self.vector_cache = VectorCache(self.project_root / ".nexus" / "vector_db")
         self.sota_searcher = SOTASearcher(self.vector_cache)
         self.neural_aggregator = NexusNeuralAggregator()
         self.hardened_validator = NexusHardenedValidator()
         self.swarm_planner = HierarchicalGraphPlanner(self.project_root)
         
-        # 🪙 P0: 交易管理器實例化 (Atomic Transaction)
+        # 🪙 原子交易支持
         self.transaction_mgr = TransactionManager(self.project_root)
-
-    def prepare_workspace(self):
-        """
-        🧬 建立 Task 專屬的物理沙盒 (Sandbox Substrate)
-        本階段執行硬體路徑投影，確保隔離性與 100% 回歸一致性。
-        """
-        logger.info("🛠️ [R-Stage] Preparing Workspace Sandbox: %s", self.run_dir)
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-
-        # 🔒 建立 repo 軟連結
-        repo_link = self.run_dir / "repo"
-        if not repo_link.exists():
-            os.symlink(self.project_root, repo_link)
-
-        # 🔬 測試設定投影 (Test Substrate Projection)
-        # 固定修復：增加 pytest.ini 與 pyproject.toml 物理複製，解決 rc=2 收集失敗。
-        import shutil
-        for cfg_file in ["pytest.ini", "pyproject.toml", ".env"]:
-            src = self.project_root / cfg_file
-            if src.exists():
-                shutil.copy2(src, self.run_dir / cfg_file)
-                logger.info("  + Projected config: %s", cfg_file)
-
-        # 🧬 核心路徑投影 (Core Path Projection)
-        for target in ["tests", ".venv"]:
-            src = self.project_root / target
-            if src.exists():
-                dest = self.run_dir / target
-                if not dest.exists():
-                    os.symlink(src, dest)
-                    logger.info("  + Linked %s", target)
 
     def run_bug(self, bug_id: str = "", desc: str = "", **kwargs):
         """執行 Bug 修復循環"""
-        self.prepare_workspace()
+        # 🏗️ 物理投影委託 (Decoupled Workspace Preparation)
+        self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
+        
         final_task_id = bug_id or kwargs.get("task_id", "unknown")
         
-        # 🛡️ 實例化狀態主權 (Genesis)
+        # 🛡️ 實例化狀態主權
         state = NexusState(task_id=final_task_id)
         state.metadata["task_description"] = desc
         state.metadata.update(kwargs.get("context", {}))
@@ -125,20 +107,16 @@ class NexusEngine:
         return self._execute_task_workflow(final_task_id, "nexus:bug", state=state)
 
     def run_feature(self, **kwargs) -> bool:
-        """執行功能開發任務 (v19 蜂群驅動 - 物理大成)。"""
-        self.prepare_workspace()
+        """執行功能開發任務"""
+        # 🏗️ 物理投影委託
+        self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
         
-        # 🛡️ 實例化主權 ID (Genesis)
         task_id = kwargs.get("task_id") or f"feat-{int(time.time())}"
         task_desc = kwargs.get("task", "")
-        # 🧪 物理具現：彈性化 context 吸收
         context = kwargs.get("context") or {}
         swarm_mode = kwargs.get("swarm_mode") or context.get("swarm_mode", False)
         
-        # ⚖️ 狀態導通：實例化物理主權
         state = NexusState(task_id=task_id)
-        
-        # 🧬 物理具現：注入進化元數據
         state.metadata["swarm_mode"] = swarm_mode
         state.metadata["task_description"] = task_desc
         state.metadata.update(context)
@@ -147,16 +125,19 @@ class NexusEngine:
 
     def run_test(self, test_id: str = "", **kwargs):
         """執行 Test 循環"""
-        self.prepare_workspace()
+        self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
         return self._execute_task_workflow(test_id, "nexus:test")
 
     def run_self_heal(self, mode: str = "quick", **kwargs):
         """執行 Self-heal 自我修復循環"""
-        self.prepare_workspace()
+        self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
         final_id = kwargs.get("task_id", f"heal-{int(time.time())}")
         return self._execute_task_workflow(final_id, f"nexus:self-heal:{mode}")
 
-    def execute_benchmark(self, framework: str, task_count: int, output_csv: str, swarm_mode: bool = False, **kwargs) -> Dict[str, Any]:
+    def run_research(self, **kwargs) -> bool:
+        """執行 SOTA 學術研究任務"""
+        # 研究類任務通常有獨立的工作空間，由 coordinator 統一觸發投影
+        self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
         """執行基準測試 (v22-ARC 擴張)"""
         if framework == "arc-agi":
             from nexus.engine.arc_simulation import ARCVisualReasoner
@@ -269,11 +250,12 @@ class NexusEngine:
         
         print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {forecast['est_tokens']}, ROI: {forecast['roi_score']:.2f}")
         
-        # 🛡️ 治理攔截：ROI < 0.5 自動拒絕並觸發 ASH
-        if forecast["roi_score"] < 0.5 or risk["reject_prob"] > 0.8:
-            print(f"🚨 [v20:Reject] Low ROI or High Risk! Triggering Adaptive Self-Healing...")
+        # 🛡️ 治理閘門：委託 GateEvaluator 進行 Phase D 判定
+        proceed, reason = self.gate_eval.should_proceed("D", forecast, risk)
+        if not proceed:
+            print(f"🚨 [Gate:Reject] {reason}! Triggering Adaptive Self-Healing...")
             repair_plan = self.ash_selector.trigger_ash(task_id, task_desc, str(risk))
-            state.metadata["last_rejection_reason"] = "low_roi_or_high_risk"
+            state.metadata["last_rejection_reason"] = reason
             state.metadata["ash_selected_strategy"] = repair_plan["selected_strategy"]
             self.state_io.save_global_state(state)
             return  # 任務預防性終止
@@ -370,8 +352,11 @@ class NexusEngine:
                     commands=verify_cmds
                 )
                 
-                # 💎 結晶化：將任務結果寫入治理鏈
-                self._crystallize(task_id, skill_id, passed, gate_results)
+                # 💎 結晶化：委託 MetricsAggregator 聚合數據
+                payload = self.metrics_agg.aggregate_crystallize_payload(
+                    task_id, skill_id, passed, gate_results, state.metadata
+                )
+                self._crystallize(payload)
                 
                 if passed:
                     logger.info("✅ [%s] Successful crystallization.", skill_id)
@@ -390,27 +375,20 @@ class NexusEngine:
             self.state_io.save_global_state(state)
             logger.info("⚓ [Nexus:Hardened] State persisted to .musestate")
 
-    def _crystallize(self, decision_id: str, skill_id: str, passed: bool, gate_results: List[dict]):
-        """寫入樣本事件到治理鏈"""
-        total = len(gate_results)
-        passed_count = sum(1 for r in gate_results if r.get("passed"))
-        pass_rate = (passed_count / total * 100.0) if total > 0 else 0.0
-
-        payload = {
-            "decision_id": decision_id,
-            "skill_id": skill_id,
-            "source": "pipeline.crystallize",
-            "pass": passed,
-            "regression_pass_rate": pass_rate,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "phase": "P2_OBS_WINDOW",
-            "metadata": {
-                "gate_count": total,
-                "gate_passed": passed_count,
-                "engine_version": "v17.1-hardened"
-            }
-        }
-        return payload
+    def _crystallize(self, payload: dict):
+        """
+        物理結晶化：將指標 Payload 寫入治理日誌與長效索引內容及對等。
+        """
+        # 1. 寫入 Event Log
+        log_path = self.project_root / ".nexus/metrics/skill_outcome_events.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a") as f:
+            import json
+            f.write(json.dumps(payload) + "\n")
+            
+        # 2. 通知 Reporter/Hub
+        self.reporter.report_outcome(payload)
+        logger.info("💎 [Crystallize] Outcome persisted for task: %s", payload.get("decision_id"))
 
     def receive_subagent_outcome(self, payload: Dict[str, Any], state: NexusState):
         """⚖️ AOS-P5.3: 收攏子代理執行期補丁與知識"""

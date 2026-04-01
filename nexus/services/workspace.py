@@ -14,6 +14,12 @@ FLASH_INGEST_BIN = os.getenv("MUSE_CORE_FLASH_INGEST", "")
 UV_BIN = shutil.which("uv") or "uv"
 
 
+
+class WorkspacePermissionError(Exception):
+    """當無法訪問專案根目錄或沙盒路徑時拋出。"""
+    pass
+
+
 class WorkspaceManager:
     """
     🧬 Lvl 17 Workspace Isolation Protocol (Commander Mode)
@@ -22,10 +28,38 @@ class WorkspaceManager:
 
     def __init__(self, project_root):
         self.project_root = Path(project_root).resolve()
+        
+        # 🛡️ Preflight: 檢查基礎權限 (Fail-Closed)
+        if not os.access(self.project_root, os.R_OK | os.W_OK):
+             raise WorkspacePermissionError(f"Sandbox projection requires RW access to {self.project_root}")
+             
         self.workspace_base = Path(os.getenv("NEXUS_WORKSPACE_BASE", "/tmp/codex-workspaces"))
         self.workspace_base.mkdir(parents=True, exist_ok=True)
         self.lock_file = Path(os.getenv("NEXUS_WORKSPACE_LOCK", "/tmp/codex-loop-merge.lock"))
         self.lock_file.touch(exist_ok=True)
+
+    def prepare_physical_sandbox(self, run_dir: Path) -> Path:
+        """
+        🏗️ 物理沙盒投影 (Phase 0 Refactor)
+        負責任務專屬目錄建立、Symbolic Links 與配置檔案投影。
+        """
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 1. 配置投影 (Copy)
+        for config_name in ['pytest.ini', 'pyproject.toml', '.env']:
+            src = self.project_root / config_name
+            if src.exists():
+                shutil.copy2(src, run_dir / config_name)
+        
+        # 2. 核心目錄 Symlink (Zero-copy link)
+        for dir_name in ['tests', '.venv']:
+            src = self.project_root / dir_name
+            tgt = run_dir / dir_name
+            if src.exists() and not tgt.exists():
+                tgt.symlink_to(src)
+        
+        return run_dir
 
     def lease(self, task_id: typing.Optional[str] = None,
             branch_name: typing.Optional[str] = None):

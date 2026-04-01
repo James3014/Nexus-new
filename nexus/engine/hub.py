@@ -15,6 +15,15 @@ class NexusHub:
         self.metrics_dir = self.project_root / ".nexus" / "metrics"
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
         
+    def report_outcome(self, payload: Dict[str, Any]):
+        """
+        ⚖️ 治理紀錄 (Report Outcome)
+        將任務結果回傳至中樞，作為後續 SOTA 優化與技能重塑的依據內容。
+        """
+        # Phase 1: 目前僅作為治理日誌之輔助入口，數據已由 coordinator 寫入實體日誌內容
+        logger.info("📡 [NexusHub] Logic report outcome received for decision: %s", payload.get("decision_id"))
+        return True
+
     def optimize_skills(self, max_items: int = 50, rebound: bool = False) -> Dict[str, Any]:
         """Processes the optimization queue and updates policy memory."""
         queue_path = self.metrics_dir / "skills_optimization_queue.json"

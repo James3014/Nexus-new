@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from nexus.health.diagnostics import HealthDiagnostics
+from nexus.health.evaluator import HealthEvaluator
 from nexus.health.executor import RepairExecutor
 from nexus.health.planner import RepairPlanner
 from nexus.health.scoring import HealthScorer
 from nexus.health.service import SelfHealService
+
+
+logger = logging.getLogger(__name__)
+
+# 🧪 全域評估器實例 (Singleton Pattern for Phase 1)
+_health_eval = HealthEvaluator()
 
 
 CHECK_LEVEL_ALIASES = {
@@ -87,7 +95,7 @@ def normalize_check_level(level: str) -> str:
 
 def _collect_snapshot(engine):
     state = engine.state_io.load_global_state()
-    return HealthScorer.apply_snapshot(state)
+    return _health_eval.evaluate_state(state).get("snapshot")
 
 def _build_snapshot_result(normalized: str, snapshot) -> SelfCheckResult:
     return SelfCheckResult(
@@ -144,8 +152,8 @@ def run_self_check(engine, level: str = "standard") -> SelfCheckResult:
 
 def _diagnose_and_plan(engine):
     state = engine.state_io.load_global_state()
-    before = HealthScorer.apply_snapshot(state)
-    diagnosis = HealthDiagnostics.diagnose(state, before)
+    before = _health_eval.evaluate_state(state).get("snapshot", {})
+    diagnosis = _health_eval.diagnose_drift(state, before)
     plan = RepairPlanner(Path(engine.project_root)).build_plan(diagnosis, state=state)
     planned_actions = [action.id for action in plan.actions]
     phase_route = list(getattr(plan, "phase_route", []))
@@ -253,7 +261,7 @@ def _collect_self_healing(metadata: dict) -> dict[str, object]:
 
 def run_health_explain(engine) -> HealthExplainResult:
     state = engine.state_io.load_global_state()
-    snapshot = HealthScorer.apply_snapshot(state)
+    snapshot = _health_eval.evaluate_state(state).get("snapshot")
     metadata = state.metadata or {}
     
     phase_health = _gather_phase_health(state)
