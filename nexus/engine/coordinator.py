@@ -38,6 +38,7 @@ from scripts.engine.nexus_transaction import TransactionManager
 # ⚖️ 治理中心組件 (Governance Matrix)
 from nexus.core.gate_evaluator import GateEvaluator, AcceptancePolicy
 from nexus.core.metrics_aggregator import MetricsAggregator
+from nexus.core.policy_loader import PolicyLoader
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +67,15 @@ class NexusEngine:
         self.state_io = StateIO(self.project_root, run_dir=self.run_dir)
         self.workspace_mgr = WorkspaceManager(self.project_root)
         
-        # Phase 1: 治理閘門與指標解耦
-        self.policy = AcceptancePolicy()
+        # Phase 2B: 治理政策外部化 (Environment-Aware YAML Loader)
+        env = os.getenv("NEXUS_ENV", "dev") # 預設為 dev
+        self.policy = PolicyLoader.load(str(self.project_root), env=env)
         self.gate_eval = GateEvaluator(self.policy)
         self.metrics_agg = MetricsAggregator()
 
         self.validator = NexusHardenedValidator()
         self.latent_forecaster = get_latent_forecaster(str(self.project_root))
-        self.ash_selector = get_self_healing_selector(str(self.project_root))
+        self.ash_selector = get_self_healing_selector(str(self.project_root), env=env)
         self.memory = MemoryService(self.project_root)
         self.hub = NexusHub(self.project_root)
         
@@ -242,13 +244,25 @@ class NexusEngine:
             
         # --- 🧬 v20 Phase 0: Latent Forecast (JEPA Zero-token) ---
         task_desc = state.metadata.get("task_description", "Unknown Task")
-        forecast = self.latent_forecaster.forecast_roi(task_desc)
-        risk = self.latent_forecaster.predict_risk(task_desc)
+        
+        # 🛡️ 治理對位：支援元數據 Overdrive (用於測試與手動干預)
+        forecast = {
+            "est_tokens": state.metadata.get("forecast_tokens", 0),
+            "roi_score": state.metadata.get("roi_score", 0.0)
+        }
+        risk = {
+            "reject_prob": state.metadata.get("reject_prob", 0.0)
+        }
+        
+        # 若未提供 Overdrive，則由預測器進行物理推論
+        if forecast["roi_score"] == 0.0:
+            forecast = self.latent_forecaster.forecast_roi(task_desc)
+            risk = self.latent_forecaster.predict_risk(task_desc)
         
         state.metadata["forecast_tokens"] = forecast["est_tokens"]
         state.metadata["forecast_roi"] = forecast["roi_score"]
         
-        print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {forecast['est_tokens']}, ROI: {forecast['roi_score']:.2f}")
+        print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {forecast.get('est_tokens', 0)}, ROI: {forecast.get('roi_score', 0.0):.2f}")
         
         # 🛡️ 治理閘門：委託 GateEvaluator 進行 Phase D 判定
         proceed, reason = self.gate_eval.should_proceed("D", forecast, risk)
