@@ -72,6 +72,8 @@ def swarm(wave, features):
         _get_service().swarm_wave1()
     elif wave == 2:
         _get_service().swarm_wave2()
+    elif wave == 3:
+        _get_service().swarm_wave3()
     else:
         click.echo(f"⚠️ Wave {wave} not yet implemented.")
 

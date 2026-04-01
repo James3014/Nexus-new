@@ -1,9 +1,9 @@
 # v23 X-Ray Full Analysis Report
 
 ## Summary
-v23 X-Ray Cross-Repo Scan complete. Symbols: 60502 | Crossings: 67444
+v23 X-Ray Cross-Repo Scan complete. Symbols: 60584 | Crossings: 67531
 
-## Symbols (60502)
+## Symbols (60584)
 - nexus::hello.py::hello
 - nexus::test_stage2_policy.py::run_test_case
 - nexus::ingest.py::ingest_task_result
@@ -54,9 +54,9 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 60502 | Crossings: 67444
 - nexus::SWE-bench/tests/test_cli.py::test_smoke_test
 - nexus::SWE-bench/tests/test_cli.py::test_one_instance
 - nexus::SWE-bench/tests/test_harness_utils.py::UtilTests
-- ... and 60452 more
+- ... and 60534 more
 
-## Crossings (67444)
+## Crossings (67531)
 - nexus::test_stage2_policy.py -> sys
 - nexus::test_stage2_policy.py -> tempfile
 - nexus::test_stage2_policy.py -> json
@@ -107,9 +107,9 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 60502 | Crossings: 67444
 - nexus::live_guardrail_test.py -> nexus.core.planner_auditor
 - nexus::live_guardrail_test.py -> nexus.health.scoring
 - nexus::live_guardrail_test.py -> nexus.core.state_contracts
-- ... and 67394 more
+- ... and 67481 more
 
-## Risks Detected (5108)
+## Risks Detected (5110)
 ⚠️ nexus::physical_verify.py: Potential subprocess execution detected.
 ⚠️ nexus::physical_verify.py: Potential subprocess execution detected.
 ⚠️ nexus::SWE-bench/tests/test_collect_cli.py: Potential subprocess execution detected.
@@ -4403,9 +4403,6 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 60502 | Crossings: 67444
 ⚠️ nexus::nexus/core/workspace_manager.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/core/workspace_manager.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/core/workspace_manager.py: Potential subprocess execution detected.
-⚠️ nexus::nexus/core/skill_distiller.py: Potential subprocess execution detected.
-⚠️ nexus::nexus/core/skill_distiller.py: Potential subprocess execution detected.
-⚠️ nexus::nexus/core/skill_distiller.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/core/commander.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/security/tls_provider.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/health/sandbox.py: Potential subprocess execution detected.
@@ -4433,6 +4430,9 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 60502 | Crossings: 67444
 ⚠️ nexus::nexus/services/gateway.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/services/reporter.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/services/patcher.py: Potential subprocess execution detected.
+⚠️ nexus::nexus/services/cli_commands_service.py: Potential subprocess execution detected.
+⚠️ nexus::nexus/services/cli_commands_service.py: Potential subprocess execution detected.
+⚠️ nexus::nexus/services/cli_commands_service.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/services/cli_commands_service.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/services/workspace.py: Potential subprocess execution detected.
 ⚠️ nexus::nexus/services/workspace.py: Potential subprocess execution detected.
@@ -4658,11 +4658,13 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 60502 | Crossings: 67444
 ⚠️ nexus::scripts/ops/phase6_research.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/ops/phase6_research.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/ops/phase7_autotune_loop.py: Potential subprocess execution detected.
+⚠️ nexus::scripts/ops/sentinel_reboot.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/ops/ci_gate.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/ops/ci_smoke_test.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/ops/review_proposal.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/ops/review_proposal.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/ops/review_proposal.py: Potential subprocess execution detected.
+⚠️ nexus::scripts/ops/daemon.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/engine/node_launcher.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/engine/nexus_transaction.py: Potential subprocess execution detected.
 ⚠️ nexus::scripts/engine/nexus_transaction.py: Potential subprocess execution detected.

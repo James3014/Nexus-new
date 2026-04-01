@@ -1,0 +1,37 @@
+# 🛡️ [Wave 3] Nexus RBAC Sovereignty Matrix (v23 Hardened)
+
+roles:
+  shogun:
+    id: R0
+    description: "Supreme Commander (Nexus CLI Owner)"
+    permissions:
+      - "*" # Full administrative access
+    
+  daimyo:
+    id: R1
+    description: "Orchestrator (Phase Managers)"
+    permissions:
+      - "decompose_mission"
+      - "read_spec"
+      - "write_task_manifest"
+      
+  samurai:
+    id: R2
+    description: "Agent Executors (Code Implementers)"
+    permissions:
+      - "read_file"
+      - "write_file"
+      - "run_benchmark"
+      - "self_heal"
+
+  monitor:
+    id: R3
+    description: "Observability Sentinel (HUD/Metrics)"
+    permissions:
+      - "read_metrics"
+      - "update_hud"
+
+governance:
+  default_policy: "DENY_ALL"
+  entropy_threshold: 4.5
+  aos_lock_baseline: 155.0
