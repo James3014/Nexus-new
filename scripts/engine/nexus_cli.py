@@ -100,8 +100,22 @@ def acceptance_check(window):
 @click.option("--refresh", default=2)
 @click.option("--daemon", is_flag=True)
 def hud(refresh, daemon):
-    """📊 [HUD] 啟動底行實時監控 (v23 Hardened)"""
+    """📊 [HUD] 鎖定底行狀態顯示 (v23 永久化)"""
     _get_service().hud(refresh, daemon)
+
+@nexus.command(name="nexus:release")
+@click.option("--tag", required=True)
+@click.option("--aos", required=True, type=int)
+def release(tag, aos):
+    """🚀 [Release] 正式發布掛籤與 SOTA 結晶封裝 (v23 Final Gate)"""
+    _get_service().release(tag, aos)
+
+@nexus.command(name="nexus:release")
+@click.option("--tag", required=True)
+@click.option("--aos", required=True, type=int)
+def release(tag, aos):
+    """🚀 [Release] 正式發布掛籤與 SOTA 結晶封裝 (v23 Final Gate)"""
+    _get_service().release(tag, aos)
 
 @nexus.command(name="nexus:spec-lock")
 @click.argument("file_path")

@@ -1,9 +1,9 @@
 # v23 X-Ray Full Analysis Report
 
 ## Summary
-v23 X-Ray Cross-Repo Scan complete. Symbols: 60584 | Crossings: 67531
+v23 X-Ray Cross-Repo Scan complete. Symbols: 60585 | Crossings: 67532
 
-## Symbols (60584)
+## Symbols (60585)
 - nexus::hello.py::hello
 - nexus::test_stage2_policy.py::run_test_case
 - nexus::ingest.py::ingest_task_result
@@ -54,9 +54,9 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 60584 | Crossings: 67531
 - nexus::SWE-bench/tests/test_cli.py::test_smoke_test
 - nexus::SWE-bench/tests/test_cli.py::test_one_instance
 - nexus::SWE-bench/tests/test_harness_utils.py::UtilTests
-- ... and 60534 more
+- ... and 60535 more
 
-## Crossings (67531)
+## Crossings (67532)
 - nexus::test_stage2_policy.py -> sys
 - nexus::test_stage2_policy.py -> tempfile
 - nexus::test_stage2_policy.py -> json
@@ -107,7 +107,7 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 60584 | Crossings: 67531
 - nexus::live_guardrail_test.py -> nexus.core.planner_auditor
 - nexus::live_guardrail_test.py -> nexus.health.scoring
 - nexus::live_guardrail_test.py -> nexus.core.state_contracts
-- ... and 67481 more
+- ... and 67482 more
 
 ## Risks Detected (5110)
 ⚠️ nexus::physical_verify.py: Potential subprocess execution detected.

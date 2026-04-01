@@ -35,17 +35,38 @@ class SentinelReboot:
     def _is_running(self, name: str) -> bool:
         # 🚀 行動 20: 檢測進程 (使用 pgrep 簡化檢查)
         try:
+            # 排除 grep 與 sentinel 本身指令內容內容及性能分析內容
             output = subprocess.check_output(["pgrep", "-f", name])
-            return len(output) > 0
+            pids = output.decode().strip().split("\n")
+            # 排除當前進程 PID
+            my_pid = str(os.getpid())
+            active_pids = [p for p in pids if p != my_pid]
+            return len(active_pids) > 0
         except subprocess.CalledProcessError:
             return False
 
     def _respawn(self, path: str):
         full_path = self.repo_root / path
+        logger.info(f"🛡️ [Sentinel] Attempting respawn: {full_path}")
         if full_path.exists():
-            subprocess.Popen([sys.executable, str(full_path)])
+            subprocess.Popen([sys.executable, str(full_path)], 
+                             stdout=subprocess.DEVNULL, 
+                             stderr=subprocess.DEVNULL,
+                             start_new_session=True)
             logger.info(f"🛡️ [Sentinel] Successfully respawned {path}.")
+        else:
+            logger.error(f"🛡️ [Sentinel] FILE NOT FOUND: {full_path}")
 
 if __name__ == "__main__":
-    sentinel = SentinelReboot(Path("."))
+    # 使用絕對路徑
+    root = Path(__file__).resolve().parents[2]
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[
+            logging.FileHandler(root / ".nexus/metrics/sentinel.log"),
+            logging.StreamHandler()
+        ]
+    )
+    sentinel = SentinelReboot(root)
     sentinel.monitor_and_respawn()

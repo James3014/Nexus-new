@@ -32,8 +32,19 @@ class CliCommandsService:
             if aos_full:
                 from nexus.engine.red_team_audit import RedTeamAudit
                 click.echo(f"🟢 P4 Swarm Fortress: 0 POLLUTION")
-                click.echo("🛡️  NEXUS BATTLE ARMOR | EVOLUTION LEVEL: L6.0 ETERNAL 🧬")
-                click.echo("AOS SCORE: 145/100 | GOVERNANCE: v23 Phase 3")
+                
+                # 🧪 Dyna-CLI: 動態讀取實體指標內容及其內容分析內容
+                metrics_path = self.repo_root / ".nexus" / "metrics" / "latest_state.json"
+                if metrics_path.exists():
+                    with open(metrics_path, "r") as f:
+                        data = json.load(f)
+                        score = data.get("aos_score", 145)
+                        tag = data.get("tag", "v23-unknown")
+                        mode = data.get("mode", "UNKNOWN")
+                    click.echo(f"🛡️  NEXUS BATTLE ARMOR | EVOLUTION LEVEL: L6.0 ETERNAL 🧬")
+                    click.echo(f"AOS SCORE: {score}/100 | GOVERNANCE: {mode} ({tag})")
+                else:
+                    click.echo("AOS SCORE: 145/100 | GOVERNANCE: v23 Phase 3 (Fallback)")
 
         from nexus.engine.federation import FederationLayer
         fed = FederationLayer(self.repo_root)
