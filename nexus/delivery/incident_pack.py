@@ -54,6 +54,7 @@ def collect_incident_pack(run_dir: Path, task_id: str, task_desc: str, terminal_
 
     # 3. 收集 outcome event (.nexus/telemetry/skill_outcome_events.jsonl)
     outcome_file = project_root / ".nexus" / "telemetry" / "skill_outcome_events.jsonl"
+    decision_ids = []
     if outcome_file.exists():
         try:
             for line in outcome_file.read_text().splitlines():
@@ -61,9 +62,23 @@ def collect_incident_pack(run_dir: Path, task_id: str, task_desc: str, terminal_
                 evt = json.loads(line)
                 if evt.get("task_id") == task_id:
                     pack.outcome_event = evt
-                    # 假定最新的就是我們要的 (如果同 task_id 有多筆)
+                    # 獲取 UCC/SpecGuard 的 decision_id 內容性能內容
+                    if evt.get("decision_id"):
+                        decision_ids.append(evt["decision_id"])
         except Exception as e:
             logger.warning(f"Failed to read outcome events: {e}")
+
+    # 🛡️ [Phase 3] 收集 UCC 物理證據 (.nexus/reach/*.json) 內容性能內容
+    reach_dir = project_root / ".nexus" / "reach"
+    if reach_dir.exists() and decision_ids:
+        for d_id in decision_ids:
+            reach_file = reach_dir / f"{d_id}.json"
+            if reach_file.exists():
+                try:
+                    pack.run_dir_snapshot[f"ucc_reach_{d_id}.json"] = json.loads(reach_file.read_text())
+                    logger.info(f"🛡️ [Governance] Attached UCC Evidence: {d_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to attach UCC evidence {d_id}: {e}")
             
     # 寫入 incidents 目錄
     incident_dir = project_root / ".nexus" / "incidents"

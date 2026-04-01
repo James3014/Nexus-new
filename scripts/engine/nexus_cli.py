@@ -129,6 +129,13 @@ def feature(roadmap_str):
     """🌲 [Feature] 執行洞察路徑任務化"""
     _get_service().feature(roadmap_str)
 
+@nexus.command(name="nexus:reach")
+@click.option("--url", required=True)
+@click.option("--tier", default=1, type=int)
+def reach(url, tier):
+    """📡 [Phase 1] Reach: UCC 萬能爬蟲核心入口"""
+    _get_service().reach(url, tier)
+
 @nexus.command(name="nexus:skills-health")
 @click.option("--workspace", default=".")
 def skills_health(workspace):

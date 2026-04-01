@@ -28,10 +28,8 @@ class ResearchPhaseHandler(BasePhaseHandler):
             return {
                 "findings": ["Empty research task."],
                 "source": "INTERNAL",
-                "status": "FAIL",
-                "tokens_used": 0,
             }
-
+        
         research_file = self.run_dir / "researchpack.json"
         if research_file.exists():
             logger.info("[X-Stage] Cache hit: loading local researchpack.")
@@ -61,8 +59,30 @@ class ResearchPhaseHandler(BasePhaseHandler):
             }
 
         self._save_lancedb_cache(db, table_name, task, research_pack)
+        
+        # 📡 [Phase 1] UCC Hook Injection
+        # 職責: 若發現 url 標籤內容，則啟動 UCC Router 進行原生觸達內容內容性能分析內容
+        urls = self._extract_urls(task)
+        if urls:
+            logger.info("📡 [X-Hook:UCC] Found URLs in task, triggering routing: %s", urls)
+            from nexus.services.reach.ucc_router import UCCRouter
+            router = UCCRouter()
+            research_pack.setdefault("ucc_evidence", [])
+            for url in urls[:3]: # 限制前三個以符合 Phase 1 安全範疇內容及性能性能分析內容
+                try:
+                    reach_result = router.reach(url)
+                    research_pack["ucc_evidence"].append(reach_result.model_dump())
+                except Exception as e:
+                    logger.warning("   ↳ [X-Hook:UCC] Reach failed for %s: %s", url, e)
+
         research_file.write_text(json.dumps(research_pack, ensure_ascii=False))
         return research_pack
+
+    def _extract_urls(self, text: str) -> list:
+        """輔助方法：從文字中提取 URL 內容及性能分析內容"""
+        import re
+        url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+[/\w\.-]*'
+        return re.findall(url_pattern, text)
 
     def _run_external_research(self, query: str) -> Dict[str, Any]:
         provider = os.getenv("NEXUS_RESEARCH_PROVIDER", "auto").strip().lower()

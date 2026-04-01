@@ -12,9 +12,13 @@ from nexus.learning.skill_exchange import SkillExchange
 from nexus.learning.retrieval_audit import log_retrieval_audit
 from nexus.learning.search_strategies import KeywordSearchStrategy, SemanticSearchStrategy
 from nexus.core.errors import NexusError
+from datetime import datetime
+from nexus.services.reach.ucc_router import ReachResult
 
 EMBEDDING_MODEL_ID = "all-MiniLM-L6-v2"
 EMBEDDING_MODEL_VERSION = "v2.0"  # 語義版本，model 換版本時手動遞增
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeIndex:
     def __init__(self, workspace_root: Path, use_embedding: bool = False):
@@ -45,6 +49,18 @@ class KnowledgeIndex:
             except ImportError:
                 self.use_embedding = False
                 logging.getLogger(__name__).warning("⚠️ sentence-transformers 未安裝，語義搜尋已降級。")
+        
+        # 🔗 Phase 2.2: LanceDB 實體對位內容及性能性能性能
+        self.db_path = workspace_root / ".nexus" / "learning" / "lancedb"
+        self.db = None
+        try:
+            import lance
+            self.db = lance.connect(str(self.db_path))
+            logger.info("🧠 [KnowledgeIndex] LanceDB connected at %s", self.db_path)
+        except ImportError:
+            logger.warning("⚠️ [KnowledgeIndex] lancedb 未安裝，證據索引功能將降級為 Stub 模式。")
+        except Exception as e:
+            logger.error("🛑 [KnowledgeIndex] LanceDB connection failed: %s", e)
                 
     def _tokenize(self, text: str) -> set:
         if not text:
@@ -215,3 +231,67 @@ class KnowledgeIndex:
             logging.getLogger(__name__).warning("evidence_extraction_failed task_id=unknown skill_id=%s trace_id=%s: %s", skill_id, trace_id, exc)
             
         return None
+
+    def index_reach_evidence(self, reach_results: List[Dict[str, Any] | ReachResult]):
+        """
+        🧬 [Phase 2.2] 僅索引高品質 UCC 證據內容及性能分析內容及其內容內容
+        守則: 僅索引 confidence > 0.7 且 markdown 非空者內容內容。不執行權重回寫內容性能。
+        """
+        if not self.db:
+            logger.warning("⚠️ [Index:Skip] LanceDB unavailable, skipping indexing.")
+            return
+
+        import pandas as pd
+        valid_data = []
+        
+        for item in reach_results:
+            # 兼容 dict 與 ReachResult 物件內容與性能分析內容
+            res = item if isinstance(item, dict) else item.model_dump()
+            
+            if res.get("confidence", 0) > 0.7 and res.get("markdown"):
+                embedding = [0.0] * 384 # 預設零向量，若 SemanticStrategy 可用則調用內容性能性能
+                if self.semantic_strategy:
+                    try:
+                        embedding = self.semantic_strategy.model.encode(res["markdown"]).tolist()
+                    except: pass
+                
+                valid_data.append({
+                    "decision_id": res.get("decision_id"),
+                    "url": res.get("url"),
+                    "content": res.get("markdown"),
+                    "structured_data": json.dumps(res.get("structured_data") or {}),
+                    "vector": embedding,
+                    "resolver": res.get("resolver"),
+                    "confidence": res.get("confidence"),
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+
+        if valid_data:
+            try:
+                df = pd.DataFrame(valid_data)
+                table_name = "reach_evidence"
+                if table_name in self.db.table_names():
+                    self.db.table(table_name).add(df)
+                else:
+                    self.db.create_table(table_name, data=df)
+                logger.info("✅ [KnowledgeIndex] Indexed %d new evidence items to LanceDB.", len(valid_data))
+            except Exception as e:
+                logger.error("🛑 [KnowledgeIndex] Failed to write to LanceDB: %s", e)
+
+    def query_similar_evidence(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        🧬 [Phase 2.2] C 階段語義檢索入口內容及性能分析內容及其內容內容
+        """
+        if not self.db or "reach_evidence" not in self.db.table_names():
+            return []
+
+        try:
+            embedding = [0.0] * 384
+            if self.semantic_strategy:
+                embedding = self.semantic_strategy.model.encode(query).tolist()
+            
+            results = self.db.table("reach_evidence").search(embedding).limit(top_k).to_list()
+            return results
+        except Exception as e:
+            logger.error("🛑 [KnowledgeIndex] Query failed: %s", e)
+            return []

@@ -187,7 +187,7 @@ class CliCommandsService:
         sys.argv = ["nexus_cli.py", "--window", str(window)]
         return acceptance_main()
 
-        def _acquire_maintenance_lock(self):
+    def _acquire_maintenance_lock(self):
         lock_path = self.repo_root / ".nexus" / "maintenance.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text(datetime.now(timezone.utc).isoformat())
@@ -321,7 +321,7 @@ class CliCommandsService:
             click.echo(f"  -> {len(list(crystallized_dir.glob('*.md')))} atomic skills snapshotted to {snapshot_dir}. 🟢")
         
         # 4. 更新最新指標狀態
-                metrics_file = self.repo_root / ".nexus" / "metrics" / "latest_state.json"
+        metrics_file = self.repo_root / ".nexus" / "metrics" / "latest_state.json"
         
         # 🧪 [Atomic-Write] 徹底解決 Serena 指標寫入衝突內容內容及性能內容性能
         import tempfile
@@ -341,3 +341,20 @@ class CliCommandsService:
             raise
         
         click.echo(f"🏆 [RELEASE COMPLETE] Nexus Singularity OS {tag} is now OFFICIAL.")
+
+    def reach(self, url: str, tier: int = 1):
+        """📡 [Phase 1] Reach: UCC 萬能爬蟲核心入口"""
+        from nexus.services.reach.ucc_router import UCCRouter
+        
+        click.echo(f"📡 [Reach] Initiating UCC for: {url} (Tier: {tier})")
+        router = UCCRouter()
+        result = router.reach(url, tier)
+        
+        # 🛡️ 物理持久化 (已由 UCCRouter 內部處理)
+        reach_dir = self.repo_root / ".nexus" / "reach"
+        reach_dir.mkdir(parents=True, exist_ok=True)
+        
+        click.echo(f"✅ [Reach:Success] ID: {result.decision_id} | Resolver: {result.resolver}")
+        click.echo(f"   ↳ Result stored in .nexus/reach/{result.decision_id}.json")
+        
+        return result.model_dump()

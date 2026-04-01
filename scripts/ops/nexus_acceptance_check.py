@@ -191,6 +191,47 @@ def _evaluate_learning_promotion(
     )
 
 
+def _evaluate_ucc_truth_efficiency(
+    outcome_rows: List[Dict[str, Any]],
+    *,
+    window: int,
+    reach_min: float = 70.0,
+) -> CriterionResult:
+    """[Phase 3] UCC Truth Efficiency: Reach Success, Veto effectiveness, and Learning growth."""
+    recent, _ = _window_pair(outcome_rows, window)
+    
+    # 1. Reach Success Rate
+    reach_events = [r for r in recent if str(r.get("skill_id", "")).startswith("reach.")]
+    reach_success = sum(1 for r in reach_events if bool(r.get("pass", False)))
+    reach_rate = _pct(reach_success, len(reach_events))
+    
+    # 2. Doc Veto Effectiveness
+    veto_events = [r for r in recent if r.get("skill_id") == "spec_guard_v2"]
+    veto_count = sum(1 for r in veto_events if r.get("status") == "VETOED")
+    
+    # 3. Learning & Repair Intel Growth
+    indexed_events = [r for r in recent if r.get("source") == "pipeline.crystallize" and r.get("indexed_count", 0) > 0]
+    indexed_total = sum(int(r.get("indexed_count", 0)) for r in indexed_events)
+    
+    repair_intel_events = [r for r in recent if r.get("skill_id") == "self_healing_research"]
+    intel_total = len(repair_intel_events)
+    
+    passed = len(reach_events) == 0 or reach_rate >= reach_min
+    
+    return CriterionResult(
+        name="ucc_truth_efficiency",
+        passed=passed,
+        detail={
+            "reach_success_rate": f"{reach_rate}%",
+            "reach_events_count": len(reach_events),
+            "doc_veto_detected": veto_count,
+            "evidence_indexed_total": indexed_total,
+            "repair_intel_available": intel_total,
+            "threshold_reach": reach_min
+        }
+    )
+
+
 def _write_markdown(report: Dict[str, Any], path: Path) -> None:
     lines = [
         "# Nexus Acceptance Check (Hardened)",
@@ -257,13 +298,15 @@ def main():
         outcome_rows, window=args.window, pr_min=args.pr_min, nrh_min=args.nrh_min, mode=args.learning_gate_mode
     )
     
-    gate_passed = all(c.passed for c in checks + [learning_check])
+    ucc_check = _evaluate_ucc_truth_efficiency(all_out, window=args.window)
+    
+    gate_passed = all(c.passed for c in checks + [learning_check, ucc_check])
     
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if gate_passed else "FAIL",
         "gate_passed": gate_passed,
-        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks + [learning_check]],
+        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks + [learning_check, ucc_check]],
     }
     
     (output_dir / "acceptance_check.json").write_text(json.dumps(report, indent=2))
