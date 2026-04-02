@@ -1,0 +1,23 @@
+warning: No `requires-python` value found in the workspace. Defaulting to `>=3.12`.
+Traceback (most recent call last):
+  File "/Users/jameschen/Workspace/nexus/.venv/bin/mlx_lm.server", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages/mlx_lm/server.py", line 2025, in main
+    run(args.host, args.port, ModelProvider(args))
+                              ^^^^^^^^^^^^^^^^^^^
+  File "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages/mlx_lm/server.py", line 522, in __init__
+    self.load(self.cli_args.model, draft_model_path="default_model")
+  File "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages/mlx_lm/server.py", line 556, in load
+    model, tokenizer = load(
+                       ^^^^^
+  File "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages/mlx_lm/utils.py", line 479, in load
+    model, config = load_model(model_path, lazy, model_config=model_config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages/mlx_lm/utils.py", line 300, in load_model
+    config = load_config(model_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jameschen/Workspace/nexus/.venv/lib/python3.12/site-packages/mlx_lm/utils.py", line 252, in load_config
+    with open(model_path / "config.json", "r") as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotADirectoryError: [Errno 20] Not a directory: '/Users/jameschen/nexus/models/27B.gguf/config.json'

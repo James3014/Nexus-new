@@ -1,3 +1,4 @@
+from pathlib import Path
 from nexus.pilot_cli.session import PilotSession
 from nexus.pilot_cli.onboarding import build_session_from_answers
 from nexus.pilot_cli.onboarding import prompt_for_missing_session_fields
@@ -41,7 +42,6 @@ def test_onboarding_builds_session_from_answers():
 
 def test_prompt_for_missing_session_fields_collects_answers():
     import tempfile
-    from pathlib import Path
 
     config_dir = Path(tempfile.mkdtemp(prefix="nexus-pilot-test-"))
     import os

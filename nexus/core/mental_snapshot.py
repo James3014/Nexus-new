@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import hashlib
-from typing import Dict, Any, Optional
 from nexus.core.state_contracts import NexusState
 
 class MentalSnapshot:

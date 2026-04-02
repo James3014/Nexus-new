@@ -1,10 +1,10 @@
+from pathlib import Path
 """
 PR-04 TDD: Bug/Feature 共用 Pipeline 等價驗證
 確保 run_bug/run_feature 都委派給同一個 _run_task_pipeline，不含重複分支邏輯。
 """
 import pytest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 from nexus.engine.coordinator import NexusEngine
 
 

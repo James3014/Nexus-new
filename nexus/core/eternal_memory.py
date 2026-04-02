@@ -1,8 +1,8 @@
+from pathlib import Path
 #!/usr/bin/env python3
 import json
 import os
 import asyncio
-from pathlib import Path
 from cryptography.fernet import Fernet
 import arweave
 

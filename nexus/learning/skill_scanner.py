@@ -1,3 +1,4 @@
+from typing import Any, Dict, List, Optional, Tuple
 """Security scanner for learned skill artifacts.
 
 Scans SKILL.md content for 4 threat vectors:
@@ -11,7 +12,6 @@ Inspired by skill-creator-advanced's compatibility/trust audit layer.
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Tuple
 from datetime import datetime, timezone
 from nexus.core.event_bus import NexusEventBus
 

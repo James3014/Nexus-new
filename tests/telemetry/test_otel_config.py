@@ -1,7 +1,7 @@
+from pathlib import Path
 import pytest
 import os
 import json
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 from nexus.telemetry.otel_config import init_otel, JsonlSpanExporter
 from opentelemetry import trace

@@ -1,3 +1,4 @@
+from typing import Any, Dict, List, Optional, Tuple
 """
 OpenTelemetry TracerProvider 初始化
 支援三種模式：
@@ -11,7 +12,6 @@ import json
 import logging
 import pathlib
 import typing
-from typing import Optional, Dict, Any
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider, ReadableSpan

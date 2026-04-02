@@ -1,8 +1,8 @@
+from pathlib import Path
 """Unit tests for P2 OpenTelemetry integration."""
 
 import json
 import tempfile
-from pathlib import Path
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider

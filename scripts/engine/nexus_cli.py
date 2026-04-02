@@ -41,11 +41,13 @@ def probe(test_spec):
 @nexus.command(name="nexus:benchmark")
 @click.option("--dataset", default="historical_regression")
 @click.option("--repeat", default=1)
+@click.option("--tasks", "tasks_count", default=10)
+@click.option("--output", "output_csv", default=None)
 @click.option("--dual-core-physical", is_flag=True)
 @click.option("--ablation", is_flag=True)
-def benchmark(dataset, repeat, dual_core_physical, ablation):
-    """🚀 [Phase E/V] AOS 消融實驗 (Service 化)"""
-    BenchmarkService(REPO_ROOT).run(dataset, repeat, dual_core_physical, ablation)
+def benchmark(dataset, repeat, tasks_count, output_csv, dual_core_physical, ablation):
+    """🚀 [Phase E/V] AOS 消融實驗 (Service 化)內容、內容及性能內容性能性能"""
+    BenchmarkService(REPO_ROOT).run(dataset, repeat, dual_core_physical, ablation, tasks_count, output_csv)
     click.echo("✅ [Benchmark] Complete.")
 
 @nexus.command(name="nexus:xray")

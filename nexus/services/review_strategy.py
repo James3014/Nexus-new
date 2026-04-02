@@ -1,3 +1,6 @@
+from __future__ import annotations
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Tuple
 """
 R04: Reviewer 策略模式 (Strategy Pattern)。
 
@@ -6,12 +9,10 @@ R04: Reviewer 策略模式 (Strategy Pattern)。
 - ConversationReviewStrategy：處理對話上下文的審核
 - ReviewerFactory：根據 mode 動態掛載對應策略
 """
-from __future__ import annotations
 
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     pass  # 避免循環 import，reviewer 實例以 Any 傳入
@@ -140,7 +141,6 @@ class CodeReviewStrategy(ReviewStrategy):
     def _get_files_and_diff(self, reviewer: Any, manual_files: Optional[list]) -> tuple:
         """取得審核的檔案列表與 diff 文字。"""
         if manual_files:
-            from pathlib import Path
             code_files = [str(Path(f).absolute()) for f in manual_files if Path(f).is_file()]
             return code_files, "Manual Review Mode"
         files, diff_text = reviewer.git.get_changes(reviewer.scope, reviewer.base_ref)

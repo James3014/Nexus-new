@@ -1,5 +1,5 @@
-from dependency_injector import containers, providers
 from pathlib import Path
+from dependency_injector import containers, providers
 
 # 延遲導入服務，避免循環依賴
 from nexus.services.git import GitManager

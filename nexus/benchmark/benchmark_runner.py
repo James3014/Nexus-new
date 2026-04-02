@@ -1,8 +1,8 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import time
 import logging
-from pathlib import Path
-from typing import Dict, Any, Optional
 
 from nexus.benchmark.workspace import BenchmarkWorkspace
 from nexus.benchmark.csv_reporter import BenchmarkCsvReporter

@@ -1,5 +1,5 @@
-import json
 from pathlib import Path
+import json
 from dataclasses import fields
 
 from nexus.core.outcome_schema import NexusOutcomeV2, _ALLOWED_FIELDS_V2, OUTCOME_SCHEMA_VERSION

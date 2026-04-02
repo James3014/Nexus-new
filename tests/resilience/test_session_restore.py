@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import subprocess
-from pathlib import Path
 from nexus.core.session_persistence import SessionPersistence
 
 def test_tmux_session_creation_and_check():

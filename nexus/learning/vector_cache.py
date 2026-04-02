@@ -1,8 +1,8 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 import lancedb
 import pandas as pd
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class VectorCache:
             # 🛡️ 物理硬化：雙重對位 (Schema + Data) 封殺類型推斷錯誤
             schema = pa.schema([
                 pa.field("id", pa.string()),
-                pa.field("vector", pa.fixed_size_list(pa.float32(), 1024)),
+                pa.field("vector", pa.list_(pa.float32(), 1024)),
                 pa.field("content", pa.string()),
                 pa.field("tier", pa.string()),
                 pa.field("metadata", pa.string())

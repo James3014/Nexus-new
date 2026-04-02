@@ -1,3 +1,4 @@
+from typing import Any, Dict, List, Optional, Tuple
 """TLS-encrypted Registry Synchronization Server and Client.
 
 Handles secure push/pull requests between Nexus Swarm nodes.
@@ -8,7 +9,6 @@ import ssl
 import socket
 import logging
 import threading
-from typing import List, Dict, Any, Optional
 
 from nexus.security.tls_provider import TLSProvider
 from nexus.learning.skill_registry import SkillRegistry

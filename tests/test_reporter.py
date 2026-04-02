@@ -1,6 +1,6 @@
+from pathlib import Path
 import unittest
 import json
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 from nexus.services.reporter import Reporter
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
+from pathlib import Path
 
 from datetime import UTC
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 
 from pydantic import BaseModel
 from pydantic import Field

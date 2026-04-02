@@ -1,5 +1,5 @@
 import pytest
-from nexus.core.parity_audit import ParityAuditor, ParityViolation
+from nexus.core.parity_audit import ParityAuditor, SurfaceViolation
 from nexus.core.command_dag import CommandDAG, CommandLockedError
 from nexus.core.cost_hook import CostHook
 from nexus.core.ink_parser import InkParser

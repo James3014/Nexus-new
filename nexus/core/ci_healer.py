@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 import re
-from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 

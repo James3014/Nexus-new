@@ -9,7 +9,7 @@ def test_coder_rbac_unauthorized():
     """核驗 Coder 角色無權呼叫 git_push (應拋出 RBACViolation)"""
     with pytest.raises(RBACViolation) as excinfo:
         ShadowAuditor.check_rbac("Coder", "git_push")
-    assert "Coder 無權呼叫 git_push" in str(excinfo.value)
+    assert "角色 Coder 權限不足，禁止呼叫: git_push" in str(excinfo.value)
 
 def test_manager_rbac_authorized():
     """核驗 Manager 角色獲權呼叫 git_push"""

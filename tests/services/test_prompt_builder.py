@@ -1,7 +1,7 @@
+from pathlib import Path
 import pytest
 import json
 import yaml
-from pathlib import Path
 from nexus.services.prompt_builder import PromptBuilder
 
 @pytest.fixture

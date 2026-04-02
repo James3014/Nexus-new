@@ -1,3 +1,5 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 """Shared Skill Registry using SQLite.
 
 Pillar 1 of the Cross-Agent Skill Sharing Architecture.
@@ -8,8 +10,6 @@ Utilizes WAL mode to support concurrent reads while a node is writing.
 import sqlite3
 import json
 import logging
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from dataclasses import asdict
 

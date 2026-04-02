@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional, Literal
 from enum import Enum
 
 @dataclass

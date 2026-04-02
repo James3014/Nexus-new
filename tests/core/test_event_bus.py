@@ -1,7 +1,7 @@
+from pathlib import Path
 import time
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from nexus.core.event_bus import NexusEventBus
 

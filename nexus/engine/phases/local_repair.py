@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
 from __future__ import annotations
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+#!/usr/bin/env python3
 
 import py_compile
 import re
 import hashlib
-from pathlib import Path
-from typing import Any, Dict, Optional
 
 from nexus.core.state_contracts import NexusState
 

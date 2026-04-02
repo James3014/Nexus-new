@@ -1,3 +1,5 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 """DiskJanitor unified cleanup service.
 
 Addresses Black Zone #6: Disk Footprint Growth.
@@ -14,8 +16,6 @@ import gzip
 import time
 import shutil
 import logging
-from pathlib import Path
-from typing import Dict, Any, Optional
 
 from nexus.learning.disk_policy import DiskPolicy
 

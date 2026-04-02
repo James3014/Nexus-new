@@ -1,5 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
 import logging
-from typing import Dict, Any, List, Optional
 from nexus.learning.latent_predictor_v20 import LatentPredictorV20
 from nexus.core.ash_matrix import ASHMatrix
 from nexus.core.ash_template_resolver import ASHTemplateResolver

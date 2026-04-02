@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Optional, Tuple
 import json
 from datetime import datetime
-from typing import Optional
 from nexus.core.state_contracts import NexusState, TraumaRecord
 
 class TraumaEngine:

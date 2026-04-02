@@ -1,6 +1,6 @@
+from pathlib import Path
 import os
 import shutil
-from pathlib import Path
 import pytest
 from nexus.engine.coordinator import NexusEngine
 from nexus.containers import NexusContainer

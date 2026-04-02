@@ -1,7 +1,7 @@
+from pathlib import Path
 import json
 import os
 import pytest
-from pathlib import Path
 from nexus.core.memory.ingest import ingest_task_result
 from nexus.core.memory.schema import EpisodicMemory
 

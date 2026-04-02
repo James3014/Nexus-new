@@ -1,5 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
-from typing import Any, Dict, Optional
 from nexus.executors.protocol import ExecutorOutput, ExecutorStatusEnum
 from nexus.core.state_contracts import NexusState, StepRecord
 

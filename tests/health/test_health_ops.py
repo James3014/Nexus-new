@@ -1,6 +1,6 @@
+from pathlib import Path
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from nexus.core.state_contracts import HealthMetrics, NexusState

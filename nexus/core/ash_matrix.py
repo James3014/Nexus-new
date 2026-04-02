@@ -1,10 +1,10 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 #!/usr/bin/env python3
 import os
 import logging
 import yaml
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 

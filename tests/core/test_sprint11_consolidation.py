@@ -1,9 +1,9 @@
+from pathlib import Path
 """tests/core/test_sprint11_consolidation.py
 Sprint 11 verification: outcome schema, handoff bundle, minimal tracer, and federation lock.
 """
 import json
 import pytest
-from pathlib import Path
 from dataclasses import dataclass
 
 # ─────────────────────────── 11b: Outcome Schema ─────────────────────────────

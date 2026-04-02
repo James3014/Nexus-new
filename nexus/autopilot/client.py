@@ -1,6 +1,6 @@
+from pathlib import Path
 import grpc
 import sys
-from pathlib import Path
 
 # Add project root to path for proto imports
 REPO_ROOT = Path(__file__).resolve().parents[2]

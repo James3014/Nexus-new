@@ -1,9 +1,9 @@
+from pathlib import Path
 """Tests for skill_lifecycle.py"""
 
 import json
 import re
 import tempfile
-from pathlib import Path
 from unittest.mock import patch, mock_open
 
 from nexus.learning.skill_lifecycle import (

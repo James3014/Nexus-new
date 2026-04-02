@@ -1,7 +1,7 @@
+from pathlib import Path
 import importlib.util
 import shutil
 import subprocess
-from pathlib import Path
 
 
 def _load_module():

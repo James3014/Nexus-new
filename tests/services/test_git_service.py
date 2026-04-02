@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from nexus.services.git import GitManager
 

@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Dict, Any
 
 class ProviderErrorType(Enum):
     """標準化 Provider 錯誤分類 (Enum)。"""

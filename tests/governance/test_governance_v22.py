@@ -1,7 +1,7 @@
+from pathlib import Path
 import pytest
 from nexus.core.capability_gate import CapabilityGate, Phase
 from nexus.core.dependency_probe import DependencyProbe
-from pathlib import Path
 
 # --- 🧪 Capability Gate Tests ---
 

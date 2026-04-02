@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import re
-from pathlib import Path
 
 def test_forbidden_imports():
     """🛡️ 確保底層 (core/services) 不會循環導入高層 (engine/app)"""

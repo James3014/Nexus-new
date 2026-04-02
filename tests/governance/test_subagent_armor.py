@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import os
-from pathlib import Path
 from nexus.core.subagent_armor import SubAgentArmor, NakedRunError
 
 def test_armor_naked_run_blocked():

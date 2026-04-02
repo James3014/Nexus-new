@@ -1,8 +1,8 @@
 from __future__ import annotations
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
 
 
 HealthStatus = Literal["UNKNOWN", "HEALTHY", "WARNING", "CRITICAL"]

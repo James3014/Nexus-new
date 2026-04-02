@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Optional, Tuple, Type
 import json
 import logging
-from typing import Dict, Any, Type
 
 logger = logging.getLogger(__name__)
 

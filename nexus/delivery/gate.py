@@ -1,7 +1,7 @@
 from __future__ import annotations
+from pathlib import Path
 
 import subprocess
-from pathlib import Path
 
 from nexus.delivery.contract import contract_for_level
 from nexus.delivery.models import CompletionRequest

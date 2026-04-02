@@ -1,3 +1,4 @@
+from pathlib import Path
 """Test suite for Cross-Agent Skill Sharing Infrastructure.
 
 Contains verification for:
@@ -9,7 +10,6 @@ Contains verification for:
 import tempfile
 import os
 import json
-from pathlib import Path
 from dataclasses import asdict
 
 from nexus.learning.skill_schema import SkillFrontmatter, SkillSuccessMetric

@@ -1,7 +1,7 @@
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import functools
 import logging
 import time
-from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 

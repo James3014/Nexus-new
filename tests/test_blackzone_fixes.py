@@ -1,7 +1,7 @@
+from pathlib import Path
 """Tests for Sprint 1 Black Zone fixes."""
 import json
 import tempfile
-from pathlib import Path
 import logging
 
 def test_streaming_count_handles_large_file():

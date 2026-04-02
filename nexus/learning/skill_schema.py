@@ -1,5 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 
 @dataclass

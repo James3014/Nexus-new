@@ -1,7 +1,7 @@
+from pathlib import Path
 import os
 import json
 import pytest
-from pathlib import Path
 from nexus.core.state_io import StateIO
 from nexus.core.state_contracts import NexusState
 

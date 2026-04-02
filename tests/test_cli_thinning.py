@@ -1,10 +1,10 @@
+from pathlib import Path
 """
 PR-05 TDD: CLI 薄化驗證
 確保 scripts/nexus_cli.py 只 parse + dispatch，不含業務邏輯。
 """
 import ast
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
 from nexus.app.command_service import TaskRequest

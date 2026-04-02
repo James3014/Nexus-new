@@ -23,13 +23,19 @@ def test_acl_integrity_block():
     assert acl.check_permission("executor", "run_command", cmd="ls -la") is True
 
 def test_scoring_governance_penalty():
-    state = NexusState()
+    state = NexusState(task_id="TASK_000")
     # 模擬 1 次治理違規
     state.metadata["governance_violation_count"] = 1
-    state.health_metrics.test_pass_rate = 1.0 # 滿分
-    state.health_metrics.token_efficiency = 1.0 # 滿分
+    state.metadata["plan_density_score"] = 1.0 # 滿分
+    state.metadata["thinking_depth_score"] = 1.0 # 滿分
     
-    # 即使基礎分是 100，偵測到違規後應強制限縮至 89.9 (WARNING)
-    snapshot = HealthScorer.build_snapshot(state)
+    # 指標
+    state.phase_health.health_metrics.test_pass_rate = 1.0
+    state.phase_health.health_metrics.token_efficiency = 1.0
+    state.tokens.total_usage = 1000
+    state.tokens.capture_status = "captured"
+    
+    # 即使基礎分溢出，偵測到違規後應強制限縮至 89.9 (WARNING)
+    snapshot = HealthScorer.apply_snapshot(state)
     assert snapshot.overall_score == 89.9
     assert snapshot.status == "WARNING"

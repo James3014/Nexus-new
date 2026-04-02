@@ -1,5 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
 
 class PhaseHealthSignals(BaseModel):
     """

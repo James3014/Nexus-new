@@ -1,6 +1,6 @@
-import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import logging
 import json
 import numpy as np
 from nexus.core.vector_rag import VectorRAG

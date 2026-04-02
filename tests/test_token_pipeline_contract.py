@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from nexus.services.gateway import BattlesuitGateway as LLMClient
 from nexus.engine.phases.research import ResearchPhaseHandler

@@ -1,10 +1,10 @@
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 import time
 import subprocess
 from dataclasses import dataclass
 from nexus.learning.knowledge_index import KnowledgeIndex
 from nexus.core.event_bus import NexusEventBus
-from typing import Any, Dict, List, Optional
 from nexus.core.protocols import PipelineContextProtocol
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.delivery.phantom_guard import detect_inconclusive_success

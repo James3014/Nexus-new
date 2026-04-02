@@ -1,7 +1,7 @@
+from pathlib import Path
 import json
 import yaml
 import pytest
-from pathlib import Path
 from nexus.core.optimize.loop import optimize_loop
 
 @pytest.fixture

@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import logging
+logger = logging.getLogger(__name__)
 from datetime import datetime
 from .episode_repository import EpisodeRepository
 from .learning_evidence import LearningEvidenceBuilder
@@ -64,7 +66,21 @@ class PolicyManager:
         return policies
 
     def apply_policy_to_state(self, state: NexusState, task_description: str):
-        """將 Policy 注入當前狀態機 (PHA-051)"""
+        """將 Policy 注入當前狀態機 (PHA-051) + 守則 2: 神經閘門預檢性質性能。"""
+        # 🛡️ 守則 2: 接入 v3.2.4 神經哨兵，實現新舊雙軌治理。內容性能分析。
+        from nexus.plugins.sentinel_plugin import evaluate_neural_intent
+        
+        # 🧬 [Neural Reflex] v3.2.4 P1 Track 2: 意圖導通性質分析成果。內容其及性能。
+        state.intent = getattr(state, 'intent', task_description or "")
+        
+        if not evaluate_neural_intent(state.intent):
+            state.metadata["neural_veto"] = True # Veto 標記性質分析內容。
+            logger.warning(f"[Sentinel V3.2] RISK VETO: {state.intent[:50]}...")
+            state.policy_applied = False
+            return # 🛡️ 物理其及性質內容攔截：不進行語義檢索。內容性能。
+        else:
+            state.metadata["neural_veto"] = False
+
         policies = self.propose_policy(task_description)
         if policies:
             print(f"🎯 [PolicyManager] Semantic hit: {len(policies)} policies found.")

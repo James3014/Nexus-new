@@ -1,6 +1,6 @@
+from pathlib import Path
 import json
 import subprocess
-from pathlib import Path
 
 
 def test_write_phase_metrics_updates_run_file_and_live_status(tmp_path):

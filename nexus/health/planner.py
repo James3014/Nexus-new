@@ -1,7 +1,7 @@
 from __future__ import annotations
-
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
+
 
 from nexus.core.state_contracts import NexusState
 from .models import HealthDiagnosis, HealthTrigger, RepairAction, RepairPlan

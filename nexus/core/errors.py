@@ -1,7 +1,7 @@
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 import functools
 import logging
 import traceback
-from typing import Any, Callable, TypeVar, Optional
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
+from typing import Any, Dict, List, Optional, Tuple
 import time
 import json
 from dataclasses import dataclass, field, asdict
-from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 @dataclass(frozen=True)

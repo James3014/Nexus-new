@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from nexus.core.state_contracts import NexusState
 
@@ -45,25 +46,44 @@ class HealthScorer:
 
     @classmethod
     def apply_snapshot(cls, state: NexusState) -> HealthSnapshot:
+        # 1. 基礎快照 (Legacy 邏輯)
         snapshot = cls.build_snapshot(state)
-        state.health_score = snapshot.overall_score
-        state.pipeline_health = snapshot.phase_average if snapshot.phase_average is not None else snapshot.overall_score
-        state.health_metrics.status = snapshot.status
-        state.health_metrics.last_check_at = datetime.now()
         
-        outcome_score = state.health_metrics.outcome_quality * 100.0
-        
-        # 具現化：深度思考 (Deep Thinking) 硬化邏輯
-        # 從 metadata 讀取由 PlannerAuditor 產出的密度指標
+        # 2. 應用硬化邏輯 (Hardening Logic)
         plan_density = state.metadata.get("plan_density_score", 1.0)
         thinking_depth = state.metadata.get("thinking_depth_score", 1.0)
         
-        # 若計畫密度低於 0.6，執行「強制降智懲罰」(score *= 0.4)，確保 AOS < 60
+        # 取得 build_snapshot 產出的各項分數
+        overall = snapshot.overall_score
+        
+        # 若計畫密度低於 0.6，進一步懲罰
         if plan_density < 0.6:
-            outcome_score *= 0.4
+            overall *= 0.4
             
-        # 基礎分累加思維深度加分 (Max 120)
-        outcome_score = min(outcome_score + (thinking_depth * 20.0), 120.0)
+        # 累加思維深度加分
+        overall = min(overall + (thinking_depth * 20.0), 120.0)
+
+        # 🎯 治理門檻硬化：若有違規，強制封頂 89.9
+        if state.metadata.get("governance_violation_count", 0) > 0:
+            overall = min(overall, 89.9)
+
+        # 寫回狀態 (v2.0.0 Schema)
+        state.phase_health.health_score = round(overall, 1)
+        state.phase_health.pipeline_health = snapshot.phase_average if snapshot.phase_average is not None else overall
+        state.phase_health.health_metrics.status = cls._status_for_score(overall)
+        state.phase_health.health_metrics.last_check_at = datetime.now()
+
+        # 更新 snapshot 對象 (用於 test 回讀)
+        reasons = list(snapshot.reasons)
+        if state.metadata.get("governance_violation_count", 0) > 0 and "governance_threshold_enforced" not in reasons:
+            reasons.append("governance_threshold_enforced")
+
+        snapshot = dataclasses.replace(
+            snapshot,
+            overall_score=state.phase_health.health_score,
+            status=state.phase_health.health_metrics.status,
+            reasons=reasons
+        )
 
         state.metadata["health_snapshot"] = {
             "overall_score": snapshot.overall_score,
@@ -73,10 +93,13 @@ class HealthScorer:
             "status": snapshot.status,
             "reasons": snapshot.reasons,
         }
+        
+        # 同步各階段指標到 phase_health
         for phase, score in snapshot.phase_scores.items():
-            if phase in state.phase_metrics:
-                state.phase_metrics[phase].health = score.score
-                state.phase_metrics[phase].signals = dict(score.signals)
+            if phase in state.phase_health.phase_metrics:
+                state.phase_health.phase_metrics[phase].health = score.score
+                state.phase_health.phase_metrics[phase].signals = dict(score.signals)
+        
         return snapshot
 
     @staticmethod
@@ -131,21 +154,21 @@ class HealthScorer:
 
     @staticmethod
     def _outcome_score(state: NexusState) -> Optional[float]:
-        metrics = state.health_metrics
+        metrics = state.phase_health.health_metrics
         has_outcome_signal = bool(metrics.last_check_at) or any(
             [
                 metrics.test_pass_rate,
                 metrics.drift_index,
                 metrics.error_rate,
                 metrics.token_efficiency != 1.0,
-                state.audit_pass_count,
-                state.total_token_usage,
+                state.audit.audit_pass_count,
+                state.tokens.total_usage,
             ]
         )
         if not has_outcome_signal:
             return None
 
-        # 基礎成果評分 (Legacy)
+        # 基礎成果評分 (v2)
         base_score = (
             (metrics.test_pass_rate * 40.0)
             + (max(0.0, 1.0 - metrics.drift_index) * 20.0)
@@ -153,12 +176,9 @@ class HealthScorer:
             + (min(1.0, metrics.token_efficiency) * 20.0)
         )
 
-        # 具現化：治理懲罰 (Governance Penalty)
-        # 若 Agent 使用了侵入式操作 (如 kill -9) 且未獲審核，扣除 40% 原始分數
+        # 治理懲罰 (Governance Penalty)
         governance_penalty = state.metadata.get("governance_violation_count", 0) * 15.0
-        
         final_score = max(0.0, base_score - governance_penalty)
-        
         return round(final_score, 2)
 
     @classmethod
@@ -178,8 +198,7 @@ class HealthScorer:
         else:
             overall = (outcome_score * 0.7) + (phase_average * 0.3)
 
-        # 具現化：AOS 120 溢出與 100 基線補強
-        # 即使基礎分溢出至 120，若有懲罰則從 100 起扣，確保降至 90 以下觸發 WARNING
+        # 治理攔截
         if state.metadata.get("governance_violation_count", 0) > 0:
             overall = min(overall, 89.9)
             reasons.append("governance_threshold_enforced")
@@ -189,7 +208,8 @@ class HealthScorer:
             overall = min(overall, 45.0)
             reasons.append(f"review_status:{review_status.lower()}")
 
-        if outcome_score is not None and state.total_token_usage == 0 and state.token_capture_status == "unknown":
+        # Token 抓取檢查 (v2.0.0 Schema)
+        if outcome_score is not None and state.tokens.total_usage == 0 and state.tokens.capture_status == "unknown":
             overall = min(overall, 60.0)
             reasons.append("missing_token_capture")
 
@@ -209,21 +229,20 @@ class HealthScorer:
         if score >= 100.0:
             return "HEALTHY"
         if score >= 90.0:
-            return "HEALTHY" # 90-100 仍視為健康，但低於 90 即觸發警報
+            return "HEALTHY"
         if score >= 50.0:
             return "WARNING"
         if score > 0.0:
             return "CRITICAL"
         return "UNKNOWN"
+
     @staticmethod
     def calculate_reward(status: str) -> float:
-        """計算自我修復循後的獎勵值。"""
         reward_map = {"healthy": 8.0, "repaired": 12.0, "noop": 0.0, "degraded": -4.0, "failed": -10.0}
         return reward_map.get(str(status), 0.0)
 
     @staticmethod
     def apply_decay_and_rewards(old_weights: dict, route: list, reward: float, decay: float) -> dict[str, float]:
-        """應用權重衰減與路徑獎勵。"""
         new_weights = {}
         for phase in ["P", "X", "D", "R", "A", "C"]:
             base = float(old_weights.get(phase, 0.0) or 0.0) * decay

@@ -1,10 +1,10 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 #!/usr/bin/env python3
 import lancedb
 import pandas as pd
 import os
-from pathlib import Path
 from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Any
 
 class VectorRAG:
     """

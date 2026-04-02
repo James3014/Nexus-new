@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 from nexus.core.state_contracts import NexusState
 
 class TokenAccumulator:

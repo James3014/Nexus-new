@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional
 from nexus.market.credit_ledger import CreditLedger
 
 logger = logging.getLogger(__name__)

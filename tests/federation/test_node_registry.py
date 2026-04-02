@@ -1,8 +1,8 @@
+from pathlib import Path
 import pytest
 import sqlite3
 import time
 import json
-from pathlib import Path
 from nexus.federation.node_registry import NodeRegistry, NodeRecord
 
 @pytest.fixture

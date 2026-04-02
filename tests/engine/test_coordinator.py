@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import time
-from pathlib import Path
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 from nexus.engine.coordinator import NexusEngine

@@ -1,4 +1,4 @@
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Optional, Tuple
 import re
 
 class TaskPredictor:

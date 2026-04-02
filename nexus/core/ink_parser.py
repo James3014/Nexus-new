@@ -1,7 +1,7 @@
+from typing import Any, Dict, List, Optional, Tuple
 import re
 import logging
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 

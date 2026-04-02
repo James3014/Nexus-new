@@ -1,5 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
 
 # Schema Swell Prevention: Only approved top-level fields are allowed.
 # If you need to add a field, add it here AND update OUTCOME_SCHEMA_VERSION.

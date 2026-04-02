@@ -1,12 +1,12 @@
 from __future__ import annotations
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 import fcntl
 import os
 import threading
 import time
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Dict, Iterator, List, Set, Tuple
 import logging
 
 logger = logging.getLogger(__name__)

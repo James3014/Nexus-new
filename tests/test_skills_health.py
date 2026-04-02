@@ -1,5 +1,5 @@
-import json
 from pathlib import Path
+import json
 
 from scripts.ops.skills_health import build_skills_health
 

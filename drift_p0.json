@@ -1,0 +1,9 @@
+📡 [Audit] Connecting to Hardened Bridge: 127.0.0.1:50051
+🧪 [Audit] Starting 50-case Neural Gating Verification...
+{
+  "drift_rate": 0.5,
+  "policy_hit_rate": 0.5,
+  "samples": 50,
+  "residue_verification": "CLEAN",
+  "protocol": "TCP"
+}

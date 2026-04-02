@@ -1,7 +1,7 @@
 from __future__ import annotations
+from typing import Any, Dict, List, Optional, Tuple
 
 from dataclasses import dataclass
-from typing import Any, Dict
 
 
 @dataclass(frozen=True)

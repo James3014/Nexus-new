@@ -1,3 +1,4 @@
+from typing import Any, Dict, List, Optional, Tuple
 """
 Nexus Tracer — 封裝 OpenTelemetry API，提供 Pipeline-Aware 的 Span 管理
 
@@ -13,7 +14,6 @@ Nexus Tracer — 封裝 OpenTelemetry API，提供 Pipeline-Aware 的 Span 管�
 """
 
 from contextlib import contextmanager
-from typing import Optional, Dict, Any
 import logging
 
 from opentelemetry import trace

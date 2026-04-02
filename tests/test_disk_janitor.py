@@ -1,3 +1,4 @@
+from pathlib import Path
 """Test suite for DiskJanitor cleanup strategies (Part A)."""
 
 import os
@@ -5,7 +6,6 @@ import time
 import json
 import tempfile
 import sqlite3
-from pathlib import Path
 
 from nexus.learning.disk_policy import DiskPolicy
 from nexus.learning.disk_janitor import DiskJanitor

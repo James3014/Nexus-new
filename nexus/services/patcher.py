@@ -1,8 +1,8 @@
+from pathlib import Path
 import re
 import hashlib
 import time
 import subprocess
-from pathlib import Path
 
 class SafePatcher:
     """負責補丁的安全校驗與套用。"""

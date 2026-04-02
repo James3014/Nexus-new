@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import tempfile
-from pathlib import Path
 from nexus.learning.knowledge_index import KnowledgeIndex
 
 def test_knowledge_index():

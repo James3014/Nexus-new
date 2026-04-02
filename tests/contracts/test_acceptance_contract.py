@@ -1,6 +1,6 @@
+from pathlib import Path
 import json
 import inspect
-from pathlib import Path
 
 from scripts.ops import nexus_acceptance_check
 
@@ -20,9 +20,9 @@ def test_acceptance_rules_contract():
     assert hasattr(nexus_acceptance_check, "_evaluate_regression_and_side_effects")
     
     # 模擬一次呼叫取得 CriterionResult.name
-    res1 = nexus_acceptance_check._evaluate_repair_success([], window=1, success_min=80.0)
+    res1 = nexus_acceptance_check._evaluate_repair_success([], [], window=1, success_min=80.0)
     res2 = nexus_acceptance_check._evaluate_phantom_false_positive([], window=1, fp_max=3.0)
-    res3 = nexus_acceptance_check._evaluate_regression_and_side_effects([], window=1, regression_min=95.0, retry_spike_factor=2.0, retry_abs_max=1.0)
+    res3, _ = nexus_acceptance_check._evaluate_regression_and_side_effects([], window=1, regression_min=95.0, retry_spike_factor=2.0, retry_abs_max=1.0)
     
     actual_rules = {res1.name, res2.name, res3.name}
     assert actual_rules == expected_rules, f"Acceptance 規則名稱漂移！預期: {expected_rules}, 實際: {actual_rules}"

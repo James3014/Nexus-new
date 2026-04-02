@@ -1,9 +1,9 @@
+from pathlib import Path
 """
 tests/learning/test_knowledge_index_sprint12.py
 Tests for Sprint 12b: Learning hardening
 """
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Test 12b: Date parsing failure should not crash

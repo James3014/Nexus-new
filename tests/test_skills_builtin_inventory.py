@@ -1,5 +1,5 @@
-import json
 from pathlib import Path
+import json
 
 
 def test_builtin_skill_stubs_exist_for_critical_inventory_entries():

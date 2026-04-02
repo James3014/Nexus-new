@@ -1,9 +1,9 @@
 from __future__ import annotations
+from pathlib import Path
 
 import io
 import runpy
 from contextlib import redirect_stdout
-from pathlib import Path
 
 
 def _write_csv(tmp_path: Path, content: str) -> Path:

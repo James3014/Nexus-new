@@ -1,6 +1,6 @@
+from pathlib import Path
 import json
 import os
-from pathlib import Path
 from rich.console import Console
 
 from nexus.pilot_cli.session import PilotSession

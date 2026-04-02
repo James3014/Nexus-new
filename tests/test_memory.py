@@ -1,7 +1,7 @@
+from pathlib import Path
 import unittest
 import json
 import os
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 from nexus.services.memory import MemoryService, FaultLesson
 

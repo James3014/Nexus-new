@@ -1,3 +1,5 @@
+from pathlib import Path
+from typing import Any, Dict, Generator, List, Optional, Tuple
 """
 nexus/core/minimal_tracer.py
 ─────────────────────────────
@@ -15,8 +17,6 @@ import logging
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Generator, Optional
 
 logger = logging.getLogger(__name__)
 

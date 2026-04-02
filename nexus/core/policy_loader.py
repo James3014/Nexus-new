@@ -1,7 +1,7 @@
+from pathlib import Path
 #!/usr/bin/env python3
 import os
 import logging
-from pathlib import Path
 from nexus.core.gate_evaluator import AcceptancePolicy
 
 logger = logging.getLogger(__name__)

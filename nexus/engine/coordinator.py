@@ -1,11 +1,11 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 import os
 import shutil
 import time
 import json
 import subprocess
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
 
 # 🛡️ Nexus 治理與合約導入
@@ -80,8 +80,10 @@ class NexusEngine:
         self.hub = NexusHub(self.project_root)
         
         # 核心組件對位
-        self.reporter = self.hub
-        self.phases = {"P": "Planner", "R": "Repair", "D": "Developer", "X": "Executor"}
+        # 核心組件對位 (由 DI 容器注入)
+        self.reporter = kwargs.get("reporter", self.hub)
+        # 核心組件對位 (由 DI 容器注入實體物)
+        self.phases = kwargs.get("phases", {"P": "Planner", "D": "Diagnose", "R": "Repair", "X": "Research"})
         
         # 🛰️ 聯邦與進化底層
         self.federation = FederationLayer(self.project_root)
@@ -106,6 +108,10 @@ class NexusEngine:
         state.metadata["task_description"] = desc
         state.metadata.update(kwargs.get("context", {}))
         
+        # 🛡️ 治理對位：物理通知 (Governance Contact Audit)
+        self.reporter.voice_notify(f"Nexus 啟動：偵測到 Bug {final_task_id}", urgency="critical")
+        self.reporter.log_trace("run_bug", final_task_id, "START", 0, 0.0)
+        
         return self._execute_task_workflow(final_task_id, "nexus:bug", state=state)
 
     def run_feature(self, **kwargs) -> bool:
@@ -123,6 +129,10 @@ class NexusEngine:
         state.metadata["task_description"] = task_desc
         state.metadata.update(context)
         
+        # 🛡️ 治理對位：物理通知
+        self.reporter.voice_notify(f"Nexus 啟動：功能開發 {task_id}", urgency="normal")
+        self.reporter.log_trace("run_feature", task_id, "START", 0, 0.0)
+
         return self._execute_task_workflow(task_id, kwargs.get("agent_id", "nexus:feature"), state=state)
 
     def run_test(self, test_id: str = "", **kwargs):

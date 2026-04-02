@@ -1,10 +1,10 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import time
 import sqlite3
 import logging
-from typing import List, Optional, Any, Dict
 from dataclasses import dataclass, asdict
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

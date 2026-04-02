@@ -1,7 +1,7 @@
+from typing import Any, Dict, List, Optional, Tuple
 import os
 import time
 import logging
-from typing import List, Dict, Any, Optional
 from nexus.core.parity_audit import ParityAuditor
 from nexus.core.ci_healer import CIHealer
 from nexus.core.notifier import NexusNotifier

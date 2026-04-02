@@ -1,6 +1,6 @@
+from pathlib import Path
 import json
 import yaml
-from pathlib import Path
 
 def optimize_loop(project_root: str = "."):
     """

@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, model_validator
 from .state_legacy import NexusStateLegacyMixin
 from datetime import datetime
@@ -126,6 +126,7 @@ class HealthMetrics(BaseModel):
     drift_index: float = 0.0    # 偏離指數 (越小越健康)
     error_rate: float = 0.0     # 錯誤率
     token_efficiency: float = 1.0 # 1.0 為標準
+    outcome_quality: float = 1.0 # 成果品質 (0.0 - 1.0)
     last_check_at: Optional[datetime] = None
     status: str = "UNKNOWN"     # HEALTHY, WARNING, CRITICAL
 

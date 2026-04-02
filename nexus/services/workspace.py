@@ -1,3 +1,4 @@
+from pathlib import Path
 #!/usr/bin/env python3
 import os
 import uuid
@@ -5,7 +6,6 @@ import fcntl
 import shutil
 import subprocess
 import typing
-from pathlib import Path
 
 # 🔗 核心技能路徑 (Phase 3 & 6)
 KB_DIR = os.getenv("NEXUS_KB_DIR", "/Users/jameschen/Downloads/obsidian/知識庫")

@@ -1,7 +1,7 @@
+from pathlib import Path
 import pytest
 import asyncio
 import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from nexus.core.dual_loop_orchestrator import DualLoopOrchestrator
 

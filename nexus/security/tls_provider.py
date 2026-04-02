@@ -1,3 +1,5 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 """Zero-dependency mTLS using Python's built-in ssl and subprocess.
 
 Handles automatic generation of a local Certificate Authority (CA)
@@ -8,8 +10,6 @@ import os
 import ssl
 import logging
 import subprocess
-from pathlib import Path
-from typing import Tuple
 
 logger = logging.getLogger(__name__)
 

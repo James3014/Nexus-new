@@ -1,5 +1,5 @@
-import pytest
 from pathlib import Path
+import pytest
 from nexus.engine.config import EngineConfig
 
 def test_engine_config_defaults():

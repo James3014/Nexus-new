@@ -1,9 +1,9 @@
+from pathlib import Path
 import os
 import sys
 import json
 import click
 import subprocess
-from pathlib import Path
 from datetime import datetime, timezone
 
 class CliCommandsService:
@@ -138,6 +138,20 @@ class CliCommandsService:
                 sys.exit(1)
                 
         click.echo(f"✅ [Spec-Lock] {file_path} PASSED Constitutional Audit.")
+
+    def run_clean(self, dry_run: bool = True):
+        """🧹 Clean: 清理工作空間噪音，保留核心資產。"""
+        click.echo(f"🧹 [Clean] Purging workspace noises (Dry-run={dry_run})...")
+        targets = [".musestate", "plan.json", "tracelog.jsonl"]
+        for t in targets:
+            path = self.repo_root / t
+            if path.exists():
+                if not dry_run:
+                    path.unlink()
+                    click.echo(f"  -> Deleted: {t}")
+                else:
+                    click.echo(f"  -> [Dry-Run] Would delete: {t}")
+        return True
 
     def feature(self, roadmap_str: str):
         """🌲 Feature Tasking: 將 80 洞察轉化為執行清單"""

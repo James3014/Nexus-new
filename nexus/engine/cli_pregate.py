@@ -1,10 +1,10 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 """CLI Pre-Gate：在 A 階段之前，用 exit code 做一次機械性驗證"""
 import subprocess
 import logging
 import os
 import sys
-from pathlib import Path
-from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict, Any, Optional
 import re
 from datetime import datetime, timezone
 from nexus.learning.skill_schema import SkillFrontmatter

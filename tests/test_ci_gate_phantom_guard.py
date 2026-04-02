@@ -1,5 +1,5 @@
-import importlib.util
 from pathlib import Path
+import importlib.util
 
 
 def _load_ci_gate_module():

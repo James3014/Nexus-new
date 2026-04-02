@@ -4,7 +4,7 @@ from nexus.core.state_contracts import NexusState
 
 def test_repair_gate_rejection_no_red_test():
     repair = RepairPhaseHandler(".", "/tmp")
-    state = NexusState("TASK_001")
+    state = NexusState(task_id="TASK_001")
     context = {"task": "fix some issue", "has_red_test": False}
     
     # 執行 run
@@ -14,7 +14,7 @@ def test_repair_gate_rejection_no_red_test():
 
 def test_repair_gate_pass_with_red_test():
     repair = RepairPhaseHandler(".", "/tmp")
-    state = NexusState("TASK_001")
+    state = NexusState(task_id="TASK_001")
     # 模擬環境中存在失敗測試
     context = {"task": "fix issue with tests/test1.py", "has_red_test": True}
     

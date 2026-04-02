@@ -1,5 +1,5 @@
-import pytest
 from pathlib import Path
+import pytest
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 
 def test_run_cli_pregate_success(tmp_path):

@@ -1,5 +1,5 @@
-import pytest
 from pathlib import Path
+import pytest
 from nexus.learning.latent_predictor_v20 import LatentPredictorV20
 from unittest.mock import MagicMock
 

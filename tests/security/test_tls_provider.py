@@ -1,7 +1,7 @@
+from pathlib import Path
 import pytest
 import os
 import ssl
-from pathlib import Path
 from nexus.security.tls_provider import TLSProvider
 
 def test_tls_provider_init(tmp_path):

@@ -1,3 +1,4 @@
+from typing import Any, Dict, List, Optional, Tuple
 """
 nexus/core/exit_codes.py
 ─────────────────────────────
@@ -13,7 +14,6 @@ Design rules:
   - All new terminal states require a code review + bump of EXIT_CODE_REGISTRY_VERSION
 """
 from enum import IntEnum
-from typing import Dict
 
 EXIT_CODE_REGISTRY_VERSION = "v1.0"
 

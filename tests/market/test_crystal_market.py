@@ -1,5 +1,5 @@
-import pytest
 from pathlib import Path
+import pytest
 from nexus.market.credit_ledger import CreditLedger
 from nexus.market.crystal_market import CrystalMarket, CrystalListing
 

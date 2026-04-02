@@ -1,6 +1,6 @@
+from pathlib import Path
 """Unit tests for V3 VDD Hardening features (Embedding versioning, EventBus, Sandbox)"""
 import tempfile
-from pathlib import Path
 import json
 
 from nexus.learning.embedding_cache import EmbeddingCache

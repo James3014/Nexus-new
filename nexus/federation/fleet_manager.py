@@ -1,8 +1,8 @@
+from typing import Any, Dict, List, Optional, Tuple
 import subprocess
 import os
 import argparse
 import random
-from typing import List, Dict, Any
 
 def get_node_id(port: int, region: str) -> str:
     return f"node-{port}-{region}"

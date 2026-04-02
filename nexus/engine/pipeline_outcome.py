@@ -1,6 +1,6 @@
+from typing import Any, Dict, List, Optional, Tuple
 from enum import IntEnum
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
 
 class PipelineTerminalState(IntEnum):
     """四態終止語義 + Exit Code 正式映射表"""

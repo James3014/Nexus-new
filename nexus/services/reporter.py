@@ -1,11 +1,11 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import os
 import sys
 import subprocess
 import shutil
-from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 
 class Reporter:
@@ -20,6 +20,15 @@ class Reporter:
         else:
             self.tracelog_path = tracelog_path or self.project_root / "tracelog.jsonl"
         self.silent = silent
+
+    def report_outcome(self, payload: Dict[str, Any]):
+        """📡 [Reporter] 轉發任務結果至治理日誌 (API 對位)。"""
+        # 僅進行日誌通報，實體結晶化由 coordinator 處理
+        # 這裡為了 API 相容感應 NexusHub
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("📡 [Reporter] outcome reported for task: %s", payload.get("decision_id"))
+        return True
 
     @staticmethod
     def _resolve_notify_command(message: str) -> Optional[list[str]]:

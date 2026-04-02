@@ -1,8 +1,8 @@
 from __future__ import annotations
+from typing import Any, Dict, List, Optional, Tuple
 
 import hashlib
 import re
-from typing import List
 
 from .models import FaultSignature
 

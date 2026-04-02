@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package nexus.v1;
+option go_package = "nexus-swarm/nexus";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// 🌀 Nexus Phase Lifecycle (PXDRAC Standard)
+enum PhaseID {
+  PHASE_UNKNOWN = 0;
+  PHASE_PLAN = 1;
+  PHASE_RESEARCH = 2; // ✅ Synced with 'X' Research Phase
+  PHASE_DIAGNOSE = 3;
+  PHASE_REPAIR = 4;
+  PHASE_AUDIT = 5;
+  PHASE_CRYSTALLIZE = 6;
+}
+
+// 📦 Core System Services (Rust Skeleton)
+service NexusCore {
+  // Worktree Management
+  rpc LeaseWorktree(LeaseRequest) returns (WorktreeLease);
+  rpc HarvestWorktree(HarvestRequest) returns (ActionResponse);
+  rpc CancelLease(CancelLeaseRequest) returns (ActionResponse); // ✅ v2.1 Emergency Purge
+
+  // Governance & Policy
+  rpc EvaluatePolicy(PolicyRequest) returns (PolicyDecision);
+
+  // Health & Monitoring
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse); // ✅ v2.1 K8s Proxy
+}
+
+// 🛰️ Swarm & Orchestration Services (Go Bus)
+service NexusSwarm {
+  // Phase Orchestration
+  rpc RunPhase(PhaseRequest) returns (PhaseOutcome);
+
+  // Telemetry & Metrics
+  rpc EmitMetrics(stream MetricEvent) returns (ActionResponse);
+}
+
+// --- Messages ---
+
+message LeaseRequest {
+  string task_id = 1;
+  string branch_hint = 2;
+  map<string, string> metadata = 3;
+}
+
+message WorktreeLease {
+  string lease_id = 1;
+  string path = 2;
+  string branch_name = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message HarvestRequest {
+  string lease_id = 1;
+  bool force_merge = 2;
+}
+
+message CancelLeaseRequest {
+  string lease_id = 1;
+  string reason = 2;
+}
+
+message PolicyRequest {
+  string task_id = 1;
+  string phase = 2;
+  string action = 3;
+  string context = 4;
+  string intent_prompt = 5; // ✅ v2.2 Neural Sentinel: LLM Gating Prompt
+}
+
+message PolicyDecision {
+  string decision_id = 1;
+  bool allow = 2;
+  string reason = 3;
+  enum SentinelIntents {
+    SAFE_READ = 0;
+    DANGEROUS_WRITE = 1;
+    HUMAN_REVIEW = 2;
+    OOS_ACCESS = 3;
+  }
+  SentinelIntents intent = 4; // ✅ v2.2 Neural: LLM Categorization
+  repeated string enforcement_actions = 5;
+}
+
+message PhaseRequest {
+  string task_id = 1;
+  PhaseID phase = 2;
+  google.protobuf.Struct context = 3;
+}
+
+message PhaseOutcome {
+  string phase_id = 1;
+  enum Status {
+    SUCCESS = 0;
+    FAILED = 1;
+    HUMAN_REVIEW = 2;
+    ESCALATED = 3;
+  }
+  Status status = 2;
+  string summary = 3;
+  google.protobuf.Struct mutations = 4;
+  map<string, double> metrics = 5;
+}
+
+message MetricEvent {
+  google.protobuf.Timestamp timestamp = 1;
+  string event_type = 2;
+  double value = 3;
+  map<string, string> labels = 4;
+}
+
+message ActionResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 residue_count = 3;  // ✅ v2.1d Hardened: 物理殘留計數
+  string cleanup_trace = 4;   // ✅ v2.1d Hardened: 清理物理軌跡
+}
+
+message HealthCheckRequest {
+  string service_name = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+}

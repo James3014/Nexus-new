@@ -1,5 +1,5 @@
-import sys
 from pathlib import Path
+import sys
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

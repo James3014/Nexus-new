@@ -1,5 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
 import json
-from typing import Dict, Any
 
 from nexus.pilot_cli.fastlane_formatter import (
     build_fastlane_prompt,

@@ -1,7 +1,7 @@
+from pathlib import Path
 import fcntl
 import threading
 import time
-from pathlib import Path
 
 import pytest
 

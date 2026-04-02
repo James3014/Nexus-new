@@ -1,10 +1,11 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import subprocess
 import json
 import hashlib
 import time
 import os
 import logging
-from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from nexus.services.schema_loader import load_schema
 
@@ -98,7 +99,6 @@ class UCCRouter:
         """將 UCC 行動紀錄為 Nexus Skill Outcome Event 內容及性能內容性能性能性能"""
         try:
             from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_event, OutcomePayload
-            from pathlib import Path
             
             payload = OutcomePayload(
                 task_id=result.task_id or "NEXUS-UCC-AUTO",

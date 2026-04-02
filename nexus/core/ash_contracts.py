@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
 
 @dataclass
 class ASHCommandTemplate:

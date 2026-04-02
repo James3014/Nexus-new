@@ -1,6 +1,6 @@
+from pathlib import Path
 import pytest
 import hashlib
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 from nexus.services.patcher import SafePatcher
 

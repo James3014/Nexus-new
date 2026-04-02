@@ -16,8 +16,8 @@ def test_ambiguity_low_score():
 
 def test_clarification_gate_interception():
     planner = PlannerPhaseHandler(".", "/tmp")
-    state = NexusState("TASK_001")
-    context = {"task": "優化一下"}
+    state = NexusState(task_id="TASK_001")
+    context = {"task": "修一下"}
     
     # 模擬執行 run
     result, msg = planner._guard_intent(context["task"])

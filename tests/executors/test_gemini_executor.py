@@ -1,6 +1,6 @@
+from pathlib import Path
 import json
 import pytest
-from pathlib import Path
 from nexus.executors.gemini import GeminiExecutor
 from nexus.executors.protocol import ExecutorInput, ContextPackSchema, ExecutorStatusEnum, ProviderErrorType
 

@@ -1,4 +1,4 @@
-from typing import TypedDict, Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 class PipelineMetadata(TypedDict, total=False):
     # --- Pipeline 執行狀態 ---
@@ -56,7 +56,9 @@ class PipelineMetadata(TypedDict, total=False):
     human_review_required: bool
     human_review_reason: str
 
-    # --- Pregate ---
+    # --- Pregate & Sentinel (v2.8 Neural) ---
+    neural_veto: Optional[bool]
+    neural_reason: Optional[str]
     pregate_skip: bool
     pregate_skip_reason: str
     cli_pregate_results: List[Dict[str, Any]]

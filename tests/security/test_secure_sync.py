@@ -1,9 +1,9 @@
+from pathlib import Path
 import time
 import json
 import pytest
 import socket
 import ssl
-from pathlib import Path
 from unittest.mock import MagicMock
 from nexus.security.tls_provider import TLSProvider
 from nexus.security.secure_sync import SecureRegistrySync

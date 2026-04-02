@@ -1,3 +1,4 @@
+from typing import Any, Dict, List, Optional, Tuple
 """Skill Exchange Protocol implementation.
 
 Pillar 2 of the Cross-Agent Skill Sharing Architecture.
@@ -6,7 +7,6 @@ and the global SQLite SkillRegistry, enforcing Trust Demotion rules for remote s
 """
 
 import json
-from typing import List, Optional, Dict, Any
 import logging
 
 from nexus.learning.skill_store import SkillStore

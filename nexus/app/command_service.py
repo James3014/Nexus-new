@@ -1,6 +1,6 @@
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 from nexus.delivery.gate import evaluate_completion
 from nexus.delivery.models import CompletionRequest

@@ -1,5 +1,5 @@
-import sys
 from pathlib import Path
+import sys
 from unittest.mock import MagicMock, patch
 
 from nexus.core.state_contracts import NexusState

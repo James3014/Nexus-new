@@ -1,7 +1,7 @@
+from pathlib import Path
 import sys
 import types
 import subprocess
-from pathlib import Path
 
 sys.modules.setdefault("lancedb", types.SimpleNamespace(connect=lambda *args, **kwargs: None))
 sys.modules.setdefault(

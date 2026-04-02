@@ -1,8 +1,8 @@
+from typing import Any, Dict, List, Optional, Tuple
 import codecs
 import os
 import select
 import sys
-from typing import Optional
 
 try:
     from prompt_toolkit import PromptSession

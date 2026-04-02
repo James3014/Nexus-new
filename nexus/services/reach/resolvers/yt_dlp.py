@@ -1,7 +1,7 @@
+from typing import Any, Dict, List, Optional, Tuple
 import subprocess
 import json
 import time
-from typing import Dict, Any, List, Optional
 
 def fetch_transcript(url: str) -> Dict[str, Any]:
     """

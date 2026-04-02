@@ -1,8 +1,8 @@
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import logging
-from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any, List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,16 @@ class NexusHub:
         """
         # Phase 1: 目前僅作為治理日誌之輔助入口，數據已由 coordinator 寫入實體日誌內容
         logger.info("📡 [NexusHub] Logic report outcome received for decision: %s", payload.get("decision_id"))
+        return True
+
+    def voice_notify(self, message: str, urgency: str = "normal"):
+        """治理語音播報：轉向日誌系統"""
+        logger.info("🔊 [NexusHub:Voice] %s (Urgency: %s)", message, urgency)
+        return True
+
+    def log_trace(self, *args, **kwargs):
+        """核心追蹤器：轉向調試日誌"""
+        logger.debug("🛰️ [NexusHub:Trace] %s %s", args, kwargs)
         return True
 
     def optimize_skills(self, max_items: int = 50, rebound: bool = False) -> Dict[str, Any]:

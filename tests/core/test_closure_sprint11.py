@@ -1,3 +1,4 @@
+from pathlib import Path
 """tests/core/test_closure_sprint11.py
 Tests for the three Sprint 11 closure items:
 1. Exit code registry
@@ -7,7 +8,6 @@ Tests for the three Sprint 11 closure items:
 import gzip
 import json
 import pytest
-from pathlib import Path
 
 # ─────────────── Closure #1: Exit Code Registry ───────────────────────────
 
@@ -91,7 +91,6 @@ def test_benchmark_fingerprint_has_required_fields():
     """
     import subprocess, os, sys
     from datetime import datetime, timezone
-    from pathlib import Path
 
     BENCHMARK_SCHEMA_VERSION = "v1.0"
 

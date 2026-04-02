@@ -1,7 +1,7 @@
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 import time
 import dataclasses
-from typing import Any, Dict, Optional
 from nexus.core.protocols import PipelineContextProtocol
 from nexus.learning.knowledge_index import KnowledgeIndex
 from nexus.core.events import NexusEvent

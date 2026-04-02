@@ -1,0 +1,82 @@
+version: '3'
+
+vars:
+  PROTO_SRC: packages/proto/nexus.proto
+  BIN_DIR: bin
+  NEXUS_ENV: '{{.NEXUS_ENV | default "dev"}}'
+
+tasks:
+  default:
+    cmds:
+      - task: list
+    silent: true
+
+  list:
+    cmds:
+      - task --list
+    silent: true
+
+  # 🌀 Protobuf Generation
+  gen-proto:
+    desc: 生成 Rust 與 Go 的 gRPC 代碼
+    cmds:
+      - task: gen-proto-rust
+      - task: gen-proto-go
+
+  gen-proto-rust:
+    desc: 生成 Rust stubs
+    dir: packages/core
+    cmds:
+      - cargo build # 透過 build.rs 自動生成
+
+  gen-proto-go:
+    desc: 生成 Go stubs
+    dir: packages/swarm
+    cmds:
+      - protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative {{.PROTO_SRC}}
+
+  # 🏗️ Build Tasks
+  build:
+    desc: 編譯全組件 (Rust Core + Go Swarm)
+    cmds:
+      - task: build-core
+      - task: build-swarm
+
+  build-core:
+    desc: 編譯 Rust Core 內核
+    dir: packages/core
+    cmds:
+      - cargo build --release
+    sources:
+      - src/**/*.rs
+      - Cargo.toml
+    generates:
+      - ../../{{.BIN_DIR}}/nexus-core
+
+  build-swarm:
+    desc: 編譯 Go Swarm 總線
+    dir: packages/swarm
+    cmds:
+      - go build -o ../../{{.BIN_DIR}}/nexus-swarm cmd/main.go
+    sources:
+      - "**/*.go"
+      - go.mod
+    generates:
+      - ../../{{.BIN_DIR}}/nexus-swarm
+
+  # 🚀 Execution Modes
+  dev:
+    desc: 以 Bridge 模式啟動開發環境
+    env:
+      NEXUS_EXEC_MODE: bridge
+    cmds:
+      - task: build
+      - ./{{.BIN_DIR}}/nexus-swarm --dev
+
+  # 🧪 Testing
+  test:
+    desc: 執行全系統整合測試
+    cmds:
+      - cargo test --manifest-path packages/core/Cargo.toml
+      - go test ./packages/swarm/...
+      - pytest tests/bridge/

@@ -1,6 +1,6 @@
+from pathlib import Path
 import json
 from datetime import datetime
-from pathlib import Path
 from nexus.telemetry.otel_config import mttr_histogram, accuracy_gauge
 
 def crystallize_winning_hypothesis(arc_result: dict, ar_fix: str, success: bool = True):
