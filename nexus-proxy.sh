@@ -33,6 +33,7 @@ fi
 
 cd "$TARGET_DIR" || exit 1
 echo "[$ARMOR_LABEL] @ $SHA_REF"
+    echo "[PROTOCOL REMINDER] agent: please read docs/AGENT_MANDATORY_PROTOCOL.md before acting."
 
 # 🚀 執行指令 (版本感知執行)
 UV_BIN=$(command -v uv || echo "/Users/jameschen/.local/bin/uv")

@@ -1,2 +1,7 @@
-# 🛑 MANDATORY: READ MUSE_PROTO.md FIRST (located in project root).
-# ADVISE: Use `nexus-sync` to poll the latest session summary.
+# 🛡️ Nexus Agent Mandatory Rule
+# -----------------------------
+# Whenever you start a task in this workspace, you MUST first read:
+# /Users/jameschen/Workspace/nexus/docs/AGENT_MANDATORY_PROTOCOL.md
+
+# [IDENTITY REQUIRED]
+# 回報開場白：指揮官，我已載入 [目前戰甲] @ [SHA]，CI Gate: [PASS/FAIL]。請指定任務。
