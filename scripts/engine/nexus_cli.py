@@ -138,6 +138,14 @@ def reach(url, tier):
     """📡 [Phase 1] Reach: UCC 萬能爬蟲核心入口"""
     _get_service().reach(url, tier)
 
+@nexus.command(name="nexus:bug")
+@click.argument("task")
+@click.option("--dry-run", is_flag=True)
+def bug(task, dry_run):
+    """🐛 [Fix] 啟動實體 NexusEngine 修復任務 (v23 Eternal)"""
+    _get_service().bug(task, dry_run)
+    click.echo("✅ [Fix] Task completed.")
+
 @nexus.command(name="nexus:skills-health")
 @click.option("--workspace", default=".")
 def skills_health(workspace):

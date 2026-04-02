@@ -1,6 +1,6 @@
 import argparse
 import sys
-from benchmark_suite import BenchmarkSuite
+from benchmark_suite import NexusBenchmark
 
 def main():
     parser = argparse.ArgumentParser(description="Nexus v7 Benchmark System")
@@ -9,7 +9,7 @@ def main():
     parser.add_argument("--compare", help="Compare with specific version")
     
     args = parser.parse_args()
-    suite = BenchmarkSuite()
+    suite = NexusBenchmark()
     
     print(f"🏎️  [Benchmark] Running suite (Superpowers: {args.superpowers})")
     if args.compare:

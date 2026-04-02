@@ -98,7 +98,13 @@ class NexusEngine:
 
     def run_bug(self, bug_id: str = "", desc: str = "", **kwargs):
         """執行 Bug 修復循環"""
+        final_task_id = bug_id or kwargs.get("task_id", "unknown")
+        
         # 🏗️ 物理投影委託 (Decoupled Workspace Preparation)
+        if not self.run_dir:
+            self.run_dir = self.project_root / ".nexus" / "runs" / final_task_id
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            
         self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
         
         final_task_id = bug_id or kwargs.get("task_id", "unknown")
