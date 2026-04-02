@@ -1,12 +1,12 @@
 {
   "terminal.integrated.profiles.osx": {
     "nexus-rust": {
-      "path": "/Users/jameschen/Workspace/nexus/nexus-proxy.sh",
-      "args": ["rust"]
+      "path": "bash",
+      "args": ["/Users/jameschen/Workspace/nexus/nexus-proxy.sh", "rust"]
     },
     "nexus-python": {
-      "path": "/Users/jameschen/Workspace/nexus/nexus-proxy.sh", 
-      "args": ["python"]
+      "path": "bash", 
+      "args": ["/Users/jameschen/Workspace/nexus/nexus-proxy.sh", "python"]
     }
   },
   "terminal.integrated.defaultProfile.osx": "nexus-rust"

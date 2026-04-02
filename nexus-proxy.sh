@@ -34,16 +34,42 @@ fi
 cd "$TARGET_DIR" || exit 1
 echo "[$ARMOR_LABEL] @ $SHA_REF"
 
-# 🚀 執行指令 (強制透過 uv run)
+# 🚀 執行指令 (版本感知執行)
 UV_BIN=$(command -v uv || echo "/Users/jameschen/.local/bin/uv")
 
-if [ "$#" -gt 0 ]; then
-    "$UV_BIN" run scripts/engine/nexus_cli.py "$@"
+# 判斷入口點 (v22 有 engine/nexus_cli.py, v1.5 主要是 scripts/*.py)
+if [ -f "scripts/engine/nexus_cli.py" ]; then
+    CLI_BIN="scripts/engine/nexus_cli.py"
+    CMD_ARGS=("$@")
+elif [ -f "scripts/nexus_cli.py" ]; then
+    CLI_BIN="scripts/nexus_cli.py"
+    CMD_ARGS=("$@")
 else
-    "$UV_BIN" run scripts/engine/nexus_cli.py nexus:status --aos
+    # 舊版 Baseline 回退到 app.py 或直接說明
+    CLI_BIN="scripts/app.py"
+    echo "⚠️  注意：舊版戰甲無統一 CLI，嘗試執行 $CLI_BIN 或直接使用 python 腳本。"
+    CMD_ARGS=("$@")
 fi
 
-# 🛡️ 身份驗證與驗收回報
+if [ "${#CMD_ARGS[@]}" -gt 0 ]; then
+    if [ -f "$CLI_BIN" ]; then
+        "$UV_BIN" run "$CLI_BIN" "${CMD_ARGS[@]}"
+    else
+        echo "❌ Error: Entry point $CLI_BIN not found in current armor."
+    fi
+else
+    if [ "$ARMOR" == "v22" ] || [ "$ARMOR" == "rust" ]; then
+        "$UV_BIN" run "$CLI_BIN" nexus:status --aos
+    else
+        echo "ℹ️  Python Baseline 戰甲就緒。可用腳本位於 scripts/ 目錄下。"
+    fi
+fi
+
+# 🛡️ 身份驗證與驗收回報 (版本感知)
 CURRENT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "UNKNOWN")
-CI_STATUS=$("$UV_BIN" run scripts/ops/ci_gate.py --dry-run 2>/dev/null | head -1)
+if [ -f "scripts/ops/ci_gate.py" ]; then
+    CI_STATUS=$("$UV_BIN" run scripts/ops/ci_gate.py --dry-run 2>/dev/null | head -1)
+else
+    CI_STATUS="N/A (Legacy Baseline)"
+fi
 echo "[NEXUS IDENTITY: $CURRENT_SHA | CI: ${CI_STATUS:-'PENDING'}]"
