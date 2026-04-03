@@ -1,0 +1,10 @@
+{
+  "identifier": "primary",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:default",
+    "fs:default",
+    "allowall"
+  ]
+}

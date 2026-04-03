@@ -1,127 +1,232 @@
-import { ArmorHUD } from './components/ArmorHUD'
-import { TerminalPane } from './components/TerminalPane'
-import { Activity, Cpu, LayoutIcon } from 'lucide-react'
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
-
-// 模擬遙測數據 (Phase 2 將對接實體 API)
-const data = [
-  { time: '00:00', load: 30, intent: 45 },
-  { time: '04:00', load: 45, intent: 52 },
-  { time: '08:00', load: 38, intent: 48 },
-  { time: '12:00', load: 65, intent: 75 },
-  { time: '16:00', load: 55, intent: 68 },
-  { time: '20:00', load: 42, intent: 55 },
-  { time: '24:00', load: 35, intent: 48 }
-]
+import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { DeskViewModel } from "./types/DeskViewModel";
+import { LogEvent, PhaseEvent, DeskEvent } from "./types/DeskEvent";
+import { CriticalBanner } from "./components/CriticalBanner";
+import { ResolutionDrawer } from "./components/ResolutionDrawer";
+import { ActionButtons } from "./components/ActionButtons";
+import { LogStreamPanel } from "./components/LogStreamPanel";
+import { PhaseTimeline } from "./components/PhaseTimeline";
+import { ProfileSwitcher } from "./components/ProfileSwitcher";
+import { RunSwitcher } from "./components/RunSwitcher";
+import { DiffViewer } from "./components/DiffViewer";
+import { MetricsRibbon } from "./components/MetricsRibbon";
+import { ErrorDBPanel } from "./components/ErrorDBPanel";
+import { DecisionLedgerPanel } from "./components/DecisionLedgerPanel";
+import { ReviewSidebar } from "./components/ReviewSidebar";
+import { ReplaySnapshotModal } from "./components/ReplaySnapshotModal";
 
 function App() {
+  const [data, setData] = useState<DeskViewModel | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [phaseStatus, setPhaseStatus] = useState<Record<string, "success" | "fail" | "active" | "pending">>({});
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState("prod");
+  
+  // Replay State
+  const [activeSnapshot, setActiveSnapshot] = useState<any>(null);
+  const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
+
+  const unlistenLogRef = useRef<UnlistenFn | null>(null);
+  const unlistenEventRef = useRef<UnlistenFn | null>(null);
+
+  const fetchData = async () => {
+    try {
+      const res = await invoke<DeskViewModel>("get_desk_view_model");
+      setData(res);
+      if (res.showCriticalAlert && !isDrawerOpen) {
+        setIsDrawerOpen(true);
+      }
+    } catch (e) {
+      console.error("Fetch Error:", e);
+    }
+  };
+
+  const logDecision = async (action: string, actor: string, reason?: string) => {
+    if (!data?.taskId) return;
+    try {
+      await invoke("append_decision", {
+        taskId: data.taskId,
+        action,
+        actor,
+        targetJson: JSON.stringify({ currentPhase: data.currentPhase }),
+        reason,
+        evidenceRefsJson: JSON.stringify(["manifest.json", "auditresult.json"])
+      });
+    } catch (e) {
+      console.error("Ledger Error:", e);
+    }
+  };
+
+  const startSubscriptions = async (taskId: string) => {
+    if (unlistenLogRef.current) unlistenLogRef.current();
+    if (unlistenEventRef.current) unlistenEventRef.current();
+
+    try {
+      await invoke("subscribe_log_tail", { taskId });
+      await invoke("subscribe_run_events", { taskId });
+
+      unlistenLogRef.current = await listen<LogEvent>("log-line", (event) => {
+        if (event.payload.taskId === taskId) {
+          setLogs(prev => [...prev.slice(-4999), event.payload.line]);
+        }
+      });
+
+      unlistenEventRef.current = await listen<DeskEvent>("run-event", (event) => {
+        const payload = event.payload;
+        if (payload.taskId === taskId) {
+          if (payload.kind === "phase.start" || payload.kind === "phase.complete") {
+            const e = payload as PhaseEvent;
+            setPhaseStatus(prev => ({ 
+              ...prev, 
+              [e.phase]: e.kind === "phase.start" ? "active" : (e.status === "fail" ? "fail" : "success") 
+            }));
+          }
+          fetchData();
+        }
+      });
+    } catch (e) {
+      console.error("Subscription Error:", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const timer = setInterval(fetchData, 5000);
+    return () => {
+      clearInterval(timer);
+      if (unlistenLogRef.current) unlistenLogRef.current();
+      if (unlistenEventRef.current) unlistenEventRef.current();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (data?.taskId) {
+      startSubscriptions(data.taskId);
+    }
+  }, [data?.taskId]);
+
+  const handleAction = async (cmd: string) => {
+    try {
+      await logDecision(`COMMAND_EXEC: ${cmd}`, 'human');
+      await invoke("run_nexus_command", { cmd });
+      fetchData();
+    } catch (e) {
+      alert(`Command Error: ${e}`);
+    }
+  };
+
+  const handleApplyFix = async (fixCmd: string) => {
+    await logDecision(`FIX_APPLY: ${fixCmd}`, 'human', 'Applying suggested fingerprint fix.');
+    handleAction(fixCmd);
+  };
+
+  const handleProfileChange = async (p: string) => {
+     setCurrentProfile(p);
+     await logDecision(`PROFILE_SWITCH: ${p}`, 'human');
+  };
+
+  const onPhaseClick = (phase: string) => {
+    // 實作 P1 Replay Snapshot
+    const snapshot = {
+      id: `snap-${phase}`,
+      phase,
+      ts: new Date().toISOString(),
+      logWindow: logs.slice(-20),
+      diffPreview: "--- Replay Code Context ---\n+ Fixed memory leak\n- legacy code",
+      metrics: { tokens: 1200, cost: 0.05 }
+    };
+    setActiveSnapshot(snapshot);
+    setIsSnapshotOpen(true);
+  };
+
+  const handleAddAnnotation = async (body: string, severity: string) => {
+    if (!data?.taskId) return;
+    try {
+      await invoke("add_annotation", {
+        taskId: data.taskId,
+        targetType: 'TASK',
+        targetRefJson: JSON.stringify({ taskId: data.taskId }),
+        severity,
+        body,
+        author: 'Commander'
+      });
+      await logDecision('ANNOTATION_ADD', 'human', `Added ${severity} review note.`);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  if (!data) return <div className="h-screen bg-black flex items-center justify-center text-cyan-500 font-mono animate-pulse">NEXUS_GOVERNANCE_SYSTEM_BOOT...</div>;
+
+  const isLocked = data.showCriticalAlert || ["TAMPERED", "VERIFYFATAL"].includes(data.normalizedStatus);
+  const isError = data.severity === "danger" && data.normalizedStatus !== "INIT";
+
   return (
-    <div className="flex flex-col h-screen bg-black text-cyan-50 font-sans overflow-hidden">
-      {/* 頂部戰術 HUD */}
-      <ArmorHUD />
+    <div className="h-screen flex flex-col bg-[#050505] text-[#ccc] font-sans selection:bg-blue-900/30 scanline overflow-hidden">
+      <CriticalBanner 
+        isVisible={isLocked} 
+        message={data.normalizedStatus} 
+        reason={data.showCriticalAlert ? "LOCKED BY GOVERNANCE SPINE: TAMPERED" : "FATAL STATE LOCK"} 
+      />
 
-      <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 overflow-hidden">
+      <header className="px-4 py-2 border-b border-[#222] bg-[#0a0a0a] flex justify-between items-center z-10 shrink-0">
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
+            <span className="text-[10px] text-[#555] font-black uppercase tracking-tighter">Governance Unit</span>
+            <span className="text-sm font-bold text-white tracking-widest">{data.armorName}</span>
+          </div>
+          <div className="h-8 w-px bg-[#222]" />
+          <ProfileSwitcher currentProfile={currentProfile} onProfileChange={handleProfileChange} />
+          <RunSwitcher activeTaskId={data.taskId} onTaskChange={() => fetchData()} />
+        </div>
         
-        {/* 左側與中央: 終端面板 (佔據 8 欄位) */}
-        <section className="lg:col-span-8 flex flex-col min-h-0 gap-4">
-           <TerminalPane />
-           
-           <div className="p-4 bg-slate-900/40 border border-slate-800 rounded-xl flex items-center justify-between shadow-lg">
-              <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 bg-cyan-500/10 rounded-lg flex items-center justify-center">
-                    <Activity className="w-5 h-5 text-cyan-400" />
-                 </div>
-                 <div>
-                    <h3 className="text-sm font-bold uppercase tracking-widest text-cyan-500/80">系統指令集 (Palette)</h3>
-                    <p className="text-[10px] text-slate-500 font-mono">[ALT+P] 調用全域指令功能</p>
-                 </div>
-              </div>
-              <div className="flex gap-2">
-                 {['benchmark', 'audit', 'release'].map(cmd => (
-                   <button key={cmd} className="px-3 py-1.5 bg-slate-800 hover:bg-cyan-500/20 border border-slate-700 hover:border-cyan-500/50 rounded-md text-[10px] font-mono uppercase tracking-tighter transition-all">
-                     {cmd}
-                   </button>
-                 ))}
-              </div>
-           </div>
-        </section>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setIsDrawerOpen(true)} className="text-[10px] bg-blue-900/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-sm hover:bg-blue-500 transition-all uppercase font-bold">Reality Audit</button>
+          <div className={`w-2 h-2 rounded-full animate-pulse ${isLocked ? 'bg-red-500 shadow-[0_0_10px_red]' : 'bg-green-500 shadow-[0_0_10px_green]'}`} />
+        </div>
+      </header>
 
-        {/* 右側: 遙測與狀態列 (佔據 4 欄位) */}
-        <section className="lg:col-span-4 flex flex-col gap-6 overflow-y-auto no-scrollbar pb-6">
-           
-           {/* GPU / M4 狀態卡片 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 group hover:border-cyan-500/30 transition-all">
-              <div className="flex justify-between items-start mb-4">
-                <Cpu className="text-cyan-400 w-6 h-6 group-hover:drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
-                <span className="bg-cyan-500/10 text-cyan-400 text-[10px] font-mono px-2 py-0.5 rounded border border-cyan-500/20 uppercase">M4 Max</span>
-              </div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">Neural Inference</p>
-              <div className="flex items-baseline gap-2">
-                <p className="text-2xl font-bold font-mono tracking-wider">13.4 <span className="text-xs font-normal">GB</span></p>
-              </div>
-            </div>
+      <main className="flex-1 p-3 flex flex-col gap-3 overflow-hidden">
+        <div className="shrink-0 space-y-3">
+          <MetricsRibbon totalTokens={2730} phaseCosts={{P: {tokens: 420, cost: 0.02}}} />
+          <PhaseTimeline currentPhase={data.currentPhase} phaseStatus={phaseStatus} onClick={onPhaseClick} />
+        </div>
 
-            <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 group hover:border-purple-500/30 transition-all">
-              <div className="flex justify-between items-start mb-4">
-                <Activity className="text-purple-400 w-6 h-6 group-hover:drop-shadow-[0_0_10px_rgba(168,85,247,0.8)]" />
-                <span className="bg-purple-500/10 text-purple-400 text-[10px] font-mono px-2 py-0.5 rounded border border-purple-500/20 uppercase">Core</span>
-              </div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">Active Links</p>
-              <p className="text-2xl font-bold font-mono tracking-wider">8082</p>
-            </div>
+        <div className="flex-1 grid grid-cols-12 gap-3 overflow-hidden">
+          {/* Fact Source (Logs + Diff) */}
+          <div className="col-span-12 lg:col-span-8 grid grid-rows-2 gap-3 overflow-hidden">
+            <LogStreamPanel logs={logs} height={300} />
+            <DiffViewer taskId={data.taskId} />
           </div>
 
-          {/* 遙測圖表 */}
-          <div className="flex-1 min-h-[300px] bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-               <h3 className="text-sm font-bold tracking-widest uppercase flex items-center gap-2">
-                  <LayoutIcon size={16} className="text-cyan-400" /> Neural Telemetry
-               </h3>
-               <div className="px-2 py-0.5 bg-cyan-500/20 rounded text-[10px] text-cyan-400 border border-cyan-500/30 font-mono tracking-widest">LIVE</div>
-            </div>
-            
-            <div className="flex-1 w-full mt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorLoad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} opacity={0.3} />
-                  <XAxis dataKey="time" stroke="#475569" tick={{ fill: '#475569', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
-                  <YAxis stroke="#475569" tick={{ fill: '#475569', fontSize: 10, fontFamily: 'monospace' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', color: '#f1f5f9', fontSize: '12px' }} />
-                  <Area type="monotone" dataKey="load" stroke="#22d3ee" strokeWidth={3} fillOpacity={1} fill="url(#colorLoad)" animationDuration={2000} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            
-            <div className="mt-4 flex flex-wrap gap-4 justify-center">
-               <div className="flex items-center gap-1.5 text-[10px] font-mono tracking-widest text-cyan-400 uppercase">
-                  <span className="w-2 h-2 bg-cyan-400 rounded-sm shadow-[0_0_5px_rgba(34,211,238,0.5)]"></span> GPU Load %
-               </div>
-            </div>
+          {/* Decision & Governance Column */}
+          <div className="col-span-12 lg:col-span-4 flex flex-col gap-3 overflow-hidden">
+             <div className="h-1/2 flex flex-col overflow-hidden">
+                <DecisionLedgerPanel taskId={data.taskId} />
+             </div>
+             <div className="flex-1 flex flex-col overflow-hidden">
+                <ReviewSidebar taskId={data.taskId} onAddAnnotation={handleAddAnnotation} />
+             </div>
           </div>
+        </div>
 
+        {/* Global Action Lock bar */}
+        <section className="bg-[#0d0d0d] p-4 border border-[#222] shadow-2xl relative shrink-0">
+          {isError && (
+              <div className="mb-4">
+                 <ErrorDBPanel errorCode={1} traceback="demo" onApply={handleApplyFix} />
+              </div>
+          )}
+          <ActionButtons actions={data.availableActions} isLocked={isLocked} onAction={handleAction} lockReason={isLocked ? "GOVERNANCE LOCK: CANNOT ESCAPE" : undefined} />
         </section>
       </main>
 
-      {/* 底部裝飾條 */}
-      <footer className="px-6 py-2 bg-slate-900/80 border-t border-slate-800 flex justify-between items-center text-[9px] font-mono text-slate-600 tracking-tighter uppercase">
-         <div className="flex gap-4">
-            <span>NEXUS-DESK v0.2.0-HUD-READY</span>
-            <span>OS-IDENTITY: VERIFIED</span>
-         </div>
-         <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1"><span className="w-1 h-1 bg-green-500 rounded-full"></span> LINK-CORE: OK</span>
-            <span className="flex items-center gap-1"><span className="w-1 h-1 bg-blue-500 rounded-full"></span> AGENT-UCC: SYNCED</span>
-         </div>
-      </footer>
+      <ResolutionDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} trace={data.resolutionTrace} />
+      <ReplaySnapshotModal isOpen={isSnapshotOpen} onClose={() => setIsSnapshotOpen(false)} snapshot={activeSnapshot} />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
