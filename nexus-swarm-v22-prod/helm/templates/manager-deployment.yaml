@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nexus-swarm.fullname" . }}-manager
+  labels:
+    app.kubernetes.io/component: manager
+spec:
+  replicas: {{ .Values.manager.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: manager
+    spec:
+      containers:
+      - name: manager
+        image: "{{ .Values.manager.image }}"
+        ports:
+        - containerPort: {{ .Values.manager.port }}
+        - containerPort: {{ .Values.manager.metricsPort }}
+          name: metrics
+        env:
+        - name: DATABASE_URL
+          value: "host={{ .Release.Name }}-postgresql port=5432 user={{ .Values.postgresql.auth.username }} password={{ .Values.postgresql.auth.password }} dbname={{ .Values.postgresql.auth.database }} sslmode=disable"
+        volumeMounts:
+        - name: certs
+          mountPath: /root/certs
+          readOnly: true
+        resources:
+          {{- toYaml .Values.manager.resources | nindent 10 }}
+      volumes:
+      - name: certs
+        secret:
+          secretName: nexus-swarm-manager-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nexus-swarm.fullname" . }}-manager
+spec:
+  selector:
+    app.kubernetes.io/component: manager
+  ports:
+  - name: grpc
+    port: {{ .Values.manager.port }}
+    targetPort: {{ .Values.manager.port }}
+  - name: metrics
+    port: {{ .Values.manager.metricsPort }}
+    targetPort: {{ .Values.manager.metricsPort }}

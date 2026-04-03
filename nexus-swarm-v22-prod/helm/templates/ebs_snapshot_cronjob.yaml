@@ -1,0 +1,36 @@
+# 🛡️ Nexus Swarm EBS Snapshot CronJob (Production Data Resilience)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "nexus-swarm.fullname" . }}-ebs-snapshot
+  labels:
+    {{- include "nexus-swarm.labels" . | nindent 4 }}
+spec:
+  schedule: "0 2 * * *" # Every day at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "nexus-swarm.labels" . | nindent 12 }}
+        spec:
+          serviceAccountName: {{ include "nexus-swarm.serviceAccountName" . }}
+          containers:
+          - name: snapshot
+            image: amazon/aws-cli:latest
+            command: ["/bin/sh"]
+            args:
+            - -c
+            - |
+              echo "🛡️ Starting EBS Snapshot for PersistentVolume..."
+              VOLUME_ID=$(kubectl get pv -o jsonpath='{.items[?(@.spec.awsElasticBlockStore.volumeID)].spec.awsElasticBlockStore.volumeID}')
+              if [ -z "$VOLUME_ID" ]; then
+                echo "❌ No EBS Volume found. Skipping backup."
+                exit 0
+              fi
+              aws ec2 create-snapshot \
+                --volume-id $VOLUME_ID \
+                --description "Nexus Swarm Daily Backup - $(date +%Y-%m-%d)" \
+                --tag-specifications 'ResourceType=snapshot,Tags=[{Key=NexusSwaem,Value=v22},{Key=Type,Value=Backup}]'
+              echo "✅ Snapshot created for $VOLUME_ID"
+          restartPolicy: OnFailure

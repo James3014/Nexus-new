@@ -1,0 +1,33 @@
+# 🛡️ Nexus Swarm Federation Token Rotation Job (Security Hardening)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "nexus-swarm.fullname" . }}-token-rotate
+  labels:
+    {{- include "nexus-swarm.labels" . | nindent 4 }}
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "nexus-swarm.labels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: rotate
+        image: vault:1.15
+        env:
+        - name: VAULT_ADDR
+          value: "https://vault.nexus-swarm.example.com"
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "🛡️ Rotating Federation Token..."
+          NEW_TOKEN=$(openssl rand -hex 32)
+          vault login $VAULT_TOKEN
+          vault kv put secret/nexus/federation token=$NEW_TOKEN
+          echo "✅ New token pushed to Vault."
+          # Optionally trigger a zero-downtime rolling restart of the Swarm Manager
+          kubectl rollout restart deployment/{{ include "nexus-swarm.fullname" . }}-manager
+          echo "🚀 Rolling restart triggered for Manager fleet."
+      restartPolicy: Never
+  backoffLimit: 2

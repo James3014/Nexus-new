@@ -1,0 +1,70 @@
+# 🛡️ Nexus Swarm v22 Production Values (HA + Multi-cluster)
+global:
+  federation:
+    enabled: true
+    token: "prod-fed-token-20260404"
+    # Endpoints will be overridden per region by deploy-cluster.sh
+    peerEndpoints:
+      - "manager.nexus-us-east-1.example.com:443"
+      - "manager.nexus-us-west-2.example.com:443"
+      - "manager.nexus-eu-west-1.example.com:443"
+
+manager:
+  replicas: 3
+  image: nexus-swarm-manager:v22
+  port: 9000
+  metricsPort: 9100
+  resources:
+    limits:
+      cpu: 1
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+node:
+  image: nexus-swarm-node:v22
+  replicas: 10
+  autoscaling:
+    minReplicas: 5
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 70
+  resources:
+    limits:
+      cpu: 2
+      memory: 4Gi
+    requests:
+      cpu: 1
+      memory: 2Gi
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+  hosts:
+    - host: federation.nexus-swarm.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+postgresql:
+  enabled: true
+  auth:
+    username: nexus_prod
+    # Should use secret/env injection in real prod
+    password: nexus_password_prod
+    database: swarmdb_prod
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: gp3 # AWS EBS optimization
+
+monitoring:
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+    adminPassword: "n3xu5-v22-prod"
