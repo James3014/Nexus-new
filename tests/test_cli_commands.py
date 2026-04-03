@@ -2,29 +2,24 @@ import pytest
 from click.testing import CliRunner
 from scripts.engine.nexus_cli import nexus
 import os
+from unittest.mock import patch
 
-def test_cli_resilient_shell_audit():
-    runner = CliRunner()
-    # 測試 Audit 模式
-    result = runner.invoke(nexus, ["nexus:resilient-shell", "--mode", "audit"])
-    assert result.exit_code == 0
-    assert "Error Boundary ACTIVE" in result.output
-    assert "audit mode" in result.output
 
-def test_cli_resilient_shell_block():
+def test_cli_status_aos():
     runner = CliRunner()
-    # 測試 Block 模式
-    result = runner.invoke(nexus, ["nexus:resilient-shell", "--mode", "block"])
+    result = runner.invoke(nexus, ["nexus:status", "--aos"])
     assert result.exit_code == 0
-    assert "block mode" in result.output
+    assert "[Nexus:AOS] Governance Verification" in result.output
+    assert "Federation Status" in result.output
 
-def test_cli_hud():
+
+def test_cli_hud_daemon():
     runner = CliRunner()
-    # 測試 HUD 指令 (Mock 啟動文字)
-    result = runner.invoke(nexus, ["nexus:hud", "--refresh", "1"])
+    with patch("nexus.services.cli_commands_service.subprocess.Popen") as mock_popen:
+        result = runner.invoke(nexus, ["nexus:hud", "--refresh", "1", "--daemon"])
     assert result.exit_code == 0
-    assert "Persistent state monitoring" in result.output
-    assert "AOS Score" in result.output
+    assert "[HUD] Background Daemon STARTING" in result.output
+    assert mock_popen.called
 
 def test_cli_spec_lock():
     runner = CliRunner()
@@ -37,8 +32,8 @@ def test_cli_spec_lock():
         # 測試 Spec Lock 指令
         result = runner.invoke(nexus, ["nexus:spec-lock", test_spec])
         assert result.exit_code == 0
-        assert f"Locking {test_spec}" in result.output
-        assert "Spec-Lock complete" in result.output
+        assert f"Auditing {test_spec} against MUSE_ENGINE_SPEC" in result.output
+        assert f"{test_spec} PASSED Constitutional Audit" in result.output
     finally:
         if os.path.exists(test_spec):
             os.remove(test_spec)

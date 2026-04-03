@@ -1,9 +1,11 @@
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 from nexus.services.continuous_learning import (
     finalize_learning_loop,
+    refresh_writeback_status,
     run_protocol_startup_gate,
 )
 
@@ -112,3 +114,35 @@ def test_finalize_learning_loop_marks_fully_delivered_when_no_writeback_needed(t
     assert result["delivery_status"] == "fully_delivered"
     assert state.metadata["delivery_status"] == "fully_delivered"
     assert all(item["status"] == "completed" for item in todo["items"])
+
+
+def test_refresh_writeback_status_promotes_pending_to_fully_delivered(tmp_path):
+    state = _build_state(
+        task_id="nexus-learn-3",
+        task_description="sync writeback",
+        cycle_root_cause="missing docs sync",
+        rejection_history=["docs pending"],
+    )
+
+    result = finalize_learning_loop(tmp_path, state, success=True, source="pipeline.crystallize")
+    assert result["delivery_status"] == "code_done_writeback_pending"
+
+    todo_path = tmp_path / ".nexus" / "reports" / "writeback_todo.json"
+    docs_index = tmp_path / "docs" / "INDEX.md"
+    spec_file = tmp_path / "MUSE_ENGINE_SPEC_V17.1_HARDENED.md"
+    docs_index.parent.mkdir(parents=True, exist_ok=True)
+    docs_index.write_text("updated index", encoding="utf-8")
+    spec_file.write_text("updated spec", encoding="utf-8")
+
+    newer_mtime = todo_path.stat().st_mtime + 5
+    os.utime(docs_index, (newer_mtime, newer_mtime))
+    os.utime(spec_file, (newer_mtime, newer_mtime))
+
+    refreshed = refresh_writeback_status(tmp_path, state=state, source="test-refresh")
+
+    todo = json.loads(todo_path.read_text(encoding="utf-8"))
+    assert refreshed["delivery_status"] == "fully_delivered"
+    assert state.metadata["delivery_status"] == "fully_delivered"
+    assert all(item["status"] == "completed" for item in todo["items"])
+    completion_log = tmp_path / ".nexus" / "events" / "writeback_completion.jsonl"
+    assert completion_log.exists()

@@ -1,13 +1,21 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import logging
-import lancedb
 import pandas as pd
+import json
 
 logger = logging.getLogger(__name__)
 
 import numpy as np
-import pyarrow as pa
+try:
+    import lancedb  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    lancedb = None
+
+try:
+    import pyarrow as pa  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    pa = None
 
 class VectorCache:
     """SOTA 向量緩存核心 (LanceDB + Jina v3 1024d 驅動)
@@ -20,12 +28,27 @@ class VectorCache:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = lancedb.connect(str(self.db_path))
         self.table_name = "sota_v19_cache"
-        self._ensure_table()
+        self.fallback_file = self.db_path.parent / f"{self.table_name}.json"
+        self.db = None
+        self.enabled = lancedb is not None and pa is not None
+        if self.enabled:
+            self.db = lancedb.connect(str(self.db_path))
+            self._ensure_table()
+        else:
+            logger.warning("VectorCache running in json fallback mode; lancedb/pyarrow unavailable.")
+            self._ensure_fallback_file()
+
+    def _ensure_fallback_file(self):
+        self.fallback_file.parent.mkdir(parents=True, exist_ok=True)
+        if not self.fallback_file.exists():
+            self.fallback_file.write_text("[]", encoding="utf-8")
 
     def _ensure_table(self):
         """確保向量表存在於物理存儲中。"""
+        if not self.enabled or self.db is None:
+            self._ensure_fallback_file()
+            return
         if self.table_name not in self.db.table_names():
             # 🛡️ 物理硬化：雙重對位 (Schema + Data) 封殺類型推斷錯誤
             schema = pa.schema([
@@ -47,6 +70,14 @@ class VectorCache:
 
     def upsert(self, entries: List[Dict[str, Any]]):
         """批量物理注入向量數據。具備彈性容錯閘門。"""
+        if not self.enabled or self.db is None:
+            try:
+                existing = json.loads(self.fallback_file.read_text(encoding="utf-8"))
+                existing.extend(entries)
+                self.fallback_file.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception as e:
+                logger.error("vector_cache_json_fallback_upsert_failed [%s]", str(e))
+            return
         try:
             table = self.db.open_table(self.table_name)
             # 🧬 物理具現：顯式轉換 DataFrame 類型
@@ -58,6 +89,13 @@ class VectorCache:
 
     def search(self, query_vector: Any, limit: int = 5) -> List[Dict[str, Any]]:
         """執行高維語義空間物理檢索。"""
+        if not self.enabled or self.db is None:
+            try:
+                rows = json.loads(self.fallback_file.read_text(encoding="utf-8"))
+                return rows[:limit]
+            except Exception as e:
+                logger.error("vector_cache_json_fallback_search_failed [%s]", str(e))
+                return []
         table = self.db.open_table(self.table_name)
         # 🛡️ 物理硬化：顯式轉換為 numpy.float32 以確保類型正確
         vec = np.array(query_vector, dtype=np.float32)
@@ -82,6 +120,9 @@ class VectorCache:
 
     def clear(self):
         """物理清除所有緩存數據，執行真值重置。"""
-        self.db.drop_table(self.table_name)
-        self._ensure_table()
+        if not self.enabled or self.db is None:
+            self.fallback_file.write_text("[]", encoding="utf-8")
+        else:
+            self.db.drop_table(self.table_name)
+            self._ensure_table()
         logger.warning("vector_cache_cleared")

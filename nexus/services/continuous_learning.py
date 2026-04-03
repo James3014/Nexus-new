@@ -37,6 +37,13 @@ def _append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
         handle.write("\n")
 
 
+def _load_json(path: Path) -> Dict[str, Any] | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _default_command_runner(cmd: List[str], cwd: Path) -> Tuple[int, str, str]:
     proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, check=False)
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
@@ -49,6 +56,7 @@ def run_protocol_startup_gate(
     command_runner: CommandRunner | None = None,
 ) -> ProtocolGateResult:
     root = Path(project_root)
+    refresh_writeback_status(root, source="startup-gate")
     protocol_path = root / "docs" / "AGENT_MANDATORY_PROTOCOL.md"
     ci_script = root / "scripts" / "ops" / "ci_gate.py"
     ack_log = root / ".nexus" / "events" / "protocol_ack.jsonl"
@@ -217,6 +225,8 @@ def _build_writeback_items(project_root: Path, state: Any, success: bool) -> Lis
             "target": str(project_root / ".codex_lessons.md"),
             "reason": "human-readable lesson crystallization",
             "status": "completed",
+            "completed_at": _utc_now(),
+            "completion_source": "continuous-learning",
         },
         {
             "target": str(project_root / "docs" / "INDEX.md"),
@@ -229,6 +239,77 @@ def _build_writeback_items(project_root: Path, state: Any, success: bool) -> Lis
             "status": "pending",
         },
     ]
+
+
+def refresh_writeback_status(
+    project_root: Path | str,
+    *,
+    state: Any | None = None,
+    source: str = "auto-refresh",
+) -> Dict[str, Any]:
+    root = Path(project_root)
+    todo_path = root / ".nexus" / "reports" / "writeback_todo.json"
+    payload = _load_json(todo_path)
+    if not payload:
+        return {
+            "writeback_required": False,
+            "delivery_status": "fully_delivered",
+            "completed": False,
+            "todo_path": todo_path,
+        }
+
+    items = payload.get("items", []) or []
+    changed = False
+    todo_mtime = todo_path.stat().st_mtime if todo_path.exists() else 0.0
+    previous_status = payload.get("delivery_status") or (
+        "code_done_writeback_pending" if payload.get("writeback_required") else "fully_delivered"
+    )
+
+    for item in items:
+        if item.get("status") == "completed":
+            continue
+        target = Path(str(item.get("target", "")))
+        if target.exists() and target.stat().st_mtime >= todo_mtime:
+            item["status"] = "completed"
+            item["completed_at"] = _utc_now()
+            item["completion_source"] = source
+            changed = True
+
+    writeback_required = bool(payload.get("writeback_required"))
+    all_completed = all(item.get("status") == "completed" for item in items)
+    delivery_status = "fully_delivered" if (not writeback_required or all_completed) else "code_done_writeback_pending"
+
+    payload["items"] = items
+    payload["delivery_status"] = delivery_status
+    if changed or payload.get("delivery_status") != previous_status:
+        todo_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    metadata = getattr(state, "metadata", None)
+    if isinstance(metadata, dict):
+        metadata["writeback_items"] = items
+        metadata["delivery_status"] = delivery_status
+        metadata["writeback_required"] = writeback_required
+        metadata["writeback_todo_path"] = str(todo_path)
+
+    event = {
+        "timestamp_utc": _utc_now(),
+        "task_id": payload.get("task_id", "unknown"),
+        "source": source,
+        "delivery_status": delivery_status,
+        "writeback_required": writeback_required,
+        "items_completed": sum(1 for item in items if item.get("status") == "completed"),
+        "items_total": len(items),
+    }
+    if changed or delivery_status != previous_status:
+        _append_jsonl(root / ".nexus" / "events" / "writeback_completion.jsonl", event)
+
+    return {
+        "writeback_required": writeback_required,
+        "delivery_status": delivery_status,
+        "completed": all_completed,
+        "items": items,
+        "todo_path": todo_path,
+    }
 
 
 def _write_delta_artifacts(project_root: Path, state: Any, success: bool, source: str) -> Dict[str, Path]:
@@ -306,8 +387,8 @@ def finalize_learning_loop(
     todo_path = root / ".nexus" / "reports" / "writeback_todo.json"
     todo_path.parent.mkdir(parents=True, exist_ok=True)
     todo_path.write_text(json.dumps(todo_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    delivery_status = "code_done_writeback_pending" if writeback_required else "fully_delivered"
+    refreshed = refresh_writeback_status(root, state=state, source="continuous-learning-finalize")
+    delivery_status = refreshed["delivery_status"]
     metadata = getattr(state, "metadata", None)
     if isinstance(metadata, dict):
         metadata["lessons_written"] = lessons_written

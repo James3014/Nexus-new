@@ -1,90 +1,133 @@
+from contextlib import ExitStack
 from pathlib import Path
-import pytest
-import time
-from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
-from nexus.engine.coordinator import NexusEngine
-from nexus.engine.config import EngineConfig
 
-@pytest.fixture
-def mock_config():
-    return EngineConfig(
+from nexus.core.state_contracts import NexusState
+from nexus.engine.config import EngineConfig
+from nexus.engine.coordinator import NexusEngine
+
+
+def _build_engine(config: EngineConfig, reporter: MagicMock | None = None):
+    stack = ExitStack()
+    patches = {
+        "state_io_cls": stack.enter_context(patch("nexus.engine.coordinator.StateIO")),
+        "workspace_mgr_cls": stack.enter_context(patch("nexus.engine.coordinator.WorkspaceManager")),
+        "policy_load": stack.enter_context(patch("nexus.engine.coordinator.PolicyLoader.load", return_value={"env": "dev"})),
+        "gate_eval_cls": stack.enter_context(patch("nexus.engine.coordinator.GateEvaluator")),
+        "metrics_agg_cls": stack.enter_context(patch("nexus.engine.coordinator.MetricsAggregator")),
+        "validator_cls": stack.enter_context(patch("nexus.engine.coordinator.NexusHardenedValidator")),
+        "latent_forecaster": stack.enter_context(patch("nexus.engine.coordinator.get_latent_forecaster")),
+        "ash_selector": stack.enter_context(patch("nexus.engine.coordinator.get_self_healing_selector")),
+        "memory_cls": stack.enter_context(patch("nexus.engine.coordinator.MemoryService")),
+        "hub_cls": stack.enter_context(patch("nexus.engine.hub.NexusHub")),
+        "federation_cls": stack.enter_context(patch("nexus.engine.coordinator.FederationLayer")),
+        "vector_cache_cls": stack.enter_context(patch("nexus.engine.coordinator.VectorCache")),
+        "sota_searcher_cls": stack.enter_context(patch("nexus.engine.coordinator.SOTASearcher")),
+        "aggregator_cls": stack.enter_context(patch("nexus.engine.coordinator.NexusNeuralAggregator")),
+        "planner_cls": stack.enter_context(patch("nexus.engine.coordinator.HierarchicalGraphPlanner")),
+        "tx_cls": stack.enter_context(patch("scripts.engine.nexus_transaction.TransactionManager")),
+    }
+    engine = NexusEngine(config=config, reporter=reporter or MagicMock())
+    return engine, patches, stack
+
+
+def test_engine_init_uses_current_dependencies():
+    config = EngineConfig(
         project_root=Path("/tmp/nexus_test"),
-        run_dir="/tmp/nexus_test/runs/test-run",
+        run_dir=Path("/tmp/nexus_test/runs/test-run"),
         fast_mode=True,
         audit_level="standard",
-        silent=True
+        silent=True,
     )
+    reporter = MagicMock()
 
-@pytest.fixture
-def mock_dependencies():
-    return {
-        "state_io": MagicMock(),
-        "commander": MagicMock(),
-        "router": MagicMock(),
-        "reporter": MagicMock(),
-        "accumulator": MagicMock(),
-        "health_evaluator": MagicMock(),
-        "research_policy": MagicMock(),
-    }
+    engine, patches, stack = _build_engine(config, reporter=reporter)
+    try:
+        assert engine.project_root == config.project_root
+        assert engine.run_dir == config.run_dir
+        assert engine.reporter is reporter
+        patches["policy_load"].assert_called_once_with(str(config.project_root), env="dev")
+        patches["workspace_mgr_cls"].assert_called_once_with(config.project_root)
+        patches["state_io_cls"].assert_called_once_with(config.project_root, run_dir=config.run_dir)
+    finally:
+        stack.close()
 
-def test_engine_init(mock_config, mock_dependencies):
-    with patch("nexus.telemetry.otel_config.init_otel") as mock_otel:
-        engine = NexusEngine(
-            config=mock_config,
-            **mock_dependencies
-        )
-        
-        assert engine.project_root == mock_config.project_root
-        assert engine.run_dir == Path(mock_config.run_dir)
-        assert engine.state_io == mock_dependencies["state_io"]
-        assert mock_otel.called
 
-def test_engine_lazy_properties(mock_config, mock_dependencies):
-    with patch("nexus.telemetry.otel_config.init_otel"):
-        engine = NexusEngine(config=mock_config, **mock_dependencies)
-        
-        # Test Hub lazy loading
-        hub = engine.hub
-        assert hub is not None
-        
-        # Test MemoryService lazy loading
-        with patch("nexus.services.memory.MemoryService") as mock_mem_cls:
-            mem = engine.memory
-            assert mock_mem_cls.called
-            assert mem is not None
+def test_run_bug_prepares_workspace_and_routes_workflow():
+    config = EngineConfig(project_root=Path("/tmp/nexus_test"), run_dir=Path("/tmp/nexus_test/runs/test-run"), silent=True)
+    reporter = MagicMock()
+    engine, patches, stack = _build_engine(config, reporter=reporter)
+    try:
+        engine._execute_task_workflow = MagicMock(return_value=True)
 
-def test_run_bug_redirects_to_pipeline(mock_config, mock_dependencies):
-    with patch("nexus.telemetry.otel_config.init_otel"):
-        engine = NexusEngine(config=mock_config, **mock_dependencies)
-        engine.pipeline = MagicMock()
-        engine.pipeline.run.return_value = True
-        
-        res = engine.run_bug(bug_id="bug-123", desc="fix it")
-        
-        assert res is True
-        assert engine.pipeline.run.called
-        assert engine.reporter.log_trace.called
+        result = engine.run_bug(bug_id="bug-123", desc="fix it")
 
-def test_run_feature_redirects_to_pipeline(mock_config, mock_dependencies):
-    with patch("nexus.telemetry.otel_config.init_otel"):
-        engine = NexusEngine(config=mock_config, **mock_dependencies)
-        engine.pipeline = MagicMock()
-        engine.pipeline.run.return_value = True
-        
-        res = engine.run_feature(task="build it")
-        
-        assert res is True
-        assert engine.pipeline.run.called
+        assert result is True
+        engine.workspace_mgr.prepare_physical_sandbox.assert_called_once_with(config.run_dir)
+        call = engine._execute_task_workflow.call_args
+        assert call.args[:2] == ("bug-123", "nexus:bug")
+        state = call.kwargs["state"]
+        assert isinstance(state, NexusState)
+        assert state.task_id == "bug-123"
+        assert state.metadata["task_description"] == "fix it"
+        reporter.voice_notify.assert_called_once()
+        reporter.log_trace.assert_called_once()
+    finally:
+        stack.close()
 
-def test_add_step_to_history(mock_config, mock_dependencies):
-    with patch("nexus.telemetry.otel_config.init_otel"):
-        engine = NexusEngine(config=mock_config, **mock_dependencies)
-        mock_state = MagicMock()
-        mock_state.steps_history = []
-        
-        engine._add_step_to_history(mock_state, "P", status="completed", summary="planned")
-        
-        assert len(mock_state.steps_history) == 1
-        assert mock_state.steps_history[0].phase == "P"
-        assert engine.state_io.save_global_state.called
+
+def test_run_feature_sets_swarm_context_before_workflow():
+    config = EngineConfig(project_root=Path("/tmp/nexus_test"), run_dir=Path("/tmp/nexus_test/runs/test-run"), silent=True)
+    reporter = MagicMock()
+    engine, _, stack = _build_engine(config, reporter=reporter)
+    try:
+        engine._execute_task_workflow = MagicMock(return_value=True)
+
+        result = engine.run_feature(task_id="feat-1", task="build it", context={"swarm_mode": True})
+
+        assert result is True
+        call = engine._execute_task_workflow.call_args
+        assert call.args[:2] == ("feat-1", "nexus:feature")
+        state = call.kwargs["state"]
+        assert state.metadata["swarm_mode"] is True
+        assert state.metadata["task_description"] == "build it"
+        reporter.voice_notify.assert_called_once()
+        reporter.log_trace.assert_called_once()
+    finally:
+        stack.close()
+
+
+def test_execute_task_workflow_rejects_and_triggers_self_heal():
+    config = EngineConfig(project_root=Path("/tmp/nexus_test"), run_dir=Path("/tmp/nexus_test/runs/test-run"), silent=True)
+    engine, patches, stack = _build_engine(config, reporter=MagicMock())
+    try:
+        patches["latent_forecaster"].return_value.forecast_roi.return_value = {"est_tokens": 42, "roi_score": 0.1}
+        patches["latent_forecaster"].return_value.predict_risk.return_value = {"reject_prob": 0.9}
+        engine.gate_eval.should_proceed.return_value = (False, "too risky")
+        engine.ash_selector.trigger_ash.return_value = {"selected_strategy": "rollback"}
+
+        state = NexusState(task_id="risk-1")
+        state.metadata["task_description"] = "risky fix"
+        result = engine._execute_task_workflow("risk-1", "nexus:bug", state=state)
+
+        assert result is None
+        engine.ash_selector.trigger_ash.assert_called_once()
+        assert state.metadata["last_rejection_reason"] == "too risky"
+        assert state.metadata["ash_selected_strategy"] == "rollback"
+        engine.state_io.save_global_state.assert_called_once_with(state)
+    finally:
+        stack.close()
+
+
+def test_run_benchmark_returns_current_result_shape():
+    config = EngineConfig(project_root=Path("/tmp/nexus_test"), run_dir=Path("/tmp/nexus_test/runs/test-run"), silent=True)
+    engine, _, stack = _build_engine(config, reporter=MagicMock())
+    try:
+        result = engine.run_benchmark(framework="swe-bench", swarm_mode=True)
+
+        assert isinstance(result, list)
+        assert result[0]["status"] == "PASS"
+        assert result[0]["framework"] == "swe-bench"
+        assert result[0]["swarm_density"] == "High"
+    finally:
+        stack.close()

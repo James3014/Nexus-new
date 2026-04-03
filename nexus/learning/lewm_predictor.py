@@ -1,7 +1,11 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-import torch
 import logging
+
+try:
+    import torch  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    torch = None
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,10 @@ class LeWMPredictor:
     
     def load(self, ckpt_path: str = "/Users/jameschen/Workspace/le-wm/outputs/2026-03-31/19-32-07/lightning_logs/version_0/checkpoints/last.ckpt"):
         """物理加載權重檔案。"""
+        if torch is None:
+            logger.debug("ℹ️ [JEPA] torch unavailable, falling back to placeholder mode.")
+            self.ready = False
+            return
         ckpt = Path(ckpt_path).expanduser()
         if ckpt.exists() and ckpt.stat().st_size > 1024:
             try:

@@ -4,6 +4,7 @@ import sys
 import json
 import click
 import subprocess
+import time
 from datetime import datetime, timezone
 
 class CliCommandsService:
