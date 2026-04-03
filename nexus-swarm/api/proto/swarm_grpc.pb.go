@@ -19,23 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SwarmManager_Heartbeat_FullMethodName     = "/nexus.swarm.v1.SwarmManager/Heartbeat"
-	SwarmManager_SensingStream_FullMethodName = "/nexus.swarm.v1.SwarmManager/SensingStream"
-	SwarmManager_Sensing_FullMethodName       = "/nexus.swarm.v1.SwarmManager/Sensing"
+	SwarmManager_RegisterNode_FullMethodName     = "/nexus.swarm.v1.SwarmManager/RegisterNode"
+	SwarmManager_Heartbeat_FullMethodName        = "/nexus.swarm.v1.SwarmManager/Heartbeat"
+	SwarmManager_DispatchTask_FullMethodName     = "/nexus.swarm.v1.SwarmManager/DispatchTask"
+	SwarmManager_ReportTask_FullMethodName       = "/nexus.swarm.v1.SwarmManager/ReportTask"
+	SwarmManager_GetClusterStatus_FullMethodName = "/nexus.swarm.v1.SwarmManager/GetClusterStatus"
 )
 
 // SwarmManagerClient is the client API for SwarmManager service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// SwarmManager 定義了 Nexus 聯邦的中心調度與心跳監控
 type SwarmManagerClient interface {
-	// Heartbeat 用於追蹤節點存活與能力上報
-	Heartbeat(ctx context.Context, in *HeartbeatReq, opts ...grpc.CallOption) (*HeartbeatResp, error)
-	// SensingStream 提供雙向串流能力的即時感知審計
-	SensingStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SensingReq, SensingResp], error)
-	// Sensing (Unary) 保留用於單次快速感知請求
-	Sensing(ctx context.Context, in *SensingReq, opts ...grpc.CallOption) (*SensingResp, error)
+	// 控制面 指令
+	RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeResponse, error)
+	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
+	// 任務面 指令
+	DispatchTask(ctx context.Context, in *DispatchTaskRequest, opts ...grpc.CallOption) (*DispatchTaskResponse, error)
+	ReportTask(ctx context.Context, in *ReportTaskRequest, opts ...grpc.CallOption) (*ReportTaskResponse, error)
+	// 狀態面 指令
+	GetClusterStatus(ctx context.Context, in *GetClusterStatusRequest, opts ...grpc.CallOption) (*GetClusterStatusResponse, error)
 }
 
 type swarmManagerClient struct {
@@ -46,9 +48,19 @@ func NewSwarmManagerClient(cc grpc.ClientConnInterface) SwarmManagerClient {
 	return &swarmManagerClient{cc}
 }
 
-func (c *swarmManagerClient) Heartbeat(ctx context.Context, in *HeartbeatReq, opts ...grpc.CallOption) (*HeartbeatResp, error) {
+func (c *swarmManagerClient) RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HeartbeatResp)
+	out := new(RegisterNodeResponse)
+	err := c.cc.Invoke(ctx, SwarmManager_RegisterNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *swarmManagerClient) Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HeartbeatResponse)
 	err := c.cc.Invoke(ctx, SwarmManager_Heartbeat_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -56,23 +68,30 @@ func (c *swarmManagerClient) Heartbeat(ctx context.Context, in *HeartbeatReq, op
 	return out, nil
 }
 
-func (c *swarmManagerClient) SensingStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SensingReq, SensingResp], error) {
+func (c *swarmManagerClient) DispatchTask(ctx context.Context, in *DispatchTaskRequest, opts ...grpc.CallOption) (*DispatchTaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &SwarmManager_ServiceDesc.Streams[0], SwarmManager_SensingStream_FullMethodName, cOpts...)
+	out := new(DispatchTaskResponse)
+	err := c.cc.Invoke(ctx, SwarmManager_DispatchTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[SensingReq, SensingResp]{ClientStream: stream}
-	return x, nil
+	return out, nil
 }
 
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmManager_SensingStreamClient = grpc.BidiStreamingClient[SensingReq, SensingResp]
-
-func (c *swarmManagerClient) Sensing(ctx context.Context, in *SensingReq, opts ...grpc.CallOption) (*SensingResp, error) {
+func (c *swarmManagerClient) ReportTask(ctx context.Context, in *ReportTaskRequest, opts ...grpc.CallOption) (*ReportTaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SensingResp)
-	err := c.cc.Invoke(ctx, SwarmManager_Sensing_FullMethodName, in, out, cOpts...)
+	out := new(ReportTaskResponse)
+	err := c.cc.Invoke(ctx, SwarmManager_ReportTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *swarmManagerClient) GetClusterStatus(ctx context.Context, in *GetClusterStatusRequest, opts ...grpc.CallOption) (*GetClusterStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetClusterStatusResponse)
+	err := c.cc.Invoke(ctx, SwarmManager_GetClusterStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -82,15 +101,15 @@ func (c *swarmManagerClient) Sensing(ctx context.Context, in *SensingReq, opts .
 // SwarmManagerServer is the server API for SwarmManager service.
 // All implementations must embed UnimplementedSwarmManagerServer
 // for forward compatibility.
-//
-// SwarmManager 定義了 Nexus 聯邦的中心調度與心跳監控
 type SwarmManagerServer interface {
-	// Heartbeat 用於追蹤節點存活與能力上報
-	Heartbeat(context.Context, *HeartbeatReq) (*HeartbeatResp, error)
-	// SensingStream 提供雙向串流能力的即時感知審計
-	SensingStream(grpc.BidiStreamingServer[SensingReq, SensingResp]) error
-	// Sensing (Unary) 保留用於單次快速感知請求
-	Sensing(context.Context, *SensingReq) (*SensingResp, error)
+	// 控制面 指令
+	RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeResponse, error)
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
+	// 任務面 指令
+	DispatchTask(context.Context, *DispatchTaskRequest) (*DispatchTaskResponse, error)
+	ReportTask(context.Context, *ReportTaskRequest) (*ReportTaskResponse, error)
+	// 狀態面 指令
+	GetClusterStatus(context.Context, *GetClusterStatusRequest) (*GetClusterStatusResponse, error)
 	mustEmbedUnimplementedSwarmManagerServer()
 }
 
@@ -101,14 +120,20 @@ type SwarmManagerServer interface {
 // pointer dereference when methods are called.
 type UnimplementedSwarmManagerServer struct{}
 
-func (UnimplementedSwarmManagerServer) Heartbeat(context.Context, *HeartbeatReq) (*HeartbeatResp, error) {
+func (UnimplementedSwarmManagerServer) RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterNode not implemented")
+}
+func (UnimplementedSwarmManagerServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Heartbeat not implemented")
 }
-func (UnimplementedSwarmManagerServer) SensingStream(grpc.BidiStreamingServer[SensingReq, SensingResp]) error {
-	return status.Error(codes.Unimplemented, "method SensingStream not implemented")
+func (UnimplementedSwarmManagerServer) DispatchTask(context.Context, *DispatchTaskRequest) (*DispatchTaskResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DispatchTask not implemented")
 }
-func (UnimplementedSwarmManagerServer) Sensing(context.Context, *SensingReq) (*SensingResp, error) {
-	return nil, status.Error(codes.Unimplemented, "method Sensing not implemented")
+func (UnimplementedSwarmManagerServer) ReportTask(context.Context, *ReportTaskRequest) (*ReportTaskResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportTask not implemented")
+}
+func (UnimplementedSwarmManagerServer) GetClusterStatus(context.Context, *GetClusterStatusRequest) (*GetClusterStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetClusterStatus not implemented")
 }
 func (UnimplementedSwarmManagerServer) mustEmbedUnimplementedSwarmManagerServer() {}
 func (UnimplementedSwarmManagerServer) testEmbeddedByValue()                      {}
@@ -131,8 +156,26 @@ func RegisterSwarmManagerServer(s grpc.ServiceRegistrar, srv SwarmManagerServer)
 	s.RegisterService(&SwarmManager_ServiceDesc, srv)
 }
 
+func _SwarmManager_RegisterNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterNodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SwarmManagerServer).RegisterNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SwarmManager_RegisterNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SwarmManagerServer).RegisterNode(ctx, req.(*RegisterNodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SwarmManager_Heartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HeartbeatReq)
+	in := new(HeartbeatRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -144,32 +187,61 @@ func _SwarmManager_Heartbeat_Handler(srv interface{}, ctx context.Context, dec f
 		FullMethod: SwarmManager_Heartbeat_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmManagerServer).Heartbeat(ctx, req.(*HeartbeatReq))
+		return srv.(SwarmManagerServer).Heartbeat(ctx, req.(*HeartbeatRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SwarmManager_SensingStream_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(SwarmManagerServer).SensingStream(&grpc.GenericServerStream[SensingReq, SensingResp]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type SwarmManager_SensingStreamServer = grpc.BidiStreamingServer[SensingReq, SensingResp]
-
-func _SwarmManager_Sensing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SensingReq)
+func _SwarmManager_DispatchTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DispatchTaskRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SwarmManagerServer).Sensing(ctx, in)
+		return srv.(SwarmManagerServer).DispatchTask(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SwarmManager_Sensing_FullMethodName,
+		FullMethod: SwarmManager_DispatchTask_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SwarmManagerServer).Sensing(ctx, req.(*SensingReq))
+		return srv.(SwarmManagerServer).DispatchTask(ctx, req.(*DispatchTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SwarmManager_ReportTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SwarmManagerServer).ReportTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SwarmManager_ReportTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SwarmManagerServer).ReportTask(ctx, req.(*ReportTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SwarmManager_GetClusterStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetClusterStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SwarmManagerServer).GetClusterStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SwarmManager_GetClusterStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SwarmManagerServer).GetClusterStatus(ctx, req.(*GetClusterStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -182,21 +254,26 @@ var SwarmManager_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*SwarmManagerServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "RegisterNode",
+			Handler:    _SwarmManager_RegisterNode_Handler,
+		},
+		{
 			MethodName: "Heartbeat",
 			Handler:    _SwarmManager_Heartbeat_Handler,
 		},
 		{
-			MethodName: "Sensing",
-			Handler:    _SwarmManager_Sensing_Handler,
+			MethodName: "DispatchTask",
+			Handler:    _SwarmManager_DispatchTask_Handler,
 		},
-	},
-	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "SensingStream",
-			Handler:       _SwarmManager_SensingStream_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
+			MethodName: "ReportTask",
+			Handler:    _SwarmManager_ReportTask_Handler,
+		},
+		{
+			MethodName: "GetClusterStatus",
+			Handler:    _SwarmManager_GetClusterStatus_Handler,
 		},
 	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "swarm.proto",
 }

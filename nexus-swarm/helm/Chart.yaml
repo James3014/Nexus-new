@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nexus-swarm
+description: Nexus v22 Singularity OS Distributed Swarm Cluster
+type: application
+version: 1.0.0
+appVersion: "v22"
+
+dependencies:
+  - name: postgresql
+    version: 12.1.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled

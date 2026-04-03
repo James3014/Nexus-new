@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 import os
+from pathlib import Path
 from nexus.engine.phases.base import BasePhaseHandler
 from nexus.core.state_contracts import NexusState
 from scripts.engine.intent_classifier import IntentClassifier
@@ -82,6 +83,84 @@ class PlannerPhaseHandler(BasePhaseHandler):
                     context["experience_context"] = experience_block
             except Exception as e:
                 print(f"⚠️ [RAG:Fail] Could not inject context: {e}")
+
+            # 🧬 P1-F: Hardened Consensus Lesson Retrieval (Swarm Wisdom)
+            try:
+                from nexus.services.lesson_retrieval import retrieve_with_resolution
+                from nexus.services.planner_enhancer import enhance_planner_context
+                resolution = retrieve_with_resolution(
+                    Path(self.project_root), 
+                    task, 
+                    diagnosis=context.get("diagnosis"),
+                    use_federated=True
+                )
+                
+                # P2-B: 提取 Hybrid 檢索元數據
+                backend = resolution.get("backend_used", "legacy")
+                count = resolution.get("metadata", {}).get("candidate_count", 0)
+                score = resolution.get("consensus_score", 0.0)
+                
+                if resolution["status"] == "high_consensus":
+                    print(f"🧬 [Consensus:OK] Backend: {backend} | Candidates: {count} | Score: {score:.2f}")
+                    context["lesson_context"] = resolution["prompt_context"]
+                    state.metadata["lesson_resolution"] = {
+                        **resolution.get("metadata", {}),
+                        "backend_used": backend,
+                        "candidate_count": count,
+                        "consensus_status": "high"
+                    }
+                else:
+                    print(f"🧬 [Consensus:Fallback] {resolution['prompt_context']} (Backend: {backend})")
+                    state.metadata["lesson_resolution"] = {
+                        "status": "low_consensus",
+                        "backend_used": backend,
+                        "candidate_count": count
+                    }
+                
+                # P2-C: 健康洞察與相似 Bug 修復增強
+                if context.get("diagnosis"):
+                    from nexus.services.planner_enhancer import enhance_planner_context
+                    from scripts.learning.compute_route_weights import load_mock_candidates
+                    from nexus.services.swarm_router import select_best_route
+                    
+                    enhancement = enhance_planner_context(Path(self.project_root), context["diagnosis"], resolution)
+                    
+                    # P3 Swarm Routing (Gated Mode - P3 Day 2)
+                    from nexus.services.policy_gate import apply_policy_gate
+                    candidates = load_mock_candidates(Path(self.project_root), self.name)
+                    route_decision = select_best_route(candidates)
+                    
+                    # 執行 Policy Gating (對應 P3 Day 2)
+                    health_data = enhancement["health_insights"]
+                    # 如果有 metrics 子字典則提取，否則用原字典 (相容模式)
+                    actual_metrics = health_data.get("metrics", health_data)
+                    
+                    gate_decision = apply_policy_gate(
+                        route_id=route_decision.selected_route,
+                        original_score=route_decision.score,
+                        phase=self.name,
+                        health_metrics=actual_metrics,
+                        repo_root=Path(self.project_root),
+                    )
+                    
+                    # 注入 Prompt Context
+                    context["health_enhancement"] = enhancement["prompt_context"]
+                    # 豐富化 Metadata 供 P3 審核
+                    state.metadata.update({
+                        "health_insights": enhancement["health_insights"],
+                        "repair_recommendations": enhancement["repair_recommendations"],
+                        "swarm_routing": {
+                            "selected_route": gate_decision.route_id,
+                            "gated_score": gate_decision.gated_score,
+                            "decision": gate_decision.decision.value,
+                            "signals": [s.__dict__ for s in gate_decision.signals],
+                            "backend_used": route_decision.backend_used,
+                        },
+                        **enhancement["planner_metadata"]
+                    })
+                    print(f"🌡️ [Health:Alert] Score: {enhancement['planner_metadata']['phase_health_score']:.2f} | 🛡️ Gate: {gate_decision.decision.value.upper()} ({gate_decision.gated_score})")
+            except Exception as e:
+                print(f"⚠️ [Consensus:Fail] Could not resolve lessons: {e}")
         else:
             print(f"⚪ [RAG:Off] Running Baseline (Ablation Mode).")
 

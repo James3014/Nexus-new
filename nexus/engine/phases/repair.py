@@ -7,7 +7,11 @@ from nexus.core.state_contracts import NexusState
 from nexus.engine.phases.local_repair import try_local_repair
 from nexus.services.reviewer import GatewayReviewLoop
 from nexus.services.reach.ucc_router import UCCRouter
+from nexus.services.self_heal_selector import select_self_heal_route
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RepairPhaseHandler(BasePhaseHandler):
@@ -93,12 +97,28 @@ class RepairPhaseHandler(BasePhaseHandler):
                 "reason": "Missing Red-Test (Failed Case) before repair."
             }
 
-        # ... (Existing logic for local/orchestrated repair)
-        local_result = try_local_repair(
-            project_root=self.project_root,
-            state=state,
-            context={"task": task, **context},
+        # 🛡️ P3 Day 3：Swarm self-heal selection
+        heal_decision = select_self_heal_route(
+            Path(self.project_root),
+            self.name,
+            context.get("diagnosis", {}),
         )
+        
+        state.metadata["self_heal_route"] = heal_decision
+        
+        if heal_decision["backend_used"] == "legacy-fallback":
+            logger.info(f"🛡️ [Armor:Repair] Self-heal BLOCKED: {heal_decision.get('reason', 'unknown')}")
+            # 原有的修復邏輯
+            local_result = try_local_repair(
+                project_root=self.project_root,
+                state=state,
+                context={"task": task, **context},
+            )
+        else:
+            logger.info(f"🛡️ [Armor:Repair] Self-heal ROUTED: {heal_decision['selected_route']} "
+                       f"(gated_score: {heal_decision['gated_score']:.3f})")
+            # Swarm-gated repair stub (Day 4 完整實作)
+            local_result = self._swarm_repair(state, Path(self.project_root), heal_decision["selected_route"], context)
 
         # 🛡️ [Phase 2.3] 自癒感官啟動 (Self-Healing Research)
         # 被觸發條件：初次修復失敗且診斷指示錯誤類型內容內容及性能分析內容及其內容內容
@@ -112,6 +132,16 @@ class RepairPhaseHandler(BasePhaseHandler):
                 state.metadata["repair_research_active"] = True
             
         return local_result or {"status": "FAILED"}
+
+    def _swarm_repair(self, state: NexusState, project_root: Path, selected_route: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """🛡️ [Day 3 stub] 執行蜂群修復調度代理。"""
+        # P3 Day 3 先暫時代理到 legacy 修復，Day 4 將對接真正的分散式 Agent Dispatcher
+        logger.info(f"   ↳ [Swarm:Proxy] Routing to legacy core via {selected_route}")
+        return try_local_repair(
+            project_root=project_root,
+            state=state,
+            context=context,
+        )
 
     def _research_failure_intel(self, error_type: str, project_root: Path) -> Dict[str, Any]:
         """🧬 [Phase 2.3] GitHub Issues + SO 實體採集內容及性能分析內容及其內容內容"""

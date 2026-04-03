@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { safeInvoke } from '../lib/bridge';
 
 interface ErrorFix {
   id: number;
@@ -19,7 +19,7 @@ export const ErrorDBPanel: React.FC<Props> = ({ errorCode, traceback, onApply })
 
   useEffect(() => {
     if (errorCode || traceback) {
-      invoke<ErrorFix[]>('query_error_fix', { exitCode: errorCode, traceback })
+      safeInvoke<ErrorFix[]>('query_error_fix', { exitCode: errorCode, traceback })
         .then(setFixes)
         .catch(console.error);
     }

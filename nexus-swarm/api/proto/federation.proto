@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package nexus.swarm.federation.v1;
+
+option go_package = "./api/proto";
+
+service Federation {
+  // 🛡️ Discovery & Identity
+  rpc DiscoverPeers(DiscoverPeersRequest) returns (DiscoverPeersResponse);
+  rpc HeartbeatFederation(HeartbeatFederationRequest) returns (HeartbeatFederationResponse);
+  
+  // 🛡️ Operations
+  rpc RouteTask(RouteTaskRequest) returns (RouteTaskResponse);
+  
+  // 🛡️ Consensus
+  rpc GlobalLeaderElection(GlobalLeaderElectionRequest) returns (GlobalLeaderElectionResponse);
+}
+
+message DiscoverPeersRequest {
+  string cluster_id = 1;
+  string federation_token = 2;
+  string manager_endpoint = 3;
+}
+
+message PeerInfo {
+  string cluster_id = 1;
+  string region = 2;
+  string manager_endpoint = 3;
+  int64 total_capacity = 4;
+  int64 available_capacity = 5;
+  string leader_status = 6;  // LEADER / FOLLOWER / CANDIDATE
+  int64 last_seen = 7;
+}
+
+message DiscoverPeersResponse {
+  repeated PeerInfo peers = 1;
+  string my_cluster_id = 2;
+}
+
+message HeartbeatFederationRequest {
+  string cluster_id = 1;
+  string region = 2;
+  int64 total_capacity = 3;
+  int64 available_capacity = 4;
+  string traceparent = 5;
+}
+
+message HeartbeatFederationResponse {
+  bool accepted = 1;
+  string leader_cluster = 2;
+}
+
+message RouteTaskRequest {
+  string task_id = 1;
+  string decision_id = 2;
+  string preferred_region = 3;
+  bytes task_payload = 4;
+  string traceparent = 5;
+}
+
+message RouteTaskResponse {
+  bool routed = 1;
+  string target_cluster = 2;
+  string target_node = 3;
+}
+
+message GlobalLeaderElectionRequest {
+  string cluster_id = 1;
+  int64 term = 2;
+  bytes vote = 3;
+}
+
+message GlobalLeaderElectionResponse {
+  int64 term = 1;
+  bool vote_granted = 2;
+  string leader_cluster = 3;
+}

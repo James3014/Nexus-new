@@ -1,0 +1,4 @@
+2026/04/04 03:08:53 [NEXUS v22] Swarm Manager listening on :9000
+2026/04/04 03:08:53 [NEXUS v22] HTTP Status listening on :9100
+2026/04/04 03:08:59 [NEXUS v22] Node nexus-node-JamesdeMacBook-Pro.local-7873 registered in region local (Trace: 00-9d641dcb8ad010fddaa4707988da16a1-03897ec94d5853c0-01)
+signal: killed

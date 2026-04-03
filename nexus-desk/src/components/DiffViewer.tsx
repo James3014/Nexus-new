@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { invoke } from '@tauri-apps/api/core';
+import { safeInvoke } from '../lib/bridge';
 
 interface Props {
   taskId: string;
@@ -14,7 +14,7 @@ export const DiffViewer: React.FC<Props> = ({ taskId }) => {
     if (!taskId) return;
     setLoading(true);
     try {
-      const res = await invoke<string>('get_worktree_diff', { taskId });
+      const res = await safeInvoke<string>('get_worktree_diff', { taskId });
       setDiff(res || "NO_CHANGES_DETECTED");
     } catch (e) {
       setDiff(`DIFF_ERROR: ${e}`);

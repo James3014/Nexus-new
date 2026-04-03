@@ -1,0 +1,18 @@
+warning: No `requires-python` value found in the workspace. Defaulting to `>=3.12`.
+INFO:     Started server process [8051]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)
+[2026-04-04 03:10:29,191] INFO: 🛡️ Received PR 101 from nexus-pilot. Queuing...
+INFO:     127.0.0.1:55432 - "POST /shadow-audit HTTP/1.1" 200 OK
+[2026-04-04 03:10:29,228] INFO: 🛡️ Starting Background Audit for PR 101...
+{
+  "run_id": "f0488e90",
+  "pr_id": "101",
+  "status": "SUCCESS",
+  "latency_ms": 1959,
+  "result": "Simulated Shadow Audit for PR 101 (Docker Degraded).",
+  "docker_used": false,
+  "timestamp": "2026-04-04T03:10:31.269245"
+}
+[2026-04-04 03:10:31,287] INFO: ✅ Background Audit for PR 101 complete.

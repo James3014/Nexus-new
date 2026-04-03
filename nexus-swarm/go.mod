@@ -3,6 +3,7 @@ module nexus-swarm
 go 1.25.1
 
 require (
+	github.com/lib/pq v1.12.3
 	github.com/prometheus/client_golang v1.23.2
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11

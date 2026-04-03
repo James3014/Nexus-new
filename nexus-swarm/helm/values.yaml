@@ -1,0 +1,41 @@
+# 🛡️ Nexus Swarm v22 Values
+manager:
+  replicas: 1
+  image: nexus-swarm-manager:v22
+  port: 9000
+  metricsPort: 9100
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 512Mi
+
+node:
+  image: nexus-swarm-node:v22
+  resources:
+    limits:
+      cpu: 1
+      memory: 2Gi
+    requests:
+      cpu: 250m
+      memory: 1Gi
+
+# 🛡️ Multi-Region Scaling (v22/v24 Spec)
+regions:
+  - name: us-east
+    nodeReplicas: 3
+  - name: eu-west
+    nodeReplicas: 2
+
+postgresql:
+  enabled: true
+  auth:
+    username: nexus
+    password: nexus_password
+    database: swarmdb
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi

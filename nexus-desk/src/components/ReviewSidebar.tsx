@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useState, useEffect } from 'react';
+import { safeInvoke } from '../lib/bridge';
 
 interface Annotation {
   id: string;
@@ -25,7 +25,7 @@ export const ReviewSidebar: React.FC<Props> = ({ taskId, onAddAnnotation }) => {
   const fetchAnnotations = async () => {
     if (taskId) {
       try {
-        const res = await invoke<Annotation[]>('list_annotations', { taskId });
+        const res = await safeInvoke<Annotation[]>('list_annotations', { taskId });
         setAnnotations(res);
       } catch (e) {
         console.error(e);

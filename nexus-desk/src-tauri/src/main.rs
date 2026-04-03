@@ -182,6 +182,87 @@ async fn get_worktree_diff(_task_id: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+#[command]
+async fn swarm_metrics() -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .args(&["run", "python", "desk/api_swarm_metrics.py", "."])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[command]
+async fn run_cleanup() -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .args(&["run", "python", "scripts/learning/cleanup_policy_memory.py", "."])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[command]
+async fn run_autotune() -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .env("PYTHONPATH", ".")
+        .args(&["run", "python", "scripts/learning/autotune_route_weights.py", "."])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[command]
+async fn eternal_status() -> Result<String, String> {
+    let anchor_path = PathBuf::from("/Users/jameschen/Workspace/nexus").join(".nexus/eternal/anchors.json");
+    if anchor_path.exists() {
+        fs::read_to_string(anchor_path).map_err(|e| e.to_string())
+    } else {
+        Ok(r#"{"offloaded_mb":0,"total_mb":0,"anchors_count":0}"#.to_string())
+    }
+}
+
+#[command]
+async fn eternal_download(txid: String) -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .args(&["run", "python", "scripts/engine/nexus_cli.py", "nexus:eternal", "download", "--txid", &txid])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[command]
+async fn cluster_status() -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let res = client.get("http://127.0.0.1:9100/cluster/status")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    
+    let body = res.text().await.map_err(|e| e.to_string())?;
+    Ok(body)
+}
+
+#[command]
+async fn shadow_status() -> Result<String, String> {
+    let shadow_path = PathBuf::from("/Users/jameschen/Workspace/nexus").join(".nexus/shadow/calibration.json");
+    if shadow_path.exists() {
+        fs::read_to_string(shadow_path).map_err(|e| e.to_string())
+    } else {
+        Ok(r#"{"status": "HEALTHY", "total_runs": 0, "false_positive_count": 0, "avg_latency_ms": 0, "whitelist": []}"#.to_string())
+    }
+}
+
 fn main() {
     governance::init_governance_db().expect("failed to initialize governance db");
     tauri::Builder::default()
@@ -197,7 +278,14 @@ fn main() {
             governance::append_decision,
             governance::list_decisions,
             governance::add_annotation,
-            governance::list_annotations
+            governance::list_annotations,
+            swarm_metrics,
+            run_cleanup,
+            run_autotune,
+            eternal_status,
+            eternal_download,
+            cluster_status,
+            shadow_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -14,7 +14,8 @@ class PromptBuilder:
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
         self.config_path = self.project_root / "nexus" / "config" / "models.yaml"
-        self.lesson_path = self.project_root / "obsidian/crystal_lessons.jsonl"
+        # P1-D: Updated lesson source to structured JSONL
+        self.lesson_path = self.project_root / ".nexus" / "knowledge" / "lesson_events.jsonl"
         
         # 內建核心規制 (原本在 ContextHub)
         self.NEXUS_PRIMER = {
@@ -39,21 +40,18 @@ class PromptBuilder:
         with open(self.config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
 
-    def _get_lessons(self, task: str) -> List[str]:
-        """提取相關的經驗結晶 (Lessons)。"""
-        if not self.lesson_path.exists():
-            return []
-        
-        relevant = []
-        try:
-            with open(self.lesson_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    l = json.loads(line)
-                    if l.get("signature") in task or l.get("cause") in task:
-                        relevant.append(f"- [{l['signature']}]: {l['lesson']}")
-        except Exception:
-            pass
-        return relevant[:3]
+    def _get_lessons_v22(self, task: str) -> Dict[str, Any]:
+        """使用 P1-D 檢索服務提取教訓。"""
+        from nexus.services.lesson_retrieval import (
+            retrieve_relevant_lessons,
+            inject_lesson_context,
+        )
+
+        retrieved = retrieve_relevant_lessons(self.lesson_path, task)
+        # 模擬一個空的 state 以使用 inject_lesson_context
+        dummy_state = {"metadata": {}}
+        dummy_state, _ = inject_lesson_context(dummy_state, retrieved)
+        return dummy_state["metadata"].get("retrieved_lessons", {})
 
     def _get_consensus_feedback(self, task_id: str) -> str:
         """從 .nexus/consensus/feedback.json 提取回饋 (v23 Eternal)"""
@@ -106,9 +104,9 @@ Rules:
         
         template = model_cfg.get("template", "[Nexus Task]\nTask: [Nexus Task]")
         
-        # 1. 注入 Lessons (成功經驗)
-        lessons = self._get_lessons(task)
-        lesson_str = "\n".join(lessons) if lessons else "None"
+        # 1. 注入 Lessons (成功經驗 - P1-D 升級版)
+        retrieved_data = self._get_lessons_v22(task)
+        lesson_str = retrieved_data.get("prompt_context", "None")
         
         # 2. 注入 Physical Feedback (失敗教訓)
         feedback_str = self._get_consensus_feedback(task_id)

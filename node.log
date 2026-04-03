@@ -1,0 +1,2 @@
+warning: No `requires-python` value found in the workspace. Defaulting to `>=3.12`.
+[2026-04-04 03:08:59,281] INFO: ✅ Registered with Manager: nexus-manager-v22 (Interval: 30s)

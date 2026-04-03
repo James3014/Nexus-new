@@ -573,6 +573,16 @@ Nexus Ultimate Total Atlas Integrated Verbatim (2026-03-27).
 - [ ] **Tests Green**: 目標測試案例 100% 通過。
 - [ ] **Audit Passed**: `audit_result.json` 中 `audit_passed == true`。
 - [ ] **Schemas Valid**: 所有產出檔案通過 `schemas/` 校驗。
+- [V22] Machine-Truth Learning Artifacts
+*   **Source of Truth (SSoT)**: 所有學習結晶必須同步寫入 `.nexus/knowledge/lesson_events.jsonl`，採用 `lesson_event.v1` 結構化 Schema。
+*   **Human Mirror**: `.codex_lessons.md` 僅作為人類可讀的摘要索引，其內容必須由 JSONL 真值單向同步產生。
+*   **Idempotency (冪等性)**: 採用 `SHA256(task_id + normalized_reason + patch_hash)` 作為 `lesson_id`，禁止重複教訓導致知識庫膨脹。
+*   **Governance Gate Integration**: 任何成功的 `fully_delivered` 晉升必須確保對應的 Lessons 已完成 JSONL 落盤。
+
+### [V22] Experience-Aware Planning (P1-D)
+*   **Weighted Retrieval**: 引擎在 `Phase P (Planning)` 啟動前，必須檢索 `.nexus/knowledge/lesson_events.jsonl`，採用 `Word Overlap + Category Bonus` 權重演算法。
+*   **Context Injection**: 檢索結果必須注入 `state.metadata["retrieved_lessons"]` 並同步轉化為 `prompt_context` 供 Planner/Repair 模型參考。
+*   **Verification (DoD)**: 每一筆任務計畫必須顯式聲明其是否參考了特定 `lesson_id`，確保進化軌跡可追蹤。
 - [ ] **Manifest Complete**: `manifest.json` 已生成且包含所有 round 加密索引。
 - [ ] **Worktree Removed**: 任務環境已完全回收，無殘留進程。
 - [ ] **Sync Confirmed**: 經驗與 Git 狀態已完成 Vector/Remote 同步。

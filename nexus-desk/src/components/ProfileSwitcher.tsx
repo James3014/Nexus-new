@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { safeInvoke } from '../lib/bridge';
 
 interface Props {
   currentProfile: string;
@@ -13,7 +13,7 @@ export const ProfileSwitcher: React.FC<Props> = ({ currentProfile, onProfileChan
   const handleSwitch = async (name: string) => {
     setIsApplying(true);
     try {
-      await invoke("apply_profile", { name });
+      await safeInvoke("apply_profile", { name });
       onProfileChange(name);
     } catch (e) {
       alert(`Drift Detected or Apply Failed: ${e}`);

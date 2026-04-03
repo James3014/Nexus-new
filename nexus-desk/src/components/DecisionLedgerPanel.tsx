@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { safeInvoke } from '../lib/bridge';
 
 interface DecisionEntry {
   id: string;
@@ -22,7 +22,7 @@ export const DecisionLedgerPanel: React.FC<Props> = ({ taskId }) => {
 
   useEffect(() => {
     if (taskId) {
-      invoke<DecisionEntry[]>('list_decisions', { taskId })
+      safeInvoke<DecisionEntry[]>('list_decisions', { taskId })
         .then(setEntries)
         .catch(console.error);
     }

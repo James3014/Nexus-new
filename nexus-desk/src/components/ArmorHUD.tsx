@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Shield, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { invoke } from '@tauri-apps/api/core'
+import { safeInvoke } from '../lib/bridge'
 
 interface Identity {
   armor: string
@@ -14,7 +14,7 @@ export const ArmorHUD = () => {
 
   const fetchIdentity = async () => {
     try {
-      const data: Identity = await invoke('get_nexus_identity')
+      const data: Identity = await safeInvoke('get_nexus_identity')
       setIdentity(data)
     } catch (error) {
       console.error('HUD 偵測失敗:', error)

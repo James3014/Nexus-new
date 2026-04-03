@@ -21,30 +21,36 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type HeartbeatReq struct {
+type RegisterNodeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Capabilities  []string               `protobuf:"bytes,2,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // e.g., ["rust-reflex", "ast-audit", "gpu-eval"]
-	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`             // "ONLINE", "BUSY", "MAINTENANCE"
-	Timestamp     int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Capabilities  []string               `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	Region        string                 `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
+	CpuCores      int32                  `protobuf:"varint,5,opt,name=cpu_cores,json=cpuCores,proto3" json:"cpu_cores,omitempty"`
+	MemoryMb      int64                  `protobuf:"varint,6,opt,name=memory_mb,json=memoryMb,proto3" json:"memory_mb,omitempty"`
+	AdvertiseAddr string                 `protobuf:"bytes,7,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
+	// 🛡️ TraceContext (W3C Standard)
+	Traceparent   string `protobuf:"bytes,8,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
+	Tracestate    string `protobuf:"bytes,9,opt,name=tracestate,proto3" json:"tracestate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *HeartbeatReq) Reset() {
-	*x = HeartbeatReq{}
+func (x *RegisterNodeRequest) Reset() {
+	*x = RegisterNodeRequest{}
 	mi := &file_swarm_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *HeartbeatReq) String() string {
+func (x *RegisterNodeRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*HeartbeatReq) ProtoMessage() {}
+func (*RegisterNodeRequest) ProtoMessage() {}
 
-func (x *HeartbeatReq) ProtoReflect() protoreflect.Message {
+func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_swarm_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -56,347 +62,782 @@ func (x *HeartbeatReq) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use HeartbeatReq.ProtoReflect.Descriptor instead.
-func (*HeartbeatReq) Descriptor() ([]byte, []int) {
+// Deprecated: Use RegisterNodeRequest.ProtoReflect.Descriptor instead.
+func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
 	return file_swarm_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *HeartbeatReq) GetNodeId() string {
+func (x *RegisterNodeRequest) GetNodeId() string {
 	if x != nil {
 		return x.NodeId
 	}
 	return ""
 }
 
-func (x *HeartbeatReq) GetCapabilities() []string {
+func (x *RegisterNodeRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *RegisterNodeRequest) GetCapabilities() []string {
 	if x != nil {
 		return x.Capabilities
 	}
 	return nil
 }
 
-func (x *HeartbeatReq) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *HeartbeatReq) GetTimestamp() int64 {
-	if x != nil {
-		return x.Timestamp
-	}
-	return 0
-}
-
-type HeartbeatResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	SyncTimestamp int64                  `protobuf:"varint,2,opt,name=sync_timestamp,json=syncTimestamp,proto3" json:"sync_timestamp,omitempty"`
-	NextAction    string                 `protobuf:"bytes,3,opt,name=next_action,json=nextAction,proto3" json:"next_action,omitempty"` // e.g., "STANDBY", "FLUSH_CACHE"
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HeartbeatResp) Reset() {
-	*x = HeartbeatResp{}
-	mi := &file_swarm_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HeartbeatResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HeartbeatResp) ProtoMessage() {}
-
-func (x *HeartbeatResp) ProtoReflect() protoreflect.Message {
-	mi := &file_swarm_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HeartbeatResp.ProtoReflect.Descriptor instead.
-func (*HeartbeatResp) Descriptor() ([]byte, []int) {
-	return file_swarm_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *HeartbeatResp) GetAccepted() bool {
-	if x != nil {
-		return x.Accepted
-	}
-	return false
-}
-
-func (x *HeartbeatResp) GetSyncTimestamp() int64 {
-	if x != nil {
-		return x.SyncTimestamp
-	}
-	return 0
-}
-
-func (x *HeartbeatResp) GetNextAction() string {
-	if x != nil {
-		return x.NextAction
-	}
-	return ""
-}
-
-type SensingReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	RepoUrl       string                 `protobuf:"bytes,2,opt,name=repo_url,json=repoUrl,proto3" json:"repo_url,omitempty"`
-	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
-	TaskType      string                 `protobuf:"bytes,4,opt,name=task_type,json=taskType,proto3" json:"task_type,omitempty"`
-	Token         string                 `protobuf:"bytes,5,opt,name=token,proto3" json:"token,omitempty"`
-	Traceparent   string                 `protobuf:"bytes,6,opt,name=traceparent,proto3" json:"traceparent,omitempty"` // W3C format
-	Payload       []byte                 `protobuf:"bytes,7,opt,name=payload,proto3" json:"payload,omitempty"`         // Optional: Code snippet or metadata
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SensingReq) Reset() {
-	*x = SensingReq{}
-	mi := &file_swarm_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SensingReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SensingReq) ProtoMessage() {}
-
-func (x *SensingReq) ProtoReflect() protoreflect.Message {
-	mi := &file_swarm_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SensingReq.ProtoReflect.Descriptor instead.
-func (*SensingReq) Descriptor() ([]byte, []int) {
-	return file_swarm_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *SensingReq) GetTaskId() string {
-	if x != nil {
-		return x.TaskId
-	}
-	return ""
-}
-
-func (x *SensingReq) GetRepoUrl() string {
-	if x != nil {
-		return x.RepoUrl
-	}
-	return ""
-}
-
-func (x *SensingReq) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *SensingReq) GetTaskType() string {
-	if x != nil {
-		return x.TaskType
-	}
-	return ""
-}
-
-func (x *SensingReq) GetToken() string {
-	if x != nil {
-		return x.Token
-	}
-	return ""
-}
-
-func (x *SensingReq) GetTraceparent() string {
-	if x != nil {
-		return x.Traceparent
-	}
-	return ""
-}
-
-func (x *SensingReq) GetPayload() []byte {
-	if x != nil {
-		return x.Payload
-	}
-	return nil
-}
-
-type SensingResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // "PASS", "FAIL", "REJECT"
-	Summary       string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
-	Metrics       *Metrics               `protobuf:"bytes,4,opt,name=metrics,proto3" json:"metrics,omitempty"`
-	Error         string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
-	ResultsPatch  []byte                 `protobuf:"bytes,6,opt,name=results_patch,json=resultsPatch,proto3" json:"results_patch,omitempty"` // Optional: Suggested fix or patch
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SensingResp) Reset() {
-	*x = SensingResp{}
-	mi := &file_swarm_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SensingResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SensingResp) ProtoMessage() {}
-
-func (x *SensingResp) ProtoReflect() protoreflect.Message {
-	mi := &file_swarm_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SensingResp.ProtoReflect.Descriptor instead.
-func (*SensingResp) Descriptor() ([]byte, []int) {
-	return file_swarm_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *SensingResp) GetNodeId() string {
-	if x != nil {
-		return x.NodeId
-	}
-	return ""
-}
-
-func (x *SensingResp) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *SensingResp) GetSummary() string {
-	if x != nil {
-		return x.Summary
-	}
-	return ""
-}
-
-func (x *SensingResp) GetMetrics() *Metrics {
-	if x != nil {
-		return x.Metrics
-	}
-	return nil
-}
-
-func (x *SensingResp) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
-func (x *SensingResp) GetResultsPatch() []byte {
-	if x != nil {
-		return x.ResultsPatch
-	}
-	return nil
-}
-
-type Metrics struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	SelectionLatencyUs int64                  `protobuf:"varint,1,opt,name=selection_latency_us,json=selectionLatencyUs,proto3" json:"selection_latency_us,omitempty"`
-	NetworkLatencyMs   int64                  `protobuf:"varint,2,opt,name=network_latency_ms,json=networkLatencyMs,proto3" json:"network_latency_ms,omitempty"`
-	ExecutionMs        int64                  `protobuf:"varint,3,opt,name=execution_ms,json=executionMs,proto3" json:"execution_ms,omitempty"`
-	Region             string                 `protobuf:"bytes,4,opt,name=region,proto3" json:"region,omitempty"`
-	ConfidenceScore    float32                `protobuf:"fixed32,5,opt,name=confidence_score,json=confidenceScore,proto3" json:"confidence_score,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
-}
-
-func (x *Metrics) Reset() {
-	*x = Metrics{}
-	mi := &file_swarm_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Metrics) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Metrics) ProtoMessage() {}
-
-func (x *Metrics) ProtoReflect() protoreflect.Message {
-	mi := &file_swarm_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Metrics.ProtoReflect.Descriptor instead.
-func (*Metrics) Descriptor() ([]byte, []int) {
-	return file_swarm_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *Metrics) GetSelectionLatencyUs() int64 {
-	if x != nil {
-		return x.SelectionLatencyUs
-	}
-	return 0
-}
-
-func (x *Metrics) GetNetworkLatencyMs() int64 {
-	if x != nil {
-		return x.NetworkLatencyMs
-	}
-	return 0
-}
-
-func (x *Metrics) GetExecutionMs() int64 {
-	if x != nil {
-		return x.ExecutionMs
-	}
-	return 0
-}
-
-func (x *Metrics) GetRegion() string {
+func (x *RegisterNodeRequest) GetRegion() string {
 	if x != nil {
 		return x.Region
 	}
 	return ""
 }
 
-func (x *Metrics) GetConfidenceScore() float32 {
+func (x *RegisterNodeRequest) GetCpuCores() int32 {
 	if x != nil {
-		return x.ConfidenceScore
+		return x.CpuCores
+	}
+	return 0
+}
+
+func (x *RegisterNodeRequest) GetMemoryMb() int64 {
+	if x != nil {
+		return x.MemoryMb
+	}
+	return 0
+}
+
+func (x *RegisterNodeRequest) GetAdvertiseAddr() string {
+	if x != nil {
+		return x.AdvertiseAddr
+	}
+	return ""
+}
+
+func (x *RegisterNodeRequest) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
+}
+
+func (x *RegisterNodeRequest) GetTracestate() string {
+	if x != nil {
+		return x.Tracestate
+	}
+	return ""
+}
+
+type RegisterNodeResponse struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Accepted             bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	Reason               string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	HeartbeatIntervalSec int32                  `protobuf:"varint,3,opt,name=heartbeat_interval_sec,json=heartbeatIntervalSec,proto3" json:"heartbeat_interval_sec,omitempty"`
+	ManagerId            string                 `protobuf:"bytes,4,opt,name=manager_id,json=managerId,proto3" json:"manager_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *RegisterNodeResponse) Reset() {
+	*x = RegisterNodeResponse{}
+	mi := &file_swarm_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterNodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterNodeResponse) ProtoMessage() {}
+
+func (x *RegisterNodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterNodeResponse.ProtoReflect.Descriptor instead.
+func (*RegisterNodeResponse) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RegisterNodeResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *RegisterNodeResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *RegisterNodeResponse) GetHeartbeatIntervalSec() int32 {
+	if x != nil {
+		return x.HeartbeatIntervalSec
+	}
+	return 0
+}
+
+func (x *RegisterNodeResponse) GetManagerId() string {
+	if x != nil {
+		return x.ManagerId
+	}
+	return ""
+}
+
+type HeartbeatRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	CpuPercent    float64                `protobuf:"fixed64,2,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemoryPercent float64                `protobuf:"fixed64,3,opt,name=memory_percent,json=memoryPercent,proto3" json:"memory_percent,omitempty"`
+	ActiveTasks   int32                  `protobuf:"varint,4,opt,name=active_tasks,json=activeTasks,proto3" json:"active_tasks,omitempty"`
+	TimestampUnix int64                  `protobuf:"varint,5,opt,name=timestamp_unix,json=timestampUnix,proto3" json:"timestamp_unix,omitempty"`
+	Traceparent   string                 `protobuf:"bytes,6,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
+	Tracestate    string                 `protobuf:"bytes,7,opt,name=tracestate,proto3" json:"tracestate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeartbeatRequest) Reset() {
+	*x = HeartbeatRequest{}
+	mi := &file_swarm_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeartbeatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeartbeatRequest) ProtoMessage() {}
+
+func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeartbeatRequest.ProtoReflect.Descriptor instead.
+func (*HeartbeatRequest) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *HeartbeatRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *HeartbeatRequest) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *HeartbeatRequest) GetMemoryPercent() float64 {
+	if x != nil {
+		return x.MemoryPercent
+	}
+	return 0
+}
+
+func (x *HeartbeatRequest) GetActiveTasks() int32 {
+	if x != nil {
+		return x.ActiveTasks
+	}
+	return 0
+}
+
+func (x *HeartbeatRequest) GetTimestampUnix() int64 {
+	if x != nil {
+		return x.TimestampUnix
+	}
+	return 0
+}
+
+func (x *HeartbeatRequest) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
+}
+
+func (x *HeartbeatRequest) GetTracestate() string {
+	if x != nil {
+		return x.Tracestate
+	}
+	return ""
+}
+
+type HeartbeatResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // HEALTHY / DEGRADED
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeartbeatResponse) Reset() {
+	*x = HeartbeatResponse{}
+	mi := &file_swarm_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeartbeatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeartbeatResponse) ProtoMessage() {}
+
+func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeartbeatResponse.ProtoReflect.Descriptor instead.
+func (*HeartbeatResponse) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *HeartbeatResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *HeartbeatResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type DispatchTaskRequest struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	TaskId               string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	DecisionId           string                 `protobuf:"bytes,2,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
+	Phase                string                 `protobuf:"bytes,3,opt,name=phase,proto3" json:"phase,omitempty"` // P-D-R-A-C
+	PayloadJson          string                 `protobuf:"bytes,4,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
+	RequiredCapabilities []string               `protobuf:"bytes,5,rep,name=required_capabilities,json=requiredCapabilities,proto3" json:"required_capabilities,omitempty"`
+	Traceparent          string                 `protobuf:"bytes,6,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
+	Tracestate           string                 `protobuf:"bytes,7,opt,name=tracestate,proto3" json:"tracestate,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *DispatchTaskRequest) Reset() {
+	*x = DispatchTaskRequest{}
+	mi := &file_swarm_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DispatchTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DispatchTaskRequest) ProtoMessage() {}
+
+func (x *DispatchTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DispatchTaskRequest.ProtoReflect.Descriptor instead.
+func (*DispatchTaskRequest) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DispatchTaskRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *DispatchTaskRequest) GetDecisionId() string {
+	if x != nil {
+		return x.DecisionId
+	}
+	return ""
+}
+
+func (x *DispatchTaskRequest) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *DispatchTaskRequest) GetPayloadJson() string {
+	if x != nil {
+		return x.PayloadJson
+	}
+	return ""
+}
+
+func (x *DispatchTaskRequest) GetRequiredCapabilities() []string {
+	if x != nil {
+		return x.RequiredCapabilities
+	}
+	return nil
+}
+
+func (x *DispatchTaskRequest) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
+}
+
+func (x *DispatchTaskRequest) GetTracestate() string {
+	if x != nil {
+		return x.Tracestate
+	}
+	return ""
+}
+
+type DispatchTaskResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Accepted       bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	AssignedNodeId string                 `protobuf:"bytes,2,opt,name=assigned_node_id,json=assignedNodeId,proto3" json:"assigned_node_id,omitempty"`
+	Status         string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DispatchTaskResponse) Reset() {
+	*x = DispatchTaskResponse{}
+	mi := &file_swarm_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DispatchTaskResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DispatchTaskResponse) ProtoMessage() {}
+
+func (x *DispatchTaskResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DispatchTaskResponse.ProtoReflect.Descriptor instead.
+func (*DispatchTaskResponse) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DispatchTaskResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *DispatchTaskResponse) GetAssignedNodeId() string {
+	if x != nil {
+		return x.AssignedNodeId
+	}
+	return ""
+}
+
+func (x *DispatchTaskResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type ReportTaskRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	DecisionId    string                 `protobuf:"bytes,2,opt,name=decision_id,json=decisionId,proto3" json:"decision_id,omitempty"`
+	NodeId        string                 `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // SUCCESS / FAILED / SECURITY_VIOLATION
+	Summary       string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
+	LatencyMs     float64                `protobuf:"fixed64,6,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
+	Traceparent   string                 `protobuf:"bytes,7,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
+	Tracestate    string                 `protobuf:"bytes,8,opt,name=tracestate,proto3" json:"tracestate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportTaskRequest) Reset() {
+	*x = ReportTaskRequest{}
+	mi := &file_swarm_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportTaskRequest) ProtoMessage() {}
+
+func (x *ReportTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportTaskRequest.ProtoReflect.Descriptor instead.
+func (*ReportTaskRequest) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ReportTaskRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ReportTaskRequest) GetDecisionId() string {
+	if x != nil {
+		return x.DecisionId
+	}
+	return ""
+}
+
+func (x *ReportTaskRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ReportTaskRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ReportTaskRequest) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *ReportTaskRequest) GetLatencyMs() float64 {
+	if x != nil {
+		return x.LatencyMs
+	}
+	return 0
+}
+
+func (x *ReportTaskRequest) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
+}
+
+func (x *ReportTaskRequest) GetTracestate() string {
+	if x != nil {
+		return x.Tracestate
+	}
+	return ""
+}
+
+type ReportTaskResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ack           bool                   `protobuf:"varint,1,opt,name=ack,proto3" json:"ack,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportTaskResponse) Reset() {
+	*x = ReportTaskResponse{}
+	mi := &file_swarm_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportTaskResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportTaskResponse) ProtoMessage() {}
+
+func (x *ReportTaskResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportTaskResponse.ProtoReflect.Descriptor instead.
+func (*ReportTaskResponse) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ReportTaskResponse) GetAck() bool {
+	if x != nil {
+		return x.Ack
+	}
+	return false
+}
+
+type GetClusterStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetClusterStatusRequest) Reset() {
+	*x = GetClusterStatusRequest{}
+	mi := &file_swarm_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetClusterStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetClusterStatusRequest) ProtoMessage() {}
+
+func (x *GetClusterStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetClusterStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetClusterStatusRequest) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{8}
+}
+
+type NodeStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Region        string                 `protobuf:"bytes,2,opt,name=region,proto3" json:"region,omitempty"`
+	CpuPercent    float64                `protobuf:"fixed64,3,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemoryPercent float64                `protobuf:"fixed64,4,opt,name=memory_percent,json=memoryPercent,proto3" json:"memory_percent,omitempty"`
+	ActiveTasks   int32                  `protobuf:"varint,5,opt,name=active_tasks,json=activeTasks,proto3" json:"active_tasks,omitempty"`
+	LastSeenUnix  int64                  `protobuf:"varint,6,opt,name=last_seen_unix,json=lastSeenUnix,proto3" json:"last_seen_unix,omitempty"`
+	Health        string                 `protobuf:"bytes,7,opt,name=health,proto3" json:"health,omitempty"` // HEALTHY / STALE / OFFLINE
+	AdvertiseAddr string                 `protobuf:"bytes,8,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeStatus) Reset() {
+	*x = NodeStatus{}
+	mi := &file_swarm_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeStatus) ProtoMessage() {}
+
+func (x *NodeStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeStatus.ProtoReflect.Descriptor instead.
+func (*NodeStatus) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *NodeStatus) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *NodeStatus) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *NodeStatus) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *NodeStatus) GetMemoryPercent() float64 {
+	if x != nil {
+		return x.MemoryPercent
+	}
+	return 0
+}
+
+func (x *NodeStatus) GetActiveTasks() int32 {
+	if x != nil {
+		return x.ActiveTasks
+	}
+	return 0
+}
+
+func (x *NodeStatus) GetLastSeenUnix() int64 {
+	if x != nil {
+		return x.LastSeenUnix
+	}
+	return 0
+}
+
+func (x *NodeStatus) GetHealth() string {
+	if x != nil {
+		return x.Health
+	}
+	return ""
+}
+
+func (x *NodeStatus) GetAdvertiseAddr() string {
+	if x != nil {
+		return x.AdvertiseAddr
+	}
+	return ""
+}
+
+type GetClusterStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ManagerId     string                 `protobuf:"bytes,1,opt,name=manager_id,json=managerId,proto3" json:"manager_id,omitempty"`
+	Nodes         []*NodeStatus          `protobuf:"bytes,2,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	TotalNodes    int32                  `protobuf:"varint,3,opt,name=total_nodes,json=totalNodes,proto3" json:"total_nodes,omitempty"`
+	HealthyNodes  int32                  `protobuf:"varint,4,opt,name=healthy_nodes,json=healthyNodes,proto3" json:"healthy_nodes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetClusterStatusResponse) Reset() {
+	*x = GetClusterStatusResponse{}
+	mi := &file_swarm_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetClusterStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetClusterStatusResponse) ProtoMessage() {}
+
+func (x *GetClusterStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_swarm_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetClusterStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetClusterStatusResponse) Descriptor() ([]byte, []int) {
+	return file_swarm_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetClusterStatusResponse) GetManagerId() string {
+	if x != nil {
+		return x.ManagerId
+	}
+	return ""
+}
+
+func (x *GetClusterStatusResponse) GetNodes() []*NodeStatus {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *GetClusterStatusResponse) GetTotalNodes() int32 {
+	if x != nil {
+		return x.TotalNodes
+	}
+	return 0
+}
+
+func (x *GetClusterStatusResponse) GetHealthyNodes() int32 {
+	if x != nil {
+		return x.HealthyNodes
 	}
 	return 0
 }
@@ -405,43 +846,95 @@ var File_swarm_proto protoreflect.FileDescriptor
 
 const file_swarm_proto_rawDesc = "" +
 	"\n" +
-	"\vswarm.proto\x12\x0enexus.swarm.v1\"\x81\x01\n" +
-	"\fHeartbeatReq\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\"\n" +
-	"\fcapabilities\x18\x02 \x03(\tR\fcapabilities\x12\x16\n" +
-	"\x06status\x18\x03 \x01(\tR\x06status\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"s\n" +
-	"\rHeartbeatResp\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted\x12%\n" +
-	"\x0esync_timestamp\x18\x02 \x01(\x03R\rsyncTimestamp\x12\x1f\n" +
-	"\vnext_action\x18\x03 \x01(\tR\n" +
-	"nextAction\"\xc3\x01\n" +
+	"\vswarm.proto\x12\x0enexus.swarm.v1\"\xa7\x02\n" +
+	"\x13RegisterNodeRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\"\n" +
+	"\fcapabilities\x18\x03 \x03(\tR\fcapabilities\x12\x16\n" +
+	"\x06region\x18\x04 \x01(\tR\x06region\x12\x1b\n" +
+	"\tcpu_cores\x18\x05 \x01(\x05R\bcpuCores\x12\x1b\n" +
+	"\tmemory_mb\x18\x06 \x01(\x03R\bmemoryMb\x12%\n" +
+	"\x0eadvertise_addr\x18\a \x01(\tR\radvertiseAddr\x12 \n" +
+	"\vtraceparent\x18\b \x01(\tR\vtraceparent\x12\x1e\n" +
 	"\n" +
-	"SensingReq\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x19\n" +
-	"\brepo_url\x18\x02 \x01(\tR\arepoUrl\x12\x12\n" +
-	"\x04path\x18\x03 \x01(\tR\x04path\x12\x1b\n" +
-	"\ttask_type\x18\x04 \x01(\tR\btaskType\x12\x14\n" +
-	"\x05token\x18\x05 \x01(\tR\x05token\x12 \n" +
-	"\vtraceparent\x18\x06 \x01(\tR\vtraceparent\x12\x18\n" +
-	"\apayload\x18\a \x01(\fR\apayload\"\xc6\x01\n" +
-	"\vSensingResp\x12\x17\n" +
+	"tracestate\x18\t \x01(\tR\n" +
+	"tracestate\"\x9f\x01\n" +
+	"\x14RegisterNodeResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x124\n" +
+	"\x16heartbeat_interval_sec\x18\x03 \x01(\x05R\x14heartbeatIntervalSec\x12\x1d\n" +
+	"\n" +
+	"manager_id\x18\x04 \x01(\tR\tmanagerId\"\xff\x01\n" +
+	"\x10HeartbeatRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1f\n" +
+	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
+	"cpuPercent\x12%\n" +
+	"\x0ememory_percent\x18\x03 \x01(\x01R\rmemoryPercent\x12!\n" +
+	"\factive_tasks\x18\x04 \x01(\x05R\vactiveTasks\x12%\n" +
+	"\x0etimestamp_unix\x18\x05 \x01(\x03R\rtimestampUnix\x12 \n" +
+	"\vtraceparent\x18\x06 \x01(\tR\vtraceparent\x12\x1e\n" +
+	"\n" +
+	"tracestate\x18\a \x01(\tR\n" +
+	"tracestate\";\n" +
+	"\x11HeartbeatResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\"\xff\x01\n" +
+	"\x13DispatchTaskRequest\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1f\n" +
+	"\vdecision_id\x18\x02 \x01(\tR\n" +
+	"decisionId\x12\x14\n" +
+	"\x05phase\x18\x03 \x01(\tR\x05phase\x12!\n" +
+	"\fpayload_json\x18\x04 \x01(\tR\vpayloadJson\x123\n" +
+	"\x15required_capabilities\x18\x05 \x03(\tR\x14requiredCapabilities\x12 \n" +
+	"\vtraceparent\x18\x06 \x01(\tR\vtraceparent\x12\x1e\n" +
+	"\n" +
+	"tracestate\x18\a \x01(\tR\n" +
+	"tracestate\"t\n" +
+	"\x14DispatchTaskResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\x12(\n" +
+	"\x10assigned_node_id\x18\x02 \x01(\tR\x0eassignedNodeId\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\"\xf9\x01\n" +
+	"\x11ReportTaskRequest\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1f\n" +
+	"\vdecision_id\x18\x02 \x01(\tR\n" +
+	"decisionId\x12\x17\n" +
+	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x18\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\x12\x1d\n" +
+	"\n" +
+	"latency_ms\x18\x06 \x01(\x01R\tlatencyMs\x12 \n" +
+	"\vtraceparent\x18\a \x01(\tR\vtraceparent\x12\x1e\n" +
+	"\n" +
+	"tracestate\x18\b \x01(\tR\n" +
+	"tracestate\"&\n" +
+	"\x12ReportTaskResponse\x12\x10\n" +
+	"\x03ack\x18\x01 \x01(\bR\x03ack\"\x19\n" +
+	"\x17GetClusterStatusRequest\"\x8d\x02\n" +
+	"\n" +
+	"NodeStatus\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
-	"\asummary\x18\x03 \x01(\tR\asummary\x121\n" +
-	"\ametrics\x18\x04 \x01(\v2\x17.nexus.swarm.v1.MetricsR\ametrics\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x12#\n" +
-	"\rresults_patch\x18\x06 \x01(\fR\fresultsPatch\"\xcf\x01\n" +
-	"\aMetrics\x120\n" +
-	"\x14selection_latency_us\x18\x01 \x01(\x03R\x12selectionLatencyUs\x12,\n" +
-	"\x12network_latency_ms\x18\x02 \x01(\x03R\x10networkLatencyMs\x12!\n" +
-	"\fexecution_ms\x18\x03 \x01(\x03R\vexecutionMs\x12\x16\n" +
-	"\x06region\x18\x04 \x01(\tR\x06region\x12)\n" +
-	"\x10confidence_score\x18\x05 \x01(\x02R\x0fconfidenceScore2\xf0\x01\n" +
-	"\fSwarmManager\x12J\n" +
-	"\tHeartbeat\x12\x1c.nexus.swarm.v1.HeartbeatReq\x1a\x1d.nexus.swarm.v1.HeartbeatResp\"\x00\x12N\n" +
-	"\rSensingStream\x12\x1a.nexus.swarm.v1.SensingReq\x1a\x1b.nexus.swarm.v1.SensingResp\"\x00(\x010\x01\x12D\n" +
-	"\aSensing\x12\x1a.nexus.swarm.v1.SensingReq\x1a\x1b.nexus.swarm.v1.SensingResp\"\x00B\x17Z\x15nexus-swarm/api/protob\x06proto3"
+	"\x06region\x18\x02 \x01(\tR\x06region\x12\x1f\n" +
+	"\vcpu_percent\x18\x03 \x01(\x01R\n" +
+	"cpuPercent\x12%\n" +
+	"\x0ememory_percent\x18\x04 \x01(\x01R\rmemoryPercent\x12!\n" +
+	"\factive_tasks\x18\x05 \x01(\x05R\vactiveTasks\x12$\n" +
+	"\x0elast_seen_unix\x18\x06 \x01(\x03R\flastSeenUnix\x12\x16\n" +
+	"\x06health\x18\a \x01(\tR\x06health\x12%\n" +
+	"\x0eadvertise_addr\x18\b \x01(\tR\radvertiseAddr\"\xb1\x01\n" +
+	"\x18GetClusterStatusResponse\x12\x1d\n" +
+	"\n" +
+	"manager_id\x18\x01 \x01(\tR\tmanagerId\x120\n" +
+	"\x05nodes\x18\x02 \x03(\v2\x1a.nexus.swarm.v1.NodeStatusR\x05nodes\x12\x1f\n" +
+	"\vtotal_nodes\x18\x03 \x01(\x05R\n" +
+	"totalNodes\x12#\n" +
+	"\rhealthy_nodes\x18\x04 \x01(\x05R\fhealthyNodes2\xd2\x03\n" +
+	"\fSwarmManager\x12Y\n" +
+	"\fRegisterNode\x12#.nexus.swarm.v1.RegisterNodeRequest\x1a$.nexus.swarm.v1.RegisterNodeResponse\x12P\n" +
+	"\tHeartbeat\x12 .nexus.swarm.v1.HeartbeatRequest\x1a!.nexus.swarm.v1.HeartbeatResponse\x12Y\n" +
+	"\fDispatchTask\x12#.nexus.swarm.v1.DispatchTaskRequest\x1a$.nexus.swarm.v1.DispatchTaskResponse\x12S\n" +
+	"\n" +
+	"ReportTask\x12!.nexus.swarm.v1.ReportTaskRequest\x1a\".nexus.swarm.v1.ReportTaskResponse\x12e\n" +
+	"\x10GetClusterStatus\x12'.nexus.swarm.v1.GetClusterStatusRequest\x1a(.nexus.swarm.v1.GetClusterStatusResponseB\rZ\v./api/protob\x06proto3"
 
 var (
 	file_swarm_proto_rawDescOnce sync.Once
@@ -455,27 +948,37 @@ func file_swarm_proto_rawDescGZIP() []byte {
 	return file_swarm_proto_rawDescData
 }
 
-var file_swarm_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_swarm_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_swarm_proto_goTypes = []any{
-	(*HeartbeatReq)(nil),  // 0: nexus.swarm.v1.HeartbeatReq
-	(*HeartbeatResp)(nil), // 1: nexus.swarm.v1.HeartbeatResp
-	(*SensingReq)(nil),    // 2: nexus.swarm.v1.SensingReq
-	(*SensingResp)(nil),   // 3: nexus.swarm.v1.SensingResp
-	(*Metrics)(nil),       // 4: nexus.swarm.v1.Metrics
+	(*RegisterNodeRequest)(nil),      // 0: nexus.swarm.v1.RegisterNodeRequest
+	(*RegisterNodeResponse)(nil),     // 1: nexus.swarm.v1.RegisterNodeResponse
+	(*HeartbeatRequest)(nil),         // 2: nexus.swarm.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),        // 3: nexus.swarm.v1.HeartbeatResponse
+	(*DispatchTaskRequest)(nil),      // 4: nexus.swarm.v1.DispatchTaskRequest
+	(*DispatchTaskResponse)(nil),     // 5: nexus.swarm.v1.DispatchTaskResponse
+	(*ReportTaskRequest)(nil),        // 6: nexus.swarm.v1.ReportTaskRequest
+	(*ReportTaskResponse)(nil),       // 7: nexus.swarm.v1.ReportTaskResponse
+	(*GetClusterStatusRequest)(nil),  // 8: nexus.swarm.v1.GetClusterStatusRequest
+	(*NodeStatus)(nil),               // 9: nexus.swarm.v1.NodeStatus
+	(*GetClusterStatusResponse)(nil), // 10: nexus.swarm.v1.GetClusterStatusResponse
 }
 var file_swarm_proto_depIdxs = []int32{
-	4, // 0: nexus.swarm.v1.SensingResp.metrics:type_name -> nexus.swarm.v1.Metrics
-	0, // 1: nexus.swarm.v1.SwarmManager.Heartbeat:input_type -> nexus.swarm.v1.HeartbeatReq
-	2, // 2: nexus.swarm.v1.SwarmManager.SensingStream:input_type -> nexus.swarm.v1.SensingReq
-	2, // 3: nexus.swarm.v1.SwarmManager.Sensing:input_type -> nexus.swarm.v1.SensingReq
-	1, // 4: nexus.swarm.v1.SwarmManager.Heartbeat:output_type -> nexus.swarm.v1.HeartbeatResp
-	3, // 5: nexus.swarm.v1.SwarmManager.SensingStream:output_type -> nexus.swarm.v1.SensingResp
-	3, // 6: nexus.swarm.v1.SwarmManager.Sensing:output_type -> nexus.swarm.v1.SensingResp
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	9,  // 0: nexus.swarm.v1.GetClusterStatusResponse.nodes:type_name -> nexus.swarm.v1.NodeStatus
+	0,  // 1: nexus.swarm.v1.SwarmManager.RegisterNode:input_type -> nexus.swarm.v1.RegisterNodeRequest
+	2,  // 2: nexus.swarm.v1.SwarmManager.Heartbeat:input_type -> nexus.swarm.v1.HeartbeatRequest
+	4,  // 3: nexus.swarm.v1.SwarmManager.DispatchTask:input_type -> nexus.swarm.v1.DispatchTaskRequest
+	6,  // 4: nexus.swarm.v1.SwarmManager.ReportTask:input_type -> nexus.swarm.v1.ReportTaskRequest
+	8,  // 5: nexus.swarm.v1.SwarmManager.GetClusterStatus:input_type -> nexus.swarm.v1.GetClusterStatusRequest
+	1,  // 6: nexus.swarm.v1.SwarmManager.RegisterNode:output_type -> nexus.swarm.v1.RegisterNodeResponse
+	3,  // 7: nexus.swarm.v1.SwarmManager.Heartbeat:output_type -> nexus.swarm.v1.HeartbeatResponse
+	5,  // 8: nexus.swarm.v1.SwarmManager.DispatchTask:output_type -> nexus.swarm.v1.DispatchTaskResponse
+	7,  // 9: nexus.swarm.v1.SwarmManager.ReportTask:output_type -> nexus.swarm.v1.ReportTaskResponse
+	10, // 10: nexus.swarm.v1.SwarmManager.GetClusterStatus:output_type -> nexus.swarm.v1.GetClusterStatusResponse
+	6,  // [6:11] is the sub-list for method output_type
+	1,  // [1:6] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_swarm_proto_init() }
@@ -489,7 +992,7 @@ func file_swarm_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_swarm_proto_rawDesc), len(file_swarm_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

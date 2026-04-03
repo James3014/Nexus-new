@@ -1,12 +1,262 @@
-import json
-import os
-import subprocess
-import re
 import hashlib
-from dataclasses import dataclass, field
+import json
+import logging
+import os
+import re
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Tuple, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+
+# --- P1-C: Structured Lesson Schema ---
+LESSON_SCHEMA_VERSION = "lesson_event.v1"
+
+
+def utc_now_iso() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _norm_text(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    value = value.strip()
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def _norm_list(values: Optional[List[str]]) -> List[str]:
+    if not values:
+        return []
+    seen = set()
+    out = []
+    for v in values:
+        item = _norm_text(v)
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+@dataclass
+class LessonEvent:
+    lesson_id: str
+    task_id: str
+    trace_id: Optional[str]
+    decision_id: Optional[str]
+    timestamp_utc: str
+    source_phase: str
+    category: str
+    root_cause: str
+    evidence: List[str] = field(default_factory=list)
+    corrective_action: str = ""
+    reusable_when: List[str] = field(default_factory=list)
+    do_not_apply_when: List[str] = field(default_factory=list)
+    outcome: str = "success"
+    confidence: float = 0.7
+    patch_hash: Optional[str] = None
+    artifact_refs: List[str] = field(default_factory=list)
+    schema_version: str = LESSON_SCHEMA_VERSION
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["evidence"] = _norm_list(data.get("evidence"))
+        data["reusable_when"] = _norm_list(data.get("reusable_when"))
+        data["do_not_apply_when"] = _norm_list(data.get("do_not_apply_when"))
+        data["root_cause"] = _norm_text(data.get("root_cause"))
+        data["corrective_action"] = _norm_text(data.get("corrective_action"))
+        data["category"] = _norm_text(data.get("category")) or "UNKNOWN"
+        data["source_phase"] = _norm_text(data.get("source_phase")) or "C"
+        data["outcome"] = _norm_text(data.get("outcome")) or "success"
+        data["task_id"] = _norm_text(data.get("task_id"))
+        return data
+
+
+# --- P1-C: Persistence & Sync Helpers ---
+
+
+def compute_lesson_id(
+    task_id: str,
+    root_cause: str,
+    corrective_action: str,
+    patch_hash: Optional[str] = None,
+) -> str:
+    payload = {
+        "task_id": _norm_text(task_id),
+        "root_cause": _norm_text(root_cause).lower(),
+        "corrective_action": _norm_text(corrective_action).lower(),
+        "patch_hash": _norm_text(patch_hash or ""),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def load_jsonl(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    except Exception:
+        return []
+    return rows
+
+
+def write_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        "\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows)
+        + "\n"
+    )
+    path.write_text(content, encoding="utf-8")
+
+
+def upsert_lesson_event(jsonl_path: Path, event: LessonEvent) -> bool:
+    rows = load_jsonl(jsonl_path)
+    payload = event.to_dict()
+    payload["lesson_id"] = event.lesson_id
+
+    replaced = False
+    new_rows = []
+    for row in rows:
+        if row.get("lesson_id") == event.lesson_id:
+            new_rows.append(payload)
+            replaced = True
+        else:
+            new_rows.append(row)
+
+    if not replaced:
+        new_rows.append(payload)
+
+    write_jsonl(jsonl_path, new_rows)
+    return not replaced
+
+
+def render_human_lesson_block(event: LessonEvent) -> str:
+    data = event.to_dict()
+    lines = [
+        f"### Lesson {data['task_id']}",
+        f"- **Category**: {data['category']}",
+        f"- **Root cause**: {data['root_cause']}",
+        f"- **Corrective action**: {data['corrective_action']}",
+        f"- **Outcome**: {data['outcome']}",
+    ]
+    if data["reusable_when"]:
+        lines.append(f"- **Reusable when**: {', '.join(data['reusable_when'])}")
+    if data["do_not_apply_when"]:
+        lines.append(f"- **Do not apply when**: {', '.join(data['do_not_apply_when'])}")
+    if data["evidence"]:
+        lines.append(f"- **Evidence**: {', '.join(data['evidence'])}")
+    lines.append(f"- **Lesson ID**: `{event.lesson_id}`")
+    return "\n".join(lines).strip() + "\n"
+
+
+def sync_markdown_lesson_index(md_path: Path, event: LessonEvent) -> None:
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    block = render_human_lesson_block(event)
+
+    if not md_path.exists():
+        md_path.write_text("# 🧬 Project Evolution Lessons\n\n" + block, encoding="utf-8")
+        return
+
+    doc = md_path.read_text(encoding="utf-8")
+    marker = f"### Lesson {event.task_id}"
+    if marker in doc:
+        # Replace the entire block for this task_id to avoid duplication
+        pattern = rf"### Lesson {re.escape(event.task_id)}\n(?:.*?)(?=\n### Lesson |\Z)"
+        doc = re.sub(pattern, block.rstrip(), doc, flags=re.S)
+    else:
+        if not doc.endswith("\n"):
+            doc += "\n"
+        doc += "\n" + block
+
+    md_path.write_text(doc, encoding="utf-8")
+
+
+def build_structured_lesson(
+    *,
+    task_id: str,
+    raw_lesson: str,
+    category: Optional[str] = None,
+    root_cause: Optional[str] = None,
+    evidence: Optional[List[str]] = None,
+    corrective_action: Optional[str] = None,
+    reusable_when: Optional[List[str]] = None,
+    do_not_apply_when: Optional[List[str]] = None,
+    source_phase: str = "C",
+    trace_id: Optional[str] = None,
+    decision_id: Optional[str] = None,
+    outcome: str = "success",
+    confidence: float = 0.7,
+    patch_hash: Optional[str] = None,
+    artifact_refs: Optional[List[str]] = None,
+) -> LessonEvent:
+    lesson_text = _norm_text(raw_lesson)
+
+    # Heuristic parsing if specific fields not provided
+    guessed_root = (
+        root_cause or (lesson_text.split(". ")[0].strip() if lesson_text else "Unknown")
+    )
+    guessed_action = corrective_action or (
+        (lesson_text.split(". ", 1)[1].strip() if ". " in lesson_text else lesson_text)
+    )
+
+    event = LessonEvent(
+        lesson_id="",
+        task_id=task_id,
+        trace_id=trace_id,
+        decision_id=decision_id,
+        timestamp_utc=utc_now_iso(),
+        source_phase=source_phase,
+        category=(category or "UNKNOWN"),
+        root_cause=guessed_root,
+        evidence=evidence or [],
+        corrective_action=guessed_action,
+        reusable_when=reusable_when or [],
+        do_not_apply_when=do_not_apply_when or [],
+        outcome=outcome,
+        confidence=confidence,
+        patch_hash=patch_hash,
+        artifact_refs=artifact_refs or [],
+    )
+    normalized = event.to_dict()
+    event.lesson_id = compute_lesson_id(
+        task_id=normalized["task_id"],
+        root_cause=normalized["root_cause"],
+        corrective_action=normalized["corrective_action"],
+        patch_hash=normalized.get("patch_hash"),
+    )
+    return event
+
+
+def persist_structured_lesson(
+    *,
+    repo_root: Path,
+    task_id: str,
+    raw_lesson: str,
+    **kwargs,
+) -> LessonEvent:
+    event = build_structured_lesson(task_id=task_id, raw_lesson=raw_lesson, **kwargs)
+
+    repo_root = Path(repo_root)
+    lesson_jsonl = repo_root / ".nexus" / "knowledge" / "lesson_events.jsonl"
+    codex_md = repo_root / ".codex_lessons.md"  # Sync to main lessons file
+
+    upsert_lesson_event(lesson_jsonl, event)
+    sync_markdown_lesson_index(codex_md, event)
+    return event
+
+
+# --- Original Imports & Setup ---
 
 
 @dataclass
@@ -704,6 +954,25 @@ def finalize_learning_loop(
     steward = MemorySteward(root)
     violations = list(_iter_lesson_candidates(state, success))
     lessons_written = bool(violations) and bool(steward.crystallize(violations))
+
+    # --- P1-C: Structured Lesson Persistence ---
+    if lessons_written:
+        task_id = getattr(state, "task_id", "unknown")
+        for v in violations:
+            persist_structured_lesson(
+                repo_root=root,
+                task_id=task_id,
+                raw_lesson=v.get("reason", "Unknown Issue"),
+                category=v.get("category", "UNKNOWN"),
+                root_cause=v.get("reason", "Unknown Issue"),
+                corrective_action=v.get("suggestion", "N/A"),
+                artifact_refs=[
+                    ".nexus/reports/acceptancecheck.json",
+                    ".nexus/reports/auditresult.json",
+                ],
+            )
+    # --------------------------------------------
+
     delta_paths = _write_delta_artifacts(root, state, success, source)
 
     writeback_required = _should_require_writeback(state)

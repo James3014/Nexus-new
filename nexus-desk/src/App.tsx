@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useEffect, useRef } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { DeskViewModel } from "./types/DeskViewModel";
 import { LogEvent, PhaseEvent, DeskEvent } from "./types/DeskEvent";
@@ -16,41 +15,10 @@ import { ErrorDBPanel } from "./components/ErrorDBPanel";
 import { DecisionLedgerPanel } from "./components/DecisionLedgerPanel";
 import { ReviewSidebar } from "./components/ReviewSidebar";
 import { ReplaySnapshotModal } from "./components/ReplaySnapshotModal";
+import ArmorStatsPanel from "./components/ArmorStatsPanel";
 
-type FatalBoundaryProps = {
-  children: React.ReactNode;
-};
-
-type FatalBoundaryState = {
-  error: string | null;
-};
-
-class FatalBoundary extends React.Component<FatalBoundaryProps, FatalBoundaryState> {
-  state: FatalBoundaryState = { error: null };
-
-  static getDerivedStateFromError(error: Error): FatalBoundaryState {
-    return { error: error.message };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error("Render Error:", error);
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="h-screen bg-black flex items-center justify-center px-6">
-          <div className="max-w-3xl w-full border border-red-900/50 bg-[#050505] p-6 font-mono">
-            <div className="text-red-400 text-sm tracking-widest uppercase">Nexus Render Failure</div>
-            <div className="mt-4 text-red-300 whitespace-pre-wrap break-words">{this.state.error}</div>
-          </div>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
+// 🛡️ [BRIDGE] Safe Multi-Mode Invocation
+import { safeInvoke, isTauriEnv } from "./lib/bridge";
 
 function App() {
   const [data, setData] = useState<DeskViewModel | null>(null);
@@ -63,13 +31,15 @@ function App() {
   // Replay State
   const [activeSnapshot, setActiveSnapshot] = useState<any>(null);
   const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"standard" | "swarm">("standard");
 
   const unlistenLogRef = useRef<UnlistenFn | null>(null);
   const unlistenEventRef = useRef<UnlistenFn | null>(null);
 
   const fetchData = async () => {
     try {
-      const res = await invoke<DeskViewModel>("get_desk_view_model");
+      // 🛡️ [SAFE] Use abstraction
+      const res = await safeInvoke<DeskViewModel>("get_desk_view_model");
       setData(res);
       setBootError(null);
       if (res.showCriticalAlert && !isDrawerOpen) {
@@ -84,7 +54,7 @@ function App() {
   const logDecision = async (action: string, actor: string, reason?: string) => {
     if (!data?.taskId) return;
     try {
-      await invoke("append_decision", {
+      await safeInvoke("append_decision", {
         taskId: data.taskId,
         action,
         actor,
@@ -98,12 +68,14 @@ function App() {
   };
 
   const startSubscriptions = async (taskId: string) => {
+    if (!isTauriEnv()) return; // Subscription requires IPC
+    
     if (unlistenLogRef.current) unlistenLogRef.current();
     if (unlistenEventRef.current) unlistenEventRef.current();
 
     try {
-      await invoke("subscribe_log_tail", { taskId });
-      await invoke("subscribe_run_events", { taskId });
+      await safeInvoke("subscribe_log_tail", { taskId });
+      await safeInvoke("subscribe_run_events", { taskId });
 
       unlistenLogRef.current = await listen<LogEvent>("log-line", (event) => {
         if (event.payload.taskId === taskId) {
@@ -131,6 +103,12 @@ function App() {
   };
 
   useEffect(() => {
+    // 🛡️ [URL-Switch] Check for Swarm Mode
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'swarm') {
+        setViewMode('swarm');
+    }
+    
     fetchData();
     const timer = setInterval(fetchData, 5000);
     return () => {
@@ -149,7 +127,7 @@ function App() {
   const handleAction = async (cmd: string) => {
     try {
       await logDecision(`COMMAND_EXEC: ${cmd}`, 'human');
-      await invoke("run_nexus_command", { cmd });
+      await safeInvoke("run_nexus_command", { cmd });
       fetchData();
     } catch (e) {
       alert(`Command Error: ${e}`);
@@ -167,7 +145,6 @@ function App() {
   };
 
   const onPhaseClick = (phase: string) => {
-    // 實作 P1 Replay Snapshot
     const snapshot = {
       id: `snap-${phase}`,
       phase,
@@ -183,7 +160,7 @@ function App() {
   const handleAddAnnotation = async (body: string, severity: string) => {
     if (!data?.taskId) return;
     try {
-      await invoke("add_annotation", {
+      await safeInvoke("add_annotation", {
         taskId: data.taskId,
         targetType: 'TASK',
         targetRefJson: JSON.stringify({ taskId: data.taskId }),
@@ -221,7 +198,6 @@ function App() {
   const isError = data.severity === "danger" && data.normalizedStatus !== "INIT";
 
   return (
-    <FatalBoundary>
     <div className="h-screen flex flex-col bg-[#050505] text-[#ccc] font-sans selection:bg-blue-900/30 scanline overflow-hidden">
       <CriticalBanner 
         isVisible={isLocked} 
@@ -233,7 +209,14 @@ function App() {
         <div className="flex items-center gap-6">
           <div className="flex flex-col">
             <span className="text-[10px] text-[#555] font-black uppercase tracking-tighter">Governance Unit</span>
-            <span className="text-sm font-bold text-white tracking-widest">{data.armorName}</span>
+            <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-white tracking-widest">{data.armorName}</span>
+                {!isTauriEnv() && (
+                    <span className="bg-amber-900/40 border border-amber-500/30 text-amber-500 text-[8px] px-1 px-1.5 rounded uppercase font-black animate-pulse">
+                        Mock Mode
+                    </span>
+                )}
+            </div>
           </div>
           <div className="h-8 w-px bg-[#222]" />
           <ProfileSwitcher currentProfile={currentProfile} onProfileChange={handleProfileChange} />
@@ -241,50 +224,65 @@ function App() {
         </div>
         
         <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setViewMode(viewMode === "standard" ? "swarm" : "standard")} 
+            className={`text-[10px] border px-3 py-1 rounded-sm transition-all uppercase font-bold ${
+                viewMode === "swarm" ? "bg-amber-900/30 text-amber-500 border-amber-500/50" : "bg-blue-900/20 text-blue-400 border-blue-500/30"
+            }`}
+          >
+            {viewMode === "standard" ? "Switch to Swarm" : "Switch to Core"}
+          </button>
           <button onClick={() => setIsDrawerOpen(true)} className="text-[10px] bg-blue-900/20 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-sm hover:bg-blue-500 transition-all uppercase font-bold">Reality Audit</button>
           <div className={`w-2 h-2 rounded-full animate-pulse ${isLocked ? 'bg-red-500 shadow-[0_0_10px_red]' : 'bg-green-500 shadow-[0_0_10px_green]'}`} />
         </div>
       </header>
 
       <main className="flex-1 p-3 flex flex-col gap-3 overflow-hidden">
-        <div className="shrink-0 space-y-3">
-          <MetricsRibbon totalTokens={2730} phaseCosts={{P: {tokens: 420, cost: 0.02}}} />
-          <PhaseTimeline currentPhase={data.currentPhase} phaseStatus={phaseStatus} onClick={onPhaseClick} />
-        </div>
+        {viewMode === "standard" ? (
+            <div className="flex-1 flex flex-col gap-3 overflow-hidden">
+                <div className="shrink-0 space-y-3">
+                    <MetricsRibbon totalTokens={2730} phaseCosts={{P: {tokens: 420, cost: 0.02}}} />
+                    <PhaseTimeline currentPhase={data.currentPhase} phaseStatus={phaseStatus} onClick={onPhaseClick} />
+                </div>
 
-        <div className="flex-1 grid grid-cols-12 gap-3 overflow-hidden">
-          {/* Fact Source (Logs + Diff) */}
-          <div className="col-span-12 lg:col-span-8 grid grid-rows-2 gap-3 overflow-hidden">
-            <LogStreamPanel logs={logs} height={300} />
-            <DiffViewer taskId={data.taskId} />
-          </div>
+                <div className="flex-1 grid grid-cols-12 gap-3 overflow-hidden">
+                    {/* Fact Source (Logs + Diff) */}
+                    <div className="col-span-12 lg:col-span-8 grid grid-rows-2 gap-3 overflow-hidden">
+                        <LogStreamPanel logs={logs} height={300} />
+                        <DiffViewer taskId={data.taskId} />
+                    </div>
 
-          {/* Decision & Governance Column */}
-          <div className="col-span-12 lg:col-span-4 flex flex-col gap-3 overflow-hidden">
-             <div className="h-1/2 flex flex-col overflow-hidden">
-                <DecisionLedgerPanel taskId={data.taskId} />
-             </div>
-             <div className="flex-1 flex flex-col overflow-hidden">
-                <ReviewSidebar taskId={data.taskId} onAddAnnotation={handleAddAnnotation} />
-             </div>
-          </div>
-        </div>
+                    {/* Decision & Governance Column */}
+                    <div className="col-span-12 lg:col-span-4 flex flex-col gap-3 overflow-hidden">
+                        <div className="h-1/2 flex flex-col overflow-hidden text-white">
+                            <DecisionLedgerPanel taskId={data.taskId} />
+                        </div>
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                            <ReviewSidebar taskId={data.taskId} onAddAnnotation={handleAddAnnotation} />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        ) : (
+            <div className="flex-1 overflow-hidden">
+                <ArmorStatsPanel />
+            </div>
+        )}
 
-        {/* Global Action Lock bar */}
+        {/* 🛡️ Global Action Lock bar (RESTORED) */}
         <section className="bg-[#0d0d0d] p-4 border border-[#222] shadow-2xl relative shrink-0">
           {isError && (
               <div className="mb-4">
                  <ErrorDBPanel errorCode={1} traceback="demo" onApply={handleApplyFix} />
               </div>
           )}
-          <ActionButtons actions={data.availableActions} isLocked={isLocked} onAction={handleAction} lockReason={isLocked ? "GOVERNANCE LOCK: CANNOT ESCAPE" : undefined} />
+          <ActionButtons actions={data.availableActions || {}} isLocked={isLocked} onAction={handleAction} lockReason={isLocked ? "GOVERNANCE LOCK: CANNOT ESCAPE" : undefined} />
         </section>
       </main>
 
       <ResolutionDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} trace={data.resolutionTrace} />
       <ReplaySnapshotModal isOpen={isSnapshotOpen} onClose={() => setIsSnapshotOpen(false)} snapshot={activeSnapshot} />
     </div>
-    </FatalBoundary>
   );
 }
 

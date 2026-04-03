@@ -1,0 +1,66 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "🛡️ Cluster Health (Nodes)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "nexusswarmhealthynodes{namespace=\"nexus\"}" }
+      ]
+    },
+    {
+      "title": "⚡ Task Latency P95 (ms)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(nexustasklatencyseconds_bucket[5m])) * 1000" }
+      ]
+    },
+    {
+      "title": "🧠 Node Load (CPU %)",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(node_cpu_seconds_total{job=\"nexus-node\"}[5m])) by (instance)" }
+      ]
+    },
+    {
+      "title": "🛡️ Shadow Audit Queue",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "nexusshadowauditpending{namespace=\"nexus\"}" }
+      ]
+    }
+  ],
+  "schemaVersion": 30,
+  "style": "dark",
+  "tags": ["nexus", "swarm", "v22"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "title": "Nexus Swarm v22 Cockpit",
+  "uid": "nexus-swarm-v22",
+  "version": 1
+}
