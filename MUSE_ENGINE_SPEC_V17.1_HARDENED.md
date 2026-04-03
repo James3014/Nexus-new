@@ -593,6 +593,18 @@ Nexus Ultimate Total Atlas Integrated Verbatim (2026-03-27).
 | **Schema Integrity** | 總狀態轉換次數 | N/A | Schema Valid |
 
 ---
+
+### 17.3 治理 HUD 硬化合約 (2.1-STABLE-HARDENED)
+- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `/Users/jameschen/Workspace/nexus/` 的絕對錨定。
+- [x] **ACL 命名空間扁平化**: 本地 App 權限引用必須使用扁平 `identifier` (如 `allowall`)，嚴禁在單一上下文環境下加註 `app:` 等無意義命名空間，以防編譯器與運行端靜默拒絕。
+- [x] **反黑屏守則 (Anti-Blackout UX)**: 治理 HUD 必須具備 `FatalBoundary` (React Error Boundary)。任何前端初始化崩潰必須物理顯示於畫面上，禁止「靜默黑屏」。
+- [x] **數據序列化對位**: 所有 Rust 治理結構體強制實裝 `#[serde(rename_all = "camelCase")]`，確保與前端 React 屬性讀取無縫對接。
+
+<!-- nexus-anchor:governance-hardening -->
+<!-- /nexus-anchor:governance-hardening -->
+
+---
+
 %% 
 MUSE ENGINE SPEC - Industrial Hardened v17.0 (The Final Seal).
 100-Point Hardware Protocol implemented. 
@@ -852,15 +864,16 @@ uv run scripts/engine/nexus_cli.py nexus:release-ready
 - [x] `phase6/phase7/phase7-loop` 研究入口
 - [x] 朋友版遠端安裝端點 `/install/nexus-pilot-friend.sh`
 
-### 17.2 需持續觀測（monitoring）
-- [ ] acceptance gate 長窗穩定度（真實任務樣本）
-- [ ] skills queue 長期吞吐與回補成功率
-- [ ] tailnet onboarding 成功率（朋友端）
+### 17.3 治理 HUD 硬化合約 (2.1-STABLE-HARDENED)
+- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `/Users/jameschen/Workspace/nexus/` 的絕對錨定。
+- [x] **ACL 命名空間扁平化**: 本地 App 權限引用必須使用扁平 `identifier` (如 `allowall`)，嚴禁在單一上下文環境下加註 `app:` 等無意義命名空間，以防編譯器與運行端靜默拒絕。
+- [x] **反黑屏守則 (Anti-Blackout UX)**: 治理 HUD 必須具備 `FatalBoundary` (React Error Boundary)。任何前端初始化崩潰必須物理顯示於畫面上，禁止「靜默黑屏」。
+- [x] **數據序列化對位**: 所有 Rust 治理結構體強制實裝 `#[serde(rename_all = "camelCase")]`，確保與前端 React 屬性讀取無縫對接。
 
 ---
 
 %% 
-MUSE ENGINE SPEC v17.1 Addendum
-- No historical content removed.
-- Production contracts updated to 2026-03-28 runtime truth.
+MUSE ENGINE SPEC v17.3 Addendum
+- Path: /Users/jameschen/Workspace/nexus/MUSE_ENGINE_SPEC_V17.1_HARDENED.md
+- Updated at 2026-04-03 12:35 (Triple Deadlock Resolution committed)
 %%

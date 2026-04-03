@@ -54,6 +54,9 @@
 
 ## 🛠️ 維護與同步
 
+<!-- nexus-anchor:evolution -->
+<!-- /nexus-anchor:evolution -->
+
 ## Sync Targets
 - [INDEX.md](file:///Users/jameschen/Workspace/nexus/docs/INDEX.md)
 - [SYSTEM_ARCHITECTURE_BLUEPRINT.md](file:///Users/jameschen/Workspace/nexus/docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md)

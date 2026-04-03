@@ -260,16 +260,65 @@ def _build_writeback_items(project_root: Path, state: Any, success: bool) -> Lis
     ]
 
 
+def _apply_semantic_patch(path: Path, category: str, task_id: str, heading: str, body: str) -> bool:
+    import re
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = path.read_text(encoding="utf-8") if path.exists() else ""
+    
+    # 🛡️ Category Anchor Defs
+    start_anchor = f"<!-- nexus-anchor:{category} -->"
+    end_anchor = f"<!-- /nexus-anchor:{category} -->"
+    
+    # 🛡️ Task Marker Defs
+    task_start = f"<!-- nexus-writeback:{task_id} -->"
+    task_end = f"<!-- /nexus-writeback:{task_id} -->"
+    new_task_block = f"\n{task_start}\n{heading}\n\n{body}\n{task_end}\n"
+
+    # Step 1: Ensure Category Anchor exists
+    if start_anchor not in content or end_anchor not in content:
+        # Dual-track: Look for legacy footer or just append
+        full_anchor_block = f"\n\n## Auto Writeback: {category}\n{start_anchor}\n{end_anchor}\n"
+        if "%% " in content: # Insert before footer
+            parts = content.split("%%", 1)
+            content = parts[0].rstrip() + full_anchor_block + "%%" + parts[1]
+        else:
+            content = content.rstrip() + full_anchor_block
+    
+    # Step 2: Extract Category segment
+    pattern = re.escape(start_anchor) + "(.*?)" + re.escape(end_anchor)
+    match = re.search(pattern, content, re.DOTALL)
+    if not match: return False # Should not happen after Step 1
+    
+    segment = match.group(1)
+    
+    # Step 3: Check for Task-ID replacement
+    task_pattern = re.escape(task_start) + ".*?" + re.escape(task_end)
+    if re.search(task_pattern, segment, re.DOTALL):
+        # REPLACE existing task block
+        new_segment = re.sub(task_pattern, new_task_block.strip() + "\n", segment, flags=re.DOTALL)
+    else:
+        # PREPEND (Most Recent First)
+        new_segment = "\n" + new_task_block.strip() + "\n" + segment.lstrip()
+
+    # Step 4: Re-stitch document
+    final_content = content[:match.start(1)] + new_segment + content[match.end(1):]
+    path.write_text(final_content, encoding="utf-8")
+    return True
+
+
 def _auto_apply_writeback_item(payload: Dict[str, Any], item: Dict[str, Any], source: str) -> bool:
     target = Path(str(item.get("target", "")))
     task_id = str(payload.get("task_id", "unknown"))
     delta_artifacts = payload.get("delta_artifacts", {}) or {}
     delta_key = None
     target_name = target.name
+    category = "learning-trace"
     if target_name == "INDEX.md":
         delta_key = "index_delta"
+        category = "evolution"
     elif target_name.startswith("MUSE_ENGINE_SPEC"):
         delta_key = "spec_delta"
+        category = "governance-hardening"
     if not delta_key:
         return False
 
@@ -280,8 +329,7 @@ def _auto_apply_writeback_item(payload: Dict[str, Any], item: Dict[str, Any], so
     if not delta_path.exists():
         return False
 
-    marker = f"<!-- nexus-writeback:{task_id}:{target_name} -->"
-    heading = f"## Auto Writeback: {task_id}"
+    heading = f"### Auto Writeback: {task_id}"
     body = "\n".join(
         [
             f"- Applied at: `{_utc_now()}`",
@@ -291,7 +339,8 @@ def _auto_apply_writeback_item(payload: Dict[str, Any], item: Dict[str, Any], so
             delta_path.read_text(encoding="utf-8").rstrip(),
         ]
     )
-    changed = _append_section_once(target, marker, heading, body)
+    
+    changed = _apply_semantic_patch(target, category, task_id, heading, body)
     if changed:
         item["status"] = "completed"
         item["completed_at"] = _utc_now()
