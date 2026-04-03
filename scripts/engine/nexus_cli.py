@@ -3,6 +3,7 @@ import sys
 import os
 import click
 from pathlib import Path
+from nexus.services.continuous_learning import run_protocol_startup_gate
 
 # 🧪 Nexus v23 Eternal Neural Swarm CLI (Self-Evolve Refactored)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,9 +17,19 @@ from nexus.services.cli_commands_service import CliCommandsService
 from nexus.core.skill_compressor import SkillCompressor
 
 @click.group()
-def nexus():
+@click.pass_context
+def nexus(ctx):
     """⚖️ Nexus Singularity OS (v23 Eternal Neural Swarm)"""
-    pass
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("NEXUS_SKIP_PROTOCOL_GATE") == "1":
+        return
+    command_name = ctx.invoked_subcommand or (sys.argv[1] if len(sys.argv) > 1 else "")
+    result = run_protocol_startup_gate(REPO_ROOT, command_name=command_name)
+    ctx.ensure_object(dict)
+    ctx.obj["protocol_gate"] = result
+    if not result.ok:
+        raise click.ClickException(
+            f"Protocol gate failed: {result.protocol_path} | ci({result.ci_mode})={result.ci_summary or result.ci_exit_code}"
+        )
 
 def _get_service():
     return CliCommandsService(REPO_ROOT)

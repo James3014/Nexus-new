@@ -33,6 +33,7 @@ from nexus.engine.self_healing_selector import get_self_healing_selector
 from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.services.memory import MemoryService
+from nexus.services.continuous_learning import finalize_learning_loop
 from scripts.engine.nexus_transaction import TransactionManager
 
 # ⚖️ 治理中心組件 (Governance Matrix)
@@ -387,12 +388,23 @@ class NexusEngine:
                     task_id, skill_id, passed, gate_results, state.metadata
                 )
                 self._crystallize(payload)
+                learning_finalize = finalize_learning_loop(
+                    self.project_root,
+                    state,
+                    success=bool(passed),
+                    source="engine.coordinator",
+                )
                 
-                if passed:
+                if passed and not learning_finalize.get("writeback_required"):
                     logger.info("✅ [%s] Successful crystallization.", skill_id)
                     # 💎 [Transaction: Commit] Audit 通過，物理鎖定變更
                     self.transaction_mgr.commit_if_passed(task_id)
                     return True
+                elif passed and learning_finalize.get("writeback_required"):
+                    logger.info("📝 [%s] Code complete but write-back still pending.", skill_id)
+                    state.metadata["delivery_status"] = "code_done_writeback_pending"
+                    self.transaction_mgr.audit_rollback(task_id)
+                    return False
                 else:
                     logger.info("🔄 Audit Rejected for %s. Retrying...", skill_id)
                     # 🚨 [Transaction: Rollback] Audit 失敗，物理恢復真相

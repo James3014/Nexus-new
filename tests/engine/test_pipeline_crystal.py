@@ -50,11 +50,13 @@ def test_stage_crystallize_saves_state(mock_ctx, mock_tracer):
     pipeline = MockPipeline()
     pipeline._collect_crystal_signals = MagicMock(return_value={"raw_terminal_state": "SUCCESS"})
     pipeline._handle_crystallize_success = MagicMock()
-    
-    pipeline._stage_crystallize(mock_ctx, True, mock_tracer)
+
+    with patch("nexus.engine.pipeline_crystal.finalize_learning_loop") as mock_finalize:
+        pipeline._stage_crystallize(mock_ctx, True, mock_tracer)
     
     assert pipeline.engine.state_io.save_global_state.called
     assert pipeline.engine.commander.next_step.called
+    assert mock_finalize.called
 
 @patch("nexus.engine.pipeline_crystal.SkillStore")
 @patch("nexus.engine.pipeline_crystal.build_skill_artifact")

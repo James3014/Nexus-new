@@ -15,6 +15,7 @@ from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_
 from nexus.core.event_bus import NexusEventBus
 from nexus.engine.pipeline_outcome import PipelineOutcome, PipelineTerminalState, HumanReviewHandoff
 from nexus.core.outcome_schema import NexusOutcomeV2
+from nexus.services.continuous_learning import finalize_learning_loop
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,23 @@ class PipelineCrystalMixin:
             self._handle_crystallize_success(ctx, signals)
         else:
             self._handle_crystallize_failure(ctx)
+
+        learning_finalize = None
+        try:
+            learning_finalize = finalize_learning_loop(
+                getattr(self.engine, "project_root", Path(".")),
+                ctx.state,
+                success=success,
+                source="pipeline.crystallize",
+            )
+        except Exception as exc:
+            logger.warning("continuous_learning_finalize_failed: %s", exc)
             
         self.engine.state_io.save_global_state(ctx.state)
-        self.engine.commander.next_step(status="completed", state=ctx.state)
+        next_status = "completed"
+        if isinstance(learning_finalize, dict) and learning_finalize.get("writeback_required"):
+            next_status = "pending_writeback"
+        self.engine.commander.next_step(status=next_status, state=ctx.state)
 
     def _collect_crystal_signals(self, ctx: PipelineContextProtocol, success: bool, tracer: Any) -> dict:
         """收集結晶所需的信號與元數據。"""

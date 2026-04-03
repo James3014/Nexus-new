@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
+import argparse
 import subprocess
 import sys
 import json
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from nexus.delivery.phantom_guard import compute_phantom_success
 
-ROOT = Path(__file__).resolve().parents[2]
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 
 def run_step(name, cmd):
@@ -21,7 +25,27 @@ def run_step(name, cmd):
         print(res.stderr)
         return False, res.stderr
 
+
+def run_dry_run():
+    print("🛡️ [Nexus CI Gate] Dry-run status check...")
+    checks = {
+        "venv_python": VENV_PYTHON.exists(),
+        "contracts_dir": (ROOT / "tests" / "contracts").exists(),
+        "benchmark_script": (ROOT / "scripts" / "nexus_cli.py").exists() or (ROOT / "scripts" / "engine" / "nexus_cli.py").exists(),
+    }
+    for key, ok in checks.items():
+        print(f"- {key}: {'OK' if ok else 'MISSING'}")
+    return 0 if all(checks.values()) else 1
+
 def main():
+    parser = argparse.ArgumentParser(description="Nexus CI gate")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--strict", action="store_true")
+    args = parser.parse_args()
+
+    if args.dry_run:
+        sys.exit(run_dry_run())
+
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
     
     # 0. Contract Regression & E2E DI Gate
