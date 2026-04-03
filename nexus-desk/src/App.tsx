@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { DeskViewModel } from "./types/DeskViewModel";
@@ -17,8 +17,44 @@ import { DecisionLedgerPanel } from "./components/DecisionLedgerPanel";
 import { ReviewSidebar } from "./components/ReviewSidebar";
 import { ReplaySnapshotModal } from "./components/ReplaySnapshotModal";
 
+type FatalBoundaryProps = {
+  children: React.ReactNode;
+};
+
+type FatalBoundaryState = {
+  error: string | null;
+};
+
+class FatalBoundary extends React.Component<FatalBoundaryProps, FatalBoundaryState> {
+  state: FatalBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): FatalBoundaryState {
+    return { error: error.message };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("Render Error:", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="h-screen bg-black flex items-center justify-center px-6">
+          <div className="max-w-3xl w-full border border-red-900/50 bg-[#050505] p-6 font-mono">
+            <div className="text-red-400 text-sm tracking-widest uppercase">Nexus Render Failure</div>
+            <div className="mt-4 text-red-300 whitespace-pre-wrap break-words">{this.state.error}</div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function App() {
   const [data, setData] = useState<DeskViewModel | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [phaseStatus, setPhaseStatus] = useState<Record<string, "success" | "fail" | "active" | "pending">>({});
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -35,11 +71,13 @@ function App() {
     try {
       const res = await invoke<DeskViewModel>("get_desk_view_model");
       setData(res);
+      setBootError(null);
       if (res.showCriticalAlert && !isDrawerOpen) {
         setIsDrawerOpen(true);
       }
     } catch (e) {
       console.error("Fetch Error:", e);
+      setBootError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -88,6 +126,7 @@ function App() {
       });
     } catch (e) {
       console.error("Subscription Error:", e);
+      setBootError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -158,12 +197,31 @@ function App() {
     }
   };
 
-  if (!data) return <div className="h-screen bg-black flex items-center justify-center text-cyan-500 font-mono animate-pulse">NEXUS_GOVERNANCE_SYSTEM_BOOT...</div>;
+  if (!data) {
+    return (
+      <div className="h-screen bg-black flex items-center justify-center px-6">
+        <div className="max-w-3xl w-full border border-cyan-900/40 bg-[#050505] p-6 font-mono">
+          <div className="text-cyan-500 text-sm tracking-widest uppercase">
+            Nexus Governance Boot
+          </div>
+          <div className="mt-4 text-cyan-400 animate-pulse">
+            NEXUS_GOVERNANCE_SYSTEM_BOOT...
+          </div>
+          {bootError && (
+            <div className="mt-6 border border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300 whitespace-pre-wrap break-words">
+              {bootError}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const isLocked = data.showCriticalAlert || ["TAMPERED", "VERIFYFATAL"].includes(data.normalizedStatus);
   const isError = data.severity === "danger" && data.normalizedStatus !== "INIT";
 
   return (
+    <FatalBoundary>
     <div className="h-screen flex flex-col bg-[#050505] text-[#ccc] font-sans selection:bg-blue-900/30 scanline overflow-hidden">
       <CriticalBanner 
         isVisible={isLocked} 
@@ -226,6 +284,7 @@ function App() {
       <ResolutionDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} trace={data.resolutionTrace} />
       <ReplaySnapshotModal isOpen={isSnapshotOpen} onClose={() => setIsSnapshotOpen(false)} snapshot={activeSnapshot} />
     </div>
+    </FatalBoundary>
   );
 }
 

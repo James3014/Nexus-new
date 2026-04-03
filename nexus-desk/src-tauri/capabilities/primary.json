@@ -5,6 +5,10 @@
     "core:default",
     "shell:default",
     "fs:default",
-    "allowall"
+    "allowall",
+    "shell:allow-spawn",
+    "shell:allow-execute",
+    "fs:read-all",
+    "fs:write-all"
   ]
 }

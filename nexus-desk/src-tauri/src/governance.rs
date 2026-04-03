@@ -4,6 +4,7 @@ use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ErrorFix {
     pub id: i32,
     pub pattern: String,
@@ -12,6 +13,7 @@ pub struct ErrorFix {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct DecisionLedgerEntry {
     pub id: String,
     pub task_id: String,
@@ -27,6 +29,7 @@ pub struct DecisionLedgerEntry {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ReviewAnnotation {
     pub id: String,
     pub task_id: String,
@@ -44,7 +47,7 @@ pub struct ReviewAnnotation {
 }
 
 pub fn init_governance_db() -> rusqlite::Result<()> {
-    let conn = Connection::open("src-tauri/src/errors.db")?;
+    let conn = Connection::open("/Users/jameschen/Workspace/nexus/nexus-desk/src-tauri/src/errors.db")?;
     
     // 原有的 Error Fingerprint 表
     conn.execute(
@@ -109,7 +112,7 @@ pub async fn query_error_fix(exit_code: i32, traceback: String) -> Result<Vec<Er
     
     let search_hash = if traceback.contains("timeout") { "demo_hash".to_string() } else { hash };
 
-    let conn = Connection::open("src-tauri/src/errors.db").map_err(|e| e.to_string())?;
+    let conn = Connection::open("/Users/jameschen/Workspace/nexus/nexus-desk/src-tauri/src/errors.db").map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare("SELECT id, pattern, fix_command, success_rate FROM errors WHERE (traceback_hash = ?1 OR exit_code = ?2) ORDER BY success_rate DESC LIMIT 5").map_err(|e| e.to_string())?;
     
     let fixes = stmt.query_map(params![search_hash, exit_code], |row| {
@@ -140,7 +143,7 @@ pub async fn append_decision(
     let decision_id = decision_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let ts = chrono::Utc::now().to_rfc3339();
 
-    let conn = Connection::open("src-tauri/src/errors.db").map_err(|e| e.to_string())?;
+    let conn = Connection::open("/Users/jameschen/Workspace/nexus/nexus-desk/src-tauri/src/errors.db").map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO decision_ledger (id, task_id, decision_id, action, actor, target_json, reason, evidence_refs_json, ts)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -152,7 +155,7 @@ pub async fn append_decision(
 
 #[tauri::command]
 pub async fn list_decisions(task_id: String) -> Result<Vec<DecisionLedgerEntry>, String> {
-    let conn = Connection::open("src-tauri/src/errors.db").map_err(|e| e.to_string())?;
+    let conn = Connection::open("/Users/jameschen/Workspace/nexus/nexus-desk/src-tauri/src/errors.db").map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare("SELECT id, task_id, trace_id, audit_trace_id, decision_id, action, actor, target_json, reason, evidence_refs_json, ts FROM decision_ledger WHERE task_id = ?1 ORDER BY ts DESC").map_err(|e| e.to_string())?;
     
     let entries = stmt.query_map(params![task_id], |row| {
@@ -188,7 +191,7 @@ pub async fn add_annotation(
     let id = Uuid::new_v4().to_string();
     let ts = chrono::Utc::now().to_rfc3339();
 
-    let conn = Connection::open("src-tauri/src/errors.db").map_err(|e| e.to_string())?;
+    let conn = Connection::open("/Users/jameschen/Workspace/nexus/nexus-desk/src-tauri/src/errors.db").map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO review_annotations (id, task_id, target_type, target_ref_json, severity, status, author, body, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, 'OPEN', ?6, ?7, ?8, ?8)",
@@ -200,7 +203,7 @@ pub async fn add_annotation(
 
 #[tauri::command]
 pub async fn list_annotations(task_id: String) -> Result<Vec<ReviewAnnotation>, String> {
-    let conn = Connection::open("src-tauri/src/errors.db").map_err(|e| e.to_string())?;
+    let conn = Connection::open("/Users/jameschen/Workspace/nexus/nexus-desk/src-tauri/src/errors.db").map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare("SELECT id, task_id, trace_id, audit_trace_id, decision_id, target_type, target_ref_json, severity, status, author, body, created_at, updated_at FROM review_annotations WHERE task_id = ?1 ORDER BY created_at DESC").map_err(|e| e.to_string())?;
     
     let entries = stmt.query_map(params![task_id], |row| {
