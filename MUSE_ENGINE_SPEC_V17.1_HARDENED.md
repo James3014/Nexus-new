@@ -576,6 +576,7 @@ Nexus Ultimate Total Atlas Integrated Verbatim (2026-03-27).
 - [ ] **Manifest Complete**: `manifest.json` 已生成且包含所有 round 加密索引。
 - [ ] **Worktree Removed**: 任務環境已完全回收，無殘留進程。
 - [ ] **Sync Confirmed**: 經驗與 Git 狀態已完成 Vector/Remote 同步。
+- [ ] **Writeback Validated**: `writeback_validation.jsonl` 中所有 Target 均為 `pass`。交付狀態必須從 `pending` 晉升至 `fully_delivered` 始可結案。
 
 ---
 
@@ -599,8 +600,50 @@ Nexus Ultimate Total Atlas Integrated Verbatim (2026-03-27).
 - [x] **ACL 命名空間扁平化**: 本地 App 權限引用必須使用扁平 `identifier` (如 `allowall`)，嚴禁在單一上下文環境下加註 `app:` 等無意義命名空間，以防編譯器與運行端靜默拒絕。
 - [x] **反黑屏守則 (Anti-Blackout UX)**: 治理 HUD 必須具備 `FatalBoundary` (React Error Boundary)。任何前端初始化崩潰必須物理顯示於畫面上，禁止「靜默黑屏」。
 - [x] **數據序列化對位**: 所有 Rust 治理結構體強制實裝 `#[serde(rename_all = "camelCase")]`，確保與前端 React 屬性讀取無縫對接。
+- [x] **回寫治理門禁 (P1-B Gate)**: 嚴禁盲目結案。`refresh_writeback_status` 必須調用語義驗證器，核對 `expected_hash` 與實體區塊。
+
+#### 回寫驗證失敗碼 (WB_FAIL_CODES)
+| 錯誤碼 | 語義 | 處理建議 (Remediation) |
+| :--- | :--- | :--- |
+| **WB_ANCHOR_DUPLICATE** | 錨點不唯一 | 物理刪除多餘的 HTML Anchor 標記 |
+| **WB_CONTENT_MISMATCH** | 內容不一致 | 重新執行 `nexus:refresh` 或檢查回寫日誌 |
+| **WB_SORT_VIOLATION** | 排序錯誤 | 確保最新任務位於 Anchor 區最前方 |
+| **WB_TASK_BLOCK_MISSING** | 區塊遺失 | 檢查檔案是否被手動修改導致標記受損 |
 
 <!-- nexus-anchor:governance-hardening -->
+<!-- nexus-writeback:nexus-learn-4 -->
+### Auto Writeback: nexus-learn-4
+
+- Applied at: `2026-04-03T12:36:43.642105+00:00`
+- Applied by: `startup-gate`
+- Delta artifact: `/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pytest-of-jameschen/pytest-392/test_refresh_writeback_status_1/.nexus/reports/writeback/nexus-learn-4_SPEC.delta.md`
+
+# SPEC Delta: nexus-learn-4
+
+## Suggested Updates
+- Reflect learning loop outcome from `pipeline.crystallize`.
+- Document root cause: need indexed doc sync
+- Review protocol/startup gate expectations if this task changed delivery behavior.
+<!-- /nexus-writeback:nexus-learn-4 -->
+
+
+<!-- nexus-writeback:nexus-learn-3 -->
+### Auto Writeback: nexus-learn-3
+
+- Applied at: `2026-04-03T12:36:43.618667+00:00`
+- Applied by: `manual-test`
+- Delta artifact: `/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pytest-of-jameschen/pytest-392/test_refresh_writeback_status_0/.nexus/reports/writeback/nexus-learn-3_SPEC.delta.md`
+
+# SPEC Delta: nexus-learn-3
+
+## Suggested Updates
+- Reflect learning loop outcome from `pipeline.crystallize`.
+- Document root cause: missing docs sync
+- Review protocol/startup gate expectations if this task changed delivery behavior.
+<!-- /nexus-writeback:nexus-learn-3 -->
+
+
+
 <!-- /nexus-anchor:governance-hardening -->
 
 ---

@@ -1,12 +1,51 @@
-from __future__ import annotations
-
 import json
 import os
 import subprocess
-from dataclasses import dataclass
+import re
+import hashlib
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Tuple, Optional
+
+
+@dataclass
+class TargetVerification:
+    target_file: str
+    anchor_id: str
+    task_id: str
+    marker_found: bool = False
+    anchor_found: bool = False
+    anchor_unique: bool = False
+    block_count: int = 0
+    is_most_recent: bool = False
+    content_hash_expected: Optional[str] = None
+    content_hash_actual: Optional[str] = None
+    reasons: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ValidationResult:
+    ok: bool
+    final_status: str
+    fail_code: Optional[str] = None
+    reasons: List[str] = field(default_factory=list)
+    verified_targets: List[TargetVerification] = field(default_factory=list)
+    event_payload: Dict[str, Any] = field(default_factory=dict)
+
+
+FAIL_CODES = {
+    "TODO_MISSING": "WB_TODO_MISSING",
+    "TARGET_MISSING": "WB_TARGET_MISSING",
+    "ANCHOR_DUPLICATE": "WB_ANCHOR_DUPLICATE",
+    "ANCHOR_NOT_FOUND": "WB_ANCHOR_NOT_FOUND",
+    "MARKER_MISSING": "WB_MARKER_MISSING",
+    "TASK_BLOCK_MISSING": "WB_TASK_BLOCK_MISSING",
+    "TASK_BLOCK_DUPLICATE": "WB_TASK_BLOCK_DUPLICATE",
+    "CONTENT_MISMATCH": "WB_CONTENT_MISMATCH",
+    "SORT_VIOLATION": "WB_SORT_VIOLATION",
+    "NOT_READY": "WB_NOT_READY",
+}
 
 from scripts.steward import MemorySteward
 
@@ -238,22 +277,28 @@ def _should_require_writeback(state: Any) -> bool:
 def _build_writeback_items(project_root: Path, state: Any, success: bool) -> List[Dict[str, Any]]:
     metadata = getattr(state, "metadata", {}) or {}
     summary = metadata.get("cycle_root_cause") or metadata.get("phantom_success_reason") or "sync docs after task completion"
-    status = "completed" if success else "pending"
+    
+    def _rel(target_path: Path) -> str:
+        try:
+            return str(target_path.relative_to(project_root))
+        except ValueError:
+            return str(target_path)
+
     return [
         {
-            "target": str(project_root / ".codex_lessons.md"),
+            "target": _rel(project_root / ".codex_lessons.md"),
             "reason": "human-readable lesson crystallization",
             "status": "completed",
             "completed_at": _utc_now(),
             "completion_source": "continuous-learning",
         },
         {
-            "target": str(project_root / "docs" / "INDEX.md"),
+            "target": _rel(project_root / "docs" / "INDEX.md"),
             "reason": summary,
             "status": "pending",
         },
         {
-            "target": str(project_root / "MUSE_ENGINE_SPEC_V17.1_HARDENED.md"),
+            "target": _rel(project_root / "MUSE_ENGINE_SPEC_V17.1_HARDENED.md"),
             "reason": "phase/learning/governance delta review",
             "status": "pending",
         },
@@ -306,8 +351,12 @@ def _apply_semantic_patch(path: Path, category: str, task_id: str, heading: str,
     return True
 
 
-def _auto_apply_writeback_item(payload: Dict[str, Any], item: Dict[str, Any], source: str) -> bool:
-    target = Path(str(item.get("target", "")))
+def _auto_apply_writeback_item(root: Path, payload: Dict[str, Any], item: Dict[str, Any], source: str) -> bool:
+    target_raw = item.get("target", "")
+    target = Path(target_raw)
+    if not target.is_absolute():
+        target = root / target
+        
     task_id = str(payload.get("task_id", "unknown"))
     delta_artifacts = payload.get("delta_artifacts", {}) or {}
     delta_key = None
@@ -326,6 +375,9 @@ def _auto_apply_writeback_item(payload: Dict[str, Any], item: Dict[str, Any], so
     if not delta_path_raw:
         return False
     delta_path = Path(str(delta_path_raw))
+    if not delta_path.is_absolute():
+        delta_path = root / delta_path
+        
     if not delta_path.exists():
         return False
 
@@ -342,11 +394,181 @@ def _auto_apply_writeback_item(payload: Dict[str, Any], item: Dict[str, Any], so
     
     changed = _apply_semantic_patch(target, category, task_id, heading, body)
     if changed:
+        # Pre-calculate expectation for the validator
         item["status"] = "completed"
         item["completed_at"] = _utc_now()
         item["completion_source"] = source
         item["auto_applied"] = True
+        
+        # 🛡️ Capture the exact truth block as defined in _apply_semantic_patch
+        task_start = f"<!-- nexus-writeback:{task_id} -->"
+        task_end = f"<!-- /nexus-writeback:{task_id} -->"
+        # Match the logic in _apply_semantic_patch exactly
+        rendered_block = f"{task_start}\n{heading}\n\n{body}\n{task_end}"
+        item["expected_hash"] = hashlib.sha256(rendered_block.encode("utf-8")).hexdigest()
+        item["anchor_id"] = category
+        
     return changed
+
+
+def _normalize_markdown(text: str) -> str:
+    text = text.replace("\r\n", "\n").strip()
+    text = re.sub(r"[ \t]+$", "", text, flags=re.M)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
+
+
+def validate_writeback_completion(
+    task_id: str,
+    todo_path: Path,
+    repo_root: Path,
+) -> ValidationResult:
+    if not todo_path.exists():
+        return ValidationResult(ok=False, final_status="code_done_writeback_pending", fail_code=FAIL_CODES["TODO_MISSING"], reasons=["todo missing"])
+    
+    payload = json.loads(todo_path.read_text(encoding="utf-8"))
+    items = payload.get("items", []) or []
+    
+    verified_targets = []
+    reasons = []
+    fail_code = None
+    all_ok = True if items else False
+    
+    for item in items:
+        target_raw = item.get("target", "")
+        status = item.get("status", "pending")
+        
+        # 🛡️ P1-B: Any non-completed item blocks promotion
+        if status != "completed":
+            reasons.append(f"{target_raw}: pending")
+            fail_code = fail_code or FAIL_CODES["NOT_READY"]
+            all_ok = False
+            continue
+
+        anchor_id = item.get("anchor_id") # P1-B: Only anchored files are semantically validated
+        expected_hash = item.get("expected_hash")
+        
+        # 🛡️ Skip semantic validation if no anchor is defined (e.g. .codex_lessons.md)
+        if not anchor_id:
+            tv = TargetVerification(target_file=str(target_raw), anchor_id="", task_id=task_id, is_most_recent=True)
+            verified_targets.append(tv)
+            continue
+
+        # Handle both absolute and relative targets correctly
+        target = Path(target_raw)
+        if not target.is_absolute():
+            target = repo_root / target
+        
+        tv = TargetVerification(target_file=str(target_raw), anchor_id=anchor_id, task_id=task_id, content_hash_expected=expected_hash)
+        
+        if not target.exists():
+            tv.reasons.append("target missing")
+            verified_targets.append(tv)
+            reasons.append(f"{target_raw}: missing")
+            fail_code = fail_code or FAIL_CODES["TARGET_MISSING"]
+            all_ok = False
+            continue
+            
+        doc = target.read_text(encoding="utf-8")
+        start_anchor = f"<!-- nexus-anchor:{anchor_id} -->"
+        end_anchor = f"<!-- /nexus-anchor:{anchor_id} -->"
+        anchor_hits = [m.start() for m in re.finditer(re.escape(start_anchor), doc)]
+        
+        tv.anchor_found = len(anchor_hits) > 0
+        tv.anchor_unique = len(anchor_hits) == 1
+        
+        if not tv.anchor_found:
+            tv.reasons.append("anchor not found")
+            verified_targets.append(tv)
+            reasons.append(f"{target_raw}: anchor {anchor_id} missing")
+            fail_code = fail_code or FAIL_CODES["ANCHOR_NOT_FOUND"]
+            all_ok = False
+            continue
+            
+        if not tv.anchor_unique:
+            tv.reasons.append("duplicate anchor")
+            verified_targets.append(tv)
+            reasons.append(f"{target_raw}: duplicate anchor {anchor_id}")
+            fail_code = fail_code or FAIL_CODES["ANCHOR_DUPLICATE"]
+            all_ok = False
+            continue
+
+        # Extract Region
+        pattern = re.escape(start_anchor) + "(.*?)" + re.escape(end_anchor)
+        match = re.search(pattern, doc, re.DOTALL)
+        if not match:
+            tv.reasons.append("anchor slice failed")
+            verified_targets.append(tv)
+            all_ok = False
+            continue
+            
+        region = match.group(1)
+        tv.marker_found = "Auto Writeback" in region
+        
+        # Extract Task Block
+        task_start = f"<!-- nexus-writeback:{task_id} -->"
+        task_end = f"<!-- /nexus-writeback:{task_id} -->"
+        task_pattern = re.escape(task_start) + "(.*?)" + re.escape(task_end)
+        task_hits = list(re.finditer(task_pattern, region, re.DOTALL))
+        tv.block_count = len(task_hits)
+        
+        if tv.block_count == 0:
+            tv.reasons.append("task block missing")
+            verified_targets.append(tv)
+            reasons.append(f"{target_raw}: block {task_id} missing")
+            fail_code = fail_code or FAIL_CODES["TASK_BLOCK_MISSING"]
+            all_ok = False
+            continue
+            
+        if tv.block_count > 1:
+            tv.reasons.append("duplicate task block")
+            verified_targets.append(tv)
+            reasons.append(f"{target_raw}: duplicate block {task_id}")
+            fail_code = fail_code or FAIL_CODES["TASK_BLOCK_DUPLICATE"]
+            all_ok = False
+            continue
+            
+        # Hash Check
+        actual_block = task_hits[0].group(0)
+        actual_hash_raw = hashlib.sha256(actual_block.encode("utf-8")).hexdigest()
+        
+        if expected_hash and actual_hash_raw != expected_hash:
+            # 🛡️ Fallback: If raw match fails, try normalized match to account for minor whitespace jitter
+            actual_hash_norm = hashlib.sha256(_normalize_markdown(actual_block).encode("utf-8")).hexdigest()
+            if actual_hash_norm != expected_hash:
+                tv.reasons.append(f"content mismatch (raw:{actual_hash_raw[:8]} expected:{expected_hash[:8]})")
+                verified_targets.append(tv)
+                reasons.append(f"{target_raw}: hash mismatch")
+                fail_code = fail_code or FAIL_CODES["CONTENT_MISMATCH"]
+                all_ok = False
+                continue
+        
+        # Sort Check (Simple: is it first in region?)
+        all_blocks = list(re.finditer(r"<!-- nexus-writeback:.*? -->", region))
+        if all_blocks and task_start not in all_blocks[0].group(0):
+            tv.reasons.append("sort violation")
+            verified_targets.append(tv)
+            reasons.append(f"{target_raw}: not most recent")
+            fail_code = fail_code or FAIL_CODES["SORT_VIOLATION"]
+            all_ok = False
+            continue
+            
+        tv.is_most_recent = True
+        verified_targets.append(tv)
+
+    return ValidationResult(
+        ok=all_ok,
+        final_status="fully_delivered" if all_ok else "code_done_writeback_pending",
+        fail_code=None if all_ok else (fail_code or FAIL_CODES["NOT_READY"]),
+        reasons=reasons,
+        verified_targets=verified_targets,
+        event_payload={
+            "task_id": task_id,
+            "status": "pass" if all_ok else "fail",
+            "fail_code": fail_code,
+            "targets_count": len(verified_targets)
+        }
+    )
 
 
 def refresh_writeback_status(
@@ -367,33 +589,35 @@ def refresh_writeback_status(
             "todo_path": todo_path,
         }
 
+    task_id = payload.get("task_id", "unknown")
     items = payload.get("items", []) or []
     changed = False
-    todo_mtime = todo_path.stat().st_mtime if todo_path.exists() else 0.0
-    previous_status = payload.get("delivery_status") or (
-        "code_done_writeback_pending" if payload.get("writeback_required") else "fully_delivered"
-    )
+    previous_status = payload.get("delivery_status") or "code_done_writeback_pending"
 
+    # Step 1: Attempt auto-apply for pending items
     for item in items:
         if item.get("status") == "completed":
             continue
-        target = Path(str(item.get("target", "")))
-        if auto_apply and _auto_apply_writeback_item(payload, item, source):
-            changed = True
-            continue
-        if target.exists() and target.stat().st_mtime >= todo_mtime:
-            item["status"] = "completed"
-            item["completed_at"] = _utc_now()
-            item["completion_source"] = source
+        if auto_apply and _auto_apply_writeback_item(root, payload, item, source):
             changed = True
 
+    # Step 1.5: Flush to disk before validation (read-after-write consistency)
+    if changed:
+        payload["items"] = items
+        todo_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Step 2: Semantic Validation Gate (P1-B Heart)
+    val_result = validate_writeback_completion(task_id, todo_path, root)
+    
+    # Step 3: Record Validation Event
+    _append_jsonl(root / ".nexus" / "events" / "writeback_validation.jsonl", val_result.event_payload)
+
     writeback_required = bool(payload.get("writeback_required"))
-    all_completed = all(item.get("status") == "completed" for item in items)
-    delivery_status = "fully_delivered" if (not writeback_required or all_completed) else "code_done_writeback_pending"
+    delivery_status = val_result.final_status if writeback_required else "fully_delivered"
 
     payload["items"] = items
     payload["delivery_status"] = delivery_status
-    if changed or payload.get("delivery_status") != previous_status:
+    if changed or delivery_status != previous_status:
         todo_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     metadata = getattr(state, "metadata", None)
@@ -418,7 +642,7 @@ def refresh_writeback_status(
     return {
         "writeback_required": writeback_required,
         "delivery_status": delivery_status,
-        "completed": all_completed,
+        "completed": val_result.ok if writeback_required else True,
         "items": items,
         "todo_path": todo_path,
     }

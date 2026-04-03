@@ -55,6 +55,46 @@
 ## 🛠️ 維護與同步
 
 <!-- nexus-anchor:evolution -->
+<!-- nexus-writeback:nexus-learn-4 -->
+### Auto Writeback: nexus-learn-4
+
+- Applied at: `2026-04-03T12:36:43.641518+00:00`
+- Applied by: `startup-gate`
+- Delta artifact: `/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pytest-of-jameschen/pytest-392/test_refresh_writeback_status_1/.nexus/reports/writeback/nexus-learn-4_INDEX.delta.md`
+
+# INDEX Delta: nexus-learn-4
+
+- Source: `pipeline.crystallize`
+- Success: `True`
+- Root Cause: need indexed doc sync
+- Pending Writeback: `True`
+
+## Rejection History
+- index delta pending
+- spec delta pending
+<!-- /nexus-writeback:nexus-learn-4 -->
+
+
+<!-- nexus-writeback:nexus-learn-3 -->
+### Auto Writeback: nexus-learn-3
+
+- Applied at: `2026-04-03T12:36:43.617771+00:00`
+- Applied by: `manual-test`
+- Delta artifact: `/private/var/folders/ld/b61fwcys3x14s175ld5z1k9m0000gn/T/pytest-of-jameschen/pytest-392/test_refresh_writeback_status_0/.nexus/reports/writeback/nexus-learn-3_INDEX.delta.md`
+
+# INDEX Delta: nexus-learn-3
+
+- Source: `pipeline.crystallize`
+- Success: `True`
+- Root Cause: missing docs sync
+- Pending Writeback: `True`
+
+## Rejection History
+- docs pending
+<!-- /nexus-writeback:nexus-learn-3 -->
+
+
+
 <!-- /nexus-anchor:evolution -->
 
 ## Sync Targets

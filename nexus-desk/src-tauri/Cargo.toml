@@ -1,18 +1,22 @@
 [package]
-name = "nexus-desk"
-version = "0.1.0"
-description = "Nexus Singularity OS Dashboard"
-authors = ["Nexus Team"]
+name = "nexusdesk"
+version = "2.1.0"
+description = "Nexus Desk - Hardened Governance Cockpit"
+authors = ["Nexus Engineers"]
 edition = "2021"
 
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
-
 [dependencies]
-tauri = { version = "2.1", features = [] }
-tauri-plugin-shell = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+tauri = { version = "2.1.2", features = ["image-ico"] }
+tauri-plugin-shell = "2.2.0"
+tauri-plugin-fs = "2.2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+notify = "6.1.1"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+sha2 = "0.10.8"
 tokio = { version = "1", features = ["full"] }
-tauri-plugin-fs = "2.4.5"
-chrono = { version = "0.4.44", features = ["serde"] }
+
+[build-dependencies]
+tauri-build = { version = "2.0.3", features = [] }

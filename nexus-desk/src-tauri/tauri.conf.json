@@ -1,35 +1,25 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "nexus-desk",
-  "version": "0.1.0",
-  "identifier": "com.nexus.desk.cockpit",
+  "productName": "Nexus Desk",
+  "version": "2.1.0-hardened",
+  "identifier": "com.nexus.desk",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "nexus-desk",
-        "width": 800,
-        "height": 600
+        "title": "Nexus Desk",
+        "width": 1600,
+        "height": 1000,
+        "label": "main"
       }
     ],
     "security": {
-      "csp": null
+      "capabilities": ["primary"]
     }
   },
   "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ]
+    "active": true
   }
 }

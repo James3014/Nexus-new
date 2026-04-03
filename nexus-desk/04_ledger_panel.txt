@@ -1,0 +1,30 @@
+import React, { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+
+interface DecisionEntry {
+  id: string;
+  taskId: string;
+  decisionId: string;
+  action: string;
+  actor: string;
+  targetJson: string;
+  reason?: string;
+  evidenceRefsJson: string;
+  ts: string;
+}
+
+interface Props {
+  taskId: string;
+}
+
+export const DecisionLedgerPanel: React.FC<Props> = ({ taskId }) => {
+  const [entries, setEntries] = useState<DecisionEntry[]>([]);
+
+  useEffect(() => {
+    if (taskId) {
+      invoke<DecisionEntry[]>('list_decisions', { taskId })
+        .then(setEntries)
+        .catch(console.error);
+    }
+  }, [taskId]);
+

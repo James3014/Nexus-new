@@ -1,0 +1,50 @@
+use rusqlite::{Connection, params};
+use sha2::{Sha256, Digest};
+use serde::{Serialize, Deserialize};
+use uuid::Uuid;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ErrorFix {
+    pub id: i32,
+    pub pattern: String,
+    pub fix_command: String,
+    pub success_rate: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DecisionLedgerEntry {
+    pub id: String,
+    pub task_id: String,
+    pub trace_id: Option<String>,
+    pub audit_trace_id: Option<String>,
+    pub decision_id: String,
+    pub action: String,
+    pub actor: String,
+    pub target_json: String,
+    pub reason: Option<String>,
+    pub evidence_refs_json: String,
+    pub ts: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ReviewAnnotation {
+    pub id: String,
+    pub task_id: String,
+    pub trace_id: Option<String>,
+    pub audit_trace_id: Option<String>,
+    pub decision_id: Option<String>,
+    pub target_type: String,
+    pub target_ref_json: String,
+    pub severity: String,
+    pub status: String,
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub fn init_governance_db() -> rusqlite::Result<()> {
+    let conn = Connection::open("src-tauri/src/errors.db")?;
+    
+    // 原有的 Error Fingerprint 表
+    conn.execute(
