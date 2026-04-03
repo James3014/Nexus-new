@@ -146,3 +146,28 @@ def test_refresh_writeback_status_promotes_pending_to_fully_delivered(tmp_path):
     assert all(item["status"] == "completed" for item in todo["items"])
     completion_log = tmp_path / ".nexus" / "events" / "writeback_completion.jsonl"
     assert completion_log.exists()
+
+
+def test_refresh_writeback_status_auto_applies_delta_artifacts(tmp_path):
+    state = _build_state(
+        task_id="nexus-learn-4",
+        task_description="auto apply writeback",
+        cycle_root_cause="need indexed doc sync",
+        rejection_history=["index delta pending", "spec delta pending"],
+    )
+
+    result = finalize_learning_loop(tmp_path, state, success=True, source="pipeline.crystallize")
+    assert result["delivery_status"] == "code_done_writeback_pending"
+
+    refreshed = refresh_writeback_status(tmp_path, state=state, source="startup-gate")
+
+    index_text = (tmp_path / "docs" / "INDEX.md").read_text(encoding="utf-8")
+    spec_text = (tmp_path / "MUSE_ENGINE_SPEC_V17.1_HARDENED.md").read_text(encoding="utf-8")
+    todo = json.loads((tmp_path / ".nexus" / "reports" / "writeback_todo.json").read_text(encoding="utf-8"))
+
+    assert refreshed["delivery_status"] == "fully_delivered"
+    assert state.metadata["delivery_status"] == "fully_delivered"
+    assert "## Auto Writeback: nexus-learn-4" in index_text
+    assert "## Auto Writeback: nexus-learn-4" in spec_text
+    assert all(item["status"] == "completed" for item in todo["items"])
+    assert any(item.get("auto_applied") for item in todo["items"] if item["target"].endswith("INDEX.md"))

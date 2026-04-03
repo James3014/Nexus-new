@@ -44,6 +44,25 @@ def _load_json(path: Path) -> Dict[str, Any] | None:
         return None
 
 
+def _append_section_once(path: Path, marker: str, heading: str, body: str) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if marker in existing:
+        return False
+    block = "\n".join(
+        [
+            "",
+            marker,
+            heading,
+            "",
+            body.rstrip(),
+            "",
+        ]
+    )
+    path.write_text(existing.rstrip() + block + "\n", encoding="utf-8")
+    return True
+
+
 def _default_command_runner(cmd: List[str], cwd: Path) -> Tuple[int, str, str]:
     proc = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, check=False)
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
@@ -241,11 +260,52 @@ def _build_writeback_items(project_root: Path, state: Any, success: bool) -> Lis
     ]
 
 
+def _auto_apply_writeback_item(payload: Dict[str, Any], item: Dict[str, Any], source: str) -> bool:
+    target = Path(str(item.get("target", "")))
+    task_id = str(payload.get("task_id", "unknown"))
+    delta_artifacts = payload.get("delta_artifacts", {}) or {}
+    delta_key = None
+    target_name = target.name
+    if target_name == "INDEX.md":
+        delta_key = "index_delta"
+    elif target_name.startswith("MUSE_ENGINE_SPEC"):
+        delta_key = "spec_delta"
+    if not delta_key:
+        return False
+
+    delta_path_raw = delta_artifacts.get(delta_key)
+    if not delta_path_raw:
+        return False
+    delta_path = Path(str(delta_path_raw))
+    if not delta_path.exists():
+        return False
+
+    marker = f"<!-- nexus-writeback:{task_id}:{target_name} -->"
+    heading = f"## Auto Writeback: {task_id}"
+    body = "\n".join(
+        [
+            f"- Applied at: `{_utc_now()}`",
+            f"- Applied by: `{source}`",
+            f"- Delta artifact: `{delta_path}`",
+            "",
+            delta_path.read_text(encoding="utf-8").rstrip(),
+        ]
+    )
+    changed = _append_section_once(target, marker, heading, body)
+    if changed:
+        item["status"] = "completed"
+        item["completed_at"] = _utc_now()
+        item["completion_source"] = source
+        item["auto_applied"] = True
+    return changed
+
+
 def refresh_writeback_status(
     project_root: Path | str,
     *,
     state: Any | None = None,
     source: str = "auto-refresh",
+    auto_apply: bool = True,
 ) -> Dict[str, Any]:
     root = Path(project_root)
     todo_path = root / ".nexus" / "reports" / "writeback_todo.json"
@@ -269,6 +329,9 @@ def refresh_writeback_status(
         if item.get("status") == "completed":
             continue
         target = Path(str(item.get("target", "")))
+        if auto_apply and _auto_apply_writeback_item(payload, item, source):
+            changed = True
+            continue
         if target.exists() and target.stat().st_mtime >= todo_mtime:
             item["status"] = "completed"
             item["completed_at"] = _utc_now()
@@ -387,7 +450,12 @@ def finalize_learning_loop(
     todo_path = root / ".nexus" / "reports" / "writeback_todo.json"
     todo_path.parent.mkdir(parents=True, exist_ok=True)
     todo_path.write_text(json.dumps(todo_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    refreshed = refresh_writeback_status(root, state=state, source="continuous-learning-finalize")
+    refreshed = refresh_writeback_status(
+        root,
+        state=state,
+        source="continuous-learning-finalize",
+        auto_apply=False,
+    )
     delivery_status = refreshed["delivery_status"]
     metadata = getattr(state, "metadata", None)
     if isinstance(metadata, dict):
