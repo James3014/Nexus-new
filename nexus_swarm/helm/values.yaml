@@ -8,6 +8,7 @@ global:
 serviceAccount:
   create: true
   name: ""
+
 manager:
   replicas: 1
   image: nexus-swarm-manager:v22

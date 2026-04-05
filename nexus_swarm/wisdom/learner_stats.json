@@ -1,0 +1,32 @@
+{
+    "regression-count-2": {
+        "correct_count": 0,
+        "fp_count": 0,
+        "missed_count": 1,
+        "alpha": 1.0,
+        "beta": 3.0,
+        "confidence": 0.25,
+        "bypass_score": 0.0,
+        "last_feedback_at": "2026-04-04T00:22:52.915006"
+    },
+    "phantom_block_fp": {
+        "correct_count": 0,
+        "fp_count": 1,
+        "missed_count": 0,
+        "alpha": 1.0,
+        "beta": 2.0,
+        "confidence": 0.3333333333333333,
+        "bypass_score": 1.0,
+        "last_feedback_at": "2026-04-04T00:22:52.915440"
+    },
+    "system-overload-detected": {
+        "correct_count": 0,
+        "fp_count": 0,
+        "missed_count": 257,
+        "alpha": 1.0,
+        "beta": 515.0,
+        "confidence": 0.001937984496124031,
+        "bypass_score": 0.0,
+        "last_feedback_at": "2026-04-05T20:19:13.773332"
+    }
+}
