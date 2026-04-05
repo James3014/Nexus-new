@@ -54,6 +54,29 @@ def main():
         f'"{VENV_PYTHON}" -m pytest tests/contracts/ tests/test_container_orchestration.py -q',
     )
     if not success: sys.exit(1)
+
+    # 0.7 Wiki Governance Audit (Pass 7 - CI Hardened)
+    success, _ = run_step(
+        "Wiki Governance Audit",
+        f'"{VENV_PYTHON}" scripts/ops/wiki_linter.py --strict --ci-report wiki_audit.json',
+    )
+    if not success: sys.exit(1)
+
+    # 0.7.5 Wiki Drift Audit (Agent 3 - WS3)
+    # Non-breaking for now: reports missing paths and stale content.
+    run_step(
+        "Wiki Drift Audit",
+        f'"{VENV_PYTHON}" scripts/ops/wiki_drift_audit.py',
+    )
+
+    # 0.8 Display Wiki Audit Summary
+    audit_file = ROOT / "wiki_audit.json"
+    if audit_file.exists():
+        try:
+            audit_data = json.loads(audit_file.read_text())
+            print(f"📊 [Wiki-Audit] {audit_data['passed']} Passed, {audit_data['failed']} Failed, {audit_data['waived']} Waived, {audit_data['expired']} Expired")
+        except:
+            pass
     
     # 0.5 Warning Budget Gate
     success, _ = run_step(
@@ -150,4 +173,5 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    # NX-ID: NEXUS IDENTITY: 619e460e + CI-GUARDED
     main()
