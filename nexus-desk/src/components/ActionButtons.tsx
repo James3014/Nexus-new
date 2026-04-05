@@ -33,11 +33,32 @@ export const ActionButtons: React.FC<Props> = ({ actions, isLocked, onAction, lo
   };
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <Button label="效能測試" cmd="benchmark" active={actions.benchmark} />
-      <Button label="執行稽核" cmd="acceptance-check" active={actions.acceptanceCheck} />
-      <Button label="發布就緒" cmd="release-ready" active={actions.releaseReady} />
-      <Button label="正式發布" cmd="publish" active={actions.publish} primary />
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Button label="效能測試" cmd="benchmark" active={actions.benchmark} />
+        <Button label="執行稽核" cmd="acceptance-check" active={actions.acceptanceCheck} />
+        <Button label="發布就緒" cmd="release-ready" active={actions.releaseReady} />
+        <Button label="正式發布" cmd="publish" active={actions.publish} primary />
+      </div>
+
+      {/* 🛡️ v23 Wisdom Feedback Loop (HITL) */}
+      <div className="pt-4 border-t border-[#222]">
+        <div className="text-[9px] text-[#555] uppercase font-black tracking-widest mb-2 flex items-center gap-2">
+           <span className="w-1 h-1 bg-blue-500 rounded-full" />
+           Wisdom Feedback Loop (HITL)
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+           <button onClick={() => onAction('wisdom_correct')} className="bg-green-900/10 border border-green-500/30 text-green-500 py-1.5 rounded-sm text-[9px] font-black uppercase hover:bg-green-500 hover:text-black transition-all">
+             ✅ Correct
+           </button>
+           <button onClick={() => onAction('wisdom_fp')} className="bg-orange-900/10 border border-orange-500/30 text-orange-500 py-1.5 rounded-sm text-[9px] font-black uppercase hover:bg-orange-500 hover:text-black transition-all">
+             ❌ False Positive
+           </button>
+           <button onClick={() => onAction('wisdom_missed')} className="bg-red-900/10 border border-red-500/30 text-red-500 py-1.5 rounded-sm text-[9px] font-black uppercase hover:bg-red-500 hover:text-black transition-all">
+             ⚠️ Unsafe Missed
+           </button>
+        </div>
+      </div>
     </div>
   );
 };

@@ -127,7 +127,31 @@ function App() {
   const handleAction = async (cmd: string) => {
     try {
       await logDecision(`COMMAND_EXEC: ${cmd}`, 'human');
-      await safeInvoke("run_nexus_command", { cmd });
+      
+      // 🛡️ v23 Wisdom Feedback Integration
+      if (cmd.startsWith('wisdom_')) {
+        const typeMap: Record<string, string> = {
+          'wisdom_correct': 'correct',
+          'wisdom_fp': 'false_positive',
+          'wisdom_missed': 'unsafe_missed'
+        };
+        
+        const feedbackEvent = {
+          task_id: data?.taskId || "manual-entry",
+          pattern_id: "auto-detect", // 這裡未來可由 UI 傳入具體 Pattern ID
+          feedback_type: typeMap[cmd],
+          actor: "commander",
+          source: "desk_ui"
+        };
+        
+        const { submitFeedback } = await import("./lib/bridge");
+        const res = await submitFeedback(feedbackEvent);
+        console.log("Wisdom Feedback Submitted:", res);
+        alert(`Wisdom Feedback Sent: ${typeMap[cmd]}`);
+      } else {
+        await safeInvoke("run_nexus_command", { cmd });
+      }
+      
       fetchData();
     } catch (e) {
       alert(`Command Error: ${e}`);

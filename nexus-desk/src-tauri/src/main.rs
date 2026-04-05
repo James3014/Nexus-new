@@ -3,11 +3,34 @@
 mod governance;
 mod log_stream;
 
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use tauri::{command, AppHandle, Emitter};
 use std::fs;
 use std::process::Command;
 use std::path::PathBuf;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WisdomLookupPayload {
+    task_id: String,
+    snippet: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FeedbackEvent {
+    task_id: String,
+    pattern_id: String,
+    feedback_type: String,
+    actor: String,
+    source: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GuardPayload {
+    task_id: String,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -262,6 +285,64 @@ async fn shadow_status() -> Result<String, String> {
         Ok(r#"{"status": "HEALTHY", "total_runs": 0, "false_positive_count": 0, "avg_latency_ms": 0, "whitelist": []}"#.to_string())
     }
 }
+#[command]
+async fn wisdom_lookup(payload: WisdomLookupPayload) -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .env("NEXUS_SKIP_PROTOCOL_GATE", "1")
+        .args(&["run", "python", "scripts/engine/nexus_cli.py", "nexus:wisdom", "lookup", "--snippet", &payload.snippet.unwrap_or_default()])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[command]
+async fn submit_feedback(payload: FeedbackEvent) -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .env("NEXUS_SKIP_PROTOCOL_GATE", "1")
+        .args(&[
+            "run", "python", "scripts/engine/nexus_cli.py", "nexus:wisdom", "feedback", 
+            "--task-id", &payload.task_id, 
+            "--pattern-id", &payload.pattern_id, 
+            "--type", &payload.feedback_type,
+            "--actor", &payload.actor,
+            "--source", &payload.source
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[command]
+async fn wisdom_stats() -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .env("NEXUS_SKIP_PROTOCOL_GATE", "1")
+        .args(&["run", "python", "scripts/engine/nexus_cli.py", "nexus:wisdom", "stats"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[command]
+async fn guard_validate(payload: GuardPayload) -> Result<String, String> {
+    let repo_root = "/Users/jameschen/Workspace/nexus";
+    let output = Command::new("uv")
+        .current_dir(repo_root)
+        .env("NEXUS_SKIP_PROTOCOL_GATE", "1")
+        .args(&["run", "python", "scripts/engine/nexus_cli.py", "nexus:guard", "validate", "--task-id", &payload.task_id])
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
 
 fn main() {
     governance::init_governance_db().expect("failed to initialize governance db");
@@ -285,7 +366,11 @@ fn main() {
             eternal_status,
             eternal_download,
             cluster_status,
-            shadow_status
+            shadow_status,
+            wisdom_lookup,
+            submit_feedback,
+            wisdom_stats,
+            guard_validate
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

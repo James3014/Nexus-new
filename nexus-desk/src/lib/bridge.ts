@@ -87,6 +87,18 @@ const mockResponses: Record<string, any> = {
     avg_latency_ms: 1250,
     whitelist: ["1", "2", "305"]
   },
+  wisdom_lookup: JSON.stringify([
+    { pattern_id: "rust-lock-poison", confidence: 0.92, recommendation: "fix" }
+  ]),
+  wisdom_stats: JSON.stringify({
+    "rust-lock-poison": { alpha: 12, beta: 1, confidence: 0.92, bypass_score: 0.08 }
+  }),
+  guard_validate: JSON.stringify({
+    task_id: "mock-task",
+    consensus_pass: true,
+    outcome: { outcome: "approved", risk_score: 0.2 }
+  }),
+  submit_feedback: JSON.stringify({ status: "success" }),
   eternal_download: "Mock Download: Success.",
   apply_profile: "Mock: Profile applied.",
   run_cleanup: "Mock Cleanup: 140 entries purged.",
@@ -128,3 +140,9 @@ export function isTauriEnv(): boolean {
    return typeof window !== "undefined" && 
     (window.hasOwnProperty("__TAURI_INTERNALS__") || window.hasOwnProperty("__TAURI__"));
 }
+
+// 🛡️ v23 Wisdom & Guard High-Level Bridge Calls
+export const submitFeedback = (event: any) => safeInvoke<string>("submit_feedback", { payload: event });
+export const wisdomLookup = (taskId: string, snippet?: string) => safeInvoke<string>("wisdom_lookup", { payload: { taskId, snippet } });
+export const getWisdomStats = () => safeInvoke<string>("wisdom_stats");
+export const validateGuard = (taskId: string) => safeInvoke<string>("guard_validate", { payload: { taskId } });
