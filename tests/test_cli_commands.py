@@ -2,7 +2,7 @@ import pytest
 from click.testing import CliRunner
 from scripts.engine.nexus_cli import nexus
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 def test_cli_status_aos():
@@ -43,3 +43,27 @@ def test_cli_invalid_command():
     # 測試無效指令
     result = runner.invoke(nexus, ["nexus:invalid-cmd"])
     assert result.exit_code != 0
+
+
+def test_cli_governance_check_pass():
+    runner = CliRunner()
+    with patch("scripts.engine.nexus_cli.subprocess.run", return_value=MagicMock(returncode=0)):
+        result = runner.invoke(nexus, ["nexus:governance-check"])
+    assert result.exit_code == 0
+    assert "[Governance-Check] PASS" in result.output
+
+
+def test_cli_governance_check_fail():
+    runner = CliRunner()
+    with patch("scripts.engine.nexus_cli.subprocess.run", return_value=MagicMock(returncode=1)):
+        result = runner.invoke(nexus, ["nexus:governance-check"])
+    assert result.exit_code != 0
+    assert "Governance gate failed" in result.output
+
+
+def test_cli_acceptance_check_blocks_when_governance_fails():
+    runner = CliRunner()
+    with patch("scripts.engine.nexus_cli.subprocess.run", return_value=MagicMock(returncode=2)):
+        result = runner.invoke(nexus, ["nexus:acceptance-check", "--window", "10"])
+    assert result.exit_code != 0
+    assert "Governance gate failed before acceptance-check" in result.output

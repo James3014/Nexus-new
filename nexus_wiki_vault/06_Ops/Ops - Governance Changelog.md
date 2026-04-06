@@ -28,6 +28,7 @@ owner: agent
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-07 | **Nexus CLI Governance Gate Integration** | `scripts/engine/nexus_cli.py`, `scripts/ops/ci_gate.py` | Mid | Git revert | Codex |
 | 2026-04-07 | **Wiki Sync Upgrade: Block-on-miss Enforcement** | `scripts/ops/wiki_sync_check.py`, `ci_gate.py` | Mid | Git revert | Antigravity |
 | 2026-04-07 | **Wiki Sync: Warn-first Implementation** | `scripts/ops/wiki_sync_check.py`, `ci_gate.py` | Low | Git revert | Antigravity |
 | 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `Module - State Contracts` | Low | Git revert | Antigravity |

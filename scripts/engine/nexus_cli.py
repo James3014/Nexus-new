@@ -5,6 +5,7 @@ import json
 import click
 import asyncio
 import time
+import subprocess
 from typing import Dict, Any, List
 from pathlib import Path
 from datetime import datetime
@@ -43,6 +44,20 @@ def nexus(ctx):
 
 def _get_service():
     return CliCommandsService(REPO_ROOT)
+
+
+def _run_governance_gate(*, dry_run: bool = True, wiki_drift_enforce_level: str = "p0") -> int:
+    """Run governance gate with shared defaults for CLI entry commands."""
+    cmd = [
+        sys.executable,
+        str(REPO_ROOT / "scripts" / "ops" / "ci_gate.py"),
+        "--wiki-drift-enforce-level",
+        wiki_drift_enforce_level,
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+    res = subprocess.run(cmd)
+    return int(getattr(res, "returncode", 1))
 
 @nexus.command(name="nexus:status")
 @click.option("--global", "global_view", is_flag=True)
@@ -389,7 +404,31 @@ def heartbeat(test):
 @click.option("--window", default=50)
 def acceptance_check(window):
     """🧪 Acceptance-Check: 執行正式驗收門禁 (AOS Crystal Gate)"""
+    gate_rc = _run_governance_gate(dry_run=True, wiki_drift_enforce_level="p0")
+    if gate_rc != 0:
+        raise click.ClickException(
+            f"Governance gate failed before acceptance-check (exit={gate_rc})."
+        )
     _get_service().acceptance_check(window)
+
+
+@nexus.command(name="nexus:governance-check")
+@click.option("--strict", is_flag=True, help="Run governance gate in blocking mode (non-dry-run).")
+@click.option(
+    "--wiki-drift-enforce-level",
+    default="p0",
+    type=click.Choice(["warn", "p0"], case_sensitive=False),
+    help="Drift enforce level passed through to ci_gate.",
+)
+def governance_check(strict, wiki_drift_enforce_level):
+    """🛡️ Governance-Check: 執行治理門禁與 Wiki 同步阻斷檢查"""
+    gate_rc = _run_governance_gate(
+        dry_run=not strict,
+        wiki_drift_enforce_level=wiki_drift_enforce_level,
+    )
+    if gate_rc != 0:
+        raise click.ClickException(f"Governance gate failed (exit={gate_rc}).")
+    click.echo("✅ [Governance-Check] PASS")
 
 @nexus.command(name="nexus:hud")
 @click.option("--refresh", default=2)
