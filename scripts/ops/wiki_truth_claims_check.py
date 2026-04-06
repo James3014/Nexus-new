@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import json
+from datetime import datetime
 from pathlib import Path
 
 # 🛡️ Nexus Truth Claims Verifier v2.0 (Agent H - Hardened)
@@ -56,6 +57,38 @@ def env_pre_flight():
     except:
         return False, "Unexpected Pre-flight error"
 
+# 🛡️ Truth Policy Constraints (Agent T)
+WHITELIST_PREFIXES = [
+    "test", "ls", "grep", "rg", "git tag --list",
+    "uv run scripts/ops/wiki_linter.py --strict",
+    "uv run scripts/ops/ci_gate.py --dry-run",
+    "uv run scripts/ops/wiki_coverage_audit.py",
+    "uv run scripts/ops/wiki_drift_audit.py"
+]
+BLACKLIST_KEYWORDS = [
+    "rm", "git reset", "git checkout", "git clean", "sudo", "curl |",
+    ">", ">>", ";", "&&", "||", "$(", "`"
+]
+
+def is_policy_compliant(cmd):
+    """Agent T: Validate command against security whitelist and blacklist."""
+    cmd = cmd.strip()
+    # Check Whitelist
+    whitelisted = any(cmd.startswith(prefix) for prefix in WHITELIST_PREFIXES)
+    if not whitelisted: return False, "CMD_NOT_IN_WHITELIST"
+    # Check Blacklist with Word Boundaries (Agent T+ Revision)
+    import re
+    for kw in BLACKLIST_KEYWORDS:
+        # Use word boundaries for alphabetic keywords like 'rm', 'sudo'
+        if kw.isalpha():
+            if re.search(r"\b" + re.escape(kw) + r"\b", cmd):
+                return False, f"CMD_CONTAINS_BLACKLIST_KEYWORD: {kw}"
+        else:
+            # For non-alphabetic chars like '>', ';', '&&', substring check is safer
+            if kw in cmd:
+                return False, f"CMD_CONTAINS_BLACKLIST_SYMBOL: {kw}"
+    return True, None
+
 def run_checks():
     print("🛡️ WS-H: Executing Truth Claims Auto-Calibration v2.0...")
     
@@ -77,6 +110,7 @@ def run_checks():
     mismatch_count = 0
     infra_error_count = 0
 
+    claims = []
     for row in rows[1:]: # Skip header
         cols = [c.strip() for c in row]
         if len(cols) != 6: continue
@@ -85,18 +119,32 @@ def run_checks():
         
         c_id = c_id.replace("`", "")
         command = command.replace("`", "")
-        
-        # Security Check
-        safe, safe_msg = is_safe(command)
-        if not safe:
-            results.append({"id": c_id, "claim": claim, "status": "ENVIRONMENT_FAIL", "error": f"Safety Block: {safe_msg}", "wiki_status": wiki_status})
-            infra_error_count += 1
+        claims.append((c_id, command, wiki_status))
+
+    # SUMMARY STATS
+    mismatch_count = 0
+    infra_error_count = 0
+    policy_violation_count = 0
+    blocked_claim_ids = []
+    results = []
+
+    for c_id, claim, wiki_status in claims:
+        # Agent T: Policy Check
+        compliant, violation_reason = is_policy_compliant(claim)
+        if not compliant:
+            policy_violation_count += 1
+            blocked_claim_ids.append(c_id)
+            results.append({
+                "id": c_id, "claim": claim, "status": "POLICY_BLOCKED",
+                "error": f"Policy Violation: {violation_reason}",
+                "wiki_status": wiki_status
+            })
             continue
 
-        print(f"🧐 Checking {c_id}: {command}...")
+        print(f"🧐 Checking {c_id}: {claim}...")
         
         try:
-            res = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=15, cwd=REPO_ROOT)
+            res = subprocess.run(claim, shell=True, capture_output=True, text=True, timeout=10, cwd=REPO_ROOT)
             
             # Status Machine Mapping
             actual_status = "MATCH"
@@ -142,7 +190,7 @@ def run_checks():
             })
             
         except subprocess.TimeoutExpired:
-            results.append({"id": c_id, "claim": claim, "status": "ENVIRONMENT_FAIL", "error": "Timeout expired (15s)", "wiki_status": wiki_status})
+            results.append({"id": c_id, "claim": claim, "status": "ENVIRONMENT_FAIL", "error": "Timeout expired (10s)", "wiki_status": wiki_status})
             infra_error_count += 1
         except Exception as e:
             results.append({"id": c_id, "claim": claim, "status": "ENVIRONMENT_FAIL", "error": f"System Error: {str(e)}", "wiki_status": wiki_status})
@@ -152,8 +200,11 @@ def run_checks():
     summary = {
         "mismatch_count": mismatch_count,
         "infra_error_count": infra_error_count,
-        "total_checked": len(results),
-        "status": "PASS" if mismatch_count == 0 else "FAIL"
+        "policy_violation_count": policy_violation_count,
+        "blocked_claim_ids": blocked_claim_ids,
+        "total_claims": len(claims),
+        "timestamp": datetime.now().isoformat(),
+        "status": "PASS" if (mismatch_count == 0 and policy_violation_count == 0) else "FAIL"
     }
     
     output = {"summary": summary, "details": results}

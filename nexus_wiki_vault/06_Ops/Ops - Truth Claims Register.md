@@ -29,16 +29,16 @@ owner: agent
 
 | ID | Claim Description (聲明內容) | Evidence (證據路徑) | Verification Command (驗證命令) | Status | Last Verified |
 |---|---|---|---|---|---|
-| `C-01` | CI Gate 實體存在於腳本目錄。 | `scripts/ops/ci_gate.py` | `test -f scripts/ops/ci_gate.py && echo OK` | ✅ | 2026-04-06 |
+| `C-01` | CI Gate 實體存在於腳本目錄。 | `scripts/ops/ci_gate.py` | `test -f scripts/ops/ci_gate.py` | ✅ | 2026-04-06 |
 | `C-02` | v22.1.1-prod 釋出標籤已封裝。 | `git tags` | `git tag --list 'v22.1.1-prod'` | ✅ | 2026-04-06 |
 | `C-03` | Wiki Linter v1.4 主線硬閘啟用。 | `scripts/ops/wiki_linter.py` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
-| `C-04` | .nexus 狀態目錄具備寫入權限。 | `.nexus/` | `test -w .nexus && echo OK` | ✅ | 2026-04-06 |
+| `C-04` | .nexus 狀態目錄具備寫入權限。 | `.nexus/` | `test -w .nexus` | ✅ | 2026-04-06 |
 | `C-05` | Memory Index (LanceDB) 實體初始化。 | `.nexus/memory/memory_index.lancedb` | `ls -d .nexus/memory/memory_index.lancedb` | ✅ | 2026-04-06 |
-| `C-06` | CLI 入口 nexus_cli.py 預備。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py && echo OK` | ✅ | 2026-04-06 |
+| `C-06` | CLI 入口 nexus_cli.py 預備。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py` | ✅ | 2026-04-06 |
 | `C-07` | Agent Schema 指導規約存在。 | `99_Schema/AGENT_SCHEMA.md` | `test -f nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md` | ✅ | 2026-04-06 |
 | `C-08` | CI Gate Dry-run 鏈路完整通透。 | `scripts/ops/ci_gate.py` | `uv run scripts/ops/ci_gate.py --dry-run` | ✅ | 2026-04-06 |
-| `C-09` | Evidence Chain (manifest) 格式合法。 | `.nexus/swarm/manifest.json` | `test -f .nexus/swarm/manifest.json && echo OK` | ✅ | 2026-04-06 |
-| `C-10` | Pilot CLI v100+ 交付模組存在。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py && echo OK` | ✅ | 2026-04-06 |
+| `C-09` | Evidence Chain (manifest) 格式合法。 | `.nexus/swarm/manifest.json` | `test -f .nexus/swarm/manifest.json` | ✅ | 2026-04-06 |
+| `C-10` | Pilot CLI v100+ 交付模組存在。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py` | ✅ | 2026-04-06 |
 | `C-11` | v22 核心規格書實體標註。 | `MUSE-NEXUS-Engine-Specification-v22-Eternal.md` | `test -f MUSE-NEXUS-Engine-Specification-v22-Eternal.md` | ✅ | 2026-04-06 |
 | `C-12` | Waiver Registry 必填欄位稽核。 | `06_Ops/Ops - Provenance Exceptions and Waivers.md` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
 | `C-13` | Knowledge Lineage 節點完整。 | `05_Protocols/Protocol - Knowledge Lineage.md` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |

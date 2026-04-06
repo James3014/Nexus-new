@@ -83,11 +83,14 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Module - Advanced Core Intelligence]]**: [New] Ash 矩陣與進階政策登記。
 - **[[Source - Operational Scripts Index]]**: [New] 全量維運與引擎腳本索引。
 
-### Operational Governance (維運治理)
-- **[[Ops - Truth Claims Register]]**: [P0] 物理實體真值驗證清單。
+### 🛡️ 治理維運 (Operations & Governance)
+- **[[Ops - Governance SLO Dashboard]]**: 治理指標趨勢面板。
+- **[[Ops - Wiki Drift Audit]]**: 實體與文檔漂移監控。
+- **[[Ops - Wiki Link Integrity]]**: 連結完整性與孤兒頁。
+- **[[Ops - Ownership and Review SLA]]**: 頁面所有權與編校年資平衡。
+- **[[Ops - Truth Claims Register]]**: 真相宣稱與自動化驗證。
+- **[[Ops - Governance Changelog]]**: 治理變更歷史路徑。
 - **[[Ops - CI Failure Playbook]]**: [New] CI 紅燈故障排除 20 案手冊。
-- **[[Ops - Governance Changelog]]**: 記錄 Nexus 治理系統的演化歷程。
-- **[[Ops - Wiki Drift Audit]]**: Wiki 內容漂移稽核報告。
 
 (State Hub)
 
