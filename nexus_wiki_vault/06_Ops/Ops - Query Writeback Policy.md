@@ -57,7 +57,10 @@ owner: agent
 2. **格式化**: 依照 `Ops - Wiki Page Type Contracts` 將結論轉化為 Markdown 格式。
 3. **驗證**: 執行 `wiki_linter.py` 確保格式正確。
 4. **提交**: 由 Agent 建立新頁面或更新現有頁面。
-5. **標註**: 在 Wiki 中使用 `[Reference: query_id]` 標記來源。
+5. **自動化**: 使用 `scripts/ops/wiki_query_writeback.py` 執行策略強制與自動回寫。支援 `--input-json` 批量導入。
+6. **存放**: 新發現預設存放於 `08_Analysis/` 目錄。
+7. **標註**: 在 Wiki 中使用 `[Reference: query_id]` 標記來源。
+
 
 ## Source notes
 - v23 Wisdom Memory Specifications

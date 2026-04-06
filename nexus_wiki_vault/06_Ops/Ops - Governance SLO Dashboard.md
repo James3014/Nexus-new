@@ -21,6 +21,8 @@ last_compiled: 2026-04-06
 | `p0_count` | `.nexus/reports/wiki_drift_report.json` | `>0` 代表阻斷級風險 |
 | `global_coverage_pct` | `.nexus/reports/wiki_coverage_report.json` | 低於門檻需補映射 |
 | `keypath_coverage_pct` | `.nexus/reports/wiki_keypath_coverage_report.json` | 關鍵路徑需 100% |
+| `weighted_score` | `.nexus/reports/wiki_capability_coverage_report.json` | 權重覆蓋率需 >90% |
+| `pass_rate` | `.nexus/reports/wiki_eval_report.json` | 回歸測試通過率需 >95% |
 | `mismatch_count` | `.nexus/reports/wiki_truth_claims_report.json` | `>0` 代表真值不一致 |
 
 ## 🎯 Current Status (Latest Snapshot)
@@ -28,7 +30,10 @@ last_compiled: 2026-04-06
 | Metric | Value | Status |
 | :--- | :--- | :--- |
 | **P0 Drift** | 0 | ✅ PASS |
-| **Global Coverage** | 0.00% | ⚠️ LOW |
+| **Weighted Coverage** | 0.00% | ⚠️ LOW |
+| **Eval Pass Rate** | 0.00% | ❌ FAIL |
+| **Evidence Rate** | 0.00% | ❌ FAIL |
+| **Stale Pages** | 0 | ✅ FRESH |
 | **Key Path Coverage** | 0.00% | ❌ FAIL |
 | **Truth Mismatch** | 4 | ❌ MISMATCH |
 

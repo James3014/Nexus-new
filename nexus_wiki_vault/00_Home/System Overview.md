@@ -61,7 +61,8 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Ops - Truth Claims Register]]**: 實體真值驗證表。
 - **[[Source - Coverage Heatmap]]**: Wiki 覆蓋率熱圖。
 - **[[Ops - Wiki Drift Audit]]**: 物理路徑漂移稽核。
-- **[[Module - Implementation Responsibility Matrix]]**: 代碼責任矩陣。
+- **[[Ops - Wiki Regression Evals]]**: [New] Wiki 知識回歸測試。
+- **Module - Implementation Responsibility Matrix**: 代碼責任矩陣。
 
 ### 🧠 Core Modules (Deep Dives)
 - **[[Module - Core Orchestrator Deep Dive]]**: 編排引擎深描。
@@ -86,6 +87,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Source - Operational Scripts Index]]**: [New] 全量維運與引擎腳本索引。
 
 ### 🛡️ 治理維運 (Operations & Governance)
+- **[[Ops - Weekly Governance Report]]**: 每週治理健康度與風險摘要。
 - **[[Ops - Wiki Page Type Contracts]]**: [New] Wiki 頁面類型契約。
 - **[[Ops - Query Writeback Policy]]**: [New] 查詢回寫至 Wiki 政策。
 - **[[Ops - Governance SLO Dashboard]]**: 治理指標趨勢面板。
