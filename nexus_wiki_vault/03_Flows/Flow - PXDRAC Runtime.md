@@ -19,10 +19,10 @@ owner: agent
 # Flow - PXDRAC Runtime
 
 ## One-sentence summary
-本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: Spec v22 Part 5]
+本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: Spec v22] [Code: nexus_cli.py]
 
 ## Role / responsibility
-- 本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Reference: Spec v22 Part 5]
+- 本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: Spec v22] [Code: nexus_cli.py]
 - **序列控制**: 確保 P -> X -> D -> R -> A -> C 相位的物理連續性。
 - **工件交接**: 規範各相位產出物如何進入下一個 Phase Runner。 [Source: nexus/core/handoff_bundle.py]
 - **異常處理**: 定義在任何相位失敗時的 Rollback 路徑。 [Source: scripts/engine/nexus_cli.py]

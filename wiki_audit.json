@@ -1,6 +1,6 @@
 {
-  "total": 47,
-  "passed": 47,
+  "total": 56,
+  "passed": 56,
   "failed": 0,
   "waived": 1,
   "expired": 0,
@@ -54,13 +54,37 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Wiki Link Integrity.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - CI Failure Playbook.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Governance SLO Dashboard.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Ownership and Review SLA.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Query Writeback Policy.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -84,6 +108,12 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Wiki Page Type Contracts.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
       "status": "\u2705",
       "errors": [],
@@ -91,6 +121,12 @@
     },
     {
       "file": "06_Ops/Ops - Wiki Drift Audit.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Truth Claims Command Policy.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -192,6 +228,18 @@
       "warnings": []
     },
     {
+      "file": "02_Modules/Module - Dual Phase Diagnosis.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Metadata Collectors.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "02_Modules/Module - Task Scheduling and Swarm Adapters.md",
       "status": "\u2705",
       "errors": [],
@@ -211,6 +259,12 @@
     },
     {
       "file": "02_Modules/Module - Policy and Learning Governance.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - CLI Commands Service.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []

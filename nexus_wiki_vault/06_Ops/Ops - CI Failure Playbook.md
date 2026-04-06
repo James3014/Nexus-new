@@ -18,7 +18,7 @@ owner: agent
 # Ops - CI Failure Playbook
 
 ## One-sentence summary
-針對 Nexus CI Gate 常見紅燈案例的故障排除與修復手冊。 [Source: scripts/ops/ci_gate.py]
+針對 Nexus CI Gate 常見紅燈案例的故障排除與修復手冊。 [Source: scripts/ops/ci_gate.py] [Code: incident_rca_adapter.py]
 
 ## Role / responsibility
 - **快速響應**: 提供一致性的初階診斷與修復路徑，縮短 Release 阻斷時間。 [Source: scripts/ops/ci_gate.py]

@@ -19,7 +19,7 @@ owner: agent
 # Ops - Truth Claims Register
 
 ## One-sentence summary
-本頁集中管理所有關於 Nexus 物理狀態的真值聲明 (Truth Claims)，並提供可機器執行的驗證命令。 [Source: compiled-governance]
+本頁集中管理所有關於 Nexus 物理狀態的真值聲明 (Truth Claims)，並提供可機器執行的驗證命令。 [Source: compiled-governance] [Code: wiki_truth_claims_check.py]
 
 ## Role / responsibility
 - **可驗證性管控**: 確保 Wiki 內提到的關鍵架構與門禁在物理實體中確實存在且有效。 [Source: `wiki_linter.py`]

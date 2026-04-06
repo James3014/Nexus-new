@@ -18,7 +18,7 @@ owner: agent
 # Protocol - CLI Surface
 
 ## One-sentence summary
-本頁記錄 Nexus 核心命令清單與參數規範，作為外部調用與治理的權威介面映射。 [Source: `nexus_cli.py`]
+本頁記錄 Nexus 核心命令清單與參數規範，作為外部調用與治理的權威介面映射。 [Source: Protocol - CLI Surface] [Code: nexus_cli.py]
 
 ## Role / responsibility
 - **命令索引**: 映射 `plan`, `explore`, `diagnose`, `repair`, `audit`, `crystal` 等核心子命令。

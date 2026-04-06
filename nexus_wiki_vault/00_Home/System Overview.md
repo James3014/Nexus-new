@@ -18,6 +18,8 @@ related_pages:
   - "[[Ops - Truth Claims Register]]"
   - "[[Source - Coverage Heatmap]]"
   - "[[Ops - Wiki Drift Audit]]"
+  - "[[Ops - Wiki Page Type Contracts]]"
+  - "[[Ops - Query Writeback Policy]]"
   - "[[Ops - CI Failure Playbook]]"
   - "[[Agent Onboarding - Command Pack]]"
   - "[[Ops - Governance Changelog]]"
@@ -84,6 +86,8 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Source - Operational Scripts Index]]**: [New] 全量維運與引擎腳本索引。
 
 ### 🛡️ 治理維運 (Operations & Governance)
+- **[[Ops - Wiki Page Type Contracts]]**: [New] Wiki 頁面類型契約。
+- **[[Ops - Query Writeback Policy]]**: [New] 查詢回寫至 Wiki 政策。
 - **[[Ops - Governance SLO Dashboard]]**: 治理指標趨勢面板。
 - **[[Ops - Wiki Drift Audit]]**: 實體與文檔漂移監控。
 - **[[Ops - Wiki Link Integrity]]**: 連結完整性與孤兒頁。

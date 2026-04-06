@@ -61,6 +61,12 @@ def main():
         "Wiki Drift Audit",
         f'"{VENV_PYTHON}" scripts/ops/wiki_drift_audit.py',
     )
+
+    # 2b. Wiki Capability Coverage Audit (Phase 5 Strengthening)
+    run_step(
+        "Wiki Capability Coverage Audit",
+        f'"{VENV_PYTHON}" scripts/ops/wiki_capability_coverage_audit.py',
+    )
     
     # Check Drift Blocking Logic
     if WIKI_DRIFT_REPORT.exists():
