@@ -36,6 +36,17 @@ def run_dry_run():
     for key, ok in checks.items():
         print(f"- {key}: {'OK' if ok else 'MISSING'}")
     
+    print("\n🚀 [CI-Gate] Running Agent Protocol Check (Dry-run)...")
+    res = subprocess.run(f'"{VENV_PYTHON}" scripts/ops/agent_protocol_check.py', shell=True)
+    if res.returncode == 0:
+        print("✅ Agent Protocol Check PASSED")
+        checks["protocol_check"] = True
+    else:
+        print(f"⚠️ [DRY-RUN] Agent Protocol Check FAILED (Return Code: {res.returncode})")
+        checks["protocol_check"] = False
+    
+    print(f"- protocol_check: {'OK' if checks['protocol_check'] else 'FAIL'}")
+
     print("\n📊 [Phase 6] Summary Audit (Dry-Run):")
     print_phase_6_summaries()
     
@@ -101,6 +112,13 @@ def main():
 
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
     
+    # 0. Agent Protocol Check
+    success, _ = run_step(
+        "Agent Protocol Check",
+        f'"{VENV_PYTHON}" scripts/ops/agent_protocol_check.py',
+    )
+    if not success and not args.dry_run: sys.exit(1)
+
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
     success, _ = run_step(
         "Wiki Governance Audit",

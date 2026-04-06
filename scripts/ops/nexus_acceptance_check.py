@@ -232,6 +232,53 @@ def _evaluate_ucc_truth_efficiency(
     )
 
 
+def _summarize_wiki_harness(project_root: Path) -> Dict[str, Any]:
+    """[C] Summary of wiki harness metrics."""
+    reports_dir = project_root / ".nexus" / "reports"
+    drift_file = reports_dir / "wiki_drift_report.json"
+    coverage_file = reports_dir / "wiki_coverage_report.json"
+    truth_file = reports_dir / "wiki_truth_claims_report.json"
+
+    summary = {
+        "drift": "missing",
+        "coverage_global": "missing",
+        "coverage_keypath": "missing",
+        "truth_mismatch": "missing",
+        "policy_violation": "missing"
+    }
+
+    if drift_file.exists():
+        try:
+            data = json.loads(drift_file.read_text())
+            s = data.get("summary", {})
+            p0 = s.get("p0_count", 0)
+            p1 = s.get("p1_count", 0)
+            summary["drift"] = f"p0={p0}, p1={p1}"
+        except: pass
+
+    if coverage_file.exists():
+        try:
+            data = json.loads(coverage_file.read_text())
+            s = data.get("summary", {})
+            global_cov = s.get("coverage_ratio", s.get("coverage_ratio_float", 0))
+            keypath_cov = s.get("keypath_coverage_ratio", 0)
+            summary["coverage_global"] = f"{global_cov:.2%}" if isinstance(global_cov, (int, float)) else str(global_cov)
+            summary["coverage_keypath"] = f"{keypath_cov:.2%}" if isinstance(keypath_cov, (int, float)) else str(keypath_cov)
+        except: pass
+
+    if truth_file.exists():
+        try:
+            data = json.loads(truth_file.read_text())
+            s = data.get("summary", {})
+            mismatch = s.get("mismatch_count", 0)
+            violations = s.get("policy_violation_count", 0)
+            summary["truth_mismatch"] = str(mismatch)
+            summary["policy_violation"] = str(violations)
+        except: pass
+
+    return summary
+
+
 def _write_markdown(report: Dict[str, Any], path: Path) -> None:
     lines = [
         "# Nexus Acceptance Check (Hardened)",
@@ -240,9 +287,18 @@ def _write_markdown(report: Dict[str, Any], path: Path) -> None:
         f"- gate_passed: {str(report['gate_passed']).lower()}",
         f"- generated_at_utc: {report['generated_at_utc']}",
         "",
-        "## Criteria",
+        "## 📚 Wiki Harness Summary",
         ""
     ]
+    wiki = report.get("wiki_harness", {})
+    for k, v in wiki.items():
+        lines.append(f"- {k}: {v}")
+    
+    lines.extend([
+        "",
+        "## Criteria",
+        ""
+    ])
     for item in report["criteria"]:
         lines.append(f"- {item['name']}: {'PASS' if item['passed'] else 'FAIL'}")
         for key, val in item["detail"].items():
@@ -302,11 +358,14 @@ def main():
     
     gate_passed = all(c.passed for c in checks + [learning_check, ucc_check])
     
+    wiki_summary = _summarize_wiki_harness(project_root)
+    
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if gate_passed else "FAIL",
         "gate_passed": gate_passed,
         "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks + [learning_check, ucc_check]],
+        "wiki_harness": wiki_summary,
     }
     
     (output_dir / "acceptance_check.json").write_text(json.dumps(report, indent=2))

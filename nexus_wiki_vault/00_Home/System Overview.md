@@ -52,6 +52,8 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 ## Navigation (治理與開發入口)
 
 ### 🚀 Onboarding & Ops
+- **[[Agent Boot Sequence]]**: 新 Agent 前 30 分鐘啟動 SOP。
+- **[[CLI Surface Quickstart]]**: 任務常用 CLI 最小命令集。
 - **[[Agent Onboarding - Command Pack]]**: 常用指令速查。
 - **[[Ops - CI Failure Playbook]]**: CI 失敗修復指南。
 - **[[Agent Onboarding - Implementation Map]]**: 實作路徑地圖。
@@ -65,6 +67,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **Module - Implementation Responsibility Matrix**: 代碼責任矩陣。
 
 ### 🧠 Core Modules (Deep Dives)
+- **[[Nexus Glossary]]**: 核心術語與語義對齊入口。
 - **[[Module - Core Orchestrator Deep Dive]]**: 編排引擎深描。
 - **[[Module - Guard and Gate Control]]**: 工具閘門控制。
 - **[[Module - Memory Pipeline Deep Dive]]**: 記憶體管道與 LanceDB。
@@ -91,6 +94,10 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Ops - Wiki Page Type Contracts]]**: [New] Wiki 頁面類型契約。
 - **[[Ops - Query Writeback Policy]]**: [New] 查詢回寫至 Wiki 政策。
 - **[[Ops - Governance SLO Dashboard]]**: 治理指標趨勢面板。
+- **[[Ops - Architecture Decision Records]]**: 架構決策脈絡與取捨索引。
+- **[[Ops - Optimization Proposal Protocol]]**: 優化提案提交與驗收模板。
+- **[[Ops - Agent Capability Boundaries]]**: 代理改動邊界與 HITL 規則。
+- **[[Ops - Learning Closure Matrix]]**: 錯誤類型到防再發策略矩陣。
 - **[[Ops - Wiki Drift Audit]]**: 實體與文檔漂移監控。
 - **[[Ops - Wiki Link Integrity]]**: 連結完整性與孤兒頁。
 - **[[Ops - Ownership and Review SLA]]**: 頁面所有權與編校年資平衡。
@@ -100,6 +107,23 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 
 (State Hub)
 
+## 🚀 Nexus Armor Mode & Protocol Enforcement
+
+All tasks must be executed in **Nexus Armor Mode** to ensure safety and alignment:
+
+### 1. Pre-flight Checks
+- **Nexus Status**: `uv run scripts/engine/nexus_cli.py nexus:status --global`
+- **Agent Protocol**: `uv run scripts/ops/agent_protocol_check.py`
+
+### 2. CI Governance
+- **Nexus CI Gate**: `uv run scripts/ops/ci_gate.py --dry-run`
+- **Wiki Linter**: `uv run scripts/ops/wiki_linter.py --strict`
+
+### 3. Acceptance & Learning
+- **Acceptance Check**: `uv run scripts/ops/nexus_acceptance_check.py`
+- **Learning Closure**: Failure-to-Lesson writeback to `Ops - Learning Closure Matrix`.
+
+---
 ## Source notes
 - MUSE-NEXUS Engine Specification v22: 定義 P-X-D-R-A-C 相位矩陣與基礎契約。
 - v23 Wisdom notes: 定義智慧治理層與貝氏學習迴圈。
