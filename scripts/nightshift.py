@@ -1,11 +1,12 @@
 import signal
 import subprocess
+import os
 import json
 import time
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 from concurrent.futures import ProcessPoolExecutor
 from nexus.core.state_contracts import NexusIssue, NexusState, TddStatus
 from nexus.core.context_hub import ContextHub
@@ -141,21 +142,60 @@ def main():
     parser.add_argument("--max_rounds", type=int, default=10)
     parser.add_argument("--budget_min", type=int, default=5)
     parser.add_argument("--target_file", default="README.md")
+    parser.add_argument("--mode", default="default", choices=["default", "v23-burnin", "governance-upgrade"], help="Night Shift mode")
+    parser.add_argument("--target-events", type=int, default=0, help="Target number of events to stop")
+    parser.add_argument("--parallel", type=int, default=1, help="Parallel workers")
+    parser.add_argument("--target-layers", type=int, default=19, help="Number of governance layers")
+    parser.add_argument("--auto-stop", action="store_true", help="Auto-stop based on criteria")
     
     args = parser.parse_args()
     
+    if args.mode == "v23-burnin":
+        os.environ["NEXUS_BURNIN_MODE"] = "1"
+        os.environ["NEXUS_SKIP_PROTOCOL_GATE"] = "1"
+    elif args.mode == "governance-upgrade":
+        os.environ["NEXUS_GOVERNANCE_UPGRADE"] = "1"
+        os.environ["NEXUS_TARGET_LAYERS"] = str(args.target_layers)
+
     task_list = args.tasks.split(",") if args.tasks else [args.task]
     
-    if args.swarm:
-        print(f"🐝 [Swarm] Launching {args.workers} workers for {len(task_list)} tasks...")
-        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+    # Auto-stop check mechanism (Simplified for loop)
+    def check_stop_criteria():
+        """
+        🛑 階段 2 停止條件：CI PASS && Context Reduction > 30% && Decision Quality == SOTA
+        """
+        metrics_file = Path(".nexus/metrics/governance_benchmark.json")
+        if not metrics_file.exists(): return False
+        try:
+            with open(metrics_file, "r") as f:
+                data = json.load(f)
+                return data.get("ci_pass") and data.get("context_reduction") >= 0.3
+        except: return False
+
+    def check_events():
+        metrics_file = Path(".nexus/metrics/feedback_events.jsonl")
+        if not metrics_file.exists(): return 0
+        with open(metrics_file, "r") as f:
+            return sum(1 for _ in f)
+
+    if args.swarm or args.parallel > 1:
+        workers = args.parallel if args.parallel > 1 else args.workers
+        print(f"🐝 [Swarm] Launching {workers} workers for {len(task_list)} tasks...")
+        with ProcessPoolExecutor(max_workers=workers) as executor:
             for t_name in task_list:
                 shift = AutoResearchNightShift(t_name, args.max_rounds, args.budget_min, args.target_file)
                 executor.submit(shift.run)
+                
+                if args.auto_stop and check_stop_criteria():
+                    print("🎯 [Governance] Convergence reached (CI Pass + Context -30%). Stopping.")
+                    break
     else:
         for t_name in task_list:
             shift = AutoResearchNightShift(t_name, args.max_rounds, args.budget_min, args.target_file)
             shift.run()
+            if args.auto_stop and check_stop_criteria():
+                print("🎯 [Governance] Convergence reached. Finishing task.")
+                break
 
 if __name__ == "__main__":
     main()

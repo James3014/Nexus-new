@@ -48,7 +48,14 @@ PATH_ALIASES = {
     "Protocol - CLI Drift Matrix": "05_Protocols/Protocol - CLI Drift Matrix.md",
     "Page: Diff": "07_Diffs/Diff - v17.1 vs v22 vs v23.md",
     "Ops - Artifact Retention": "06_Ops/Ops - Artifact Retention and Provenance.md",
-    "Module - Memory Repository": "02_Modules/Module - Memory Repository.md"
+    "Module - Memory Repository": "02_Modules/Module - Memory Repository.md",
+    "ci_gate.py": "scripts/ops/ci_gate.py",
+    "wiki_linter.py": "scripts/ops/wiki_linter.py",
+    "wiki_coverage_audit.py": "scripts/ops/wiki_coverage_audit.py",
+    "wiki_truth_claims_check.py": "scripts/ops/wiki_truth_claims_check.py",
+    "wiki_drift_audit.py": "scripts/ops/wiki_drift_audit.py",
+    "nexus_cli.py": "scripts/engine/nexus_cli.py",
+    "W-01-Proposed": "01_System/System - Unknowns and Conflicts.md"
 }
 
 WISDOM_COMPONENTS = ["disk_janitor.py", "online_learner.py", "consensus_guard.py", "predictive_healer.py", "lesson_resolver.py", "memory_embedding.py", "memory_indexer.py", "nexus_crystal.py", "manifest_factory.py", "nexus_explore.py", "state_machine.py", "pilot_cli.py", "nexus_plan.py", "nexus_diagnose.py"]
@@ -98,7 +105,7 @@ def load_waivers():
     return waivers
 
 def verify_path(path_str):
-    raw_path = path_str.strip().replace("`", "").replace("'", "").replace("\"", "")
+    raw_path = path_str.strip().replace("`", "").replace("'", "").replace("\"", "").replace("[", "").replace("]", "")
     if not raw_path: return False
     if any(comp in raw_path for comp in WISDOM_COMPONENTS): return True
     if raw_path in ["path", "schemas/"]: return True

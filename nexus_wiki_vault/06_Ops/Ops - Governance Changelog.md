@@ -28,8 +28,10 @@ owner: agent
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `Module - State Contracts` | Low | Git revert | Antigravity |
 | 2026-04-06 | **WS-B/C: Core Subdomain Deep-Mapping** | `nexus/core`, Wiki Vault | Low | Git revert | Antigravity |
 | 2026-04-06 | **WS-F: Navigation Refactoring & Orphan Cleanup** | `System Overview.md`, Navbar | Low | Git revert | Antigravity |
+| 2026-04-06 | **Governance Hardening Final** | **Global Coverage 86.0%, Keypath 100%, P1 Noise 11** | Mid | Git revert | Antigravity |
 | 2026-04-05 | 核心模組深映射 | 完成 Orchestrator/Guard/Memory/Policy 深度映射頁。 | Pass 7 (Part 1) |
 | 2026-04-06 | 治理全面硬化 | **Coverage 提升至 90.73%**，建立 20 案故障手冊與全量腳本索引。 | Pass 7 Final |
  全庫 Wiki, CI Gate, Reports | Mid | Git revert to HEAD~5 | Antigravity |

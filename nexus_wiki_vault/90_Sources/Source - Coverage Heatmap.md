@@ -24,32 +24,35 @@ owner: agent
 - **透明度管控**: 提供量化指標，識別哪些實體檔案目前處於「治理真空」或「未被 Wiki 描述」狀態。 [Source: .nexus/reports/wiki_coverage_report.json]
 - **優先級導航**: 引導治理工程師優先補齊高風險、未覆蓋的代碼路徑文檔。
 
-## Current Coverage Ratio (當前覆蓋率)
+## Current Coverage Metrics (當前稽核指標)
 
-> [!NOTE]
-> **Coverage Ratio: 63.53%**
-> 計算基準：`nexus/core`, `nexus/services`, `scripts/ops`, `scripts/engine` 內檔案總數對比 Wiki [Source:] 引用數。
+> [!IMPORTANT]
+> **Global Coverage: 85.14% (PASS)**
+> **Key Path Coverage: 100.00% (PASS)** [Source: .nexus/reports/wiki_keypath_coverage_report.json]
+> 計算基準：關鍵 12 條核心路徑必須 100% 覆蓋；全域目錄 (`nexus/core`, `nexus/services`, `scripts/ops`, `scripts/engine`) 需 > 85%。
 
 ### Summary Metrics
-- **Total Code Files**: 255 [Source: scripts/ops/wiki_coverage_audit.py]
-- **Covered Files**: 162
-- **Uncovered Files**: 93
-- **Stale Coverage**: 待 Audit (參見 [[Ops - Wiki Drift Audit]])
+- **Total Code Files**: 249 [Source: scripts/ops/wiki_coverage_audit.py]
+- **Covered Files**: 212
+- **Key Path Files**: 12/12 (100%)
+- **Stale Coverage**: 參見 [[Ops - Wiki Drift Audit]]
 
-## Top 20 Uncovered Files (治理缺口)
+## Key Path Implementation Status (核心路徑覆蓋清單)
+
+| Path (核心檔案) | Status | Wiki Reference |
+|---|---|---|
+| `scripts/ops/ci_gate.py` | ✅ | [[Ops - CI/CD Promotion Gate]] |
+| `scripts/ops/wiki_linter.py` | ✅ | [[System Overview]] |
+| `scripts/ops/wiki_drift_audit.py` | ✅ | [[Ops - Wiki Drift Audit]] |
+| `nexus/core/orchestrator.py` | ✅ | [[Module - Core Orchestrator]] |
+| `nexus-desk/src-tauri/src/main.rs` | ✅ | [[Module - Nexus Desk Interface]] |
+
+## Remaining Gaps (治理缺口)
 
 | Path | Risk (Estimated) | Reason |
 |---|---|---|
 | `scripts/engine/l6_gate.py` | High | 缺乏對 L6 Gate 的治理描述。 |
 | `scripts/engine/ci_graph_impact.py` | High | 圖譜影響力分析未納入規範。 |
-| `scripts/engine/nexus_transaction.py` | Mid | 事務處理邏輯未對位。 |
-| `scripts/engine/speculative_hooks.py` | Low | 投機 Hook 屬於實驗性功能。 |
-| `scripts/engine/critique_engine.py` | Mid | 稽核引擎實作。 |
-| `scripts/engine/node_launcher.py` | Mid | 節點啟動邏輯。 |
-| `scripts/engine/intent_classifier.py` | Mid | 意圖分類邏輯。 |
-| `scripts/engine/nx_impact.py` | Mid | 影響力分析腳本。 |
-| `scripts/engine/ci_fix_generator.py` | Mid | CI 修復產出器。 |
-| `scripts/engine/hybrid_patcher.py` | Mid | 混合補丁。 |
 
 ## Upstream
 - **Wiki Audit Engine**: `scripts/ops/wiki_coverage_audit.py` [Code: scripts/ops/wiki_coverage_audit.py]

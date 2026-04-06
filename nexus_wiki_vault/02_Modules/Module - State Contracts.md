@@ -20,29 +20,32 @@ owner: agent
 # Module - State Contracts
 
 ## One-sentence summary
-本頁定義 Nexus 任務執行過程中必須遵循的 5 大 JSON 狀態契約與跨檔案不變量。 [Source: `schemas/`]
+本頁定義 Nexus 任務執行過程中必須遵循的 5 大 JSON 狀態契約與跨檔案不變量。 [Reference: Spec v22]
 
 ## Role / responsibility
-- **結構校驗**: 確保所有任務工件符合 `plan`, `diagnosis`, `repair`, `audit`, `manifest` 結構。 [Source: `manifest_schema.json`]
-- **不變量維護**: 強制要求 `task_id` 與 `trace_id` 在整個 Evidence Chain 中保持一致。 [Source: Spec v22 Part 4.1]
-- **風險分級**: 根據 `audit_result.json` 的 `risk_score` 決定門禁通過與否。 [Source: `ci_gate.py`]
+- **結構校驗**: 確保所有任務工件符合 `plan`, `diagnosis`, `repair`, `audit`, `manifest` 結構。 [Reference: manifest_schema.json]
+- **不變量維護**: 強制要求 `task_id` 與 `trace_id` 在整個 Evidence Chain 中保持一致。 [Reference: Spec v22 Part 4.1]
+- **風險分級**: 根據 `audit_result.json` 的 `risk_score` 決定門禁通過與否。 [Source: scripts/ops/ci_gate.py]
 
 ## Core Contracts Matrix
 
 | Contract | Purpose | Key ID | Source Provenance |
 |---|---|---|---|
-| `plan.json` | 任務目標與 TODO | `task_id` | [Source: `plan_schema.json`] |
-| `diagnosis.json` | 現狀診斷與 Trace | `trace_id` | [Source: `diagnosis_schema.json`] |
-| `repair_final.json`| 修復方案與 Patch | `patch_hash` | [Source: `repair_final_schema.json`] |
-| `audit_result.json`| 審計風險評估 | `risk_score` | [Source: `audit_result_schema.json`] |
-| `manifest.json` | 最終證據封裝 | `seal_status` | [Source: `manifest_schema.json`] |
+| `plan.json` | 任務目標與 TODO | `task_id` | [Reference: plan_schema.json] |
+| `diagnosis.json` | 現狀診斷與 Trace | `trace_id` | [Reference: diagnosis_schema.json] |
+| `repair_final.json`| 修復方案與 Patch | `patch_hash` | [Reference: repair_final_schema.json] |
+| `audit_result.json`| 審計風險評估 | `risk_score` | [Reference: audit_result_schema.json] |
+| `manifest.json` | 最終證據封裝 | `seal_status` | [Reference: manifest_schema.json] |
 
 ## Upstream
-- **Phase Runners**: 產出符合這些 Schema 的實體 JSON。 [Code: `nexus_cli.py`]
+- **Phase Runners**: 產出符合這些 Schema 的實體 JSON。 [Source: scripts/engine/nexus_cli.py]
+- **Core Orchestrator**: 根據契約內容進行相位調度。 [Source: nexus/core/orchestrator.py]
+- `nexus/core/handoff_bundle.py`: 狀態交接封裝邏輯。 [Source: nexus/core/handoff_bundle.py]
+- v22 Engine Spec: 確立 `manifest.json` 為唯一權威索引。 [Reference: Spec v22]
 
 ## Downstream
-- **Core Orchestrator**: 根據契約內容進行相位調度。 [Code: `orchestrator.py`]
 - **[[System - Unknowns and Conflicts]]**: 登記 Schema 漂移衝突。
+- **[[Ops - CI/CD Promotion Gate]]**: 基於契約數值執行發佈決策。
 
 ## Related modules / files
 - `/Users/jameschen/Workspace/schemas/`: 實體 JSON Schema 定義。

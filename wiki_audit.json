@@ -1,0 +1,291 @@
+{
+  "total": 47,
+  "passed": 47,
+  "failed": 0,
+  "waived": 1,
+  "expired": 0,
+  "details": [
+    {
+      "file": "04_State/State - Lifecycle.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_State/State - Schemas.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - CLI Drift Matrix.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - Evidence Map.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - Evidence Chain.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - Knowledge Lineage.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "05_Protocols/Protocol - CLI Surface.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Truth Claims Register.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - CI Failure Playbook.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Artifact Retention and Provenance.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Governance Changelog.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Wisdom Layer.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Acceptance and Release.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Wiki Drift Audit.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "90_Sources/Source - Operational Scripts Index.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "90_Sources/Source Index.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "90_Sources/Source - Nexus Anti Registry.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "90_Sources/Source - Coverage Heatmap.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/System - Unknowns and Conflicts.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/System - Physical Topology.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/System - Next Questions for Human.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "07_Diffs/Diff - v17.1 vs v22 vs v23.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Intelligence and Logic (Remaining Core).md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - State Contracts.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Implementation Responsibility Matrix.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Nexus Desk Interface.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Advanced Core Intelligence.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Runtime Services.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Core Orchestrator.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Core Orchestrator Deep Dive.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Task Scheduling and Swarm Adapters.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Platform Core Registry.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Security and Tool Guard Registry.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Policy and Learning Governance.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Domain Services and Adapters.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Intelligence and Context Core.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - State Lifecycle and Snapshotting.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Memory Repository.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Guard and Gate Control.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Memory Pipeline Deep Dive.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "03_Flows/Flow - PXDRAC Runtime.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/System Overview.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/Agent Onboarding - Implementation Map.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/Agent Onboarding - Command Pack.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/Agent Mastery - 90 Percent Path.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    }
+  ]
+}

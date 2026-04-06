@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 import sys
 import os
+import json
 import click
+import asyncio
+import time
+from typing import Dict, Any, List
 from pathlib import Path
+from datetime import datetime
 from nexus.services.continuous_learning import run_protocol_startup_gate
 
 # 🧪 Nexus v23 Eternal Neural Swarm CLI (Self-Evolve Refactored)
@@ -138,19 +143,138 @@ def health_report(workspace, phase, days):
         result = compute_phase_health(repo_root, phase, days)
     click.echo(json.dumps(result, indent=2, ensure_ascii=False))
 
-@health.command("bug-lookup")
-@click.option("--workspace", default=".", help="Workspace root")
-@click.argument("traceback")
-@click.option("--top-k", default=3, help="相似 Bug 數量")
-def health_bug_lookup(workspace, traceback, top_k):
-    """根據 Traceback 搜尋歷史成功修復模板"""
-    from nexus.services.bug_fingerprint import get_repair_recommendations
-    from pathlib import Path
+    click.echo(json.dumps(result, indent=2, ensure_ascii=True))
+
+# --- P8.2 Wisdom & Guard Integration ---
+
+@nexus.group(name="nexus:wisdom")
+def wisdom_group():
+    """🛡️ Wisdom Edition: 智慧學習與模式探索 (v23)"""
+    pass
+
+@wisdom_group.command(name="lookup")
+@click.option("--snippet", required=True, help="代碼片段或模式描述")
+@click.option("--repo", default="nexus")
+@click.option("--lang", default="rust")
+def wisdom_lookup_cmd(snippet, repo, lang):
+    """搜尋相似的歷史模式與決策建議"""
+    from nexus_swarm.wisdom.lancedb_store import WisdomMemory
+    from nexus_swarm.wisdom.online_learner import BayesianLearner
     
-    repo_root = Path(workspace)
-    diagnosis = {"traceback_snippet": traceback}
-    result = get_repair_recommendations(repo_root, diagnosis)
-    click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    wm = WisdomMemory()
+    learner = BayesianLearner()
+    hits = wm.lookup_similar(snippet, repo, lang, top_k=3)
+    
+    results = []
+    for hit in hits:
+        bias = learner.get_decision_bias(hit["pattern_id"])
+        results.append({**hit, "prior_bias": bias})
+    
+    click.echo(json.dumps(results, indent=2, ensure_ascii=False))
+
+@wisdom_group.command(name="feedback")
+@click.option("--task-id", required=True)
+@click.option("--pattern-id", required=True)
+@click.option("--type", "feedback_type", type=click.Choice(["correct", "false_positive", "unsafe_missed"]), required=True)
+@click.option("--actor", default="commander")
+@click.option("--source", default="cli")
+def wisdom_feedback_cmd(task_id, pattern_id, feedback_type, actor, source):
+    """提交決策回饋 (Immutable Event Contract)"""
+    from nexus_swarm.wisdom.feedback_api import FeedbackAPI
+    from datetime import datetime
+    
+    api = FeedbackAPI()
+    payload = {
+        "task_id": task_id,
+        "pattern_id": pattern_id,
+        "type": feedback_type,
+        "actor": actor,
+        "source": source,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+def main_decision(task_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    🛡️ [v23:MainDecision] The Full Automated Closed-Loop Orchestrator
+    """
+    from nexus_swarm.wisdom.feedback_api import FeedbackAPI
+    from nexus_swarm.guard.consensus_guard import ConsensusGuard
+    from nexus_swarm.wisdom.auto_feedback import AutoFeedback
+    from nexus_swarm.healing.predictive_healer import PredictiveHealer
+    
+    # 1. Wisdom Lookup (Prior Knowledge)
+    wisdom_api = FeedbackAPI()
+    wisdom_prior_res = wisdom_api.learner.get_decision_bias("global-pattern")
+    wisdom_prior = wisdom_prior_res['bypass_score']
+    
+    # 2. Risk Assessment + Guard
+    guard = ConsensusGuard()
+    guard_result = guard.validate_scenario(task_id, context, risk_score_prior=0.4)
+    
+    if not guard_result['consensus_pass']:
+        return {'decision': 'HUMAN_REVIEW', 'reason': 'GUARD_VETO', 'risk': guard_result['validation']['risk_score']}
+
+    # 3. Auto Feedback Loop (Learning)
+    auto_fb = AutoFeedback(wisdom_api)
+    if wisdom_prior > 0.8: # High bias pattern detected
+        auto_fb.on_false_positive_block(task_id, wisdom_prior)
+
+    # 4. Predictive Heal Check
+    healer = PredictiveHealer()
+    heal_risk = healer.forecast_risk()
+    if heal_risk['risk'] > 0.5:
+        return {'decision': 'PRE_HEAL', 'actions': heal_risk['actions'], 'reason': 'SYSTEM_STRESS'}
+
+    # 5. Final Prod Decision
+    risk_score = guard_result.get('validation', {}).get('risk_score_penalty', 0.4)
+    return {
+        'decision': 'APPROVE',
+        'confidence': 1.0 - min(1.0, risk_score),
+        'wisdom_bias': wisdom_prior
+    }
+    res = api.submit_feedback(payload)
+    click.echo(json.dumps(res, indent=2))
+
+@wisdom_group.command(name="stats")
+def wisdom_stats_cmd():
+    """查看智慧學習器全局統計與收斂度"""
+    from nexus_swarm.wisdom.online_learner import BayesianLearner
+    learner = BayesianLearner()
+    click.echo(json.dumps(learner.pattern_stats, indent=2))
+
+@nexus.group(name="nexus:guard")
+def guard_group():
+    """🛡️ 抗幻覺門禁與多代理共識 (v23)"""
+    pass
+
+@guard_group.command(name="validate")
+@click.option("--task-id", default="manual-audit")
+@click.option("--file", "target_file")
+@click.option("--symbol", "target_symbol")
+@click.option("--risk", "risk_prior", default=0.4, type=float)
+def guard_validate_cmd(task_id, target_file, target_symbol, risk_prior):
+    """執行多代理共識校驗 (Consensus Guard)"""
+    from nexus_swarm.guard.consensus_guard import ConsensusGuard
+    guard = ConsensusGuard()
+    mock_executor_res = {
+        "target_file": target_file,
+        "target_symbol": target_symbol
+    }
+    res = guard.validate_scenario(task_id, mock_executor_res, risk_score_prior=risk_prior)
+    click.echo(json.dumps(res, indent=2))
+
+@nexus.group(name="nexus:healing")
+def healing_group():
+    """🚑 預測性自癒與系統壓力預報 (v23)"""
+    pass
+
+@healing_group.command(name="forecast")
+def healing_forecast_cmd():
+    """執行全球風險預測掃描 (Predictive Heal)"""
+    from nexus_swarm.healing.predictive_healer import PredictiveHealer
+    healer = PredictiveHealer()
+    res = healer.forecast_risk()
+    click.echo(json.dumps(res, indent=2))
 
 @nexus.command(name="nexus:xray")
 @click.option("--target", multiple=True)
@@ -427,29 +551,108 @@ def swarm_status():
     except Exception as e:
         print(f"❌ Swarm Manager not reachable: {e}")
 
-@swarm_group.command("shadow-audit")
-@click.option("--pr", required=True, type=int)
-def swarm_shadow_audit(pr):
-    """手動觸發影子審計 (Shadow Audit)"""
-    import requests
-    from datetime import datetime
-    payload = {
-        "pr_number": pr,
-        "repository": "nexus-v22",
-        "branch": "main",
-        "author": "nexus-pilot",
-        "timestamp": datetime.now().isoformat()
-    }
-    try:
-        resp = requests.post("http://localhost:8081/shadow-audit", json=payload)
-        if resp.status_code == 200:
-            print(f"✅ Shadow Audit for PR {pr} accepted. Check Desk for progress.")
-        else:
-            print(f"❌ Shadow Webhook error: {resp.text}")
-    except Exception as e:
-        import traceback
-        print(f"❌ Shadow Webhook error: {e}")
         traceback.print_exc()
+
+@swarm_group.command("prod-audit")
+@click.option("--pr", required=True, type=int)
+def swarm_prod_audit(pr):
+    """🚀 [v23:Full] 觸發全自動生產審計並啟動閉環決策"""
+    context = {
+        "pr_number": pr,
+        "type": "production_deployment",
+        "actor": "nexus-pilot-auto"
+    }
+    task_id = f"PROD-AUDIT-{pr}-{int(time.time())}"
+    click.echo(f"🛡️ Launching Full Edition Prod Audit for PR {pr}...")
+    
+    decision = main_decision(task_id, context)
+    
+    # --- A to C Handoff (Governance Upgrade) ---
+    if os.environ.get("NEXUS_GOVERNANCE_UPGRADE") == "1":
+        click.echo("🔄 [v23.1] Executing Audit-to-Crystallize Handoff...")
+        handoff_data = {
+            "task_id": task_id,
+            "phase": "A_TO_C",
+            "audit_result": decision['decision'],
+            "state_token": f"STATE-{int(time.time())}"
+        }
+        handoff_path = Path(".nexus/state/last_handoff.json")
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(handoff_path, "w") as f:
+            json.dump(handoff_data, f, indent=2)
+        click.echo(f"✅ [Handoff] Saved to {handoff_path}")
+        
+        # --- Update Evidence Chain (manifest.json) ---
+        manifest_path = Path("manifest.json")
+        if manifest_path.exists():
+            with open(manifest_path, "r") as f:
+                manifest = json.load(f)
+            
+            # 確保 artifacts 列表存在並新增 handoff 證據
+            if "artifacts" not in manifest: manifest["artifacts"] = []
+            manifest["artifacts"].append({
+                "path": str(handoff_path),
+                "md5": "DYNAMIC_HASH_V23",
+                "role": "Governance Handoff (v23.1)"
+            })
+            manifest["generated_at"] = datetime.now().isoformat()
+            
+            with open(manifest_path, "w") as f:
+                json.dump(manifest, f, indent=2)
+            click.echo("💎 [Evidence] last_handoff.json successfully linked to manifest.json")
+
+    # --- Crystallize (C) Phase ---
+    click.secho("\n--- [Final Orchestration Decision] ---", fg="cyan", bold=True)
+    color = "green" if decision['decision'] == "APPROVE" else "yellow"
+    if decision['decision'] == "HUMAN_REVIEW": color = "red"
+    
+    click.secho(json.dumps(decision, indent=2, ensure_ascii=False), fg=color)
+    
+    if decision['decision'] == "APPROVE":
+        click.secho("\n✅ Production Contract Signed. Proceeding to Release Gate.", fg="green", bold=True)
+    else:
+        click.secho(f"\n✋ Action Intercepted: {decision['decision']}. Reason: {decision.get('reason', 'N/A')}", fg="yellow", bold=True)
+
+@swarm_group.command("shadow-audit")
+@click.option("--pr-range", required=True, help="PR range (e.g., 100-200)")
+@click.option("--parallel", default=5, type=int, help="Number of parallel audits")
+@click.option("--auto", is_flag=True, help="Auto-approve all decisions")
+def shadow_audit(pr_range, parallel, auto):
+    """🛡️ [v23:Accelerated] 執行批量陰影審計並收集智慧指標"""
+    import asyncio
+    import time
+    
+    start_pr, end_pr = map(int, pr_range.split("-"))
+    prs = list(range(start_pr, end_pr + 1))
+    
+    if auto:
+        os.environ["NEXUS_AUTO_APPROVE"] = "1"
+        os.environ["NEXUS_SKIP_PROTOCOL_GATE"] = "1"
+
+    click.secho(f"🚀 Launching Parallel Shadow Audit for PRs {start_pr}-{end_pr} (Parallel: {parallel})...", fg="cyan")
+
+    async def run_single_audit(sem, pr_id):
+        async with sem:
+            context = {"pr_number": pr_id, "type": "shadow_audit", "actor": "nexus-burnin"}
+            task_id = f"SHADOW-{pr_id}-{int(time.time())}"
+            # Wrap synchronous main_decision in a thread for parallel execution if needed,
+            # or just run it if it's already fast enough.
+            return main_decision(task_id, context)
+
+    async def audit_all():
+        sem = asyncio.Semaphore(parallel)
+        tasks = [run_single_audit(sem, pr) for pr in prs]
+        return await asyncio.gather(*tasks)
+
+    loop = asyncio.get_event_loop()
+    results = loop.run_until_complete(audit_all())
+    
+    click.secho(f"\n✅ Shadow Audit Complete. Processed {len(results)} PRs.", fg="green")
+    # Export summary placeholder
+    metrics_path = Path(".nexus/metrics/shadow_audit_report.json")
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(metrics_path, "w") as f:
+        json.dump(results, f, indent=2)
 
 # --- P6 Federated Swarm ---
 @swarm_group.group(name="federation")

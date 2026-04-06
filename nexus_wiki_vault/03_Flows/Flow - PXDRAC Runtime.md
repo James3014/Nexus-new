@@ -22,20 +22,21 @@ owner: agent
 本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: Spec v22 Part 5]
 
 ## Role / responsibility
+- 本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Reference: Spec v22 Part 5]
 - **序列控制**: 確保 P -> X -> D -> R -> A -> C 相位的物理連續性。
-- **工件交接**: 規範各相位產出物如何進入下一個 Phase Runner。 [Source: `handoff_bundle.py`]
-- **異常處理**: 定義在任何相位失敗時的 Rollback 路徑。 [Source: `nexus_cli.py`]
+- **工件交接**: 規範各相位產出物如何進入下一個 Phase Runner。 [Source: nexus/core/handoff_bundle.py]
+- **異常處理**: 定義在任何相位失敗時的 Rollback 路徑。 [Source: scripts/engine/nexus_cli.py]
 
 ## Runtime Sequence Matrix
 
 | Phase | Runner | Key Artifact | Source Provenance |
 |---|---|---|---|
-| **P** (Plan) | `nexus_plan` | `plan.json` | [Source: `plan_schema.json`] |
-| **X** (Explore) | `nexus_explore` | `explore_report.json` | [Source: `nexus_explore.py`] |
-| **D** (Diagnose) | `nexus_diagnose` | `diagnosis.json` | [Source: `diagnosis_schema.json`] |
-| **R** (Repair) | `nexus_repair` | `repair_final.json` | [Source: `repair_final_schema.json`] |
-| **A** (Audit) | `nexus_audit` | `audit_result.json` | [Source: `audit_result_schema.json`] |
-| **C** (Crystal) | `nexus_crystal` | `manifest.json` | [Source: `manifest_schema.json`] |
+| **P** (Plan) | `nexus_plan` | `plan.json` | [Reference: plan_schema.json] |
+| **X** (Explore) | `nexus_explore` | `explore_report.json` | [Source: scripts/ops/nexus_explore.py] |
+| **D** (Diagnose) | `nexus_diagnose` | `diagnosis.json` | [Reference: diagnosis_schema.json] |
+| **R** (Repair) | `nexus_repair` | `repair_final.json` | [Reference: repair_final_schema.json] |
+| **A** (Audit) | `nexus_audit` | `audit_result.json` | [Reference: audit_result_schema.json] |
+| **C** (Crystal) | `nexus_crystal` | `manifest.json` | [Reference: manifest_schema.json] |
 
 ## Upstream
 - **User Intent**: 原始任務描述。

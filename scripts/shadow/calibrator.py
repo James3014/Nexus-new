@@ -7,6 +7,11 @@ from pathlib import Path
 from datetime import datetime
 
 NEXUS_ROOT = Path("/Users/jameschen/Workspace/nexus")
+sys.path.append(str(NEXUS_ROOT)) # 🛡️ Enable local module imports
+
+from nexus_swarm.wisdom.lancedb_store import WisdomMemory
+from nexus_swarm.wisdom.online_learner import BayesianLearner
+
 SHADOW_DIR = NEXUS_ROOT / ".nexus" / "shadow"
 CALIBRATION_FILE = SHADOW_DIR / "calibration.json"
 RUNS_DIR = SHADOW_DIR / "runs"
@@ -14,6 +19,14 @@ RUNS_DIR = SHADOW_DIR / "runs"
 class ShadowCalibrator:
     def __init__(self):
         self.load_calibration()
+        # 🛡️ Initialize Wisdom Layer (v23 Phase 2)
+        try:
+            self.wisdom = WisdomMemory()
+            self.learner = BayesianLearner()
+            self.wisdom_active = True
+        except Exception as e:
+            print(f"⚠️ Wisdom Layer Initialization Failed: {e}. Falling back to v22 baseline.")
+            self.wisdom_active = False
 
     def load_calibration(self):
         if CALIBRATION_FILE.exists():
@@ -63,6 +76,31 @@ class ShadowCalibrator:
 
         latency_ms = int((time.time() - start_time) * 1000)
         
+        # 🛡️ Wisdom Lookup [v23 Shadow Integration]
+        wisdom_guidance = None
+        if self.wisdom_active:
+            try:
+                # 模擬 pattern 提取，實際會從 payload 提取代碼
+                snippet = payload.get("code_snippet", "let lock = mutex.lock().unwrap();") if payload else ""
+                repo = payload.get("repository", "nexus") if payload else "nexus"
+                lang = payload.get("language", "rust") if payload else "rust"
+                
+                hits = self.wisdom.lookup_similar(snippet, repo, lang, top_k=1)
+                if hits:
+                    best_match = hits[0]
+                    bias = self.learner.get_decision_bias(best_match["pattern_id"])
+                    wisdom_guidance = {
+                        "hit": True,
+                        "pattern_id": best_match["pattern_id"],
+                        "confidence": bias["confidence"],
+                        "recommendation": bias["recommendation"]
+                    }
+                    # 🛡️ Shadow Decision: Adjusting result based on Wisdom (Shadow mode only)
+                    if bias["recommendation"] == "bypass":
+                        result_summary += " | [Shadow: Wisdom suggests BYPASS]"
+            except Exception as e:
+                print(f"⚠️ Wisdom Lookup Failed (Fail-Open): {e}")
+
         # 🛡️ Update Metrics
         self.calData["total_runs"] += 1
         # Mock logic: 5% chance of FP for testing
@@ -87,7 +125,8 @@ class ShadowCalibrator:
             "latency_ms": latency_ms,
             "result": result_summary,
             "docker_used": has_docker,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "wisdom": wisdom_guidance # 🛡️ Wisdom Metadata Attached
         }
         
         with open(RUNS_DIR / f"{run_id}.json", 'w') as f:

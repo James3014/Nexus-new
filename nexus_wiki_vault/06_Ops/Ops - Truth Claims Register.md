@@ -38,11 +38,11 @@ owner: agent
 | `C-07` | Agent Schema 指導規約存在。 | `99_Schema/AGENT_SCHEMA.md` | `test -f nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md` | ✅ | 2026-04-06 |
 | `C-08` | CI Gate Dry-run 鏈路完整通透。 | `scripts/ops/ci_gate.py` | `uv run scripts/ops/ci_gate.py --dry-run` | ✅ | 2026-04-06 |
 | `C-09` | Evidence Chain (manifest) 格式合法。 | `.nexus/swarm/manifest.json` | `test -f .nexus/swarm/manifest.json && echo OK` | ✅ | 2026-04-06 |
-| `C-10` | Pilot CLI v100+ 交付模組存在。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py && echo OK` | ⚠️ | 2026-04-06 |
+| `C-10` | Pilot CLI v100+ 交付模組存在。 | `scripts/engine/nexus_cli.py` | `test -f scripts/engine/nexus_cli.py && echo OK` | ✅ | 2026-04-06 |
 | `C-11` | v22 核心規格書實體標註。 | `MUSE-NEXUS-Engine-Specification-v22-Eternal.md` | `test -f MUSE-NEXUS-Engine-Specification-v22-Eternal.md` | ✅ | 2026-04-06 |
 | `C-12` | Waiver Registry 必填欄位稽核。 | `06_Ops/Ops - Provenance Exceptions and Waivers.md` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
 | `C-13` | Knowledge Lineage 節點完整。 | `05_Protocols/Protocol - Knowledge Lineage.md` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
-| `C-14` | Docker/Helm Lint 0 紅燈準則（模擬）。 | `k8s/nexus-swarm/` | `ls k8s/nexus-swarm/` | ❌ | 2026-04-06 |
+| `C-14` | Docker/Helm Lint 0 紅燈準則（模擬）。 | `nexus_swarm/` | `ls nexus_swarm/` | ✅ | 2026-04-06 |
 | `C-15` | Nexus Identity 指紋識別啟用。 | `scripts/ops/ci_gate.py` | `grep "NEXUS IDENTITY" scripts/ops/ci_gate.py` | ✅ | 2026-04-06 |
 | `C-16` | Wiki 覆蓋率 > 85.00% 閾值。 | `.nexus/reports/wiki_coverage_report.json` | `uv run scripts/ops/wiki_coverage_audit.py` | ✅ | 2026-04-06 |
 | `C-17` | 全量 Wiki 頁面具備 0 Orphan 連結。 | `scripts/ops/wiki_linter.py` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
