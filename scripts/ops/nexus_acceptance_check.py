@@ -17,6 +17,11 @@ except ImportError:
     # Fail-safe for different environment structures
     def build_skills_health(path): return {"ready_for_formal_use": True, "summary": {}}
 
+try:
+    from scripts.ops.lesson_writeback_check import check_lesson_evidence
+except ImportError:
+    def check_lesson_evidence(project_root): return True
+
 
 @dataclass(frozen=True)
 class CriterionResult:
@@ -232,6 +237,11 @@ def _evaluate_ucc_truth_efficiency(
     )
 
 
+REQUIRED_WIKI_HARNESS_KEYS = [
+    "drift", "coverage_global", "coverage_keypath", "truth_mismatch", "policy_violation"
+]
+
+
 def _summarize_wiki_harness(project_root: Path) -> Dict[str, Any]:
     """[C] Summary of wiki harness metrics."""
     reports_dir = project_root / ".nexus" / "reports"
@@ -239,13 +249,7 @@ def _summarize_wiki_harness(project_root: Path) -> Dict[str, Any]:
     coverage_file = reports_dir / "wiki_coverage_report.json"
     truth_file = reports_dir / "wiki_truth_claims_report.json"
 
-    summary = {
-        "drift": "missing",
-        "coverage_global": "missing",
-        "coverage_keypath": "missing",
-        "truth_mismatch": "missing",
-        "policy_violation": "missing"
-    }
+    summary = {k: "missing" for k in REQUIRED_WIKI_HARNESS_KEYS}
 
     if drift_file.exists():
         try:
@@ -254,7 +258,8 @@ def _summarize_wiki_harness(project_root: Path) -> Dict[str, Any]:
             p0 = s.get("p0_count", 0)
             p1 = s.get("p1_count", 0)
             summary["drift"] = f"p0={p0}, p1={p1}"
-        except: pass
+        except:
+            pass
 
     if coverage_file.exists():
         try:
@@ -264,7 +269,8 @@ def _summarize_wiki_harness(project_root: Path) -> Dict[str, Any]:
             keypath_cov = s.get("keypath_coverage_ratio", 0)
             summary["coverage_global"] = f"{global_cov:.2%}" if isinstance(global_cov, (int, float)) else str(global_cov)
             summary["coverage_keypath"] = f"{keypath_cov:.2%}" if isinstance(keypath_cov, (int, float)) else str(keypath_cov)
-        except: pass
+        except:
+            pass
 
     if truth_file.exists():
         try:
@@ -274,9 +280,36 @@ def _summarize_wiki_harness(project_root: Path) -> Dict[str, Any]:
             violations = s.get("policy_violation_count", 0)
             summary["truth_mismatch"] = str(mismatch)
             summary["policy_violation"] = str(violations)
-        except: pass
+        except:
+            pass
 
     return summary
+
+
+def _evaluate_wiki_harness_contract(wiki_summary: Dict[str, Any]) -> CriterionResult:
+    """新增準則: wiki_harness_contract."""
+    all_present = all(k in wiki_summary for k in REQUIRED_WIKI_HARNESS_KEYS)
+    all_strings = all(isinstance(v, str) for v in wiki_summary.values())
+    passed = all_present and all_strings
+    
+    return CriterionResult(
+        name="wiki_harness_contract",
+        passed=passed,
+        detail={k: wiki_summary.get(k, "absent") for k in REQUIRED_WIKI_HARNESS_KEYS}
+    )
+
+
+def _evaluate_lesson_writeback(project_root: Path) -> CriterionResult:
+    """新增準則: lesson_writeback_ready."""
+    passed = check_lesson_evidence(project_root)
+    return CriterionResult(
+        name="lesson_writeback_ready",
+        passed=passed,
+        detail={
+            "check_target": ".nexus/reports/lesson_writeback.json or wiki_matrix",
+            "passed": passed
+        }
+    )
 
 
 def _write_markdown(report: Dict[str, Any], path: Path) -> None:
@@ -291,8 +324,9 @@ def _write_markdown(report: Dict[str, Any], path: Path) -> None:
         ""
     ]
     wiki = report.get("wiki_harness", {})
-    for k, v in wiki.items():
-        lines.append(f"- {k}: {v}")
+    # 固定順序輸出
+    for k in REQUIRED_WIKI_HARNESS_KEYS:
+        lines.append(f"- {k}: {wiki.get(k, 'missing')}")
     
     lines.extend([
         "",
@@ -356,15 +390,18 @@ def main():
     
     ucc_check = _evaluate_ucc_truth_efficiency(all_out, window=args.window)
     
-    gate_passed = all(c.passed for c in checks + [learning_check, ucc_check])
-    
     wiki_summary = _summarize_wiki_harness(project_root)
+    wiki_contract_check = _evaluate_wiki_harness_contract(wiki_summary)
+    
+    lesson_check = _evaluate_lesson_writeback(project_root)
+    
+    gate_passed = all(c.passed for c in checks + [learning_check, ucc_check, wiki_contract_check, lesson_check])
     
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if gate_passed else "FAIL",
         "gate_passed": gate_passed,
-        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks + [learning_check, ucc_check]],
+        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks + [learning_check, ucc_check, wiki_contract_check, lesson_check]],
         "wiki_harness": wiki_summary,
     }
     

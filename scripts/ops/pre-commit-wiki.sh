@@ -9,13 +9,19 @@ echo "🔍 [Nexus-Wiki] Running Fast-Feedback Path Audit..."
 
 # Run linter on changed files only
 "${VENV_PYTHON}" "${REPO_ROOT}/scripts/ops/wiki_linter.py" --changed-only
+RESULT_LINTER=$?
 
-RESULT=$?
+# Run Agent Protocol Check on staged files
+echo "🔍 [Nexus-Protocol] Running Staged Boundary Audit..."
+"${VENV_PYTHON}" "${REPO_ROOT}/scripts/ops/agent_protocol_check.py" --check-staged --strict-boundary
+RESULT_PROTOCOL=$?
 
-if [ $RESULT -ne 0 ]; then
-    echo "❌ [Nexus-Wiki] Path Audit FAILED. Please fix invalid paths before committing."
+if [ $RESULT_LINTER -ne 0 ] || [ $RESULT_PROTOCOL -ne 0 ]; then
+    echo "❌ [Nexus-Gate] Pre-commit Audit FAILED."
+    if [ $RESULT_LINTER -ne 0 ]; then echo "  - Wiki Linter FAILED"; fi
+    if [ $RESULT_PROTOCOL -ne 0 ]; then echo "  - Agent Protocol Check FAILED"; fi
     exit 1
 fi
 
-echo "✅ [Nexus-Wiki] Path Audit PASSED."
+echo "✅ [Nexus-Gate] Pre-commit Audit PASSED."
 exit 0

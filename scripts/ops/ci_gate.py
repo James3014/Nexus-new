@@ -26,6 +26,32 @@ def run_step(name, cmd):
         print(res.stderr)
         return False, res.stderr
 
+def run_protocol_check(dry_run: bool):
+    print(f"\n🚀 [CI-Gate] Running Agent Protocol Check {'(Dry-run)' if dry_run else ''}...")
+    res = subprocess.run(f'"{VENV_PYTHON}" scripts/ops/agent_protocol_check.py', shell=True)
+    if res.returncode == 0:
+        print("✅ Agent Protocol Check PASSED")
+        return True
+    else:
+        if dry_run:
+            print(f"⚠️ [DRY-RUN] Agent Protocol Check FAILED (Return Code: {res.returncode})")
+        else:
+            print(f"❌ Agent Protocol Check FAILED (Return Code: {res.returncode})")
+        return False
+
+def run_lesson_check(dry_run: bool):
+    print(f"\n🚀 [CI-Gate] Running Lesson Writeback Check {'(Dry-run)' if dry_run else ''}...")
+    res = subprocess.run(f'"{VENV_PYTHON}" scripts/ops/lesson_writeback_check.py', shell=True)
+    if res.returncode == 0:
+        print("✅ Lesson Writeback Check PASSED")
+        return True
+    else:
+        if dry_run:
+            print(f"⚠️ [DRY-RUN] Lesson Writeback Check FAILED (Return Code: {res.returncode})")
+        else:
+            print(f"❌ Lesson Writeback Check FAILED (Return Code: {res.returncode})")
+        return False
+
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
     checks = {
@@ -36,16 +62,11 @@ def run_dry_run():
     for key, ok in checks.items():
         print(f"- {key}: {'OK' if ok else 'MISSING'}")
     
-    print("\n🚀 [CI-Gate] Running Agent Protocol Check (Dry-run)...")
-    res = subprocess.run(f'"{VENV_PYTHON}" scripts/ops/agent_protocol_check.py', shell=True)
-    if res.returncode == 0:
-        print("✅ Agent Protocol Check PASSED")
-        checks["protocol_check"] = True
-    else:
-        print(f"⚠️ [DRY-RUN] Agent Protocol Check FAILED (Return Code: {res.returncode})")
-        checks["protocol_check"] = False
+    checks["protocol_check"] = run_protocol_check(dry_run=True)
+    checks["lesson_check"] = run_lesson_check(dry_run=True)
     
     print(f"- protocol_check: {'OK' if checks['protocol_check'] else 'FAIL'}")
+    print(f"- lesson_check: {'OK' if checks['lesson_check'] else 'FAIL'}")
 
     print("\n📊 [Phase 6] Summary Audit (Dry-Run):")
     print_phase_6_summaries()
@@ -113,11 +134,12 @@ def main():
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
     
     # 0. Agent Protocol Check
-    success, _ = run_step(
-        "Agent Protocol Check",
-        f'"{VENV_PYTHON}" scripts/ops/agent_protocol_check.py',
-    )
-    if not success and not args.dry_run: sys.exit(1)
+    if not run_protocol_check(dry_run=args.dry_run):
+        if not args.dry_run: sys.exit(1)
+
+    # 0b. Lesson Writeback Check
+    if not run_lesson_check(dry_run=args.dry_run):
+        if not args.dry_run: sys.exit(1)
 
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
     success, _ = run_step(
