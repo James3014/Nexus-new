@@ -52,6 +52,25 @@ def run_lesson_check(dry_run: bool):
             print(f"❌ Lesson Writeback Check FAILED (Return Code: {res.returncode})")
         return False
 
+def run_wiki_sync_check(dry_run: bool):
+    print(f"\n🚀 [CI-Gate] Running Wiki Sync Check {'(Dry-run)' if dry_run else ''}...")
+    res = subprocess.run(f'"{VENV_PYTHON}" scripts/ops/wiki_sync_check.py --mode worktree', shell=True)
+    if res.returncode == 0:
+        print("✅ Wiki Sync Check PASSED")
+        return "OK"
+    elif res.returncode == 2:
+        if dry_run:
+            print(f"❌ [DRY-RUN-BLOCK] Wiki Sync Check FAILED (Return Code: 2)")
+        else:
+            print(f"❌ [CI-BLOCK] Wiki Sync Check FAILED (Return Code: 2)")
+        return "FAIL"
+    else:
+        if dry_run:
+            print(f"⚠️ [DRY-RUN] Wiki Sync Check FAILED (Return Code: {res.returncode})")
+        else:
+            print(f"❌ Wiki Sync Check FAILED (Return Code: {res.returncode})")
+        return "FAIL"
+
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
     checks = {
@@ -64,16 +83,19 @@ def run_dry_run():
     
     checks["protocol_check"] = run_protocol_check(dry_run=True)
     checks["lesson_check"] = run_lesson_check(dry_run=True)
+    wiki_sync_status = run_wiki_sync_check(dry_run=True)
+    checks["wiki_sync"] = (wiki_sync_status == "OK")
     
     print(f"- protocol_check: {'OK' if checks['protocol_check'] else 'FAIL'}")
     print(f"- lesson_check: {'OK' if checks['lesson_check'] else 'FAIL'}")
+    print(f"- wiki_sync: {wiki_sync_status}")
 
     print("\n📊 [Phase 6] Summary Audit (Dry-Run):")
-    print_phase_6_summaries()
+    print_phase_6_summaries(wiki_sync_status=wiki_sync_status)
     
     return 0 if all(checks.values()) else 1
 
-def print_phase_6_summaries():
+def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
     reports = {
         "drift": ROOT / ".nexus" / "reports" / "wiki_drift_report.json",
         "capability": ROOT / ".nexus" / "reports" / "wiki_capability_coverage_report.json",
@@ -81,6 +103,7 @@ def print_phase_6_summaries():
         "writeback": ROOT / ".nexus" / "reports" / "wiki_writeback_report.json"
     }
 
+    print(f"📊 [Wiki-Sync] Status: {wiki_sync_status}")
     # Drift Summary
     if reports["drift"].exists():
         try:
@@ -141,6 +164,11 @@ def main():
     if not run_lesson_check(dry_run=args.dry_run):
         if not args.dry_run: sys.exit(1)
 
+    # 0c. Wiki Sync Check
+    wiki_sync_status = run_wiki_sync_check(dry_run=args.dry_run)
+    if wiki_sync_status == "FAIL":
+        if not args.dry_run: sys.exit(1)
+
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
     success, _ = run_step(
         "Wiki Governance Audit",
@@ -173,7 +201,7 @@ def main():
     )
     
     # Report Summaries & Enforcement
-    print_phase_6_summaries()
+    print_phase_6_summaries(wiki_sync_status=wiki_sync_status)
 
     reports = {
         "drift": ROOT / ".nexus" / "reports" / "wiki_drift_report.json",
