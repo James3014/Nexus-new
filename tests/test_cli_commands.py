@@ -71,9 +71,14 @@ def test_cli_acceptance_check_blocks_when_governance_fails():
 
 import json
 
-def test_cli_closeout_pass(tmp_path):
+def test_cli_closeout_pass(tmp_path, monkeypatch):
     runner = CliRunner()
     contract_file = tmp_path / "done_contract_test.json"
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "scripts.engine.nexus_cli.subprocess.run",
+        lambda *args, **kwargs: MagicMock(returncode=0, stdout='{"ok": true}\n', stderr=""),
+    )
     data = {
         "linter_exit_code": 0,
         "ci_gate_exit_code": 0,
@@ -86,10 +91,20 @@ def test_cli_closeout_pass(tmp_path):
     result = runner.invoke(nexus, ["nexus:closeout", "--contract", str(contract_file)])
     assert result.exit_code == 0
     assert "Hard-Gate successfully cleared" in result.output
+    status_path = tmp_path / ".nexus" / "reports" / "closeout_status.json"
+    assert status_path.exists()
+    status = json.loads(status_path.read_text())
+    assert status["status"] == "PASS"
+    assert status["exit_code"] == 0
 
-def test_cli_closeout_fail(tmp_path):
+def test_cli_closeout_fail(tmp_path, monkeypatch):
     runner = CliRunner()
     contract_file = tmp_path / "fail_contract_test.json"
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "scripts.engine.nexus_cli.subprocess.run",
+        lambda *args, **kwargs: MagicMock(returncode=1, stdout='{"ok": false, "checks": {"linter_ok": false}}\n', stderr=""),
+    )
     data = {
         "linter_exit_code": 1,
         "ci_gate_exit_code": 0,
@@ -104,6 +119,11 @@ def test_cli_closeout_fail(tmp_path):
     # Output should contain the JSON error
     assert '"ok": false' in result.output
     assert '"linter_ok": false' in result.output
+    status_path = tmp_path / ".nexus" / "reports" / "closeout_status.json"
+    assert status_path.exists()
+    status = json.loads(status_path.read_text())
+    assert status["status"] == "FAIL"
+    assert status["exit_code"] != 0
 
 def test_cli_closeout_missing_contract():
     runner = CliRunner()

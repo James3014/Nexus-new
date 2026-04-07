@@ -23,9 +23,70 @@ from nexus.services.cli_commands_service import CliCommandsService
 from nexus.core.skill_compressor import SkillCompressor
 from nexus.services.arweave_uploader import upload_lessons_to_arweave
 import asyncio
+import os
+import concurrent.futures
 from scripts.eternal.slicer import slice_jsonl
 from scripts.eternal.offloader import offload_all_slices
 from scripts.eternal.anchor import write_anchors, download_anchor
+
+import time
+import uuid
+import queue
+import threading
+import atexit
+
+class SingleWriterQueue:
+    """🛡️ [v23:IO] FIFO Background Writer to decouple disk IO from decision flow"""
+    def __init__(self):
+        self._queue = queue.Queue()
+        self._stop_event = threading.Event()
+        self._worker = threading.Thread(target=self._run, daemon=True)
+        self._worker.start()
+
+    def _run(self):
+        while not self._stop_event.is_set() or not self._queue.empty():
+            try:
+                path, content, mode = self._queue.get(timeout=0.1)
+                from pathlib import Path
+                p = Path(path)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with p.open(mode, encoding="utf-8") as f:
+                    f.write(content)
+                self._queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception:
+                pass # Fail silently for async-eligible logs
+
+    def put(self, path, content, mode="a"):
+        if not self._stop_event.is_set():
+            self._queue.put((path, content, mode))
+
+    def flush(self):
+        self._stop_event.set()
+        self._queue.join()
+        if self._worker.is_alive():
+            self._worker.join(timeout=2.0)
+
+# 🌐 Global Single-Writer Instance
+_io_queue = SingleWriterQueue()
+atexit.register(_io_queue.flush)
+
+def _log_perf_span(name, start_ts, end_ts, decision_id, metadata=None):
+    """🛡️ [v23:PerfMonitor] Async-eligible: Put to queue"""
+    try:
+        import json
+        payload = {
+            "span_name": name,
+            "decision_id": decision_id,
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+            "duration_ms": (end_ts - start_ts) * 1000,
+            "metadata": metadata or {}
+        }
+        _io_queue.put("/Users/jameschen/Workspace/nexus/.nexus/metrics/perf_spans.jsonl", json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 @click.group()
 @click.pass_context
@@ -56,7 +117,11 @@ def _run_governance_gate(*, dry_run: bool = True, wiki_drift_enforce_level: str 
     ]
     if dry_run:
         cmd.append("--dry-run")
+    t0 = time.perf_counter()
     res = subprocess.run(cmd)
+    t1 = time.perf_counter()
+    # Note: decision_id is typically not available here, using global/placeholder
+    _log_perf_span("ops.subprocess.gate", t0, t1, "NEXUS_SYSTEM_GATE", {"exit_code": res.returncode})
     return int(getattr(res, "returncode", 1))
 
 @nexus.command(name="nexus:status")
@@ -98,21 +163,36 @@ def learning_sync(peer, pull_eternal):
 @click.option("--contract", default=".nexus/reports/done_contract.json", help="Path to the done contract JSON file")
 def closeout(contract):
     """🛡️ Nexus Closeout Hard-Gate (PASS 報告強制驗證)"""
+    status_path = REPO_ROOT / ".nexus" / "reports" / "closeout_status.json"
+    status_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
         str(REPO_ROOT / "scripts" / "ops" / "closeout_guard.py"),
         "--contract",
         contract,
     ]
+    t0 = time.perf_counter()
     res = subprocess.run(cmd, capture_output=True, text=True)
+    t1 = time.perf_counter()
+    _log_perf_span("ops.subprocess.closeout", t0, t1, "NEXUS_SYSTEM_CLOSEOUT", {"exit_code": res.returncode})
     if res.stdout:
         click.echo(res.stdout, nl=False)
     if res.stderr:
         click.echo(res.stderr, err=True, nl=False)
-        
+
+    payload = {
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "contract_path": str(contract),
+        "exit_code": int(res.returncode),
+        "status": "PASS" if res.returncode == 0 else "FAIL",
+    }
+    # 📥 [Patch B] Async-eligible: Offload status_path write
+    _io_queue.put(str(status_path), json.dumps(payload, ensure_ascii=False, indent=2), mode="w")
+
     if res.returncode != 0:
+        _io_queue.flush() # Ensure flush before exit
         sys.exit(res.returncode)
-    click.echo("✅ [Closeout] PASS: Hard-Gate successfully cleared.")
+    click.echo(f"✅ [Closeout] PASS: Hard-Gate successfully cleared. Status file: {status_path}")
 
 @nexus.group(name="nexus:memory")
 def memory():
@@ -232,21 +312,78 @@ def main_decision(task_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
     """
     🛡️ [v23:MainDecision] The Full Automated Closed-Loop Orchestrator
     """
+    t_start = time.perf_counter()
     from nexus_swarm.wisdom.feedback_api import FeedbackAPI
     from nexus_swarm.guard.consensus_guard import ConsensusGuard
     from nexus_swarm.wisdom.auto_feedback import AutoFeedback
     from nexus_swarm.healing.predictive_healer import PredictiveHealer
     
     # 1. Wisdom Lookup (Prior Knowledge)
+    tw0 = time.perf_counter()
     wisdom_api = FeedbackAPI()
     wisdom_prior_res = wisdom_api.learner.get_decision_bias("global-pattern")
     wisdom_prior = wisdom_prior_res['bypass_score']
+    tw1 = time.perf_counter()
+    _log_perf_span("wisdom.lookup", tw0, tw1, task_id, {"bias_score": wisdom_prior})
     
-    # 2. Risk Assessment + Guard
-    guard = ConsensusGuard()
-    guard_result = guard.validate_scenario(task_id, context, risk_score_prior=0.4)
+    # 2. & 4. Risk Assessment (Parallel Candidate)
+    parallel_enabled = os.getenv("NEXUS_PATCH_C_PARALLEL", "False") == "True"
     
+    if parallel_enabled:
+        # ⚡ [Patch C] Limited Parallelization (Experimental)
+        tg0 = time.perf_counter()
+        th0 = time.perf_counter()
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                guard = ConsensusGuard()
+                healer = PredictiveHealer()
+                
+                f_guard = executor.submit(guard.validate_scenario, task_id, context, risk_score_prior=0.4)
+                f_healer = executor.submit(healer.forecast_risk)
+                
+                # Wait with 3.0s timeout as per spec
+                done, not_done = concurrent.futures.wait([f_guard, f_healer], timeout=3.0)
+                
+                if f_guard in done:
+                    guard_result = f_guard.result()
+                else:
+                    raise TimeoutError("Guard execution timeout")
+                
+                if f_healer in done:
+                    heal_risk = f_healer.result()
+                else:
+                    heal_risk = {'risk': 0.6, 'actions': ['TIMEOUT_RECOVERY'], 'reason': 'HEALER_TIMEOUT'}
+            
+            tg1 = time.perf_counter()
+            th1 = time.perf_counter()
+            _log_perf_span("guard.validate.parallel", tg0, tg1, task_id, {"pass": guard_result['consensus_pass']})
+            _log_perf_span("healer.forecast.parallel", th0, th1, task_id, {"risk": heal_risk['risk']})
+            
+        except Exception as exc:
+            # 🛡️ Fallback to Serial if parallel fails
+            _log_perf_span("patch_c.fallback", time.perf_counter(), time.perf_counter(), task_id, {"reason": str(exc)})
+            guard = ConsensusGuard()
+            guard_result = guard.validate_scenario(task_id, context, risk_score_prior=0.4)
+            healer = PredictiveHealer()
+            heal_risk = healer.forecast_risk()
+    else:
+        # 🛡️ Standard Serial Path (v22.5 Baseline)
+        tg0 = time.perf_counter()
+        guard = ConsensusGuard()
+        guard_result = guard.validate_scenario(task_id, context, risk_score_prior=0.4)
+        tg1 = time.perf_counter()
+        _log_perf_span("guard.validate", tg0, tg1, task_id, {"pass": guard_result['consensus_pass']})
+
+        # 4. Predictive Heal Check
+        th0 = time.perf_counter()
+        healer = PredictiveHealer()
+        heal_risk = healer.forecast_risk()
+        th1 = time.perf_counter()
+        _log_perf_span("healer.forecast", th0, th1, task_id, {"risk": heal_risk['risk']})
+
+    # --- Post-Processing Decision Logic ---
     if not guard_result['consensus_pass']:
+        _log_perf_span("orchestrator.total", t_start, time.perf_counter(), task_id, {"status": "GUARD_VETO"})
         return {'decision': 'HUMAN_REVIEW', 'reason': 'GUARD_VETO', 'risk': guard_result['validation']['risk_score']}
 
     # 3. Auto Feedback Loop (Learning)
@@ -254,19 +391,19 @@ def main_decision(task_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
     if wisdom_prior > 0.8: # High bias pattern detected
         auto_fb.on_false_positive_block(task_id, wisdom_prior)
 
-    # 4. Predictive Heal Check
-    healer = PredictiveHealer()
-    heal_risk = healer.forecast_risk()
     if heal_risk['risk'] > 0.5:
+        _log_perf_span("orchestrator.total", t_start, time.perf_counter(), task_id, {"status": "PRE_HEAL"})
         return {'decision': 'PRE_HEAL', 'actions': heal_risk['actions'], 'reason': 'SYSTEM_STRESS'}
 
     # 5. Final Prod Decision
     risk_score = guard_result.get('validation', {}).get('risk_score_penalty', 0.4)
-    return {
+    decision_out = {
         'decision': 'APPROVE',
         'confidence': 1.0 - min(1.0, risk_score),
         'wisdom_bias': wisdom_prior
     }
+    _log_perf_span("orchestrator.total", t_start, time.perf_counter(), task_id, {"status": "APPROVE"})
+    return decision_out
     res = api.submit_feedback(payload)
     click.echo(json.dumps(res, indent=2))
 
@@ -656,8 +793,11 @@ def swarm_prod_audit(pr):
             })
             manifest["generated_at"] = datetime.now().isoformat()
             
+            tm0 = time.perf_counter()
             with open(manifest_path, "w") as f:
                 json.dump(manifest, f, indent=2)
+            tm1 = time.perf_counter()
+            _log_perf_span("metrics.serialize", tm0, tm1, "NEXUS_MANIFEST_WRITE")
             click.echo("💎 [Evidence] last_handoff.json successfully linked to manifest.json")
 
     # --- Crystallize (C) Phase ---

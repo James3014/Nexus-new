@@ -16,3 +16,18 @@ The `done_contract.json` MUST contain:
 - `changed_files`: Non-empty list of paths
 
 Failure to pass this gate blocks any "PASS" reporting or task finalization.
+
+## 🔧 Gemini+Nexus Stable Invocation (Required for headless runs)
+When invoking Gemini for implementation from automation/headless contexts, use:
+
+```bash
+python3 scripts/ops/gemini_nexus_invoke.py \
+  --preflight \
+  --prompt-file <task_prompt.md> \
+  --report-file .nexus/reports/gemini_invoke_report.json
+```
+
+Why:
+- prevents concurrent overlapping Gemini runs (single-flight lock)
+- detects `AUTH_LOOP` early instead of hanging long tasks
+- applies timeout + retry policy with explicit failure reason

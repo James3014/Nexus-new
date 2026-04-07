@@ -71,6 +71,21 @@ def run_wiki_sync_check(dry_run: bool):
             print(f"❌ Wiki Sync Check FAILED (Return Code: {res.returncode})")
         return "FAIL"
 
+def run_closeout_contract_check(dry_run: bool, contract_path: str):
+    print(f"\n🚀 [CI-Gate] Running Closeout Contract Check {'(Dry-run)' if dry_run else ''}...")
+    res = subprocess.run(
+        f'"{VENV_PYTHON}" scripts/ops/closeout_guard.py --contract "{contract_path}"',
+        shell=True,
+    )
+    if res.returncode == 0:
+        print("✅ Closeout Contract Check PASSED")
+        return True
+    if dry_run:
+        print(f"❌ [DRY-RUN-BLOCK] Closeout Contract Check FAILED (Return Code: {res.returncode})")
+    else:
+        print(f"❌ [CI-BLOCK] Closeout Contract Check FAILED (Return Code: {res.returncode})")
+    return False
+
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
     checks = {
@@ -149,10 +164,17 @@ def main():
     parser.add_argument("--wiki-drift-enforce-level", choices=["off", "warn", "p0"], default="warn", help="Drift enforcement level")
     parser.add_argument("--wiki-capability-enforce-level", choices=["off", "warn", "strict"], default="warn", help="Capability enforcement level")
     parser.add_argument("--wiki-eval-enforce-level", choices=["off", "warn", "strict"], default="warn", help="Eval regression enforcement level")
+    parser.add_argument("--require-closeout-contract", action="store_true", help="Block CI if done contract closeout check fails")
+    parser.add_argument("--closeout-contract-path", default=".nexus/reports/done_contract.json", help="Path to done contract JSON")
     args = parser.parse_args()
 
     if args.dry_run:
-        sys.exit(run_dry_run())
+        dry_exit = run_dry_run()
+        if args.require_closeout_contract:
+            closeout_ok = run_closeout_contract_check(dry_run=True, contract_path=args.closeout_contract_path)
+            if not closeout_ok:
+                dry_exit = 1
+        sys.exit(dry_exit)
 
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
     
@@ -168,6 +190,11 @@ def main():
     wiki_sync_status = run_wiki_sync_check(dry_run=args.dry_run)
     if wiki_sync_status == "FAIL":
         if not args.dry_run: sys.exit(1)
+
+    if args.require_closeout_contract:
+        closeout_ok = run_closeout_contract_check(dry_run=args.dry_run, contract_path=args.closeout_contract_path)
+        if not closeout_ok and not args.dry_run:
+            sys.exit(1)
 
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
     success, _ = run_step(
