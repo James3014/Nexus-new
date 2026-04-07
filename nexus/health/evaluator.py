@@ -17,10 +17,12 @@ class HealthEvaluator:
         對當前狀態執行完整健康評估內容及對等。
         """
         snapshot = self.scorer.apply_snapshot(state)
+        # 修正為屬性存取 (v2.2.1 Object Scale)
+        score = snapshot.overall_score if hasattr(snapshot, "overall_score") else 0.0
         return {
-            "score": snapshot.get("overall_score", 0.0),
+            "score": score,
             "snapshot": snapshot,
-            "status": "healthy" if snapshot.get("overall_score", 0.0) > 80.0 else "degraded"
+            "status": "healthy" if score > 80.0 else "degraded"
         }
 
     def diagnose_drift(self, state: dict, baseline: dict) -> typing.Dict[str, typing.Any]:

@@ -50,8 +50,8 @@ class HealthScorer:
         snapshot = cls.build_snapshot(state)
         
         # 2. 應用硬化邏輯 (Hardening Logic)
-        plan_density = state.metadata.get("plan_density_score", 1.0)
-        thinking_depth = state.metadata.get("thinking_depth_score", 1.0)
+        plan_density = state.metadata.get("plan_density_score", 0.0)
+        thinking_depth = state.metadata.get("thinking_depth_score", 0.0)
         
         # 取得 build_snapshot 產出的各項分數
         overall = snapshot.overall_score

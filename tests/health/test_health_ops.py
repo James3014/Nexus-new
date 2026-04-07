@@ -31,7 +31,7 @@ def test_run_self_check_quick_uses_snapshot(monkeypatch, tmp_path):
     engine = _engine(tmp_path)
     monkeypatch.setattr(
         "nexus.health.ops.HealthScorer.apply_snapshot",
-        lambda state: _FakeSnapshot(overall_score=87.5, status="HEALTHY"),
+        lambda self, state: _FakeSnapshot(overall_score=87.5, status="HEALTHY"),
     )
 
     result = run_self_check(engine, level="quick")
@@ -49,7 +49,7 @@ def test_run_self_check_high_requires_benchmark_health(monkeypatch, tmp_path):
     engine = _engine(tmp_path)
     monkeypatch.setattr(
         "nexus.health.ops.HealthScorer.apply_snapshot",
-        lambda state: _FakeSnapshot(overall_score=88.0, status="WARNING"),
+        lambda self, state: _FakeSnapshot(overall_score=88.0, status="WARNING"),
     )
     engine.run_benchmark.return_value = [
         {"task_id": "OFF-001", "status": "PASS", "health": 93.33},
@@ -73,11 +73,11 @@ def test_run_self_heal_dry_run_only_suggests(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "nexus.health.ops.HealthScorer.apply_snapshot",
-        lambda current: _FakeSnapshot(overall_score=42.0, status="CRITICAL"),
+        lambda self, current: _FakeSnapshot(overall_score=42.0, status="CRITICAL"),
     )
     monkeypatch.setattr(
         "nexus.health.ops.HealthDiagnostics.diagnose",
-        lambda current, snapshot: HealthDiagnosis(kind="audit_failure", summary="audit failed"),
+        lambda self, current, snapshot: HealthDiagnosis(kind="audit_failure", summary="audit failed"),
     )
     monkeypatch.setattr(
         "nexus.health.ops.RepairPlanner.build_plan",
@@ -224,7 +224,7 @@ def test_run_health_explain_returns_integrated_view(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "nexus.health.ops.HealthScorer.apply_snapshot",
-        lambda current: _FakeSnapshot(overall_score=93.0, status="HEALTHY"),
+        lambda self, current: _FakeSnapshot(overall_score=93.0, status="HEALTHY"),
     )
 
     result = run_health_explain(engine)
@@ -243,7 +243,7 @@ def test_run_health_explain_alignment_zero_without_history(monkeypatch, tmp_path
     engine = _engine(tmp_path)
     monkeypatch.setattr(
         "nexus.health.ops.HealthScorer.apply_snapshot",
-        lambda current: _FakeSnapshot(overall_score=50.0, status="WARNING"),
+        lambda self, current: _FakeSnapshot(overall_score=50.0, status="WARNING"),
     )
     result = run_health_explain(engine)
     assert result.adversarial_metrics["gan_alignment_score"] == 0.0
@@ -258,7 +258,7 @@ def test_run_health_explain_appends_time_series_log(monkeypatch, tmp_path):
     engine = _engine(tmp_path)
     monkeypatch.setattr(
         "nexus.health.ops.HealthScorer.apply_snapshot",
-        lambda current: _FakeSnapshot(overall_score=81.0, status="WARNING"),
+        lambda self, current: _FakeSnapshot(overall_score=81.0, status="WARNING"),
     )
 
     run_health_explain(engine)

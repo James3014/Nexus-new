@@ -6,6 +6,7 @@ from nexus.core.state_contracts import NexusState, HealthMetrics
 from nexus.health.models import HealthDiagnosis, HealthSnapshot, HealthTrigger, PhaseScore, RepairExecutionResult
 from nexus.health.service import SelfHealService
 from nexus.services.memory import FaultLesson
+from nexus.health.scoring import HealthScorer
 
 
 class _ExecutorStub:
@@ -122,7 +123,7 @@ def test_self_heal_service_records_failed_execution(monkeypatch, tmp_path):
     assert state.metadata["auto_repair_last_result"]["cycle_status"] == "failed"
 
 
-def test_self_heal_service_ingests_benchmark_evidence(tmp_path):
+def test_self_heal_service_ingests_benchmark_evidence(monkeypatch, tmp_path):
     state = NexusState(
         task_id="heal-evidence",
         health_metrics=HealthMetrics(last_check_at=datetime.now(), status="WARNING"),
@@ -144,6 +145,13 @@ def test_self_heal_service_ingests_benchmark_evidence(tmp_path):
         )
     )
 
+    original_apply = HealthScorer.apply_snapshot
+
+    def fake_apply_after(s):
+        s.metadata.update({"thinking_depth_score": 1.0, "plan_density_score": 1.0})
+        return original_apply(s)
+
+    monkeypatch.setattr("nexus.health.service.HealthScorer.apply_snapshot", fake_apply_after)
     cycle = SelfHealService(Path(tmp_path), executor=executor).run_cycle(state)
 
     assert cycle.status == "repaired"
