@@ -94,6 +94,26 @@ def learning_sync(peer, pull_eternal):
     from nexus.services.federated_learning import sync_federated_lessons
     asyncio.run(sync_federated_lessons(REPO_ROOT, peer=peer, pull_eternal=pull_eternal))
 
+@nexus.command(name="nexus:closeout")
+@click.option("--contract", default=".nexus/reports/done_contract.json", help="Path to the done contract JSON file")
+def closeout(contract):
+    """🛡️ Nexus Closeout Hard-Gate (PASS 報告強制驗證)"""
+    cmd = [
+        sys.executable,
+        str(REPO_ROOT / "scripts" / "ops" / "closeout_guard.py"),
+        "--contract",
+        contract,
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.stdout:
+        click.echo(res.stdout, nl=False)
+    if res.stderr:
+        click.echo(res.stderr, err=True, nl=False)
+        
+    if res.returncode != 0:
+        sys.exit(res.returncode)
+    click.echo("✅ [Closeout] PASS: Hard-Gate successfully cleared.")
+
 @nexus.group(name="nexus:memory")
 def memory():
     """🛡️ 向量記憶體管理 (LanceDB)"""

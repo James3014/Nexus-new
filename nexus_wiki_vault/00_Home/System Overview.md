@@ -2,7 +2,7 @@
 '- [[MUSE_ENGINE_SPEC|v23 Wisdom]] notes [Source': '[[MUSE_ENGINE_SPEC|MUSE_ENGINE_SPEC]]]'
 aliases: '[Nexus Overview, Home, NEXUS_OS]'
 confidence: high
-last_compiled: '2026-04-06'
+last_compiled: '2026-04-07'
 owner: agent
 raw_sources: ''
 related_pages: ''
@@ -92,6 +92,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Ops - Wiki Drift Audit]]**: 實體與文檔漂移監控。
 - **[[Ops - Wiki Link Integrity]]**: 連結完整性與孤兒頁。
 - **[[Ops - Reference Boundary and Archive Policy]]**: Reference 保留邊界與封存治理。
+- **[[Ops - Closeout Hard Gate]]**: 完成回報前的 done contract 阻斷閘門。
 - **[[Ops - Ownership and Review SLA]]**: 頁面所有權與編校年資平衡。
 - **[[Ops - Truth Claims Register]]**: 真相宣稱與自動化驗證。
 - **[[Ops - Governance Changelog]]**: 治理變更歷史路徑。

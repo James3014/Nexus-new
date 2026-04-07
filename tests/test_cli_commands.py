@@ -67,3 +67,46 @@ def test_cli_acceptance_check_blocks_when_governance_fails():
         result = runner.invoke(nexus, ["nexus:acceptance-check", "--window", "10"])
     assert result.exit_code != 0
     assert "Governance gate failed before acceptance-check" in result.output
+
+
+import json
+
+def test_cli_closeout_pass(tmp_path):
+    runner = CliRunner()
+    contract_file = tmp_path / "done_contract_test.json"
+    data = {
+        "linter_exit_code": 0,
+        "ci_gate_exit_code": 0,
+        "required_tests_passed": True,
+        "commit_sha": "abc123def456",
+        "changed_files": ["file1.py"]
+    }
+    contract_file.write_text(json.dumps(data))
+    
+    result = runner.invoke(nexus, ["nexus:closeout", "--contract", str(contract_file)])
+    assert result.exit_code == 0
+    assert "Hard-Gate successfully cleared" in result.output
+
+def test_cli_closeout_fail(tmp_path):
+    runner = CliRunner()
+    contract_file = tmp_path / "fail_contract_test.json"
+    data = {
+        "linter_exit_code": 1,
+        "ci_gate_exit_code": 0,
+        "required_tests_passed": True,
+        "commit_sha": "abc123def456",
+        "changed_files": ["file1.py"]
+    }
+    contract_file.write_text(json.dumps(data))
+    
+    result = runner.invoke(nexus, ["nexus:closeout", "--contract", str(contract_file)])
+    assert result.exit_code != 0
+    # Output should contain the JSON error
+    assert '"ok": false' in result.output
+    assert '"linter_ok": false' in result.output
+
+def test_cli_closeout_missing_contract():
+    runner = CliRunner()
+    result = runner.invoke(nexus, ["nexus:closeout", "--contract", "non_existent.json"])
+    assert result.exit_code != 0
+    assert "Contract file missing" in result.output
