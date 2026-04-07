@@ -9,12 +9,12 @@ raw_sources:
 - nexus/services/memory_repository.py
 - nexus/services/memory_embedding.py
 related_pages:
-- '[[Ops - Wisdom Layer|Ops - Wisdom Layer]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[Ops - Wisdom Layer](../06_Ops/Ops - Wisdom Layer.md)'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
-- '[[State - Schemas|State - Schemas]]'
+- '[State - Schemas](../04_State/State - Schemas.md)'
 source_of_truth: nexus/services/memory_indexer.py
 status: active
 tags:
@@ -49,7 +49,7 @@ version_scope:
 
 ## Downstream
 - **Wisdom Lookup**: 提供相似模式檢索與決策 Bias。 [Source: nexus_cli.py]
-- **[[Ops - Wisdom Layer]]**: 作為智慧治理的底層基礎設施。
+- **[Ops - Wisdom Layer](../06_Ops/Ops - Wisdom Layer.md)**: 作為智慧治理的底層基礎設施。
 
 ## Version Boundary Hardening (版本邊界硬化)
 > [!IMPORTANT]
@@ -93,4 +93,4 @@ version_scope:
 - [ ] **Search Fallback**: 當 FTS (Full Text Search) 失效時的 Regex 降級邏輯。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

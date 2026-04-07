@@ -13,10 +13,10 @@ priority: P2
 version: v1.0.2-Refinement
 visibility: internal
 landscape: structural
-path: nexus_wiki_vault/01_Core/Specs/MUSE_PROTO.md
+path: /MUSE_PROTO.md
 ---
-Waiver: 00_Home/[[System Overview]].md
-[source: 00_Home/[[System Overview]].md]
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../00_Home/System Overview.md).md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
 
@@ -88,4 +88,4 @@ Security Seal: VERIFIED-20260331-FELO-HARDENED
 
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

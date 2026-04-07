@@ -1,88 +1,3006 @@
 {
   "skills": {
     "codebase_investigator": {
-      "phases": ["D"],
-      "langs": ["*"],
-      "triggers": ["修正", "最新", "搜尋", "位移", "large_stacktrace", "hotspot_logic"],
+      "phases": [
+        "D"
+      ],
+      "langs": [
+        "*"
+      ],
+      "triggers": [
+        "修正",
+        "最新",
+        "搜尋",
+        "位移",
+        "large_stacktrace",
+        "hotspot_logic"
+      ],
       "description": "Deep analysis of codebase for diagnostic phase."
     },
     "self-healer": {
-      "phases": ["R"],
-      "langs": ["python"],
-      "triggers": ["repeated_quality_issues"],
+      "phases": [
+        "R"
+      ],
+      "langs": [
+        "python"
+      ],
+      "triggers": [
+        "repeated_quality_issues"
+      ],
       "description": "Autonomous repair of code with repetitive quality failures."
     },
     "git-manager": {
-      "phases": ["P", "C"],
-      "langs": ["*"],
-      "triggers": ["worktree_needed", "git_commit"],
+      "phases": [
+        "P",
+        "C"
+      ],
+      "langs": [
+        "*"
+      ],
+      "triggers": [
+        "worktree_needed",
+        "git_commit"
+      ],
       "description": "Git state and worktree management."
     },
     "aibdd.spec.user-story.gen": {
-      "phases": ["P"],
-      "langs": ["*"],
-      "triggers": ["fuzzy_request"],
+      "phases": [
+        "P"
+      ],
+      "langs": [
+        "*"
+      ],
+      "triggers": [
+        "fuzzy_request"
+      ],
       "description": "Generate formalized user stories from fuzzy requests."
     },
     "aibdd.auto.python.e2e.red/green": {
-      "phases": ["R"],
-      "langs": ["python"],
-      "triggers": ["new_feature"],
+      "phases": [
+        "R"
+      ],
+      "langs": [
+        "python"
+      ],
+      "triggers": [
+        "new_feature"
+      ],
       "description": "Automated Red/Green TDD cycle for python."
     },
     "common.gen.pseudo-code": {
-      "phases": ["D"],
-      "langs": ["*"],
-      "triggers": ["hard_to_read_logic"],
+      "phases": [
+        "D"
+      ],
+      "langs": [
+        "*"
+      ],
+      "triggers": [
+        "hard_to_read_logic"
+      ],
       "description": "Generate readable pseudo-code for complex logic blocks."
     },
     "openui-ui-gen": {
-      "phases": ["P", "D"],
-      "langs": ["html", "js"],
-      "triggers": ["ui", "dashboard", "design", "interface", "frontend", "warroom"],
+      "phases": [
+        "P",
+        "D"
+      ],
+      "langs": [
+        "html",
+        "js"
+      ],
+      "triggers": [
+        "ui",
+        "dashboard",
+        "design",
+        "interface",
+        "frontend",
+        "warroom"
+      ],
       "description": "AI-powered UI generation using OpenUI. Generates HTML/JS from nl descriptions."
     },
     "ui-validator": {
-      "phases": ["R", "A"],
-      "langs": ["html", "js"],
-      "triggers": ["test", "validation", "crash", "interaction", "ui_bug"],
+      "phases": [
+        "R",
+        "A"
+      ],
+      "langs": [
+        "html",
+        "js"
+      ],
+      "triggers": [
+        "test",
+        "validation",
+        "crash",
+        "interaction",
+        "ui_bug"
+      ],
       "description": "Playwright-based UI interaction validation for cross-browser stability."
     },
     "nexus-design-polish": {
-      "phases": ["D", "A"],
-      "langs": ["html", "css", "js"],
-      "triggers": ["polish", "audit", "ui_ux", "impeccable", "design"],
+      "phases": [
+        "D",
+        "A"
+      ],
+      "langs": [
+        "html",
+        "css",
+        "js"
+      ],
+      "triggers": [
+        "polish",
+        "audit",
+        "ui_ux",
+        "impeccable",
+        "design"
+      ],
       "description": "Premium UI design audit and polish based on Impeccable Arsenal."
     },
     "nexus-bdd-automation": {
-      "phases": ["P", "R"],
-      "langs": ["python", "java"],
-      "triggers": ["spec", "gherkin", "bdd", "user_story", "automation"],
+      "phases": [
+        "P",
+        "R"
+      ],
+      "langs": [
+        "python",
+        "java"
+      ],
+      "triggers": [
+        "spec",
+        "gherkin",
+        "bdd",
+        "user_story",
+        "automation"
+      ],
       "description": "Automated requirement engineering and BDD test generation."
     },
     "nexus-debug-expert": {
-      "phases": ["D", "R"],
-      "langs": ["*"],
-      "triggers": ["debug", "root_cause", "crash", "fix", "rca", "修復", "對接"],
+      "phases": [
+        "D",
+        "R"
+      ],
+      "langs": [
+        "*"
+      ],
+      "triggers": [
+        "debug",
+        "root_cause",
+        "crash",
+        "fix",
+        "rca",
+        "修復",
+        "對接"
+      ],
       "description": "Systematic 4-stage root cause analysis based on Superpowers v5."
     },
     "nexus-skill-creator": {
-      "phases": ["D", "A", "C"],
-      "langs": ["markdown", "python"],
-      "triggers": ["create_skill", "optimize_skill", "repair_skill", "eval", "benchmark"],
+      "phases": [
+        "D",
+        "A",
+        "C"
+      ],
+      "langs": [
+        "markdown",
+        "python"
+      ],
+      "triggers": [
+        "create_skill",
+        "optimize_skill",
+        "repair_skill",
+        "eval",
+        "benchmark"
+      ],
       "description": "Skill creation, optimization, and repair based on Skill-Creator protocol."
     },
     "nexus-planner-expert": {
-      "phases": ["P"],
-      "langs": ["markdown"],
-      "triggers": ["summary", "摘要", "report", "plan", "writing-plans", "architecture", "implementation_plan", "roadmap", "計畫", "方案"],
+      "phases": [
+        "P"
+      ],
+      "langs": [
+        "markdown"
+      ],
+      "triggers": [
+        "summary",
+        "摘要",
+        "report",
+        "plan",
+        "writing-plans",
+        "architecture",
+        "implementation_plan",
+        "roadmap",
+        "計畫",
+        "方案"
+      ],
       "description": "Atomic plan writing with Pre-Action Recall protocol based on Superpowers v5."
     },
     "nexus-knowledge-graph": {
-      "phases": ["D", "A", "O"],
-      "langs": ["markdown", "python"],
-      "triggers": ["graph", "topology", "drift", "wiki", "audit", "scan", "investigate", "知識圖譜"],
+      "phases": [
+        "D",
+        "A",
+        "O"
+      ],
+      "langs": [
+        "markdown",
+        "python"
+      ],
+      "triggers": [
+        "graph",
+        "topology",
+        "drift",
+        "wiki",
+        "audit",
+        "scan",
+        "investigate",
+        "知識圖譜"
+      ],
       "description": "High-precision knowledge graph builder for documentation and code paths. Integrated via Graphify."
+    },
+    "memory-sync": {
+      "description": "\"🧠 大腦靈魂同步 (Memory Sync)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "sync",
+        "nexus",
+        "brain"
+      ]
+    },
+    "openclaw-map": {
+      "description": "\"OpenClaw Map\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "map",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-browse": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "browse",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-ci-cd-and-automation": {
+      "description": "Automates CI/CD pipeline setup. Use when setting up or modifying build and deployment pipelines. Use when you need to automate quality gates, configure test runners in CI, or establish deployment strategies.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "automation",
+        "nexus",
+        "brain"
+      ]
+    },
+    "using-git-worktrees": {
+      "description": "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - creates isolated git worktrees with smart directory selection and safety verification",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "worktrees",
+        "nexus",
+        "brain"
+      ]
+    },
+    "japan-ski-radar": {
+      "description": "\"⛷️ 日本雪場偵查雷達 (Japan Ski Radar)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "radar",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-debugging-and-error-recovery": {
+      "description": "Guides systematic root-cause debugging. Use when tests fail, builds break, behavior doesn't match expectations, or you encounter any unexpected error. Use when you need a systematic approach to finding and fixing the root cause rather than guessing.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "recovery",
+        "nexus",
+        "brain"
+      ]
+    },
+    "skill-manager": {
+      "description": "\"🛠️ 核心技能: Skill Manager\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "manager",
+        "nexus",
+        "brain"
+      ]
+    },
+    "autoresearch": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "autoresearch",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.handlers.success-failure": {
+      "description": "\"Success-Failure-Handler (E2E Cucumber Version)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "failure",
+        "nexus",
+        "brain"
+      ]
+    },
+    "nightly-sync": {
+      "description": "\"🛠️ 核心技能: Nightly Sync\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "sync",
+        "nexus",
+        "brain"
+      ]
+    },
+    "animate": {
+      "description": "Review a feature and enhance it with purposeful animations, micro-interactions, and motion effects that improve usability and delight.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "animate",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.code-quality": {
+      "description": "\"SOLID 設計原則\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "quality",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-design-consultation": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "consultation",
+        "nexus",
+        "brain"
+      ]
+    },
+    "quieter": {
+      "description": "Tone down overly bold or visually aggressive designs. Reduces intensity while maintaining design quality and impact.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "quieter",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.handlers.readmodel-then": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "then",
+        "nexus",
+        "brain"
+      ]
+    },
+    "tana-curator": {
+      "description": "\"🛠️ 核心技能: Tana Curator\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "curator",
+        "nexus",
+        "brain"
+      ]
+    },
+    "ledger": {
+      "description": "\"語意記帳技能 (Ledger Skill)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "ledger",
+        "nexus",
+        "brain"
+      ]
+    },
+    "inspiration-curator": {
+      "description": "\"🛠️ 核心技能: Inspiration Curator\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "curator",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-guard": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "guard",
+        "nexus",
+        "brain"
+      ]
+    },
+    "test-driven-development": {
+      "description": "Use when implementing any feature or bugfix, before writing implementation code",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "development",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.bdd.feature.refine": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.bdd.feature.refine",
+        "nexus",
+        "brain"
+      ]
+    },
+    "core": {
+      "description": "\"🛠️ 核心技能: Core\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "core",
+        "nexus",
+        "brain"
+      ]
+    },
+    "inbox-organizer": {
+      "description": "\"這裡目前由 Hook 控制邏輯，我們建立一個殼\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "organizer",
+        "nexus",
+        "brain"
+      ]
+    },
+    "optimize": {
+      "description": "Improve interface performance across loading speed, rendering, animations, images, and bundle size. Makes experiences faster and smoother.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "optimize",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-plan-ceo-review": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "review",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-qa-only": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "only",
+        "nexus",
+        "brain"
+      ]
+    },
+    "pinchtab": {
+      "description": "\"Pinchtab\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "pinchtab",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-context-engineering": {
+      "description": "Optimizes agent context setup. Use when starting a new session, when agent output quality degrades, when switching between tasks, or when you need to configure rules files and context for a project.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "engineering",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.bdd.feature.analyze": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.bdd.feature.analyze",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.handlers.aggregate-then": {
+      "description": "\"Aggregate-Then-Handler (E2E Cucumber Version)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "then",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-security-and-hardening": {
+      "description": "Hardens code against vulnerabilities. Use when handling user input, authentication, data storage, or external integrations. Use when building any feature that accepts untrusted data, manages user sessions, or interacts with third-party services.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "hardening",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-incremental-implementation": {
+      "description": "Delivers changes incrementally. Use when implementing any feature or change that touches more than one file. Use when you're about to write a large amount of code at once, or when a task feels too big to land in one step.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "implementation",
+        "nexus",
+        "brain"
+      ]
+    },
+    "idea-generator": {
+      "description": "\"創意發電機 (Idea Generator)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "generator",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.bdd.feature.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.bdd.feature.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-git-workflow-and-versioning": {
+      "description": "Structures git workflow practices. Use when making any code change. Use when committing, branching, resolving conflicts, or when you need to organize work across multiple parallel streams.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "versioning",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-spec-driven-development": {
+      "description": "Creates specs before coding. Use when starting a new project, feature, or significant change and no specification exists yet. Use when requirements are unclear, ambiguous, or only exist as a vague idea.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "development",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.refactor": {
+      "description": "\"Refactor Stage\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.java.e2e.refactor",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-plan-eng-review": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "review",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-frontend-ui-engineering": {
+      "description": "Builds production-quality UIs. Use when building or modifying user-facing interfaces. Use when creating components, implementing layouts, managing state, or when the output needs to look and feel production-quality rather than AI-generated.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "engineering",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.tech-stack.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "stack.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "clarify": {
+      "description": "Improve unclear UX copy, error messages, microcopy, labels, and instructions. Makes interfaces easier to understand and use.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "clarify",
+        "nexus",
+        "brain"
+      ]
+    },
+    "using-superpowers": {
+      "description": "Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "superpowers",
+        "nexus",
+        "brain"
+      ]
+    },
+    "dispatching-parallel-agents": {
+      "description": "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "agents",
+        "nexus",
+        "brain"
+      ]
+    },
+    "ski-diagnostician": {
+      "description": "\"🏂 滑雪技術診斷大師 (Ski Diagnostician)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "diagnostician",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.red": {
+      "description": "\"角色\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.java.e2e.red",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-upgrade": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "upgrade",
+        "nexus",
+        "brain"
+      ]
+    },
+    "auto-skill": {
+      "description": "\"🧬 Muse-Core 自我成長協議 (Lvl 15) - 監測執行訊號、結晶複用經驗、優化知識索引的自我進化引擎。\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "skill",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-deprecation-and-migration": {
+      "description": "Manages deprecation and migration. Use when removing old systems, APIs, or features. Use when migrating users from one implementation to another. Use when deciding whether to maintain or sunset existing code.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "migration",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-investigate": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "investigate",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-documentation-and-adrs": {
+      "description": "Records decisions and documentation. Use when making architectural decisions, changing public APIs, shipping features, or when you need to record context that future engineers and agents will need to understand the codebase.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "adrs",
+        "nexus",
+        "brain"
+      ]
+    },
+    "healthcheck": {
+      "description": "\"🛠️ 核心技能: Healthcheck\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "healthcheck",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-code-review-and-quality": {
+      "description": "Conducts multi-axis code review. Use before merging any change. Use when reviewing code written by yourself, another agent, or a human. Use when you need to assess code quality across multiple dimensions before it enters the main branch.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "quality",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.schema-analysis": {
+      "description": "\"Schema Analysis\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "analysis",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-document-release": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "release",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "gstack",
+        "nexus",
+        "brain"
+      ]
+    },
+    "web-actuator": {
+      "description": "\"Web 執行器技能 (Web Actuator)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "actuator",
+        "nexus",
+        "brain"
+      ]
+    },
+    "notebooklm-skill": {
+      "description": "\"NotebookLM Research Assistant Skill\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "skill",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-careful": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "careful",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-autoplan": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "autoplan",
+        "nexus",
+        "brain"
+      ]
+    },
+    "skills-security-check": {
+      "description": "\"Skill: Skills-Security-Check\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "check",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-review": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "review",
+        "nexus",
+        "brain"
+      ]
+    },
+    "executing-plans": {
+      "description": "Use when you have a written implementation plan to execute in a separate session with review checkpoints",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "plans",
+        "nexus",
+        "brain"
+      ]
+    },
+    "distill": {
+      "description": "Strip designs to their essence by removing unnecessary complexity. Great design is simple, powerful, and clean.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "distill",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-design-review": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "review",
+        "nexus",
+        "brain"
+      ]
+    },
+    "link-smelter": {
+      "description": "\"📜 執行鐵律\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "smelter",
+        "nexus",
+        "brain"
+      ]
+    },
+    "delight": {
+      "description": "Add moments of joy, personality, and unexpected touches that make interfaces memorable and enjoyable to use. Elevates functional to delightful.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "delight",
+        "nexus",
+        "brain"
+      ]
+    },
+    "finishing-a-development-branch": {
+      "description": "Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "branch",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-plan-design-review": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "review",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.bdd.scenario.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.bdd.scenario.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "teach-impeccable": {
+      "description": "One-time setup that gathers design context for your project and saves it to your AI config file. Run once to establish persistent design guidelines.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "impeccable",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.handlers.success-failure": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "failure",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-performance-optimization": {
+      "description": "Optimizes application performance. Use when performance requirements exist, when you suspect performance regressions, or when Core Web Vitals or load times need improvement. Use when profiling reveals bottlenecks that need fixing.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "optimization",
+        "nexus",
+        "brain"
+      ]
+    },
+    "daily-innovation": {
+      "description": "\"python3 /Users/jameschen/.openclaw/skills/idea-generator/scripts/dailyinnovation.py\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "innovation",
+        "nexus",
+        "brain"
+      ]
+    },
+    "onboard": {
+      "description": "Design or improve onboarding flows, empty states, and first-time user experiences. Helps users get started successfully and understand value quickly.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "onboard",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.handlers.command": {
+      "description": "\"Command-Handler (E2E Cucumber Version)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.java.e2e.handlers.command",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-retro": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "retro",
+        "nexus",
+        "brain"
+      ]
+    },
+    "scrapling-agent": {
+      "description": "\"Scrapling Agent Skill\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "agent",
+        "nexus",
+        "brain"
+      ]
+    },
+    "apple-reminders": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "reminders",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.control-flow": {
+      "description": "\"Control Flow\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "flow",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.unittest.pytest-bdd.step": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "bdd.step",
+        "nexus",
+        "brain"
+      ]
+    },
+    "heartbeat": {
+      "description": "\"🛠️ 核心技能: Heartbeat\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "heartbeat",
+        "nexus",
+        "brain"
+      ]
+    },
+    "normalize": {
+      "description": "Normalize design to match your design system and ensure consistency",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "normalize",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-code-simplification": {
+      "description": "Simplifies code for clarity. Use when refactoring code for clarity without changing behavior. Use when code works but is harder to read, maintain, or extend than it should be. Use when reviewing code that has accumulated unnecessary complexity.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "simplification",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.refactor": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.python.e2e.refactor",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.red": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.python.e2e.red",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.unittest.pytest-bdd.feature": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "bdd.feature",
+        "nexus",
+        "brain"
+      ]
+    },
+    "felo-cli": {
+      "description": "\"Use this skill for Felo Open Platform chat workflows in this repository.\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "cli",
+        "nexus",
+        "brain"
+      ]
+    },
+    "evolution-linker": {
+      "description": "\"🛠️ 核心技能: Evolution Linker\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "linker",
+        "nexus",
+        "brain"
+      ]
+    },
+    "tana": {
+      "description": "\"🛠️ 核心技能: Tana\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "tana",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-codex": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "codex",
+        "nexus",
+        "brain"
+      ]
+    },
+    "cooking-lab": {
+      "description": "\"🛠️ 核心技能: Cooking Lab\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "lab",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-unfreeze": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "unfreeze",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.handlers.aggregate-then": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "then",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.ds.analyze": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.ds.analyze",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-ship": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "ship",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-planning-and-task-breakdown": {
+      "description": "Breaks work into ordered tasks. Use when you have a spec or clear requirements and need to break work into implementable tasks. Use when a task feels too large to start, when you need to estimate scope, or when parallel work is possible.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "breakdown",
+        "nexus",
+        "brain"
+      ]
+    },
+    "harden": {
+      "description": "Improve interface resilience through better error handling, i18n support, text overflow handling, and edge case management. Makes interfaces robust and production-ready.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "harden",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-setup-deploy": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "deploy",
+        "nexus",
+        "brain"
+      ]
+    },
+    "brainstorming": {
+      "description": "\"You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "brainstorming",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.handlers.aggregate-given": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "given",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-benchmark": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "benchmark",
+        "nexus",
+        "brain"
+      ]
+    },
+    "polish": {
+      "description": "Final quality pass before shipping. Fixes alignment, spacing, consistency, and detail issues that separate good from great.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "polish",
+        "nexus",
+        "brain"
+      ]
+    },
+    "session-compactor": {
+      "description": "\"🛠️ 核心技能: Session Compactor\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "compactor",
+        "nexus",
+        "brain"
+      ]
+    },
+    "scheduler-manager": {
+      "description": "\"🤖 Scheduler Manager (排程管理器)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "manager",
+        "nexus",
+        "brain"
+      ]
+    },
+    "context-hub-retriever": {
+      "description": "\"透過 Context Hub (chub) 獲取最新、無幻覺的官方 API 文件與技能指引。\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "retriever",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.bdd.feature.diagram": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.bdd.feature.diagram",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.handlers.query": {
+      "description": "\"Query-Handler (E2E Cucumber Version)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.java.e2e.handlers.query",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.schema-analysis": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "analysis",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.diagram.class-diagram.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "diagram.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "context-injector": {
+      "description": "\"🛠️ 核心技能: Context Injector\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "injector",
+        "nexus",
+        "brain"
+      ]
+    },
+    "obsidian-skills": {
+      "description": "\"🛠️ 核心技能: Obsidian Skills\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "skills",
+        "nexus",
+        "brain"
+      ]
+    },
+    "qmd-search": {
+      "description": "\"QMD Search Skill\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "search",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.frontend.msw-api-layer": {
+      "description": "\"角色\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "layer",
+        "nexus",
+        "brain"
+      ]
+    },
+    "skill-creator-advanced": {
+      "description": "在使用者要建立、改版或檢核 skill 時使用。常見觸發像「skill review」「提高 skill 觸發率」「優化 SKILL.md」「補 trigger eval」。輸出可安裝、可測、邊界清楚的 skill；不適用於一次性 prompt 或單一 tool schema。",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "advanced",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gemini-bridge": {
+      "description": "\"🚀 具備記憶的本機 Gemini 橋接\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "bridge",
+        "nexus",
+        "brain"
+      ]
+    },
+    "soul-alignment": {
+      "description": "\"🧬 Muse-Core Soul-Alignment 協議 (Lvl 15)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "alignment",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.step-template": {
+      "description": "\"Step Template\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "template",
+        "nexus",
+        "brain"
+      ]
+    },
+    "idea-reality": {
+      "description": "\"現實檢測過濾器 (Idea Reality Check)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "reality",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-using-agent-skills": {
+      "description": "Discovers and invokes agent skills. Use when starting a session or when you need to discover which skill applies to the current task. This is the meta-skill that governs how all other skills are discovered and invoked.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "skills",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.handlers.readmodel-then": {
+      "description": "\"ReadModel-Then-Handler (E2E Cucumber Version)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "then",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-land-and-deploy": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "deploy",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.handlers.aggregate-given": {
+      "description": "\"Aggregate-Given-Handler (E2E Cucumber Version)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "given",
+        "nexus",
+        "brain"
+      ]
+    },
+    "weather": {
+      "description": "\"🛠️ 核心技能: Weather\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "weather",
+        "nexus",
+        "brain"
+      ]
+    },
+    "extract": {
+      "description": "Extract and consolidate reusable components, design tokens, and patterns into your design system. Identifies opportunities for systematic reuse and enriches your component library.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "extract",
+        "nexus",
+        "brain"
+      ]
+    },
+    "requesting-code-review": {
+      "description": "Use when completing tasks, implementing major features, or before merging to verify work meets requirements",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "review",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.bdd.feature.translate": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.bdd.feature.translate",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.diagram.sequence-diagram.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "diagram.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.prd.detail-req.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "req.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "obsidian": {
+      "description": "\"Obsidian Flavored Markdown Skill (Official Kepano Standard)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "obsidian",
+        "nexus",
+        "brain"
+      ]
+    },
+    "schema-markup": {
+      "description": "When the user wants to add, fix, or optimize schema markup and structured data on their site. Also use when the user mentions \"schema markup,\" \"structured data,\" \"JSON-LD,\" \"rich snippets,\" \"schema.org,\" \"FAQ schema,\" \"product schema,\" \"review schema,\" \"breadcrumb schema,\" \"Google rich results,\" \"knowledge panel,\" \"star ratings in search,\" or \"add structured data.\" Use this whenever someone wants their pages to show enhanced results in Google. For broader SEO issues, see seo-audit. For AI search optimization, see ai-seo.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "markup",
+        "nexus",
+        "brain"
+      ]
+    },
+    "receiving-code-review": {
+      "description": "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative agreement or blind implementation",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "review",
+        "nexus",
+        "brain"
+      ]
+    },
+    "video-tool": {
+      "description": "\"影片影像處理技能 (Video Tool)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "tool",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.handlers.command": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.python.e2e.handlers.command",
+        "nexus",
+        "brain"
+      ]
+    },
+    "audio-notify": {
+      "description": "\"音效通知 (Audio Notify)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "notify",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.step-template": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "template",
+        "nexus",
+        "brain"
+      ]
+    },
+    "writing-skills": {
+      "description": "Use when creating new skills, editing existing skills, or verifying skills work before deployment",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "skills",
+        "nexus",
+        "brain"
+      ]
+    },
+    "critique": {
+      "description": "Evaluate design effectiveness from a UX perspective. Assesses visual hierarchy, information architecture, emotional resonance, and overall design quality with actionable feedback.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "critique",
+        "nexus",
+        "brain"
+      ]
+    },
+    "self-audit": {
+      "description": "\"🛠️ 核心技能: Self Audit\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "audit",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.ds.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.spec.ds.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-qa": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "qa",
+        "nexus",
+        "brain"
+      ]
+    },
+    "apple-notes": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "notes",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-api-and-interface-design": {
+      "description": "Guides stable API and interface design. Use when designing APIs, module boundaries, or any public interface. Use when creating REST or GraphQL endpoints, defining type contracts between modules, or establishing boundaries between frontend and backend.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "design",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-shipping-and-launch": {
+      "description": "Prepares production launches. Use when preparing to deploy to production. Use when you need a pre-launch checklist, when setting up monitoring, when planning a staged rollout, or when you need a rollback strategy.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "launch",
+        "nexus",
+        "brain"
+      ]
+    },
+    "brain-filter": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "filter",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.control-flow": {
+      "description": "\"指令\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "flow",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-browser-testing-with-devtools": {
+      "description": "Tests in real browsers. Use when building or debugging anything that runs in a browser. Use when you need to inspect the DOM, capture console errors, analyze network requests, profile performance, or verify visual output with real runtime data via Chrome DevTools MCP.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "devtools",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-setup-browser-cookies": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "cookies",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.code-quality": {
+      "description": "\"Code Quality\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "quality",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.spec.diagram.activity-diagram.gen": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "diagram.gen",
+        "nexus",
+        "brain"
+      ]
+    },
+    "superpowers": {
+      "description": "\"⚡ Superpowers v5 工程指令集 (Engineering Core × Auto-Skill) - Muse-Core Lvl 14\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "superpowers",
+        "nexus",
+        "brain"
+      ]
+    },
+    "verification-before-completion": {
+      "description": "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "completion",
+        "nexus",
+        "brain"
+      ]
+    },
+    "brain-skill-router": {
+      "description": "🧠 大腦導航中樞 (v23 Eternal) - 用於在 200+ 技能中精確加載工程裝備。",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "router",
+        "nexus",
+        "brain"
+      ]
+    },
+    "food-scout": {
+      "description": "\"🥗 Food Scout (在地美食偵查員)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "scout",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.green": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.python.e2e.green",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.java.e2e.green": {
+      "description": "\"角色\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.java.e2e.green",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-freeze": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "freeze",
+        "nexus",
+        "brain"
+      ]
+    },
+    "common.git.commit": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "common.git.commit",
+        "nexus",
+        "brain"
+      ]
+    },
+    "mac-status": {
+      "description": "\"🛠️ 核心技能: Mac Status\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "status",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-cso": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "cso",
+        "nexus",
+        "brain"
+      ]
+    },
+    "subagent-driven-development": {
+      "description": "Use when executing implementation plans with independent tasks in the current session",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "development",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-test-driven-development": {
+      "description": "Drives development with tests. Use when implementing any logic, fixing any bug, or changing any behavior. Use when you need to prove that code works, when a bug report arrives, or when you're about to modify existing functionality.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "development",
+        "nexus",
+        "brain"
+      ]
+    },
+    "colorize": {
+      "description": "Add strategic color to features that are too monochromatic or lack visual interest. Makes interfaces more engaging and expressive.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "colorize",
+        "nexus",
+        "brain"
+      ]
+    },
+    "mystery-box": {
+      "description": "\"🛠️ 核心技能: Mystery Box\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "box",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-office-hours": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "hours",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.unittest.pytest-bdd.step-template": {
+      "description": "\"Skill Placeholder\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "template",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-canary": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "canary",
+        "nexus",
+        "brain"
+      ]
+    },
+    "gstack-connect-chrome": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "chrome",
+        "nexus",
+        "brain"
+      ]
+    },
+    "as-idea-refine": {
+      "description": "Refines ideas iteratively. Refine ideas through structured divergent and convergent thinking. Use \"idea-refine\" or \"ideate\" to trigger.",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "refine",
+        "nexus",
+        "brain"
+      ]
+    },
+    "reflection": {
+      "description": "\"🛠️ 核心技能: Reflection\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "reflection",
+        "nexus",
+        "brain"
+      ]
+    },
+    "aibdd.auto.python.e2e.handlers.query": {
+      "description": "\"(Content from source)\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "aibdd.auto.python.e2e.handlers.query",
+        "nexus",
+        "brain"
+      ]
+    },
+    "soul-sync": {
+      "description": "\"🛠️ 核心技能: Soul Sync\"",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "sync",
+        "nexus",
+        "brain"
+      ]
+    },
+    "common.git.tree": {
+      "description": "|",
+      "phases": [
+        "P",
+        "R",
+        "D",
+        "V",
+        "A",
+        "C"
+      ],
+      "triggers": [
+        "common.git.tree",
+        "nexus",
+        "brain"
+      ]
     }
   }
 }

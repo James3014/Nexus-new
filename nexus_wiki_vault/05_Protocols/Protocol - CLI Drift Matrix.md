@@ -9,9 +9,9 @@ raw_sources:
 - MUSE-NEXUS Engine Specification v22
 - MUSE-NEXUS Engine Specification v17.1
 related_pages:
-- '[[Protocol - CLI Surface|Protocol - CLI Surface]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[Protocol - CLI Surface](Protocol - CLI Surface.md)'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: scripts/engine/nexus_cli.py
@@ -50,15 +50,15 @@ version_scope:
 | **Diag** | `nexus --diagnose` | `nexus:diagnose` | `nexus:diagnose --risk` | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]]] |
 | **Repair**| `nexus --repair` | `nexus:repair` | `nexus:repair --auto` | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
 | **Audit** | Manual check | `nexus:audit` | `nexus:audit --guard` | [Source: ci_gate.py] |
-| **Knowledge**| `[[MUSE_ENGINE_SPEC|MUSE_SPEC]].md` | `lesson_events.jsonl`| `[[Module - Memory Repository|LanceDB]] Vector` | [Source: memory_indexer.py] |
+| **Knowledge**| `[[MUSE_ENGINE_SPEC|MUSE_SPEC]].md` | `lesson_events.jsonl`| `[LanceDB](../02_Modules/Module - Memory Repository.md) Vector` | [Source: /nexus/services/memory_indexer.py] |
 
 ## Upstream
-- **[[Protocol - CLI Surface]]**: 提供當前版本的命令全集。
-- **[[Source Index]]**: 提供各版本原始規格入口。
+- **[Protocol - CLI Surface](Protocol - CLI Surface.md)**: 提供當前版本的命令全集。
+- **[Source Index](../90_Sources/Source Index.md)**: 提供各版本原始規格入口。
 
 ## Downstream
 - **Orchestrator Decision Layer**: 指導跨版本的命令生成邏輯。 [Code: 00_Home/System Overview.md]
-- **[[System - Unknowns and Conflicts]]**: 登記參數語義漂移產生的邏輯矛盾。
+- **[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)**: 登記參數語義漂移產生的邏輯矛盾。
 
 ## Related modules / files
 - `scripts/engine/nexus_cli.py`: 實體命令實作。 [Code: nexus_cli.py]
@@ -73,4 +73,4 @@ version_scope:
 - [ ] **Default Values**: v23 下預設 `--risk` 等級對 v22 執行流的影響。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

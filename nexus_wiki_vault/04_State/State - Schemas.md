@@ -6,10 +6,10 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - State Contracts|State Contracts]]|[[Module - [[Module - State Contracts|State
-  Contracts]]|Module - [[Module - State Contracts|State Contracts]]]]]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[State Contracts](../02_Modules/Module - State Contracts.md)|[[Module - [[Module - State Contracts|State
+  Contracts]]|Module - [State Contracts](../02_Modules/Module - State Contracts.md)]]]]'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: /Users/jameschen/Workspace/schemas/
@@ -41,11 +41,11 @@ version_scope:
 
 ## Upstream
 - **MUSE Architect**: 定義邏輯契約。
-- **[[Module - State Contracts]]**: 具體化契約對位矩陣。
+- **[Module - State Contracts](../02_Modules/Module - State Contracts.md)**: 具體化契約對位矩陣。
 
 ## Downstream
 - **Phase Runners**: 執行時實體解析 Schema。 [Code: 00_Home/System Overview.md]
-- **[[System - Unknowns and Conflicts]]**: 登記因 Schema 更新產生的漂移。
+- **[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)**: 登記因 Schema 更新產生的漂移。
 
 ## Related modules / files
 - `/Users/jameschen/Workspace/schemas/*.json`: 實體定義文件。
@@ -59,4 +59,4 @@ version_scope:
 - [ ] **[[Validation|Validation]] Budget**: 複雜任務下 Schema 校驗的效能損耗。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

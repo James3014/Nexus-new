@@ -56,7 +56,7 @@ They must not become an independent truth source.
 If two sources disagree:
 - do not silently merge,
 - do not guess,
-- create or update `[[System - Unknowns and Conflicts]]`,
+- create or update `[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)`,
 - note version scope and source path,
 - mark confidence as low or medium until resolved.
 
@@ -117,7 +117,7 @@ Use only these top-level folders:
 - `07_Diffs`: version and architecture differences
 - `08_Incidents`: important incident and RCA summaries
 - `09_Roadmap`: future evolution and planned capability pages
-- `90_Sources`: [[Source Index]] and source metadata only
+- `90_Sources`: [Source Index](../90_Sources/Source Index.md) and source metadata only
 - `99_Schema`: rules, templates, linting, agent instructions
 
 ---
@@ -136,8 +136,8 @@ Use one of these page prefixes only:
 - `Diff - ...`
 
 [[exceptions]]:
-- `[[System Overview]]`
-- `[[Source Index]]`
+- `[System Overview](../00_Home/System Overview.md)`
+- `[Source Index](../90_Sources/Source Index.md)`
 - `AGENT_SCHEMA`
 
 ### 5.2 Stable naming
@@ -172,7 +172,7 @@ Each page must declare one of:
 - diff
 - incident
 - roadmap
-- source-[[index]]
+- source-[index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)
 - schema
 
 ### 6.2 Frontmatter template
@@ -237,12 +237,12 @@ Every page must link to at least 2 related pages.
 
 ### 8.2 Hub linking
 All major pages should link back to one of:
-- `[[System Overview]]`
-- `[[System - Unknowns and Conflicts]]`
+- `[System Overview](../00_Home/System Overview.md)`
+- `[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)`
 
 ### 8.3 Conflict backlinks
 Any page with unresolved conflict must link to:
-- `[[System - Unknowns and Conflicts]]`
+- `[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)`
 
 ### 8.4 Source linking
 Where possible, connect concept pages to:
@@ -275,7 +275,7 @@ Tier 3:
 
 ### 9.2 Ingest behavior
 When ingesting a new source:
-1. update `[[Source Index]]`
+1. update `[Source Index](../90_Sources/Source Index.md)`
 2. identify affected pages
 3. update only impacted summaries
 4. add new conflicts if contradictions appear
@@ -316,7 +316,7 @@ Pages about release, acceptance, manifest, schemas, or runtime truth must align 
 The agent must not:
 - invent modules, files, or flows
 - silently reconcile conflicting versions
-- treat [[walkthrough]] notes as higher authority than active specs
+- treat [walkthrough](../Reference/walkthrough.md) notes as higher authority than active specs
 - create a second manifest or state registry inside Obsidian
 - modify runtime files from vault instructions
 - turn notes into deployment instructions without source support
@@ -335,8 +335,8 @@ Escalate to human when:
 - source documents appear stale or internally inconsistent
 
 Escalation output goes to:
-- `[[System - Next Questions for Human]]`
-- and, if conflict-related, also `[[System - Unknowns and Conflicts]]`
+- `[System - Next Questions for Human](../01_System/System - Next Questions for Human.md)`
+- and, if conflict-related, also `[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)`
 
 ---
 

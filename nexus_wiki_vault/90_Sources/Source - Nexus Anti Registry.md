@@ -1,13 +1,13 @@
 ---
-aliases: '[Nexus Anti [[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source [[index|Index]]|Sources]]]]]]]],
+aliases: '[Nexus Anti [Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[[Source [[index|Index]]|Sources]]]]]]]],
   External Research Registry]'
 confidence: high
 last_compiled: '2026-04-06'
 owner: agent
 related_pages: ''
-source_of_truth: compiled-[[index|index]]
+source_of_truth: compiled-[index](../.nexus/graph/index.md)
 status: active
-tags: '[[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source [[index|Index]]|sources]]]]]]]],
+tags: '[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[[Source [[index|Index]]|sources]]]]]]]],
   external, registry, nexus-anti]'
 title: Source - Nexus Anti Registry
 type: system
@@ -35,7 +35,7 @@ version_scope: '[v17.1, v22, v23]'
 - 需引用外部文件時，先在本頁登記為 reference，再進行實作落地。 [Source: nexus_wiki_vault/06_Ops/Ops - CI/CD Promotion Gate.md]].md]
 
 ## Related modules / files
-- `nexus_wiki_vault/90_Sources/[[Source Index]].md`: 主來源索引頁。 [Source: nexus_wiki_vault/90_Sources/Source Index.md]].md]
+- `nexus_wiki_vault/90_Sources/[Source Index](Source Index.md).md`: 主來源索引頁。 [Source: nexus_wiki_vault/90_Sources/Source Index.md]].md]
 - `scripts/ops/wiki_linter.py`: provenance/path 驗證規則。 [Source: scripts/ops/wiki_linter.py]
 - `MUSE-NEXUS-Engine-Specification-v22-Eternal.md`: 現行主規格。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 - `MUSE_ENGINE_SPEC_V17.1_HARDENED.md`: legacy 規格。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
@@ -54,7 +54,7 @@ version_scope: '[v17.1, v22, v23]'
 | Historical spec mirrors | v17.1/v22 規格副本 | No | 只能引用 repo 主規格頁，不以外部副本作為最終來源 |
 | Strategic analysis | SWOT / market comparison / design consultation | No | 只能作為提案背景 |
 | Audit reports | [[qa|QA]]/review/refactor reports | Conditional | 需先對位到 repo 可驗證路徑 |
-| Proposed implementation notes | 例如 [[Module - Memory Repository|LanceDB]] 補充提案 | Conditional | 先落地代碼與工件，再升級到真值頁 |
+| Proposed implementation notes | 例如 [LanceDB](../02_Modules/Module - Memory Repository.md) 補充提案 | Conditional | 先落地代碼與工件，再升級到真值頁 |
 
 ## Related modules / files
-- [[System Overview]]
+- [System Overview](../00_Home/System Overview.md)

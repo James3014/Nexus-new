@@ -7,8 +7,8 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - Intelligence and Context Core|Module - Intelligence and Context Core]]'
-- '[[Module - Policy and Learning Governance|Module - Policy and Learning Governance]]'
+- '[Module - Intelligence and Context Core](Module - Intelligence and Context Core.md)'
+- '[Module - Policy and Learning Governance](Module - Policy and Learning Governance.md)'
 source_of_truth: nexus/core/ash_matrix.py
 status: active
 tags:
@@ -62,12 +62,12 @@ version_scope:
 | **Truth Validator** | 多重證據交叉比對的最終真值確認。 | [Source: nexus/core/truth_validator.py] |
 
 ## Upstream
-- **[[System Overview]]**: 進階智慧引擎導航。
+- **[System Overview](../00_Home/System Overview.md)**: 進階智慧引擎導航。
 - **MUSE-NEXUS Spec**: 要求進階邏輯必須與核心 PDRAC 保持雙向保真。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 進階模組與物理檔案映射。
-- **[[Module - Intelligence and Context Core]]**: 共享語義容器與上下文對接。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 進階模組與物理檔案映射。
+- **[Module - Intelligence and Context Core](Module - Intelligence and Context Core.md)**: 共享語義容器與上下文對接。
 
 ## Related modules / files
 - `nexus/core/ash_matrix.py`: Ash 核心。 [Code: nexus/core/ash_matrix.py]
@@ -81,4 +81,4 @@ version_scope:
 - [ ] **Healing Conflict**: 多個修復策略 (Healers) 同時運作時的優先級決策。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

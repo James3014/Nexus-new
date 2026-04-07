@@ -8,11 +8,11 @@ owner: agent
 raw_sources:
 - pilot_cli.py
 - memory_service.py
-- disk_janitor.py
+- /.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py
 related_pages:
-- '[[Module - Core Orchestrator|Module - Core Orchestrator]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[Module - Core Orchestrator](Module - Core Orchestrator.md)'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: nexus/services/
@@ -38,12 +38,12 @@ version_scope:
 
 ## Role / responsibility
 - **IO 接管 (Pilot CLI)**: 處理 1024-byte TTY 限制下的非阻塞輸入。 [Code: pilot_cli.py]
-- **記憶體協調 (Memory Service)**: 管理 [[Module - Memory Repository|LanceDB]] 存取與 FTS 檢索。 [Source: nexus_wiki_vault/02_Modules/Module - Memory Repository.md]]]
-- **磁碟維護 (Disk Janitor)**: 執行 Artifact Retention 政策要求的物理清理。 [Code: disk_janitor.py]
+- **記憶體協調 (Memory Service)**: 管理 [LanceDB](Module - Memory Repository.md) 存取與 FTS 檢索。 [Source: nexus_wiki_vault/02_Modules/Module - Memory Repository.md]]]
+- **磁碟維護 (Disk Janitor)**: 執行 Artifact Retention 政策要求的物理清理。 [Code: /.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py]
 
 ## Upstream
-- **[[Module - Core Orchestrator]]**: 發起服務調用請求。
-- **[[Ops - Artifact Retention and Provenance|Retention Policy]]**: 提供清理時間戳 Cutoff。 [Source: 00_Home/System Overview.md]
+- **[Module - Core Orchestrator](Module - Core Orchestrator.md)**: 發起服務調用請求。
+- **[Retention Policy](../06_Ops/Ops - Artifact Retention and Provenance.md)**: 提供清理時間戳 Cutoff。 [Source: 00_Home/System Overview.md]
 
 ## Downstream
 - **File System**: 實體檔案修改與刪除。
@@ -61,4 +61,4 @@ version_scope:
 - [ ] **Log Rotation**: 服務運行日誌的保留與截斷政策。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

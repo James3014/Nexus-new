@@ -8,16 +8,16 @@ last_compiled: 2026-04-06
 owner: agent
 raw_sources:
 - nexus/learning/disk_policy.py
-- nexus/learning/disk_janitor.py
+- nexus/learning//.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py
 - nexus/core/handoff_bundle.py
 related_pages:
-- Ops - CI/[[CD Promotion Gate|Promotion Gate]]|[[CD [[CD Promotion Gate|Promotion
-  Gate]]|CD [[CD Promotion Gate|Promotion Gate]]]]]]
-- '[[Protocol - Evidence Map|Evidence Map]]|[[Protocol - [[Protocol - Evidence Map|Evidence
-  Map]]|Protocol - [[Protocol - Evidence Map|Evidence Map]]]]]]'
-- '[[Module - Memory Repository|Module - Memory Repository]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- Ops - CI/[Promotion Gate](Ops - CI/CD Promotion Gate.md)|[[CD [[CD Promotion Gate|Promotion
+  Gate]]|CD [Promotion Gate](Ops - CI/CD Promotion Gate.md)]]]]
+- '[Evidence Map](../05_Protocols/Protocol - Evidence Map.md)|[[Protocol - [[Protocol - Evidence Map|Evidence
+  Map]]|Protocol - [Evidence Map](../05_Protocols/Protocol - Evidence Map.md)]]]]'
+- '[Module - Memory Repository](../02_Modules/Module - Memory Repository.md)'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: scripts/learning/cleanup_policy_memory.py
@@ -44,7 +44,7 @@ version_scope:
 
 ## Role / responsibility
 - **容量治理**: 透過 TTL 機制防止 `.nexus/` 目錄與向量資料庫無限膨脹。
-- **證據保鮮**: 確保 [[CD Promotion Gate|Promotion Gate]] 所需的核心證據在保留期內 100% 可用。
+- **證據保鮮**: 確保 [Promotion Gate](Ops - CI/CD Promotion Gate.md) 所需的核心證據在保留期內 100% 可用。
 - **溯源校驗**: 定義工件回指原始規格或代碼的硬性連結規則。
 
 ## Artifact Conversion & Retention Matrix
@@ -55,10 +55,10 @@ version_scope:
 | **Run Manifests** | Sealer | **CRITICAL** | `.nexus/runs/*/manifest.json` | 90 Days | `manifest_schema.json` |
 | **Handoff Bundles**| Orchestrator| **CRITICAL** | `.nexus/state/handoff_*.json` | 30 Days | `handoff_bundle.py` |
 | **[[SKILL]] Outcomes** | Monitor | MEDIUM | `.nexus/metrics/skill_outcome_*.jsonl` | 90 Days | `disk_policy.py` |
-| **Archived Skills**| Janitor | LOW | `skills/archived/*.md` | 90 Days | `disk_janitor.py` |
+| **Archived Skills**| Janitor | LOW | `skills/archived/*.md` | 90 Days | `/.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py` |
 
 ## Retention Mechanisms
-- **DiskJanitor Service**: 每 24 小時執行一次，掃描 `retention_days` (Default 90) 之前的過期文件。 [Source: disk_janitor.py]
+- **DiskJanitor Service**: 每 24 小時執行一次，掃描 `retention_days` (Default 90) 之前的過期文件。 [Source: /.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py]
 - **Atomic Cleanup**: `cleanup_policy_memory.py` 採用原子替換方式清理 JSONL，確保數據一致性。 [Source: 00_Home/System Overview.md]
 
 ## Upstream
@@ -66,11 +66,11 @@ version_scope:
 - **System Time**: 依賴 UTC 時間戳進行 Cutoff 計算。
 
 ## Downstream
-- **[[Module - Memory Repository]]**: 同步執行 90 天窗口的向量索引清理。
+- **[Module - Memory Repository](../02_Modules/Module - Memory Repository.md)**: 同步執行 90 天窗口的向量索引清理。
 - **[[Ops - CI/CD Promotion Gate]]**: 依賴 Retention Path 內的證據進行晉升審計。
 
 ## Related modules / files
-- `nexus/learning/disk_janitor.py`: 實體清理執行者。
+- `nexus/learning//.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py`: 實體清理執行者。
 - `scripts/learning/cleanup_policy_memory.py`: 策略記憶專屬清理。
 
 ## Source notes
@@ -82,4 +82,4 @@ version_scope:
 - [ ] **Manual Lock**: 是否需要建立 `.lock` 標記以保護特定任務工件免於被 Pruning。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

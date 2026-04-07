@@ -6,10 +6,10 @@ owner: agent
 related_pages: ''
 source_of_truth: scripts/engine/nexus_cli.py
 status: active
-tags: '[[System Overview|home]], [[Agent Onboarding - Command Pack|onboarding]], boot,
+tags: '[home](System Overview.md), [onboarding](Agent Onboarding - Command Pack.md), boot,
   sop]'
 title: Agent Boot Sequence
-type: '[[System Overview|home]]'
+type: '[home](System Overview.md)'
 version_scope: '[v22, v23]'
 ---
 
@@ -25,12 +25,12 @@ version_scope: '[v22, v23]'
 - **失敗早檢出**: 先做命令面與治理 gate 檢查，避免後段返工。 [Source: scripts/ops/ci_gate.py]
 
 ## Upstream
-- `[[MUSE_PROTO]].md`: 定義全域協議錨點。 [Source: 01_System/MUSE_PROTO.md]
+- `[MUSE_PROTO](../01_System/MUSE_PROTO.md).md`: 定義全域協議錨點。 [Source: 01_System/MUSE_PROTO.md]
 - `scripts/engine/nexus_cli.py`: 定義 Nexus 命令面。 [Code: scripts/engine/nexus_cli.py]
 
 ## Downstream
-- `[[Agent Onboarding - Implementation Map]]`: 進入任務執行路徑。
-- `[[Ops - CI Failure Playbook]]`: 若 preflight 失敗時的修復入口。
+- `[Agent Onboarding - Implementation Map](Agent Onboarding - Implementation Map.md)`: 進入任務執行路徑。
+- `[Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)`: 若 preflight 失敗時的修復入口。
 
 ## Related modules / files
 - `scripts/engine/nexus_cli.py`
@@ -39,8 +39,8 @@ version_scope: '[v22, v23]'
 
 ## 🗺️ Step 0: Landscape Discovery (地景探索)
 新 Agent 進場的第一動作**不是**跑指令，而是確立座標。
-1.  **確認地圖**: 查閱 [[Vault Topology]] 建立架構全景。
-2.  **建立脈絡**: 閱讀 [[System Overview]] 了解當前治理基線。
+1.  **確認地圖**: 查閱 [Vault Topology](Vault Topology.md) 建立架構全景。
+2.  **建立脈絡**: 閱讀 [System Overview](System Overview.md) 了解當前治理基線。
 3.  **安全考古**: 若任務涉及深層邏輯，必須查閱 [[01_Core/Specs/Legacy_V9/INDEX|Legacy Index]]。
 
 ## Source notes

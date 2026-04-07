@@ -33,12 +33,12 @@ Generated at: 2026-04-06 10:27
 | **Evidence Rate** | ⚠️ WEAK | 75.00% |
 
 ## Upstream
-- [[System Overview]]
+- [System Overview](../00_Home/System Overview.md)
 - `.nexus/reports/` 中的各項 JSON 原始報表。
 
 ## Downstream
-- 作為 [[CD Promotion Gate|CI gate]] 的治理依據。
-- [[Ops - Governance SLO Dashboard]]
+- 作為 [CI gate](Ops - CI/CD Promotion Gate.md) 的治理依據。
+- [Ops - Governance SLO Dashboard](Ops - Governance SLO Dashboard.md)
 
 ## Risks (Top 5)
 ✅ No high-priority risks detected.

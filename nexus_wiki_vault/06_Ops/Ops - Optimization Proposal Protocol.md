@@ -6,10 +6,10 @@ confidence: high
 last_compiled: 2026-04-07
 owner: agent
 related_pages:
-- '[[System Overview|System Overview]]'
-- '[[Ops - Architecture Decision Records|Ops - Architecture Decision Records]]'
-- '[[Ops - Acceptance and Release|Ops - Acceptance and Release]]'
-- '[[Ops - Learning Closure Matrix|Ops - Learning Closure Matrix]]'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Ops - Architecture Decision Records](Ops - Architecture Decision Records.md)'
+- '[Ops - Acceptance and Release](Ops - Acceptance and Release.md)'
+- '[Ops - Learning Closure Matrix](Ops - Learning Closure Matrix.md)'
 source_of_truth: scripts/ops/scope_guard.py
 status: active
 tags:
@@ -52,8 +52,8 @@ version_scope:
 - `scripts/ops/ci_gate.py`: 基礎 gate 驗收。 [Code: scripts/ops/ci_gate.py]
 
 ## Downstream
-- `[[Ops - Architecture Decision Records]]`: 生效後需寫 ADR。
-- `[[Ops - Governance Changelog]]`: 生效後需寫治理變更記錄。
+- `[Ops - Architecture Decision Records](Ops - Architecture Decision Records.md)`: 生效後需寫 ADR。
+- `[Ops - Governance Changelog](Ops - Governance Changelog.md)`: 生效後需寫治理變更記錄。
 
 ## Related modules / files
 - `.nexus/config/task_contract.example.json`
@@ -75,4 +75,4 @@ uv run scripts/ops/ci_gate.py --dry-run --wiki-drift-enforce-level p0
 - [ ] 是否要增加「預估負債變化」欄位（維運成本/誤報率）。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

@@ -6,12 +6,12 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- Ops - CI/[[CD Promotion Gate|Promotion Gate]]|[[CD [[CD Promotion Gate|Promotion
-  Gate]]|CD [[CD Promotion Gate|Promotion Gate]]]]]]
-- '[[Protocol - Evidence Map|Evidence Map]]|[[Protocol - [[Protocol - Evidence Map|Evidence
-  Map]]|Protocol - [[Protocol - Evidence Map|Evidence Map]]]]]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- Ops - CI/[Promotion Gate](Ops - CI/CD Promotion Gate.md)|[[CD [[CD Promotion Gate|Promotion
+  Gate]]|CD [Promotion Gate](Ops - CI/CD Promotion Gate.md)]]]]
+- '[Evidence Map](../05_Protocols/Protocol - Evidence Map.md)|[[Protocol - [[Protocol - Evidence Map|Evidence
+  Map]]|Protocol - [Evidence Map](../05_Protocols/Protocol - Evidence Map.md)]]]]'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: scripts/ops/nexus_release_gate.sh
@@ -37,9 +37,9 @@ version_scope:
 本頁定義 Nexus 軟體正式封版與發布的流程，對齊測試、審計、Manifest 與環境清理的硬性要求。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Role / responsibility
-- **發布阻斷**: 在未滿足 `[[CD Promotion Gate|Promotion Gate]]` 指標前禁止執行 `git tag`。 [Source: 00_Home/System Overview.md]
+- **發布阻斷**: 在未滿足 `[Promotion Gate](Ops - CI/CD Promotion Gate.md)` 指標前禁止執行 `git tag`。 [Source: 00_Home/System Overview.md]
 - **環境清場**: 要求發布前工作區 (Worktree) 必須 100% 乾淨且通過 `git audit`。 [Source: 00_Home/System Overview.md]
-- **同步確認**: 確保 Wiki 與 Repo 之內的 [[README]] 與 Spec 已同步更新。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- **同步確認**: 確保 Wiki 與 Repo 之內的 [README](../Reference/README.md) 與 Spec 已同步更新。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Upstream
 - **[[Ops - CI/CD Promotion Gate]]**: 提供晉升核准。
@@ -62,4 +62,4 @@ version_scope:
 - [ ] **Staging Layer**: 是否需要在 Production 前新增一個 Staging 相位。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

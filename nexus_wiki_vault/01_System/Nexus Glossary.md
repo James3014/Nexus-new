@@ -7,12 +7,12 @@ confidence: high
 last_compiled: 2026-04-07
 owner: agent
 related_pages:
-- '[[System Overview|System Overview]]'
+- '[System Overview](../00_Home/System Overview.md)'
 - '[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime|[[Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]
   Runtime|Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime]]]]'
-- '[[Ops - Acceptance and Release|Ops - Acceptance and Release]]'
-- '[[Ops - Truth Claims Register|Truth Claims]] Register|[[Ops - [[Ops - Truth Claims
-  Register|Truth Claims]] Register|Ops - [[Ops - Truth Claims Register|Truth Claims]]
+- '[Ops - Acceptance and Release](../06_Ops/Ops - Acceptance and Release.md)'
+- '[Truth Claims](../06_Ops/Ops - Truth Claims Register.md) Register|[[Ops - [[Ops - Truth Claims
+  Register|Truth Claims]] Register|Ops - [Truth Claims](../06_Ops/Ops - Truth Claims Register.md)
   Register]]]]'
 source_of_truth: compiled
 status: active
@@ -39,12 +39,12 @@ version_scope:
 - **治理穩定**: 作為文件、CI 報告與任務回報的共用詞彙基準。
 
 ## Upstream
-- `[[System Overview]]`: 全系統定位與版本邊界。
-- `[[Flow - PXDRAC Runtime]]`: 執行相位定義。
+- `[System Overview](../00_Home/System Overview.md)`: 全系統定位與版本邊界。
+- `[Flow - PXDRAC Runtime](../03_Flows/Flow - PXDRAC Runtime.md)`: 執行相位定義。
 
 ## Downstream
-- `[[Agent Boot Sequence]]`: 新 agent 啟動時快速對齊術語。
-- `[[Ops - CI Failure Playbook]]`: 故障分類與修復語境一致化。
+- `[Agent Boot Sequence](../00_Home/Agent Boot Sequence.md)`: 新 agent 啟動時快速對齊術語。
+- `[Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)`: 故障分類與修復語境一致化。
 
 ## Related modules / files
 - `scripts/engine/nexus_cli.py`
@@ -57,7 +57,7 @@ version_scope:
 - `P0 Drift`: 會阻斷發布的關鍵漂移問題。
 - `Observe-only`: 樣本為 0 時不阻斷，但必須留下可追蹤證據（例如 `no_sample_observe_only=true`）。
 - `Truth Claim`: 必須可由命令或實體路徑驗證的聲明。
-- `[[task]] Contract`: 對任務交付範圍、命令、工件與變更路徑的約束。
+- `[task](../Reference/task.md) Contract`: 對任務交付範圍、命令、工件與變更路徑的約束。
 
 ## Open questions / conflicts
 - [ ] 是否將 `PDRAC` (legacy) 與 `[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]` (current) 的差異固定為獨立術語頁。

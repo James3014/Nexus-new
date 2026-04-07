@@ -7,9 +7,9 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - Memory Pipeline Deep Dive|Module - Memory Pipeline Deep Dive]]'
-- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
-  Matrix]]'
+- '[Module - Memory Pipeline Deep Dive](Module - Memory Pipeline Deep Dive.md)'
+- '[Module - Implementation Responsibility
+  Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/core/context_hub.py
 status: active
 tags:
@@ -58,12 +58,12 @@ version_scope:
 | **Handoff Bundle** | 包含完整上下文與資源權限的移交包。 | [Source: nexus/core/handoff_bundle.py] |
 
 ## Upstream
-- **[[System Overview]]**: 全域智慧架構導航。
+- **[System Overview](../00_Home/System Overview.md)**: 全域智慧架構導航。
 - **MUSE-NEXUS Spec**: 定義知識提取 (Crystallize) 的邏輯標準。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 智慧模組與物理檔案映射。
-- **[[Module - Memory Pipeline Deep Dive]]**: 技術細節實作對接。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 智慧模組與物理檔案映射。
+- **[Module - Memory Pipeline Deep Dive](Module - Memory Pipeline Deep Dive.md)**: 技術細節實作對接。
 
 ## Related modules / files
 - `nexus/core/context_hub.py`: 上下文樞紐。 [Code: nexus/core/context_hub.py]
@@ -77,4 +77,4 @@ version_scope:
 - [ ] **Embedding Drift**: 隨著模型更新，如何自動偵測並重新索引各項晶體。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

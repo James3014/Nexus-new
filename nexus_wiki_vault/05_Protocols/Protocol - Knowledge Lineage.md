@@ -6,16 +6,16 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - State Contracts|State Contracts]]|[[Module - [[Module - State Contracts|State
-  Contracts]]|Module - [[Module - State Contracts|State Contracts]]]]]]'
-- '[[Protocol - Evidence Map|Evidence Map]]|[[Protocol - [[Protocol - Evidence Map|Evidence
-  Map]]|Protocol - [[Protocol - Evidence Map|Evidence Map]]]]]]'
-- '[[Module - Memory Repository|Module - Memory Repository]]'
-- '[[Ops - Artifact Retention and Provenance|Ops - Artifact Retention and Provenance]]'
-- Ops - CI/[[CD Promotion Gate|Promotion Gate]]|[[CD [[CD Promotion Gate|Promotion
-  Gate]]|CD [[CD Promotion Gate|Promotion Gate]]]]]]
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[State Contracts](../02_Modules/Module - State Contracts.md)|[[Module - [[Module - State Contracts|State
+  Contracts]]|Module - [State Contracts](../02_Modules/Module - State Contracts.md)]]]]'
+- '[Evidence Map](Protocol - Evidence Map.md)|[[Protocol - [[Protocol - Evidence Map|Evidence
+  Map]]|Protocol - [Evidence Map](Protocol - Evidence Map.md)]]]]'
+- '[Module - Memory Repository](../02_Modules/Module - Memory Repository.md)'
+- '[Ops - Artifact Retention and Provenance](../06_Ops/Ops - Artifact Retention and Provenance.md)'
+- Ops - CI/[Promotion Gate](../06_Ops/Ops - CI/CD Promotion Gate.md)|[[CD [[CD Promotion Gate|Promotion
+  Gate]]|CD [Promotion Gate](../06_Ops/Ops - CI/CD Promotion Gate.md)]]]]
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: MUSE-NEXUS-v22#DataFabric
@@ -59,7 +59,7 @@ graph LR
     end
 
     subgraph "Phase 3: Persistence & Governance"
-        MR --> |"Vector [[index]]"| WL[["Ops - Wisdom Layer"]]
+        MR --> |"Vector [index](../.nexus/graph/index.md)"| WL[["Ops - Wisdom Layer"]]
         MR --> |"Cleanup Policy"| RP[["Ops - Artifact Retention and Provenance"]]
     end
 
@@ -74,16 +74,16 @@ graph LR
 ```
 
 ## Upstream
-- **[[System Overview]]**: 提供宏觀數據演化背景。
+- **[System Overview](../00_Home/System Overview.md)**: 提供宏觀數據演化背景。
 - **Runtime Trace**: 實體任務執行紀錄。
 
 ## Downstream
-- **[[Ops - Wisdom Layer]]**: 指導智慧層的教訓應用。
+- **[Ops - Wisdom Layer](../06_Ops/Ops - Wisdom Layer.md)**: 指導智慧層的教訓應用。
 - **[[Ops - CI/CD Promotion Gate]]**: 提供全鏈路審核證據。
 
 ## Related modules / files
-- `05_Protocols/[[Protocol - Evidence Map]].md`: 原始證據圖譜。 [Source: 05_Protocols/Protocol - Evidence Map.md]]]
-- `06_Ops/[[Ops - Artifact Retention and Provenance]].md`: 保存政策。 [Source: 06_Ops/Ops - Artifact Retention and Provenance.md]]]
+- `05_Protocols/[Protocol - Evidence Map](Protocol - Evidence Map.md).md`: 原始證據圖譜。 [Source: 05_Protocols/Protocol - Evidence Map.md]]]
+- `06_Ops/[Ops - Artifact Retention and Provenance](../06_Ops/Ops - Artifact Retention and Provenance.md).md`: 保存政策。 [Source: 06_Ops/Ops - Artifact Retention and Provenance.md]]]
 
 ## Source notes
 - v22 Engine Spec: 確立 Knowledge Lineage 作為 Data Fabric 的最高層現。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]

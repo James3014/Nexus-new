@@ -7,9 +7,9 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[System Overview|System Overview]]'
-- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
-  Matrix]]'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Module - Implementation Responsibility
+  Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/core/hubs.py
 status: active
 tags:
@@ -62,11 +62,11 @@ version_scope:
 | **Agent Awareness** | Agent 自我感官狀態維護。 | [Source: nexus/core/agent_awareness.py] |
 
 ## Upstream
-- **[[System Overview]]**: 提供本模組的全域上下文導航。
+- **[System Overview](../00_Home/System Overview.md)**: 提供本模組的全域上下文導航。
 - **MUSE-NEXUS Spec**: 定義 Core 層級的初始化規範。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 提供實體檔案與功能職責的具體映射。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 提供實體檔案與功能職責的具體映射。
 - **[[Ops - CI/CD Promotion Gate]]**: 元數據與指標作為發版依據。
 
 ## Related modules / files
@@ -81,4 +81,4 @@ version_scope:
 - [ ] **Notifier Scale**: 是否需要對接外部 Webhook (如 Discord/Slack) 的標準模組。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

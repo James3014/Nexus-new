@@ -1,3 +1,44 @@
+---
+id: nexus_truth_dashboard
+type: doc
+status: active
+created: 2026-04-07T07:29:29Z
+updated: 2026-04-07T07:29:29Z
+owner: nexus-core
+tags: [nexus, governance]
+governance: Trident 3.0
+ci_hash: pend-audit
+soul_alignment: harmonized
+priority: P2
+version: v1.0.0
+visibility: internal
+landscape: structural
+path: nexus_wiki_vault/Reference/nexus_truth_dashboard.md
+---
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../00_Home/System Overview.md).md]
+## One-sentence summary
+- Pending detailed [[documentation]].
+
+## Role / responsibility
+- Pending detailed [[documentation]].
+
+## Upstream
+- Pending detailed [[documentation]].
+
+## Downstream
+- Pending detailed [[documentation]].
+
+## Related modules / files
+- Pending detailed [[documentation]].
+
+## Source notes
+- Pending detailed [[documentation]].
+
+## Open questions / conflicts
+- Pending detailed [[documentation]].
+
+---
 # 📊 Nexus Data Truth Dashboard (Audit-Grade Estimate)
 
 > [!NOTE]
@@ -27,9 +68,9 @@
 | OFF-007 | Dr. Claw | Bug | ✅ OK | Auto-Diagnostics |
 | OFF-008 | Wheel-Shift | Feat | ✅ OK | LLM Allocation |
 | OFF-009 | State Guard | Bug | ✅ OK | Contract Integrity |
-| OFF-010 | Full Lifecycle | Audit | ✅ OK | E2E Validation |
+| OFF-010 | Full Lifecycle | Audit | ✅ OK | E2E [[Validation|Validation]] |
 
-## 🛡️ 自動化攔截 (CI Gate Status)
+## 🛡️ 自動化攔截 ([CI Gate](../06_Ops/Ops - CI/CD Promotion Gate.md) Status)
 
 - **Pytest Regression**: ✅ PASSING
 - **Offline Replay**: ✅ PASSING
@@ -49,9 +90,13 @@
 uv run scripts/ci_gate.py && uv run scripts/nexus_cli.py nexus:benchmark --tasks 10 --output nexus_truth_dashboard.csv
 ```
 
-### 數據來源 (Sources)
+### 數據來源 ([[Source [[index|Index]]|[[Source [[index|Index]]|[[Source [[index|Index]]|[[Source [[index|Index]]|Sources]]]]]]]])
 - **核心指標**: `ci_benchmark.csv` (由 `ci_gate.py` 產出)
 - **回歸測試**: `tests/test_v9_regression_p1.py`
-- **Token 正則驗證**: `tests/test_llm_token_regex.py`
+- **Token 正則驗證**: `tests/tests/test_llm_token_regex.py`
 
 *Last Updated: 2026-03-18 (post ci_gate re-verify)*
+
+
+---
+[System Overview](../00_Home/System Overview.md)

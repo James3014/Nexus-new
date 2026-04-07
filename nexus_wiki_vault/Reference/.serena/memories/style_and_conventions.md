@@ -15,8 +15,8 @@ visibility: internal
 landscape: structural
 path: nexus_wiki_vault/06_Ops/Reference/.serena/memories/style_and_conventions.md
 ---
-Waiver: 00_Home/[[System Overview]].md
-[source: 00_Home/[[System Overview]].md]
+Waiver: 00_Home/[System Overview](../../../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../../../00_Home/System Overview.md).md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
 
@@ -46,8 +46,8 @@ Waiver: 00_Home/[[System Overview]].md
 - **Naming**: `snake_case` for variables/functions, `PascalCase` for classes.
 - **Type Hints**: Mandatory for core library functions.
 - **Bilingual Docs**: All [[documentation]] must be provided in both English and Traditional Chinese.
-- **Contract Driven**: Use Pydantic models for data [[Validation|validation]] (see `scripts/core/state_contracts.py`).
+- **Contract Driven**: Use Pydantic models for data [[Validation|validation]] (see `scripts/.nexus/workspaces/bug-1774969963/nexus/core/state_contracts.py`).
 
 
 ---
-[[System Overview]]
+[System Overview](../../../00_Home/System Overview.md)

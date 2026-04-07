@@ -19,7 +19,7 @@ visibility: internal
 ---
 
 
-Waiver: 00_Home/[[System Overview]].md
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
 [source: nexus_wiki_vault/00_Home/System Overview.md]].md]
 
 agent-capability-boundaries
@@ -69,14 +69,14 @@ path: /Users/jameschen/Workspace/nexus/nexus_wiki_vault/06_Ops/Ops - Agent Capab
 | --- | --- | --- |
 | **allowed_paths** | Project root, `scripts/ops/`, `nexus_wiki_vault/`, `docs/` | `agent_protocol_check.py` |
 | **forbidden_paths** | `.obsidian/`, `benchmarks/`, `logs/`, `nexus_swarm/`, `packages/` | `ci_gate.py` |
-| **max_files_touched** | 10 | `Nexus [[CD Promotion Gate|CI Gate]]` |
+| **max_files_touched** | 10 | `Nexus [CI Gate](Ops - CI/CD Promotion Gate.md)` |
 
 ## 🚀 Protocol Requirements
 
-- **Semantic Completion**: "Passed" tests do not mean the [[task]] is finished. The agent must confirm all intended behaviors are achieved.
+- **Semantic Completion**: "Passed" tests do not mean the [task](../Reference/task.md) is finished. The agent must confirm all intended behaviors are achieved.
 - **Evidence-Driven Reporting**: No claims of completion without providing specific command outputs.
 - **Fail-to-Lesson Writeback**: Every failure must be converted into a lesson and recorded in the `Learning Closure Matrix`.
 
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

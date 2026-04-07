@@ -5,7 +5,7 @@ governance: Trident 3.0
 id: nexus-nexus-pilot-cli-[[quickstart|quickstart]]-cn
 landscape: structural
 owner: Nexus Core
-path: /Users/jameschen/Workspace/nexus/nexus_wiki_vault/06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md
+path: /docs/NEXUS_PILOT_CLI_QUICKSTART_CN.md
 priority: P2
 soul_alignment: harmonized
 status: Current
@@ -20,7 +20,7 @@ visibility: internal
 ---
 
 
-Waiver: 00_Home/[[System Overview]].md
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
 [source: nexus_wiki_vault/00_Home/System Overview.md]].md]
 
 
@@ -105,7 +105,7 @@ bash /path/to/nexus/scripts/ops/install_nexus_pilot_friend.sh
 - `/provider <name>`：切換供應商名稱（例如 Gemini）。
 - `/model`：打開模型清單，用數字選模型。
 - `/model <name>`：手動切換模型名稱。
-- `/govern` 或 `/govern <[[task]]>`：把任務送入治理流程。
+- `/govern` 或 `/govern <[task](../Reference/task.md)>`：把任務送入治理流程。
 - `/help`：顯示指令說明。
 - `/exit`：離開 CLI。
 
@@ -163,7 +163,7 @@ nexus-pilot-friend <tenant_id>
 ### Q3. `govern` 和直接聊天差在哪裡？
 
 - 直接聊天：拿來問問題、要建議、快速查錯。
-- `/govern` 或 `/govern <[[task]]>`：拿來送正式任務，讓 Gateway 走治理流程。
+- `/govern` 或 `/govern <[task](../Reference/task.md)>`：拿來送正式任務，讓 Gateway 走治理流程。
 
 ### Q4. 朋友說「它不能讀我本機檔案」
 
@@ -203,4 +203,4 @@ curl -fsSL http://100.82.155.88:5005/install/nexus-pilot-friend.sh | bash
 - 開發者安裝腳本（需完整 repo）：`scripts/ops/install_nexus_pilot_friend.sh`
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

@@ -32,71 +32,71 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 
 ## Downstream
 - **Codebase**: 執行檔案修改、測試執行。
-- **.[[Module - State Lifecycle and Snapshotting|nexus State]]**: 輸出 metrics、reports 與證據工件- **v22 (Stable Baseline)**: 原生生產力基線。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- **.[nexus State](../02_Modules/Module - State Lifecycle and Snapshotting.md)**: 輸出 metrics、reports 與證據工件- **v22 (Stable Baseline)**: 原生生產力基線。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 - **v23 (Intelligence Layer)**: 疊加於 v22 之上的智慧治理層。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]] Supplement]
 
 ## Navigation (治理與開發入口)
 
 ### 🗺️ Knowledge & Heritage (地圖與遺產)
-- **[[Vault Topology]]**: [New] 知識庫全景拓撲圖。
+- **[Vault Topology](Vault Topology.md)**: [New] 知識庫全景拓撲圖。
 - **[[01_Core/Specs/Legacy_V9/INDEX|Legacy V9 Index]]**: [Imported] Nexus V9 核心架構與穩定化歷史。
 - **[[01_Core/Specs/Muse-Nexus-v152-upgrade/INDEX|v152 Upgrade Index]]**: [Imported] v152 關鍵升級路徑與環境變數。
 
-### 🚀 [[Agent Onboarding - Command Pack|Onboarding]] & Ops
-- **[[Agent Boot Sequence]]**: 新 Agent 前 30 分鐘啟動 SOP。
-- **[[CLI Surface Quickstart]]**: 任務常用 CLI 最小命令集。
-- **[[Agent Onboarding - Command Pack]]**: 常用指令速查。
-- **[[Ops - CI Failure Playbook]]**: CI 失敗修復指南。
-- **[[Agent Onboarding - Implementation Map]]**: 實作路徑地圖。
-- **[[Ops - Governance Changelog]]**: 治理變更日誌。
+### 🚀 [Onboarding](Agent Onboarding - Command Pack.md) & Ops
+- **[Agent Boot Sequence](Agent Boot Sequence.md)**: 新 Agent 前 30 分鐘啟動 SOP。
+- **[CLI Surface Quickstart](CLI Surface Quickstart.md)**: 任務常用 CLI 最小命令集。
+- **[Agent Onboarding - Command Pack](Agent Onboarding - Command Pack.md)**: 常用指令速查。
+- **[Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)**: CI 失敗修復指南。
+- **[Agent Onboarding - Implementation Map](Agent Onboarding - Implementation Map.md)**: 實作路徑地圖。
+- **[Ops - Governance Changelog](../06_Ops/Ops - Governance Changelog.md)**: 治理變更日誌。
 
 ### 🛡️ Governance & Quality
-- **[[Ops - Truth Claims Register]]**: 實體真值驗證表。
-- **[[Source - Coverage Heatmap]]**: Wiki 覆蓋率熱圖。
-- **[[Ops - Wiki Drift Audit]]**: 物理路徑漂移稽核。
-- **[[Ops - Wiki Regression Evals]]**: [New] Wiki 知識回歸測試。
-- **[[Module - Implementation Responsibility Matrix]]**: 代碼責任矩陣。
+- **[Ops - Truth Claims Register](../06_Ops/Ops - Truth Claims Register.md)**: 實體真值驗證表。
+- **[Source - Coverage Heatmap](../90_Sources/Source - Coverage Heatmap.md)**: Wiki 覆蓋率熱圖。
+- **[Ops - Wiki Drift Audit](../06_Ops/Ops - Wiki Drift Audit.md)**: 物理路徑漂移稽核。
+- **[Ops - Wiki Regression Evals](../06_Ops/Ops - Wiki Regression Evals.md)**: [New] Wiki 知識回歸測試。
+- **[Module - Implementation Responsibility Matrix](../02_Modules/Module - Implementation Responsibility Matrix.md)**: 代碼責任矩陣。
 
 ### 🧠 Core Modules (Deep Dives)
-- **[[Nexus Glossary]]**: 核心術語與語義對齊入口。
-- **[[Module - Core Orchestrator Deep Dive]]**: 編排引擎深描。
-- **[[Module - Guard and Gate Control]]**: 工具閘門控制。
-- **[[Module - Memory Pipeline Deep Dive]]**: 記憶體管道與 [[Module - Memory Repository|LanceDB]]。
-- **[[Module - Policy and Learning Governance]]**: 政策管理與學習。
+- **[Nexus Glossary](../01_System/Nexus Glossary.md)**: 核心術語與語義對齊入口。
+- **[Module - Core Orchestrator Deep Dive](../02_Modules/Module - Core Orchestrator Deep Dive.md)**: 編排引擎深描。
+- **[Module - Guard and Gate Control](../02_Modules/Module - Guard and Gate Control.md)**: 工具閘門控制。
+- **[Module - Memory Pipeline Deep Dive](../02_Modules/Module - Memory Pipeline Deep Dive.md)**: 記憶體管道與 [LanceDB](../02_Modules/Module - Memory Repository.md)。
+- **[Module - Policy and Learning Governance](../02_Modules/Module - Policy and Learning Governance.md)**: 政策管理與學習。
 
 ## Related modules / files
-- `nexus/core/`- **[[Module - Core Orchestrator|Orchestrator Node]]**: 位於 `/Users/jameschen/Workspace/nexus/`。 [Code: nexus_cli.py]
+- `nexus/core/`- **[Orchestrator Node](../02_Modules/Module - Core Orchestrator.md)**: 位於 `/Users/jameschen/Workspace/nexus/`。 [Code: scripts/engine/nexus_cli.py]
 - **Vast State**: `.nexus/` 目錄。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ### Module Registry (全系統組件登記)
-- **[[Module - Implementation Responsibility Matrix]]**: [P0] 核心功能與物理檔案映射總表。
-- **[[Module - Platform Core Registry]]**: [New] 基礎設施與核心 Hubs 登記。
-- **[[Module - State Lifecycle and Snapshotting]]**: [New] 狀態機與快照引擎登記。
-- **[[Module - Security and Tool Guard Registry]]**: [New] 安全防禦與工具鎖定登記。
-- **[[Module - Intelligence and Context Core]]**: [New] 語義上下文與 RAG 登記。
-- **[[Module - Task Scheduling and Swarm Adapters]]**: [New] 任務調度與並行協作登記。
-- **[[Module - Domain Services and Adapters]]**: [New] 外部服務與適配器登記。
-- **[[Module - Intelligence and Logic (Remaining Core)]]**: [New] 剩餘核心邏輯登記。
-- **[[Module - Advanced Core Intelligence]]**: [New] Ash 矩陣與進階政策登記。
-- **[[Source - Operational Scripts Index]]**: [New] 全量維運與引擎腳本索引。
+- **[Module - Implementation Responsibility Matrix](../02_Modules/Module - Implementation Responsibility Matrix.md)**: [P0] 核心功能與物理檔案映射總表。
+- **[Module - Platform Core Registry](../02_Modules/Module - Platform Core Registry.md)**: [New] 基礎設施與核心 Hubs 登記。
+- **[Module - State Lifecycle and Snapshotting](../02_Modules/Module - State Lifecycle and Snapshotting.md)**: [New] 狀態機與快照引擎登記。
+- **[Module - Security and Tool Guard Registry](../02_Modules/Module - Security and Tool Guard Registry.md)**: [New] 安全防禦與工具鎖定登記。
+- **[Module - Intelligence and Context Core](../02_Modules/Module - Intelligence and Context Core.md)**: [New] 語義上下文與 RAG 登記。
+- **[Module - Task Scheduling and Swarm Adapters](../02_Modules/Module - Task Scheduling and Swarm Adapters.md)**: [New] 任務調度與並行協作登記。
+- **[Module - Domain Services and Adapters](../02_Modules/Module - Domain Services and Adapters.md)**: [New] 外部服務與適配器登記。
+- **[Module - Intelligence and Logic (Remaining Core)](../02_Modules/Module - Intelligence and Logic (Remaining Core).md)**: [New] 剩餘核心邏輯登記。
+- **[Module - Advanced Core Intelligence](../02_Modules/Module - Advanced Core Intelligence.md)**: [New] Ash 矩陣與進階政策登記。
+- **[Source - Operational Scripts Index](../90_Sources/Source - Operational Scripts Index.md)**: [New] 全量維運與引擎腳本索引。
 
 ### 🛡️ 治理維運 (Operations & Governance)
-- **[[Ops - Weekly Governance Report]]**: 每週治理健康度與風險摘要。
-- **[[Ops - Wiki Page Type Contracts]]**: [New] Wiki 頁面類型契約。
-- **[[Ops - Query Writeback Policy]]**: [New] 查詢回寫至 Wiki 政策。
-- **[[Ops - Governance SLO Dashboard]]**: 治理指標趨勢面板。
-- **[[Ops - Architecture Decision Records]]**: 架構決策脈絡與取捨索引。
-- **[[Ops - Optimization Proposal Protocol]]**: 優化提案提交與驗收模板。
-- **[[Ops - Agent Capability Boundaries]]**: 代理改動邊界與 HITL 規則。
-- **[[Ops - Learning Closure Matrix]]**: 錯誤類型到防再發策略矩陣。
-- **[[Ops - Wiki Drift Audit]]**: 實體與文檔漂移監控。
-- **[[Ops - Wiki Link Integrity]]**: 連結完整性與孤兒頁。
-- **[[Ops - Reference Boundary and Archive Policy]]**: Reference 保留邊界與封存治理。
-- **[[Ops - Closeout Hard Gate]]**: 完成回報前的 done contract 阻斷閘門。
-- **[[Ops - Ownership and Review SLA]]**: 頁面所有權與編校年資平衡。
-- **[[Ops - Truth Claims Register]]**: 真相宣稱與自動化驗證。
-- **[[Ops - Governance Changelog]]**: 治理變更歷史路徑。
-- **[[Ops - CI Failure Playbook]]**: [New] CI 紅燈故障排除 20 案手冊。
+- **[Ops - Weekly Governance Report](../06_Ops/Ops - Weekly Governance Report.md)**: 每週治理健康度與風險摘要。
+- **[Ops - Wiki Page Type Contracts](../06_Ops/Ops - Wiki Page Type Contracts.md)**: [New] Wiki 頁面類型契約。
+- **[Ops - Query Writeback Policy](../06_Ops/Ops - Query Writeback Policy.md)**: [New] 查詢回寫至 Wiki 政策。
+- **[Ops - Governance SLO Dashboard](../06_Ops/Ops - Governance SLO Dashboard.md)**: 治理指標趨勢面板。
+- **[Ops - Architecture Decision Records](../06_Ops/Ops - Architecture Decision Records.md)**: 架構決策脈絡與取捨索引。
+- **[Ops - Optimization Proposal Protocol](../06_Ops/Ops - Optimization Proposal Protocol.md)**: 優化提案提交與驗收模板。
+- **[Ops - Agent Capability Boundaries](../06_Ops/Ops - Agent Capability Boundaries.md)**: 代理改動邊界與 HITL 規則。
+- **[Ops - Learning Closure Matrix](../06_Ops/Ops - Learning Closure Matrix.md)**: 錯誤類型到防再發策略矩陣。
+- **[Ops - Wiki Drift Audit](../06_Ops/Ops - Wiki Drift Audit.md)**: 實體與文檔漂移監控。
+- **[Ops - Wiki Link Integrity](../06_Ops/Ops - Wiki Link Integrity.md)**: 連結完整性與孤兒頁。
+- **[Ops - Reference Boundary and Archive Policy](../06_Ops/Ops - Reference Boundary and Archive Policy.md)**: Reference 保留邊界與封存治理。
+- **[Ops - Closeout Hard Gate](../06_Ops/Ops - Closeout Hard Gate.md)**: 完成回報前的 done contract 阻斷閘門。
+- **[Ops - Ownership and Review SLA](../06_Ops/Ops - Ownership and Review SLA.md)**: 頁面所有權與編校年資平衡。
+- **[Ops - Truth Claims Register](../06_Ops/Ops - Truth Claims Register.md)**: 真相宣稱與自動化驗證。
+- **[Ops - Governance Changelog](../06_Ops/Ops - Governance Changelog.md)**: 治理變更歷史路徑。
+- **[Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)**: [New] CI 紅燈故障排除 20 案手冊。
 
 (State Hub)
 
@@ -106,5 +106,5 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - MUSE-NEXUS Engine Specification v17.1 Hardened: 提供物理拓撲與硬化門禁歷史。
 
 ## Open questions / conflicts
-- [ ] 哪些頁面應進一步拆成模組頁（如 [[Module - State Contracts|State Contracts]]）。
+- [ ] 哪些頁面應進一步拆成模組頁（如 [State Contracts](../02_Modules/Module - State Contracts.md)）。
 - [ ] 針對 PDRAC 與 [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] 的語義漂移進行對位。

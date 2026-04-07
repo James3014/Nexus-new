@@ -1,8 +1,8 @@
 {
-  "total": 56,
-  "passed": 56,
+  "total": 88,
+  "passed": 88,
   "failed": 0,
-  "waived": 1,
+  "waived": 0,
   "expired": 0,
   "details": [
     {
@@ -48,6 +48,12 @@
       "warnings": []
     },
     {
+      "file": "09_Roadmap/Phase 6 - Nexus Hardening.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Truth Claims Register.md",
       "status": "\u2705",
       "errors": [],
@@ -78,7 +84,19 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Architecture Decision Records.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Ownership and Review SLA.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Closeout Hard Gate.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -90,13 +108,37 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Wiki Regression Evals.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Governance Changelog.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Reference Boundary and Archive Policy.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Wisdom Layer.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/NEXUS_ENFORCED_LAUNCH.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Optimization Proposal Protocol.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -114,7 +156,19 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Ops - Learning Closure Matrix.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - Provenance Exceptions and Waivers.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/NEXUS_PILOT_CLI_QUICKSTART_CN.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -127,6 +181,18 @@
     },
     {
       "file": "06_Ops/Ops - Truth Claims Command Policy.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Agent Capability Boundaries.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "06_Ops/Ops - Weekly Governance Report.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -157,6 +223,18 @@
     },
     {
       "file": "01_System/System - Unknowns and Conflicts.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/Nexus Glossary.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "01_System/MUSE_PROTO.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -312,6 +390,60 @@
       "warnings": []
     },
     {
+      "file": "Reference/program.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/nexus_truth_dashboard.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/QUICKSTART.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/README.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/task.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/walkthrough.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/Vault Topology.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/CLI Surface Quickstart.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/Agent Boot Sequence.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "00_Home/System Overview.md",
       "status": "\u2705",
       "errors": [],
@@ -319,6 +451,12 @@
     },
     {
       "file": "00_Home/Agent Onboarding - Implementation Map.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "00_Home/Root_README_Summary.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -336,7 +474,61 @@
       "warnings": []
     },
     {
+      "file": "06_Ops/Security/Audit - mTLS and Service Mesh Gap.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
       "file": "06_Ops/Ops - CI/CD Promotion Gate.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": ".nexus/graph/Community_1.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": ".nexus/graph/index.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/docs/00_PROJECT_INDEX.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/.serena/memories/project_overview.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/.serena/memories/suggested_commands.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/.serena/memories/style_and_conventions.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/.serena/memories/task_completion_checklist.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "Reference/.serena/memories/automated_execution_protocol.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []

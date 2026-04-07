@@ -19,7 +19,7 @@ type: ops
 
 ## Role / responsibility
 - 聚合 `drift/coverage/truth` 報表，提供治理儀表板。
-- 讓人類審核與 [[CD Promotion Gate|CI gate]] 共用同一組 SLO 觀測基線。
+- 讓人類審核與 [CI gate](Ops - CI/CD Promotion Gate.md) 共用同一組 SLO 觀測基線。
 
 ## Matrix / flow / interfaces
 | Metric | Source Report | Gate Meaning |
@@ -55,7 +55,7 @@ type: ops
 
 ## Upstream
 - `scripts/ops/wiki_slo_dashboard.py` 產出快照與趨勢。 [Code: scripts/ops/wiki_slo_dashboard.py]
-- [[System Overview]]
+- [System Overview](../00_Home/System Overview.md)
 
 ## Downstream
 - 作為 `ci_gate.py` 前置人工判讀面板。

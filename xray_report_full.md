@@ -1,9 +1,9 @@
 # v23 X-Ray Full Analysis Report
 
 ## Summary
-v23 X-Ray Cross-Repo Scan complete. Symbols: 9524 | Crossings: 5048
+v23 X-Ray Cross-Repo Scan complete. Symbols: 9532 | Crossings: 5049
 
-## Symbols (9524)
+## Symbols (9532)
 - core::metrics_aggregator.py::MetricsAggregator
 - core::metrics_aggregator.py::__init__
 - core::metrics_aggregator.py::aggregate_crystallize_payload
@@ -54,9 +54,9 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 9524 | Crossings: 5048
 - core::skill_outcomes.py::append_skill_outcome_event
 - core::handoff_bundle.py::HandoffRequest
 - core::handoff_bundle.py::HandoffRetentionPolicy
-- ... and 9474 more
+- ... and 9482 more
 
-## Crossings (5048)
+## Crossings (5049)
 - core::metrics_aggregator.py -> typing
 - core::metrics_aggregator.py -> time
 - core::shogun.py -> typing
@@ -107,7 +107,7 @@ v23 X-Ray Cross-Repo Scan complete. Symbols: 9524 | Crossings: 5048
 - core::access_control_list.py -> typing
 - core::access_control_list.py -> logging
 - core::access_control_list.py -> re
-- ... and 4998 more
+- ... and 4999 more
 
 ## Risks Detected (27)
 ⚠️ core::session_persistence.py: Potential subprocess execution detected.

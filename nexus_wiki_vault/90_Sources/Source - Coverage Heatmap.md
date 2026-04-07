@@ -6,10 +6,10 @@ owner: agent
 related_pages: ''
 source_of_truth: .nexus/reports/wiki_coverage_report.json
 status: active
-tags: '[[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source [[index|Index]]|sources]]]]]]]],
+tags: '[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[[Source [[index|Index]]|sources]]]]]]]],
   coverage, audit, heatmap]'
 title: Source - Coverage Heatmap
-type: '[[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source [[index|Index]]|sources]]]]]]]]'
+type: '[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[[Source [[index|Index]]|sources]]]]]]]]'
 version_scope: '[v17.1, v22, v23]'
 ---
 
@@ -35,17 +35,17 @@ version_scope: '[v17.1, v22, v23]'
 - **Total Code Files**: 249 [Source: scripts/ops/wiki_coverage_audit.py]
 - **Covered Files**: 212
 - **Key Path Files**: 12/12 (100%)
-- **Stale Coverage**: 參見 [[Ops - Wiki Drift Audit]]
+- **Stale Coverage**: 參見 [Ops - Wiki Drift Audit](../06_Ops/Ops - Wiki Drift Audit.md)
 
 ## Key Path Implementation Status (核心路徑覆蓋清單)
 
 | Path (核心檔案) | Status | Wiki Reference |
 |---|---|---|
 | `scripts/ops/ci_gate.py` | ✅ | [[Ops - CI/CD Promotion Gate]] |
-| `scripts/ops/wiki_linter.py` | ✅ | [[System Overview]] |
-| `scripts/ops/wiki_drift_audit.py` | ✅ | [[Ops - Wiki Drift Audit]] |
-| `nexus/core/orchestrator.py` | ✅ | [[Module - Core Orchestrator]] |
-| `nexus-desk/src-tauri/src/main.rs` | ✅ | [[Module - Nexus Desk Interface]] |
+| `scripts/ops/wiki_linter.py` | ✅ | [System Overview](../00_Home/System Overview.md) |
+| `scripts/ops/wiki_drift_audit.py` | ✅ | [Ops - Wiki Drift Audit](../06_Ops/Ops - Wiki Drift Audit.md) |
+| `nexus/core/orchestrator.py` | ✅ | [Module - Core Orchestrator](../02_Modules/Module - Core Orchestrator.md) |
+| `nexus-desk/src-tauri/src/main.rs` | ✅ | [Module - Nexus Desk Interface](../02_Modules/Module - Nexus Desk Interface.md) |
 
 ## Remaining Gaps (治理缺口)
 
@@ -59,8 +59,8 @@ version_scope: '[v17.1, v22, v23]'
 - **Provenance Tags**: 全庫 `[Source: 00_Home/System Overview.md]` 標籤。
 
 ## Downstream
-- **[[Source Index]]**: 提供全域來源索引。
-- **[[Ops - Wiki Drift Audit]]**: 驗證已覆蓋項的時效性。
+- **[Source Index](Source Index.md)**: 提供全域來源索引。
+- **[Ops - Wiki Drift Audit](../06_Ops/Ops - Wiki Drift Audit.md)**: 驗證已覆蓋項的時效性。
 
 ## Related modules / files
 - `.nexus/reports/wiki_coverage_report.json`: 生成的報表。 [Source: .nexus/reports/wiki_coverage_report.json]

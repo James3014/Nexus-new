@@ -26,10 +26,10 @@ version_scope:
 ## Role / responsibility
 - **知識轉化**: 將動態的執行數據或 AI 探查結果轉化為持久的 Wiki 知識。
 - **減少重複**: 避免對同一問題進行重複的昂貴探查。
-- **維護一致性**: 確保回寫的內容符合 `[[Ops - Wiki Page Type Contracts]]`。
+- **維護一致性**: 確保回寫的內容符合 `[Ops - Wiki Page Type Contracts](Ops - Wiki Page Type Contracts.md)`。
 
 ## Upstream
-- **[[System Overview]]**: 總體治理入口。
+- **[System Overview](../00_Home/System Overview.md)**: 總體治理入口。
 - **[[01_System/System - Unknowns and Conflicts.md]]**: 提供回寫的潛在目標（待解問題）。
 
 ## Downstream
@@ -62,7 +62,7 @@ version_scope:
 
 ## Workflow (回寫流程)
 1. **觸發**: 執行 `nexus explore` 或 `nexus diagnose` 產生高價值結論。
-2. **格式化**: 依照 `[[Ops - Wiki Page Type Contracts]]` 將結論轉化為 Markdown 格式。
+2. **格式化**: 依照 `[Ops - Wiki Page Type Contracts](Ops - Wiki Page Type Contracts.md)` 將結論轉化為 Markdown 格式。
 3. **驗證**: 執行 `wiki_linter.py` 確保格式正確。
 4. **提交**: 由 Agent 建立新頁面或更新現有頁面。
 5. **自動化**: 使用 `scripts/ops/wiki_query_writeback.py` 執行策略強制與自動回寫。支援 `--input-json` 批量導入。

@@ -20,7 +20,7 @@ visibility: internal
 ---
 
 
-Waiver: 00_Home/[[System Overview]].md
+Waiver: 00_Home/[System Overview](System Overview.md).md
 [source: nexus_wiki_vault/00_Home/System Overview.md]].md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
@@ -81,7 +81,7 @@ Waiver: 00_Home/[[System Overview]].md
     *   **戰場探索者 (戰情室 v9)**: 職能命中率與自學習調權的實時遙測面板。
 *   **🌙 Night Shift Code Factory [V23]**: Fully integrated autonomic production line with governance auto-stop.
     *   **夜班代碼工廠 (v23)**: 深度整合自主演進邏輯，具備 19 層治理自動停機與標竿優化。
-*   **🛡️ 19-Layer Governance (v23.1)**: Permanent L0 Rules & L1 [[index]] for cross-turn state persistence.
+*   **🛡️ 19-Layer Governance (v23.1)**: Permanent L0 Rules & L1 [index](../.nexus/graph/index.md) for cross-turn state persistence.
     *   **19 層治理架構 (v23.1)**: L0 治理根與 L1 任務索引常駐化，達成 30% Context 減量與跨回合狀態繼承。
 
 ---
@@ -91,11 +91,11 @@ Waiver: 00_Home/[[System Overview]].md
 ```bash
 # Fix a bug with v9 Autonomic Precision
 # 以 v9 自主精度修復 Bug
-python3 scripts/engine/nexus_cli.py nexus:bug --[[task]] "fix hydration error on dynamic routes" --delivery-mode ask --silent
+python3 scripts/engine/nexus_cli.py nexus:bug --[task](../Reference/task.md) "fix hydration error on dynamic routes" --delivery-mode ask --silent
 
 # Build a feature with top-tier resilience
 # 具備高韌性的新功能開發
-python3 scripts/engine/nexus_cli.py nexus:feature --[[task]] "migrate session storage to redis" --domain### 17.3 治理 HUD 硬化合約 (2.1-STABLE-HARDENED)
+python3 scripts/engine/nexus_cli.py nexus:feature --[task](../Reference/task.md) "migrate session storage to redis" --domain### 17.3 治理 HUD 硬化合約 (2.1-STABLE-HARDENED)
 - [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `/Users/jameschen/Workspace/nexus/` 的絕對錨定。
 - [x] **ACL 命名空間扁平化**: 本地 App 權限引用必須使用扁平 `identifier` (如 `allowall`)，嚴禁在單一上下文環境下加註 `app:` 等無意義命名空間，以防編譯器與運行端靜默拒絕。
 - [x] **反黑屏守則 (Anti-Blackout UX)**: 治理 HUD 必須具備 `FatalBoundary` (React Error Boundary)。任何前端初始化崩潰必須物理顯示於畫面上，禁止「靜默黑屏」。
@@ -121,7 +121,7 @@ Nexus Swarm 現在運行於 **v23.1 治理升級版**，此版本建立在 **v22
 ### 🛡️ 關鍵治理特性
 - **A→C Handoff**: 在審計與固化相位間建立物理級狀態封存，確保跨回合 (Cross-turn) 調用的一致性。
 - [x] **Audit-Crystallize Handoff**: 於 A 與 C 之間建立 `.nexus/state/last_handoff.json` 正式工件。
-- [x] **證據鏈對位**: `last_handoff.json` 已寫入 `manifest.json` 與 [[Protocol - Evidence Chain|artifact chain]]。
+- [x] **證據鏈對位**: `last_handoff.json` 已寫入 `manifest.json` 與 [artifact chain](../05_Protocols/Protocol - Evidence Chain.md)。
 - [x] **狀態機繼承**: 失敗路徑映射至 `NexusExitCode` (ESCALATED/HUMAN_REVIEW)。
 
 ### 18.2 驗收數據與穩定化標竿 (v23.1)
@@ -143,21 +143,21 @@ MUSE ENGINE SPEC v23.1 Addendum
 # Ask the operator whether this bugfix needs high-standard delivery
 # 主動詢問這次 bug 修復是否需要高標交付
 python3 scripts/engine/nexus_cli.py nexus:bug \
-  --[[task]] "fix login callback regression" \
+  --[task](../Reference/task.md) "fix login callback regression" \
   --delivery-mode ask
 
 # Ask the operator whether this feature needs high-standard delivery
 # 主動詢問這次功能開發是否需要高標交付
 python3 scripts/engine/nexus_cli.py nexus:feature \
-  --[[task]] "add SSO audit trail" \
+  --[task](../Reference/task.md) "add SSO audit trail" \
   --delivery-mode ask
 
-# Run the [[task]] runner and ask before enforcing completion gate
+# Run the [task](../Reference/task.md) runner and ask before enforcing completion gate
 # 在任務編排前先詢問是否啟用 completion gate
 python3 scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
 ```
 
-**[EN]** If the operator selects `high`, Nexus will enforce the completion gate before marking the [[task]] as delivered. For `bug` and `feature`, Nexus can auto-suggest verification commands for Python, Rust, and Go projects when `--verify` is omitted. The CLI also prints the verification commands it used and the generated delivery report paths.
+**[EN]** If the operator selects `high`, Nexus will enforce the completion gate before marking the [task](../Reference/task.md) as delivered. For `bug` and `feature`, Nexus can auto-suggest verification commands for Python, Rust, and Go projects when `--verify` is omitted. The CLI also prints the verification commands it used and the generated delivery report paths.
 
 **[ZH]** 若操作者選擇 `high`，Nexus 會在任務標記完成前強制通過 completion gate。對 `bug` 與 `feature` 而言，如果沒有提供 `--verify`，Nexus 會自動推建議驗證命令，支援 Python、Rust、Go 專案。CLI 也會直接輸出本次實際採用的驗證命令與生成的交付報告路徑。
 
@@ -181,9 +181,9 @@ nexus:test --full-chain "voice narration feature"
 
 ## 🗺️ Navigation | 導航
 
-For detailed project architecture, refactor roadmap, and script ownership, please refer to the **[Project [[index|Index]] (docs/[[index|INDEX]].md)](docs/[[index|INDEX]].md)**.
+For detailed project architecture, refactor roadmap, and script ownership, please refer to the **[Project [Index](../.nexus/graph/index.md) (docs/[INDEX](../.nexus/graph/index.md).md)](docs/[INDEX](../.nexus/graph/index.md).md)**.
 
-關於專案架構、重構路線圖與腳本所有權的詳細資訊，請參閱 **[專案索引 (docs/[[index|INDEX]].md)](docs/[[index|INDEX]].md)**。
+關於專案架構、重構路線圖與腳本所有權的詳細資訊，請參閱 **[專案索引 (docs/[INDEX](../.nexus/graph/index.md).md)](docs/[INDEX](../.nexus/graph/index.md).md)**。
 
 ---
 **Nexus v9: The engine that grows with the project.** 🫡🦾💎🚀✨🚩
@@ -193,4 +193,4 @@ For detailed project architecture, refactor roadmap, and script ownership, pleas
 
 
 ---
-[[System Overview]]
+[System Overview](System Overview.md)

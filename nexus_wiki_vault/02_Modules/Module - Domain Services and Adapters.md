@@ -7,9 +7,9 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - Memory Pipeline Deep Dive|Module - Memory Pipeline Deep Dive]]'
-- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
-  Matrix]]'
+- '[Module - Memory Pipeline Deep Dive](Module - Memory Pipeline Deep Dive.md)'
+- '[Module - Implementation Responsibility
+  Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/services/memory.py
 status: active
 tags:
@@ -42,7 +42,7 @@ version_scope:
 | Category | Component Name | Responsibility (職責) | Source (Path) |
 |---|---|---|---|
 | **Memory** | **memory.py** | 記憶服務主入口。 | [Source: nexus/services/memory.py] |
-| **Memory** | **memory_repository.py** | 實體 [[Module - Memory Repository|LanceDB]] 表與磁碟 IO 管理。 | [Source: nexus/services/memory_repository.py] |
+| **Memory** | **memory_repository.py** | 實體 [LanceDB](Module - Memory Repository.md) 表與磁碟 IO 管理。 | [Source: nexus/services/memory_repository.py] |
 | **Memory** | **memory_indexer.py** | 負責向量索引的建立與維護。 | [Source: nexus/services/memory_indexer.py] |
 | **Memory** | **memory_embedding.py** | LLM Embedding [[api|API]] 協調。 | [Source: nexus/services/memory_embedding.py] |
 | **Memory** | **continuous_learning.py** | 持續學習與記憶固化。 | [Source: nexus/services/continuous_learning.py] |
@@ -85,11 +85,11 @@ version_scope:
 | **Bridge** | **fp_bridge_v2.py** | 二代指紋橋接。 | [Source: nexus/services/fp_bridge_v2.py] |
 
 ## Upstream
-- **[[System Overview]]**: 全域服務集群。
+- **[System Overview](../00_Home/System Overview.md)**: 全域服務集群。
 - **MUSE-NEXUS Spec**: 適配器超時門檻規範。
 
 ## Downstream
-- **[[Module - Memory Pipeline Deep Dive]]**: 深度技術實現。
+- **[Module - Memory Pipeline Deep Dive](Module - Memory Pipeline Deep Dive.md)**: 深度技術實現。
 - **[[Ops - CI/CD Promotion Gate]]**: 提供質量 Benchmark。
 
 ## Related modules / files
@@ -102,4 +102,4 @@ version_scope:
 - [ ] **Distributed Cache**: 是否需要在 Service 層引入全域分佈式緩存。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

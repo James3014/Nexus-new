@@ -7,7 +7,7 @@ aliases: []
 每次更新 vault 前後都檢查：
 
 - [ ] 是否只更新受影響頁面
-- [ ] 是否更新 [[Source Index]]
+- [ ] 是否更新 [Source Index](../90_Sources/Source Index.md)
 - [ ] 是否補上 source notes
 - [ ] 是否標記 version_scope
 - [ ] 是否新增 backlinks
@@ -16,7 +16,7 @@ aliases: []
 - [ ] 是否產出更新摘要
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)
 
 
 ## One-sentence summary

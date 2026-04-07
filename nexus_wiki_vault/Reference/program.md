@@ -13,10 +13,10 @@ priority: P2
 version: v1.0.0
 visibility: internal
 landscape: structural
-path: nexus_wiki_vault/06_Ops/Reference/program.md
+path: /program.md
 ---
-Waiver: 00_Home/[[System Overview]].md
-[source: 00_Home/[[System Overview]].md]
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../00_Home/System Overview.md).md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
 
@@ -59,4 +59,4 @@ Waiver: 00_Home/[[System Overview]].md
 
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

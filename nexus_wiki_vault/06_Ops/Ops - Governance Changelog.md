@@ -1,6 +1,6 @@
 ---
-aliases: '[Governance Log, Audit Log, System [[Diff - v17.1 vs v22 vs v23|Evolution
-  Log]]]'
+aliases: '[Governance Log, Audit Log, System [Evolution
+  Log](../07_Diffs/Diff - v17.1 vs v22 vs v23.md)]'
 confidence: high
 last_compiled: '2026-04-06'
 owner: agent
@@ -29,19 +29,19 @@ version_scope: '[v17.1, v22, v23]'
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
 | 2026-04-07 | **Gemini Invocation Reliability Hardening** | `scripts/ops/gemini_nexus_invoke.py`, `AGENT_PROTOCOL_v2.md` | Low | Git revert | Codex |
-| 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `[[Module - State Contracts]]` | Low | Git revert | Antigravity |
+| 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `[Module - State Contracts](../02_Modules/Module - State Contracts.md)` | Low | Git revert | Antigravity |
 | 2026-04-06 | **WS-B/C: Core Subdomain Deep-Mapping** | `nexus/core`, Wiki Vault | Low | Git revert | Antigravity |
-| 2026-04-06 | **WS-F: Navigation Refactoring & Orphan Cleanup** | `[[System Overview]].md`, Navbar | Low | Git revert | Antigravity |
+| 2026-04-06 | **WS-F: Navigation Refactoring & Orphan Cleanup** | `[System Overview](../00_Home/System Overview.md).md`, Navbar | Low | Git revert | Antigravity |
 | 2026-04-06 | **Governance Hardening Final** | **Global Coverage 86.0%, Keypath 100%, P1 Noise 11** | Mid | Git revert | Antigravity |
 | 2026-04-05 | 核心模組深映射 | 完成 Orchestrator/Guard/Memory/Policy 深度映射頁。 | Pass 7 (Part 1) |
 | 2026-04-06 | 治理全面硬化 | **Coverage 提升至 90.73%**，建立 20 案故障手冊與全量腳本索引。 | Pass 7 Final |
- 全庫 Wiki, [[CD Promotion Gate|CI Gate]], Reports | Mid | Git revert to HEAD~5 | Antigravity |
+ 全庫 Wiki, [CI Gate](Ops - CI/CD Promotion Gate.md), Reports | Mid | Git revert to HEAD~5 | Antigravity |
 
 ## Upstream
-- **[[CD Promotion Gate|CI Gate]]**: 提供自動變更觸發與驗證環境。 [Source: scripts/ops/ci_gate.py]
+- **[CI Gate](Ops - CI/CD Promotion Gate.md)**: 提供自動變更觸發與驗證環境。 [Source: scripts/ops/ci_gate.py]
 
 ## Downstream
-- **[[System Overview]]**: 提供最新治理狀態的摘要。
+- **[System Overview](../00_Home/System Overview.md)**: 提供最新治理狀態的摘要。
 - **[[Ops - CI/CD Promotion Gate]]**: 作為發版前「變更稽核」的參考。
 
 ## Related modules / files

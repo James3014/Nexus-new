@@ -26,19 +26,19 @@ type: ops
 ## SLA Matrix (服務等級協議表格)
 | Level | Page Type | Review Period | Action on Expiration |
 |---|---|---|---|
-| **Critical** | [[System Overview|Home]], Ops, Prot | 30 Days | High Priority Warning |
+| **Critical** | [Home](../00_Home/System Overview.md), Ops, Prot | 30 Days | High Priority Warning |
 | **Standard** | Modules | 45 Days | Standard Notification |
 | **Backup** | Source | 90 Days | Passive Monitor |
 
 ## Upstream
-- **[[System Overview]]**: 總覽。
-- **[[Ops - Governance SLO Dashboard]]**: 指標看板。
+- **[System Overview](../00_Home/System Overview.md)**: 總覽。
+- **[Ops - Governance SLO Dashboard](Ops - Governance SLO Dashboard.md)**: 指標看板。
 
 ## Downstream
 - **[[Ops - CI/CD Promotion Gate]]**: 禁止帶有 Stale 核心頁面的版本發佈 (未來)。
 
 ## Related modules / files
-- `/Users/jameschen/Workspace/nexus/scripts/ops/wiki_owner_audit.py`: 產權稽核腳本。
+- `/scripts/ops/wiki_owner_audit.py`: 產權稽核腳本。
 
 ## Source notes
 - v22 Engine Spec Part 3:「凡物理邏輯必有主，凡文檔聲明必有核」。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]

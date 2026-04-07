@@ -6,11 +6,11 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[State - Lifecycle|State - Lifecycle]]'
-- '[[Protocol - Evidence Map|Evidence Map]]|[[Protocol - [[Protocol - Evidence Map|Evidence
-  Map]]|Protocol - [[Protocol - Evidence Map|Evidence Map]]]]]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[State - Lifecycle](../04_State/State - Lifecycle.md)'
+- '[Evidence Map](../05_Protocols/Protocol - Evidence Map.md)|[[Protocol - [[Protocol - Evidence Map|Evidence
+  Map]]|Protocol - [Evidence Map](../05_Protocols/Protocol - Evidence Map.md)]]]]'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: scripts/engine/nexus_cli.py
@@ -53,10 +53,10 @@ version_scope:
 
 ## Upstream
 - **User Intent**: 原始任務描述。
-- **[[State - Lifecycle]]**: 提供相位權威定義。
+- **[State - Lifecycle](../04_State/State - Lifecycle.md)**: 提供相位權威定義。
 
 ## Downstream
-- **[[Protocol - Evidence Map]]**: 追隨流程產出物理工件鏈。
+- **[Protocol - Evidence Map](../05_Protocols/Protocol - Evidence Map.md)**: 追隨流程產出物理工件鏈。
 - **[[Ops - CI/CD Promotion Gate]]**: 對最後產出物執行門禁檢查。
 
 ## Related modules / files
@@ -71,4 +71,4 @@ version_scope:
 - [ ] **Manual Intervention**: 在 A 相位失敗後是否允許人類手動干預並重新進入 R。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

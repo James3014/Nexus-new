@@ -11,15 +11,15 @@ raw_sources:
 - warning_budget_check.py
 - MUSE-NEXUS Engine Specification v22
 related_pages:
-- '[[Module - State Contracts|State Contracts]]|[[Module - [[Module - State Contracts|State
-  Contracts]]|Module - [[Module - State Contracts|State Contracts]]]]]]'
-- '[[Protocol - Evidence Chain|Protocol - Evidence Chain]]'
+- '[State Contracts](../../02_Modules/Module - State Contracts.md)|[[Module - [[Module - State Contracts|State
+  Contracts]]|Module - [State Contracts](../../02_Modules/Module - State Contracts.md)]]]]'
+- '[Protocol - Evidence Chain](../../05_Protocols/Protocol - Evidence Chain.md)'
 - Ops - CI/CD Promotion Gate
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[System Overview](../../00_Home/System Overview.md)'
+- '[Unknowns](../../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[Unknowns](../../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: scripts/ops/ci_gate.py
@@ -62,7 +62,7 @@ version_scope:
 
 ### 3. Benchmark Replay (Mini-lane)
 - **指令**: `nexus:benchmark --tasks 10`
-- **實體檢核**: 使用 `[[Ops - Truth Claims Register]]` 驗證本地環境是否存在真值斷裂。 [Source: 06_Ops/Ops - Truth Claims Register.md]]]
+- **實體檢核**: 使用 `[Ops - Truth Claims Register](../Ops - Truth Claims Register.md)` 驗證本地環境是否存在真值斷裂。 [Source: 06_Ops/Ops - Truth Claims Register.md]]]
 - **主約更新**: 當程式碼變更時，優先更新對應的 Wiki [Source: 00_Home/System Overview.md] 標籤。
 - **指標**: 
     - **Avg Health > 90%**: 任務成功率基準線。 [Source: 00_Home/System Overview.md]
@@ -83,7 +83,7 @@ version_scope:
 
 ## Downstream
 - **Phase C (Crystallize)**: 門禁通過後，執行 `nexus:crystal` 進行經驗落盤。
-- **[[Ops - Acceptance and Release]]**: 作為 [[Ops - Acceptance and Release|Release Gate]] 的最終前置條件。
+- **[Ops - Acceptance and Release](../Ops - Acceptance and Release.md)**: 作為 [Release Gate](../Ops - Acceptance and Release.md) 的最終前置條件。
 
 ## Related modules / files
 - `scripts/ops/ci_gate.py`: 門禁執行引擎。
@@ -97,11 +97,11 @@ version_scope:
 - **Baseline commit**: `619e460`（目前 repo HEAD）。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 - **Release tags present**: `v22.1.0-prod`, `v22.1.1-prod`。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 - **Gate health (dry-run)**: `venv_python`, `contracts_dir`, `benchmark_script` 目前可通過。 [Source: scripts/ops/ci_gate.py]
-- **Release discipline**: Production promotion 仍以 `ci_gate --strict` + Wiki governance + 實體證據清單 `[[Ops - Truth Claims Register]]` 為準，不因外部報告而豁免。 [Source: scripts/ops/ci_gate.py]
+- **Release discipline**: Production promotion 仍以 `ci_gate --strict` + Wiki governance + 實體證據清單 `[Ops - Truth Claims Register](../Ops - Truth Claims Register.md)` 為準，不因外部報告而豁免。 [Source: scripts/ops/ci_gate.py]
 
 ## Open questions / conflicts
 - [ ] **Manual Override**: 是否允許人類在 `Health < 90%` 但環境受限的情況下強制 Bypass。
 - [ ] **v23.1 Handoff**: 門禁完成後 `last_handoff.json` 的鎖定順序。
 
 ---
-[[System Overview]]
+[System Overview](../../00_Home/System Overview.md)

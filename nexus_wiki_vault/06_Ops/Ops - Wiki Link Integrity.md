@@ -30,14 +30,14 @@ type: ops
 | **Broken WikiLinks**| Target missing | > 0 | `wiki_link_audit.py` |
 
 ## Upstream
-- **[[System Overview]]**: 總覽。
-- **[[Ops - Wiki Drift Audit]]**: 物理路徑稽核。
+- **[System Overview](../00_Home/System Overview.md)**: 總覽。
+- **[Ops - Wiki Drift Audit](Ops - Wiki Drift Audit.md)**: 物理路徑稽核。
 
 ## Downstream
 - **[[Ops - CI/CD Promotion Gate]]**: 作為發版前的「鏈接健康」警告。
 
 ## Related modules / files
-- `/Users/jameschen/Workspace/nexus/scripts/ops/wiki_link_audit.py`: 主稽核腳本。
+- `/scripts/ops/wiki_link_audit.py`: 主稽核腳本。
 
 ## Source notes
 - v22 Engine Spec Part 7: 規定所有治理文檔必備全局入鏈。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]

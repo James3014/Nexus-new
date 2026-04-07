@@ -13,10 +13,10 @@ priority: P2
 version: v1.0.0
 visibility: internal
 landscape: structural
-path: nexus_wiki_vault/06_Ops/Reference/docs/00_PROJECT_INDEX.md
+path: /nexus_wiki_vault/Reference/docs/00_PROJECT_INDEX.md
 ---
-Waiver: 00_Home/[[System Overview]].md
-[source: 00_Home/[[System Overview]].md]
+Waiver: 00_Home/[System Overview](../../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../../00_Home/System Overview.md).md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
 
@@ -39,7 +39,7 @@ Waiver: 00_Home/[[System Overview]].md
 - Pending detailed [[documentation]].
 
 ---
-# Muse-Nexus Project [[index]]
+# Muse-Nexus Project [index](../../.nexus/graph/index.md)
 
 ## Purpose
 
@@ -51,7 +51,7 @@ Waiver: 00_Home/[[System Overview]].md
    現有 repo 的能力、主要腳本與運作方式。
 
 2. [[[02_TARGET_ARCHITECTURE|02_TARGET_ARCHITECTURE]].md](./[[02_TARGET_ARCHITECTURE|02_TARGET_ARCHITECTURE]].md)
-   目標中的 Commander / [[Module - Intelligence and Context Core|Context Hub]] / P-D-X-R-A-C 架構。
+   目標中的 Commander / [Context Hub](../../02_Modules/Module - Intelligence and Context Core.md) / P-D-X-R-A-C 架構。
 
 3. [[[03_GAP_ANALYSIS|03_GAP_ANALYSIS]].md](./[[03_GAP_ANALYSIS|03_GAP_ANALYSIS]].md)
    現況與藍圖的逐項對照。
@@ -69,7 +69,7 @@ Waiver: 00_Home/[[System Overview]].md
    root-level scripts 與 `scripts/core/` 的 ownership 暫行判定與 duplicate map。
 
 8. [[[08_MIGRATION_RUNBOOK_V1_5_2_PLUS|08_MIGRATION_RUNBOOK_V1_5_2_PLUS]].md](./[[08_MIGRATION_RUNBOOK_V1_5_2_PLUS|08_MIGRATION_RUNBOOK_V1_5_2_PLUS]].md)
-   從舊 Nexus 遷移到 Commander / [[Module - Intelligence and Context Core|Context Hub]] / Skills Router / X / Reflection 架構的升級作戰手冊。
+   從舊 Nexus 遷移到 Commander / [Context Hub](../../02_Modules/Module - Intelligence and Context Core.md) / Skills Router / X / Reflection 架構的升級作戰手冊。
 
 9. [[[09_STATE_CONTRACT_DRAFT|09_STATE_CONTRACT_DRAFT]].md](./[[09_STATE_CONTRACT_DRAFT|09_STATE_CONTRACT_DRAFT]].md)
    `reflection / research_pack / skills_used / external_used / steps_history` 等新增欄位的 JSON contract 草案。
@@ -112,4 +112,4 @@ Waiver: 00_Home/[[System Overview]].md
 
 
 ---
-[[System Overview]]
+[System Overview](../../00_Home/System Overview.md)

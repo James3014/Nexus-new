@@ -7,8 +7,8 @@ last_compiled: 2026-04-07
 owner: agent
 priority: P3
 related_pages:
-- '[[System Overview]]'
-- '[[System - Unknowns and Conflicts]]'
+- '[System Overview](../../00_Home/System Overview.md)'
+- '[System - Unknowns and Conflicts](../../01_System/System - Unknowns and Conflicts.md)'
 source_of_truth: nexus_swarm/cmd/swarm-manager/main.go
 status: active
 tags:
@@ -65,7 +65,7 @@ s := grpc.NewServer()
 - [Consensus Report 0d389da5](file:///Users/jameschen/.gemini/antigravity/brain/0d389da5-3a15-4717-b21c-cd5aad468415/overview.txt): 首次識別此項治理債務。
 
 ---
-[[System Overview]] | [[System - Unknowns and Conflicts]]
+[System Overview](../../00_Home/System Overview.md) | [System - Unknowns and Conflicts](../../01_System/System - Unknowns and Conflicts.md)
 
 
 ## Upstream

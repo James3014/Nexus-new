@@ -6,10 +6,10 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Protocol - Evidence Map|Evidence Map]]|[[Protocol - [[Protocol - Evidence Map|Evidence
-  Map]]|Protocol - [[Protocol - Evidence Map|Evidence Map]]]]]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[Evidence Map](Protocol - Evidence Map.md)|[[Protocol - [[Protocol - Evidence Map|Evidence
+  Map]]|Protocol - [Evidence Map](Protocol - Evidence Map.md)]]]]'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: MUSE-NEXUS-v22#DataFabric
@@ -40,7 +40,7 @@ version_scope:
 - **歸檔準備**: 轉換為加密封印格式以供 Arweave 存儲。 [Source: 00_Home/System Overview.md]
 
 ## Upstream
-- **[[Protocol - Evidence Map]]**: 提供依賴圖譜。
+- **[Protocol - Evidence Map](Protocol - Evidence Map.md)**: 提供依賴圖譜。
 - **Phase Runners**: 提交通知至 Manifest Sealer。 [Code: nexus_cli.py]
 
 ## Downstream
@@ -60,4 +60,4 @@ version_scope:
 - [ ] **Encrypted Payload**: 是否應在 manifest 中包含工件的加密摘要而非純文字路徑。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

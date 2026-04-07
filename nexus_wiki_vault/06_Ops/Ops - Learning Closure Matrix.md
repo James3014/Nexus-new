@@ -7,10 +7,10 @@ confidence: high
 last_compiled: 2026-04-07
 owner: agent
 related_pages:
-- '[[System Overview|System Overview]]'
-- '[[Ops - Architecture Decision Records|Ops - Architecture Decision Records]]'
-- '[[Ops - Optimization Proposal Protocol|Ops - Optimization Proposal Protocol]]'
-- '[[Ops - Governance SLO Dashboard|Ops - Governance SLO Dashboard]]'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Ops - Architecture Decision Records](Ops - Architecture Decision Records.md)'
+- '[Ops - Optimization Proposal Protocol](Ops - Optimization Proposal Protocol.md)'
+- '[Ops - Governance SLO Dashboard](Ops - Governance SLO Dashboard.md)'
 source_of_truth: .nexus/reports/
 status: active
 tags:
@@ -41,7 +41,7 @@ version_scope:
 
 | Error Type | Symptom | Prevention Rule | Verification |
 |---|---|---|---|
-| Gate pass but [[task]] incomplete | 格式過關但語義未完成 | 強制提案模板與語義驗收 | `nexus_task_contract_guard.py` |
+| Gate pass but [task](../Reference/task.md) incomplete | 格式過關但語義未完成 | 強制提案模板與語義驗收 | `nexus_task_contract_guard.py` |
 | Auto-fix side effects | 順手改到無關檔案 | 任務邊界契約 + forbidden paths | `contract-check` + diff review |
 | Dry-run blind spots | dry-run 綠燈但實際不穩 | 補報表摘要與分級阻斷 | `ci_gate.py --full-dry-run` |
 | Repeated wiki path errors | `missing_path` 重複出現 | 路徑正規化與 alias map | `wiki_drift_audit.py` |
@@ -52,8 +52,8 @@ version_scope:
 - `.nexus/reports/wiki_truth_claims_report.json`: 真值校驗訊號來源。 [Source: .nexus/reports/wiki_truth_claims_report.json]
 
 ## Downstream
-- `[[Ops - Governance SLO Dashboard]]`: 聚合趨勢與告警。
-- `[[Ops - Governance Changelog]]`: 記錄策略生效時間點。
+- `[Ops - Governance SLO Dashboard](Ops - Governance SLO Dashboard.md)`: 聚合趨勢與告警。
+- `[Ops - Governance Changelog](Ops - Governance Changelog.md)`: 記錄策略生效時間點。
 
 ## Related modules / files
 - `scripts/ops/wiki_drift_audit.py`
@@ -69,4 +69,4 @@ version_scope:
 - [ ] 是否為每個錯誤類型增加 `MTTR` 與 `repeat_rate` 量化欄位。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

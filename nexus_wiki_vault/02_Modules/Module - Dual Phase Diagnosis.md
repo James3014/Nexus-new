@@ -12,7 +12,7 @@ related_pages:
   Runtime|Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime]]]]'
 - '[[[[Module - Core Orchestrator|Module - Core Orchestrator]] Deep Dive|[[Module
   - Core Orchestrator|Module - Core Orchestrator]] Deep Dive]]|[[[[Module - Core Orchestrator|Module
-  - Core Orchestrator]] Deep Dive|[[Module - Core Orchestrator|Module - Core Orchestrator]]
+  - Core Orchestrator]] Deep Dive|[Module - Core Orchestrator](Module - Core Orchestrator.md)
   Deep Dive]]]]'
 source_of_truth: nexus/services/dual_phase_d.py
 status: active
@@ -45,11 +45,11 @@ version_scope:
 
 ## Upstream
 - **Experience Layer**: 提供歷史類似問題的解決方案作為參考。
-- **[[Flow - PXDRAC Runtime]]**: 驅動 D 相位的進入與退出控制。
-- **[[System Overview]]**: 系統導航。
+- **[Flow - PXDRAC Runtime](../03_Flows/Flow - PXDRAC Runtime.md)**: 驅動 D 相位的進入與退出控制。
+- **[System Overview](../00_Home/System Overview.md)**: 系統導航。
 
 ## Downstream
-- **[[Module - Core Orchestrator Deep Dive]]**: 回報執行狀態。
+- **[Module - Core Orchestrator Deep Dive](Module - Core Orchestrator Deep Dive.md)**: 回報執行狀態。
 - **Repair Service**: 接受對應的修復提案。
 
 ## Related modules / files

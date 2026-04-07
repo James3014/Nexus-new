@@ -7,17 +7,17 @@ related_pages: ''
 source_of_truth: nexus/core/swarm_orchestrator.py
 status: active
 tags: '[core, orchestrator, pdrac, swarm, logic, dive]'
-title: '[[Module - Core Orchestrator|Module - Core Orchestrator]] Deep Dive'
+title: '[Module - Core Orchestrator](Module - Core Orchestrator.md) Deep Dive'
 type: module
 version_scope: '[v22, v23]'
 ---
 
 
 
-# [[Module - Core Orchestrator]] Deep Dive
+# [Module - Core Orchestrator](Module - Core Orchestrator.md) Deep Dive
 
 > [!NOTE]
-> **Canonical Page**: 本頁探討 `SwarmOrchestrator` 的微觀實作與多代理共識機制。量化指標與子命令架構請見 [[Module - Core Orchestrator]]。
+> **Canonical Page**: 本頁探討 `SwarmOrchestrator` 的微觀實作與多代理共識機制。量化指標與子命令架構請見 [Module - Core Orchestrator](Module - Core Orchestrator.md)。
 
 ## One-sentence summary
 本頁深入探討 Nexus `SwarmOrchestrator` 的微觀執行邏輯、P-X-D-R-A-C 生命週期狀態機與多代理共識機制。 [Source: nexus/core/swarm_orchestrator.py]
@@ -37,11 +37,11 @@ version_scope: '[v22, v23]'
 | **State Synchronizer** | 將運行時狀態同步回 `StateRepository`。 | [Source: nexus/core/swarm_orchestrator.py] |
 
 ## Upstream
-- **[[System Overview]]**: 核心邏輯架構導航。
-- **[[Module - Task Scheduling and Swarm Adapters]]**: 提供宏觀任務分片輸入。
+- **[System Overview](../00_Home/System Overview.md)**: 核心邏輯架構導航。
+- **[Module - Task Scheduling and Swarm Adapters](Module - Task Scheduling and Swarm Adapters.md)**: 提供宏觀任務分片輸入。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 提供實體檔案與邏輯功能的最終映射。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 提供實體檔案與邏輯功能的最終映射。
 - **[[Ops - CI/CD Promotion Gate]]**: 狀態機正確性作為發版審計標誌。
 
 ## Related modules / files

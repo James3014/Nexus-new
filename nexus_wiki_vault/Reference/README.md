@@ -13,10 +13,10 @@ priority: P2
 version: v1.0.0
 visibility: internal
 landscape: structural
-path: nexus_wiki_vault/06_Ops/Reference/README.md
+path: /README.md
 ---
-Waiver: 00_Home/[[System Overview]].md
-[source: 00_Home/[[System Overview]].md]
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../00_Home/System Overview.md).md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
 
@@ -82,11 +82,11 @@ Waiver: 00_Home/[[System Overview]].md
 ```bash
 # Fix a bug with v9 Autonomic Precision
 # 以 v9 自主精度修復 Bug
-nexus:bug --[[task]] "fix hydration error on dynamic routes" --silent
+nexus:bug --[task](task.md) "fix hydration error on dynamic routes" --silent
 
 # Build a feature with top-tier resilience
 # 具備高韌性的新功能開發
-nexus:feature --[[task]] "migrate session storage to redis" --domain django
+nexus:feature --[task](task.md) "migrate session storage to redis" --domain django
 
 # Trigger autonomic learning cycle
 # 啟動自主演進學習循環
@@ -110,4 +110,4 @@ nexus:test --full-chain "voice narration feature"
 # Certified by v9 Autonomic Superpowers
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

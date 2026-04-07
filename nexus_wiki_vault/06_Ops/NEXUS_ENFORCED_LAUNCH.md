@@ -5,7 +5,7 @@ governance: Trident 3.0
 id: nexus-nexus-enforced-launch
 landscape: structural
 owner: Nexus Core
-path: /Users/jameschen/Workspace/nexus/nexus_wiki_vault/06_Ops/NEXUS_ENFORCED_LAUNCH.md
+path: /docs/NEXUS_ENFORCED_LAUNCH.md
 priority: P2
 soul_alignment: harmonized
 status: Current
@@ -20,7 +20,7 @@ visibility: internal
 ---
 
 
-Waiver: 00_Home/[[System Overview]].md
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
 [source: nexus_wiki_vault/00_Home/System Overview.md]].md]
 
 
@@ -64,7 +64,7 @@ uv run scripts/ops/ci_gate.py --dry-run
 
 ## Mandatory Protocol Checks
 
-Before any [[task]] execution, the agent must pass:
+Before any [task](../Reference/task.md) execution, the agent must pass:
 1.  **Agent Protocol Check**: `uv run scripts/ops/agent_protocol_check.py`
 2.  **Wiki Governance Audit**: `uv run scripts/ops/wiki_linter.py --strict`
 3.  **Acceptance Check**: `uv run scripts/ops/nexus_acceptance_check.py --output-dir .nexus/reports`
@@ -75,7 +75,7 @@ Before any [[task]] execution, the agent must pass:
 
 ## Required Policy
 - ✅ Allowed: launch via enforced scripts only.
-- ❌ Disallowed: direct `gemini ...` or direct `antigravity ...` for production [[task]] execution.
+- ❌ Disallowed: direct `gemini ...` or direct `antigravity ...` for production [task](../Reference/task.md) execution.
 
 ## Gemini (enforced)
 ```bash
@@ -102,4 +102,4 @@ ALLOW_GATE_FAIL=1 bash /Users/jameschen/Workspace/nexus/scripts/ops/start_gemini
 ```
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

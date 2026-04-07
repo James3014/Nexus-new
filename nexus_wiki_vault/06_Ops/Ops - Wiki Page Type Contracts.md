@@ -28,7 +28,7 @@ version_scope:
 - **維護品質**: 確保所有知識條目皆具備來源追蹤 (Provenance) 與責任歸屬 (Owner)。
 
 ## Upstream
-- **[[System Overview]]**: 總體治理入口。
+- **[System Overview](../00_Home/System Overview.md)**: 總體治理入口。
 - **[[99_Schema/AGENT_SCHEMA.md]]**: 定義代理操作與元數據基礎。
 
 ## Downstream
@@ -43,7 +43,7 @@ version_scope:
 
 ### 1. System (系統/入口)
 - **用途**: 描述系統總體、拓撲或高層次導航。
-- **必要 Frontmatter**: `type: [[System Overview|home]]` 或 `type: system`, `status`, `owner`, `version_scope`.
+- **必要 Frontmatter**: `type: [home](../00_Home/System Overview.md)` 或 `type: system`, `status`, `owner`, `version_scope`.
 - **必要章節**: `## One-sentence summary`, `## Navigation`, `## Related modules / files`.
 
 ### 2. Concept (概念/原理)

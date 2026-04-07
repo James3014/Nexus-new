@@ -1,12 +1,12 @@
 ---
-aliases: '[Metadata Collectors, Data [[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source
+aliases: '[Metadata Collectors, Data [Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[[Source
   [[index|Index]]|Sources]]]]]]]]]'
 confidence: low
 last_compiled: '2026-04-06'
 owner: agent
 raw_sources: ''
 related_pages: ''
-source_of_truth: scripts/engine/collectors/node_collector_v1.py
+source_of_truth: scripts/.nexus/workspaces/bug-1774969963/scripts/engine/collectors/node_collector_v1.py
 status: proposed
 tags: '[module, metadata, collector, proposed]'
 title: Module - Metadata Collectors
@@ -31,13 +31,13 @@ version_scope: '[v23]'
 
 ## Upstream
 - **MUSE Spec v23**: 定義對「全局 Metadata 實時一致性」的架構要求。
-- **[[System Overview]]**: 系統導航。
+- **[System Overview](../00_Home/System Overview.md)**: 系統導航。
 
 ## Downstream
-- **[[Module - Core Orchestrator]]**: 調度器依賴此層數據進行任務分析（X 相位）。
+- **[Module - Core Orchestrator](Module - Core Orchestrator.md)**: 調度器依賴此層數據進行任務分析（X 相位）。
 
 ## Related modules / files
-- `scripts/engine/collectors/node_collector_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
+- `scripts/.nexus/workspaces/bug-1774969963/scripts/engine/collectors/node_collector_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
 - `scripts/engine/collectors/edge_resolver_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
 
 ## Source notes

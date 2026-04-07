@@ -1,5 +1,5 @@
 ---
-aliases: '[ADR [[index|Index]], Decision Rationale, Governance ADR]'
+aliases: '[ADR [Index](../.nexus/graph/index.md), Decision Rationale, Governance ADR]'
 confidence: high
 last_compiled: '2026-04-07'
 owner: agent
@@ -31,7 +31,7 @@ version_scope: '[v22, v23]'
 | `ADR-001` | Wiki 走「編譯知識層」而非 runtime state。 | Accepted | `nexus_wiki_vault/`, `.nexus/reports/` | - | 2026-04-07 |
 | `ADR-002` | Gate 通過不等於任務完成，需加語義驗收。 | Accepted | `scripts/ops/nexus_task_contract_guard.py` | - | 2026-04-07 |
 | `ADR-003` | Drift 採分級阻斷（P0 block, P1/P2 observe）。 | Accepted | `scripts/ops/wiki_drift_audit.py` | - | 2026-04-07 |
-| `ADR-004` | [[Ops - Truth Claims Register|Truth Claims]] 需命令白名單與策略保護。 | Accepted | `scripts/ops/wiki_truth_claims_check.py` | - | 2026-04-07 |
+| `ADR-004` | [Truth Claims](Ops - Truth Claims Register.md) 需命令白名單與策略保護。 | Accepted | `scripts/ops/wiki_truth_claims_check.py` | - | 2026-04-07 |
 | `ADR-005` | 強制啟動前 preflight + CI dry-run。 | Accepted | `scripts/ops/_nexus_preflight.sh` | - | 2026-04-07 |
 
 ## Upstream
@@ -39,8 +39,8 @@ version_scope: '[v22, v23]'
 - `scripts/ops/wiki_drift_audit.py`: 漂移分級來源。 [Code: scripts/ops/wiki_drift_audit.py]
 
 ## Downstream
-- `[[Ops - Optimization Proposal Protocol]]`: 新提案的提交格式與驗收規則。
-- `[[Ops - Governance Changelog]]`: 把生效決策轉為時間線紀錄。
+- `[Ops - Optimization Proposal Protocol](Ops - Optimization Proposal Protocol.md)`: 新提案的提交格式與驗收規則。
+- `[Ops - Governance Changelog](Ops - Governance Changelog.md)`: 把生效決策轉為時間線紀錄。
 
 ## Related modules / files
 - `scripts/ops/nexus_task_contract_guard.py`
@@ -56,4 +56,4 @@ version_scope: '[v22, v23]'
 - [ ] 是否要在 CI 增加「PR 必須關聯 ADR 或豁免」檢查。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

@@ -1,20 +1,20 @@
 ---
-aliases: '[Scripts [[index|Index]], Ops Scripts, Engine Scripts]'
+aliases: '[Scripts [Index](../.nexus/graph/index.md), Ops Scripts, Engine Scripts]'
 confidence: high
 last_compiled: '2026-04-06'
 owner: agent
 related_pages: ''
 source_of_truth: scripts/ops/ci_gate.py
 status: active
-tags: '[source, scripts, ops, engine, [[index|index]]]'
-title: Source - Operational Scripts [[index|Index]]
+tags: '[source, scripts, ops, engine, [index](../.nexus/graph/index.md)]'
+title: Source - Operational Scripts [Index](../.nexus/graph/index.md)
 type: source
 version_scope: '[v22, v23]'
 ---
 
 
 
-# Source - Operational Scripts [[index]]
+# Source - Operational Scripts [index](../.nexus/graph/index.md)
 
 ## One-sentence summary
 本頁索引了 Nexus 系統中所有關鍵的維運 (Ops) 與引擎 (Engine) 腳本，作為自動化任務與治理審計的物理真值入口。 [Source: scripts/ops/ci_gate.py]
@@ -107,11 +107,11 @@ version_scope: '[v22, v23]'
 | **Hooks** | **speculative_hooks.py** | 投機性掛勾。 | [Source: scripts/engine/speculative_hooks.py] |
 
 ## Upstream
-- **[[System Overview]]**: 腳本導航中心。
-- **[[Ops - Truth Claims Register]]**: 真值驗證依據。
+- **[System Overview](../00_Home/System Overview.md)**: 腳本導航中心。
+- **[Ops - Truth Claims Register](../06_Ops/Ops - Truth Claims Register.md)**: 真值驗證依據。
 
 ## Downstream
-- **[[Ops - CI Failure Playbook]]**: 修復路徑。
+- **[Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)**: 修復路徑。
 
 ## Related modules / files
 - `scripts/ops/`: 全量維運腳本。
@@ -124,4 +124,4 @@ version_scope: '[v22, v23]'
 - [ ] **Unused Scripts**: 稽核中標示為 0 回鏈的腳本是否應批量移動至 `archive/`。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

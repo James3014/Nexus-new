@@ -7,9 +7,9 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - Platform Core Registry|Module - Platform Core Registry]]'
-- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
-  Matrix]]'
+- '[Module - Platform Core Registry](Module - Platform Core Registry.md)'
+- '[Module - Implementation Responsibility
+  Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/core/state_repository.py
 status: active
 tags:
@@ -43,7 +43,7 @@ version_scope:
 |---|---|---|
 | **State Repository** | JSONL 狀態流的主讀寫引擎。 | [Source: nexus/core/state_repository.py] |
 | **State IO** | 物理路徑管理與檔案鎖控制。 | [Source: nexus/core/state_io.py] |
-| **[[Module - State Contracts|State Contracts]]** | `NexusState` 數據結構與型別定義。 | [Source: nexus/core/state_contracts.py] |
+| **[State Contracts](Module - State Contracts.md)** | `NexusState` 數據結構與型別定義。 | [Source: nexus/core/state_contracts.py] |
 | **State Migrator** | 不同版本架構間的數據遷移。 | [Source: nexus/core/state_migrator.py] |
 | **State Validator** | 狀態完整性與邊界校驗。 | [Source: nexus/core/state_validator.py] |
 | **State Legacy** | v17 與舊版 Nexus 狀態的墊片層。 | [Source: nexus/core/state_legacy.py] |
@@ -53,11 +53,11 @@ version_scope:
 | **Migration Validator** | 遷移後的一致性自動對比。 | [Source: nexus/core/migration_validator.py] |
 
 ## Upstream
-- **[[System Overview]]**: 全域狀態管理導航。
+- **[System Overview](../00_Home/System Overview.md)**: 全域狀態管理導航。
 - **MUSE-NEXUS Spec**: 定義狀態機的原子性與持久化要求。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 持久化工具鏈與物理檔案映射。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 持久化工具鏈與物理檔案映射。
 - **[[Ops - CI/CD Promotion Gate]]**: 狀態完整性作為發版前的最後檢查。
 
 ## Related modules / files
@@ -72,4 +72,4 @@ version_scope:
 - [ ] **State Compaction**: 隨著 JSONL 增長，是否需要自動觸發 L1/L2 壓縮任務。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

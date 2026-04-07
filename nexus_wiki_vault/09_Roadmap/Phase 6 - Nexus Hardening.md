@@ -23,10 +23,10 @@ type: roadmap
 - **Governance**: 提升 Wiki 覆蓋率與真值一致性。
 
 ## Upstream
-- [[System Overview]]
+- [System Overview](../00_Home/System Overview.md)
 
 ## Downstream
-- [[Ops - Wiki Regression Evals]]
+- [Ops - Wiki Regression Evals](../06_Ops/Ops - Wiki Regression Evals.md)
 
 ## Related modules / files
 - `scripts/ops/wiki_capability_coverage_audit.py`

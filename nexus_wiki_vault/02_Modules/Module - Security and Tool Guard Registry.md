@@ -7,11 +7,11 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - Guard and Gate Control|Gate Control]]|[[Module - Guard and [[Module
+- '[Gate Control](Module - Guard and Gate Control.md)|[[Module - Guard and [[Module
   - Guard and Gate Control|Gate Control]]|Module - Guard and [[Module - Guard and
   Gate Control|Gate Control]]]]]]'
-- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
-  Matrix]]'
+- '[Module - Implementation Responsibility
+  Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/core/capability_gate.py
 status: active
 tags:
@@ -55,12 +55,12 @@ version_scope:
 | **Phantom Detect** | 偵測並攔截惡意「幽靈」進程。 | [Source: nexus/core/phantom_detect.py] |
 
 ## Upstream
-- **[[System Overview]]**: 全域安全性導航。
+- **[System Overview](../00_Home/System Overview.md)**: 全域安全性導航。
 - **MUSE-NEXUS Spec**: 要求系統必須具備 Zero-Trust 工具隔離能力。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 安全防護模組與物理檔案映射。
-- **[[Module - Guard and Gate Control]]**: 深層技術實作對接。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 安全防護模組與物理檔案映射。
+- **[Module - Guard and Gate Control](Module - Guard and Gate Control.md)**: 深層技術實作對接。
 
 ## Related modules / files
 - `nexus/core/capability_gate.py`: 主閘門。 [Code: nexus/core/capability_gate.py]
@@ -74,4 +74,4 @@ version_scope:
 - [ ] **Cross-OS [[compatibility]]**: 物理進程鎖定在 macOS 與 Linux 環境下的行為一致性。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

@@ -6,12 +6,12 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Ops - Wisdom Layer|Ops - Wisdom Layer]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[Ops - Wisdom Layer](../06_Ops/Ops - Wisdom Layer.md)'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
-- '[[State - Schemas|State - Schemas]]'
+- '[State - Schemas](../04_State/State - Schemas.md)'
 source_of_truth: compiled-wiki
 status: active
 tags:
@@ -33,7 +33,7 @@ version_scope:
 
 ## Role / responsibility
 - **決策隊列**: 將 Wiki 衝突轉換為人類可理解的選擇題。 [Source: 01_System/System - Unknowns and Conflicts.md]]]
-- **風險升級**: 標註具有「環境崩解」風險的問題。 [Source: ci_gate.py]
+- **風險升級**: 標註具有「環境崩解」風險的問題。 [Source: scripts/ops/ci_gate.py]
 - **歷史存證**: 記錄過往人類對關鍵衝突的裁撤結果。
 
 ## Current Questions Bucket
@@ -45,15 +45,15 @@ version_scope:
 | `Q-03` | **Ops** | 何時啟動 Arweave 硬化同步計晝。 | LOW | [Source: 00_Home/System Overview.md] |
 
 ## Upstream
-- **[[System - Unknowns and Conflicts]]**: 提供原始衝突報告。
+- **[System - Unknowns and Conflicts](System - Unknowns and Conflicts.md)**: 提供原始衝突報告。
 - **Wiki Linter**: 反饋無法自動修復的一致性問題。 [Source: wiki_linter.py]
 
 ## Downstream
 - **Human Response**: 更新 `.agents/skills/` 下的治理實施腳本。
-- **[[System Overview]]**: 根據決策更新系統概覽與權威邊界。
+- **[System Overview](../00_Home/System Overview.md)**: 根據決策更新系統概覽與權威邊界。
 
 ## Related modules / files
-- `01_System/[[System - Unknowns and Conflicts]].md`: 衝突來源頁。
+- `01_System/[System - Unknowns and Conflicts](System - Unknowns and Conflicts.md).md`: 衝突來源頁。
 - `MUSE_NEXUS_v23_Wisdom.md`: 智慧決策的偏好底稿。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]]]
 
 ## Source notes

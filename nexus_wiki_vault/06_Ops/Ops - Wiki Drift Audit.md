@@ -33,7 +33,7 @@ version_scope: '[v17.1, v22, v23]'
 - **Wiki Audit Engine**: `scripts/ops/wiki_drift_audit.py` [Code: scripts/ops/wiki_drift_audit.py]
 
 ## Downstream
-- **[[Ops - Governance Changelog]]**: 記錄漂移修復的歷史。
+- **[Ops - Governance Changelog](Ops - Governance Changelog.md)**: 記錄漂移修復的歷史。
 
 ## Related modules / files
 - `scripts/ops/wiki_drift_audit.py`: 漂移審計核心。 [Source: scripts/ops/wiki_drift_audit.py]
@@ -45,4 +45,4 @@ version_scope: '[v17.1, v22, v23]'
 - [ ] **Hard Fail**: 何時將 Wiki Drift Audit 升級為 Hard Fail。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

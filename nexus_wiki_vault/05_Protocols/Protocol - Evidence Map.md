@@ -10,13 +10,13 @@ raw_sources:
 - MUSE-NEXUS Engine Specification v17.1
 - manifest_schema.json
 related_pages:
-- '[[Module - State Contracts|State Contracts]]|[[Module - [[Module - State Contracts|State
-  Contracts]]|Module - [[Module - State Contracts|State Contracts]]]]]]'
-- '[[Protocol - Evidence Chain|Protocol - Evidence Chain]]'
-- Ops - CI/[[CD Promotion Gate|Promotion Gate]]|[[CD [[CD Promotion Gate|Promotion
-  Gate]]|CD [[CD Promotion Gate|Promotion Gate]]]]]]
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[State Contracts](../02_Modules/Module - State Contracts.md)|[[Module - [[Module - State Contracts|State
+  Contracts]]|Module - [State Contracts](../02_Modules/Module - State Contracts.md)]]]]'
+- '[Protocol - Evidence Chain](Protocol - Evidence Chain.md)'
+- Ops - CI/[Promotion Gate](../06_Ops/Ops - CI/CD Promotion Gate.md)|[[CD [[CD Promotion Gate|Promotion
+  Gate]]|CD [Promotion Gate](../06_Ops/Ops - CI/CD Promotion Gate.md)]]]]
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: compiled-wiki
@@ -44,7 +44,7 @@ version_scope:
 ## Role / responsibility
 - **地圖導航**: 呈現從 Planning 到 Crystallize 的資料流向。 [Source: nexus_cli.py]
 - **對帳追蹤**: 標註 `task_id` 與 `trace_id` 在不同階段的責任變更。 [Source: 00_Home/System Overview.md]
-- **門禁可視化**: 標註哪些工件是 [[CD Promotion Gate|Promotion Gate]] 的強制輸入。 [Source: ci_gate.py]
+- **門禁可視化**: 標註哪些工件是 [Promotion Gate](../06_Ops/Ops - CI/CD Promotion Gate.md) 的強制輸入。 [Source: ci_gate.py]
 
 ## Upstream
 - **Phase P-R**: 產出原始 JSON 工件。 [Source: 02_Modules/Module - State Contracts.md]]]
@@ -52,7 +52,7 @@ version_scope:
 
 ## Downstream
 - **[[Ops - CI/CD Promotion Gate]]**: 提供指標對位的實體證據。
-- **[[System - Unknowns and Conflicts]]**: 登記工件鏈斷裂衝突。
+- **[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)**: 登記工件鏈斷裂衝突。
 
 ## Evidence Dependency Map
 
@@ -95,7 +95,7 @@ graph TD
 | `write_proof.json` | Repairer (R) | **CRITICAL** | `.nexus/runs/<id>/` | [Source: ci_gate.py] |
 | `audit_result.json`| Auditor (A) | **CRITICAL** | `.nexus/runs/<id>/` | [Source: 00_Home/System Overview.md] |
 | `manifest.json` | Manifest Sealer (C) | **CRITICAL** | Root: `manifest.json` | [Source: 00_Home/System Overview.md] |
-| `lesson_events.jsonl`| Crystallizer (C) | MEDIUM | `.nexus/knowledge/` | [Source: memory_indexer.py] |
+| `lesson_events.jsonl`| Crystallizer (C) | MEDIUM | `.nexus/knowledge/` | [Source: /nexus/services/memory_indexer.py] |
 
 ## Related modules / files
 - `.nexus/runs/`: 任務實體存放區。
@@ -110,4 +110,4 @@ graph TD
 - [ ] **Drift Register**: 如何在地圖中標註「預期工件缺失」的處理邏輯。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

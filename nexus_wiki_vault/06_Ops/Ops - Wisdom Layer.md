@@ -21,11 +21,11 @@ version_scope: '[v23]'
 
 ## Role / responsibility
 - **決策偏好 (Bias)**: 從 `Memory Repository` 提取相似教訓以引導當前任務路由。 [Source: memory_indexer.py]
-- **共識護欄 (ConsensusGuard)**: 在高風險操作前執行多重判斷與幻覺檢測。 [Code: consensus_guard.py]
+- **共識護欄 (ConsensusGuard)**: 在高風險操作前執行多重判斷與幻覺檢測。 [Code: /nexus_swarm/guard/consensus_guard.py]
 - **自我修復 (PredictiveHealer)**: 在故障發生前預測並觸發 Rollback 或修補。 [Code: predictive_healer.py]
 
 ## Upstream
-- **[[Module - Memory Repository]]**: 提供向量經驗底座。
+- **[Module - Memory Repository](../02_Modules/Module - Memory Repository.md)**: 提供向量經驗底座。
 - **[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Feedback Loop**: 提供實時執行結果回饋。
 
 ## Downstream
@@ -44,4 +44,4 @@ version_scope: '[v23]'
 - [ ] **Knowledge Decay**: 智慧層是否應具備「遺忘」過時模式的能力。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

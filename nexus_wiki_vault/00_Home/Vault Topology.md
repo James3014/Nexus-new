@@ -28,7 +28,7 @@ type:
 - **版本關聯**: 明確標註 v9, v152, v23 之間的演進關係。
 
 ## Upstream
-- [[System Overview]]: 作為全局進入點。
+- [System Overview](System Overview.md): 作為全局進入點。
 
 ## Downstream
 - [[01_Core]]: 所有核心技術規格。
@@ -49,9 +49,9 @@ type:
 ## 核心架構流圖
 ```mermaid
 graph TD
-    [[System Overview|Home]]["[[System Overview]]"] --> Core["[[01_Core]]"]
-    [[System Overview|Home]] --> Ops["[[06_Ops]]"]
-    [[System Overview|Home]] --> Incidents["[[08_Incidents]]"]
+    [Home](System Overview.md)["[System Overview](System Overview.md)"] --> Core["[[01_Core]]"]
+    [Home](System Overview.md) --> Ops["[[06_Ops]]"]
+    [Home](System Overview.md) --> Incidents["[[08_Incidents]]"]
     
     subgraph "Trident 3.0 Core"
         Core --> Specs["核心規格 (High-Level)"]
@@ -72,14 +72,14 @@ graph TD
 - **總文檔數**：309
 - **強連結文檔 (含 [[)]**：309 (100%)
 - **主要導覽樞紐**：
-    - [[System Overview]] (根節點)
+    - [System Overview](System Overview.md) (根節點)
     - [[01_Core/Specs/Legacy_V9/INDEX|Legacy V9 Index]] (歷史橋樑)
     - [[01_Core/Specs/Muse-Nexus-v152-upgrade/INDEX|v152 Upgrade Index]] (版本橋樑)
 
 ## 導覽路徑建議
-1. 從 [[System Overview]] 開始。
+1. 從 [System Overview](System Overview.md) 開始。
 2. 進入 [[01_Core]] 查看當前規格。
 3. 透過內嵌的「語義連結」直接跳轉至相關的歷史背景 (Legacy Docs)。
 
 ---
-[返回主頁面 [[System Overview]]]
+[返回主頁面 [System Overview](System Overview.md)]

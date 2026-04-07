@@ -7,9 +7,9 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - Security and Tool Guard Registry|Module - Security and Tool Guard Registry]]'
-- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
-  Matrix]]'
+- '[Module - Security and Tool Guard Registry](Module - Security and Tool Guard Registry.md)'
+- '[Module - Implementation Responsibility
+  Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/core/capability_gate.py
 status: active
 tags:
@@ -47,11 +47,11 @@ version_scope:
 | **Injection Guard** | 檢測並防止針對工具參數的惡意注入攻擊。 | [Source: nexus/core/jit_tool_injector.py] |
 
 ## Upstream
-- **[[System Overview]]**: 安全架構全景。
-- **[[Module - Security and Tool Guard Registry]]**: 提供權限清單與組件實體。
+- **[System Overview](../00_Home/System Overview.md)**: 安全架構全景。
+- **[Module - Security and Tool Guard Registry](Module - Security and Tool Guard Registry.md)**: 提供權限清單與組件實體。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 映射至物理檔案。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 映射至物理檔案。
 - **[[Ops - CI/CD Promotion Gate]]**: 安全閘門狀態作為核心發版基準。
 
 ## Related modules / files
@@ -65,4 +65,4 @@ version_scope:
 - [ ] **Bypass Scenarios**: 緊急維護模式下如何安全且可審計地繞過特定閘門。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)

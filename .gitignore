@@ -34,3 +34,4 @@ nexus.log
 .worktrees/
 
 isolated_swarm/
+.gstack/

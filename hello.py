@@ -1,2 +1,1 @@
-def hello():
-    print('Heelo')
+print('Nexus Fully Operational')

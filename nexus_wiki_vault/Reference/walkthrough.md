@@ -15,8 +15,8 @@ visibility: internal
 landscape: structural
 path: nexus_wiki_vault/06_Ops/Reference/walkthrough.md
 ---
-Waiver: 00_Home/[[System Overview]].md
-[source: 00_Home/[[System Overview]].md]
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../00_Home/System Overview.md).md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
 
@@ -48,18 +48,18 @@ Waiver: 00_Home/[[System Overview]].md
 
 ### 1. Token 追蹤體系升級
 - **LLM 服務層**: 在 `nexus/services/llm.py` 中實作多模式 Regex 提取與 `fallback_est` (長度/4) 保底。
-- **指標累積器**: `nexus/engine/metrics/token_accumulator.py` 支援 `raw_model`, `fallback_est`, `system_overhead` 三位一體歸集。
+- **指標累積器**: `nexus/.nexus/workspaces/bug-1774969963/nexus/engine/metrics/token_accumulator.py` 支援 `raw_model`, `fallback_est`, `system_overhead` 三位一體歸集。
 - **系統開銷**: 固定為 X-Research (+50) 與 R-Repair (+100) 增加基礎損耗，確保指標不為 0。
 
 ### 2. 引擎強韌化
 - **修復 Path 偏移**: 修正 `scripts/engine/nexus_cli.py` 中 REPO_ROOT 的家目錄指引錯誤（parents[1] -> parents[2]）。
 - **類型相容性**: `ContextHub` 與 `NexusPipeline` 已能同時處理 Dict 與 Pydantic Object，避免在 Benchmark 循環中崩潰。
 - **缺失方法補齊**: 在 `Commander` 中實作 `crystallize` 方法，確保 C 階段轉移不中斷。
-- **狀態持久化**: 確保每個 [[task]] 完成後皆調用 `save_global_state()`，包括 `token_capture_status`。
+- **狀態持久化**: 確保每個 [task](task.md) 完成後皆調用 `save_global_state()`，包括 `token_capture_status`。
 
 ## 📈 驗證結果 (Benchmark Final)
 - **測試環境**: `uv run scripts/nexus_cli.py nexus:benchmark --tasks 10`
-- **[[CD Promotion Gate|CI Gate]] 狀態**: **PASS** (10/10)
+- **[CI Gate](../06_Ops/Ops - CI/CD Promotion Gate.md) 狀態**: **PASS** (10/10)
 - **關鍵指標**:
   - 平均健康度 (Avg Health): 99.7%
   - 最大漂移 (Max Drift): 0.00
@@ -76,4 +76,4 @@ Waiver: 00_Home/[[System Overview]].md
 
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

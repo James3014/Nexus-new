@@ -7,13 +7,13 @@ tags:
 - policy
 - truth-claims
 - sandbox
-title: Ops - [[Ops - Truth Claims Register|Truth Claims]] Command Policy
+title: Ops - [Truth Claims](Ops - Truth Claims Register.md) Command Policy
 type: ops
 ---
 
 
 
-# Ops - [[Ops - Truth Claims Register|Truth Claims]] Command Policy
+# Ops - [Truth Claims](Ops - Truth Claims Register.md) Command Policy
 
 ## One-sentence summary
 本頁面定義真值校驗指令執行時必須遵循的安全白名單、黑名單以及執行期沙箱規範。 [Source: scripts/ops/wiki_truth_claims_check.py]
@@ -34,8 +34,8 @@ type: ops
 | **Logic** | `grep`, `rg` | `;`, `&&`, `||`, `$(`, `` ` `` | Filter |
 
 ## Upstream
-- **[[Ops - Truth Claims Register]]**: 指令來源。
-- **[[System Overview]]**: 系統總覽。
+- **[Ops - Truth Claims Register](Ops - Truth Claims Register.md)**: 指令來源。
+- **[System Overview](../00_Home/System Overview.md)**: 系統總覽。
 
 ## Downstream
 - **[[Ops - CI/CD Promotion Gate]]**: 安全門禁決策。

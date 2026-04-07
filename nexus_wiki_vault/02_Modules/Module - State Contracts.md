@@ -12,10 +12,10 @@ raw_sources:
 - audit_result_schema.json
 - manifest_schema.json
 related_pages:
-- '[[State - Lifecycle|State - Lifecycle]]'
-- '[[State - Schemas|State - Schemas]]'
-- '[[System Overview|System Overview]]'
-- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+- '[State - Lifecycle](../04_State/State - Lifecycle.md)'
+- '[State - Schemas](../04_State/State - Schemas.md)'
+- '[System Overview](../00_Home/System Overview.md)'
+- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 source_of_truth: /Users/jameschen/Workspace/schemas/
@@ -62,7 +62,7 @@ version_scope:
 - v22 Engine Spec: 確立 `manifest.json` 為唯一權威索引。 [Reference: Spec v22]
 
 ## Downstream
-- **[[System - Unknowns and Conflicts]]**: 登記 Schema 漂移衝突。
+- **[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)**: 登記 Schema 漂移衝突。
 - **[[Ops - CI/CD Promotion Gate]]**: 基於契約數值執行發佈決策。
 
 ## Related modules / files
@@ -78,4 +78,4 @@ version_scope:
 - [ ] **Schema Evolution**: v23 智慧層是否應具備動態調整 Audit 閾值的能力。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

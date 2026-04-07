@@ -15,8 +15,8 @@ visibility: internal
 landscape: structural
 path: nexus_wiki_vault/06_Ops/Reference/[[quickstart|QUICKSTART]].md
 ---
-Waiver: 00_Home/[[System Overview]].md
-[source: 00_Home/[[System Overview]].md]
+Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
+[source: 00_Home/[System Overview](../00_Home/System Overview.md).md]
 ## One-sentence summary
 - Pending detailed [[documentation]].
 
@@ -97,7 +97,7 @@ python3 scripts/nexus_cli.py nexus:test --full-chain "voice narration UI"
 ```bash
 # Example: Fallback Chain in action
 # 範例：備援鏈運作中
-python3 scripts/nexus_cli.py nexus:feature --[[task]] "optimize database indexes" --bypass-cb
+python3 scripts/nexus_cli.py nexus:feature --[task](task.md) "optimize database indexes" --bypass-cb
 ```
 **[EN]** Observe the `🛡️ [v9 Override]` or `🎯 [SkillsRouter]` logs to see autonomic decisions.
 **[ZH]** 觀察 `🛡️ [v9 Override]` 或 `🎯 [SkillsRouter]` 日誌，查看自主決策過程。
@@ -118,4 +118,4 @@ python3 scripts/nexus_cli.py nexus:warroom
 
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

@@ -18,7 +18,7 @@ version_scope: '[v17.1, v22, v23]'
 # Module - Core Orchestrator
 
 > [!NOTE]
-> **Canonical Page**: 本頁為 Nexus Orchestrator 的高階權威定義。技術細節與微觀實作請參閱 [[Module - Core Orchestrator Deep Dive]]。
+> **Canonical Page**: 本頁為 Nexus Orchestrator 的高階權威定義。技術細節與微觀實作請參閱 [Module - Core Orchestrator Deep Dive](Module - Core Orchestrator Deep Dive.md)。
 
 ## One-sentence summary
 本模組為 Nexus Swarm 的「神經中樞」，負責接收任務指令、調度 Phase Runners 並維護全域狀態機。 [Source: scripts/engine/nexus_cli.py]
@@ -34,7 +34,7 @@ version_scope: '[v17.1, v22, v23]'
 
 ## Downstream
 - **Phase Runners**: 調用具體的業務執行實體。 [Source: nexus/core/orchestrator.py]
-- **[[Module - State Contracts]]**: 確保交接工件符合 JSON Schema。
+- **[Module - State Contracts](Module - State Contracts.md)**: 確保交接工件符合 JSON Schema。
 
 ## Related modules / files
 - `nexus/core/orchestrator.py`: 核心業務管理類。 [Source: nexus/core/orchestrator.py]
@@ -46,7 +46,7 @@ version_scope: '[v17.1, v22, v23]'
 
 ## Open questions / conflicts
 - [ ] **Concurrency**: 多任務併發時鎖定 `.nexus/` 的資源競爭處理。
-- [ ] **External [[api|API]]**: 是否需要開放 FastAPI 入口以支援 [[Module - Nexus Desk Interface|Nexus Desk]] 介面調用。
+- [ ] **External [[api|API]]**: 是否需要開放 FastAPI 入口以支援 [Nexus Desk](Module - Nexus Desk Interface.md) 介面調用。
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)

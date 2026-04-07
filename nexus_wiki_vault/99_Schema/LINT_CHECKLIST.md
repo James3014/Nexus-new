@@ -25,7 +25,7 @@ aliases: []
 - [ ] 無 placeholder 未清
 
 ---
-[[System Overview]]
+[System Overview](../00_Home/System Overview.md)
 
 
 ## One-sentence summary

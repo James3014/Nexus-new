@@ -7,9 +7,9 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- '[[Module - Policy and Learning Governance|Module - Policy and Learning Governance]]'
-- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
-  Matrix]]'
+- '[Module - Policy and Learning Governance](Module - Policy and Learning Governance.md)'
+- '[Module - Implementation Responsibility
+  Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/core/learning_governance.py
 status: active
 tags:
@@ -59,12 +59,12 @@ version_scope:
 | **Session Persistence** | 長期對話會話的狀態保留與恢復。 | [Source: nexus/core/session_persistence.py] |
 
 ## Upstream
-- **[[System Overview]]**: 全域邏輯引擎導航。
+- **[System Overview](../00_Home/System Overview.md)**: 全域邏輯引擎導航。
 - **MUSE-NEXUS Spec**: 要求證據鏈採樣率不得低於 100%。
 
 ## Downstream
-- **[[Module - Implementation Responsibility Matrix]]**: 邏輯模組與物理檔案映射。
-- **[[Module - Policy and Learning Governance]]**: 上層治理策略實作。
+- **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 邏輯模組與物理檔案映射。
+- **[Module - Policy and Learning Governance](Module - Policy and Learning Governance.md)**: 上層治理策略實作。
 
 ## Related modules / files
 - `nexus/core/learning_governance.py`: 學習規約。 [Code: nexus/core/learning_governance.py]
@@ -78,4 +78,4 @@ version_scope:
 - [ ] **Scorer Bias**: 對於人類反饋 (Human-in-the-loop) 的加權計算方式。
 
 ---
-Back to [[System Overview]]
+Back to [System Overview](../00_Home/System Overview.md)
