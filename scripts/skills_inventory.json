@@ -1,0 +1,88 @@
+{
+  "skills": {
+    "codebase_investigator": {
+      "phases": ["D"],
+      "langs": ["*"],
+      "triggers": ["修正", "最新", "搜尋", "位移", "large_stacktrace", "hotspot_logic"],
+      "description": "Deep analysis of codebase for diagnostic phase."
+    },
+    "self-healer": {
+      "phases": ["R"],
+      "langs": ["python"],
+      "triggers": ["repeated_quality_issues"],
+      "description": "Autonomous repair of code with repetitive quality failures."
+    },
+    "git-manager": {
+      "phases": ["P", "C"],
+      "langs": ["*"],
+      "triggers": ["worktree_needed", "git_commit"],
+      "description": "Git state and worktree management."
+    },
+    "aibdd.spec.user-story.gen": {
+      "phases": ["P"],
+      "langs": ["*"],
+      "triggers": ["fuzzy_request"],
+      "description": "Generate formalized user stories from fuzzy requests."
+    },
+    "aibdd.auto.python.e2e.red/green": {
+      "phases": ["R"],
+      "langs": ["python"],
+      "triggers": ["new_feature"],
+      "description": "Automated Red/Green TDD cycle for python."
+    },
+    "common.gen.pseudo-code": {
+      "phases": ["D"],
+      "langs": ["*"],
+      "triggers": ["hard_to_read_logic"],
+      "description": "Generate readable pseudo-code for complex logic blocks."
+    },
+    "openui-ui-gen": {
+      "phases": ["P", "D"],
+      "langs": ["html", "js"],
+      "triggers": ["ui", "dashboard", "design", "interface", "frontend", "warroom"],
+      "description": "AI-powered UI generation using OpenUI. Generates HTML/JS from nl descriptions."
+    },
+    "ui-validator": {
+      "phases": ["R", "A"],
+      "langs": ["html", "js"],
+      "triggers": ["test", "validation", "crash", "interaction", "ui_bug"],
+      "description": "Playwright-based UI interaction validation for cross-browser stability."
+    },
+    "nexus-design-polish": {
+      "phases": ["D", "A"],
+      "langs": ["html", "css", "js"],
+      "triggers": ["polish", "audit", "ui_ux", "impeccable", "design"],
+      "description": "Premium UI design audit and polish based on Impeccable Arsenal."
+    },
+    "nexus-bdd-automation": {
+      "phases": ["P", "R"],
+      "langs": ["python", "java"],
+      "triggers": ["spec", "gherkin", "bdd", "user_story", "automation"],
+      "description": "Automated requirement engineering and BDD test generation."
+    },
+    "nexus-debug-expert": {
+      "phases": ["D", "R"],
+      "langs": ["*"],
+      "triggers": ["debug", "root_cause", "crash", "fix", "rca", "修復", "對接"],
+      "description": "Systematic 4-stage root cause analysis based on Superpowers v5."
+    },
+    "nexus-skill-creator": {
+      "phases": ["D", "A", "C"],
+      "langs": ["markdown", "python"],
+      "triggers": ["create_skill", "optimize_skill", "repair_skill", "eval", "benchmark"],
+      "description": "Skill creation, optimization, and repair based on Skill-Creator protocol."
+    },
+    "nexus-planner-expert": {
+      "phases": ["P"],
+      "langs": ["markdown"],
+      "triggers": ["summary", "摘要", "report", "plan", "writing-plans", "architecture", "implementation_plan", "roadmap", "計畫", "方案"],
+      "description": "Atomic plan writing with Pre-Action Recall protocol based on Superpowers v5."
+    },
+    "nexus-knowledge-graph": {
+      "phases": ["D", "A", "O"],
+      "langs": ["markdown", "python"],
+      "triggers": ["graph", "topology", "drift", "wiki", "audit", "scan", "investigate", "知識圖譜"],
+      "description": "High-precision knowledge graph builder for documentation and code paths. Integrated via Graphify."
+    }
+  }
+}
