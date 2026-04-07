@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 import uuid
 
 @dataclass
@@ -24,6 +25,7 @@ class FindingsCard:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     recall_accuracy: float = 0.0
+    task_id: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -49,24 +51,62 @@ class FindingsMemoryStore:
                 (self.base_path / scope / kind).mkdir(parents=True, exist_ok=True)
 
     def _get_card_path(self, card: FindingsCard) -> Path:
-        return self.base_path / card.scope / card.kind / f"{card.id}.json"
+        """
+        🛡️ 硬化路徑: 加入 task_id 避免併發覆蓋。
+        """
+        safe_task_id = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in (card.task_id or ""))
+        filename = f"{safe_task_id}_{card.id}.json" if safe_task_id else f"{card.id}.json"
+        return self.base_path / card.scope / card.kind / filename
+
+    def _atomic_write_json(self, path: Path, payload: Dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
 
     def write(self, card: FindingsCard) -> str:
-        """寫入記憶卡。"""
+        """寫入記憶卡 (主路徑 + 鏡像備份)。"""
         card.updated_at = datetime.now().isoformat()
         path = self._get_card_path(card)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(card.to_dict(), f, indent=4, ensure_ascii=False)
+        payload = card.to_dict()
+        self._atomic_write_json(path, payload)
+
+        mirror_root = Path(os.environ.get("NEXUS_MEMORY_MIRROR_ROOT", "/tmp/nexus_mirror"))
+        safe_task_id = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in (card.task_id or ""))
+        mirror_name = f"{safe_task_id}_{card.id}.json" if safe_task_id else f"{card.id}.json"
+        mirror_path = mirror_root / mirror_name
+        self._atomic_write_json(mirror_path, payload)
+
         return str(path)
 
-    def read(self, card_id: str, scope: str = "task", kind: str = "knowledge") -> Optional[FindingsCard]:
+    def read(self, card_id: str, scope: str = "task", kind: str = "knowledge", task_id: Optional[str] = None) -> Optional[FindingsCard]:
         """讀取記憶卡。"""
-        path = self.base_path / scope / kind / f"{card_id}.json"
+        if task_id:
+            safe_task_id = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task_id)
+            filename = f"{safe_task_id}_{card_id}.json"
+        else:
+            # 相容舊版或全局搜尋
+            filename = f"{card_id}.json"
+            
+        path = self.base_path / scope / kind / filename
+        
         if not path.exists():
-            # 嘗試全局搜索 (如果 scope 是 task)
-            if scope == "task":
-                return self.read(card_id, scope="global", kind=kind)
-            return None
+            # 嘗試找尋所有以 card_id 結尾或特定的檔案
+            potential_files = list((self.base_path / scope / kind).glob(f"*_{card_id}.json"))
+            if potential_files:
+                path = potential_files[0]
+            else:
+                if scope == "task":
+                    return self.read(card_id, scope="global", kind=kind, task_id=task_id)
+                return None
         
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)

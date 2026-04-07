@@ -22,9 +22,13 @@ class AutoResearchNightShift:
         self.max_rounds = max_rounds
         self.budget_sec = budget_min * 60
         self.target_file = target_file
-        self.project_root = Path(__file__).resolve().parents[1]
+        # 🛡️ Hardened: Force absolute path for persist memory from sandboxes
+        self.project_root = Path("/Users/jameschen/Workspace/nexus")
+
         self.worktree_mgr = WorkspaceManager(str(self.project_root))
         self.hub = ContextHub(self.project_root)
+        from nexus.research.findings_memory import FindingsMemoryStore
+        self.memory_store = FindingsMemoryStore(self.project_root)
         self.best_score = 0.0
         self.base_commit = None
         self.tracelog_path = self.project_root / "tracelog.jsonl"
@@ -45,6 +49,7 @@ class AutoResearchNightShift:
         """記錄優化軌跡並推送。"""
         import os
         from nexus.connectors.base import NexusEvent
+        from nexus.research.findings_memory import FindingsCard
         
         entry = {
             "timestamp": datetime.now().isoformat(),
@@ -57,6 +62,25 @@ class AutoResearchNightShift:
         }
         with open(self.tracelog_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+
+        # Persist a structured episode for downstream distillation.
+        self.memory_store.write(
+            FindingsCard(
+                task_id=self.task,
+                kind="episodes",
+                scope="task",
+                title=f"NightShift round {round_id}: {status}",
+                stage="A",
+                confidence="medium",
+                tags=[f"task:{self.task}", f"status:{status.lower()}"],
+                body=f"score={score:.4f}; best_so_far={self.best_score:.4f}",
+                extra={
+                    "audit_score": score,
+                    "round_id": round_id,
+                    "status": status,
+                },
+            )
+        )
             
         # 🚀 推送關鍵發現
         event = NexusEvent(

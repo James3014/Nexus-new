@@ -256,6 +256,7 @@ class ContextHub:
         
         # 建立結構化記憶卡
         card = FindingsCard(
+            task_id=(metadata or {}).get("task_id", failure_signature),
             kind="episodes",
             title=f"Failure: {failure_signature}",
             scope="task",
