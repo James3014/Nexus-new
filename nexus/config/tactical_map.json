@@ -1,0 +1,26 @@
+{
+  "total_skills": 187,
+  "base_skills": ["core", "manifest", "pdrac"],
+  "quadrants": {
+    "Q1_Critical_Core": {
+      "max_tools": 5,
+      "skills": ["audit", "enforce", "billing"],
+      "priority": "hardened"
+    },
+    "Q2_Ops_Support": {
+      "max_tools": 15,
+      "skills": ["iops_monitor", "deploy", "profile", "config", "ops"],
+      "priority": "flexible"
+    },
+    "Q3_Research_Exp": {
+      "max_tools": 30,
+      "skills": ["swarm", "federate", "learning_loop", "search", "bench"],
+      "priority": "log_audit"
+    },
+    "Q4_Maintenance": {
+      "max_tools": 10,
+      "skills": ["clean", "migrate", "distill", "prune", "archived"],
+      "priority": "stable"
+    }
+  }
+}

@@ -237,6 +237,52 @@ def memory_stats(workspace: str):
     except Exception as e:
         click.echo(json.dumps({"status": "error", "message": str(e)}, indent=2))
 
+@memory.command("search")
+@click.argument("query")
+@click.option("--mode", type=click.Choice(["palace", "semantic", "dual"]), default="dual")
+@click.option("--tenant", "tenant_id", default="default")
+@click.option("--threshold", "min_palace_hit", default=0.8, type=float)
+def memory_search(query: str, mode: str, tenant_id: str, min_palace_hit: float):
+    """🚀 [Phase 32] 雙模語義/階層檢索入口"""
+    from nexus.core.router import SkillsRouter
+    router = SkillsRouter(str(REPO_ROOT))
+    context = {
+        "mode": mode,
+        "tenant_id": tenant_id,
+        "min_palace_hit": min_palace_hit,
+        "active_domain": "undeclared" # 🛡️ 使用唯讀權限
+    }
+    
+    t0 = time.perf_counter()
+    result = router.memory_route(query, context)
+    t1 = time.perf_counter()
+    
+    result["latency_ms"] = round((t1 - t0) * 1000, 2)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+
+@memory.command("search")
+@click.argument("query")
+@click.option("--mode", type=click.Choice(["palace", "semantic", "dual"]), default="dual")
+@click.option("--tenant", "tenant_id", default="default")
+@click.option("--threshold", "min_palace_hit", default=0.8, type=float)
+def memory_search(query: str, mode: str, tenant_id: str, min_palace_hit: float):
+    """🚀 [Phase 32] 雙模語義/階層檢索入口"""
+    from nexus.core.router import SkillsRouter
+    router = SkillsRouter(str(REPO_ROOT))
+    context = {
+        "mode": mode,
+        "tenant_id": tenant_id,
+        "min_palace_hit": min_palace_hit,
+        "active_domain": "undeclared" # 🛡️ 使用唯讀權限
+    }
+    
+    t0 = time.perf_counter()
+    result = router.memory_route(query, context)
+    t1 = time.perf_counter()
+    
+    result["latency_ms"] = round((t1 - t0) * 1000, 2)
+    click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+
 @nexus.command(name="nexus:research-map")
 @click.option("--task-id", required=True, help="目標任務 ID")
 @click.option("--output", default="research_map.mmd", help="匯出路徑")

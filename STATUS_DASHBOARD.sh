@@ -55,9 +55,16 @@ total = len(data)
 ingest_ok = sum(1 for d in data if d.get('status') in ['NEW', 'MERGED', 'NEW_INITIAL'])
 dedup_hits = sum(1 for d in data if d.get('status') in ['DISCARDED', 'MERGED'])
 hit_rate = sum(d.get('retrieval_hit', 0) for d in data) / total if total > 0 else 0
+
+# 🚀 Phase 32 Dual-Mode Metrics
+palace_hits = sum(1 for d in data if d.get('mode_used') == 'palace')
+arweave_sync = sum(1 for d in data if d.get('arweave_tx') is not None)
+
 print(f'  - Ingest Success: {ingest_ok}/{total}')
 print(f'  - Dedup Ratio: {int(dedup_hits/total*100 if total>0 else 0)}%')
 print(f'  - Retrieval Hit: {int(hit_rate*100)}% (Target: 85%)')
+print(f'  - Dual-Mode L1 (Palace): {int(palace_hits/total*100 if total>0 else 0)}%')
+print(f'  - Arweave Sync: {int(arweave_sync/total*100 if total>0 else 0)}%')
 " 2>/dev/null
 else
     echo "  - Learning Metrics: ❌ NO DATA (Waiting for Hook)"
