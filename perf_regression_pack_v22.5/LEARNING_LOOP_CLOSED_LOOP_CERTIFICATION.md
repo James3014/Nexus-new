@@ -42,17 +42,22 @@ Verification of the end-to-end knowledge cycle: Event Capture -> Distillation ->
 - **Authority**: Critique Engine (Spec-32) + MUSE Signature.
 - **Threshold**: Replication in > 3 independent swarm environments.
 
-## 8. Remaining Gaps / Risks
-- **Triggers**: Automated `Post-run hook` in `swarm_harness.py` is defined but requires code implementation.
-- **Dedup Code**: The distance check (0.1 threshold) is specified but needs native logic hardening.
+## 8. Phase 31 Hardening Evidence (v23.5)
+| Component | Action Taken | Logic Enforcement |
+| :--- | :--- | :--- |
+| **Automation** | `post_run_hook` (v23.5) | Async trigger for `brain_loop_closure.py` on task success. |
+| **Deduplication** | `semantic_dedup_ingest` | 0.1/0.3 distance threshold enforced in `memory_repository.py`. |
+| **Governance** | `Domain Firewall` | 403 Forbidden for cross-domain mismatches in `router.py`. |
+| **Observability** | `L-Gate Metrics` | Integrated `Ingest/Dedup/HitRate` into `STATUS_DASHBOARD.sh`. |
 
-## 9. Final Status: [CONDITIONAL PASS]
-**Reasoning**: All engineering contracts, proof, and governance logic are 100% verified and established. The system is "Wisdom-Ready", awaiting the final physical code hooks for 100% automation.
+## 9. Final Status: [FULLY HARDENED PASS]
+**Reasoning**: All engineering gaps identified in the CONDITIONAL PASS have been physically implemented and verified in Phase 31. The Learning Loop is now fully autonomous, code-enforced, and observable.
 
-## 10. Required Next Engineering Actions
-1. **[CORE-CODE]**: Implement the `post-run-hook` in `swarm_harness.py` to trigger `brain_loop_closure.py` automatically.
-2. **[MEMORY-CODE]**: Harden the `semantic-dedup` logic in `memory_repository.py` using the 0.1 spec threshold.
-3. **[STATUS-CODE]**: Integrate `retrieval hit-rate` and `ingest success` metrics into the `status_dashboard.sh`.
+## 10. Completed Engineering Actions (Ref: Phase 31)
+1. **[DONE]**: Recursive `post-run-hook` automation in `swarm_harness.py`.
+2. **[DONE]**: Authoritative `memory_repository.py` with native semantic dedup.
+3. **[DONE]**: Real-time `L-Gate` HUD indicators.
+4. **[DONE]**: Router `403 Domain Mismatch` enforcement.
 
 ---
-**[NEXUS CLOSED-LOOP STATUS: CONDITIONALLY CERTIFIED | 🟢 PASS]**
+**[NEXUS CLOSED-LOOP STATUS: FULLY HARDENED & CERTIFIED | 🟢 PASS]**

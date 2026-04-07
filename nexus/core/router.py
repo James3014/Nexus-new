@@ -71,6 +71,35 @@ class SkillsRouter:
             "artifact_found": False,
         }
 
+    def _get_active_domain(self, context: Dict[str, Any]) -> str:
+        """🔍 提取當前任務的 ActiveDomain，預設為 'undeclared'。"""
+        return context.get("active_domain", "undeclared")
+
+    def _enforce_firewall(self, skill_id: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+        """🛡️ v23.5 Domain Firewall: 攔截非法跨域調用或超預算暴露。"""
+        active_domain = self._get_active_domain(context)
+        skill_info = self.inventory.get("skills", {}).get(skill_id, {})
+        skill_domain = skill_info.get("domain", "system")
+        
+        # 1. Undeclared Domain Allowlist (Read-Only Tools)
+        allowlist = ["view_file", "ls", "grep_search", "list_dir", "read_resource"]
+        if active_domain == "undeclared" and skill_id not in allowlist:
+            return False, f"403 Forbidden: Undeclared domain restricted to read-only tools. (Skill: {skill_id})"
+            
+        # 2. Domain Mismatch
+        if active_domain != "undeclared" and skill_domain != active_domain and skill_domain != "global":
+            return False, f"403 Forbidden: Domain Mismatch. (Active: {active_domain}, Skill: {skill_id} in {skill_domain})"
+            
+        # 3. Tool Exposure Budget (Q-Level Caps)
+        # 這裡假設 phase 映射到 Q1-Q3 預算
+        phase = context.get("phase", "Q1")
+        budget_map = {"Q1": 5, "Q2": 15, "Q3": 30}
+        current_exposure = len(context.get("tools_exposed", []))
+        if current_exposure >= budget_map.get(phase, 5):
+            return False, f"403 Forbidden: Tool exposure budget exceeded for {phase}. (Limit: {budget_map.get(phase, 5)})"
+
+        return True, "PASS"
+
     def _load_weights(self) -> Dict[str, Any]:
         """從 JSON 載入權重，若失敗則回傳預設值。"""
         defaults = {
@@ -205,7 +234,10 @@ class SkillsRouter:
         for skill_id, info in skills_data.items():
             if phase not in info.get("phases", []):
                 continue
-                
+            
+            # 🛡️ v23.5 Router Enforcement: Domain Firewall & Budget
+            is_allowed, firewall_msg = self._enforce_firewall(skill_id, context_dict)
+            
             scorecard = self.generate_scorecard(skill_id, phase, context_dict, info)
             artifact = self._resolve_skill_artifact(skill_id)
             
@@ -218,14 +250,16 @@ class SkillsRouter:
                 "skill_path": artifact["skill_path"],
                 "skill_source": artifact["skill_source"],
                 "artifact_found": artifact["artifact_found"],
+                "firewall_status": firewall_msg
             }
             
-            if scorecard["status"] == "SELECTED" and artifact["artifact_found"]:
+            if is_allowed and scorecard["status"] == "SELECTED" and artifact["artifact_found"]:
                 candidates.append(candidate)
             else:
+                reason = firewall_msg if not is_allowed else ("Skill artifact missing" if not artifact["artifact_found"] else scorecard["reason"])
                 rejected.append({
                     "skill_id": skill_id,
-                    "reason": "Skill artifact missing" if not artifact["artifact_found"] else scorecard["reason"],
+                    "reason": reason,
                     "score": scorecard["final_score"]
                 })
         return candidates, rejected

@@ -116,9 +116,14 @@ class NexusOrchestrator:
                 self._save_reflection(data, strike)
                 if self._should_self_critique(data):
                     print(
-                        f"🔄 [FlashJudge] Self-critique triggered (Confidence: {data.get('confidence')}), retrying inner loop..."
+                        f"🔄 [FlashJudge] Self-critique triggered, retrying inner loop..."
                     )
                     continue
+
+            # 🌬️ Session Distillation: 85% Token Hard Reset
+            if self._check_session_distillation():
+                print("🌬️ [Session] 85% Token Limit reached. Distilling context and resetting session...")
+                # (Future: Implement context pruning here)
 
             if data.get("status") == "PASS":
                 return True
@@ -150,7 +155,26 @@ class NexusOrchestrator:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def _should_self_critique(self, response_data: dict) -> bool:
-        """FlashJudge 邏輯: 判斷是否需要自評再審。"""
-        # 模擬 FlashJudge 7.5 門檻
+        """🚀 v23.5 Anti-Rationalization: 攔截自我合理化描述與低置信度。"""
         confidence = response_data.get("confidence", 1.0)
+        summary = str(response_data.get("summary", "")).lower()
+        
+        # 🛡️ Rationalization Patterns
+        bad_patterns = [
+            "should have but", "will be fixed later", "it is okay though", 
+            "minor issue ignored", "not perfect but", "I assume"
+        ]
+        has_rationalization = any(p in summary for p in bad_patterns)
+        
+        if has_rationalization:
+            print(f"🛑 [Critique] Rationalization detected in summary: '{summary}'")
+            return True
+            
         return confidence < 0.75
+
+    def _check_session_distillation(self) -> bool:
+        """🌪️ 85% Token 蒸餾監測。"""
+        # 假設上下文限制為 128k (Sonnet 3.5 基準)
+        LIMIT = 120000 
+        ratio = self.total_tokens / LIMIT
+        return ratio > 0.85

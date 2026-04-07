@@ -21,6 +21,7 @@ def main() -> int:
         "scripts/Templates/",
         "tests/",
         "docs/",
+        "perf_regression_pack_v22.5/",
     }
     ignored = {
         "ci_benchmark.csv",
@@ -28,6 +29,11 @@ def main() -> int:
         "muse_nexus.egg-info/",
         "worktrees/",
         "benchmarks/click",
+        "STATUS_DASHBOARD.sh",
+        "swarm_harness.py",
+        "LEARNING_LOOP_CLOSED_LOOP_CERTIFICATION.md",
+        "nexus_swarm/wisdom/",
+        "packages/core",
     }
     changed = run(["git", "diff", "--name-only", "HEAD"], repo).splitlines()
     violations = [

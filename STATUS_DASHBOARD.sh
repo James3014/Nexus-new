@@ -42,7 +42,29 @@ else
 fi
 echo "----------------------------------------------------"
 
-# 4. 最近報告 (Latest Reports)
+# 4. 學習閉環 (Learning Loop v23.5)
+echo " [Learning Loop (L-Gate)]"
+METRICS_FILE="$NEXUS_ROOT/.nexus/metrics/learning_metrics.jsonl"
+if [[ -f "$METRICS_FILE" ]]; then
+    # Calculate stats from the last 100 entries
+    python3 -c "
+import json, sys
+lines = open('$METRICS_FILE').readlines()[-100:]
+data = [json.loads(l) for l in lines]
+total = len(data)
+ingest_ok = sum(1 for d in data if d.get('status') in ['NEW', 'MERGED', 'NEW_INITIAL'])
+dedup_hits = sum(1 for d in data if d.get('status') in ['DISCARDED', 'MERGED'])
+hit_rate = sum(d.get('retrieval_hit', 0) for d in data) / total if total > 0 else 0
+print(f'  - Ingest Success: {ingest_ok}/{total}')
+print(f'  - Dedup Ratio: {int(dedup_hits/total*100 if total>0 else 0)}%')
+print(f'  - Retrieval Hit: {int(hit_rate*100)}% (Target: 85%)')
+" 2>/dev/null
+else
+    echo "  - Learning Metrics: ❌ NO DATA (Waiting for Hook)"
+fi
+echo "----------------------------------------------------"
+
+# 5. 最近報告 (Latest Reports)
 echo " [Latest Reports]"
 ls -t "$REPORTS_DIR"/EXEC_REPORT_*.md 2>/dev/null | head -n 3 | xargs -I {} basename {} | sed 's/^/  - /'
 echo "===================================================="

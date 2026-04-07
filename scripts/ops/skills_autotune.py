@@ -322,7 +322,27 @@ def run_autotune(
         weights["skill_adjustments"] = skill_adjustments
         weights["last_updated"] = __import__("datetime").datetime.now().isoformat()
         weights["total_sessions_analyzed"] = int(weights.get("total_sessions_analyzed", 0)) + 1
+        
+        # 🏆 Final Writeback: Autonomic Weights
         weights_path.write_text(json.dumps(weights, ensure_ascii=False, indent=2), encoding="utf-8")
+        
+        # 🧠 Policy Memory Sync: Ensure the system 'learns' the new weights for future retrieval
+        policy_memory_path = project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
+        policy_memory_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(policy_memory_path, "a", encoding="utf-8") as f:
+            for skill_id, item in suggestions.items():
+                policy_entry = {
+                    "ts": __import__("datetime").datetime.now().isoformat(),
+                    "skill_id": skill_id,
+                    "route_weight": item["proposed"],
+                    "phase": "v23.5_tuning",
+                    "source": "self_heal_route_weight",
+                    "metadata": {
+                        "samples": item["count"],
+                        "last_delta": item["delta"]
+                    }
+                }
+                f.write(json.dumps(policy_entry, ensure_ascii=False) + "\n")
 
     print(f"✅ [skills:autotune] report: {report_path}")
     print(f"  - decision rows: {total_rows}")
