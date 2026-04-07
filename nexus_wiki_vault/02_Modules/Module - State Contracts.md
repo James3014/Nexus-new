@@ -1,21 +1,39 @@
 ---
-title: Module - State Contracts
-aliases: [State Contracts, JSON Schemas]
-type: module
-status: active
-version_scope: [v17.1, v22, v23]
-source_of_truth: /Users/jameschen/Workspace/schemas/
-raw_sources: [plan_schema.json, diagnosis_schema.json, repair_final_schema.json, audit_result_schema.json, manifest_schema.json]
-related_pages:
-  - "[[State - Lifecycle]]"
-  - "[[State - Schemas]]"
-  - "[[System Overview]]"
-  - "[[System - Unknowns and Conflicts]]"
-tags: [module, state, contracts, json-schema]
-last_compiled: 2026-04-06
+aliases:
+- State Contracts
+- JSON Schemas
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+raw_sources:
+- plan_schema.json
+- diagnosis_schema.json
+- repair_final_schema.json
+- audit_result_schema.json
+- manifest_schema.json
+related_pages:
+- '[[State - Lifecycle|State - Lifecycle]]'
+- '[[State - Schemas|State - Schemas]]'
+- '[[System Overview|System Overview]]'
+- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+  - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
+  Conflicts|Unknowns]] and Conflicts]]]]'
+source_of_truth: /Users/jameschen/Workspace/schemas/
+status: active
+tags:
+- module
+- state
+- contracts
+- json-schema
+title: Module - State Contracts
+type: module
+version_scope:
+- v17.1
+- v22
+- v23
 ---
+
+
 
 # Module - State Contracts
 
@@ -49,12 +67,15 @@ owner: agent
 
 ## Related modules / files
 - `/Users/jameschen/Workspace/schemas/`: 實體 JSON Schema 定義。
-- `nexus/core/handoff_bundle.py`: 狀態交接封裝邏輯。 [Code: `handoff_bundle.py`]
+- `nexus/core/handoff_bundle.py`: 狀態交接封裝邏輯。 [Code: 00_Home/System Overview.md]
 
 ## Source notes
 - Hardened v17.1 Spec: 建立最初的 4 相位工件對位要求。
-- v22 Engine Spec: 確立 `manifest.json` 為唯一權威索引。 [Source: Spec v22]
+- v22 Engine Spec: 確立 `manifest.json` 為唯一權威索引。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Contract Versioning**: 預留 `contract_version` 欄位以支援跨版本的 Schema 兼容性。
 - [ ] **Schema Evolution**: v23 智慧層是否應具備動態調整 Audit 閾值的能力。
+
+---
+[[System Overview]]

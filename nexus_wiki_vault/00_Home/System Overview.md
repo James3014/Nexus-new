@@ -1,34 +1,20 @@
 ---
-title: System Overview
-aliases: [Nexus Overview, Home]
-type: home
-status: active
-version_scope: [v22, v23]
-source_of_truth: compiled-wiki
-raw_sources:
-  - MUSE-NEXUS Engine Specification v22
-  - v23 Wisdom notes
-related_pages:
-  - "[[Module - Core Orchestrator Deep Dive]]"
-  - "[[Module - Guard and Gate Control]]"
-  - "[[Module - Memory Pipeline Deep Dive]]"
-  - "[[Module - Policy and Learning Governance]]"
-  - "[[Agent Onboarding - Implementation Map]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-  - "[[Ops - Truth Claims Register]]"
-  - "[[Source - Coverage Heatmap]]"
-  - "[[Ops - Wiki Drift Audit]]"
-  - "[[Ops - Wiki Page Type Contracts]]"
-  - "[[Ops - Query Writeback Policy]]"
-  - "[[Ops - CI Failure Playbook]]"
-  - "[[Agent Onboarding - Command Pack]]"
-  - "[[Ops - Governance Changelog]]"
-  - "[[System - Unknowns and Conflicts]]"
-tags: [home, overview, nexus]
-last_compiled: 2026-04-06
+'- [[MUSE_ENGINE_SPEC|v23 Wisdom]] notes [Source': '[[MUSE_ENGINE_SPEC|MUSE_ENGINE_SPEC]]]'
+aliases: '[Nexus Overview, Home, NEXUS_OS]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+raw_sources: ''
+related_pages: ''
+source_of_truth: compiled-wiki
+status: active
+tags: '[home, overview, nexus]'
+title: System Overview
+type: home
+version_scope: '[v22, v23]'
 ---
+
+
 
 # System Overview
 
@@ -41,17 +27,22 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **定位**: 作為 Nexus Swarm 的編排平向 (Governance Plane)，確保任務執行具有可追溯性與智慧演化能力。
 
 ## Upstream
-- **PDRAC vs PXDRAC**: v17.1 的 PDRAC 流程在 v22 中擴展為 PXDRAC (新增 `X` 探查相位)。 [Source: Spec v22 Part 3.2]
-- **CLI Drift**: v23 引入了 `--risk` 等智慧參數。 [Source: Protocol - CLI Drift Matrix]
+- **PDRAC vs [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]**: v17.1 的 PDRAC 流程在 v22 中擴展為 [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] (新增 `X` 探查相位)。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- **CLI Drift**: v23 引入了 `--risk` 等智慧參數。 [Source: nexus_wiki_vault/05_Protocols/Protocol - CLI Drift Matrix.md]]]
 
 ## Downstream
 - **Codebase**: 執行檔案修改、測試執行。
-- **.nexus State**: 輸出 metrics、reports 與證據工件- **v22 (Stable Baseline)**: 原生生產力基線。 [Source: MUSE-NEXUS Spec v22]
-- **v23 (Intelligence Layer)**: 疊加於 v22 之上的智慧治理層。 [Source: v23 Wisdom Supplement]
+- **.[[Module - State Lifecycle and Snapshotting|nexus State]]**: 輸出 metrics、reports 與證據工件- **v22 (Stable Baseline)**: 原生生產力基線。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- **v23 (Intelligence Layer)**: 疊加於 v22 之上的智慧治理層。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]] Supplement]
 
 ## Navigation (治理與開發入口)
 
-### 🚀 Onboarding & Ops
+### 🗺️ Knowledge & Heritage (地圖與遺產)
+- **[[Vault Topology]]**: [New] 知識庫全景拓撲圖。
+- **[[01_Core/Specs/Legacy_V9/INDEX|Legacy V9 Index]]**: [Imported] Nexus V9 核心架構與穩定化歷史。
+- **[[01_Core/Specs/Muse-Nexus-v152-upgrade/INDEX|v152 Upgrade Index]]**: [Imported] v152 關鍵升級路徑與環境變數。
+
+### 🚀 [[Agent Onboarding - Command Pack|Onboarding]] & Ops
 - **[[Agent Boot Sequence]]**: 新 Agent 前 30 分鐘啟動 SOP。
 - **[[CLI Surface Quickstart]]**: 任務常用 CLI 最小命令集。
 - **[[Agent Onboarding - Command Pack]]**: 常用指令速查。
@@ -64,18 +55,18 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Source - Coverage Heatmap]]**: Wiki 覆蓋率熱圖。
 - **[[Ops - Wiki Drift Audit]]**: 物理路徑漂移稽核。
 - **[[Ops - Wiki Regression Evals]]**: [New] Wiki 知識回歸測試。
-- **Module - Implementation Responsibility Matrix**: 代碼責任矩陣。
+- **[[Module - Implementation Responsibility Matrix]]**: 代碼責任矩陣。
 
 ### 🧠 Core Modules (Deep Dives)
 - **[[Nexus Glossary]]**: 核心術語與語義對齊入口。
 - **[[Module - Core Orchestrator Deep Dive]]**: 編排引擎深描。
 - **[[Module - Guard and Gate Control]]**: 工具閘門控制。
-- **[[Module - Memory Pipeline Deep Dive]]**: 記憶體管道與 LanceDB。
+- **[[Module - Memory Pipeline Deep Dive]]**: 記憶體管道與 [[Module - Memory Repository|LanceDB]]。
 - **[[Module - Policy and Learning Governance]]**: 政策管理與學習。
 
 ## Related modules / files
-- `nexus/core/`- **Orchestrator Node**: 位於 `/Users/jameschen/Workspace/nexus/`。 [Code: `nexus_cli.py`]
-- **Vast State**: `.nexus/` 目錄。 [Source: MUSE-NEXUS Spec v22]
+- `nexus/core/`- **[[Module - Core Orchestrator|Orchestrator Node]]**: 位於 `/Users/jameschen/Workspace/nexus/`。 [Code: nexus_cli.py]
+- **Vast State**: `.nexus/` 目錄。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ### Module Registry (全系統組件登記)
 - **[[Module - Implementation Responsibility Matrix]]**: [P0] 核心功能與物理檔案映射總表。
@@ -107,28 +98,11 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 
 (State Hub)
 
-## 🚀 Nexus Armor Mode & Protocol Enforcement
-
-All tasks must be executed in **Nexus Armor Mode** to ensure safety and alignment:
-
-### 1. Pre-flight Checks
-- **Nexus Status**: `uv run scripts/engine/nexus_cli.py nexus:status --global`
-- **Agent Protocol**: `uv run scripts/ops/agent_protocol_check.py`
-
-### 2. CI Governance
-- **Nexus CI Gate**: `uv run scripts/ops/ci_gate.py --dry-run`
-- **Wiki Linter**: `uv run scripts/ops/wiki_linter.py --strict`
-
-### 3. Acceptance & Learning
-- **Acceptance Check**: `uv run scripts/ops/nexus_acceptance_check.py`
-- **Learning Closure**: Failure-to-Lesson writeback to `Ops - Learning Closure Matrix`.
-
----
 ## Source notes
 - MUSE-NEXUS Engine Specification v22: 定義 P-X-D-R-A-C 相位矩陣與基礎契約。
-- v23 Wisdom notes: 定義智慧治理層與貝氏學習迴圈。
+- [[MUSE_ENGINE_SPEC|v23 Wisdom]] notes: 定義智慧治理層與貝氏學習迴圈。
 - MUSE-NEXUS Engine Specification v17.1 Hardened: 提供物理拓撲與硬化門禁歷史。
 
 ## Open questions / conflicts
-- [ ] 哪些頁面應進一步拆成模組頁（如 State Contracts）。
-- [ ] 針對 PDRAC 與 PXDRAC 的語義漂移進行對位。
+- [ ] 哪些頁面應進一步拆成模組頁（如 [[Module - State Contracts|State Contracts]]）。
+- [ ] 針對 PDRAC 與 [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] 的語義漂移進行對位。

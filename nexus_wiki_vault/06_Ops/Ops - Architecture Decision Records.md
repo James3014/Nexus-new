@@ -1,20 +1,18 @@
 ---
-title: Ops - Architecture Decision Records
-aliases: [ADR Index, Decision Rationale, Governance ADR]
-type: ops
-status: active
-version_scope: [v22, v23]
-source_of_truth: scripts/ops/ci_gate.py
-related_pages:
-  - "[[System Overview]]"
-  - "[[Ops - Governance Changelog]]"
-  - "[[Ops - Optimization Proposal Protocol]]"
-  - "[[Ops - Learning Closure Matrix]]"
-tags: [ops, adr, decisions, governance]
-last_compiled: 2026-04-07
+aliases: '[ADR [[index|Index]], Decision Rationale, Governance ADR]'
 confidence: high
+last_compiled: '2026-04-07'
 owner: agent
+related_pages: ''
+source_of_truth: scripts/ops/ci_gate.py
+status: active
+tags: '[ops, adr, decisions, governance]'
+title: Ops - Architecture Decision Records
+type: ops
+version_scope: '[v22, v23]'
 ---
+
+
 
 # Ops - Architecture Decision Records
 
@@ -33,9 +31,8 @@ owner: agent
 | `ADR-001` | Wiki 走「編譯知識層」而非 runtime state。 | Accepted | `nexus_wiki_vault/`, `.nexus/reports/` | - | 2026-04-07 |
 | `ADR-002` | Gate 通過不等於任務完成，需加語義驗收。 | Accepted | `scripts/ops/nexus_task_contract_guard.py` | - | 2026-04-07 |
 | `ADR-003` | Drift 採分級阻斷（P0 block, P1/P2 observe）。 | Accepted | `scripts/ops/wiki_drift_audit.py` | - | 2026-04-07 |
-| `ADR-004` | Truth Claims 需命令白名單與策略保護。 | Accepted | `scripts/ops/wiki_truth_claims_check.py` | - | 2026-04-07 |
+| `ADR-004` | [[Ops - Truth Claims Register|Truth Claims]] 需命令白名單與策略保護。 | Accepted | `scripts/ops/wiki_truth_claims_check.py` | - | 2026-04-07 |
 | `ADR-005` | 強制啟動前 preflight + CI dry-run。 | Accepted | `scripts/ops/_nexus_preflight.sh` | - | 2026-04-07 |
-| `ADR-006` | 強制 Agent 協定檢查 (Protocol Check) 與邊界約束。 | Accepted | `scripts/ops/agent_protocol_check.py` | - | 2026-04-07 |
 
 ## Upstream
 - `scripts/ops/ci_gate.py`: 發布門禁與阻斷策略。 [Code: scripts/ops/ci_gate.py]
@@ -57,3 +54,6 @@ owner: agent
 ## Open questions / conflicts
 - [ ] 是否要把 ADR 轉為獨立目錄 `06_Ops/ADR/` 並強制編號檔名。
 - [ ] 是否要在 CI 增加「PR 必須關聯 ADR 或豁免」檢查。
+
+---
+[[System Overview]]

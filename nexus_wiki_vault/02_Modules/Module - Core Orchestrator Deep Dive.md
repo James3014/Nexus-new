@@ -1,20 +1,20 @@
 ---
-title: Module - Core Orchestrator Deep Dive
-aliases: [Orchestrator Deep Dive, PDRAC Logic, Swarm Logic]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/swarm_orchestrator.py
-related_pages:
-  - "[[Module - Task Scheduling and Swarm Adapters]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, orchestrator, pdrac, swarm, logic, dive]
-last_compiled: 2026-04-06
+aliases: '[Orchestrator Deep Dive, PDRAC Logic, Swarm Logic]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+related_pages: ''
+source_of_truth: nexus/core/swarm_orchestrator.py
+status: active
+tags: '[core, orchestrator, pdrac, swarm, logic, dive]'
+title: '[[Module - Core Orchestrator|Module - Core Orchestrator]] Deep Dive'
+type: module
+version_scope: '[v22, v23]'
 ---
 
-# Module - Core Orchestrator Deep Dive
+
+
+# [[Module - Core Orchestrator]] Deep Dive
 
 > [!NOTE]
 > **Canonical Page**: 本頁探討 `SwarmOrchestrator` 的微觀實作與多代理共識機制。量化指標與子命令架構請見 [[Module - Core Orchestrator]]。
@@ -49,7 +49,7 @@ owner: agent
 - `nexus/core/task_graph.py`: 任務圖構建。 [Source: nexus/core/task_graph.py]
 
 ## Source notes
-- v22 Engine Spec: 規定「禁止在 PDRAC 循環中跳過 Review 階段」。 [Source: Spec v22]
+- v22 Engine Spec: 規定「禁止在 PDRAC 循環中跳過 Review 階段」。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Timeout Strategy**: 當單個節點長時間無響應時的系統級超時熔斷時間。

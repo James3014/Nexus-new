@@ -1,19 +1,19 @@
 ---
-title: Source - Coverage Heatmap
-aliases: [Wiki Coverage, Documentation Heatmap]
-type: sources
-status: active
-version_scope: [v17.1, v22, v23]
-source_of_truth: .nexus/reports/wiki_coverage_report.json
-related_pages:
-  - "[[Source Index]]"
-  - "[[System Overview]]"
-  - "[[Ops - Wiki Drift Audit]]"
-tags: [sources, coverage, audit, heatmap]
-last_compiled: 2026-04-06
+aliases: '[Wiki Coverage, [[documentation|Documentation]] Heatmap]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+related_pages: ''
+source_of_truth: .nexus/reports/wiki_coverage_report.json
+status: active
+tags: '[[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source [[index|Index]]|sources]]]]]]]],
+  coverage, audit, heatmap]'
+title: Source - Coverage Heatmap
+type: '[[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source [[index|Index]]|sources]]]]]]]]'
+version_scope: '[v17.1, v22, v23]'
 ---
+
+
 
 # Source - Coverage Heatmap
 
@@ -56,7 +56,7 @@ owner: agent
 
 ## Upstream
 - **Wiki Audit Engine**: `scripts/ops/wiki_coverage_audit.py` [Code: scripts/ops/wiki_coverage_audit.py]
-- **Provenance Tags**: 全庫 `[Source: path]` 標籤。
+- **Provenance Tags**: 全庫 `[Source: 00_Home/System Overview.md]` 標籤。
 
 ## Downstream
 - **[[Source Index]]**: 提供全域來源索引。
@@ -66,7 +66,7 @@ owner: agent
 - `.nexus/reports/wiki_coverage_report.json`: 生成的報表。 [Source: .nexus/reports/wiki_coverage_report.json]
 
 ## Source notes
-- v22 Engine Spec: 要求所有核心服務 (`nexus/services`) 必須具備 1:1 的治理對應關係。 [Source: Spec v22]
+- v22 Engine Spec: 要求所有核心服務 (`nexus/services`) 必須具備 1:1 的治理對應關係。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Dynamic Paths**: 如何處理 `*.so` 或二進位檔案的覆蓋率標記。

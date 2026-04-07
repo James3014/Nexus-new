@@ -1,11 +1,17 @@
 ---
-title: Ops - Ownership and Review SLA
-type: ops
-status: active
-tags: [governance, ownership, sla, compliance]
 last_compiled: 2026-04-06
 owner: agent
+status: active
+tags:
+- governance
+- ownership
+- sla
+- compliance
+title: Ops - Ownership and Review SLA
+type: ops
 ---
+
+
 
 # Ops - Ownership and Review SLA
 
@@ -20,7 +26,7 @@ owner: agent
 ## SLA Matrix (服務等級協議表格)
 | Level | Page Type | Review Period | Action on Expiration |
 |---|---|---|---|
-| **Critical** | Home, Ops, Prot | 30 Days | High Priority Warning |
+| **Critical** | [[System Overview|Home]], Ops, Prot | 30 Days | High Priority Warning |
 | **Standard** | Modules | 45 Days | Standard Notification |
 | **Backup** | Source | 90 Days | Passive Monitor |
 
@@ -35,7 +41,7 @@ owner: agent
 - `/Users/jameschen/Workspace/nexus/scripts/ops/wiki_owner_audit.py`: 產權稽核腳本。
 
 ## Source notes
-- v22 Engine Spec Part 3:「凡物理邏輯必有主，凡文檔聲明必有核」。 [Source: Spec v22]
+- v22 Engine Spec Part 3:「凡物理邏輯必有主，凡文檔聲明必有核」。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Agent Transition**: 當 Agent 版本升級時，如何自動移交 Ownership 權限。

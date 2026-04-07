@@ -1,10 +1,16 @@
 ---
+last_compiled: 2026-04-06
+status: active
+tags:
+- governance
+- slo
+- dashboard
+- tracking
 title: Ops - Governance SLO Dashboard
 type: ops
-status: active
-tags: [governance, slo, dashboard, tracking]
-last_compiled: 2026-04-06
 ---
+
+
 
 # Ops - Governance SLO Dashboard
 
@@ -13,7 +19,7 @@ last_compiled: 2026-04-06
 
 ## Role / responsibility
 - 聚合 `drift/coverage/truth` 報表，提供治理儀表板。
-- 讓人類審核與 CI gate 共用同一組 SLO 觀測基線。
+- 讓人類審核與 [[CD Promotion Gate|CI gate]] 共用同一組 SLO 觀測基線。
 
 ## Matrix / flow / interfaces
 | Metric | Source Report | Gate Meaning |

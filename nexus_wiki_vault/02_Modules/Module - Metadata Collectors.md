@@ -1,21 +1,20 @@
 ---
-title: Module - Metadata Collectors
-aliases: [Metadata Collectors, Data Sources]
-type: module
-status: proposed
-version_scope: [v23]
-source_of_truth: scripts/engine/collectors/node_collector_v1.py
-raw_sources:
-  - scripts/engine/collectors/node_collector_v1.py
-  - scripts/engine/collectors/edge_resolver_v1.py
-related_pages:
-  - "[[Module - Core Orchestrator]]"
-  - "[[Source Index]]"
-tags: [module, metadata, collector, proposed]
-last_compiled: 2026-04-06
+aliases: '[Metadata Collectors, Data [[index|Index]]|[[index|Index]]|[[index|Index]]|[[Source
+  [[index|Index]]|Sources]]]]]]]]]'
 confidence: low
+last_compiled: '2026-04-06'
 owner: agent
+raw_sources: ''
+related_pages: ''
+source_of_truth: scripts/engine/collectors/node_collector_v1.py
+status: proposed
+tags: '[module, metadata, collector, proposed]'
+title: Module - Metadata Collectors
+type: module
+version_scope: '[v23]'
 ---
+
+
 
 # Module - Metadata Collectors
 
@@ -23,7 +22,7 @@ owner: agent
 > **Governance Conflict**: 根據 2026-04-06 審計結果，`node_collector_v1.py` 與 `edge_resolver_v1.py` 尚未在正式 `scripts/engine/` 目錄中物理落地。
 
 ## One-sentence summary
-本模組提案負責 `MUSE_ENGINE` 數據層的節點與邊緣關係採集，目前作為治理藍圖進行記錄。 [Source: W-01-Proposed]
+本模組提案負責 `MUSE_ENGINE` 數據層的節點與邊緣關係採集，目前作為治理藍圖進行記錄。 [Source: 00_Home/System Overview.md]
 
 ## Role / responsibility
 - **節點自省**: 採集 Nexus 全量代碼與文檔節點的 Metadata。
@@ -38,8 +37,8 @@ owner: agent
 - **[[Module - Core Orchestrator]]**: 調度器依賴此層數據進行任務分析（X 相位）。
 
 ## Related modules / files
-- `scripts/engine/collectors/node_collector_v1.py` (Missing) [Source: [[System - Unknowns and Conflicts]]]
-- `scripts/engine/collectors/edge_resolver_v1.py` (Missing) [Source: [[System - Unknowns and Conflicts]]]
+- `scripts/engine/collectors/node_collector_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
+- `scripts/engine/collectors/edge_resolver_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
 
 ## Source notes
 - **Conflict Registry**: 物理對象缺失，列為 v23 首批補全對象。

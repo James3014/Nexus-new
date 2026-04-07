@@ -1,19 +1,26 @@
 ---
+confidence: high
+last_compiled: 2026-04-06
+owner: agent
+source_of_truth: compiled-wiki
+status: active
+tags:
+- ops
+- wiki
+- governance
+- contract
 title: Ops - Wiki Page Type Contracts
 type: governance
-status: active
-version_scope: [v23]
-source_of_truth: compiled-wiki
-tags: [ops, wiki, governance, contract]
-last_compiled: 2026-04-06
-confidence: high
-owner: agent
+version_scope:
+- v23
 ---
+
+
 
 # Ops - Wiki Page Type Contracts
 
 ## One-sentence summary
-本文件定義 Nexus Wiki 的頁面類型契約，規定各類型頁面的必要欄位、章節結構與版本控制規範，以確保 Wiki 知識庫的結構化與可稽核性。 [Source: Release Discipline] [Code: ci_gate.py]
+本文件定義 Nexus Wiki 的頁面類型契約，規定各類型頁面的必要欄位、章節結構與版本控制規範，以確保 Wiki 知識庫的結構化與可稽核性。 [Source: 00_Home/System Overview.md] [Code: ci_gate.py]
 
 ## Role / responsibility
 - **定義標準**: 為不同用途的 Wiki 頁面提供統一的結構模板。 [Code: ci_gate.py]
@@ -36,16 +43,16 @@ owner: agent
 
 ### 1. System (系統/入口)
 - **用途**: 描述系統總體、拓撲或高層次導航。
-- **必要 Frontmatter**: `type: home` 或 `type: system`, `status`, `owner`, `version_scope`.
+- **必要 Frontmatter**: `type: [[System Overview|home]]` 或 `type: system`, `status`, `owner`, `version_scope`.
 - **必要章節**: `## One-sentence summary`, `## Navigation`, `## Related modules / files`.
 
 ### 2. Concept (概念/原理)
-- **用途**: 解釋核心理論、算法或架構設計（如 PXDRAC）。
+- **用途**: 解釋核心理論、算法或架構設計（如 [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]）。
 - **必要 Frontmatter**: `type: concept`, `owner`, `source_of_truth`.
 - **必要章節**: `## One-sentence summary`, `## Role / responsibility`, `## Source notes`.
 
 ### 3. Phase (相位/流程)
-- **用途**: 詳述 PXDRAC 或其他運作流程的特定階段。
+- **用途**: 詳述 [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] 或其他運作流程的特定階段。
 - **必要 Frontmatter**: `type: phase`, `owner`.
 - **必要章節**: `## One-sentence summary`, `## Flow details`, `## Input/Output`, `## Source notes`.
 

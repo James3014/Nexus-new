@@ -1,22 +1,21 @@
 ---
-title: Module - CLI Commands Service
-aliases: [CLI Commands Service, Command Registry]
-type: module
-status: active
-version_scope: [v17.1, v22, v23]
-source_of_truth: nexus/services/cli_commands_service.py
-raw_sources:
-  - nexus/services/cli_commands_service.py
-related_pages:
-  - "[[Module - Core Orchestrator]]"
-  - "[[Protocol - CLI Surface]]"
-tags: [module, service, cli, command]
-last_compiled: 2026-04-06
+aliases: '[[Protocol - CLI Surface|CLI Commands]] Service, Command Registry]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+raw_sources: ''
+related_pages: ''
+source_of_truth: nexus/services/cli_commands_service.py
+status: active
+tags: '[module, service, cli, command]'
+title: Module - [[Protocol - CLI Surface|CLI Commands]] Service
+type: module
+version_scope: '[v17.1, v22, v23]'
 ---
 
-# Module - CLI Commands Service
+
+
+# Module - [[Protocol - CLI Surface|CLI Commands]] Service
 
 > [!NOTE]
 > **Canonical Page**: 本頁描述 Nexus CLI 命令的具體服務端實作。關於命令路徑解析請見 [[Protocol - CLI Surface]]。

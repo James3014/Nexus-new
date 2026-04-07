@@ -1,18 +1,31 @@
 ---
-title: Module - Advanced Core Intelligence
-aliases: [Advanced Core, Ash Intelligence, Policy Advanced]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/ash_matrix.py
-related_pages:
-  - "[[Module - Intelligence and Context Core]]"
-  - "[[Module - Policy and Learning Governance]]"
-tags: [core, advanced, intel, ash, policy, research]
-last_compiled: 2026-04-06
+aliases:
+- Advanced Core
+- Ash Intelligence
+- Policy Advanced
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[Module - Intelligence and Context Core|Module - Intelligence and Context Core]]'
+- '[[Module - Policy and Learning Governance|Module - Policy and Learning Governance]]'
+source_of_truth: nexus/core/ash_matrix.py
+status: active
+tags:
+- core
+- advanced
+- intel
+- ash
+- policy
+- research
+title: Module - Advanced Core Intelligence
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Advanced Core Intelligence
 
@@ -62,7 +75,7 @@ owner: agent
 - `nexus/core/policy_metabolizer.py`: 政策代謝。 [Code: nexus/core/policy_metabolizer.py]
 
 ## Source notes
-- v22 Engine Spec: 規定 Ash 矩陣的推理延遲不得超過 1.5s。 [Source: Spec v22]
+- v22 Engine Spec: 規定 Ash 矩陣的推理延遲不得超過 1.5s。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Healing Conflict**: 多個修復策略 (Healers) 同時運作時的優先級決策。

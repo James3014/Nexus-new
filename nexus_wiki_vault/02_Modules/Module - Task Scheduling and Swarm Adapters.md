@@ -1,27 +1,27 @@
 ---
-title: Module - Task Scheduling and Swarm Adapters
-aliases: [Task Scheduling, Swarm Orchestration, K8s Adapter]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/swarm.py
-related_pages:
-  - "[[Module - Core Orchestrator Deep Dive]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, task, scheduling, swarm, k8s, sharding]
-last_compiled: 2026-04-06
+aliases: '[[task|Task]] Scheduling, Swarm Orchestration, K8s Adapter]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+related_pages: ''
+source_of_truth: nexus/core/swarm.py
+status: active
+tags: '[core, [[task|task]], scheduling, swarm, k8s, sharding]'
+title: Module - [[task|Task]] Scheduling and Swarm Adapters
+type: module
+version_scope: '[v22, v23]'
 ---
 
-# Module - Task Scheduling and Swarm Adapters
+
+
+# Module - [[task]] Scheduling and Swarm Adapters
 
 ## One-sentence summary
 本模組集合了 Nexus 的多代理協作、任務圖分片、並行執行調度與 Kubernetes Swarm 適配邏輯。 [Source: nexus/core/swarm.py]
 
 ## Role / responsibility
 - **多代理調度**: 使用 `SwarmOrchestrator` 統籌多個執行個體的並行任務鏈。
-- **任務分片**: 透過 `Task Sharding` 將複雜需求分解為相互依賴的 DAG (Directed Acyclic Graph) 節點。
+- **任務分片**: 透過 `[[task]] Sharding` 將複雜需求分解為相互依賴的 DAG (Directed Acyclic Graph) 節點。
 - **物理集群接入**: 提供 K8s 適配層與 SSE 串流支持，實現分散式執行環境。
 
 ## Scheduling Component Registry (調度組件登記)
@@ -29,9 +29,9 @@ owner: agent
 | Component | Responsibility (職責) | Source (Path) |
 |---|---|---|
 | **Swarm Orchestrator** | 統籌多個子代理的執行狀態與訊息傳遞。 | [Source: nexus/core/swarm_orchestrator.py] |
-| **Task Graph** | 任務依賴性 DAG 的構建。 | [Source: nexus/core/task_graph.py] |
+| **[[task]] Graph** | 任務依賴性 DAG 的構建。 | [Source: nexus/core/task_graph.py] |
 | **Command DAG** | 底層 shell 指令執行鏈的拓撲。 | [Source: nexus/core/command_dag.py] |
-| **Task Sharding** | 將大型任務切割為多個可並行子分片。 | [Source: nexus/core/task_sharding.py] |
+| **[[task]] Sharding** | 將大型任務切割為多個可並行子分片。 | [Source: nexus/core/task_sharding.py] |
 | **Planner Executor** | Planner 指令的實體執行執行器。 | [Source: nexus/core/planner_executor.py] |
 | **Planner Auditor** | 針對計畫執行結果進行獨立驗證。 | [Source: nexus/core/planner_auditor.py] |
 | **K8s Swarm Adapter** | 實現 Nexus 核心與 K8s Pod 集群的通信。 | [Source: nexus/core/k8s_swarm_adapter.py] |
@@ -56,7 +56,7 @@ owner: agent
 - `nexus/core/task_sharding.py`: 分片邏輯。 [Code: nexus/core/task_sharding.py]
 
 ## Source notes
-- v22 Engine Spec: 要求單個 Swarm 分片的大小不得超過 2048 字符指令。 [Source: Spec v22]
+- v22 Engine Spec: 要求單個 Swarm 分片的大小不得超過 2048 字符指令。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Locking Mechanism**: 在 K8s 分散式環境下的文件寫入鎖競合處理。

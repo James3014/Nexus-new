@@ -1,18 +1,31 @@
 ---
-title: Module - State Lifecycle and Snapshotting
-aliases: [State Management, Nexus State, Snapshotting Engine]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/state_repository.py
-related_pages:
-  - "[[Module - Platform Core Registry]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, state, snapshot, lifecycle, persistence]
-last_compiled: 2026-04-06
+aliases:
+- State Management
+- Nexus State
+- Snapshotting Engine
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[Module - Platform Core Registry|Module - Platform Core Registry]]'
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/core/state_repository.py
+status: active
+tags:
+- core
+- state
+- snapshot
+- lifecycle
+- persistence
+title: Module - State Lifecycle and Snapshotting
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - State Lifecycle and Snapshotting
 
@@ -30,7 +43,7 @@ owner: agent
 |---|---|---|
 | **State Repository** | JSONL 狀態流的主讀寫引擎。 | [Source: nexus/core/state_repository.py] |
 | **State IO** | 物理路徑管理與檔案鎖控制。 | [Source: nexus/core/state_io.py] |
-| **State Contracts** | `NexusState` 數據結構與型別定義。 | [Source: nexus/core/state_contracts.py] |
+| **[[Module - State Contracts|State Contracts]]** | `NexusState` 數據結構與型別定義。 | [Source: nexus/core/state_contracts.py] |
 | **State Migrator** | 不同版本架構間的數據遷移。 | [Source: nexus/core/state_migrator.py] |
 | **State Validator** | 狀態完整性與邊界校驗。 | [Source: nexus/core/state_validator.py] |
 | **State Legacy** | v17 與舊版 Nexus 狀態的墊片層。 | [Source: nexus/core/state_legacy.py] |
@@ -53,7 +66,7 @@ owner: agent
 - `nexus/core/brain_snapshot.py`: 大腦快照。 [Code: nexus/core/brain_snapshot.py]
 
 ## Source notes
-- v22 Engine Spec: 要求狀態寫入必須具備 "Fail-safe" 屬性，禁止殘留半完成的 JSON 損毀。 [Source: Spec v22]
+- v22 Engine Spec: 要求狀態寫入必須具備 "Fail-safe" 屬性，禁止殘留半完成的 JSON 損毀。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **State Compaction**: 隨著 JSONL 增長，是否需要自動觸發 L1/L2 壓縮任務。

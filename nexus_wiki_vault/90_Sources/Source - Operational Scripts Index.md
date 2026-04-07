@@ -1,20 +1,20 @@
 ---
-title: Source - Operational Scripts Index
-aliases: [Scripts Index, Ops Scripts, Engine Scripts]
-type: source
-status: active
-version_scope: [v22, v23]
-source_of_truth: scripts/ops/ci_gate.py
-related_pages:
-  - "[[System Overview]]"
-  - "[[Ops - Truth Claims Register]]"
-tags: [source, scripts, ops, engine, index]
-last_compiled: 2026-04-06
+aliases: '[Scripts [[index|Index]], Ops Scripts, Engine Scripts]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+related_pages: ''
+source_of_truth: scripts/ops/ci_gate.py
+status: active
+tags: '[source, scripts, ops, engine, [[index|index]]]'
+title: Source - Operational Scripts [[index|Index]]
+type: source
+version_scope: '[v22, v23]'
 ---
 
-# Source - Operational Scripts Index
+
+
+# Source - Operational Scripts [[index]]
 
 ## One-sentence summary
 本頁索引了 Nexus 系統中所有關鍵的維運 (Ops) 與引擎 (Engine) 腳本，作為自動化任務與治理審計的物理真值入口。 [Source: scripts/ops/ci_gate.py]
@@ -57,15 +57,15 @@ owner: agent
 | **Utility** | **task_scheduler.py** | 任務調度中心。 | [Source: scripts/ops/task_scheduler.py] |
 | **Utility** | **daemon.py** | 基礎守護進程。 | [Source: scripts/ops/daemon.py] |
 | **Utility** | **hudson_daemon.py** | Hudson 協作守護進程。 | [Source: scripts/ops/hudson_daemon.py] |
-| **Test** | **v23_1_regression_suite.py** | v23 迴歸測試集。 | [Source: scripts/ops/v23_1_regression_suite.py] |
+| **Test** | **v23_1_regression_suite.py** | v23 迴歸測試集。 | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
 | **Test** | **ci_smoke_test.py** | CI 冒煙測試。 | [Source: scripts/ops/ci_smoke_test.py] |
 | **Test** | **soak_test.py** | 浸泡壓力測試。 | [Source: scripts/ops/soak_test.py] |
 | **Support** | **nexus_probe.py** | 系統狀態探針。 | [Source: scripts/ops/nexus_probe.py] |
 | **Support** | **night_summary.py** | 夜間執行彙整。 | [Source: scripts/ops/night_summary.py] |
 | **Support** | **render_delivery_report.py** | 交付報告生成。 | [Source: scripts/ops/render_delivery_report.py] |
-| **Test** | **v23_1_guard_backtest.py** | v23 護欄回測。 | [Source: scripts/ops/v23_1_guard_backtest.py] |
-| **Test** | **v23_1_hardened_backtest.py**| v23 硬化回測。 | [Source: scripts/ops/v23_1_hardened_backtest.py] |
-| **Test** | **v23_1_healing_precision_check.py**| v23 自癒精度檢查。 | [Source: scripts/ops/v23_1_healing_precision_check.py] |
+| **Test** | **v23_1_guard_backtest.py** | v23 護欄回測。 | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
+| **Test** | **v23_1_hardened_backtest.py**| v23 硬化回測。 | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
+| **Test** | **v23_1_healing_precision_check.py**| v23 自癒精度檢查。 | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
 | **Test** | **p3_swarm_stress.py** | Phase 3 集群壓力測試。| [Source: scripts/ops/p3_swarm_stress.py] |
 | **Metrics** | **write_phase_metrics.py** | 寫入相位指標。 | [Source: scripts/ops/write_phase_metrics.py] |
 | **Metrics** | **render_phase_sparkline.py** | 生成相位趨勢圖。 | [Source: scripts/ops/render_phase_sparkline.py] |
@@ -118,7 +118,7 @@ owner: agent
 - `scripts/engine/`: 全量引擎腳本。
 
 ## Source notes
-- v22 Engine Spec: 要求覆蓋率稽核必須偵測到所有物理存在的 `.py` 檔案。 [Source: Spec v22]
+- v22 Engine Spec: 要求覆蓋率稽核必須偵測到所有物理存在的 `.py` 檔案。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Unused Scripts**: 稽核中標示為 0 回鏈的腳本是否應批量移動至 `archive/`。

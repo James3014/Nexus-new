@@ -1,13 +1,19 @@
 ---
-title: Ops - Truth Claims Command Policy
-type: ops
-status: active
-tags: [security, policy, truth-claims, sandbox]
 last_compiled: 2026-04-06
 owner: agent
+status: active
+tags:
+- security
+- policy
+- truth-claims
+- sandbox
+title: Ops - [[Ops - Truth Claims Register|Truth Claims]] Command Policy
+type: ops
 ---
 
-# Ops - Truth Claims Command Policy
+
+
+# Ops - [[Ops - Truth Claims Register|Truth Claims]] Command Policy
 
 ## One-sentence summary
 本頁面定義真值校驗指令執行時必須遵循的安全白名單、黑名單以及執行期沙箱規範。 [Source: scripts/ops/wiki_truth_claims_check.py]
@@ -38,7 +44,7 @@ owner: agent
 - `scripts/ops/wiki_truth_claims_check.py`: 腳本。
 
 ## Source notes
-- v22 Hardened Security:「凡治理層內執行之操作，必受沙箱邏輯之規範」。 [Source: Spec v22]
+- v22 Hardened Security:「凡治理層內執行之操作，必受沙箱邏輯之規範」。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Dynamic Whitelist**: 未來是否支持由 `owner` 手動為特定 Claims 申請臨時豁免。

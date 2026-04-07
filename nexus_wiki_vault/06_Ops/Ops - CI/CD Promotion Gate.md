@@ -1,26 +1,44 @@
 ---
-title: Ops - CI/CD Promotion Gate
-aliases: [Promotion Gate, CI Gate, Acceptance Logic]
-type: ops
-status: active
-version_scope: [v17.1, v22, v23]
-source_of_truth: scripts/ops/ci_gate.py
-raw_sources:
-  - nexus_acceptance_check.py
-  - warning_budget_check.py
-  - MUSE-NEXUS Engine Specification v22
-related_pages:
-  - "[[Module - State Contracts]]"
-  - "[[Protocol - Evidence Chain]]"
-  - "[[Ops - CI/CD Promotion Gate]]"
-  - "[[System Overview]]"
-  - "[[System - Unknowns and Conflicts]]"
-  - "[[System - Unknowns and Conflicts]]"
-tags: [ops, ci, gate, acceptance, quality]
-last_compiled: 2026-04-06
+aliases:
+- Promotion Gate
+- CI Gate
+- Acceptance Logic
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+raw_sources:
+- nexus_acceptance_check.py
+- warning_budget_check.py
+- MUSE-NEXUS Engine Specification v22
+related_pages:
+- '[[Module - State Contracts|State Contracts]]|[[Module - [[Module - State Contracts|State
+  Contracts]]|Module - [[Module - State Contracts|State Contracts]]]]]]'
+- '[[Protocol - Evidence Chain|Protocol - Evidence Chain]]'
+- Ops - CI/CD Promotion Gate
+- '[[System Overview|System Overview]]'
+- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+  - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
+  Conflicts|Unknowns]] and Conflicts]]]]'
+- '[[System - Unknowns and Conflicts|Unknowns]] and Conflicts|[[System - [[System
+  - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
+  Conflicts|Unknowns]] and Conflicts]]]]'
+source_of_truth: scripts/ops/ci_gate.py
+status: active
+tags:
+- ops
+- ci
+- gate
+- acceptance
+- quality
+title: Ops - CI/CD Promotion Gate
+type: ops
+version_scope:
+- v17.1
+- v22
+- v23
 ---
+
+
 
 # Ops - CI/CD Promotion Gate
 
@@ -44,12 +62,12 @@ owner: agent
 
 ### 3. Benchmark Replay (Mini-lane)
 - **指令**: `nexus:benchmark --tasks 10`
-- **實體檢核**: 使用 `[[Ops - Truth Claims Register]]` 驗證本地環境是否存在真值斷裂。 [Source: Page: Ops - Truth Claims Register]
-- **主約更新**: 當程式碼變更時，優先更新對應的 Wiki [Source: path] 標籤。
+- **實體檢核**: 使用 `[[Ops - Truth Claims Register]]` 驗證本地環境是否存在真值斷裂。 [Source: 06_Ops/Ops - Truth Claims Register.md]]]
+- **主約更新**: 當程式碼變更時，優先更新對應的 Wiki [Source: 00_Home/System Overview.md] 標籤。
 - **指標**: 
-    - **Avg Health > 90%**: 任務成功率基準線。 [Source: `ci_gate.py` L137]
-    - **Max Drift < 0.5**: 物理狀態與預期狀態的偏移上限。 [Source: `ci_gate.py` L140]
-    - **Min Phase Health > 80%**: 確保單一相位 (如 D 或 R) 無重大短板。 [Source: `ci_gate.py` L143]
+    - **Avg Health > 90%**: 任務成功率基準線。 [Source: 00_Home/System Overview.md]
+    - **Max Drift < 0.5**: 物理狀態與預期狀態的偏移上限。 [Source: 00_Home/System Overview.md]
+    - **Min Phase Health > 80%**: 確保單一相位 (如 D 或 R) 無重大短板。 [Source: 00_Home/System Overview.md]
 
 ### 4. Evidence Integrity (Repair Honesty)
 - **路徑**: `.nexus/runs/latest/write_proof.json`
@@ -65,7 +83,7 @@ owner: agent
 
 ## Downstream
 - **Phase C (Crystallize)**: 門禁通過後，執行 `nexus:crystal` 進行經驗落盤。
-- **[[Ops - Acceptance and Release]]**: 作為 Release Gate 的最終前置條件。
+- **[[Ops - Acceptance and Release]]**: 作為 [[Ops - Acceptance and Release|Release Gate]] 的最終前置條件。
 
 ## Related modules / files
 - `scripts/ops/ci_gate.py`: 門禁執行引擎。
@@ -84,3 +102,6 @@ owner: agent
 ## Open questions / conflicts
 - [ ] **Manual Override**: 是否允許人類在 `Health < 90%` 但環境受限的情況下強制 Bypass。
 - [ ] **v23.1 Handoff**: 門禁完成後 `last_handoff.json` 的鎖定順序。
+
+---
+[[System Overview]]

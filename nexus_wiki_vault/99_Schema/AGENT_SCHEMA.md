@@ -1,12 +1,19 @@
 ---
-title: AGENT_SCHEMA
-aliases: [Vault Schema, Nexus Obsidian Schema]
-type: schema
-status: active
-version_scope: [v17.1, v22, v23]
-owner: human
+aliases:
+- Vault Schema
+- Nexus Obsidian Schema
 last_updated: 2026-04-06
+owner: human
+status: active
+title: AGENT_SCHEMA
+type: schema
+version_scope:
+- v17.1
+- v22
+- v23
 ---
+
+
 
 # AGENT_SCHEMA
 
@@ -110,7 +117,7 @@ Use only these top-level folders:
 - `07_Diffs`: version and architecture differences
 - `08_Incidents`: important incident and RCA summaries
 - `09_Roadmap`: future evolution and planned capability pages
-- `90_Sources`: source index and source metadata only
+- `90_Sources`: [[Source Index]] and source metadata only
 - `99_Schema`: rules, templates, linting, agent instructions
 
 ---
@@ -128,9 +135,9 @@ Use one of these page prefixes only:
 - `Ops - ...`
 - `Diff - ...`
 
-Exceptions:
-- `System Overview`
-- `Source Index`
+[[exceptions]]:
+- `[[System Overview]]`
+- `[[Source Index]]`
 - `AGENT_SCHEMA`
 
 ### 5.2 Stable naming
@@ -165,7 +172,7 @@ Each page must declare one of:
 - diff
 - incident
 - roadmap
-- source-index
+- source-[[index]]
 - schema
 
 ### 6.2 Frontmatter template
@@ -309,7 +316,7 @@ Pages about release, acceptance, manifest, schemas, or runtime truth must align 
 The agent must not:
 - invent modules, files, or flows
 - silently reconcile conflicting versions
-- treat walkthrough notes as higher authority than active specs
+- treat [[walkthrough]] notes as higher authority than active specs
 - create a second manifest or state registry inside Obsidian
 - modify runtime files from vault instructions
 - turn notes into deployment instructions without source support

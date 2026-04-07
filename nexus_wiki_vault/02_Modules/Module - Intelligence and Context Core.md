@@ -1,18 +1,32 @@
 ---
-title: Module - Intelligence and Context Core
-aliases: [Context Hub, RAG Core, Brain Intelligence]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/context_hub.py
-related_pages:
-  - "[[Module - Memory Pipeline Deep Dive]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, intel, context, rag, crystal, brain]
-last_compiled: 2026-04-06
+aliases:
+- Context Hub
+- RAG Core
+- Brain Intelligence
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[Module - Memory Pipeline Deep Dive|Module - Memory Pipeline Deep Dive]]'
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/core/context_hub.py
+status: active
+tags:
+- core
+- intel
+- context
+- rag
+- crystal
+- brain
+title: Module - Intelligence and Context Core
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Intelligence and Context Core
 
@@ -35,9 +49,9 @@ owner: agent
 | **Crystal Analyzer** | 分析並歸納任務中的 Pattern 與 Lessons。 | [Source: nexus/core/crystal_analyzer.py] |
 | **Brain Intelligence** | 模型能力預測與多模型路由邏輯。 | [Source: nexus/core/commander.py] |
 | **Ink Parser** | 分析與解析 Markdown/JSONL 中的語義塊。 | [Source: nexus/core/ink_parser.py] |
-| **Skill Distiller** | 從歷史執行中蒸餾出高可用 Skill 清單。 | [Source: nexus/core/skill_distiller.py] |
-| **Skill Compressor** | Skill 定義的長度壓縮與 Token 優化。 | [Source: nexus/core/skill_compressor.py] |
-| **Skill Outcomes** | Skill 執行的結果分類與預測。 | [Source: nexus/core/skill_outcomes.py] |
+| **[[SKILL]] Distiller** | 從歷史執行中蒸餾出高可用 [[SKILL]] 清單。 | [Source: nexus/core/skill_distiller.py] |
+| **[[SKILL]] Compressor** | [[SKILL]] 定義的長度壓縮與 Token 優化。 | [Source: nexus/core/skill_compressor.py] |
+| **[[SKILL]] Outcomes** | [[SKILL]] 執行的結果分類與預測。 | [Source: nexus/core/skill_outcomes.py] |
 | **Neural Aggregator** | 多路神經網路結果彙整與共識達成。 | [Source: nexus/core/neural_aggregator.py] |
 | **Gemini Handoff** | 多模型間的狀態移送與上下文對齊。 | [Source: nexus/core/gemini_handoff.py] |
 | **Handoff Builder** | 構建模型間移交的物理數據封裝。 | [Source: nexus/core/handoff_builder.py] |
@@ -57,7 +71,7 @@ owner: agent
 - `nexus/core/vector_rag.py`: RAG 引擎。 [Code: nexus/core/vector_rag.py]
 
 ## Source notes
-- v22 Engine Spec: 要求 RAG 召回精度 (Precision@3) 必須 > 0.85 以避免幻覺。 [Source: Spec v22]
+- v22 Engine Spec: 要求 RAG 召回精度 (Precision@3) 必須 > 0.85 以避免幻覺。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Embedding Drift**: 隨著模型更新，如何自動偵測並重新索引各項晶體。

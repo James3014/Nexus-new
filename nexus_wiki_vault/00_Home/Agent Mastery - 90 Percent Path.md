@@ -1,21 +1,19 @@
 ---
-title: Agent Mastery - 90 Percent Path
-aliases: [90% Mastery Path, New Agent Fast Track]
-type: home
-status: active
-version_scope: [v22, v23]
-source_of_truth: scripts/ops/ci_gate.py
-related_pages:
-  - "[[System Overview]]"
-  - "[[Agent Onboarding - Implementation Map]]"
-  - "[[Protocol - Knowledge Lineage]]"
-  - "[[Ops - CI/CD Promotion Gate]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [home, onboarding, mastery, governance, architecture]
-last_compiled: 2026-04-06
+aliases: '[90% Mastery Path, New Agent Fast Track]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+related_pages: ''
+source_of_truth: scripts/ops/ci_gate.py
+status: active
+tags: '[[System Overview|home]], [[Agent Onboarding - Command Pack|onboarding]], mastery,
+  governance, architecture]'
+title: Agent Mastery - 90 Percent Path
+type: '[[System Overview|home]]'
+version_scope: '[v22, v23]'
 ---
+
+
 
 # Agent Mastery - 90 Percent Path
 
@@ -23,14 +21,14 @@ owner: agent
 本頁定義新 Agent 在單次 session 內達到「架構與治理 >90%、實作細節 >90%」的最小可執行學習路徑。 [Source: scripts/ops/ci_gate.py]
 
 ## Role / responsibility
-- 提供固定進場順序，避免只看 Wiki 而忽略程式入口。 [Source: nexus_wiki_vault/00_Home/Agent Onboarding - Implementation Map.md]
+- 提供固定進場順序，避免只看 Wiki 而忽略程式入口。 [Source: nexus_wiki_vault/00_Home/Agent Onboarding - Implementation Map.md]].md]
 - 將治理概念直接對位到 CI/Wiki Gate 的硬規則。 [Source: scripts/ops/wiki_linter.py]
 - 提供可重跑的驗證命令，確保理解不是主觀聲明。 [Source: scripts/ops/ci_gate.py]
 
 ## Upstream
-- 系統全域定位來自 `[[System Overview]]`。 [Source: nexus_wiki_vault/00_Home/System Overview.md]
-- 血緣與證據流來自 `[[Protocol - Knowledge Lineage]]`。 [Source: nexus_wiki_vault/05_Protocols/Protocol - Knowledge Lineage.md]
-- 根協議錨點由 `MUSE_PROTO.md` 定義。 [Source: MUSE_PROTO.md]
+- 系統全域定位來自 `[[System Overview]]`。 [Source: nexus_wiki_vault/00_Home/System Overview.md]].md]
+- 血緣與證據流來自 `[[Protocol - Knowledge Lineage]]`。 [Source: nexus_wiki_vault/05_Protocols/Protocol - Knowledge Lineage.md]].md]
+- 根協議錨點由 `[[MUSE_PROTO]].md` 定義。 [Source: 01_System/MUSE_PROTO.md]
 
 ## Downstream
 - Agent 可依本頁步驟快速完成治理與實作雙軸對位。 [Source: scripts/engine/nexus_cli.py]
@@ -55,14 +53,13 @@ owner: agent
 
 ## Open questions / conflicts
 - [ ] 是否要把「90% Path」做成自動化檢查腳本（輸出 mastery report）。
-- [ ] `changed-only` 對未追蹤檔案不會觸發，是否要新增 pre-commit 補檢邏輯。
-- [ ] v23 智慧層命令與 v22 穩定基線的最小共同子集是否需固定白名單。
+- [ ] 修正 4 個檔案中的剩餘失敗項目。
 
 ## 90% Mastery Checklist
-1. 讀 `[[System Overview]]` 與 `[[Protocol - Knowledge Lineage]]`，建立治理視角。 [Source: nexus_wiki_vault/00_Home/System Overview.md]
-2. 讀 `[[Agent Onboarding - Implementation Map]]`，建立入口視角。 [Source: nexus_wiki_vault/00_Home/Agent Onboarding - Implementation Map.md]
+1. 讀 `[[System Overview]]` 與 `[[Protocol - Knowledge Lineage]]`，建立治理視角。 [Source: nexus_wiki_vault/00_Home/System Overview.md]].md]
+2. 讀 `[[Agent Onboarding - Implementation Map]]`，建立入口視角。 [Source: nexus_wiki_vault/00_Home/Agent Onboarding - Implementation Map.md]].md]
 3. 執行 `uv run scripts/ops/ci_gate.py --dry-run`，確認環境健康。 [Source: scripts/ops/ci_gate.py]
-4. 驗證 `[[Ops - Truth Claims Register]]` 內的所有物理聲明是否存在斷裂。 [Source: nexus_wiki_vault/06_Ops/Ops - Truth Claims Register.md]
+4. 驗證 `[[Ops - Truth Claims Register]]` 內的所有物理聲明是否存在斷裂。 [Source: nexus_wiki_vault/06_Ops/Ops - Truth Claims Register.md]].md]
 5. 讀 `scripts/engine/nexus_cli.py` 的 `nexus` group 與主要 command。 [Source: scripts/engine/nexus_cli.py]
 5. 讀 `nexus/core/orchestrator.py` 的 `run_review` / `_do_loop`。 [Source: nexus/core/orchestrator.py]
 6. 讀 `nexus/core/state_repository.py` 與 `nexus/core/state_contracts.py`。 [Source: nexus/core/state_repository.py]

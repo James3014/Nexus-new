@@ -1,20 +1,34 @@
 ---
-title: Module - Dual Phase Diagnosis
-aliases: [Dual Phase Diagnosis, Phase D Runner]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/services/dual_phase_d.py
-raw_sources:
-  - nexus/services/dual_phase_d.py
-related_pages:
-  - "[[Flow - PXDRAC Runtime]]"
-  - "[[Module - Core Orchestrator Deep Dive]]"
-tags: [module, service, diagnosis, phase-d]
-last_compiled: 2026-04-06
+aliases:
+- Dual Phase Diagnosis
+- Phase D Runner
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+raw_sources:
+- nexus/services/dual_phase_d.py
+related_pages:
+- '[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime|[[Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]
+  Runtime|Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime]]]]'
+- '[[[[Module - Core Orchestrator|Module - Core Orchestrator]] Deep Dive|[[Module
+  - Core Orchestrator|Module - Core Orchestrator]] Deep Dive]]|[[[[Module - Core Orchestrator|Module
+  - Core Orchestrator]] Deep Dive|[[Module - Core Orchestrator|Module - Core Orchestrator]]
+  Deep Dive]]]]'
+source_of_truth: nexus/services/dual_phase_d.py
+status: active
+tags:
+- module
+- service
+- diagnosis
+- phase-d
+title: Module - Dual Phase Diagnosis
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Dual Phase Diagnosis
 

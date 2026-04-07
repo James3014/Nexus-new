@@ -1,18 +1,31 @@
 ---
-title: Module - Policy and Learning Governance
-aliases: [Policy Engine, Learning Logic, Governance Core]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/learning_governance.py
-related_pages:
-  - "[[Module - Intelligence and Logic (Remaining Core)]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, policy, learning, governance, scorer]
-last_compiled: 2026-04-06
+aliases:
+- Policy Engine
+- Learning Logic
+- Governance Core
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- Module - Intelligence and Logic (Remaining Core)
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/core/learning_governance.py
+status: active
+tags:
+- core
+- policy
+- learning
+- governance
+- scorer
+title: Module - Policy and Learning Governance
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Policy and Learning Governance
 
@@ -29,7 +42,7 @@ owner: agent
 | Component | Responsibility (職責) | Source (Path) |
 |---|---|---|
 | **Learning Governance** | 統籌治理規則與自動化學習的政策入口。 | [Source: nexus/core/learning_governance.py] |
-| **Learning Scorer** | 針對任務軌跡進行物理與語詞雙重評分。 | [Source: nexus/core/learning_scorer.py] |
+| **[[Module - Intelligence and Logic (Remaining Core)|Learning Scorer]]** | 針對任務軌跡進行物理與語詞雙重評分。 | [Source: nexus/core/learning_scorer.py] |
 | **Phase Health** | 計算 PDRAC 每相位健康度的核心指標引擎。 | [Source: nexus/core/phase_health.py] |
 | **Policy Loader** | 負責高效載入與快取治理政策表。 | [Source: nexus/core/policy_loader.py] |
 
@@ -46,7 +59,7 @@ owner: agent
 - `nexus/core/learning_scorer.py`: 評分引擎。 [Code: nexus/core/learning_scorer.py]
 
 ## Source notes
-- v22 Engine Spec: 要求政策引擎的攔截檢核延遲不得超過 50ms。 [Source: Spec v22]
+- v22 Engine Spec: 要求政策引擎的攔截檢核延遲不得超過 50ms。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Policy Conflict**: 特定場景下「性能」與「安全性」政策衝突時的優先級權重係數。

@@ -1,11 +1,16 @@
 ---
-title: Ops - Weekly Governance Report
-type: ops
-status: active
-tags: [governance, report, weekly]
 last_compiled: 2026-04-06
 owner: agent
+status: active
+tags:
+- governance
+- report
+- weekly
+title: Ops - Weekly Governance Report
+type: ops
 ---
+
+
 
 # Ops - Weekly Governance Report (2026-04-06)
 
@@ -32,7 +37,7 @@ Generated at: 2026-04-06 10:27
 - `.nexus/reports/` 中的各項 JSON 原始報表。
 
 ## Downstream
-- 作為 CI gate 的治理依據。
+- 作為 [[CD Promotion Gate|CI gate]] 的治理依據。
 - [[Ops - Governance SLO Dashboard]]
 
 ## Risks (Top 5)

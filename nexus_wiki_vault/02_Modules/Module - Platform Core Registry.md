@@ -1,18 +1,31 @@
 ---
-title: Module - Platform Core Registry
-aliases: [Core Shell, Nexus Platform Core, Utility Matrix]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/hubs.py
-related_pages:
-  - "[[System Overview]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, platform, utilities, hubs, metrics]
-last_compiled: 2026-04-06
+aliases:
+- Core Shell
+- Nexus Platform Core
+- Utility Matrix
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[System Overview|System Overview]]'
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/core/hubs.py
+status: active
+tags:
+- core
+- platform
+- utilities
+- hubs
+- metrics
+title: Module - Platform Core Registry
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Platform Core Registry
 
@@ -62,7 +75,7 @@ owner: agent
 - `nexus/core/errors.py`: 錯誤定義。 [Code: nexus/core/errors.py]
 
 ## Source notes
-- v22 Engine Spec: 要求基礎設施必須在 500ms 內完成冷啟動初始化。 [Source: Spec v22]
+- v22 Engine Spec: 要求基礎設施必須在 500ms 內完成冷啟動初始化。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Notifier Scale**: 是否需要對接外部 Webhook (如 Discord/Slack) 的標準模組。

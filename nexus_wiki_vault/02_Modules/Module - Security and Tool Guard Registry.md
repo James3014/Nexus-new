@@ -1,18 +1,33 @@
 ---
-title: Module - Security and Tool Guard Registry
-aliases: [Security Guard, Access Control, Tool Lockdown]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/capability_gate.py
-related_pages:
-  - "[[Module - Guard and Gate Control]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, security, guard, lock, validator]
-last_compiled: 2026-04-06
+aliases:
+- Security Guard
+- Access Control
+- Tool Lockdown
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[Module - Guard and Gate Control|Gate Control]]|[[Module - Guard and [[Module
+  - Guard and Gate Control|Gate Control]]|Module - Guard and [[Module - Guard and
+  Gate Control|Gate Control]]]]]]'
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/core/capability_gate.py
+status: active
+tags:
+- core
+- security
+- guard
+- lock
+- validator
+title: Module - Security and Tool Guard Registry
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Security and Tool Guard Registry
 
@@ -53,10 +68,10 @@ owner: agent
 - `nexus/core/access_control_list.py`: 存取列表。 [Code: nexus/core/access_control_list.py]
 
 ## Source notes
-- v22 Engine Spec: 規定「凡涉及寫入操作 (Write-path)，必須通過 JIT 標籤檢查」。 [Source: Spec v22]
+- v22 Engine Spec: 規定「凡涉及寫入操作 (Write-path)，必須通過 JIT 標籤檢查」。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
-- [ ] **Cross-OS Compatibility**: 物理進程鎖定在 macOS 與 Linux 環境下的行為一致性。
+- [ ] **Cross-OS [[compatibility]]**: 物理進程鎖定在 macOS 與 Linux 環境下的行為一致性。
 
 ---
 Back to [[System Overview]]

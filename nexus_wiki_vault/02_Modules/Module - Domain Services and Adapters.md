@@ -1,18 +1,31 @@
 ---
-title: Module - Domain Services and Adapters
-aliases: [Domain Services, Nexus Services, Service Registry]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/services/memory.py
-related_pages:
-  - "[[Module - Memory Pipeline Deep Dive]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [services, adapter, aoss, storage, benchmark]
-last_compiled: 2026-04-06
+aliases:
+- Domain Services
+- Nexus Services
+- Service Registry
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[Module - Memory Pipeline Deep Dive|Module - Memory Pipeline Deep Dive]]'
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/services/memory.py
+status: active
+tags:
+- services
+- adapter
+- aoss
+- storage
+- benchmark
+title: Module - Domain Services and Adapters
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Domain Services and Adapters
 
@@ -29,9 +42,9 @@ owner: agent
 | Category | Component Name | Responsibility (職責) | Source (Path) |
 |---|---|---|---|
 | **Memory** | **memory.py** | 記憶服務主入口。 | [Source: nexus/services/memory.py] |
-| **Memory** | **memory_repository.py** | 實體 LanceDB 表與磁碟 IO 管理。 | [Source: nexus/services/memory_repository.py] |
+| **Memory** | **memory_repository.py** | 實體 [[Module - Memory Repository|LanceDB]] 表與磁碟 IO 管理。 | [Source: nexus/services/memory_repository.py] |
 | **Memory** | **memory_indexer.py** | 負責向量索引的建立與維護。 | [Source: nexus/services/memory_indexer.py] |
-| **Memory** | **memory_embedding.py** | LLM Embedding API 協調。 | [Source: nexus/services/memory_embedding.py] |
+| **Memory** | **memory_embedding.py** | LLM Embedding [[api|API]] 協調。 | [Source: nexus/services/memory_embedding.py] |
 | **Memory** | **continuous_learning.py** | 持續學習與記憶固化。 | [Source: nexus/services/continuous_learning.py] |
 | **Memory** | **lesson_retrieval.py** | 歷史案例 Lessons 召回。 | [Source: nexus/services/lesson_retrieval.py] |
 | **Memory** | **lesson_resolver.py** | Lesson 解決與衝突判定。 | [Source: nexus/services/lesson_resolver.py] |
@@ -50,7 +63,7 @@ owner: agent
 | **Ops** | **fs_watcher.py** | 檔案系統監聽。 | [Source: nexus/services/fs_watcher.py] |
 | **Ops** | **reporter.py** | 治理報告生成服務。 | [Source: nexus/services/reporter.py] |
 | **Security** | **rbac.py** | 基於角色的權限控制。 | [Source: nexus/services/rbac.py] |
-| **Security** | **gateway.py** | API 服務閘道。 | [Source: nexus/services/gateway.py] |
+| **Security** | **gateway.py** | [[api|API]] 服務閘道。 | [Source: nexus/services/gateway.py] |
 | **Security** | **policy_gate.py** | 政策執行閘門服務。 | [Source: nexus/services/policy_gate.py] |
 | **Security** | **spec_guard_v2.py** | 規格書二代防護。 | [Source: nexus/services/spec_guard_v2.py] |
 | **Automation** | **reviewer.py** | 自動化代碼評審。 | [Source: nexus/services/reviewer.py] |
@@ -83,7 +96,7 @@ owner: agent
 - `nexus/services/`: 全量服務檔案庫。
 
 ## Source notes
-- v22 Engine Spec: 要求對外適配器 100% 必須具備 Error Handling 指紋。 [Source: Spec v22]
+- v22 Engine Spec: 要求對外適配器 100% 必須具備 Error Handling 指紋。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Distributed Cache**: 是否需要在 Service 層引入全域分佈式緩存。

@@ -1,18 +1,31 @@
 ---
-title: Module - Guard and Gate Control
-aliases: [Gate Control, Nexus Guard, Security Gate]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/capability_gate.py
-related_pages:
-  - "[[Module - Security and Tool Guard Registry]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, guard, gate, security, access]
-last_compiled: 2026-04-06
+aliases:
+- Gate Control
+- Nexus Guard
+- Security Gate
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[Module - Security and Tool Guard Registry|Module - Security and Tool Guard Registry]]'
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/core/capability_gate.py
+status: active
+tags:
+- core
+- guard
+- gate
+- security
+- access
+title: Module - Guard and Gate Control
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Guard and Gate Control
 
@@ -46,7 +59,7 @@ owner: agent
 - `nexus/core/access_control_list.py`: 存取控制。 [Code: nexus/core/access_control_list.py]
 
 ## Source notes
-- v22 Engine Spec: 要求安全性檢查必須在工具真正執行前 10ms 內完成鎖定。 [Source: Spec v22]
+- v22 Engine Spec: 要求安全性檢查必須在工具真正執行前 10ms 內完成鎖定。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Bypass Scenarios**: 緊急維護模式下如何安全且可審計地繞過特定閘門。

@@ -1,18 +1,32 @@
 ---
-title: Module - Intelligence and Logic (Remaining Core)
-aliases: [Core Logic, Learning Scorer, Shogun Engine]
-type: module
-status: active
-version_scope: [v22, v23]
-source_of_truth: nexus/core/learning_governance.py
-related_pages:
-  - "[[Module - Policy and Learning Governance]]"
-  - "[[Module - Implementation Responsibility Matrix]]"
-tags: [core, logic, learning, scorer, shogun, aggregator]
-last_compiled: 2026-04-06
+aliases:
+- Core Logic
+- Learning Scorer
+- Shogun Engine
 confidence: high
+last_compiled: 2026-04-06
 owner: agent
+related_pages:
+- '[[Module - Policy and Learning Governance|Module - Policy and Learning Governance]]'
+- '[[Module - Implementation Responsibility Matrix|Module - Implementation Responsibility
+  Matrix]]'
+source_of_truth: nexus/core/learning_governance.py
+status: active
+tags:
+- core
+- logic
+- learning
+- scorer
+- shogun
+- aggregator
+title: Module - Intelligence and Logic (Remaining Core)
+type: module
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Module - Intelligence and Logic (Remaining Core)
 
@@ -33,9 +47,9 @@ owner: agent
 | **Learning Evidence** | 採集任務執行過程中的物理證據鏈。 | [Source: nexus/core/learning_evidence.py] |
 | **Neural Aggregator** | 彙整多個神經網絡推理結果達成共識。 | [Source: nexus/core/neural_aggregator.py] |
 | **Shogun Engine** | 歷史上用於高強度審計的「將軍」核心引擎。 | [Source: nexus/core/shogun.py] |
-| **Skill Distiller** | 從原始日誌中蒸餾出高可用原子技能。 | [Source: nexus/core/skill_distiller.py] |
-| **Skill Compressor** | 技能定義的長度與性能優化。 | [Source: nexus/core/skill_compressor.py] |
-| **Skill Outcomes** | 預測技能調用的預期產物與副作用。 | [Source: nexus/core/skill_outcomes.py] |
+| **[[SKILL]] Distiller** | 從原始日誌中蒸餾出高可用原子技能。 | [Source: nexus/core/skill_distiller.py] |
+| **[[SKILL]] Compressor** | 技能定義的長度與性能優化。 | [Source: nexus/core/skill_compressor.py] |
+| **[[SKILL]] Outcomes** | 預測技能調用的預期產物與副作用。 | [Source: nexus/core/skill_outcomes.py] |
 | **Phase Health** | 計算 P-X-D-R-A-C 每相位的健康度。 | [Source: nexus/core/phase_health.py] |
 | **Phase Health Schema** | 健康度指標的資料結構契約。 | [Source: nexus/core/phase_health_schema.py] |
 | **Pipeline Metadata** | 串接各個 Phase 之間的元數據傳遞。 | [Source: nexus/core/pipeline_metadata.py] |
@@ -58,7 +72,7 @@ owner: agent
 - `nexus/core/neural_aggregator.py`: 神經彙整。 [Code: nexus/core/neural_aggregator.py]
 
 ## Source notes
-- v22 Engine Spec: 要求 `Skill Distiller` 提取的技能具備 95% 以上的 idempotency。 [Source: Spec v22]
+- v22 Engine Spec: 要求 `[[SKILL]] Distiller` 提取的技能具備 95% 以上的 idempotency。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
 - [ ] **Scorer Bias**: 對於人類反饋 (Human-in-the-loop) 的加權計算方式。

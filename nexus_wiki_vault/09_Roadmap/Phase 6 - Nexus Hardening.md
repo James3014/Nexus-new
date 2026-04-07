@@ -1,11 +1,17 @@
 ---
-title: Phase 6 - Nexus Hardening
-type: roadmap
-status: active
-tags: [roadmap, phase6, hardening, governance]
 last_compiled: 2026-04-06
 owner: agent
+status: active
+tags:
+- roadmap
+- phase6
+- hardening
+- governance
+title: Phase 6 - Nexus Hardening
+type: roadmap
 ---
+
+
 
 # Phase 6 - Nexus Hardening
 
@@ -27,8 +33,8 @@ owner: agent
 - `scripts/ops/wiki_eval_regression.py`
 
 ## Source notes
-- [source: Spec v22]
-- [code: wiki_eval_regression.py]
+- [source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- [code: 00_Home/System Overview.md]
 
 ## Open questions / conflicts
 - [ ] Phase 7 的自動調優路徑規劃。

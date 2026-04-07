@@ -1,21 +1,21 @@
 ---
-title: Ops - Governance Changelog
-aliases: [Governance Log, Audit Log, System Evolution Log]
-type: ops
-status: active
-version_scope: [v17.1, v22, v23]
-source_of_truth: MUSE-NEXUS-Engine-Specification-v22-Eternal.md
-related_pages:
-  - "[[System Overview]]"
-  - "[[Ops - Truth Claims Register]]"
-  - "[[Ops - Wiki Drift Audit]]"
-tags: [ops, changelog, governance, evolution]
-last_compiled: 2026-04-06
+aliases: '[Governance Log, Audit Log, System [[Diff - v17.1 vs v22 vs v23|Evolution
+  Log]]]'
 confidence: high
+last_compiled: '2026-04-06'
 owner: agent
+related_pages: ''
+source_of_truth: MUSE-NEXUS-Engine-Specification-v22-Eternal.md
+status: active
+tags: '[ops, [[CHANGELOG|changelog]], governance, evolution]'
+title: Ops - Governance [[CHANGELOG|Changelog]]
+type: ops
+version_scope: '[v17.1, v22, v23]'
 ---
 
-# Ops - Governance Changelog
+
+
+# Ops - Governance [[CHANGELOG]]
 
 ## One-sentence summary
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
@@ -28,19 +28,16 @@ owner: agent
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
-| 2026-04-07 | **Nexus CLI Governance Gate Integration** | `scripts/engine/nexus_cli.py`, `scripts/ops/ci_gate.py` | Mid | Git revert | Codex |
-| 2026-04-07 | **Wiki Sync Upgrade: Block-on-miss Enforcement** | `scripts/ops/wiki_sync_check.py`, `ci_gate.py` | Mid | Git revert | Antigravity |
-| 2026-04-07 | **Wiki Sync: Warn-first Implementation** | `scripts/ops/wiki_sync_check.py`, `ci_gate.py` | Low | Git revert | Antigravity |
-| 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `Module - State Contracts` | Low | Git revert | Antigravity |
+| 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `[[Module - State Contracts]]` | Low | Git revert | Antigravity |
 | 2026-04-06 | **WS-B/C: Core Subdomain Deep-Mapping** | `nexus/core`, Wiki Vault | Low | Git revert | Antigravity |
-| 2026-04-06 | **WS-F: Navigation Refactoring & Orphan Cleanup** | `System Overview.md`, Navbar | Low | Git revert | Antigravity |
+| 2026-04-06 | **WS-F: Navigation Refactoring & Orphan Cleanup** | `[[System Overview]].md`, Navbar | Low | Git revert | Antigravity |
 | 2026-04-06 | **Governance Hardening Final** | **Global Coverage 86.0%, Keypath 100%, P1 Noise 11** | Mid | Git revert | Antigravity |
 | 2026-04-05 | 核心模組深映射 | 完成 Orchestrator/Guard/Memory/Policy 深度映射頁。 | Pass 7 (Part 1) |
 | 2026-04-06 | 治理全面硬化 | **Coverage 提升至 90.73%**，建立 20 案故障手冊與全量腳本索引。 | Pass 7 Final |
- 全庫 Wiki, CI Gate, Reports | Mid | Git revert to HEAD~5 | Antigravity |
+ 全庫 Wiki, [[CD Promotion Gate|CI Gate]], Reports | Mid | Git revert to HEAD~5 | Antigravity |
 
 ## Upstream
-- **CI Gate**: 提供自動變更觸發與驗證環境。 [Source: scripts/ops/ci_gate.py]
+- **[[CD Promotion Gate|CI Gate]]**: 提供自動變更觸發與驗證環境。 [Source: scripts/ops/ci_gate.py]
 
 ## Downstream
 - **[[System Overview]]**: 提供最新治理狀態的摘要。
@@ -50,8 +47,8 @@ owner: agent
 - `.nexus/reports/`: 包含各項掃描的自動化證據。 [Source: scripts/ops/ci_gate.py]
 
 ## Source notes
-- v22 Engine Spec: 要求「凡治理變更必有記錄，凡記錄必有回標」。 [Source: Spec v22]
+- v22 Engine Spec: 要求「凡治理變更必有記錄，凡記錄必有回標」。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
-- [ ] **Auto-logging**: 未來是否由 `ci_gate` 在成功 Promotion 後自動 Append 一筆紀錄到本頁。
+- [ ] **Auto-[[logging]]**: 未來是否由 `ci_gate` 在成功 Promotion 後自動 Append 一筆紀錄到本頁。
 - [ ] **Rollback Automation**: 何時實作「一鍵治理版本回滾」腳本。

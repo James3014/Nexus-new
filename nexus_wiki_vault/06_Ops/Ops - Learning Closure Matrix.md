@@ -1,63 +1,72 @@
 ---
+aliases:
+- Learning Loop Matrix
+- Error Prevention Matrix
+- Continuous Improvement
+confidence: high
+last_compiled: 2026-04-07
+owner: agent
+related_pages:
+- '[[System Overview|System Overview]]'
+- '[[Ops - Architecture Decision Records|Ops - Architecture Decision Records]]'
+- '[[Ops - Optimization Proposal Protocol|Ops - Optimization Proposal Protocol]]'
+- '[[Ops - Governance SLO Dashboard|Ops - Governance SLO Dashboard]]'
+source_of_truth: .nexus/reports/
+status: active
+tags:
+- ops
+- learning
+- closure
+- quality
 title: Ops - Learning Closure Matrix
 type: ops
-status: active
-version_scope: [v23]
-source_of_truth: scripts/ops/wiki_query_writeback.py
-related_pages:
-  - "[[System Overview]]"
-  - "[[Ops - Architecture Decision Records]]"
-  - "[[Ops - Optimization Proposal Protocol]]"
-tags: [ops, learning, closure, feedback]
-last_compiled: 2026-04-07
-confidence: high
-owner: agent
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Ops - Learning Closure Matrix
 
 ## One-sentence summary
-紀錄 Nexus 系統執行錯誤與其對應的防再發學習策略，實現貝氏學習閉環。 [Source: scripts/ops/wiki_query_writeback.py]
+本頁將常見錯誤類型映射到防再發策略與 CI 檢查點，確保「發生一次就學會一次」，形成可驗證的治理閉環。 [Source: .nexus/reports/wiki_drift_report.json]
 
 ## Role / responsibility
-- **錯誤持久化**: 捕捉每次執行失敗的核心教訓。
-- **策略對位**: 將教訓轉化為具體的驗證指令或 ADR。
-- **防止退化**: 確保系統不重複犯相同的技術錯誤。 [Source: AGENTS.md]
+- **錯誤歸因**: 固化問題分類，避免每次重做 root cause。
+- **策略回寫**: 把修復經驗轉成腳本規則或檢查項。
+- **持續降噪**: 追蹤是否真的降低 P1/P2、誤報與返工率。 [Source: scripts/ops/wiki_drift_audit.py]
 
-## 🔄 Learning Feedback Loop
+## Error-to-Prevention Matrix
 
-Every task execution that encounters a failure or suboptimal path must perform a "Writeback" to this matrix.
-
-| Source | Failure Mode | Lesson Learned | Verification Command | Status |
-| --- | --- | --- | --- | --- |
-| Agent Execution | Gate Pass != Task Done | Use semantic completion criteria | `uv run scripts/ops/agent_protocol_check.py` | ✅ ACTIVE |
-| Auto-fix | Unexpected side effects | Enforce capability boundaries | `uv run scripts/ops/ci_gate.py --dry-run` | ✅ ACTIVE |
-| Dry-run | Blind spots in metrics | Enhance wiki harness summary | `uv run scripts/ops/nexus_acceptance_check.py` | ✅ ACTIVE |
-
-## 🛠️ Verification Protocol
-
-To verify learning closure:
-1.  Identify the failure in logs.
-2.  Synthesize the "Lesson Learned".
-3.  Add a row to this table.
-4.  Run the corresponding Verification Command.
+| Error Type | Symptom | Prevention Rule | Verification |
+|---|---|---|---|
+| Gate pass but [[task]] incomplete | 格式過關但語義未完成 | 強制提案模板與語義驗收 | `nexus_task_contract_guard.py` |
+| Auto-fix side effects | 順手改到無關檔案 | 任務邊界契約 + forbidden paths | `contract-check` + diff review |
+| Dry-run blind spots | dry-run 綠燈但實際不穩 | 補報表摘要與分級阻斷 | `ci_gate.py --full-dry-run` |
+| Repeated wiki path errors | `missing_path` 重複出現 | 路徑正規化與 alias map | `wiki_drift_audit.py` |
+| Truth command policy regressions | unsafe command 或誤傷 | 指令白名單 + 詞邊界檢查 | `wiki_truth_claims_check.py` |
 
 ## Upstream
-- `[[Ops - Architecture Decision Records]]`: 提供決策依據。
-- `[[Ops - Optimization Proposal Protocol]]`: 指導優化。
+- `.nexus/reports/wiki_drift_report.json`: 漂移訊號來源。 [Source: .nexus/reports/wiki_drift_report.json]
+- `.nexus/reports/wiki_truth_claims_report.json`: 真值校驗訊號來源。 [Source: .nexus/reports/wiki_truth_claims_report.json]
 
 ## Downstream
-- `[[Ops - Governance Changelog]]`: 更新治理歷史。
+- `[[Ops - Governance SLO Dashboard]]`: 聚合趨勢與告警。
+- `[[Ops - Governance Changelog]]`: 記錄策略生效時間點。
 
 ## Related modules / files
-- `scripts/ops/wiki_query_writeback.py`
-- `AGENTS.md`
+- `scripts/ops/wiki_drift_audit.py`
+- `scripts/ops/wiki_truth_claims_check.py`
+- `scripts/ops/ci_gate.py`
 
 ## Source notes
-- 定義了從錯誤中提取「原子教訓」的必要性。 [Source: AGENTS.md]
+- 閉環最小條件：`error_type`, `countermeasure`, `owner`, `verification`, `effective_date`。
+- 每次回歸失敗需回寫至少一條「防再發規則」。
 
 ## Open questions / conflicts
-- [ ] 如何自動化從 Log 到矩陣的提取過程。
-- [ ] 矩陣行數過多時的索引方式。
+- [ ] 是否將矩陣改為 JSON + 自動同步到 wiki 頁面。
+- [ ] 是否為每個錯誤類型增加 `MTTR` 與 `repeat_rate` 量化欄位。
 
+---
 [[System Overview]]

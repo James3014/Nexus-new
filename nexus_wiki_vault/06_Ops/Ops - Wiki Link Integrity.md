@@ -1,11 +1,17 @@
 ---
-title: Ops - Wiki Link Integrity
-type: ops
-status: active
-tags: [governance, sanity-check, links, orphans]
 last_compiled: 2026-04-06
 owner: agent
+status: active
+tags:
+- governance
+- sanity-check
+- links
+- orphans
+title: Ops - Wiki Link Integrity
+type: ops
 ---
+
+
 
 # Ops - Wiki Link Integrity
 
@@ -34,7 +40,7 @@ owner: agent
 - `/Users/jameschen/Workspace/nexus/scripts/ops/wiki_link_audit.py`: 主稽核腳本。
 
 ## Source notes
-- v22 Engine Spec Part 7: 規定所有治理文檔必備全局入鏈。 [Source: Spec v22]
+- v22 Engine Spec Part 7: 規定所有治理文檔必備全局入鏈。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
-- [ ] **False Positives**: 暫時手動排除 `99_Schema` 與部分臨時 Changelog 頁面的孤立警報。
+- [ ] **False Positives**: 暫時手動排除 `99_Schema` 與部分臨時 [[CHANGELOG]] 頁面的孤立警報。

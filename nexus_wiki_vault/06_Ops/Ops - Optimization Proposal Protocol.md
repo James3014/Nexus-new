@@ -1,65 +1,78 @@
 ---
+aliases:
+- Optimization RFC Protocol
+- Proposal Contract
+confidence: high
+last_compiled: 2026-04-07
+owner: agent
+related_pages:
+- '[[System Overview|System Overview]]'
+- '[[Ops - Architecture Decision Records|Ops - Architecture Decision Records]]'
+- '[[Ops - Acceptance and Release|Ops - Acceptance and Release]]'
+- '[[Ops - Learning Closure Matrix|Ops - Learning Closure Matrix]]'
+source_of_truth: scripts/ops/scope_guard.py
+status: active
+tags:
+- ops
+- protocol
+- optimization
+- governance
 title: Ops - Optimization Proposal Protocol
 type: ops
-status: active
-version_scope: [v23]
-source_of_truth: scripts/ops/ci_gate.py
-related_pages:
-  - "[[System Overview]]"
-  - "[[Ops - Agent Capability Boundaries]]"
-  - "[[Ops - Learning Closure Matrix]]"
-tags: [ops, protocol, optimization]
-last_compiled: 2026-04-07
-confidence: high
-owner: agent
+version_scope:
+- v22
+- v23
 ---
+
+
 
 # Ops - Optimization Proposal Protocol
 
 ## One-sentence summary
-定義 Nexus 系統優化提案的提交格式、預期指標與驗收路徑。 [Source: scripts/ops/ci_gate.py]
+本頁定義 Nexus 優化提案的最小可接受格式，要求每個提案都具備問題證據、風險邊界、驗收命令與回滾路徑，避免只追 gate 綠燈。 [Source: scripts/ops/scope_guard.py]
 
 ## Role / responsibility
-- **標準化提案**: 確保所有優化都有基線數據與明確目標。
-- **風險控管**: 強制執行 dry-run 與協定檢查以防止副作用。
-- **閉環驗收**: 透過自動化指令確認優化實效。 [Source: scripts/ops/nexus_acceptance_check.py]
+- **語義驗收先於格式驗收**: 先判斷任務價值是否完成，再看 linter/gate。
+- **提案可執行**: 提案內容可直接轉成工作單與驗收腳本。
+- **風險可控**: 每次優化都要求明確回滾計畫。 [Source: scripts/ops/ci_gate.py]
 
-## 📊 Proposal Requirements
+## Proposal Template (提交模板)
 
-Each optimization proposal MUST include:
-1.  **Baseline Metrics**: Current state (e.g., drift count, coverage %).
-2.  **Target Metrics**: Expected state after optimization.
-3.  **Risk Assessment**: Possible side effects on unrelated modules.
-4.  **Verification Command**: Command to confirm the improvement.
-
-## 🚀 Execution Workflow
-
-1.  **Dry-run**: Run with `--dry-run` to see the proposed changes without applying them.
-2.  **Protocol Check**: Ensure `AGENTS.md` and boundary rules are respected.
-3.  **Acceptance Check**: Verify overall system health.
-
-## 🛡️ Enforced Verification
-
-- `uv run scripts/ops/wiki_linter.py --strict`
-- `uv run scripts/ops/ci_gate.py --wiki-drift-enforce-level p0`
-- `uv run scripts/ops/nexus_acceptance_check.py --output-dir .nexus/reports`
+| Section | Required | Description |
+|---|---|---|
+| Problem Statement | Yes | 問題陳述與影響範圍。 |
+| Baseline Evidence | Yes | 目前數據與重現命令（含 SHA）。 |
+| Scope Boundary | Yes | 明確列出可改與不可改路徑。 |
+| Verification Plan | Yes | 自動化驗證命令與通過門檻。 |
+| Rollback Plan | Yes | 失敗時的回退策略與條件。 |
+| Learning Writeback | Yes | 要寫回哪一頁與哪份報表。 |
 
 ## Upstream
-- `[[System Overview]]`: 提供系統架構背景。
-- `scripts/ops/ci_gate.py`: 定義發布門禁。
+- `scripts/ops/scope_guard.py`: 任務範圍守衛與約束檢查。 [Code: scripts/ops/scope_guard.py]
+- `scripts/ops/ci_gate.py`: 基礎 gate 驗收。 [Code: scripts/ops/ci_gate.py]
 
 ## Downstream
-- `[[Ops - Learning Closure Matrix]]`: 紀錄優化失敗的教訓。
+- `[[Ops - Architecture Decision Records]]`: 生效後需寫 ADR。
+- `[[Ops - Governance Changelog]]`: 生效後需寫治理變更記錄。
 
 ## Related modules / files
-- `scripts/ops/nexus_acceptance_check.py`
-- `scripts/ops/agent_protocol_check.py`
+- `.nexus/config/task_contract.example.json`
+- `scripts/engine/nexus_cli.py`
+- `scripts/ops/wiki_linter.py`
 
 ## Source notes
-- 本協定旨在降低「試錯成本」，要求所有改動均需具備可量化的證據。
+- 建議驗證命令組合：
+```bash
+uv run scripts/ops/wiki_linter.py --strict
+uv run scripts/ops/wiki_coverage_audit.py
+python3 scripts/ops/wiki_truth_claims_check.py
+uv run scripts/ops/wiki_drift_audit.py
+uv run scripts/ops/ci_gate.py --dry-run --wiki-drift-enforce-level p0
+```
 
 ## Open questions / conflicts
-- [ ] 是否應加入「優化失敗自動回滾」腳本。
-- [ ] 如何處理多個並行優化提案的衝突。
+- [ ] 是否要把模板強制化為 `proposal.yaml` 並由 CI 驗證欄位完整性。
+- [ ] 是否要增加「預估負債變化」欄位（維運成本/誤報率）。
 
+---
 [[System Overview]]

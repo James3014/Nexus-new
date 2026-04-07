@@ -1,3 +1,7 @@
+---
+aliases: []
+---
+
 # LINT_CHECKLIST
 
 ## Structural
@@ -19,3 +23,28 @@
 - [ ] 無孤兒頁
 - [ ] 無重複概念頁
 - [ ] 無 placeholder 未清
+
+---
+[[System Overview]]
+
+
+## One-sentence summary
+- TBD
+
+## Role / responsibility
+- TBD
+
+## Upstream
+- TBD
+
+## Downstream
+- TBD
+
+## Related modules / files
+- TBD
+
+## Source notes
+- TBD
+
+## Open questions / conflicts
+- TBD
