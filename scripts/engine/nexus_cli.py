@@ -237,6 +237,46 @@ def memory_stats(workspace: str):
     except Exception as e:
         click.echo(json.dumps({"status": "error", "message": str(e)}, indent=2))
 
+@nexus.command(name="nexus:research-map")
+@click.option("--task-id", required=True, help="目標任務 ID")
+@click.option("--output", default="research_map.mmd", help="匯出路徑")
+def research_map_cmd(task_id, output):
+    """🗺️ [DeepScientist] 生成 Mermaid 研究地圖"""
+    from nexus.research.research_map import ResearchMapBuilder
+    from nexus.research.findings_memory import FindingsMemoryStore
+    
+    store = FindingsMemoryStore(REPO_ROOT)
+    cards = store.list_cards(scope="task")
+    
+    builder = ResearchMapBuilder(task_id)
+    # 這裡我們基於記憶卡還原地圖
+    for card in cards:
+        builder.add_stage_node(card.stage, card.stage, status="completed")
+        builder.add_memory_node(card)
+    
+    mmd_content = builder.render_mermaid()
+    output_path = Path(output)
+    builder.export_mmd(output_path)
+    
+    click.secho(f"✅ [ResearchMap] Generated for {task_id}", fg="green")
+    click.echo(f"📍 Path: {output_path.absolute()}")
+    click.echo("-" * 20)
+    click.echo(mmd_content)
+
+@nexus.command(name="nexus:memory-list")
+@click.option("--scope", type=click.Choice(["task", "global"]), default="task")
+@click.option("--kind", help="篩選種類 (episodes/knowledge/decisions)")
+def memory_list_cmd(scope, kind):
+    """🧠 [DeepScientist] 列出所有結構化研究記憶卡"""
+    from nexus.research.findings_memory import FindingsMemoryStore
+    
+    store = FindingsMemoryStore(REPO_ROOT)
+    cards = store.list_cards(scope=scope, kind=kind)
+    
+    click.secho(f"🧠 [Memory:{scope.upper()}] Found {len(cards)} cards", fg="cyan")
+    for card in cards:
+        click.echo(f" - [{card.kind}] {card.title} (ID: {card.id}) | Stage: {card.stage}")
+
 @nexus.group(name="nexus:health")
 def health():
     """🛡️ 生產健康監控與 Bug 指紋 (P2-C)"""

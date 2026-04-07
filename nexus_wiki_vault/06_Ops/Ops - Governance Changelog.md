@@ -28,6 +28,7 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-07 | **DeepScientist Research Integration** | `nexus/research/`, `nightshift.py`, `nexus_cli.py` | Low | Git revert | Antigravity |
 | 2026-04-07 | **Gemini Invocation Reliability Hardening** | `scripts/ops/gemini_nexus_invoke.py`, `AGENT_PROTOCOL_v2.md` | Low | Git revert | Codex |
 | 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `[Module - State Contracts](../02_Modules/Module - State Contracts.md)` | Low | Git revert | Antigravity |
 | 2026-04-06 | **WS-B/C: Core Subdomain Deep-Mapping** | `nexus/core`, Wiki Vault | Low | Git revert | Antigravity |

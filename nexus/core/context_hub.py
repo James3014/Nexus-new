@@ -249,26 +249,23 @@ class ContextHub:
         lesson: str,
         metadata: Optional[Dict] = None,
     ):
-        """💾 Phase 5: 記錄失敗案例用於 Active Learning。"""
-        # Noise Governance: If run_dir exists, store there. Otherwise, global obsidian/ folder.
-        if self.run_dir is not None:
-            lesson_file = self.run_dir / "crystal_lessons.jsonl"
-        else:
-            # 🛡️ FIX-P1: Use a protected directory for knowledge baseline (not cleaned by nexus:clean)
-            lesson_file = (
-                self.project_root / ".nexus" / "knowledge" / "crystal_lessons.jsonl"
-            )
-
-        lesson_file.parent.mkdir(parents=True, exist_ok=True)
-
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "signature": failure_signature,
-            "cause": root_cause,
-            "lesson": lesson,
-            "metadata": metadata or {},
-            "recall_accuracy": 0.0,  # 初始準確度佔位
-        }
-        with open(lesson_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-        print(f"🧠 [ActiveLearning] Crystal Lesson recorded: {failure_signature}")
+        """💾 Phase 1+: 記錄結構化 FindingsCard (DeepScientist Spec)。"""
+        from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+        
+        store = FindingsMemoryStore(self.project_root)
+        
+        # 建立結構化記憶卡
+        card = FindingsCard(
+            kind="episodes",
+            title=f"Failure: {failure_signature}",
+            scope="task",
+            tags=["failure-analysis", failure_signature.split(":")[0]],
+            stage="unknown", 
+            confidence="high",
+            body=f"Root Cause: {root_cause}\nLesson: {lesson}",
+            evidence_paths=[str(self.run_dir)] if self.run_dir else [],
+            extra=metadata or {}
+        )
+        
+        path = store.write(card)
+        print(f"🧠 [DeepScientist:Memory] Structured Lesson recorded: {path}")

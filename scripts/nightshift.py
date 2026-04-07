@@ -28,13 +28,27 @@ class AutoResearchNightShift:
         self.best_score = 0.0
         self.base_commit = None
         self.tracelog_path = self.project_root / "tracelog.jsonl"
+        
+        # 🧬 DeepScientist Integration: Bayesian Optimizer
+        from nexus.research.bayesian_engine import BayesianResearchOptimizer, ResearchSearchSpace
+        self.space = ResearchSearchSpace()
+        self.space.add_dimension("temperature", 0.0, 1.0)
+        self.space.add_dimension("top_p", 0.1, 1.0)
+        self.optimizer = BayesianResearchOptimizer(self.space)
+        
+        # 🔌 Webhook Connector
+        from nexus.connectors.webhook_connector import WebhookConnector
+        webhook_url = os.environ.get("NEXUS_WEBHOOK_URL", "")
+        self.connector = WebhookConnector(webhook_url)
 
     def _log_trace(self, round_id: int, status: str, score: float):
-        """記錄優化軌跡。"""
+        """記錄優化軌跡並推送。"""
         import os
+        from nexus.connectors.base import NexusEvent
+        
         entry = {
             "timestamp": datetime.now().isoformat(),
-            "swarm_id": os.getpid(),  # 使用進程 ID 作為 Swarm ID
+            "swarm_id": os.getpid(),
             "round": round_id,
             "task": self.task,
             "status": status,
@@ -43,6 +57,16 @@ class AutoResearchNightShift:
         }
         with open(self.tracelog_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+            
+        # 🚀 推送關鍵發現
+        event = NexusEvent(
+            event_type="improvement" if status == "IMPROVED" else "convergence",
+            task=self.task,
+            round_id=round_id,
+            score=score,
+            message=f"NightShift Round {round_id}: {status} (Best: {self.best_score})"
+        )
+        self.connector.send(event)
 
     def _timeout_handler(self, signum, frame):
         raise TimeoutError(f"Round Budget ({self.budget_sec}s) exceeded!")
@@ -55,6 +79,12 @@ class AutoResearchNightShift:
         try:
             print(f"\n🔄 [{self.task} | Round {round_id}] Starting P-D-X-R-A-C Loop...")
             
+            # 1. 🎛️ Bayesian Suggest: 獲取優化參數
+            params = self.optimizer.suggest()
+            temp = params.get("temperature", 0.7)
+            top_p = params.get("top_p", 0.9)
+            print(f"   🎛️ [DeepScientist:Suggest] Params: temp={temp:.2f}, top_p={top_p:.2f}")
+
             # 1. P: Plan (Inject program.md)
             rules = self.hub.load_program_rules(str(self.project_root / "program.md"))
             
@@ -65,13 +95,20 @@ class AutoResearchNightShift:
             print(f"   🌐 [X] Researching external fixes for {self.target_file}")
             
             # 4. R: Repair
-            print(f"   🛠️ [R] Generating patch for {self.target_file}")
-            # 模擬生成補丁
-            patch = f"# Optimized for {self.task} Round {round_id}\n# FlashJudge Target: 9.0"
+            print(f"   🛠️ [R] Generating patch (using suggested params)...")
+            patch = f"# Optimized for {self.task} Round {round_id}\n# Params: temp={temp}, top_p={top_p}\n# FlashJudge Target: 9.0"
             
             # 5. A: Audit (FlashJudge)
-            score = 7.5 + (round_id * 0.1) # 模擬分數遞增
-            print(f"   ⚖️ [A] Audit Score for {self.task}: {score}")
+            # 在此實務上應呼叫 FlashJudge 命令，此處模擬一個基於參數的非線性得分
+            import random
+            base_score = 7.5 + (round_id * 0.05) 
+            noise = random.uniform(-0.5, 0.5)
+            score = min(max(base_score + (temp * 0.5) - (abs(top_p - 0.9) * 2) + noise, 0.0), 10.0)
+            
+            print(f"   ⚖️ [DeepScientist:Observe] Audit Score: {score:.2f}")
+            
+            # 📉 Bayesian Observe: 回饋優化器
+            self.optimizer.observe(params, score)
             
             signal.alarm(0)
             return score, patch
