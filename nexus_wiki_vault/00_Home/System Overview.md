@@ -91,6 +91,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Ops - Learning Closure Matrix]]**: 錯誤類型到防再發策略矩陣。
 - **[[Ops - Wiki Drift Audit]]**: 實體與文檔漂移監控。
 - **[[Ops - Wiki Link Integrity]]**: 連結完整性與孤兒頁。
+- **[[Ops - Reference Boundary and Archive Policy]]**: Reference 保留邊界與封存治理。
 - **[[Ops - Ownership and Review SLA]]**: 頁面所有權與編校年資平衡。
 - **[[Ops - Truth Claims Register]]**: 真相宣稱與自動化驗證。
 - **[[Ops - Governance Changelog]]**: 治理變更歷史路徑。

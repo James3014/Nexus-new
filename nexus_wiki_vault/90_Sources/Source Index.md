@@ -53,6 +53,7 @@ version_scope: '[v17.1, v22, v23]'
 
 ## External reference boundary
 - `nexus-anti` 文件集合已登記於 `[[Source - Nexus Anti Registry]]`，定位為 external reference layer，不直接構成 production truth。 [Source: nexus_wiki_vault/90_Sources/Source - Nexus Anti Registry.md]].md]
+- `Reference` 目錄採核心保留 + 封存隔離策略，詳見 `[[Ops - Reference Boundary and Archive Policy]]`。 [Source: nexus_wiki_vault/06_Ops/Ops - Reference Boundary and Archive Policy.md]
 
 ## Open questions / conflicts
 - [ ] **Glob expansion**: Linter 是否應支持 Tier 0 的通配符 `*.json` 檢測。
