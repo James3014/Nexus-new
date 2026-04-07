@@ -124,18 +124,43 @@ class AutoResearchNightShift:
         print(f"🏭 [AutoResearch] Factory Initiated | Task: {self.task} | Rounds: {self.max_rounds}")
         
         # 1. Lease Worktree
-        # 🧪 Use high-entropy unique names to avoid collisions in /tmp
-        timestamp = int(time.time())
-        task_id_unique = f"ds-{self.task.replace(' ', '_')[:15]}-{timestamp}"
+        # 🧪 Use high-entropy unique names to avoid collisions
+        timestamp = int(time.time_ns())
+        safe_task_name = "".join(filter(str.isalnum, self.task))[:15]
+        task_id_unique = f"ds-{safe_task_name}-{timestamp % 1000000}"
         branch_prefix = f"audit/{task_id_unique}"
         
+        # 🛡️ Atomic Global Mutex: Prevent parallel git operations
+        lock_path = "/tmp/nexus_git_atomic.lock"
+        
+        acquired = False
+        for _ in range(60): # Wait up to 60 seconds
+            try:
+                # O_CREAT | O_EXCL ensures atomic creation
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                acquired = True
+                break
+            except FileExistsError:
+                time.sleep(1)
+        
+        if not acquired:
+            print("❌ [Fatal] Could not acquire Git Global Lock. Terminating.")
+            return
+
         try:
+            # 🧹 Pre-cleanup to ensure worktree registry is clean
+            subprocess.run(["git", "worktree", "prune"], capture_output=True)
+            
             # 🛡️ Attempt dynamic lease
             task_id, branch, workpath = self.worktree_mgr.lease(task_id_unique, branch_prefix)
         except Exception as e:
-            print(f"❌ [Critical] First lease failed: {e}. Force clearing base research dir...")
-            subprocess.run(["rm", "-rf", "/tmp/codex-workspaces/research"])
+            print(f"❌ [Critical] Lease failed: {e}. Force clearing base research dir...")
+            subprocess.run(["rm", "-rf", f"/tmp/codex-workspaces/{task_id_unique}"])
             task_id, branch, workpath = self.worktree_mgr.lease(task_id_unique, branch_prefix)
+        finally:
+            if os.path.exists(lock_path):
+                os.remove(lock_path)
 
         if not workpath:
             print("❌ [Fatal] Could not establish workspace. Terminating.")
