@@ -42,7 +42,7 @@ version_scope: '[v17.1, v22, v23]'
 | Path (核心檔案) | Status | Wiki Reference |
 |---|---|---|
 | `scripts/ops/ci_gate.py` | ✅ | [[Ops - CI/CD Promotion Gate]] |
-| `scripts/ops/wiki_linter.py` | ✅ | [System Overview](../00_Home/System Overview.md) |
+| `scripts/scripts/ops/wiki_linter.py` | ✅ | [System Overview](../00_Home/System Overview.md) |
 | `scripts/ops/wiki_drift_audit.py` | ✅ | [Ops - Wiki Drift Audit](../06_Ops/Ops - Wiki Drift Audit.md) |
 | `nexus/core/orchestrator.py` | ✅ | [Module - Core Orchestrator](../02_Modules/Module - Core Orchestrator.md) |
 | `nexus-desk/src-tauri/src/main.rs` | ✅ | [Module - Nexus Desk Interface](../02_Modules/Module - Nexus Desk Interface.md) |
@@ -51,7 +51,7 @@ version_scope: '[v17.1, v22, v23]'
 
 | Path | Risk (Estimated) | Reason |
 |---|---|---|
-| `scripts/engine/l6_gate.py` | High | 缺乏對 L6 Gate 的治理描述。 |
+| `scripts/.nexus/workspaces/bug-1774969963/scripts/engine/l6_gate.py` | High | 缺乏對 L6 Gate 的治理描述。 |
 | `scripts/engine/ci_graph_impact.py` | High | 圖譜影響力分析未納入規範。 |
 
 ## Upstream
@@ -71,3 +71,9 @@ version_scope: '[v17.1, v22, v23]'
 ## Open questions / conflicts
 - [ ] **Dynamic Paths**: 如何處理 `*.so` 或二進位檔案的覆蓋率標記。
 - [ ] **Exclusion List**: 是否應排除 `__init__.py` 等結構性檔案以優化指標。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

@@ -7,7 +7,7 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 related_pages:
-- Module - Intelligence and Logic (Remaining Core)
+- Module - Intelligence and Logic - Remaining Core.md)
 - '[Module - Implementation Responsibility
   Matrix](Module - Implementation Responsibility Matrix.md)'
 source_of_truth: nexus/core/learning_governance.py
@@ -42,13 +42,13 @@ version_scope:
 | Component | Responsibility (職責) | Source (Path) |
 |---|---|---|
 | **Learning Governance** | 統籌治理規則與自動化學習的政策入口。 | [Source: nexus/core/learning_governance.py] |
-| **[Learning Scorer](Module - Intelligence and Logic (Remaining Core).md)** | 針對任務軌跡進行物理與語詞雙重評分。 | [Source: nexus/core/learning_scorer.py] |
+| **[Learning Scorer](Module - Intelligence and Logic - Remaining Core.md)** | 針對任務軌跡進行物理與語詞雙重評分。 | [Source: nexus/core/learning_scorer.py] |
 | **Phase Health** | 計算 PDRAC 每相位健康度的核心指標引擎。 | [Source: nexus/core/phase_health.py] |
 | **Policy Loader** | 負責高效載入與快取治理政策表。 | [Source: nexus/core/policy_loader.py] |
 
 ## Upstream
 - **[System Overview](../00_Home/System Overview.md)**: 治理系統導航。
-- **[Module - Intelligence and Logic (Remaining Core)](Module - Intelligence and Logic (Remaining Core).md)**: 提供基礎邏輯運算支持。
+- **[Module - Intelligence and Logic - Remaining Core.md)](Module - Intelligence and Logic - Remaining Core.md)**: 提供基礎邏輯運算支持。
 
 ## Downstream
 - **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 政策模組與物理檔案映射。
@@ -66,3 +66,9 @@ version_scope:
 
 ---
 Back to [System Overview](../00_Home/System Overview.md)
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

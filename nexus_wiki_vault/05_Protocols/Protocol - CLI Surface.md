@@ -4,7 +4,7 @@ confidence: high
 last_compiled: '2026-04-06'
 owner: agent
 related_pages: ''
-source_of_truth: scripts/engine/scripts/engine/nexus_cli.py
+source_of_truth: scripts/engine/nexus_cli.py
 status: active
 tags: '[protocol, cli, command, surface]'
 title: Protocol - CLI Surface
@@ -33,7 +33,7 @@ version_scope: '[v17.1, v22, v23]'
 - **[Protocol - CLI Drift Matrix](Protocol - CLI Drift Matrix.md)**: 追蹤跨版本的命令進化。
 
 ## Related modules / files
-- `scripts/engine/scripts/engine/nexus_cli.py`: 進入點文件。 [Code: scripts/engine/nexus_cli.py]
+- `scripts/engine/nexus_cli.py`: 進入點文件。 [Code: scripts/engine/nexus_cli.py]
 - `nexus/delivery/pilot_cli.py`: 實體 TTY 處理引擎。 [Code: pilot_cli.py]
 
 ## Source notes
@@ -46,3 +46,10 @@ version_scope: '[v17.1, v22, v23]'
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

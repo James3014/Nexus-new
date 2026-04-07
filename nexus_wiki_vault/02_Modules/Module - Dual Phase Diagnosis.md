@@ -60,3 +60,9 @@ version_scope:
 
 ## Open questions / conflicts
 - [ ] **Heuristic Bias**: 如何在自動診斷中平衡精確度與執行時長。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

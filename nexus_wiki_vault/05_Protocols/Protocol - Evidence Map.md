@@ -42,9 +42,9 @@ version_scope:
 本頁定義 Nexus 任務執行過程中工件 (Artifacts) 之間的依賴圖譜、產生者與門禁關鍵度。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Role / responsibility
-- **地圖導航**: 呈現從 Planning 到 Crystallize 的資料流向。 [Source: nexus_cli.py]
+- **地圖導航**: 呈現從 Planning 到 Crystallize 的資料流向。 [Source: scripts/engine/nexus_cli.py]
 - **對帳追蹤**: 標註 `task_id` 與 `trace_id` 在不同階段的責任變更。 [Source: 00_Home/System Overview.md]
-- **門禁可視化**: 標註哪些工件是 [Promotion Gate](../06_Ops/Ops - CI/CD Promotion Gate.md) 的強制輸入。 [Source: ci_gate.py]
+- **門禁可視化**: 標註哪些工件是 [Promotion Gate](../06_Ops/Ops - CI/CD Promotion Gate.md) 的強制輸入。 [Source: scripts/ops/ci_gate.py]
 
 ## Upstream
 - **Phase P-R**: 產出原始 JSON 工件。 [Source: 02_Modules/Module - State Contracts.md]]]
@@ -92,10 +92,10 @@ graph TD
 | `plan.json` | Planner (P) | MEDIUM | `.nexus/runs/<id>/` | [Source: 00_Home/System Overview.md] |
 | `diagnosis.json` | Diagnoser (D) | **HIGH** | `.nexus/runs/<id>/` | [Source: 00_Home/System Overview.md] |
 | `repair_final.json`| Repairer (R) | **HIGH** | `.nexus/runs/<id>/` | [Source: 00_Home/System Overview.md] |
-| `write_proof.json` | Repairer (R) | **CRITICAL** | `.nexus/runs/<id>/` | [Source: ci_gate.py] |
+| `write_proof.json` | Repairer (R) | **CRITICAL** | `.nexus/runs/<id>/` | [Source: scripts/ops/ci_gate.py] |
 | `audit_result.json`| Auditor (A) | **CRITICAL** | `.nexus/runs/<id>/` | [Source: 00_Home/System Overview.md] |
 | `manifest.json` | Manifest Sealer (C) | **CRITICAL** | Root: `manifest.json` | [Source: 00_Home/System Overview.md] |
-| `lesson_events.jsonl`| Crystallizer (C) | MEDIUM | `.nexus/knowledge/` | [Source: /nexus/services/memory_indexer.py] |
+| `lesson_events.jsonl`| Crystallizer (C) | MEDIUM | `.nexus/knowledge/` | [Source: nexus/services/memory_indexer.py] |
 
 ## Related modules / files
 - `.nexus/runs/`: 任務實體存放區。
@@ -111,3 +111,10 @@ graph TD
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

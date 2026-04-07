@@ -14,7 +14,7 @@ related_pages:
 - '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
-source_of_truth: scripts/engine/nexus_cli.py
+source_of_truth: scripts/nexus_cli.py
 status: active
 tags:
 - protocol
@@ -40,17 +40,17 @@ version_scope:
 ## Role / responsibility
 - **進化追蹤**: 記錄命令從單一 `nexus` 到 `nexus:plan`, `nexus:repair` 的結構性變遷。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 - **參數對位**: 標註 v23 智慧層引入的 `--risk`, `--auto-approve` 等新參數。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]]]
-- **相容性預警**: 標註已廢棄 (Deprecated) 的舊版參數。 [Code: nexus_cli.py]
+- **相容性預警**: 標註已廢棄 (Deprecated) 的舊版參數。 [Code: scripts/engine/nexus_cli.py]
 
 ## Command & Parameter Drift Matrix
 
 | Category | v17.1 (Hardened) | v22 (Stable) | v23 (Wisdom/v23.1) | Source Provenance |
 |---|---|---|---|---|
-| **Root** | `nexus <goal>` | `nexus:<phase>` | `nexus:<phase> --wise` | [Code: nexus_cli.py] |
+| **Root** | `nexus <goal>` | `nexus:<phase>` | `nexus:<phase> --wise` | [Code: scripts/engine/nexus_cli.py] |
 | **Diag** | `nexus --diagnose` | `nexus:diagnose` | `nexus:diagnose --risk` | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]]] |
 | **Repair**| `nexus --repair` | `nexus:repair` | `nexus:repair --auto` | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
-| **Audit** | Manual check | `nexus:audit` | `nexus:audit --guard` | [Source: ci_gate.py] |
-| **Knowledge**| `[[MUSE_ENGINE_SPEC|MUSE_SPEC]].md` | `lesson_events.jsonl`| `[LanceDB](../02_Modules/Module - Memory Repository.md) Vector` | [Source: /nexus/services/memory_indexer.py] |
+| **Audit** | Manual check | `nexus:audit` | `nexus:audit --guard` | [Source: scripts/ops/ci_gate.py] |
+| **Knowledge**| `[[MUSE_ENGINE_SPEC|MUSE_SPEC]].md` | `lesson_events.jsonl`| `[LanceDB](../02_Modules/Module - Memory Repository.md) Vector` | [Source: nexus/services/memory_indexer.py] |
 
 ## Upstream
 - **[Protocol - CLI Surface](Protocol - CLI Surface.md)**: 提供當前版本的命令全集。
@@ -61,7 +61,7 @@ version_scope:
 - **[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)**: 登記參數語義漂移產生的邏輯矛盾。
 
 ## Related modules / files
-- `scripts/engine/nexus_cli.py`: 實體命令實作。 [Code: nexus_cli.py]
+- `scripts/nexus_cli.py`: 實體命令實作。 [Code: scripts/engine/nexus_cli.py]
 - `MUSE-NEXUS-v17.1-HARDENED.md`: v17 系列參數基線。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Source notes
@@ -74,3 +74,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

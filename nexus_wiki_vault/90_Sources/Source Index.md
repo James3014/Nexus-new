@@ -30,19 +30,19 @@ version_scope: '[v17.1, v22, v23]'
 | **Tier 3** | **Legacy Spec** | `MUSE_ENGINE_SPEC_V17.1_HARDENED.md` | REFERENCE | [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] |
 | **Tier 4** | **Orchestrator** | `scripts/engine/nexus_cli.py` | CODE | [Code: nexus_cli.py] |
 | **Tier 4** | **Janitor** | `scripts/ops/disk_janitor.py` | CODE | [Code: disk_janitor.py] |
-| **Tier 4** | **[CI Gate](../06_Ops/Ops - CI/CD Promotion Gate.md)** | `scripts/ops/ci_gate.py` | CODE | [Code: ci_gate.py] |
-| **Tier 4** | **Learner** | `nexus/intelligence/online_learner.py` | CODE | [Code: online_learner.py] |
+| **Tier 4** | **[CI Gate](../06_Ops/Ops - CI/CD Promotion Gate.md)** | `scripts/ops/scripts/ops/ci_gate.py` | CODE | [Code: scripts/ops/ci_gate.py] |
+| **Tier 4** | **Learner** | `nexus/intelligence//nexus_swarm/wisdom/online_learner.py` | CODE | [Code: /nexus_swarm/wisdom/online_learner.py] |
 
 ## Role / responsibility
 - **路徑權威**: 提供 Linter 驗證 `[Source: 00_Home/System Overview.md]` 時的基準掃描清單。
-- **對位校正**: 標註邏輯名稱與實體檔案的對應關係。 [Source: wiki_linter.py]
+- **對位校正**: 標註邏輯名稱與實體檔案的對應關係。 [Source: scripts/ops/wiki_linter.py]
 
 ## Upstream
 - **Maintainer Update**: 原始 Repo 文件的物理異動。
 - **[System Overview](../00_Home/System Overview.md)**: 提供版本定位引導。
 
 ## Downstream
-- **Wiki Linter v1.3**: 讀取本頁路徑作為 Existence Check 的依據。 [Code: wiki_linter.py]
+- **Wiki Linter v1.3**: 讀取本頁路徑作為 Existence Check 的依據。 [Code: scripts/ops/wiki_linter.py]
 - **[Ops - Provenance Exceptions and Waivers](../06_Ops/Ops - Provenance Exceptions and Waivers.md)**: 為無法對位路徑提供豁免說明。
 
 ## Related modules / files
@@ -59,3 +59,10 @@ version_scope: '[v17.1, v22, v23]'
 ## Open questions / conflicts
 - [ ] **Glob expansion**: Linter 是否應支持 Tier 0 的通配符 `*.json` 檢測。
 - [ ] **Path Sync**: 當檔案重命名時，本頁是否應由腳本自動更新。
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

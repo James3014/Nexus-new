@@ -59,7 +59,7 @@ version_scope:
 
 ## Related modules / files
 - `/Users/jameschen/Workspace/nexus/`: 系統根路徑。
-- `nexus/core/errors.py`: 定義路徑缺失導致的 InfrastructureError。 [Code: 00_Home/System Overview.md]
+- `nexusnexus/.nexus/workspaces/bug-1774969963/nexus/core/errors.py`: 定義路徑缺失導致的 InfrastructureError。 [Code: 00_Home/System Overview.md]
 
 ## Source notes
 - Hardened v17.1 Spec: 定義最初的 4 級目錄硬化結構。
@@ -68,3 +68,9 @@ version_scope:
 ## Open questions / conflicts
 - [ ] **Permission Matrix**: 各目錄在不同用戶權限下的存取約束。
 - [ ] **External Mount**: 部分龐大的向量資料庫是否應掛載於外部 Volume。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

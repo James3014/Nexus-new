@@ -82,7 +82,7 @@ version_scope:
 - `scripts/ops/ci_gate.py` 將 wiki audit、tests、benchmark、evidence integrity 串成單一路徑。 [Source: scripts/ops/ci_gate.py]
 
 ## [LanceDB](Module - Memory Repository.md) implementation boundary (as-is vs proposal)
-- **已落地（repo 可驗證）**: `.nexus/memory/memory_index.[lancedb](Module - Memory Repository.md)`、`nexus/services/memory_indexer.py`、`nexus_swarm/wisdom/lancedb_store.py`。 [Source: nexus/services/memory_indexer.py]
+- **已落地（repo 可驗證）**: `.nexus/memory/memory_index.[lancedb](Module - Memory Repository.md)`、`nexus/services/memory_indexer.py`、`nexus_swarm/nexus_swarm/wisdom/lancedb_store.py`。 [Source: nexus/services/memory_indexer.py]
 - **已落地（Desk 表徵）**: `nexus-desk/src-tauri/src/main.rs` 目前有 `phase_health_source` 欄位與 Desk view model。 [Source: nexus-desk/src-tauri/src/main.rs]
 - **未落地（提案/外部文件）**: `scripts/embed_run.py`、`war_armor` table、`ArmorComparison.tsx` 目前不在本 repo。 [Source: nexus_wiki_vault/90_Sources/Source - Nexus Anti Registry.md]].md]
 - **治理規則**: 未落地提案僅可放在來源登記或 roadmap，不可寫成核心真值。 [Source: scripts/ops/wiki_linter.py]
@@ -105,3 +105,9 @@ version_scope:
 | Tool Governance | `nexus/core/capability_gate.py` | phase-based JIT 工具隔離 | 參見 `[Module - Guard and Gate Control](Module - Guard and Gate Control.md)` | `python -c "from nexus.core.capability_gate..."` |
 | Health Scoring | `nexus/core/phase_health.py` | [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] phase health 更新 | phase metrics | benchmark health 欄位 |
 | Governance Gate | `scripts/ops/ci_gate.py` | strict promotion chain | `ci_benchmark.csv` | `uv run scripts/ops/ci_gate.py --strict` |
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

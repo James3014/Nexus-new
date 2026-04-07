@@ -8,7 +8,7 @@ owner: agent
 raw_sources:
 - pilot_cli.py
 - memory_service.py
-- /.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py
+- /.nexus/.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py
 related_pages:
 - '[Module - Core Orchestrator](Module - Core Orchestrator.md)'
 - '[System Overview](../00_Home/System Overview.md)'
@@ -39,7 +39,7 @@ version_scope:
 ## Role / responsibility
 - **IO 接管 (Pilot CLI)**: 處理 1024-byte TTY 限制下的非阻塞輸入。 [Code: pilot_cli.py]
 - **記憶體協調 (Memory Service)**: 管理 [LanceDB](Module - Memory Repository.md) 存取與 FTS 檢索。 [Source: nexus_wiki_vault/02_Modules/Module - Memory Repository.md]]]
-- **磁碟維護 (Disk Janitor)**: 執行 Artifact Retention 政策要求的物理清理。 [Code: /.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py]
+- **磁碟維護 (Disk Janitor)**: 執行 Artifact Retention 政策要求的物理清理。 [Code: /.nexus/.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py]
 
 ## Upstream
 - **[Module - Core Orchestrator](Module - Core Orchestrator.md)**: 發起服務調用請求。
@@ -47,11 +47,11 @@ version_scope:
 
 ## Downstream
 - **File System**: 實體檔案修改與刪除。
-- **User Activity**: 提供實時反饋與異常提示。 [Code: nexus_cli.py]
+- **User Activity**: 提供實時反饋與異常提示。 [Code: scripts/engine/nexus_cli.py]
 
 ## Related modules / files
 - `nexus/services/pilot_cli.py`: 核心 CLI 驅動。 [Code: pilot_cli.py]
-- `nexus/services/memory_repository.py`: 記憶體存儲持久層。 [Code: 00_Home/System Overview.md]
+- `nexus/.nexus/workspaces/bug-1774969963/nexus/services/memory_repository.py`: 記憶體存儲持久層。 [Code: 00_Home/System Overview.md]
 
 ## Source notes
 - Muse Engine Spec v22: 確立服務層與核心編排層的解耦要求。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
@@ -62,3 +62,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

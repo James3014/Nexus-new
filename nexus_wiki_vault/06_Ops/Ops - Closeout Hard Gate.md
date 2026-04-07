@@ -24,7 +24,7 @@ owner: agent
 - **契約校驗**: 驗證 `linter_exit_code`、`ci_gate_exit_code`、`required_tests_passed`、`commit_sha`、`changed_files`。 [Source: scripts/ops/closeout_guard.py]
 
 ## Upstream
-- **實作完成階段**: 任務完成後產生 `.nexus/reports/done_contract.json`。 [Source: scripts/engine/nexus_cli.py]
+- **實作完成階段**: 任務完成後產生 `.nexus/reports/done_contract.json`。 [Source: scripts/nexus_cli.py]
 - **協議約束**: `AGENT_PROTOCOL_v2.md` 定義未過 closeout 禁止結案。 [Source: AGENT_PROTOCOL_v2.md]
 
 ## Downstream
@@ -33,8 +33,8 @@ owner: agent
 
 ## Related modules / files
 - `scripts/ops/closeout_guard.py`: done contract 驗證器。
-- `scripts/engine/nexus_cli.py`: `nexus:closeout` 指令入口。
-- `tests/ops/test_closeout_guard.py`: closeout guard 單元測試。
+- `scripts/nexus_cli.py`: `nexus:closeout` 指令入口。
+- `tests/tests/ops/test_closeout_guard.py`: closeout guard 單元測試。
 - `tests/tests/test_cli_commands.py`: `nexus:closeout` CLI 測試。
 
 ## Source notes
@@ -44,3 +44,10 @@ owner: agent
 ## Open questions / conflicts
 - [ ] 是否應在 `ci_gate.py` 增加可選 `--require-closeout-contract` 模式以統一入口阻斷。
 - [ ] 是否需要將 done contract schema 提升為 JSON Schema 並加入 CI 檢查。
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

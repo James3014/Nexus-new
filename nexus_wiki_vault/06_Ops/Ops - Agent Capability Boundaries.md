@@ -73,10 +73,16 @@ path: /Users/jameschen/Workspace/nexus/nexus_wiki_vault/06_Ops/Ops - Agent Capab
 
 ## 🚀 Protocol Requirements
 
-- **Semantic Completion**: "Passed" tests do not mean the [task](../Reference/task.md) is finished. The agent must confirm all intended behaviors are achieved.
+- **Semantic Completion**: "Passed" tests do not mean the [task](../task.md) is finished. The agent must confirm all intended behaviors are achieved.
 - **Evidence-Driven Reporting**: No claims of completion without providing specific command outputs.
 - **Fail-to-Lesson Writeback**: Every failure must be converted into a lesson and recorded in the `Learning Closure Matrix`.
 
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

@@ -53,11 +53,11 @@ version_scope:
 
 ## Downstream
 - `[Ops - Governance SLO Dashboard](Ops - Governance SLO Dashboard.md)`: 聚合趨勢與告警。
-- `[Ops - Governance Changelog](Ops - Governance Changelog.md)`: 記錄策略生效時間點。
+- `[Ops - Governance Changelog](../Reference/walkthrough.md)`: 記錄策略生效時間點。
 
 ## Related modules / files
 - `scripts/ops/wiki_drift_audit.py`
-- `scripts/ops/wiki_truth_claims_check.py`
+- `scripts/scripts/ops/wiki_truth_claims_check.py`
 - `scripts/ops/ci_gate.py`
 
 ## Source notes
@@ -70,3 +70,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

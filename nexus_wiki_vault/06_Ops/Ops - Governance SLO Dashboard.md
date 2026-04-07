@@ -72,3 +72,9 @@ type: ops
 ## Open questions / conflicts
 - [ ] 是否將 `global_coverage_pct` 低門檻升級為 hard gate。
 - [ ] 是否將 `link_audit` / `owner_audit` 併入 release hard gate。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

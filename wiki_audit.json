@@ -1,6 +1,6 @@
 {
-  "total": 88,
-  "passed": 88,
+  "total": 83,
+  "passed": 83,
   "failed": 0,
   "waived": 0,
   "expired": 0,
@@ -258,12 +258,6 @@
       "warnings": []
     },
     {
-      "file": "02_Modules/Module - Intelligence and Logic (Remaining Core).md",
-      "status": "\u2705",
-      "errors": [],
-      "warnings": []
-    },
-    {
       "file": "02_Modules/Module - State Contracts.md",
       "status": "\u2705",
       "errors": [],
@@ -331,6 +325,12 @@
     },
     {
       "file": "02_Modules/Module - Security and Tool Guard Registry.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "02_Modules/Module - Intelligence and Logic - Remaining Core.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -499,36 +499,6 @@
     },
     {
       "file": "Reference/docs/00_PROJECT_INDEX.md",
-      "status": "\u2705",
-      "errors": [],
-      "warnings": []
-    },
-    {
-      "file": "Reference/.serena/memories/project_overview.md",
-      "status": "\u2705",
-      "errors": [],
-      "warnings": []
-    },
-    {
-      "file": "Reference/.serena/memories/suggested_commands.md",
-      "status": "\u2705",
-      "errors": [],
-      "warnings": []
-    },
-    {
-      "file": "Reference/.serena/memories/style_and_conventions.md",
-      "status": "\u2705",
-      "errors": [],
-      "warnings": []
-    },
-    {
-      "file": "Reference/.serena/memories/task_completion_checklist.md",
-      "status": "\u2705",
-      "errors": [],
-      "warnings": []
-    },
-    {
-      "file": "Reference/.serena/memories/automated_execution_protocol.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []

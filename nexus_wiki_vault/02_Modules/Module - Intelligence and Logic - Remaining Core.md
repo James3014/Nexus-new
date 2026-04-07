@@ -19,7 +19,7 @@ tags:
 - scorer
 - shogun
 - aggregator
-title: Module - Intelligence and Logic (Remaining Core)
+title: Module - Intelligence and Logic - Remaining Core.md)
 type: module
 version_scope:
 - v22
@@ -28,7 +28,7 @@ version_scope:
 
 
 
-# Module - Intelligence and Logic (Remaining Core)
+# Module - Intelligence and Logic - Remaining Core.md)
 
 ## One-sentence summary
 本模組集合了 Nexus 的學習評分邏輯、神經網絡彙整、子系統治理與剩餘的核心邏輯組件。 [Source: nexus/core/learning_governance.py]
@@ -79,3 +79,9 @@ version_scope:
 
 ---
 Back to [System Overview](../00_Home/System Overview.md)
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

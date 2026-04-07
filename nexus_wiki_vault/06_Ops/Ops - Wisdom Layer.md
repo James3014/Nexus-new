@@ -21,20 +21,20 @@ version_scope: '[v23]'
 
 ## Role / responsibility
 - **決策偏好 (Bias)**: 從 `Memory Repository` 提取相似教訓以引導當前任務路由。 [Source: memory_indexer.py]
-- **共識護欄 (ConsensusGuard)**: 在高風險操作前執行多重判斷與幻覺檢測。 [Code: /nexus_swarm/guard/consensus_guard.py]
-- **自我修復 (PredictiveHealer)**: 在故障發生前預測並觸發 Rollback 或修補。 [Code: predictive_healer.py]
+- **共識護欄 (ConsensusGuard)**: 在高風險操作前執行多重判斷與幻覺檢測。 [Code: nexus_swarm/guard/consensus_guard.py]
+- **自我修復 (PredictiveHealer)**: 在故障發生前預測並觸發 Rollback 或修補。 [Code: nexus_swarm/healing/predictive_healer.py]
 
 ## Upstream
 - **[Module - Memory Repository](../02_Modules/Module - Memory Repository.md)**: 提供向量經驗底座。
 - **[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Feedback Loop**: 提供實時執行結果回饋。
 
 ## Downstream
-- **Orchestrator Decision Node**: 修正 `nexus_cli.py` 的調度路徑。 [Code: nexus_cli.py]
+- **Orchestrator Decision Node**: 修正 `scripts/engine/nexus_cli.py` 的調度路徑。 [Code: scripts/engine/nexus_cli.py]
 - **[[Ops - CI/CD Promotion Gate]]**: 提供智慧審計結果。
 
 ## Related modules / files
 - `nexus/intelligence/online_learner.py`: 在線學習引擎。 [Code: online_learner.py]
-- `nexus/delivery/phantom_guard.py`: 幽靈狀態校驗。 [Code: 00_Home/System Overview.md]
+- `nexus/.nexus/workspaces/bug-1774969963/nexus/delivery/phantom_guard.py`: 幽靈狀態校驗。 [Code: 00_Home/System Overview.md]
 
 ## Source notes
 - [[MUSE_ENGINE_SPEC|v23 Wisdom]] Supplement: 詳細定義「智慧層（v23）疊加於主線（v22）」的版本邊界。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
@@ -45,3 +45,10 @@ version_scope: '[v23]'
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

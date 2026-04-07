@@ -53,3 +53,9 @@ version_scope: '[v22, v23]'
 
 ## Open questions / conflicts
 - [ ] **Timeout Strategy**: 當單個節點長時間無響應時的系統級超時熔斷時間。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

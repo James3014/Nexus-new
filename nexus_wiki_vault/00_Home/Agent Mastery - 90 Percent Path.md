@@ -67,3 +67,9 @@ version_scope: '[v22, v23]'
 8. 檢查 `.nexus/contracts` 與最新 `reports` / `runs` 工件。 [Source: .nexus/contracts/sub_agent_lifecycle.json]
 9. 編修 Wiki 後先跑 `uv run scripts/ops/wiki_linter.py --strict`。 [Source: scripts/ops/wiki_linter.py]
 10. 進 CI 前再跑一次 `uv run scripts/ops/ci_gate.py --strict`。 [Source: scripts/ops/ci_gate.py]
+
+---
+[System Overview](System Overview.md)
+
+---
+[[System Overview]]

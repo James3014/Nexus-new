@@ -7,9 +7,9 @@ confidence: high
 last_compiled: 2026-04-06
 owner: agent
 raw_sources:
-- nexus/learning/disk_policy.py
-- nexus/learning//.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py
-- nexus/core/handoff_bundle.py
+- nexus/learning/.nexus/workspaces/bug-1774969963/nexus/learning/disk_policy.py
+- nexus/learning/.nexus/.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py
+- nexus/core/.nexusnexus/core/handoff_bundle.py
 related_pages:
 - Ops - CI/[Promotion Gate](Ops - CI/CD Promotion Gate.md)|[[CD [[CD Promotion Gate|Promotion
   Gate]]|CD [Promotion Gate](Ops - CI/CD Promotion Gate.md)]]]]
@@ -53,12 +53,12 @@ version_scope:
 |---|---|---|---|---|---|
 | **Policy Memory** | Crystallizer | MEDIUM | `.nexus/knowledge/policymemory.jsonl` | 90 Days | `cleanup_policy_memory.py` |
 | **Run Manifests** | Sealer | **CRITICAL** | `.nexus/runs/*/manifest.json` | 90 Days | `manifest_schema.json` |
-| **Handoff Bundles**| Orchestrator| **CRITICAL** | `.nexus/state/handoff_*.json` | 30 Days | `handoff_bundle.py` |
-| **[[SKILL]] Outcomes** | Monitor | MEDIUM | `.nexus/metrics/skill_outcome_*.jsonl` | 90 Days | `disk_policy.py` |
-| **Archived Skills**| Janitor | LOW | `skills/archived/*.md` | 90 Days | `/.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py` |
+| **Handoff Bundles**| Orchestrator| **CRITICAL** | `.nexus/state/handoff_*.json` | 30 Days | `/.nexusnexus/core/handoff_bundle.py` |
+| **[[SKILL]] Outcomes** | Monitor | MEDIUM | `.nexus/metrics/skill_outcome_*.jsonl` | 90 Days | `/.nexus/workspaces/bug-1774969963/nexus/learning/disk_policy.py` |
+| **Archived Skills**| Janitor | LOW | `skills/archived/*.md` | 90 Days | `/.nexus/.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py` |
 
 ## Retention Mechanisms
-- **DiskJanitor Service**: 每 24 小時執行一次，掃描 `retention_days` (Default 90) 之前的過期文件。 [Source: /.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py]
+- **DiskJanitor Service**: 每 24 小時執行一次，掃描 `retention_days` (Default 90) 之前的過期文件。 [Source: nexus/learning/disk_janitor.py]
 - **Atomic Cleanup**: `cleanup_policy_memory.py` 採用原子替換方式清理 JSONL，確保數據一致性。 [Source: 00_Home/System Overview.md]
 
 ## Upstream
@@ -70,12 +70,12 @@ version_scope:
 - **[[Ops - CI/CD Promotion Gate]]**: 依賴 Retention Path 內的證據進行晉升審計。
 
 ## Related modules / files
-- `nexus/learning//.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py`: 實體清理執行者。
+- `nexus/learning/.nexus/.nexus/workspaces/bug-1774969963/nexus/learning/disk_janitor.py`: 實體清理執行者。
 - `scripts/learning/cleanup_policy_memory.py`: 策略記憶專屬清理。
 
 ## Source notes
-- disk_policy.py: 定義默認 `retention_days = 90`。
-- handoff_bundle.py: 規定 Handoff 數據保留期為 `30 days`。
+- /.nexus/workspaces/bug-1774969963/nexus/learning/disk_policy.py: 定義默認 `retention_days = 90`。
+- /.nexusnexus/core/handoff_bundle.py: 規定 Handoff 數據保留期為 `30 days`。
 
 ## Open questions / conflicts
 - [ ] **Arweave Archival**: 超過 90 天的關鍵教訓是否應在刪除前強制執行 `nexus:learning-sync` 上鏈。
@@ -83,3 +83,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

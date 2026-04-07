@@ -47,7 +47,7 @@ version_scope:
 - `[Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)`: 故障分類與修復語境一致化。
 
 ## Related modules / files
-- `scripts/engine/nexus_cli.py`
+- `scripts/nexus_cli.py`
 - `scripts/ops/ci_gate.py`
 - `.nexus/reports/acceptance_check.json`
 
@@ -57,8 +57,14 @@ version_scope:
 - `P0 Drift`: 會阻斷發布的關鍵漂移問題。
 - `Observe-only`: 樣本為 0 時不阻斷，但必須留下可追蹤證據（例如 `no_sample_observe_only=true`）。
 - `Truth Claim`: 必須可由命令或實體路徑驗證的聲明。
-- `[task](../Reference/task.md) Contract`: 對任務交付範圍、命令、工件與變更路徑的約束。
+- `[task](../task.md) Contract`: 對任務交付範圍、命令、工件與變更路徑的約束。
 
 ## Open questions / conflicts
 - [ ] 是否將 `PDRAC` (legacy) 與 `[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]` (current) 的差異固定為獨立術語頁。
 - [ ] 是否建立術語版本化（v22/v23）避免未來升級時語義混淆。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

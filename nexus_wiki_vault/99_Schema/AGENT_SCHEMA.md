@@ -172,7 +172,7 @@ Each page must declare one of:
 - diff
 - incident
 - roadmap
-- source-[index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)
+- source-[index](../90_Sources/Source Index.md)
 - schema
 
 ### 6.2 Frontmatter template
@@ -407,3 +407,9 @@ Do not claim “complete” unless:
 Humans choose direction.
 The agent compiles and maintains the wiki.
 The vault should become easier to navigate over time, not larger for its own sake.
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

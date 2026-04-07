@@ -21,7 +21,7 @@ version_scope: '[v17.1, v22, v23]'
 
 ## Role / responsibility
 - **相位定義**: 定義 P-X-D-R-A-C 六大核心相位。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
-- **門禁管控**: 確保前一相位工件存在後方可進入下一相位。 [Source: ci_gate.py]
+- **門禁管控**: 確保前一相位工件存在後方可進入下一相位。 [Source: scripts/ops/ci_gate.py]
 - **狀態守護**: 執行 `ConsensusGuard` 避免非法狀態轉移。 [Code: scripts/engine/nexus_cli.py]
 
 ## Upstream
@@ -34,7 +34,7 @@ version_scope: '[v17.1, v22, v23]'
 
 ## Related modules / files
 - `nexus/core/state_machine.py`: 實體狀態機邏輯。 [Code: state_machine.py]
-- `scripts/engine/scripts/engine/nexus_cli.py`: 相位調度進入點。 [Code: scripts/engine/nexus_cli.py]
+- `scripts/nexus_cli.py`: 相位調度進入點。 [Code: scripts/engine/nexus_cli.py]
 
 ## Source notes
 - v17.1 Hardened Spec: 定義原始 PDRAC 4 相位。
@@ -43,3 +43,9 @@ version_scope: '[v17.1, v22, v23]'
 ## Open questions / conflicts
 - [ ] **Phase X Bypass**: 在極簡任務下是否允許跳過 `Explore` (X) 相位。
 - [ ] **Rollback State**: 當 Audit 失敗時，State Machine 是否應自動回退至 Diagnosis。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

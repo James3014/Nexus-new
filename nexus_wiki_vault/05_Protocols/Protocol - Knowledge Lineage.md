@@ -59,7 +59,7 @@ graph LR
     end
 
     subgraph "Phase 3: Persistence & Governance"
-        MR --> |"Vector [index](../.nexus/graph/index.md)"| WL[["Ops - Wisdom Layer"]]
+        MR --> |"Vector [index](../90_Sources/Source Index.md)"| WL[["Ops - Wisdom Layer"]]
         MR --> |"Cleanup Policy"| RP[["Ops - Artifact Retention and Provenance"]]
     end
 
@@ -91,3 +91,9 @@ graph LR
 ## Open questions / conflicts
 - [ ] **Lineage Drift**: 智慧層產出的決策是否應建立獨立的血緣分支。
 - [ ] **Storage Tiers**: 線上 (Hot) 與 離線 (Cold) 知識資產在 Lineage 中的區隔顯示。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

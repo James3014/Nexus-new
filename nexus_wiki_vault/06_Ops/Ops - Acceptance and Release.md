@@ -39,7 +39,7 @@ version_scope:
 ## Role / responsibility
 - **發布阻斷**: 在未滿足 `[Promotion Gate](Ops - CI/CD Promotion Gate.md)` 指標前禁止執行 `git tag`。 [Source: 00_Home/System Overview.md]
 - **環境清場**: 要求發布前工作區 (Worktree) 必須 100% 乾淨且通過 `git audit`。 [Source: 00_Home/System Overview.md]
-- **同步確認**: 確保 Wiki 與 Repo 之內的 [README](../Reference/README.md) 與 Spec 已同步更新。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- **同步確認**: 確保 Wiki 與 Repo 之內的 [README](../README.md) 與 Spec 已同步更新。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Upstream
 - **[[Ops - CI/CD Promotion Gate]]**: 提供晉升核准。
@@ -63,3 +63,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

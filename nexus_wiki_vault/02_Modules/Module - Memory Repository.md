@@ -15,7 +15,7 @@ related_pages:
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 - '[State - Schemas](../04_State/State - Schemas.md)'
-source_of_truth: nexus/services/memory_indexer.py
+source_of_truth: /nexus/services/memory_indexer.py
 status: active
 tags:
 - module
@@ -43,7 +43,7 @@ version_scope:
 - **經驗索引**: 將 `lesson_events.jsonl` 與 `manifest.json` 轉化為可檢索的知識節點。
 
 ## Upstream
-- **Lesson Resolver**: 提供結構化教訓。 [Source: lesson_resolver.py]
+- **Lesson Resolver**: 提供結構化教訓。 [Source: /nexus/services/lesson_resolver.py]
 - **Outcome Monitor**: 提供技能執行結果。 [Source: 00_Home/System Overview.md]
 - **Embedding Service**: 提供 384 號向量化能力。 [Source: memory_embedding.py]
 
@@ -61,9 +61,9 @@ version_scope:
 - **DB Path**: `.nexus/memory/memory_index.lancedb`
 - **Table Name**: `memory_index`
 - **Quotas (配額控制)**:
-    - **Time Window**: 90 天 (僅保留最近 3 個月的活動數據)。 [Source: memory_indexer.py]
-    - **Manifests**: Max 50 個最近任務清單。 [Source: memory_indexer.py]
-    - **Outcome Events**: Max 1000 個技能成果事件。 [Source: memory_indexer.py]
+    - **Time Window**: 90 天 (僅保留最近 3 個月的活動數據)。 [Source: /nexus/services/memory_indexer.py]
+    - **Manifests**: Max 50 個最近任務清單。 [Source: /nexus/services/memory_indexer.py]
+    - **Outcome Events**: Max 1000 個技能成果事件。 [Source: /nexus/services/memory_indexer.py]
 
 ## Entity Schema (MemoryIndexRecord)
 
@@ -81,12 +81,12 @@ version_scope:
 | `embedding` | Vector(384) | MiniLM 生成的高維語義特徵。 |
 
 ## Related modules / files
-- `nexus/services/memory_indexer.py`: 核心索引建立器。
+- `/nexus/services/memory_indexer.py`: 核心索引建立器。
 - `nexus/services/memory_repository.py`: LanceDB DAO 實作。
 
 ## Source notes
-- memory_indexer.py L39-L54: 實體 Schema 定義。
-- memory_indexer.py L21-L23: 磁碟配額定義。
+- /nexus/services/memory_indexer.py L39-L54: 實體 Schema 定義。
+- /nexus/services/memory_indexer.py L21-L23: 磁碟配額定義。
 
 ## Open questions / conflicts
 - [ ] **v23.1 Hybrid Table**: 是否需要為 `predictive_healing` 新增專屬的狀態表。
@@ -94,3 +94,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

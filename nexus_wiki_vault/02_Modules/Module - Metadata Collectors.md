@@ -1,5 +1,5 @@
 ---
-aliases: '[Metadata Collectors, Data [Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[Index](../.nexus/graph/index.md)|[[Source
+aliases: '[Metadata Collectors, Data [Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[[Source
   [[index|Index]]|Sources]]]]]]]]]'
 confidence: low
 last_compiled: '2026-04-06'
@@ -38,7 +38,7 @@ version_scope: '[v23]'
 
 ## Related modules / files
 - `scripts/.nexus/workspaces/bug-1774969963/scripts/engine/collectors/node_collector_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
-- `scripts/engine/collectors/edge_resolver_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
+- `scripts/.nexus/workspaces/bug-1774969963/scripts/engine/collectors/edge_resolver_v1.py` (Missing) [Source: nexus_wiki_vault/01_System/System - Unknowns and Conflicts.md]]]
 
 ## Source notes
 - **Conflict Registry**: 物理對象缺失，列為 v23 首批補全對象。
@@ -46,3 +46,9 @@ version_scope: '[v23]'
 ## Open questions / conflicts
 - [ ] **Physical Existence**: 檔案目前僅存在於臨時 Cache，需於 v23 正式版完成 `scripts/engine/` 的遷移落地。
 - [ ] **Performance**: 對大體量 Repo 進行全量自省時的超時限制與分片邏輯。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

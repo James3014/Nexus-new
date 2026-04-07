@@ -76,7 +76,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[Module - Intelligence and Context Core](../02_Modules/Module - Intelligence and Context Core.md)**: [New] 語義上下文與 RAG 登記。
 - **[Module - Task Scheduling and Swarm Adapters](../02_Modules/Module - Task Scheduling and Swarm Adapters.md)**: [New] 任務調度與並行協作登記。
 - **[Module - Domain Services and Adapters](../02_Modules/Module - Domain Services and Adapters.md)**: [New] 外部服務與適配器登記。
-- **[Module - Intelligence and Logic (Remaining Core)](../02_Modules/Module - Intelligence and Logic (Remaining Core).md)**: [New] 剩餘核心邏輯登記。
+- **[Module - Intelligence and Logic - Remaining Core.md)](../02_Modules/Module - Intelligence and Logic - Remaining Core.md)**: [New] 剩餘核心邏輯登記。
 - **[Module - Advanced Core Intelligence](../02_Modules/Module - Advanced Core Intelligence.md)**: [New] Ash 矩陣與進階政策登記。
 - **[Source - Operational Scripts Index](../90_Sources/Source - Operational Scripts Index.md)**: [New] 全量維運與引擎腳本索引。
 
@@ -108,3 +108,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 ## Open questions / conflicts
 - [ ] 哪些頁面應進一步拆成模組頁（如 [State Contracts](../02_Modules/Module - State Contracts.md)）。
 - [ ] 針對 PDRAC 與 [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] 的語義漂移進行對位。
+
+
+---
+[System Overview](System Overview.md)

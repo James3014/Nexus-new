@@ -100,3 +100,9 @@ uv run scripts/ci_gate.py && uv run scripts/nexus_cli.py nexus:benchmark --tasks
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

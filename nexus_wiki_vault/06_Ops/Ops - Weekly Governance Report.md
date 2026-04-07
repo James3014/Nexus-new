@@ -52,7 +52,7 @@ Generated at: 2026-04-06 10:27
 
 ## Related modules / files
 - `scripts/ops/wiki_weekly_governance_report.py`
-- `scripts/ops/wiki_linter.py`
+- `scripts/scripts/ops/wiki_linter.py`
 
 ## Source notes
 - 自動生成於 per-run CI cycle。
@@ -60,3 +60,9 @@ Generated at: 2026-04-06 10:27
 
 ## Open questions / conflicts
 - [ ] 是否需要將此報告發送至 Slack/Email。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

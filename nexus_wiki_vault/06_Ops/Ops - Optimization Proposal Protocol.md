@@ -53,11 +53,11 @@ version_scope:
 
 ## Downstream
 - `[Ops - Architecture Decision Records](Ops - Architecture Decision Records.md)`: 生效後需寫 ADR。
-- `[Ops - Governance Changelog](Ops - Governance Changelog.md)`: 生效後需寫治理變更記錄。
+- `[Ops - Governance Changelog](Ops - Governance /brain4xlab-test/node_modules/iconv-lite/Changelog.md)`: 生效後需寫治理變更記錄。
 
 ## Related modules / files
 - `.nexus/config/task_contract.example.json`
-- `scripts/engine/nexus_cli.py`
+- `scripts/nexus_cli.py`
 - `scripts/ops/wiki_linter.py`
 
 ## Source notes
@@ -76,3 +76,10 @@ uv run scripts/ops/ci_gate.py --dry-run --wiki-drift-enforce-level p0
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

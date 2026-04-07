@@ -161,7 +161,7 @@ python3 scripts/engine/nexus_cli.py nexus:runner --delivery-mode ask
 
 **[ZH]** 若操作者選擇 `high`，Nexus 會在任務標記完成前強制通過 completion gate。對 `bug` 與 `feature` 而言，如果沒有提供 `--verify`，Nexus 會自動推建議驗證命令，支援 Python、Rust、Go 專案。CLI 也會直接輸出本次實際採用的驗證命令與生成的交付報告路徑。
 
-更多規則請見 [`docs/DELIVERY_CONTRACT_CN.md`](docs/DELIVERY_CONTRACT_CN.md)。
+更多規則請見 [`../../docs/DELIVERY_CONTRACT_CN.md`](../../docs/DELIVERY_CONTRACT_CN.md)。
 
 For pilot chat usage, the canonical entry is now `scripts/nexus_pilot_cli.py`; `scripts/nexus_chat_cli.py` remains only as a [[compatibility]] shim.
 
@@ -194,3 +194,9 @@ For detailed project architecture, refactor roadmap, and script ownership, pleas
 
 ---
 [System Overview](System Overview.md)
+
+---
+[System Overview](System Overview.md)
+
+---
+[[System Overview]]

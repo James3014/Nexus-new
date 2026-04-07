@@ -58,3 +58,10 @@ uv run scripts/ops/ci_gate.py --dry-run --wiki-drift-enforce-level p0 --full-dry
 
 ---
 [System Overview](System Overview.md)
+
+
+---
+[System Overview](System Overview.md)
+
+---
+[[System Overview]]

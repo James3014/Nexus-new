@@ -54,3 +54,9 @@ uv run scripts/ops/wiki_linter.py --strict
 ## Open questions / conflicts
 - [ ] 是否要把 `acceptance-check` 納入所有任務啟動前必跑清單。
 - [ ] 是否要強制回報 `nexus_participation_ratio` 作為啟動合規證據。
+
+---
+[System Overview](System Overview.md)
+
+---
+[[System Overview]]

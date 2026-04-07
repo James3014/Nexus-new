@@ -7,7 +7,7 @@ last_compiled: 2026-04-06
 owner: agent
 related_pages:
 - '[System Overview](../00_Home/System Overview.md)'
-- '[Index](../.nexus/graph/index.md)|[[Source [[index|Index]]|Source [Index](../.nexus/graph/index.md)]]]]'
+- '[Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[[Source [[index|Index]]|Source [Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)]]]]'
 - '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
@@ -56,7 +56,7 @@ version_scope:
 - **Wiki Linter**: 讀取本頁內容作為路徑校驗的「白名單」。 [Code: scripts/ops/wiki_linter.py]
 
 ## Related modules / files
-- `scripts/ops/scripts/ops/wiki_linter.py`: 實體校驗引擎。 [Code: scripts/ops/wiki_linter.py]
+- `scripts/ops/wiki_linter.py`: 實體校驗引擎。 [Code: scripts/ops/wiki_linter.py]
 - `99_Schema/[AGENT_SCHEMA](../99_Schema/AGENT_SCHEMA.md).md`: 治理規約。 [Source: 00_Home/System Overview.md]
 
 ## Source notes
@@ -65,3 +65,9 @@ version_scope:
 ## Open questions / conflicts
 - [ ] **Automated Expiry**: 是否應在 Expiry 到期後自動撤銷 Linter 豁免。
 - [ ] **Waiver Audit**: 是否需要定期（按季度）審計所有已發放的 Waiver。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

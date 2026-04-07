@@ -37,7 +37,7 @@ version_scope:
 ## Role / responsibility
 - **權威索引**: 作為所有 `*_schema.json` 檔案的 Wiki 入口。 [Source: 02_Modules/Module - State Contracts.md]]]
 - **結構硬化**: 強制所有 Phase Runner 產出的 .json 符合特定版本 Schema。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
-- **檢驗門禁**: `ci_gate.py` 在執行前會自動進行 Schema Validity 檢核。 [Source: ci_gate.py]
+- **檢驗門禁**: `scripts/ops/ci_gate.py` 在執行前會自動進行 Schema Validity 檢核。 [Source: scripts/ops/ci_gate.py]
 
 ## Upstream
 - **MUSE Architect**: 定義邏輯契約。
@@ -49,7 +49,7 @@ version_scope:
 
 ## Related modules / files
 - `/Users/jameschen/Workspace/schemas/*.json`: 實體定義文件。
-- `nexus/core/handoff_bundle.py`: Schema 校驗邏輯。 [Code: 00_Home/System Overview.md]
+- `nexus/.nexus/.nexusnexus/core/handoff_bundle.py`: Schema 校驗邏輯。 [Code: 00_Home/System Overview.md]
 
 ## Source notes
 - Muse Engine Spec v22: 確立「所有狀態必須 Schema 化」的強制性要求。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
@@ -60,3 +60,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

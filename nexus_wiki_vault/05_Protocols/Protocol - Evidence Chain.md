@@ -36,12 +36,12 @@ version_scope:
 
 ## Role / responsibility
 - **鏈式追蹤**: 確保 `manifest.json` 完整包含單次任務的所有子工件。 [Source: 00_Home/System Overview.md]
-- **誠信校驗**: 透過 `write_proof.json` 驗證所有的文件寫入均為真實且已授權。 [Source: ci_gate.py]
+- **誠信校驗**: 透過 `write_proof.json` 驗證所有的文件寫入均為真實且已授權。 [Source: scripts/ops/ci_gate.py]
 - **歸檔準備**: 轉換為加密封印格式以供 Arweave 存儲。 [Source: 00_Home/System Overview.md]
 
 ## Upstream
 - **[Protocol - Evidence Map](Protocol - Evidence Map.md)**: 提供依賴圖譜。
-- **Phase Runners**: 提交通知至 Manifest Sealer。 [Code: nexus_cli.py]
+- **Phase Runners**: 提交通知至 Manifest Sealer。 [Code: scripts/engine/nexus_cli.py]
 
 ## Downstream
 - **Crystallizer (Phase C)**: 根據證據鏈萃取教訓。 [Code: nexus_crystal.py]
@@ -49,7 +49,7 @@ version_scope:
 
 ## Related modules / files
 - `nexus/core/manifest_factory.py`: 證據鏈封裝工廠。 [Code: manifest_factory.py]
-- `scripts/ops/index_to_manifest.py`: 手動修復工具。 [Code: 00_Home/System Overview.md]
+- `scripts/.nexusscripts/ops/index_to_manifest.py`: 手動修復工具。 [Code: 00_Home/System Overview.md]
 
 ## Source notes
 - Hardened v17.1 Spec: 定義原始「證據工件」清單。
@@ -61,3 +61,10 @@ version_scope:
 
 ---
 [System Overview](../00_Home/System Overview.md)
+
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

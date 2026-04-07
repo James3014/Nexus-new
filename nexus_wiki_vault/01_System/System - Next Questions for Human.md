@@ -46,7 +46,7 @@ version_scope:
 
 ## Upstream
 - **[System - Unknowns and Conflicts](System - Unknowns and Conflicts.md)**: 提供原始衝突報告。
-- **Wiki Linter**: 反饋無法自動修復的一致性問題。 [Source: wiki_linter.py]
+- **Wiki Linter**: 反饋無法自動修復的一致性問題。 [Source: scripts/ops/wiki_linter.py]
 
 ## Downstream
 - **Human Response**: 更新 `.agents/skills/` 下的治理實施腳本。
@@ -62,3 +62,9 @@ version_scope:
 ## Open questions / conflicts
 - [ ] **Batch Decision**: 是否支持在一次會話中批次處理所有 OPEN 問題。
 - [ ] **Response TTL**: 人類決策的有效期限，逾期是否自動回退至穩定版。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]

@@ -29,7 +29,7 @@ version_scope:
 
 ## Upstream
 - **[System Overview](../00_Home/System Overview.md)**: 總體治理入口。
-- **[[99_Schema/AGENT_SCHEMA.md]]**: 定義代理操作與元數據基礎。
+- **[[99_Schema/nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md]]**: 定義代理操作與元數據基礎。
 
 ## Downstream
 - **[[scripts/ops/wiki_linter.py]]**: 執行實體檔案的語法與結構檢查。
@@ -99,3 +99,9 @@ version_scope:
 ## Open questions / conflicts
 - [ ] 是否應強制要求所有頁面皆具備 `[source:]` 或 `[code:]` 標籤（目前由 Linter 執行）。
 - [ ] 針對 `type: incident` 的過期自動歸檔機制。
+
+---
+[System Overview](../00_Home/System Overview.md)
+
+---
+[[System Overview]]
