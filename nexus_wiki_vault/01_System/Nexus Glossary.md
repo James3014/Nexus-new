@@ -57,7 +57,7 @@ version_scope:
 - `P0 Drift`: 會阻斷發布的關鍵漂移問題。
 - `Observe-only`: 樣本為 0 時不阻斷，但必須留下可追蹤證據（例如 `no_sample_observe_only=true`）。
 - `Truth Claim`: 必須可由命令或實體路徑驗證的聲明。
-- `[task](../task.md) Contract`: 對任務交付範圍、命令、工件與變更路徑的約束。
+- `[task](../Reference/task.md) Contract`: 對任務交付範圍、命令、工件與變更路徑的約束。
 
 ## Open questions / conflicts
 - [ ] 是否將 `PDRAC` (legacy) 與 `[[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]]` (current) 的差異固定為獨立術語頁。

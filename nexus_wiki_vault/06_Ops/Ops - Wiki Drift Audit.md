@@ -33,7 +33,7 @@ version_scope: '[v17.1, v22, v23]'
 - **Wiki Audit Engine**: `scripts/ops/wiki_drift_audit.py` [Code: scripts/ops/wiki_drift_audit.py]
 
 ## Downstream
-- **[Ops - Governance Changelog](Ops - Governance /brain4xlab-test/node_modules/iconv-lite/Changelog.md)**: 記錄漂移修復的歷史。
+- **[Ops - Governance Changelog](../Reference/walkthrough.md)**: 記錄漂移修復的歷史。
 
 ## Related modules / files
 - `scripts/ops/wiki_drift_audit.py`: 漂移審計核心。 [Source: scripts/ops/wiki_drift_audit.py]

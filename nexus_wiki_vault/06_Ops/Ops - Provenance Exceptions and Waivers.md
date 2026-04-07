@@ -7,7 +7,7 @@ last_compiled: 2026-04-06
 owner: agent
 related_pages:
 - '[System Overview](../00_Home/System Overview.md)'
-- '[Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[[Source [[index|Index]]|Source [Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)]]]]'
+- '[Index](../90_Sources/Source Index.md)|[[Source [[index|Index]]|Source [Index](../90_Sources/Source Index.md)]]]]'
 - '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'

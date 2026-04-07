@@ -64,7 +64,7 @@ uv run scripts/ops/ci_gate.py --dry-run
 
 ## Mandatory Protocol Checks
 
-Before any [task](../task.md) execution, the agent must pass:
+Before any [task](../Reference/task.md) execution, the agent must pass:
 1.  **Agent Protocol Check**: `uv run scripts/ops/agent_protocol_check.py`
 2.  **Wiki Governance Audit**: `uv run scripts/ops/wiki_linter.py --strict`
 3.  **Acceptance Check**: `uv run scripts/ops/nexus_acceptance_check.py --output-dir .nexus/reports`
@@ -75,7 +75,7 @@ Before any [task](../task.md) execution, the agent must pass:
 
 ## Required Policy
 - ✅ Allowed: launch via enforced scripts only.
-- ❌ Disallowed: direct `gemini ...` or direct `antigravity ...` for production [task](../task.md) execution.
+- ❌ Disallowed: direct `gemini ...` or direct `antigravity ...` for production [task](../Reference/task.md) execution.
 
 ## Gemini (enforced)
 ```bash

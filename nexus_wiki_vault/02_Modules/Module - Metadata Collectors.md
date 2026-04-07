@@ -1,5 +1,5 @@
 ---
-aliases: '[Metadata Collectors, Data [Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)|[[Source
+aliases: '[Metadata Collectors, Data [Index](../90_Sources/Source Index.md)|[Index](../90_Sources/Source Index.md)|[Index](../90_Sources/Source Index.md)|[[Source
   [[index|Index]]|Sources]]]]]]]]]'
 confidence: low
 last_compiled: '2026-04-06'

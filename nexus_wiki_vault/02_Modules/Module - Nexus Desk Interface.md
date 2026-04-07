@@ -31,7 +31,7 @@ version_scope:
 Nexus Desk 是基於 Tauri 2 + Rust + React 的桌面監控駕駛艙，提供任務可視化與系統指標攔截。 [Source: nexus-desk/src-tauri/src/main.rs]
 
 ## Role / responsibility
-- **可視化監控**: 提供 [task](../task.md) Timeline, Diff Viewer 與成本看板。
+- **可視化監控**: 提供 [task](../Reference/task.md) Timeline, Diff Viewer 與成本看板。
 - **指標攔截 (Bridge)**: 透過 Rust 層與 Nexus Core 進行非同步通訊。 [Source: nexus-desk/src/lib/bridge.ts]
 - **系統托盤與通知**: 管理背景執行狀態。
 

@@ -53,7 +53,7 @@ version_scope:
 
 ## Downstream
 - `[Ops - Architecture Decision Records](Ops - Architecture Decision Records.md)`: 生效後需寫 ADR。
-- `[Ops - Governance Changelog](Ops - Governance /brain4xlab-test/node_modules/iconv-lite/Changelog.md)`: 生效後需寫治理變更記錄。
+- `[Ops - Governance Changelog](../Reference/walkthrough.md)`: 生效後需寫治理變更記錄。
 
 ## Related modules / files
 - `.nexus/config/task_contract.example.json`

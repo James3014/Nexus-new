@@ -40,7 +40,7 @@ version_scope: '[v22, v23]'
 
 ## Downstream
 - `[Ops - Optimization Proposal Protocol](Ops - Optimization Proposal Protocol.md)`: 新提案的提交格式與驗收規則。
-- `[Ops - Governance Changelog](Ops - Governance /brain4xlab-test/node_modules/iconv-lite/Changelog.md)`: 把生效決策轉為時間線紀錄。
+- `[Ops - Governance Changelog](../Reference/walkthrough.md)`: 把生效決策轉為時間線紀錄。
 
 ## Related modules / files
 - `scripts/ops/nexus_task_contract_guard.py`

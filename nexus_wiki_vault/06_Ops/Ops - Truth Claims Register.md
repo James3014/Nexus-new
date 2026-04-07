@@ -60,7 +60,7 @@ version_scope:
 | `C-16` | Wiki 覆蓋率 > 85.00% 閾值。 | `.nexus/reports/wiki_coverage_report.json` | `uv run scripts/ops/wiki_coverage_audit.py` | ✅ | 2026-04-06 |
 | `C-17` | 全量 Wiki 頁面具備 0 Orphan 連結。 | `scripts/ops/wiki_linter.py` | `uv run scripts/ops/wiki_linter.py --strict` | ✅ | 2026-04-06 |
 | `C-18` | PDRAC 循環實體邏輯存在。 | `nexus/core/orchestrator.py` | `grep "NexusOrchestrator" nexus/core/orchestrator.py` | ✅ | 2026-04-06 |
-| `C-19` | 治理變更日誌實體維護中。 | `06_Ops/[Ops - Governance Changelog](../walkthrough.md).md` | `test -f nexus_wiki_vault/06_Ops/Ops\ -\ Governance\ [[CHANGELOG]].md` | ✅ | 2026-04-06 |
+| `C-19` | 治理變更日誌實體維護中。 | `06_Ops/[Ops - Governance Changelog](../Reference/walkthrough.md).md` | `test -f nexus_wiki_vault/06_Ops/Ops\ -\ Governance\ [[CHANGELOG]].md` | ✅ | 2026-04-06 |
 | `C-20` | Fail-Closed 發版規則硬性定義。 | `scripts/ops/ci_gate.py` | `grep "FAIL-CLOSED" scripts/ops/ci_gate.py` | ✅ | 2026-04-06 |
 
 ## Upstream

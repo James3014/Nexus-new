@@ -22,11 +22,11 @@
     "system-overload-detected": {
         "correct_count": 0,
         "fp_count": 0,
-        "missed_count": 1751,
+        "missed_count": 1762,
         "alpha": 1.0,
-        "beta": 3503.0,
-        "confidence": 0.00028538812785388126,
+        "beta": 3525.0,
+        "confidence": 0.0002836074872376631,
         "bypass_score": 0.0,
-        "last_feedback_at": "2026-04-07T14:40:42.207468"
+        "last_feedback_at": "2026-04-07T14:53:37.551721"
     }
 }

@@ -55,7 +55,7 @@ version_scope:
 | Q13 | Incidents | What is the CI failure playbook? | [Ops - CI Failure Playbook](Ops - CI Failure Playbook.md) | "RCA" |
 | Q14 | SLO | What is the target SLO for wiki review? | [Ops - Ownership and Review SLA](Ops - Ownership and Review SLA.md) | "SLA", "Review" |
 | Q15 | Audit | How is capability coverage calculated? | scripts/ops/wiki_capability_coverage_audit.py | "risk_weight", "weighted_score" |
-| Q16 | Schema | What is the [AGENT_SCHEMA](../nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md)? | 99_Schema/[AGENT_SCHEMA](../nexus_wiki_vault/99_Schema/AGENT_SCHEMA.md).md | "schema" |
+| Q16 | Schema | What is the [AGENT_SCHEMA](../99_Schema/AGENT_SCHEMA.md)? | 99_Schema/[AGENT_SCHEMA](../99_Schema/AGENT_SCHEMA.md).md | "schema" |
 | Q17 | Learning | How is learning velocity calculated? | scripts/ops/calc_learning_velocity.py | "velocity", "learning" |
 | Q18 | Sync | How are nodes synchronized? | scripts/ops/start_index_sync_daemon.sh | "scheduler" |
 | Q19 | Provenance | What is a source provenance tag? | [Ops - Artifact Retention and Provenance](Ops - Artifact Retention and Provenance.md) | "source", "provenance", "tag" |

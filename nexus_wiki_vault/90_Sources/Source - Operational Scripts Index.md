@@ -1,20 +1,20 @@
 ---
-aliases: '[Scripts [Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md), Ops Scripts, Engine Scripts]'
+aliases: '[Scripts [Index](../90_Sources/Source Index.md), Ops Scripts, Engine Scripts]'
 confidence: high
 last_compiled: '2026-04-06'
 owner: agent
 related_pages: ''
 source_of_truth: scripts/ops/ci_gate.py
 status: active
-tags: '[source, scripts, ops, engine, [index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)]'
-title: Source - Operational Scripts [Index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)
+tags: '[source, scripts, ops, engine, [index](../90_Sources/Source Index.md)]'
+title: Source - Operational Scripts [Index](../90_Sources/Source Index.md)
 type: source
 version_scope: '[v22, v23]'
 ---
 
 
 
-# Source - Operational Scripts [index](../.nexus/nexus_wiki_vault/.nexus/graph/index.md)
+# Source - Operational Scripts [index](../90_Sources/Source Index.md)
 
 ## One-sentence summary
 本頁索引了 Nexus 系統中所有關鍵的維運 (Ops) 與引擎 (Engine) 腳本，作為自動化任務與治理審計的物理真值入口。 [Source: scripts/ops/ci_gate.py]
