@@ -124,9 +124,23 @@ class AutoResearchNightShift:
         print(f"🏭 [AutoResearch] Factory Initiated | Task: {self.task} | Rounds: {self.max_rounds}")
         
         # 1. Lease Worktree
-        task_id_prefix = f"research-{int(time.time())}-{self.task.replace(' ', '_')}"[:30]
-        branch_prefix = f"audit/{task_id_prefix}"
-        task_id, branch, workpath = self.worktree_mgr.lease(task_id_prefix, branch_prefix)
+        # 🧪 Use high-entropy unique names to avoid collisions in /tmp
+        timestamp = int(time.time())
+        task_id_unique = f"ds-{self.task.replace(' ', '_')[:15]}-{timestamp}"
+        branch_prefix = f"audit/{task_id_unique}"
+        
+        try:
+            # 🛡️ Attempt dynamic lease
+            task_id, branch, workpath = self.worktree_mgr.lease(task_id_unique, branch_prefix)
+        except Exception as e:
+            print(f"❌ [Critical] First lease failed: {e}. Force clearing base research dir...")
+            subprocess.run(["rm", "-rf", "/tmp/codex-workspaces/research"])
+            task_id, branch, workpath = self.worktree_mgr.lease(task_id_unique, branch_prefix)
+
+        if not workpath:
+            print("❌ [Fatal] Could not establish workspace. Terminating.")
+            return
+
         workpath = Path(workpath)
         
         try:
