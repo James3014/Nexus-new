@@ -1,0 +1,14 @@
+{"gen": 0, "fitness": 0.5803, "best_id": "G0-1"}
+{"gen": 1, "fitness": 0.7157, "best_id": "G1-4"}
+{"gen": 2, "fitness": 0.7234, "best_id": "G2-9"}
+{"gen": 3, "fitness": 0.7234, "best_id": "G2-9"}
+{"gen": 4, "fitness": 0.7564, "best_id": "G4-16"}
+{"gen": 5, "fitness": 0.7684, "best_id": "G5-10"}
+{"gen": 6, "fitness": 0.7713, "best_id": "G6-9"}
+{"gen": 7, "fitness": 0.7716, "best_id": "G7-11"}
+{"gen": 8, "fitness": 0.7716, "best_id": "G7-11"}
+{"gen": 9, "fitness": 0.7718, "best_id": "G9-18"}
+{"gen": 10, "fitness": 0.9599, "best_id": "GEN-10-BEST"}
+{"gen": 11, "fitness": 0.849, "best_id": "G11-34", "dna": {"density": 0.2, "spec": 0.87}}
+{"gen": 12, "fitness": 0.814, "best_id": "G12-10", "dna": {"density": 0.2, "spec": 0.82}}
+{"gen": 13, "fitness": 0.82, "best_id": "G13-26", "dna": {"density": 0.32, "spec": 0.88}}

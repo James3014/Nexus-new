@@ -1,0 +1,7 @@
+active_topology:
+  best_id: G11-34
+  dna:
+    density: 0.2
+    spec: 0.87
+  fitness: 0.849
+  gen: 11
