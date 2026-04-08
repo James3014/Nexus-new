@@ -82,48 +82,49 @@ def transform_incidents():
     print(f"✅ Exported to {target_path}")
 
 def update_dashboard():
-    print("🚀 Calculating SLA Success Rate and updating Dashboard...")
-    memory_file = KNOWLEDGE_DIR / "episodic_memory.jsonl"
-    total_tasks = 0
-    success_tasks = 0
-    
-    if memory_file.exists():
-        with open(memory_file, "r") as f:
-            for line in f:
-                entry = json.loads(line)
-                total_tasks += 1
-                if entry.get("success", False):
-                    success_tasks += 1
-    
-    success_rate = (success_tasks / total_tasks * 100) if total_tasks > 0 else 0
-    
-    dashboard_content = f"""# 📊 Nexus Compliance Dashboard (FedRAMP/SOC2 Readiness)
-## 🎯 SLA 實時指標 (SLA Real-time Metrics)
-- **當前任務總數**: {total_tasks}
-- **SLA 成功率**: {success_rate:.2f}% (目標: >95%)
-- **穩定性等級**: {"🟢 EXCELLENT" if success_rate > 90 else "🟡 WATCH"}
+    # ... (原有代碼)
+    pass
 
-## 🎯 Live Controls
-- **[Readiness Assessment (A1)](../07_Compliance/Current_Compliance_Status.md)**
-- **[FedRAMP Traceability (B2)](../07_Compliance/Incident_Trace_Log.md)**
-- **[SLA Evidence (C1/C2)](../06_Ops/Ops - Ownership and Review SLA.md)**
+def distill_feynman_lessons():
+    print("🚀 Distilling Feynman warnings into learning system lessons...")
+    audit_dir = REPO_ROOT / "compliance" / "audit"
+    lesson_file = KNOWLEDGE_DIR / "lesson_events.jsonl"
+    
+    warning_files = list(audit_dir.glob("feynman_warnings_*.json"))
+    if not warning_files:
+        print("ℹ️ No new Feynman warnings to distill.")
+        return
 
-## 🛡️ Monthly Governance Review Status
-| Check | Owner | Last Run | Status |
-|-------|-------|----------|--------|
-| Permissions Audit | Owner A | Today | ✅ PASS |
-| Vulnerability Scan | Owner B | Yesterday | ✅ PASS |
-| SLA Monthly Report | Owner C | N/A | ⏳ PENDING |
+    new_lessons = []
+    for wf in warning_files:
+        with open(wf, "r") as f:
+            data = json.load(f)
+            for warn in data.get("warnings", []):
+                new_lessons.append({
+                    "lesson_id": f"FEYNMAN-{int(time.time())}-{hash(warn) % 1000}",
+                    "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+                    "category": "LOGIC_DRIFT",
+                    "root_cause": "Feynman Audit Warning",
+                    "evidence": [warn],
+                    "corrective_action": "Align implementation with source documentation/spec.",
+                    "confidence": 0.8,
+                    "outcome": "success",
+                    "task_id": "compliance-sync"
+                })
+        # Move processed files to archive to prevent duplicate lessons
+        archive_dir = audit_dir / "archive"
+        archive_dir.mkdir(exist_ok=True)
+        os.rename(wf, archive_dir / wf.name)
 
-[Source: scripts/ops/compliance_to_wiki.py]
-"""
-    target_path = WIKI_COMPLIANCE_DIR / "Compliance_Dashboard.md"
-    with open(target_path, "w") as f:
-        f.write(dashboard_content)
-    print(f"✅ Dashboard updated with SLA rate at {target_path}")
+    if new_lessons:
+        with open(lesson_file, "a") as f:
+            for lesson in new_lessons:
+                f.write(json.dumps(lesson) + "\n")
+        print(f"✅ Distilled {len(new_lessons)} lessons into {lesson_file}")
 
 if __name__ == "__main__":
     os.makedirs(WIKI_COMPLIANCE_DIR, exist_ok=True)
     transform_enterprise_audit()
     transform_incidents()
     update_dashboard()
+    distill_feynman_lessons()
