@@ -65,3 +65,7 @@ version_scope: '[v17.1, v22, v23]'
 - **CLI**: Restored `nexus:status`, `nexus:acceptance-check`, and `nexus:contract-check`.
 - **OPS**: Added `--json` support to `nexus_acceptance_check.py`.
 - **NAS**: v0.7 engine entities integrated into core governance.
+## [2026-04-09] v0.9 Federated Learning Ignition
+- **Phase**: Transition from Meta-Learning (v0.8) to Federated Averaging (v0.9).
+- **Scope**: Multi-tenant DNA aggregation (FedAvg) + Differential Privacy (DP).
+- **Scale**: Target 5000+ virtual swarm nodes.
