@@ -200,10 +200,28 @@ class PlannerPhaseHandler(BasePhaseHandler):
             }
             
             pack_results = generator.generate(compile_in)
+            readability_score = pack_results["audit"]["readability_score"]
+            
+            # ⚖️ [Planner:Handoff] Implementation Readiness Check
+            handoff_readiness = readability_score # 基礎分數來自稽核
+            if not prediction.get("deliverables"): handoff_readiness -= 20
+            if pack_results["audit"]["jargon_count"] > 0: handoff_readiness -= 10
             
             # 啟動帝國 HUD 顯示
             hud = ReadabilityHUD(pack_results["audit"])
             hud.display()
+            
+            if handoff_readiness < 85:
+                msg = f"🛑 [Handoff:REJECTED] Readiness score too low ({handoff_readiness}/100). "
+                msg += "Implementation Pack is incomplete or ambiguous. Interview Required."
+                return {
+                    "intent_pass": False,
+                    "refusal_reason": msg,
+                    "handoff_readiness": handoff_readiness,
+                    "risk_level": "BLOCK"
+                }
+            
+            context["handoff_readiness"] = handoff_readiness
             
         except Exception as e:
             print(f"⚠️ [Compiler:Hook] Failed to generate I-Pack: {e}")
@@ -211,6 +229,7 @@ class PlannerPhaseHandler(BasePhaseHandler):
         return {
             "intent_pass": True,
             "best_node": node_id,
+            "handoff_readiness": context.get("handoff_readiness", 100),
             "risk_score": prediction["risk_score"], 
             "risks": prediction["reasons"], 
             "risk_level": prediction["risk_level"],
