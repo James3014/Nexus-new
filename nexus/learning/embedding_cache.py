@@ -56,15 +56,18 @@ class EmbeddingCache:
         except OSError as exc:
             logging.getLogger(__name__).warning("embedding_cache_save_failed: %s", exc)
 
-    def get_or_compute(self, text: str, model: Any) -> List[float]:
-        # Simple key without hashing the entire string for small inputs
-        key = hashlib.md5(text.encode("utf-8")).hexdigest()
+    def get_or_compute(self, key_id: str, text: str, model: Any) -> List[float]:
+        # Use ID if provided, otherwise MD5 hash of text
+        key = key_id if key_id else hashlib.md5(text.encode("utf-8")).hexdigest()
 
         if key in self.data:
             # For backward compatibility with old cache format [List[float]]
             if isinstance(self.data[key], list):
                 self.data[key] = {"vector": self.data[key], "last_accessed": time.time()}
             else:
+                # Ensure the entry is a dict
+                if not isinstance(self.data[key], dict):
+                    self.data[key] = {"vector": self.data[key], "last_accessed": time.time()}
                 self.data[key]["last_accessed"] = time.time()
                 
             return self.data[key]["vector"]
@@ -73,8 +76,6 @@ class EmbeddingCache:
         vector = model.encode(text).tolist()
         self.data[key] = {"vector": vector, "last_accessed": time.time()}
         
-        # Optionally, save incrementally, or rely on pipeline to save at end
-        # Since this is a light cache, let's just save. The atomic write + LRU handles scaling.
         self.save()
         return vector
 

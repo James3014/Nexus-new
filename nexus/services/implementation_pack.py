@@ -11,6 +11,7 @@ from nexus.services.decision_formula_engine import DecisionFormulaEngine
 from nexus.services.readability_gate import ReadabilityGate
 from nexus.services.wisdom_synthesizer import WisdomSynthesizer
 from nexus.services.mem_palace import MemPalace
+from nexus.services.wisdom_augmenter import WisdomAugmenter
 
 class ImplementationPackGenerator:
     """
@@ -27,29 +28,16 @@ class ImplementationPackGenerator:
         self.impl_dir.mkdir(parents=True, exist_ok=True)
         self.wisdom = WisdomSynthesizer(project_root)
         self.palace = MemPalace(str(project_root))
+        self.augmenter = WisdomAugmenter(project_root)
 
     def generate(self, planner_output: Dict[str, Any]) -> Dict[str, Any]:
         """
-        執行全量編譯與 v25.5 記憶閉環。
+        執行全量編譯、智慧增強與 v25.5 記憶閉環。
         """
         results = {}
-        # ... (解析 SOT, Normalizer, Formula Engine 的邏輯)
-        resolver = SourceOfTruthResolver(self.project_root, self.task_id)
-        sot_map = resolver.resolve()
-        results["sot_map"] = sot_map
-
-        # ... (產出 normalization.json 與 decision_formula.json)
-        norm_artifact = StatusNormalizer.generate_normalization_artifact()
-        with open(self.impl_dir / "state_normalization.json", "w") as f:
-            json.dump(norm_artifact, f, indent=2, ensure_ascii=False)
-
-        formula_engine = DecisionFormulaEngine({})
-        formulas = formula_engine.generate_artifact()
-        with open(self.impl_dir / "decision_formula.json", "w") as f:
-            json.dump(formulas, f, indent=2)
-
-        # 4. 生成實作包主體 (Implementation Pack)
-        i_pack = {
+        
+        # 0. 準備原始數據
+        compile_in = {
             "task_id": self.task_id,
             "tenant_id": self.tenant_id,
             "goal": planner_output.get("goal", "UNDEFINED"),
@@ -61,9 +49,22 @@ class ImplementationPackGenerator:
             "ui_blocks": planner_output.get("ui_blocks", []),
             "commands_to_wire": planner_output.get("commands_to_wire", []),
             "edge_cases": planner_output.get("edge_cases", []),
-            "error_handling": planner_output.get("error_handling", ["Standard Fallback"]),
-            "out_of_scope": planner_output.get("out_of_scope", ["Any unrelated code modification"]),
-            "acceptance_targets": planner_output.get("acceptance_criteria", []),
+            "acceptance_targets": planner_output.get("acceptance_criteria", [])
+        }
+
+        # 1. 🧬 [Wisdom:Augment] 執行歷史經驗自動增強 (最有用的步驟)
+        augmented_pack = self.augmenter.augment_implementation_pack(compile_in)
+        
+        # 2. 執行真值解析 (SOT Resolver)
+        resolver = SourceOfTruthResolver(self.project_root, self.task_id)
+        sot_map = resolver.resolve()
+        results["sot_map"] = sot_map
+
+        # ... (後續流程使用 augmented_pack 而非原始 planner_output)
+        i_pack = {
+            **augmented_pack,
+            "error_handling": ["Standard Fallback"],
+            "out_of_scope": ["Any unrelated code modification"],
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         with open(self.impl_dir / "implementation_pack.json", "w") as f:
