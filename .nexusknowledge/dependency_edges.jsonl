@@ -1,1 +1,2 @@
 {"from_id": "B-RULE-001", "to_id": "A-RULE-001", "type": "depends_on"}
+{"from_id": "B-EXPIRED-001", "to_id": "A-RISKY-001", "type": "depends_on"}

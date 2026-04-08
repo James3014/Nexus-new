@@ -76,3 +76,20 @@ echo " [Latest Reports]"
 ls -t "$REPORTS_DIR"/EXEC_REPORT_*.md 2>/dev/null | head -n 3 | xargs -I {} basename {} | sed 's/^/  - /'
 echo "===================================================="
 echo " (Tip: Use 'watch -n 5 ./STATUS_DASHBOARD.sh' for live view)"
+
+# --- v0.4 Predictive Healing Metrics ---
+echo -e "\n🛡️  [PREDICTIVE HEALING STATUS]"
+echo "---------------------------------------------------------"
+if [ -f ".nexusknowledge/risk_assessments.jsonl" ]; then
+    risk_count=$(wc -l < .nexusknowledge/risk_assessments.jsonl | xargs)
+    echo "Risk Assessments: $risk_count detected"
+else
+    echo "Risk Assessments: 0 detected"
+fi
+
+if [ -f ".nexusknowledge/validation_traces.jsonl" ]; then
+    pass_count=$(grep -c "PASS" .nexusknowledge/validation_traces.jsonl)
+    total_traces=$(wc -l < .nexusknowledge/validation_traces.jsonl | xargs)
+    echo "Healing Success: $pass_count/$total_traces (Success Rate)"
+fi
+echo "---------------------------------------------------------"

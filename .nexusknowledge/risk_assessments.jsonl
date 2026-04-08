@@ -1,0 +1,2 @@
+{"risk_id": "RISK-1775654711.522487", "artifact_id": "A-RISKY-001", "base_belief_id": "B-EXPIRED-001", "belief_status": "superseded", "risk_score": 0.8, "recommendation": "auto_heal", "timestamp": "2026-04-08T21:25:11.522747"}
+{"risk_id": "RISK-1775683568", "artifact_id": "A-RISKY-001", "base_belief_id": "B-EXPIRED-001", "risk_score": 0.8, "recommendation": "auto_heal", "timestamp": "2026-04-08T21:26:08.577796+00:00"}

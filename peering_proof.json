@@ -1,0 +1,7 @@
+{
+  "step": "peering_discover",
+  "p2p_mesh": "Tailscale_Simulation",
+  "active_peers": ["swarm-beta"],
+  "drift_detected": true,
+  "belief_conflicts": ["B-RULE-001"]
+}

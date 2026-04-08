@@ -1,0 +1,1 @@
+{"trace_id": "TRACE-PROP-A-RISKY-001-1775683568", "proposal_id": "PROP-A-RISKY-001-1775683568", "old_metrics": {"success_rate": 0.77}, "new_metrics": {"success_rate": 0.99}, "lift": "29.2%", "status": "PASS", "timestamp": "2026-04-08T21:26:08.578344+00:00"}

@@ -1,0 +1,8 @@
+{
+  "swarm_id": "swarm-alpha",
+  "belief_id": "B-RULE-001",
+  "content_hash": "87e963f97f235bf2c46f581fc7a62230b0a6e1f6e08e47d9f0d406fa28e2daf9",
+  "trust_tier": "unverified",
+  "local_weight": 0.9,
+  "timestamp": "2026-04-08T21:32:51.374691+00:00"
+}

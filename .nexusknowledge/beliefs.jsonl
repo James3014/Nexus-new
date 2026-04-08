@@ -1,1 +1,2 @@
 {"id": "B-RULE-001", "wing": "ENGINE", "room": "IO_STANDARDS", "type": "belief", "content": "external::async::mandatory::timeout.", "layer": 1, "status": "superseded", "timestamp": "2026-04-08T15:00:55.024307", "updated_at": "2026-04-08T15:05:18.419464"}
+{"id": "B-EXPIRED-001", "status": "superseded", "content": "Old path standard"}
