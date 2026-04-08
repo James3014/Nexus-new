@@ -1,9 +1,0 @@
-{"event_id": "evt_start_P_1775603533946", "task_id": "bug-1775603533", "phase": "P", "event_type": "phase_start", "payload": {"name": "P"}, "timestamp": 1775603533.946395, "metadata": {}}
-{"event_id": "evt_dec_1775603533946", "task_id": "bug-1775603533", "phase": "P", "event_type": "decision", "payload": {"decision_id": "dec_p_bug-1775603533_1", "skill_id": "planner"}, "timestamp": 1775603533.946545, "metadata": {}}
-{"event_id": "evt_end_P_1775603533947", "task_id": "bug-1775603533", "phase": "P", "event_type": "phase_end", "payload": {"status": "success"}, "timestamp": 1775603533.9477289, "metadata": {}}
-{"event_id": "evt_start_X_1775603533947", "task_id": "bug-1775603533", "phase": "X", "event_type": "phase_start", "payload": {"name": "X"}, "timestamp": 1775603533.947736, "metadata": {}}
-{"event_id": "evt_dec_1775603533948", "task_id": "bug-1775603533", "phase": "X", "event_type": "decision", "payload": {"decision_id": "dec_x_bug-1775603533_2", "skill_id": "researcher"}, "timestamp": 1775603533.9480672, "metadata": {}}
-{"event_id": "evt_end_X_1775603533949", "task_id": "bug-1775603533", "phase": "X", "event_type": "phase_end", "payload": {"status": "success"}, "timestamp": 1775603533.949357, "metadata": {}}
-{"event_id": "evt_dec_1775603533949", "task_id": "bug-1775603533", "phase": "R", "event_type": "decision", "payload": {"decision_id": "dec_r_bug-1775603533_3", "skill_id": "default-repair"}, "timestamp": 1775603533.949554, "metadata": {}}
-{"event_id": "evt_dec_1775603534471", "task_id": "bug-1775603533", "phase": "A", "event_type": "decision", "payload": {"decision_id": "dec_a_bug-1775603533_4", "skill_id": "audit-review"}, "timestamp": 1775603534.471199, "metadata": {}}
-{"event_id": "evt_dec_1775603534485", "task_id": "bug-1775603533", "phase": "C", "event_type": "decision", "payload": {"decision_id": "dec_c_bug-1775603533_5", "skill_id": "crystallize"}, "timestamp": 1775603534.486014, "metadata": {}}
