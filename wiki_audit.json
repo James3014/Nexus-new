@@ -1,6 +1,6 @@
 {
-  "total": 84,
-  "passed": 84,
+  "total": 88,
+  "passed": 88,
   "failed": 0,
   "waived": 0,
   "expired": 0,
@@ -13,6 +13,12 @@
     },
     {
       "file": "04_State/State - Schemas.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "04_Research/RESEARCH_STATUS_REPORT.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
@@ -223,6 +229,24 @@
     },
     {
       "file": "90_Sources/Source - Coverage Heatmap.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "07_Compliance/Current_Compliance_Status.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "07_Compliance/Incident_Trace_Log.md",
+      "status": "\u2705",
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "file": "07_Compliance/Compliance_Dashboard.md",
       "status": "\u2705",
       "errors": [],
       "warnings": []
