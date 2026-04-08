@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from nexus.core.capability_gate import CapabilityGate
-from scripts.engine.nexus_transaction import TransactionManager
+from nexus.core.nexus_transaction import TransactionManager
 
 logger = logging.getLogger(__name__)
 

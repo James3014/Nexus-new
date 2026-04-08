@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import logging
 from nexus.core.state_contracts import NexusState, AestheticViolation
 from nexus.core.event_bus import NexusEventBus
-from scripts.engine.critique_engine import CritiqueEngine
+from nexus.core.critique_engine import CritiqueEngine
 from nexus.core.xray_observer import XRayObserver
 
 logger = logging.getLogger(__name__)

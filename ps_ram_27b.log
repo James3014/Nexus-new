@@ -1,2 +1,0 @@
- 15376 uv run mlx_lm.server --model /Users/jameschen/nexus/models/27B.gguf --port 8080 --temp 0.1 --max-tokens 4096 --chat-template chat_ml
-358656 /Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /Users/jameschen/Workspace/nexus/.venv/bin/mlx_lm.server --model /Users/jameschen/nexus/models/27B.gguf --port 8080 --temp 0.1 --max-tokens 4096 --chat-template chat_ml

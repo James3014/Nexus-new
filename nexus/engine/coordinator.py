@@ -34,7 +34,7 @@ from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.services.memory import MemoryService
 from nexus.services.continuous_learning import finalize_learning_loop
-from scripts.engine.nexus_transaction import TransactionManager
+from nexus.core.nexus_transaction import TransactionManager
 
 # ⚖️ 治理中心組件 (Governance Matrix)
 from nexus.core.gate_evaluator import GateEvaluator, AcceptancePolicy

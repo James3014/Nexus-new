@@ -621,6 +621,20 @@ Nexus Ultimate Total Atlas Integrated Verbatim (2026-03-27).
 | **WB_TASK_BLOCK_MISSING** | 區塊遺失 | 檢查檔案是否被手動修改導致標記受損 |
 
 <!-- nexus-anchor:governance-hardening -->
+<!-- nexus-writeback:bug-1775603416 -->
+### Auto Writeback: bug-1775603416
+
+- Applied at: `2026-04-08T02:12:25.428965+00:00`
+- Applied by: `startup-gate`
+- Delta artifact: `/Users/jameschen/Workspace/nexus/.nexus/reports/writeback/bug-1775603416_SPEC.delta.md`
+
+# SPEC Delta: bug-1775603416
+
+## Suggested Updates
+- Reflect learning loop outcome from `pipeline.crystallize`.
+- Document root cause: patch_apply_failed
+- Review protocol/startup gate expectations if this task changed delivery behavior.
+<!-- /nexus-writeback:bug-1775603416 -->
 <!-- nexus-writeback:nexus-learn-4 -->
 ### Auto Writeback: nexus-learn-4
 

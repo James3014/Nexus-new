@@ -6,7 +6,7 @@ from datetime import datetime
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
-from scripts.brain_de_entropy import prune_dialogue
+from nexus.core.brain_de_entropy import prune_dialogue
 
 
 from nexus.core.context_compression import ToonRenderer, ContextScorer

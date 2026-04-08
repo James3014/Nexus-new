@@ -55,6 +55,23 @@
 ## 🛠️ 維護與同步
 
 <!-- nexus-anchor:evolution -->
+<!-- nexus-writeback:bug-1775603416 -->
+### Auto Writeback: bug-1775603416
+
+- Applied at: `2026-04-08T02:12:25.426849+00:00`
+- Applied by: `startup-gate`
+- Delta artifact: `/Users/jameschen/Workspace/nexus/.nexus/reports/writeback/bug-1775603416_INDEX.delta.md`
+
+# INDEX Delta: bug-1775603416
+
+- Source: `pipeline.crystallize`
+- Success: `False`
+- Root Cause: patch_apply_failed
+- Pending Writeback: `True`
+
+## Rejection History
+- none
+<!-- /nexus-writeback:bug-1775603416 -->
 <!-- nexus-writeback:nexus-learn-4 -->
 ### Auto Writeback: nexus-learn-4
 

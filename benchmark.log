@@ -1,6 +1,0 @@
-usage: nexus_cli.py [-h] [--silent] [--model-override MODEL_OVERRIDE]
-                    [--bypass-cb] [--output-dir OUTPUT_DIR] [--superpowers]
-                    [--fast] [--audit-level {bypass,standard,strict}]
-                    [--eval-mode] [--dry] [--debug-seq]
-                    {nexus:bug,nexus:test,nexus:feature,nexus:crystal,nexus:benchmark,nexus:clean,nexus:check,nexus:upgrade,nexus:runner,nexus:federate,nexus:debug} ...
-nexus_cli.py: error: unrecognized arguments: --limit 5 --repo sympy --docker nexus-elite-swe

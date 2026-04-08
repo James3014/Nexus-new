@@ -55,7 +55,7 @@ class ArweaveWriter:
 
 async def main():
     # 🧪 Quick sanity test
-    writer = ArweaveWriter(Path("/Users/jameschen/Workspace/nexus"))
+    writer = ArweaveWriter(Path("str(REPO_ROOT)"))
     test_records = [{"drawer_id": "123", "aaak_content": "atom:v1:test"}]
     res = await writer.batch_upload(test_records, tenant_id="nexus_dev")
     print(json.dumps(res, indent=2))

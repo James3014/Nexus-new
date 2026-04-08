@@ -23,7 +23,7 @@ class LeWMPredictor:
             cls._instance.ready = False
         return cls._instance
     
-    def load(self, ckpt_path: str = "/Users/jameschen/Workspace/le-wm/outputs/2026-03-31/19-32-07/lightning_logs/version_0/checkpoints/last.ckpt"):
+    def load(self, ckpt_path: str = "~/Workspace/le-wm/outputs/2026-03-31/19-32-07/lightning_logs/version_0/checkpoints/last.ckpt"):
         """物理加載權重檔案。"""
         if torch is None:
             logger.debug("ℹ️ [JEPA] torch unavailable, falling back to placeholder mode.")

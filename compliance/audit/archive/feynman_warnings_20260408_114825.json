@@ -1,0 +1,10 @@
+{
+  "status": "WARN",
+  "warnings": [
+    "Logical drift: Unresolved TODOs detected in PR diff."
+  ],
+  "source_links": [
+    "https://feynman.is/audit-rule-01"
+  ],
+  "feynman_latency": 2.002716064453125e-05
+}

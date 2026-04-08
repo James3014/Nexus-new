@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class DomainFirewall:
     """🛡️ Nexus v25.5 Domain-based Tool Firewall with BaseSkill mitigation."""
-    def __init__(self, tactical_map_path: str = '/Users/jameschen/Workspace/nexus/nexus/config/tactical_map.json'):
+    def __init__(self, tactical_map_path: str = 'str(REPO_ROOT)/nexus/config/tactical_map.json'):
         try:
             with open(tactical_map_path, 'r') as f:
                 self.map = json.load(f)
@@ -30,7 +30,7 @@ class SkillsRouter:
         self.project_root = project_root
         self.run_dir = run_dir or project_root
         self.firewall = DomainFirewall()
-        from scripts.engine.critique_engine import critique
+        from nexus.core.critique_engine import critique
         self.critique = critique
         from nexus.core.p_loop_manager import PLoopManager
         self.p_loop = PLoopManager()

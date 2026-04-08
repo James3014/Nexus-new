@@ -47,5 +47,5 @@ class TenantIOPSMonitor:
         }
 
 if __name__ == "__main__":
-    monitor = TenantIOPSMonitor(Path("/Users/jameschen/Workspace/nexus/.nexus/tenants"))
+    monitor = TenantIOPSMonitor(Path("str(REPO_ROOT)/.nexus/tenants"))
     print(monitor.get_status())

@@ -87,6 +87,6 @@ class CrystalAnalyzer:
             print("ℹ️ [Crystal] No significant experience update needed.")
 
 if __name__ == "__main__":
-    _DEFAULT_ROOT = os.getenv("NEXUS_PROJECT_ROOT", "/Users/jameschen/Downloads/Muse-Nexus")
+    _DEFAULT_ROOT = os.getenv("NEXUS_PROJECT_ROOT", "~/Downloads/Muse-Nexus")
     analyzer = CrystalAnalyzer(_DEFAULT_ROOT)
     analyzer.analyze()

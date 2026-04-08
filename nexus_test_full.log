@@ -1,5 +1,0 @@
-warning: No `requires-python` value found in the workspace. Defaulting to `>=3.12`.
-Usage: nexus_cli.py [OPTIONS] COMMAND [ARGS]...
-Try 'nexus_cli.py --help' for help.
-
-Error: No such command 'test'.

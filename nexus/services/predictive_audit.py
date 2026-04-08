@@ -16,7 +16,7 @@ class PredictiveAuditor:
     against synthesized Wisdom Rules in LanceDB.
     """
     
-    def __init__(self, project_root: str = "/Users/jameschen/Workspace/nexus"):
+    def __init__(self, project_root: str = "str(REPO_ROOT)"):
         self.project_root = Path(project_root)
         self.db_path = self.project_root / ".nexus/memory/memory_index.lancedb"
         

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class MemPalace:
     """🏰 Nexus v26.0 L1 Memory Palace & Ethical Firewall. (Refactored)"""
     
-    def __init__(self, project_root: str = "/Users/jameschen/Workspace/nexus", 
+    def __init__(self, project_root: str = "str(REPO_ROOT)", 
                  storage: MemoryStorage = None, 
                  cache: CacheStore = None):
         self.project_root = Path(project_root)

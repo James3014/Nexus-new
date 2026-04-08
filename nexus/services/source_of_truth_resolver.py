@@ -61,7 +61,7 @@ class SourceOfTruthResolver:
 
 if __name__ == "__main__":
     # 測試
-    root = Path("/Users/jameschen/Workspace/nexus")
+    root = Path("str(REPO_ROOT)")
     tid = "test-task-001"
     resolver = SourceOfTruthResolver(root, tid)
     print(json.dumps(resolver.resolve(), indent=2))

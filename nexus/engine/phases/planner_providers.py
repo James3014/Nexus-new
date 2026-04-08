@@ -19,7 +19,7 @@ class SpecCompilerProvider(Protocol):
 
 class DefaultIntentProvider:
     def classify(self, task: str) -> Dict[str, Any]:
-        from scripts.engine.intent_classifier import IntentClassifier
+        from nexus.services.intent_classifier import IntentClassifier
         return IntentClassifier().classify(task)
 
 class DefaultDependencyProvider:
