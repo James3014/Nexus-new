@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
+from nexus.models.enums import TaskType, RiskLevel
 
 class PlannerResult(BaseModel):
     intent_pass: bool
@@ -8,7 +9,7 @@ class PlannerResult(BaseModel):
     handoff_readiness: float = 100.0
     risk_score: float = 0.0
     risks: List[str] = Field(default_factory=list)
-    risk_level: str = "LOW"
+    risk_level: RiskLevel = RiskLevel.LOW
     tokens_used: int = 0
     refusal_reason: Optional[str] = None
 
@@ -16,7 +17,7 @@ class ImplementationPackSchema(BaseModel):
     task_id: str
     tenant_id: str = "default"
     goal: str
-    task_type: str = "fullstack"
+    task_type: TaskType = TaskType.FULLSTACK
     deliverables: List[str] = Field(default_factory=list)
     files_to_modify: List[str] = Field(default_factory=list)
     files_to_create: List[str] = Field(default_factory=list)

@@ -121,16 +121,29 @@ def _run_governance_gate(*, dry_run: bool = True, wiki_drift_enforce_level: str 
     _log_perf_span("ops.subprocess.gate", t0, t1, "NEXUS_SYSTEM_GATE", {"exit_code": res.returncode})
     return int(getattr(res, "returncode", 1))
 
-# 📦 [Modular CLI] Command Registration
+# 📦 [Modular CLI] Command Registration (Hardened v2)
 from nexus.cli.commands.core import status, probe, benchmark, learning_sync, closeout
 from nexus.cli.commands.memory import memory_group
+from nexus.cli.commands.health import health_group
+from nexus.cli.commands.wisdom import wisdom_group
+from nexus.cli.commands.guard import guard_group
+from nexus.cli.commands.healing import healing_group
+from nexus.cli.commands.swarm import swarm_group
+from nexus.cli.commands.swarm_v2 import swarm_v2_group
 
 nexus.add_command(status, name="nexus:status")
 nexus.add_command(probe, name="nexus:probe")
 nexus.add_command(benchmark, name="nexus:benchmark")
 nexus.add_command(learning_sync, name="nexus:learning-sync")
 nexus.add_command(closeout, name="nexus:closeout")
+
 nexus.add_command(memory_group, name="nexus:memory")
+nexus.add_command(health_group, name="nexus:health")
+nexus.add_command(wisdom_group, name="nexus:wisdom")
+nexus.add_command(guard_group, name="nexus:guard")
+nexus.add_command(healing_group, name="nexus:healing")
+nexus.add_command(swarm_group, name="nexus:swarm")
+nexus.add_command(swarm_v2_group, name="nexus:swarm_v2")
 
 if __name__ == "__main__":
     nexus()

@@ -19,7 +19,7 @@ class ImplementationPackGenerator:
     Nexus vNext 編譯器核心：將 P-Phase 產物轉化為硬性施工包。
     """
 
-    def __init__(self, project_root: Path, task_id: str, tenant_id: str = "default"):
+    def __init__(self, project_root: Path, task_id: str, tenant_id: str = "default", augmenter: WisdomAugmenter = None):
         self.project_root = project_root
         self.task_id = task_id
         self.tenant_id = tenant_id
@@ -28,7 +28,7 @@ class ImplementationPackGenerator:
         self.impl_dir.mkdir(parents=True, exist_ok=True)
         self.wisdom = WisdomSynthesizer(project_root)
         self.palace = MemPalace(str(project_root))
-        self.augmenter = WisdomAugmenter(project_root)
+        self.augmenter = augmenter or WisdomAugmenter(project_root)
 
     def generate(self, planner_output: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -52,8 +52,12 @@ class ImplementationPackGenerator:
             "acceptance_targets": planner_output.get("acceptance_criteria", [])
         }
 
-        # 1. 🧬 [Wisdom:Augment] 執行歷史經驗自動增強 (最有用的步驟)
-        augmented_pack = self.augmenter.augment_implementation_pack(compile_in)
+        # 1. 🧬 [Wisdom:Augment] 執行歷史經驗自動增強 (可選解耦路徑)
+        if self.augmenter:
+            augmented_pack = self.augmenter.augment_implementation_pack(compile_in)
+        else:
+            augmented_pack = compile_in
+            logger.info("ℹ️ [Wisdom:Skip] Augmenter is disabled.")
         
         # 2. 執行真值解析 (SOT Resolver)
         resolver = SourceOfTruthResolver(self.project_root, self.task_id)
@@ -117,7 +121,7 @@ class ImplementationPackGenerator:
 if __name__ == "__main__":
     # 測試
     import sys
-    root = Path("/Users/jameschen/Workspace/nexus")
+    root = Path("str(REPO_ROOT)")
     tid = "test-task-001" # 需確保目錄存在
     
     # 模擬 Planner 輸出
