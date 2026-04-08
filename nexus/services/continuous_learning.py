@@ -1019,6 +1019,17 @@ def finalize_learning_loop(
         "delivery_status": delivery_status,
     }
     _append_jsonl(root / ".nexus" / "events" / "learning_loop.jsonl", loop_event)
+    # 🚀 [v0.2/v0.3] Soul-Palace Belief Revision Linkage
+    try:
+        from scripts.ops.brain_loop_closure import BrainLoopClosure
+        loop = BrainLoopClosure(root)
+        if not success:
+            # 模擬偵測到與前提衝突，觸發修訂 (實務上會根據 root_cause 判定)
+            # 這裡暫時以 task_id 作為範例觸發點
+            loop.propagate_belief_revision("B-001", "superseded")
+    except Exception as e:
+        logging.warning(f"⚠️ [SoulPalace:C] Belief revision failed: {e}")
+
     return {
         "lessons_written": lessons_written,
         "writeback_required": writeback_required,

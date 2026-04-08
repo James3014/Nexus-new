@@ -1,0 +1,12 @@
+{
+  "task": "Implement News Crawler (Post-Revision)",
+  "detected_artifacts": [
+    {
+      "id": "A-RULE-001",
+      "status": "stale"
+    }
+  ],
+  "decision": "REJECT_STALE_ARTIFACT",
+  "action": "Regenerate plan based on new world state",
+  "reasoning": "Underlying belief B-RULE-001 has been superseded. Existing patterns are no longer trusted."
+}

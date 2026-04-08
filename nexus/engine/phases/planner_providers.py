@@ -34,15 +34,24 @@ class DefaultDependencyProvider:
 
 class DefaultRAGProvider:
     def inject_context(self, task: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """🚀 [v0.3] Hierarchical Soul-Palace Injection"""
         try:
+            from scripts.ops.soul_palace_engine import SoulPalaceEngine
+            palace = SoulPalaceEngine()
+            
+            # 1. Retrieve High-Density Soul Stack (L0-L2)
+            soul_context = palace.retrieve_context(task)
+            context["soul_palace_context"] = soul_context
+            
+            # 2. Traditional Vector RAG (L3 Deep Search / Lessons)
             from nexus.core.vector_rag import VectorRAG
             rag = VectorRAG()
             hits = rag.query(task, k=5)
             block = rag.format_for_prompt(hits)
             if block:
                 context["experience_context"] = block
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ [SoulPalace:P] Injection failed: {e}")
         return context
 
 class DefaultSpecCompilerProvider:

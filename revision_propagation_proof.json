@@ -1,0 +1,8 @@
+{
+  "belief_id": "B-RULE-001",
+  "new_status": "superseded",
+  "affected_artifact": "A-RULE-001",
+  "artifact_new_status": "stale",
+  "stale_reason": "Underlying belief B-RULE-001 became superseded",
+  "lineage": "B-RULE-001 -> dependency_edges -> A-RULE-001"
+}

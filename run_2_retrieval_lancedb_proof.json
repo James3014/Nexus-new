@@ -1,0 +1,11 @@
+{
+  "step": "retrieval_lancedb",
+  "lancedb_query": "async mandatory timeout",
+  "record_id": "lance-B-1775631655.024291",
+  "similarity_distance": 0.7972208857536316,
+  "trust_tier": "verified",
+  "wing": "CODE",
+  "room": "GENERAL",
+  "content_aaak": "external::async::mandatory::timeout.",
+  "ingest_timestamp": "2026-04-08T15:00:55.024307"
+}

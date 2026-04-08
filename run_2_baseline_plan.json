@@ -1,0 +1,9 @@
+{
+  "task": "Implement News Crawler",
+  "plan": [
+    "1. Use requests.get to fetch headlines",
+    "2. Parse content with BeautifulSoup",
+    "3. Save to local storage"
+  ],
+  "soul_palace_injected": false
+}

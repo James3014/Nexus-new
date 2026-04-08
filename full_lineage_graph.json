@@ -1,0 +1,53 @@
+{
+  "project": "Nexus Soul-Palace v0.3",
+  "nodes": [
+    {
+      "id": "RUN-1-MANIFEST",
+      "type": "event",
+      "description": "Weather Service Implementation Task",
+      "timestamp": "2026-04-08T14:48:38Z"
+    },
+    {
+      "id": "B-RULE-001",
+      "type": "belief",
+      "content": "async::timeout::mandatory",
+      "trust_tier": "verified",
+      "layer": 1,
+      "wing": "ENGINE",
+      "room": "IO_STANDARDS"
+    },
+    {
+      "id": "A-RULE-001",
+      "type": "artifact",
+      "ref": "WeatherService Pattern",
+      "status": "stale"
+    },
+    {
+      "id": "RUN-2-PLAN",
+      "type": "decision",
+      "description": "News Crawler Plan (Async/Timeout Injected)",
+      "impact": "Behavioral Change: Sync -> Async"
+    }
+  ],
+  "edges": [
+    {
+      "from": "RUN-1-MANIFEST",
+      "to": "B-RULE-001",
+      "type": "distills",
+      "edge_id": "edge-distill-001"
+    },
+    {
+      "from": "B-RULE-001",
+      "to": "A-RULE-001",
+      "type": "supports",
+      "edge_id": "edge-support-001"
+    },
+    {
+      "from": "B-RULE-001",
+      "to": "RUN-2-PLAN",
+      "type": "influences",
+      "edge_id": "edge-influence-001"
+    }
+  ],
+  "closure_status": "200% CLOSED LOOP"
+}

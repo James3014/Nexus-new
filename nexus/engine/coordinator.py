@@ -428,6 +428,15 @@ class NexusEngine:
             import json
             f.write(json.dumps(payload) + "\n")
             
+        # 🚀 [v0.3] Soul-Palace Auto-Archiving
+        try:
+            from scripts.ops.soul_palace_engine import SoulPalaceEngine
+            palace = SoulPalaceEngine(self.project_root)
+            artifact_content = f"Task {payload.get('task_id')} ({payload.get('skill_id')}): Result={payload.get('passed')}"
+            palace.store_knowledge("artifact", artifact_content, layer=2)
+        except Exception as e:
+            logger.warning(f"⚠️ [SoulPalace:A] Archiving failed: {e}")
+
         # 2. 通知 Reporter/Hub
         self.reporter.report_outcome(payload)
         logger.info("💎 [Crystallize] Outcome persisted for task: %s", payload.get("decision_id"))

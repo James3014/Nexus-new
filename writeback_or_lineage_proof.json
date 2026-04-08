@@ -1,0 +1,1 @@
+{"lineage_type": "DependencyGraph", "trace": "B-RULE-001 [superseded] -> Edge [depends_on] -> A-RULE-001 [stale]"}

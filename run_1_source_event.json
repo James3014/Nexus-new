@@ -1,0 +1,6 @@
+{
+  "task_id": "RUN-1-WEATHER",
+  "action": "implement_io",
+  "decision": "Establish Engineering Standard: All external I/O MUST use async with 5s timeout.",
+  "context": "Standardizing Nexus high-performance core."
+}

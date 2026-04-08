@@ -1,0 +1,9 @@
+{
+  "query": "Implement a News Crawler service to fetch daily headlines.",
+  "hit_type": "SoulPalace_Belief",
+  "hit_id": "B-RULE-001",
+  "content_raw": "external::async::mandatory::timeout.",
+  "layer": 1,
+  "wing": "ENGINE",
+  "room": "IO_STANDARDS"
+}
