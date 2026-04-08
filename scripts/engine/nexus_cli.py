@@ -69,5 +69,37 @@ def topology_live():
     with open(conf_path, "r") as f:
         click.echo(yaml.dump(yaml.safe_load(f), default_flow_style=False))
 
+@nexus.command(name="meta-init")
+def meta_init():
+    """🧬 [v0.8] Meta-Learning: Initialize Meta-Optimizer & 128-dim DNA"""
+    from scripts.ops.evolution_engine import EvolutionEngine
+    engine = EvolutionEngine(REPO_ROOT)
+    result = engine.meta_init()
+    click.echo(f"🚀 v0.8 Meta-Learning Initialized.")
+    click.echo(f"📊 DNA Expansion: {result['dna_dim']} dimensions.")
+    click.echo(f"🎯 Fitness Target: {result['target_fitness']}+")
+
+@nexus.command(name="meta-run")
+@click.option("--count", default=128, help="Population size for meta-evolution.")
+def meta_run(count):
+    """🚀 [v0.8] Meta-Evolve: Run 128-dim DNA Evolution"""
+    from scripts.ops.evolution_engine_v08 import EvolutionEngineV08
+    engine = EvolutionEngineV08(REPO_ROOT)
+    best = engine.meta_evolve(count=count)
+    click.echo(f"🧬 [v0.8 Meta-NAS] Gen {best['gen']} Evolved.")
+    click.echo(f"🏆 Fitness Score: {best['fitness']} (Meta-Optimized)")
+    click.echo(f"🧪 Meta-Mutation Rate: {best['meta_params']['mutation_rate']:.4f}")
+
+@nexus.command(name="meta-deploy")
+def meta_deploy():
+    """💎 [v0.8] Meta-Deploy: Lock-in 0.98+ Fitness Topology"""
+    from scripts.ops.evolution_engine_v08 import EvolutionEngineV08
+    engine = EvolutionEngineV08(REPO_ROOT)
+    # 讀取最後一筆 meta 紀錄
+    with open(REPO_ROOT / "evolution_traces.jsonl", "r") as f:
+        best = json.loads(f.readlines()[-1])
+    engine.deploy_v08(best)
+    click.echo(f"🚀 v0.8 Topology LOCKED. Best ID: {best['best_id']}")
+
 if __name__ == "__main__":
     nexus()

@@ -12,3 +12,6 @@
 {"gen": 11, "fitness": 0.849, "best_id": "G11-34", "dna": {"density": 0.2, "spec": 0.87}}
 {"gen": 12, "fitness": 0.814, "best_id": "G12-10", "dna": {"density": 0.2, "spec": 0.82}}
 {"gen": 13, "fitness": 0.82, "best_id": "G13-26", "dna": {"density": 0.32, "spec": 0.88}}
+{"gen": 14, "version": "v0.8", "fitness": 0.5733, "best_id": "v0.8-G14-114", "meta_params": {"mutation_rate": 0.045000000000000005, "dna_dim": 128}, "timestamp": "2026-04-08T22:47:35.690263+00:00"}
+{"gen": 15, "version": "v0.8", "fitness": 0.5298, "best_id": "v0.8-G15-33", "meta_params": {"mutation_rate": 0.045000000000000005, "dna_dim": 128}, "timestamp": "2026-04-08T22:47:35.918649+00:00"}
+{"gen": 16, "version": "v0.8", "fitness": 0.5548, "best_id": "v0.8-G16-13", "meta_params": {"mutation_rate": 0.045000000000000005, "dna_dim": 128}, "timestamp": "2026-04-08T22:49:20.245608+00:00"}

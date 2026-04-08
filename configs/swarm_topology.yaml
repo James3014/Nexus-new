@@ -1,7 +1,9 @@
 active_topology:
-  best_id: G11-34
-  dna:
-    density: 0.2
-    spec: 0.87
-  fitness: 0.849
-  gen: 11
+  best_id: v0.8-G16-13
+  fitness: 0.5548
+  gen: 16
+  meta_params:
+    dna_dim: 128
+    mutation_rate: 0.045000000000000005
+  timestamp: '2026-04-08T22:49:20.245608+00:00'
+  version: v0.8
