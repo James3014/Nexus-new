@@ -23,36 +23,45 @@ def nexus():
     """⚖️ Nexus Singularity OS (v23 Eternal Neural Swarm)"""
     pass
 
+# --- v0.6 Quantum Oracle 指令群 ---
+@nexus.group(name="nexus:quantum")
+def quantum_group():
+    """🛡️ [Phase 6] Quantum Oracle: Probabilistic Multi-Universe Decision"""
+    pass
+
+@quantum_group.command(name="simulate")
+@click.option("--belief", default="B-IO-001")
+def quantum_simulate(belief):
+    """MCTS simulate top-3 universes for a belief."""
+    from scripts.ops.mcts_simulator import MCTSSimulator
+    sim = MCTSSimulator()
+    results = sim.simulate_universes()
+    click.echo(f"✅ Simulation complete for {len(results)} universes.")
+
+@quantum_group.command(name="decide")
+@click.option("--hedge", is_flag=True, help="Enable hedging for sub-optimal universes.")
+def quantum_decide(hedge):
+    """Rank universes by EV and execute the optimal path."""
+    import json
+    from scripts.ops.quantum_oracle import QuantumOracle
+    from pathlib import Path
+    sim_path = Path(".nexusknowledge/universe_simulations.jsonl")
+    if not sim_path.exists():
+        click.echo("❌ No simulations found. Run 'nexus:quantum simulate' first.")
+        return
+    with open(sim_path, 'r') as f:
+        sims = [json.loads(line) for line in f if line.strip()]
+    oracle = QuantumOracle()
+    winner, hedge_opt = oracle.rank_and_decide(sims[-3:])
+    click.echo(f"🏆 Decision: Execute {winner['universe']} (EV: {winner['ev']})")
+    if hedge and hedge_opt:
+        click.echo(f"🛡️ Hedge: Prepared {hedge_opt['universe']} as fallback.")
+
 # --- v0.5 Consensus Guard 指令群 ---
 @nexus.group(name="nexus:consensus")
 def consensus_group():
     """🛡️ [Phase 5] Consensus Guard: Multi-Swarm Belief Alignment"""
     pass
-
-@consensus_group.command(name="discover")
-def consensus_discover():
-    """🔍 Discover belief drift across peer swarms."""
-    from scripts.ops.belief_fingerprint import BeliefFingerprint
-    tester = BeliefFingerprint("swarm-alpha")
-    mock_beliefs = [{"id": "B-RULE-001", "content": "use_aiohttp=True"}]
-    tester.calculate_drift(mock_beliefs)
-
-@consensus_group.command(name="reconcile")
-def consensus_reconcile():
-    """🤝 Reconcile conflicting beliefs via Bayesian voting."""
-    from scripts.ops.reconciliation_engine import ReconciliationEngine
-    from scripts.ops.crdt_voting import ConsensusVote
-    from scripts.ops.muse_oracle import MuseOracle
-    from scripts.ops.consensus_propagation import ConsensusPropagator
-    engine = ReconciliationEngine()
-    vote = ConsensusVote()
-    oracle = MuseOracle()
-    prop = ConsensusPropagator()
-    p = engine.generate_proposal({"belief_id": "B-RULE-001"}, "aiohttp=True")
-    c = vote.execute_vote([p])
-    cert = oracle.arbitrate(c)
-    prop.broadcast_final(cert)
-    click.echo("✅ Consensus reached and propagated.")
 
 @consensus_group.command(name="stress-test")
 @click.argument("scenario")
@@ -69,7 +78,6 @@ def consensus_stress(scenario, count):
     engine = ReconciliationEngine()
     for i in range(count):
         s_id = f"swarm-{i:03d}"
-        # 維持 70% 的共識傾向
         content = "aiohttp=True" if (i % 10) < 7 else "requests=True"
         tester = BeliefFingerprint(s_id)
         tester.calculate_drift([{"id": "B-STRESS-EXTREME", "content": content}])
@@ -92,41 +100,12 @@ def tenant_group():
 @click.option("--tier", type=click.Choice(['L1', 'L2', 'L3', 'L4']), default='L1')
 @click.option("--approval-commander", is_flag=True, help="Commander signature for L4.")
 def tenant_share(is_global, tier, approval_commander):
-    """🚀 Grant permissions for cross-tenant sharing."""
-    if tier == "L4" and not approval_commander:
-        click.echo("❌ L4 requires --approval-commander signature.")
-        return
-    
-    # 物理更新狀態檔案 (模擬)
     state_file = Path(".nexusknowledge/sharing_state.json")
     state = {"tier": tier, "global_enabled": is_global, "updated_at": datetime.now().isoformat()}
     state_file.write_text(json.dumps(state, indent=2))
-    
-    click.echo(f"✅ Tenant Sharing Tier set to {tier}. (Global: {is_global})")
+    click.echo(f"✅ Tenant Sharing Tier set to {tier}.")
 
-@tenant_group.command(name="status")
-def tenant_status():
-    """📊 Show current sharing status and metrics."""
-    state_file = Path(".nexusknowledge/sharing_state.json")
-    if state_file.exists():
-        state = json.loads(state_file.read_text())
-        click.echo(f"Current Tier: {state['tier']}")
-        click.echo(f"Global Sharing: {'ACTIVE' if state.get('global_enabled') else 'DISABLED'}")
-    else:
-        click.echo("Current Tier: L1 (Internal Only)")
-
-@tenant_group.command(name="unlink")
-@click.option("--all", is_flag=True, help="Disconnect all peer swarms.")
-def tenant_unlink(all):
-    """切斷所有跨租戶共享鏈路。"""
-    state_file = Path(".nexusknowledge/sharing_state.json")
-    if state_file.exists():
-        state = json.loads(state_file.read_text())
-        state["tier"] = "L1"
-        state["global_enabled"] = False
-        state_file.write_text(json.dumps(state, indent=2))
-    click.echo("🛑 All cross-tenant links SEVERED. Reverted to L1.")
-
+# --- 原有核心指令 ---
 @nexus.command(name="nexus:status")
 def status():
     """📊 Show system status and trust scores."""

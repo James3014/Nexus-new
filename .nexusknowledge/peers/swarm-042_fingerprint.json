@@ -1,8 +1,8 @@
 {
-  "swarm_id": "swarm-015",
+  "swarm_id": "swarm-042",
   "belief_id": "B-STRESS-EXTREME",
   "content_hash": "441303f913596c1a6273390c20964159425a7715aeda632d76d9fc139f3e3494",
   "trust_tier": "unverified",
   "local_weight": 0.9,
-  "timestamp": "2026-04-08T21:58:26.031807+00:00"
+  "timestamp": "2026-04-08T21:58:26.067639+00:00"
 }

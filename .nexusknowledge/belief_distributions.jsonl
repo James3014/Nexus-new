@@ -1,0 +1,1 @@
+{"belief_id": "B-IO-001", "universes": [{"choice": "aiohttp", "prob": 0.8133, "status": "simulated"}, {"choice": "requests", "prob": 0.1838, "status": "simulated"}, {"choice": "custom_socket", "prob": 0.0029, "status": "simulated"}], "timestamp": "2026-04-08T21:53:38.681404+00:00", "model": "Dirichlet-Prior-v1"}

@@ -1,0 +1,6 @@
+{"belief_id": "B-IO-001", "universe": "aiohttp", "mcts_metrics": {"latency_ms": 110, "success_rate": 0.98, "compute_cost": 0.4102836131105072}, "timestamp": "2026-04-08T21:55:14.747162+00:00"}
+{"belief_id": "B-IO-001", "universe": "requests", "mcts_metrics": {"latency_ms": 400, "success_rate": 0.85, "compute_cost": 0.27703161750675465}, "timestamp": "2026-04-08T21:55:14.747457+00:00"}
+{"belief_id": "B-IO-001", "universe": "custom_socket", "mcts_metrics": {"latency_ms": 148, "success_rate": 0.92, "compute_cost": 0.24390404398239574}, "timestamp": "2026-04-08T21:55:14.747468+00:00"}
+{"belief_id": "B-IO-001", "universe": "aiohttp", "mcts_metrics": {"latency_ms": 96, "success_rate": 0.98, "compute_cost": 0.34708525471599394}, "timestamp": "2026-04-08T21:57:54.453853+00:00"}
+{"belief_id": "B-IO-001", "universe": "requests", "mcts_metrics": {"latency_ms": 480, "success_rate": 0.85, "compute_cost": 0.22418394195454527}, "timestamp": "2026-04-08T21:57:54.454035+00:00"}
+{"belief_id": "B-IO-001", "universe": "custom_socket", "mcts_metrics": {"latency_ms": 129, "success_rate": 0.92, "compute_cost": 0.3724174921346143}, "timestamp": "2026-04-08T21:57:54.454045+00:00"}
