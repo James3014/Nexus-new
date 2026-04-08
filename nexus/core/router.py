@@ -25,12 +25,15 @@ class DomainFirewall:
         return skill_id in quadrant.get("skills", [])
 
 class SkillsRouter:
-    """🔀 Nexus v25.5 Hardened Fusion Router."""
-    def __init__(self, project_root: str):
+    """🔀 Nexus v26.0 General Contractor Hardened Router."""
+    def __init__(self, project_root: str, run_dir: str = None):
         self.project_root = project_root
+        self.run_dir = run_dir or project_root
         self.firewall = DomainFirewall()
         from scripts.engine.critique_engine import critique
         self.critique = critique
+        from nexus.core.p_loop_manager import PLoopManager
+        self.p_loop = PLoopManager()
 
     def memory_route(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """🚀 [Phase 36] 戰甲融合核心：領域 + 倫理 + 計費"""
@@ -50,4 +53,12 @@ class SkillsRouter:
         if not self.firewall.authorize(skill_id, current_domain):
             return {"status": "FORBIDDEN", "reason": f"Skill {skill_id} unauthorized for {current_domain}"}
 
-        return {"status": "SUCCESS", "mode": "dual", "results": []}
+        # [Phase 36.5-7] HUD Label & Evidence Pointer & Negative Lessons
+        return {
+            "status": "SUCCESS", 
+            "mode": "dual", 
+            "p_phase": self.p_loop.current_phase.value,
+            "hud": self.p_loop.get_hud_status(),
+            "negative_lessons": self.p_loop.session_failures,
+            "results": []
+        }

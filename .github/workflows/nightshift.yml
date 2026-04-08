@@ -19,16 +19,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Dependencies
+      - name: Install Dependencies 🛠️
         run: |
           pip install uv
-          uv pip install --system pandas matplotlib pydantic gitpython
+          uv sync --frozen --no-dev
+          echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
 
       - name: Execute Swarm AutoResearch 🐝
         run: |
-          python3 scripts/nightshift.py --tasks "cors,hydration,redis" --max_rounds 20 --swarm --workers 4
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          uv run python scripts/nightshift.py --tasks "cors,hydration,redis" --max_rounds 20 --swarm --workers 4
         env:
           MUSE_RUN_CODEX_LOOP: 1
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate Visualization 📊
         run: |

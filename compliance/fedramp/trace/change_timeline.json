@@ -1,0 +1,157 @@
+[
+  {
+    "artifact": "acceptance_check.md",
+    "timestamp": "2026-04-08T11:10:11.958237",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "acceptance_check.json",
+    "timestamp": "2026-04-08T11:10:11.958055",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_eval_report.json",
+    "timestamp": "2026-04-08T11:09:41.365568",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_writeback_report.json",
+    "timestamp": "2026-04-08T11:09:41.304326",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_capability_coverage_report.json",
+    "timestamp": "2026-04-08T11:09:41.251921",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_drift_report.json",
+    "timestamp": "2026-04-08T11:09:41.178218",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "enterprise_audit.json",
+    "timestamp": "2026-04-08T11:09:40.458088",
+    "category": "Audit Report"
+  },
+  {
+    "artifact": "writeback_todo.json",
+    "timestamp": "2026-04-08T10:12:25.432079",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "closeout_status.json",
+    "timestamp": "2026-04-07T12:53:12.256926",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_invoke_report.json",
+    "timestamp": "2026-04-07T12:48:51.981598",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_slo_history.jsonl",
+    "timestamp": "2026-04-06T09:17:59.446236",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_slo_snapshot.json",
+    "timestamp": "2026-04-06T09:17:59.446036",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_owner_report.json",
+    "timestamp": "2026-04-06T09:17:59.227145",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_link_report.json",
+    "timestamp": "2026-04-06T09:17:59.127925",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_truth_claims_report.json",
+    "timestamp": "2026-04-06T09:17:58.989316",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_keypath_coverage_report.json",
+    "timestamp": "2026-04-06T09:17:58.781688",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_coverage_report.json",
+    "timestamp": "2026-04-06T09:17:58.781511",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "wiki_changelog_draft.md",
+    "timestamp": "2026-04-06T09:09:37.058519",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "v23_1_stabilization_final.md",
+    "timestamp": "2026-04-05T23:41:23.637017",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "v23_1_docsync_report.md",
+    "timestamp": "2026-04-05T23:41:23.636846",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "v23_1_healing_precision.md",
+    "timestamp": "2026-04-05T23:40:35.311154",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "v23_1_guard_backtest.md",
+    "timestamp": "2026-04-05T23:40:16.352063",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "v23_1_learning_backtest.md",
+    "timestamp": "2026-04-05T23:39:52.488311",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "v23_1_regression_check.md",
+    "timestamp": "2026-04-05T23:39:10.571197",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "acceptance_check.json.bak",
+    "timestamp": "2026-04-02T18:30:16.595794",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "Phase3_Final_Cert.md",
+    "timestamp": "2026-03-31T13:29:15.686953",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "observation_window_report.md",
+    "timestamp": "2026-03-31T12:03:57.693186",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "audit_integrity_report.md",
+    "timestamp": "2026-03-30T21:08:45.139586",
+    "category": "Audit Report"
+  },
+  {
+    "artifact": "learning_gate_stage1_report_final.md",
+    "timestamp": "2026-03-30T19:46:57.460127",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "soak_test_stage1.log",
+    "timestamp": "2026-03-30T19:07:05.947012",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "learning_gate_stage1_report.md",
+    "timestamp": "2026-03-30T18:08:01.162085",
+    "category": "Operational Report"
+  }
+]

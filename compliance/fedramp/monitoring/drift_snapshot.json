@@ -1,0 +1,6 @@
+{
+  "drift_rate": 1.0,
+  "policy_hit_rate": 0.0,
+  "samples": 50,
+  "residue_verification": "CLEAN"
+}

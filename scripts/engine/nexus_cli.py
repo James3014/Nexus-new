@@ -6,10 +6,10 @@ import click
 import asyncio
 import time
 import subprocess
+import traceback
 from typing import Dict, Any, List
 from pathlib import Path
 from datetime import datetime
-from nexus.services.continuous_learning import run_protocol_startup_gate
 
 # 🧪 Nexus v23 Eternal Neural Swarm CLI (Self-Evolve Refactored)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -17,17 +17,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # 🔗 Phase 3: 自體演化導入 Service 層 (硬化導入)
-from nexus.services.benchmark_service import BenchmarkService
-from nexus.services.xray_service import XRayService
 from nexus.services.cli_commands_service import CliCommandsService
-from nexus.core.skill_compressor import SkillCompressor
-from nexus.services.arweave_uploader import upload_lessons_to_arweave
 import asyncio
 import os
 import concurrent.futures
-from scripts.eternal.slicer import slice_jsonl
-from scripts.eternal.offloader import offload_all_slices
-from scripts.eternal.anchor import write_anchors, download_anchor
+import time
+import uuid
 
 import time
 import uuid
@@ -95,6 +90,7 @@ def nexus(ctx):
     if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("NEXUS_SKIP_PROTOCOL_GATE") == "1":
         return
     command_name = ctx.invoked_subcommand or (sys.argv[1] if len(sys.argv) > 1 else "")
+    from nexus.services.continuous_learning import run_protocol_startup_gate
     result = run_protocol_startup_gate(REPO_ROOT, command_name=command_name)
     ctx.ensure_object(dict)
     ctx.obj["protocol_gate"] = result
@@ -104,6 +100,7 @@ def nexus(ctx):
         )
 
 def _get_service():
+    # Lazy: from nexus.services.cli_commands_service import CliCommandsService
     return CliCommandsService(REPO_ROOT)
 
 
@@ -147,7 +144,8 @@ def probe(test_spec):
 @click.option("--dual-core-physical", is_flag=True)
 @click.option("--ablation", is_flag=True)
 def benchmark(dataset, repeat, tasks_count, output_csv, dual_core_physical, ablation):
-    """🚀 [Phase E/V] AOS 消融實驗 (Service 化)內容、內容及性能內容性能性能"""
+    """🚀 [Phase E/V] AOS 消融實驗 (Service 化)"""
+    # Lazy: from nexus.services.benchmark_service import BenchmarkService
     BenchmarkService(REPO_ROOT).run(dataset, repeat, dual_core_physical, ablation, tasks_count, output_csv)
     click.echo("✅ [Benchmark] Complete.")
 
@@ -353,6 +351,51 @@ def wisdom_group():
     """🛡️ Wisdom Edition: 智慧學習與模式探索 (v23)"""
     pass
 
+@wisdom_group.command(name="sync")
+@click.option("--force", is_flag=True, help="Force re-synthesis of all rules")
+def wisdom_sync_cmd(force):
+    """🔄 [Phase 4] 全量同步與合成：Lesson -> Wisdom Rule"""
+    from nexus.services.wisdom_synthesizer import wisdom_synthesizer
+    click.secho("🧠 Starting Wisdom Synthesis induction loop...", fg="cyan")
+    res = wisdom_synthesizer.sync_all()
+    if res["status"] == "SUCCESS":
+        click.secho(f"✅ Synthesis Complete: {res['rules_synthesized']} global rules registered.", fg="green")
+    else:
+        click.secho(f"⚠️ Synthesis Idle: {res.get('status')}", fg="yellow")
+
+@wisdom_group.command(name="audit-risk")
+@click.argument("pack_path", type=click.Path(exists=True))
+def wisdom_audit_risk_cmd(pack_path):
+    """⚖️ [Phase 4] 執行預測性風險稽核：Implementation Pack -> Risk Score"""
+    from nexus.services.predictive_audit import predictive_auditor
+    import json
+    
+    click.secho(f"🔍 [Auditor] Auditing risk for: {pack_path}", fg="cyan")
+    try:
+        with open(pack_path, "r") as f:
+            pack_data = json.load(f)
+        
+        report = predictive_auditor.audit_risk(pack_data)
+        
+        # Display Report
+        color = "red" if report["status"] == "BLOCK" else "green"
+        click.secho(f"\n[Risk Report]", bold=True)
+        click.secho(f"Status: {report['status']} | Risk Score: {report['risk_score']}", fg=color)
+        click.echo(f"Recommendation: {report['recommendation']}")
+        
+        if report["findings"]:
+            click.echo("\n[Findings]")
+            for f in report["findings"]:
+                click.echo(f" - {f['severity']} Match: {f['rule_text']} (Similarity: {f['similarity']})")
+                click.echo(f"   Evidence: {', '.join(f['evidence_ids'])}")
+        else:
+            click.echo("✅ No significant risks identified against current Wisdom Registry.")
+            
+    except Exception as e:
+        click.secho(f"❌ Audit Error: {e}", fg="red")
+
+
+
 @wisdom_group.command(name="lookup")
 @click.option("--snippet", required=True, help="代碼片段或模式描述")
 @click.option("--repo", default="nexus")
@@ -539,6 +582,7 @@ def healing_forecast_cmd():
 @click.option("--recursive", is_flag=True, default=True)
 def xray(target, recursive):
     """👁️ v23 X-Ray: 全域多維度依賴觀測"""
+    from nexus.services.xray_service import XRayService
     path = XRayService(REPO_ROOT).run(list(target), recursive)
     click.echo(f"✅ [X-Ray] Report: {path}")
 
@@ -721,10 +765,113 @@ def bug(task, dry_run):
     _get_service().bug(task, dry_run)
     click.echo("✅ [Fix] Task completed.")
 
+@nexus.command(name="nexus:generate-pack")
+@click.option("--intent", required=True, help="High-level plan or goal")
+def generate_pack_cmd(intent):
+    """🛠️ [GeneralContractor] 將高階意圖編譯為 6-JSON 實作包"""
+    # Lazy: from nexus.services.implementation_pack import ImplementationPackGenerator
+    # Lazy: from nexus.services.readability_hud import ReadabilityHUD
+    task_id = f"gen-pack-{int(time.time())}"
+    root = REPO_ROOT
+    
+    # 模擬 Planner 針對意圖的初步預測 (這裡是 Wiring 展示點)
+    mock_planner_out = {
+        "goal": intent,
+        "data_models": [{"name": "IntentModel", "fields": {"intent": "string"}}],
+        "deliverables": ["impl_artifact.v1"],
+        "acceptance_criteria": ["Readability Score > 95"]
+    }
+    
+    from nexus.services.implementation_pack import ImplementationPackGenerator
+    generator = ImplementationPackGenerator(root, task_id)
+    click.secho(f"📡 Compiling Implementation Pack for: {intent}", fg="cyan")
+    
+    results = generator.generate(mock_planner_out)
+    
+    # 呼叫帝國 HUD
+    from nexus.services.readability_hud import ReadabilityHUD
+    hud = ReadabilityHUD(results["audit"])
+    hud.display()
+    
+    click.secho(f"✅ Pack generated: .nexus/runs/{task_id}/implementation/", fg="green")
+
+@nexus.command(name="nexus:sync-hud")
+@click.option("--task-id", default="latest", help="Task ID to sync")
+def sync_hud(task_id):
+    """📡 同步最近一次的 Readability Audit 數據至 Nexus Desk Cockpit。"""
+    repo_root = REPO_ROOT
+    if task_id == "latest":
+        runs_dir = repo_root / ".nexus" / "runs"
+        if not runs_dir.exists():
+            click.echo("❌ No runs directory found at .nexus/runs")
+            return
+        run_dirs = sorted(runs_dir.glob("*"), key=lambda d: d.stat().st_mtime, reverse=True)
+        if not run_dirs:
+            click.echo("❌ No task runs found.")
+            return
+        task_id = run_dirs[0].name
+    
+    audit_path = repo_root / ".nexus" / "runs" / task_id / "implementation" / "readability_audit.json"
+    if not audit_path.exists():
+        click.echo(f"❌ Audit report not found for {task_id}")
+        return
+        
+    try:
+        audit_data = json.loads(audit_path.read_text())
+        from nexus.services.readability_hud import ReadabilityHUD
+        hud = ReadabilityHUD(audit_data)
+        hud.sync_to_cockpit(repo_root)
+    except Exception as e:
+        click.echo(f"❌ Sync Error: {e}")
+
+@nexus.command(name="nexus:build-from-pack")
+@click.argument("pack_path", type=click.Path(exists=True))
+def build_from_pack(pack_path):
+    """🔨 [Construction] 根據施工包執行自動化動工 (v26.0 Hardened)。"""
+    # Lazy: from nexus.services.construction_service import ConstructionService
+    repo_root = REPO_ROOT
+    from nexus.services.construction_service import ConstructionService
+    service = ConstructionService(repo_root)
+    result = service.build(Path(pack_path))
+    if result["status"] == "SUCCESS":
+        click.secho(f"✅ Build Completed for {result['task_id']}", fg="green")
+    else:
+        click.secho(f"🛑 Build Failed: {result.get('reason')}", fg="red")
+
+@nexus.command(name="nexus:audit-pack")
+@click.option("--task-id", default="latest", help="Task ID to audit")
+def audit_pack(task_id):
+    """🔍 [Audit] 對現有的施工包執行治理稽核檢驗 (Governance-Prod)。"""
+    repo_root = REPO_ROOT
+    if task_id == "latest":
+        runs_dir = repo_root / ".nexus" / "runs"
+        if not runs_dir.exists():
+            click.echo("❌ No runs found.")
+            return
+        run_dirs = sorted(runs_dir.glob("*"), key=lambda d: d.stat().st_mtime, reverse=True)
+        if not run_dirs:
+            click.echo("❌ No runs found.")
+            return
+        task_id = run_dirs[0].name
+    
+    audit_path = repo_root / ".nexus" / "runs" / task_id / "implementation" / "readability_audit.json"
+    if not audit_path.exists():
+        click.echo(f"❌ Audit report not found for {task_id}")
+        return
+        
+    try:
+        audit_data = json.loads(audit_path.read_text())
+        from nexus.services.readability_hud import ReadabilityHUD
+        hud = ReadabilityHUD(audit_data)
+        hud.display()
+    except Exception as e:
+        click.echo(f"❌ Audit Error: {e}")
+
 @nexus.command(name="nexus:learning-sync")
 @click.option("--min-confidence", default=0.7)
 def learning_sync(min_confidence):
     """🧪 [Eternal Memory] 同步高品質教訓到 Arweave 永久存儲"""
+    # Lazy: from nexus.services.arweave_uploader import upload_lessons_to_arweave
     result = asyncio.run(upload_lessons_to_arweave(
         REPO_ROOT, min_confidence
     ))
@@ -749,10 +896,13 @@ def eternal_group():
 @click.option("--max-mb", default=1.0, type=float)
 def cmd_slice(policy, skills, days, max_mb):
     """將治理回憶切分為上鏈分段 (Slice)"""
+    # Lazy: from scripts.eternal.slicer import slice_jsonl
     if policy:
+        from scripts.eternal.slicer import slice_jsonl
         slices = slice_jsonl(Path(".nexus/knowledge/policymemory.jsonl"), days, max_mb)
         click.echo(f"✅ Policy Slices: {len(slices)} 檔案已存於 .nexus/eternal/slices/")
     if skills:
+        from scripts.eternal.slicer import slice_jsonl
         slices = slice_jsonl(Path(".nexus/metrics/skillsoptimizationruns.jsonl"), days, max_mb)
         click.echo(f"✅ Skills Slices: {len(slices)} 檔案已存於 .nexus/eternal/slices/")
 
@@ -761,6 +911,7 @@ def cmd_slice(policy, skills, days, max_mb):
 def cmd_offload(wallet):
     """執行 Arweave 永恆記憶上鏈任務 (Bulk Upload)"""
     click.echo(f"🛡️ 啟動永恆記憶上鏈流程 (Wallet: {wallet})...")
+    from scripts.eternal.offloader import offload_all_slices
     asyncio.run(offload_all_slices(wallet))
     click.echo("✅ 上鏈任務發送完畢。")
 
@@ -769,9 +920,11 @@ def cmd_offload(wallet):
 def cmd_anchor(update):
     """同步與校驗鏈上 Anchor 索引"""
     if update:
+        from scripts.eternal.anchor import write_anchors
         anchors = write_anchors()
         click.echo(f"✅ Anchors 已同步。已上鏈: {anchors.get('total_offloaded_mb', 0):.2f} MB")
     else:
+        from scripts.eternal.anchor import write_anchors
         anchors = write_anchors()
         click.echo(json.dumps(anchors, indent=2))
 
@@ -779,6 +932,7 @@ def cmd_anchor(update):
 @click.option("--txid", required=True)
 def cmd_download(txid):
     """透過 Arweave Gateway 具現化永恆記憶分段"""
+    from scripts.eternal.anchor import download_anchor
     file_path = asyncio.run(download_anchor(txid))
     if file_path:
         click.echo(f"✅ 下載完成：{file_path}")

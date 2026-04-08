@@ -4,6 +4,8 @@ from pathlib import Path
 from nexus.engine.phases.base import BasePhaseHandler
 from nexus.core.state_contracts import NexusState
 from scripts.engine.intent_classifier import IntentClassifier
+from nexus.services.implementation_pack import ImplementationPackGenerator
+from nexus.services.readability_hud import ReadabilityHUD
 from nexus.refactor_governance import RefactorGovernance
 from nexus.core.dependency_probe import DependencyProbe
 
@@ -23,9 +25,25 @@ class PlannerPhaseHandler(BasePhaseHandler):
 
         # 🎯 P2: 意圖預分類 (Intent Classification)
         classifier = IntentClassifier()
-        intent = classifier.classify(task)
+        intent_data = classifier.classify(task)
+        intent = intent_data["intent"]
         context["intent"] = intent
         
+        # 🛡️ Work Order 1: [SPEC_MODE] Interview
+        if intent_data.get("mode") == "spec_mode":
+            print(f"\n{ReadabilityHUD.CYAN}🚫 SPEC_MODE ACTIVATED: Interview Required{ReadabilityHUD.RESET}")
+            answers = {}
+            for q in intent_data["questionnaire"]:
+                # User 指令：CLI 現場 input()
+                try:
+                    ans = input(f"❓ {q} ")
+                except EOFError:
+                    ans = "auto-filled-by-system"
+                answers[q] = ans
+            
+            context["spec_answers"] = answers
+            print(f"{ReadabilityHUD.GREEN}✅ Spec Captured. Proceeding to compilation...{ReadabilityHUD.RESET}\n")
+
         if intent == "refactor_template":
             print("🖋️ [Refactor:Bias] Applying Linus Mode Governance...")
             context["refactor_plan"] = RefactorGovernance.generate_refactor_plan(
@@ -165,7 +183,31 @@ class PlannerPhaseHandler(BasePhaseHandler):
             print(f"⚪ [RAG:Off] Running Baseline (Ablation Mode).")
 
         prediction = self.predictor.predict(task, context)
-        # ... 
+        
+        # 🛡️ Work Order B: [Plan-to-Build Compiler] Hook
+        # 將預測結果轉化為 6-JSON 硬性施工包 (I-Pack)
+        try:
+            task_id = state.task_id if hasattr(state, "task_id") else "TASK_UNBOUND"
+            generator = ImplementationPackGenerator(Path(self.project_root), task_id)
+            print(f"📡 [Compiler:Hook] Compiling Implementation Pack for {task_id}...")
+            
+            # 將預測中的 goal/models/criteria 整理傳入
+            compile_in = {
+                "goal": task,
+                "data_models": prediction.get("data_models", []),
+                "deliverables": prediction.get("deliverables", []),
+                "acceptance_criteria": prediction.get("acceptance_criteria", [])
+            }
+            
+            pack_results = generator.generate(compile_in)
+            
+            # 啟動帝國 HUD 顯示
+            hud = ReadabilityHUD(pack_results["audit"])
+            hud.display()
+            
+        except Exception as e:
+            print(f"⚠️ [Compiler:Hook] Failed to generate I-Pack: {e}")
+
         return {
             "intent_pass": True,
             "best_node": node_id,
