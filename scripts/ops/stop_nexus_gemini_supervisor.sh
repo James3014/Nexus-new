@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-NEXUS_ROOT="${NEXUS_ROOT:-/Users/jameschen/Workspace/nexus}"
+NEXUS_ROOT="${NEXUS_ROOT:-.}"
 STATE_DIR="$NEXUS_ROOT/.nexus"
 PID_FILE="$STATE_DIR/runner_supervisor.pid"
 CHILD_PID_FILE="$STATE_DIR/runner_supervisor_child.pid"

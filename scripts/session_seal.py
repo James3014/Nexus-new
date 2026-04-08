@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 # --- CONFIG ---
-WORKSPACE_ROOT = "/Users/jameschen/Workspace/nexus"
+WORKSPACE_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[1])
 STATE_FILE = os.path.join(WORKSPACE_ROOT, "STATE.yaml")
 NEXUS_SYNC_BIN = "/Users/jameschen/.local/bin/nexus-sync"
 

@@ -12,8 +12,8 @@
 - **Input Contract**: `NexusState`, `status`
 - **Output Contract**: `next_phase`
 - **Success Criteria**: 狀態轉換 100% 準確，P-D-R-A-C 閉環運作。
-- **Dependency/Prerequisite**: `commander.py` (現存於 `/Users/jameschen/Workspace/nexus/nexus/core/commander.py`)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/nexus/engine/pipeline.py`
+- **Dependency/Prerequisite**: `commander.py` (現存於 `./nexus/core/commander.py`)
+- **Integration Point**: `./nexus/engine/pipeline.py`
 - **Priority**: P0 (Runner 核心)
 - **Confidence**: High (Fully Integrated)
 
@@ -24,7 +24,7 @@
 - **Input Contract**: `task_description`
 - **Output Contract**: `policy_hit_ids`
 - **Success Criteria**: 命中率 > 20% 且能有效縮短 Repair 輪次。
-- **Dependency/Prerequisite**: `policy_manager.py` (現存於 `/Users/jameschen/Workspace/nexus/nexus/core/policy_manager.py`)
+- **Dependency/Prerequisite**: `policy_manager.py` (現存於 `./nexus/core/policy_manager.py`)
 - **Integration Point**: `commander.py` (P-Stage Hook)
 - **Priority**: P0 (品質核心)
 - **Confidence**: High
@@ -39,8 +39,8 @@
 - **Token/Cost Impact**: 高 (多步推理)。
 - **Security/Risk Notes**: 避免掃描敏感設定檔案。
 - **Dependency/Prerequisite**: `Serena__` 語義導航工具。
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/drclaw_diagnosis.py` (現有診斷入口)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/drclaw_diagnosis.py`
+- **Local Evidence**: `./scripts/drclaw_diagnosis.py` (現有診斷入口)
+- **Integration Point**: `./scripts/drclaw_diagnosis.py`
 - **Priority**: P0 (品質核心)
 - **Confidence**: High
 - **Open Questions**: 如何限制推理步數以控制成本？
@@ -57,8 +57,8 @@
 - **Token/Cost Impact**: 極高 (3x 消耗)。
 - **Security/Risk Notes**: 需確保各模型權限一致。
 - **Dependency/Prerequisite**: `OpenClaw` 多模型路由。
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/final_path_audit.py` (現有審核邏輯)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/final_path_audit.py`
+- **Local Evidence**: `./scripts/final_path_audit.py` (現有審核邏輯)
+- **Integration Point**: `./scripts/final_path_audit.py`
 - **Priority**: P1 (品質優化)
 - **Confidence**: High
 - **Open Questions**: 如何設定模型投票權重？
@@ -74,9 +74,9 @@
 - **Retry/Fallback Policy**: 使用本地 Cross-Encoder。
 - **Token/Cost Impact**: 中。
 - **Security/Risk Notes**: 無。
-- **Dependency/Prerequisite**: `LanceDB` (現存於 `/Users/jameschen/Workspace/nexus/scripts/brain_search_v4.py`)
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/brain_search_v4.py` (核心搜尋組件)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/brain_search_v4.py`
+- **Dependency/Prerequisite**: `LanceDB` (現存於 `./scripts/brain_search_v4.py`)
+- **Local Evidence**: `./scripts/brain_search_v4.py` (核心搜尋組件)
+- **Integration Point**: `./scripts/brain_search_v4.py`
 - **Priority**: P1 (檢索優化)
 - **Confidence**: High
 - **Open Questions**: 離線 Rerank 能否滿足毫秒級響應？
@@ -93,8 +93,8 @@
 - **Token/Cost Impact**: 中。
 - **Security/Risk Notes**: 需在沙盒環境。
 - **Dependency/Prerequisite**: `Playwright`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/ui-validator.py` (UI 驗證腳本)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/ui-validator.py`
+- **Local Evidence**: `./scripts/ui-validator.py` (UI 驗證腳本)
+- **Integration Point**: `./scripts/ui-validator.py`
 - **Priority**: P2 (擴充功能)
 - **Confidence**: Medium
 - **Open Questions**: 如何動態生成複雜交互腳本？
@@ -111,8 +111,8 @@
 - **Token/Cost Impact**: 低。
 - **Security/Risk Notes**: 無。
 - **Dependency/Prerequisite**: `link_mapper.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/link_mapper.py` (鏈結地圖)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/link_mapper.py`
+- **Local Evidence**: `./scripts/link_mapper.py` (鏈結地圖)
+- **Integration Point**: `./scripts/link_mapper.py`
 - **Priority**: P1 (並行效率)
 - **Confidence**: High
 - **Open Questions**: 是否整合到 Plan 階段的 Pre-check？
@@ -129,8 +129,8 @@
 - **Token/Cost Impact**: 中。
 - **Security/Risk Notes**: 需長時間運行監控。
 - **Dependency/Prerequisite**: `ci_gate.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/ops/ci_gate.py` (CI 驗收門檻)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/ops/ci_gate.py`
+- **Local Evidence**: `./scripts/ops/ci_gate.py` (CI 驗收門檻)
+- **Integration Point**: `./scripts/ops/ci_gate.py`
 - **Priority**: P0 (Gate 核心)
 - **Confidence**: High
 - **Open Questions**: 如何定義各專案的性能基準線？
@@ -147,8 +147,8 @@
 - **Token/Cost Impact**: 中 (壓縮過程需消耗)。
 - **Security/Risk Notes**: 無。
 - **Dependency/Prerequisite**: `tiktoken`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/context_pruner.py` (現存裁剪腳本)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/context_pruner.py`
+- **Local Evidence**: `./scripts/context_pruner.py` (現存裁剪腳本)
+- **Integration Point**: `./scripts/context_pruner.py`
 - **Priority**: P0 (Token 治理)
 - **Confidence**: High
 - **Open Questions**: 壓縮算法如何保證「尺寸數字」不被遺漏？
@@ -165,8 +165,8 @@
 - **Token/Cost Impact**: 高。
 - **Security/Risk Notes**: 無。
 - **Dependency/Prerequisite**: `safepatcher.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/safepatcher.py` (修復組件)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/safepatcher.py`
+- **Local Evidence**: `./scripts/safepatcher.py` (修復組件)
+- **Integration Point**: `./scripts/safepatcher.py`
 - **Priority**: P2 (修復擴充)
 - **Confidence**: Med
 - **Open Questions**: 如何過濾無效策略以節省成本？
@@ -183,8 +183,8 @@
 - **Token/Cost Impact**: 中。
 - **Security/Risk Notes**: 需去識別化。
 - **Dependency/Prerequisite**: `steward.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/core/steward.py` (結晶管理員)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/core/steward.py`
+- **Local Evidence**: `./scripts/core/steward.py` (結晶管理員)
+- **Integration Point**: `./scripts/core/steward.py`
 - **Priority**: P1 (結晶優化)
 - **Confidence**: High
 - **Open Questions**: 如何判斷規律的「置信度」？
@@ -201,8 +201,8 @@
 - **Token/Cost Impact**: 低。
 - **Security/Risk Notes**: 無。
 - **Dependency/Prerequisite**: `tracelog_analyzer.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/tracelog_analyzer.py` (日誌分析器)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/tracelog_analyzer.py`
+- **Local Evidence**: `./scripts/tracelog_analyzer.py` (日誌分析器)
+- **Integration Point**: `./scripts/tracelog_analyzer.py`
 - **Priority**: P1 (診斷加速)
 - **Confidence**: Med
 - **Open Questions**: 如何自動獲取新出現的故障模式？
@@ -219,8 +219,8 @@
 - **Token/Cost Impact**: 低。
 - **Security/Risk Notes**: 無。
 - **Dependency/Prerequisite**: `sync_docs.sh`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/ops/sync_docs.sh` (文檔同步腳本)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/ops/sync_docs.sh`
+- **Local Evidence**: `./scripts/ops/sync_docs.sh` (文檔同步腳本)
+- **Integration Point**: `./scripts/ops/sync_docs.sh`
 - **Priority**: P1 (治理同步)
 - **Confidence**: High
 - **Open Questions**: 如何映射不同工具的獨有觸發詞？
@@ -237,8 +237,8 @@
 - **Token/Cost Impact**: 中。
 - **Security/Risk Notes**: 需防止 Worktree 衝突。
 - **Dependency/Prerequisite**: `parallel_spawner.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/core/parallel_spawner.py` (並行執行器)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/core/parallel_spawner.py`
+- **Local Evidence**: `./scripts/core/parallel_spawner.py` (並行執行器)
+- **Integration Point**: `./scripts/core/parallel_spawner.py`
 - **Priority**: P1 (並行效率)
 - **Confidence**: High
 - **Open Questions**: 如何動態分配 GPU/Token 預算給不同進程？
@@ -255,8 +255,8 @@
 - **Token/Cost Impact**: 高。
 - **Security/Risk Notes**: 嚴禁誤刪手寫筆記。
 - **Dependency/Prerequisite**: `librarian_auditor.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/librarian_auditor.py` (大腦審查員)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/librarian_auditor.py`
+- **Local Evidence**: `./scripts/librarian_auditor.py` (大腦審查員)
+- **Integration Point**: `./scripts/librarian_auditor.py`
 - **Priority**: P2 (治理優化)
 - **Confidence**: Med
 - **Open Questions**: 如何精確定義「技術過時」？
@@ -273,8 +273,8 @@
 - **Token/Cost Impact**: 中。
 - **Security/Risk Notes**: 需在完全隔離環境。
 - **Dependency/Prerequisite**: `benchmark_suite.py`
-- **Local Evidence**: `/Users/jameschen/Workspace/nexus/scripts/bench/benchmark_suite.py` (壓力測試組)
-- **Integration Point**: `/Users/jameschen/Workspace/nexus/scripts/bench/benchmark_suite.py`
+- **Local Evidence**: `./scripts/bench/benchmark_suite.py` (壓力測試組)
+- **Integration Point**: `./scripts/bench/benchmark_suite.py`
 - **Priority**: P2 (擴充功能)
 - **Confidence**: Med
 - **Open Questions**: 混沌測試的爆炸半徑如何控制？

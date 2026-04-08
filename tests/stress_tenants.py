@@ -23,7 +23,7 @@ async def simulate_tenant_query(router: SkillsRouter, tenant_id: str):
     return True
 
 async def run_stress_test():
-    router = SkillsRouter("/Users/jameschen/Workspace/nexus")
+    router = SkillsRouter(str(__import__("pathlib").Path(__file__).resolve().parents[1]))
     tenants = [f"corp_tenant_{i}" for i in range(10)]
     tasks = []
     

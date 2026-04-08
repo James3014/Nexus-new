@@ -2,7 +2,7 @@ import asyncio
 from nexus.core.router import SkillsRouter
 
 async def test_firewall():
-    router = SkillsRouter("/Users/jameschen/Workspace/nexus")
+    router = SkillsRouter(str(__import__("pathlib").Path(__file__).resolve().parents[1]))
     
     # Test 1: Authorized (Q1 skill in Q1 domain)
     ctx_q1 = {"active_domain": "Q1_Critical_Core", "tenant_id": "corp_gold"}

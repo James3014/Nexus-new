@@ -41,6 +41,6 @@ class KnowledgeRecoverer:
 
 if __name__ == "__main__":
     # 🧪 TEST: Manual Recovery Trigger
-    recoverer = KnowledgeRecoverer(Path("/Users/jameschen/Workspace/nexus"))
+    recoverer = KnowledgeRecoverer(Path(str(__import__("pathlib").Path(__file__).resolve().parents[2])))
     count = recoverer.recover_from_mirror()
     print(f"🏁 Recovery Complete. Total Atoms Re-ingested: {count}")

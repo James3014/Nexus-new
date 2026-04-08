@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 # Add project root to sys.path
-sys.path.append("/Users/jameschen/Workspace/nexus")
+sys.path.append(str(__import__("pathlib").Path(__file__).resolve().parents[0]))
 
 from nexus.engine.coordinator import NexusEngine
 
@@ -12,7 +12,7 @@ def test_anti_fp_logic():
     print("🧪 Testing Anti-False-Positive Logic...")
     
     # Initialize a mock engine 
-    engine = NexusEngine(project_root=Path("/Users/jameschen/Workspace/nexus"))
+    engine = NexusEngine(project_root=Path(str(__import__("pathlib").Path(__file__).resolve().parents[0])))
     
     # Case 1: Mocked Failure - No Patch but success=True (Typical False Positive)
     scoring_1 = engine.dual_track_scoring(

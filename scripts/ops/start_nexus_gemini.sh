@@ -5,7 +5,7 @@ set -euo pipefail
 export TMPDIR="${TMPDIR:-/tmp}"
 
 GEMINI_BIN="/Users/jameschen/.npm-global/bin/gemini"
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 NEXUS_OBS="/Users/jameschen/Downloads/obsidian/知識庫/01_Projects/nexus"
 BOOTSTRAP_FILE="$NEXUS_OBS/AGENT_BOOTSTRAP_NEXUS.md"
 MODEL="${1:-gemini-3-flash-preview}"
@@ -119,11 +119,11 @@ EXTRA_PROMPT='---
 6. 即使任務執行中，也必須每 30 秒輸出一行心跳：
    [time] worker-id | task-id | running | blocker=<none|...>
 7. 每輪里程碑回報必須落地文件到：
-   /Users/jameschen/Workspace/nexus/docs/EXEC_REPORT_<YYYYMMDD_HHMMSS>.md
+   ./docs/EXEC_REPORT_<YYYYMMDD_HHMMSS>.md
    內容固定：
    SUMMARY / METRICS / GATE / EVIDENCE_PATHS / NEXT / MODEL_USAGE
 8. 完成回報後，必須把最新報告檔路徑再回貼一行：
-   REPORT_FILE: /Users/jameschen/Workspace/nexus/docs/EXEC_REPORT_<...>.md
+   REPORT_FILE: ./docs/EXEC_REPORT_<...>.md
 9. 禁止「只回報不落檔」：在回貼 REPORT_FILE 前，必須先執行檔案存在檢查（file_exists=true）並回貼。
 10. 若 REPORT_FILE 不存在，該輪回報視為無效，必須立即補寫檔案再重送回報。
 11. 若 `nexus:runner` 結束且仍有 token/配額，不得閒置；必須立刻：

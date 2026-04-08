@@ -47,7 +47,7 @@ class CliCommandsService:
         return "PASS"
 
     def heartbeat(self, test: bool):
-        from scripts.ops.nexus_heartbeat import run_heartbeat
+        from nexus.core.ops.nexus_heartbeat import run_heartbeat
         return run_heartbeat(self.repo_root, test=test)
 
     def reach(self, url: str, tier: int = 1):

@@ -79,18 +79,18 @@ Before any [task](../Reference/task.md) execution, the agent must pass:
 
 ## Gemini (enforced)
 ```bash
-bash /Users/jameschen/Workspace/nexus/scripts/ops/start_gemini_nexus_enforced.sh gemini-3-flash-preview yolo
+bash ./scripts/ops/start_gemini_nexus_enforced.sh gemini-3-flash-preview yolo
 ```
 
 ## Antigravity (enforced)
 ```bash
-bash /Users/jameschen/Workspace/nexus/scripts/ops/start_antigravity_nexus_enforced.sh
+bash ./scripts/ops/start_antigravity_nexus_enforced.sh
 ```
 
 If antigravity is not on PATH:
 ```bash
 ANTIGRAVITY_BIN=/absolute/path/to/antigravity \
-bash /Users/jameschen/Workspace/nexus/scripts/ops/start_antigravity_nexus_enforced.sh
+bash ./scripts/ops/start_antigravity_nexus_enforced.sh
 ```
 
 ## Override behavior
@@ -98,7 +98,7 @@ By default, gate failure blocks startup.
 
 Temporary bypass (not recommended):
 ```bash
-ALLOW_GATE_FAIL=1 bash /Users/jameschen/Workspace/nexus/scripts/ops/start_gemini_nexus_enforced.sh
+ALLOW_GATE_FAIL=1 bash ./scripts/ops/start_gemini_nexus_enforced.sh
 ```
 
 ---

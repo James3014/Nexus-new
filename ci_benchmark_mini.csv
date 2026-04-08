@@ -1,0 +1,36 @@
+{
+    "timestamp": "2026-03-31T21:02:41.675639",
+    "mode": "DRY-RUN",
+    "resolution_rate": 0.0,
+    "avg_duration": "1.8s",
+    "total_tasks": 3,
+    "success_count": 0,
+    "top_skills": [
+        "codebaseinvestigator",
+        "SafePatcher",
+        "FlashJudge"
+    ],
+    "detailed_results": [
+        {
+            "task": "fix login timeout in django auth",
+            "success": false,
+            "duration": 1.8205912113189697,
+            "tokens": 2500,
+            "score": 6.5
+        },
+        {
+            "task": "resolve race condition in websocket handler",
+            "success": false,
+            "duration": 1.7369229793548584,
+            "tokens": 2500,
+            "score": 6.5
+        },
+        {
+            "task": "implement user avatar upload with cloudinary",
+            "success": false,
+            "duration": 1.7331609725952148,
+            "tokens": 5000,
+            "score": 6.5
+        }
+    ]
+}

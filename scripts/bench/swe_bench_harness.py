@@ -41,10 +41,10 @@ def main():
             env = os.environ.copy()
             env["NEXUS_BENCHMARK_MODE"] = "1"
             
-            subprocess.run(cmd, capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus", env=env)
+            subprocess.run(cmd, capture_output=True, text=True, cwd=str(__import__("pathlib").Path(__file__).resolve().parents[2]), env=env)
             
             # Extract Patch
-            runs_dir = Path("/Users/jameschen/Workspace/nexus/.nexus/runs")
+            runs_dir = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/runs"))
             # Filter for task dirs only
             task_dirs = sorted([d for d in runs_dir.glob("task-*") if d.is_dir()], key=os.path.getmtime)
             latest_run = task_dirs[-1]
@@ -77,7 +77,7 @@ def main():
         "--max_workers", "8",
         "--run_id", f"nexus-eval-{int(time.time())}"
     ]
-    subprocess.run(eval_cmd, cwd="/Users/jameschen/Workspace/nexus")
+    subprocess.run(eval_cmd, cwd=str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     
     print("✅ [SWE-bench] Full Cycle Complete.")
 

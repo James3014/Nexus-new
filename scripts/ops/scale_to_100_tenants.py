@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-def scale_to_100_tenants(base_dir: str = "/Users/jameschen/Workspace/nexus/.nexus/tenants"):
+def scale_to_100_tenants(base_dir: str = str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/tenants")):
     """🚀 Provision 100 Tenants for Nexus v24.5."""
     path = Path(base_dir)
     print(f"🏗️ Scaling Nexus to 100 Tenants...")

@@ -5,8 +5,8 @@ import time
 # [SOTA 10/10] Nexus Auto-Evolution Engine
 # Implementation based on Sir's expert "Auto-Evolution" principles (Phase 6).
 
-LEADERBOARD = "/Users/jameschen/Workspace/nexus/workspaces/leaderboard.json"
-CRYSTALS = "/Users/jameschen/Workspace/nexus/global_crystals.jsonl"
+LEADERBOARD = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/leaderboard.json")
+CRYSTALS = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "global_crystals.jsonl")
 
 def nexus_evolve(config):
     focus = config.get("focus", "repair_phase")

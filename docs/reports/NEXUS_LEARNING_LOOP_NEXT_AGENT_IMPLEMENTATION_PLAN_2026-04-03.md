@@ -2,7 +2,7 @@
 
 Date: 2026-04-03
 Audience: 下一位負責實作深化的 agent
-Repo: `/Users/jameschen/Workspace/nexus`
+Repo: `.`
 
 ## 1. 任務定位
 
@@ -20,20 +20,20 @@ Repo: `/Users/jameschen/Workspace/nexus`
 
 先讀：
 
-- [NEXUS_LEARNING_LOOP_CLOSED_LOOP_REPORT_2026-04-03.md](/Users/jameschen/Workspace/nexus/docs/reports/NEXUS_LEARNING_LOOP_CLOSED_LOOP_REPORT_2026-04-03.md)
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
-- [pipeline_crystal.py](/Users/jameschen/Workspace/nexus/nexus/engine/pipeline_crystal.py)
-- [coordinator.py](/Users/jameschen/Workspace/nexus/nexus/engine/coordinator.py)
-- [nexus_cli.py](/Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py)
-- [test_continuous_learning.py](/Users/jameschen/Workspace/nexus/tests/services/test_continuous_learning.py)
-- [test_cli_commands.py](/Users/jameschen/Workspace/nexus/tests/test_cli_commands.py)
-- [test_coordinator.py](/Users/jameschen/Workspace/nexus/tests/engine/test_coordinator.py)
+- [NEXUS_LEARNING_LOOP_CLOSED_LOOP_REPORT_2026-04-03.md](./docs/reports/NEXUS_LEARNING_LOOP_CLOSED_LOOP_REPORT_2026-04-03.md)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
+- [pipeline_crystal.py](./nexus/engine/pipeline_crystal.py)
+- [coordinator.py](./nexus/engine/coordinator.py)
+- [nexus_cli.py](./scripts/engine/nexus_cli.py)
+- [test_continuous_learning.py](./tests/services/test_continuous_learning.py)
+- [test_cli_commands.py](./tests/test_cli_commands.py)
+- [test_coordinator.py](./tests/engine/test_coordinator.py)
 
 必要時再讀：
 
-- [steward.py](/Users/jameschen/Workspace/nexus/scripts/steward.py)
-- [INDEX.md](/Users/jameschen/Workspace/nexus/docs/INDEX.md)
-- [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](/Users/jameschen/Workspace/nexus/MUSE_ENGINE_SPEC_V17.1_HARDENED.md)
+- [steward.py](./scripts/steward.py)
+- [INDEX.md](./docs/INDEX.md)
+- [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](./MUSE_ENGINE_SPEC_V17.1_HARDENED.md)
 
 ## 3. 現況邊界
 
@@ -81,7 +81,7 @@ Repo: `/Users/jameschen/Workspace/nexus`
   - generated content
 
 建議修改：
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
 - 新增純函式 helper，例如 `apply_structured_writeback_delta(...)`
 - 視需要新增 `nexus/services/writeback_renderer.py`
 
@@ -110,8 +110,8 @@ Repo: `/Users/jameschen/Workspace/nexus`
 - `writeback_validation.jsonl`
 
 檔案：
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
-- tests: [test_continuous_learning.py](/Users/jameschen/Workspace/nexus/tests/services/test_continuous_learning.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
+- tests: [test_continuous_learning.py](./tests/services/test_continuous_learning.py)
 
 ### P1-C: 強化 lesson schema
 
@@ -137,8 +137,8 @@ Repo: `/Users/jameschen/Workspace/nexus`
   - `.nexus/knowledge/lesson_events.jsonl`
 
 建議修改：
-- [steward.py](/Users/jameschen/Workspace/nexus/scripts/steward.py)
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
+- [steward.py](./scripts/steward.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
 
 ### P1-D: 把 lessons 反向餵回 planner / repair
 
@@ -152,11 +152,11 @@ Repo: `/Users/jameschen/Workspace/nexus`
   - 預先把 correct practice 注入 context
 
 優先入口：
-- [pipeline.py](/Users/jameschen/Workspace/nexus/nexus/engine/pipeline.py)
-- [pipeline_stages.py](/Users/jameschen/Workspace/nexus/nexus/engine/pipeline_stages.py)
-- [pipeline_repair.py](/Users/jameschen/Workspace/nexus/nexus/engine/pipeline_repair.py)
+- [pipeline.py](./nexus/engine/pipeline.py)
+- [pipeline_stages.py](./nexus/engine/pipeline_stages.py)
+- [pipeline_repair.py](./nexus/engine/pipeline_repair.py)
 - 若有需要再接：
-  - [coordinator.py](/Users/jameschen/Workspace/nexus/nexus/engine/coordinator.py)
+  - [coordinator.py](./nexus/engine/coordinator.py)
 
 最小可行版本：
 - 根據 task description 與 root cause 做 keyword / tag match

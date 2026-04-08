@@ -16,7 +16,7 @@ def test_isolation():
     payload_a = {
         "action": {
             "type": "create_file",
-            "path": "/Users/jameschen/Workspace/nexus/workspaces/A/test_A.txt",
+            "path": str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/A/test_A.txt"),
             "content": "Secret content for Tenant A"
         }
     }
@@ -30,7 +30,7 @@ def test_isolation():
     payload_b_malicious = {
         "action": {
             "type": "create_file",
-            "path": "/Users/jameschen/Workspace/nexus/workspaces/A/test_B_malicious.txt",
+            "path": str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/A/test_B_malicious.txt"),
             "content": "I am Tenant B"
         }
     }
@@ -46,7 +46,7 @@ def test_isolation():
     payload_b_valid = {
         "action": {
             "type": "create_file",
-            "path": "/Users/jameschen/Workspace/nexus/workspaces/B/test_B.txt",
+            "path": str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/B/test_B.txt"),
             "content": "Secret content for Tenant B"
         }
     }

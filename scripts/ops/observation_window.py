@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # Config
-PROJECT_ROOT = Path("/Users/jameschen/Workspace/nexus")
+PROJECT_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 OUTCOME_EVENTS = PROJECT_ROOT / ".nexus/metrics/skill_outcome_events.jsonl"
 BASELINE_FILE = PROJECT_ROOT / ".nexus/reports/obs_window_baseline.json"
 

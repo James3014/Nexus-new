@@ -1,0 +1,2 @@
+{"type": "adapter_lesson", "fragility_type": "SCHEMA_UI_DIRECT_BINDING (table.data_table)", "fix_template_used": "adapter_v1_for_tenant_REDACTED", "success_rate": 0.95, "lesson": "Secrets: sk-REDACTED. Paths: /workspace/tenant/src/main.rs. Binding table.data_table is risky.", "timestamp": "2026-03-26T09:19:02.894476"}
+{"type": "fix", "fragility_type": "UNKNOWN", "fix_template_used": "none", "success_rate": 0.95, "lesson": "Use DTO", "timestamp": "2026-03-26T09:24:25.329603"}

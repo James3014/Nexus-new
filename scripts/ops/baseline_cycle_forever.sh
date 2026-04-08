@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /Users/jameschen/Workspace/nexus
+cd .
 round=0
 
 while true; do

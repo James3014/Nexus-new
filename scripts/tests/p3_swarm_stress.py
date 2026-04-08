@@ -5,7 +5,7 @@ import signal
 from pathlib import Path
 
 # 🛡️ Nexus 物理路徑對位
-PROJECT_ROOT = Path("/Users/jameschen/Workspace/nexus")
+PROJECT_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 MANAGER_BIN = PROJECT_ROOT / "nexus-swarm/swarm-manager"
 NODE_BIN = PROJECT_ROOT / "nexus-reflex/target/debug/nexus-reflex" # 或 mocked binary
 

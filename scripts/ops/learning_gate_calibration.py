@@ -118,7 +118,7 @@ def main() -> int:
 
     for i in range(1, args.runs + 1):
         # Use absolute paths for CLI commands
-        project_root = "/Users/jameschen/Workspace/nexus"
+        project_root = str(__import__("pathlib").Path(__file__).resolve().parents[2])
         cli_path = f"{project_root}/scripts/nexus_cli.py"
         acc_check_path = f"{project_root}/scripts/ops/nexus_acceptance_check.py"
 

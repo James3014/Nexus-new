@@ -6,7 +6,7 @@ from crystal_market import transact_crystal
 # [SOTA 10/10] Economic Fairness & Token Flow Audit
 # Verification based on Sir's expert "Wisdom Economy" criteria.
 
-LEDGER_PATH = "/Users/jameschen/Workspace/nexus/workspaces/tenant_balance.json"
+LEDGER_PATH = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/tenant_balance.json")
 
 def test_economics():
     print("// Nexus-Economic Test: Starting Economic Fairness & Token Flow Audit...")

@@ -9,7 +9,7 @@ from pathlib import Path
 # 🛡️ Nexus Truth Claims Verifier v2.0 (Agent H - Hardened)
 # [NEXUS IDENTITY: 06624d2 + CI-GUARDED]
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_truth_claims_report.json"
 

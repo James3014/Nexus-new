@@ -1,5 +1,5 @@
 #!/bin/zsh
-REPO_ROOT="/Users/jameschen/Workspace/nexus"
+REPO_ROOT="."
 PID_FILE="$REPO_ROOT/.nexus/task_scheduler.pid"
 
 if [[ -f "$PID_FILE" ]]; then

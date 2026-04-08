@@ -8,7 +8,7 @@ from pathlib import Path
 # 🛡️ Nexus Wiki Eval Regression v1.1
 # Purpose: Execute automated regression testing of Wiki content via deterministic keyword checks.
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 EVAL_FILE = VAULT_ROOT / "06_Ops" / "Ops - Wiki Regression Evals.md"
 REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_eval_report.json"

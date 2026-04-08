@@ -2,7 +2,7 @@ import os
 import re
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 
 # 1. 強制修復圖譜檔案 (正確路徑)

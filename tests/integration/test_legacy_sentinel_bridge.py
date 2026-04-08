@@ -27,7 +27,7 @@ def test_safe_intent_bridge(mock_state):
 
 def test_risk_intent_bridge(mock_state):
     """驗證 RISK 意圖之物理攔截"""
-    mock_state.intent = "rm -rf /Users/jameschen/Workspace/nexus"
+    mock_state.intent = "rm -rf str(__import__("pathlib").Path(__file__).resolve().parents[2])"
     pm = PolicyManager(project_root=".")
     
     # 🛡️ 模擬 sentinel 回傳 RISK (R)

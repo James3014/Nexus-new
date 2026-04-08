@@ -304,7 +304,7 @@ level: L5.7 Eternal
 
 ## 🛡️ 第一重：物理精準掃描 (Physical Audit) - [COMPLETED]
 
-**掃描時間**: 2026-03-26 20:38 **掃描範圍**: `/Users/jameschen/Workspace/nexus` (全域，含隱藏目錄)
+**掃描時間**: 2026-03-26 20:38 **掃描範圍**: `.` (全域，含隱藏目錄)
 
 ### 1. 核心開發與執行區 (Core & Exec)
 
@@ -350,7 +350,7 @@ level: L5.7 Eternal
 
 ## 🛡️ 第二重：全量細節與配置掃描 (Full Scrutiny Audit) - [COMPLETED]
 
-**掃描時間**: 2026-03-26 20:52 **掃描範圍**: `/Users/jameschen/Workspace/nexus` (100% 遞歸遍歷)
+**掃描時間**: 2026-03-26 20:52 **掃描範圍**: `.` (100% 遞歸遍歷)
 
 ### 1. 全球級別的 AI 評測背甲 (The Benchmark Spine)
 
@@ -452,7 +452,7 @@ level: L5.7 Eternal
 
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/nexus/core/commander.py|5612|`state_contracts`, `TraumaEngine`|狀態自動機切換 (P-D-R-A-C)|
 
-|`/Users/jameschen/Workspace/nexus/nexus/core/coordinator.py`|13644|`NexusPipeline`, `TokenAccumulator`|頂層引擎調度器 (Orchestrator)|
+|`./nexus/core/coordinator.py`|13644|`NexusPipeline`, `TokenAccumulator`|頂層引擎調度器 (Orchestrator)|
 
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/nexus/core/state_contracts.py|9093|`pydantic`|定義 NexusState 數據契約與轉移禁地|
 
@@ -464,7 +464,7 @@ level: L5.7 Eternal
 
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/rust.svg)<br><br>…/nexus/nexus-reflex/src/main.rs|8522|`cargo`, `tree-sitter`|獨立 Rust Binary；提供物理文件保護|
 
-|`/Users/jameschen/Workspace/nexus-core/src/lib.rs`|2112|`pyo3`|**PyO3 加速層**；協助 Python 直接調用 Rust 函數|
+|`.-core/src/lib.rs`|2112|`pyo3`|**PyO3 加速層**；協助 Python 直接調用 Rust 函數|
 
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/scripts/core/parallel_spawner.py|1823|`openclaw bin`|同步併行啟動多個子代理任務|
 

@@ -8,20 +8,20 @@
 ---
 
 ## 🏗️ Intelligence Layer (01-05)
-- [01_PERF_INDEX.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/01_PERF_INDEX.md)
-- [02_REGRESSION_BASELINE_VS_CURRENT.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/02_REGRESSION_BASELINE_VS_CURRENT.md)
-- [03_WORKLOAD_AND_TEST_CONDITIONS.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/03_WORKLOAD_AND_TEST_CONDITIONS.md)
-- [04_TRACE_TIMELINE_BREAKDOWN.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/04_TRACE_TIMELINE_BREAKDOWN.md)
-- [05_ROOT_CAUSE_HYPOTHESIS_MATRIX.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/05_ROOT_CAUSE_HYPOTHESIS_MATRIX.md)
+- [01_PERF_INDEX.md](file://./perf_regression_pack_v22.5/01_PERF_INDEX.md)
+- [02_REGRESSION_BASELINE_VS_CURRENT.md](file://./perf_regression_pack_v22.5/02_REGRESSION_BASELINE_VS_CURRENT.md)
+- [03_WORKLOAD_AND_TEST_CONDITIONS.md](file://./perf_regression_pack_v22.5/03_WORKLOAD_AND_TEST_CONDITIONS.md)
+- [04_TRACE_TIMELINE_BREAKDOWN.md](file://./perf_regression_pack_v22.5/04_TRACE_TIMELINE_BREAKDOWN.md)
+- [05_ROOT_CAUSE_HYPOTHESIS_MATRIX.md](file://./perf_regression_pack_v22.5/05_ROOT_CAUSE_HYPOTHESIS_MATRIX.md)
 
 ## 🛠️ Engineering Internals (06-13)
-- [06_ORCHESTRATOR_CODE_PATHS.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/06_ORCHESTRATOR_CODE_PATHS.md)
-- [07_GUARD_HEALER_DECISION_CHAIN.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/07_GUARD_HEALER_DECISION_CHAIN.md)
-- [11_RECOMMENDED_FIX_ASYNC_BLUEPRINT.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/11_RECOMMENDED_FIX_ASYNC_BLUEPRINT.md)
+- [06_ORCHESTRATOR_CODE_PATHS.md](file://./perf_regression_pack_v22.5/06_ORCHESTRATOR_CODE_PATHS.md)
+- [07_GUARD_HEALER_DECISION_CHAIN.md](file://./perf_regression_pack_v22.5/07_GUARD_HEALER_DECISION_CHAIN.md)
+- [11_RECOMMENDED_FIX_ASYNC_BLUEPRINT.md](file://./perf_regression_pack_v22.5/11_RECOMMENDED_FIX_ASYNC_BLUEPRINT.md)
 
 ## ✅ Validation & Reports (14-26)
-- [25_PATCH_B_REPORT.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/25_PATCH_B_REPORT.md)
-- [26_PATCH_C_PARALLEL_REPORT.md](file:///Users/jameschen/Workspace/nexus/perf_regression_pack_v22.5/26_PATCH_C_PARALLEL_REPORT.md)
+- [25_PATCH_B_REPORT.md](file://./perf_regression_pack_v22.5/25_PATCH_B_REPORT.md)
+- [26_PATCH_C_PARALLEL_REPORT.md](file://./perf_regression_pack_v22.5/26_PATCH_C_PARALLEL_REPORT.md)
 
 ---
 

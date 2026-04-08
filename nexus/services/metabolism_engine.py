@@ -2,7 +2,6 @@ import os
 import json
 import logging
 from typing import Dict, Any
-from nexus.core.p_loop_manager import PPhase
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +10,6 @@ class SessionMetabolism:
     def __init__(self, token_limit: int = 128000):
         self.token_limit = token_limit
         self.threshold = 0.85
-        self.last_aaak_ratio = 1.0
 
     def should_distill(self, current_tokens: int) -> bool:
         """🔍 Check if session needs distillation."""
@@ -21,19 +19,15 @@ class SessionMetabolism:
             return True
         return False
 
-    def distill(self, session_essence: Dict[str, Any], p_manager: Any = None) -> str:
+    def distill(self, session_essence: Dict[str, Any]) -> str:
         """📉 Snapshots context and uploads to Arweave."""
-        logger.info("🧪 [Metabolism:DISTILLING] (P4) Extracting core intent and context...")
-        
-        # [Phase 36.5 Alignment] Update P-Loop state to P4
-        if p_manager:
-            p_manager.transition_to(PPhase.P4_METABOLIZE, {"trigger": "token_pressure", "limit": self.token_limit})
+        logger.info("🧪 [Metabolism:DISTILLING] Extracting core intent and context...")
         
         # 🔗 Mock Arweave upload in development
         arweave_tx = f"ar_tx_distilled_{int(os.path.getmtime(__file__))}"
         
         # Save locally as golden source reference
-        lineage_path = "str(REPO_ROOT)/.nexus/eternal/lineage.json"
+        lineage_path = str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/eternal/lineage.json")
         os.makedirs(os.path.dirname(lineage_path), exist_ok=True)
         
         history = []

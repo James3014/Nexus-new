@@ -10,7 +10,7 @@ from pathlib import Path
 from nexus.engine.phases.planner import PlannerPhaseHandler
 
 def run_phys_sim():
-    repo_root = Path("/Users/jameschen/Workspace/nexus")
+    repo_root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     # 模擬 PlannerPhaseHandler 需要初始化參數
     planner = PlannerPhaseHandler(str(repo_root), str(repo_root / ".nexus" / "runs" / "test_run"))
     

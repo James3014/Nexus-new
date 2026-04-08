@@ -8,7 +8,7 @@
 
 ## 1. 核心治理出口 (Primary LLM Client)
 所有受控的 LLM 調用均集中於以下路徑：
-- **實體檔案**: [`nexus/services/llm.py`](file:///Users/jameschen/Workspace/nexus/nexus/services/llm.py)
+- **實體檔案**: [`nexus/services/llm.py`](file://./nexus/services/llm.py)
 - **類別**: `LLMClient`
 - **調用方式**: 
   - **SDK 模式**: 使用 `openai` SDK 呼叫 `chat.completions.create`。
@@ -23,16 +23,16 @@
 以下腳本 **繞過** 了 `LLMClient` 進行實體二進制呼叫，存在 Token 監控與 Auth 治理漏洞：
 
 ### 🚨 [Bypass] 結晶化引擎
-- **檔案**: [`scripts/crystallize_via_gws_v3.py`](file:///Users/jameschen/Workspace/nexus/scripts/crystallize_via_gws_v3.py#L113)
+- **檔案**: [`scripts/crystallize_via_gws_v3.py`](file://./scripts/crystallize_via_gws_v3.py#L113)
 - **語法**: `subprocess.run(["gemini", "-p", "CRM 結晶化："], ...)`
 - **風險**: 繞過 `LLMClient` 的 Retries、Token 計數以及 Auth Fallback 邏輯。
 
 ### 🚨 [Bypass] 潛意識守護進程
-- **檔案**: [`scripts/subconscious_daemon.py`](file:///Users/jameschen/Workspace/nexus/scripts/subconscious_daemon.py#L147)
+- **檔案**: [`scripts/subconscious_daemon.py`](file://./scripts/subconscious_daemon.py#L147)
 - **語法**: `gemini_bin = shutil.which("gemini")` (及其後續調用)
 
 ### 🚨 [Bypass] TG/PTY 橋接器
-- **檔案**: [`scripts/tg_pty_bridge.py`](file:///Users/jameschen/Workspace/nexus/scripts/tg_pty_bridge.py#L53)
+- **檔案**: [`scripts/tg_pty_bridge.py`](file://./scripts/tg_pty_bridge.py#L53)
 - **語法**: `subprocess.run(["gemini", "-m", ...])`
 
 ---

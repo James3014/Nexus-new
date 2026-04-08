@@ -1,6 +1,6 @@
 # 📜 Universal Agent Guidelines: READ MUSE_PROTO.md
 # SCOPE: Antigravity, Gemini, OpenClaw, Codex, Claude.
-# SSOT: /Users/jameschen/Workspace/nexus/MUSE_PROTO.md
+# SSOT: ./MUSE_PROTO.md
 
 ## 🎯 Semantic Completion Criteria
 - **Behavioral Integrity**: The requested functionality is verified through empirical testing.

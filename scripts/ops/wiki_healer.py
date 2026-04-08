@@ -2,8 +2,8 @@ import os
 import re
 from pathlib import Path
 
-VAULT_ROOT = Path("/Users/jameschen/Workspace/nexus/nexus_wiki_vault")
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+VAULT_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "nexus_wiki_vault"))
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 
 # 故障檔案清單 (從 jq 輸出轉化)
 FAILED_FILES = [

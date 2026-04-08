@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- CONFIG ---
-WORKSPACE_ROOT="/Users/jameschen/Workspace/nexus"
+WORKSPACE_ROOT="."
 GEMINI_BIN="/Users/jameschen/.npm-global/bin/gemini"
 OPENCLAW_BIN="/Users/jameschen/.npm-global/bin/openclaw"
 OC_WORKSPACE="/Users/jameschen/.openclaw/workspace"

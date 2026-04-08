@@ -1,7 +1,7 @@
 # Nexus Autonomous GAN Research Data Sample
 
 Generated at: 2026-03-27 (Asia/Taipei)  
-Source root: `/Users/jameschen/Workspace/nexus/.nexus`
+Source root: `./.nexus`
 
 ## Inventory Snapshot
 
@@ -24,7 +24,7 @@ Current signal quality is still low (mostly cold-start/UNKNOWN), so treat this a
 
 ## Sample A: health_explain_timeseries.jsonl (last 50)
 
-Path: `/Users/jameschen/Workspace/nexus/.nexus/metrics/health_explain_timeseries.jsonl`
+Path: `./.nexus/metrics/health_explain_timeseries.jsonl`
 
 ```json
 {"ts_utc": "2026-03-27T13:05:35.899448+00:00", "snapshot_score": 0.0, "snapshot_status": "UNKNOWN", "pipeline_health": 0.0, "phase_health": {"P": 0.0, "X": 0.0, "D": 0.0, "R": 0.0, "A": 0.0, "C": 0.0}, "anti_hallucination": {"last_review_status": "", "patch_generated": false, "patch_apply_success": false, "proof_type": "", "proof_present": false, "phantom_success_reason": ""}, "learning": {"frozen": false, "freeze_reasons": [], "ingest_status": "", "curiosity_score": 0.0, "pattern_reuse_rate": 0.0, "lesson_quality": 0.0, "next_run_hit_rate": 0.0}, "self_healing": {"cycle_status": "", "diagnosis_kind": "", "after_diagnosis_kind": "", "phase_route": [], "route_before": [], "route_after": [], "route_weights": {}, "policy_sync": ""}, "adversarial_metrics": {"discriminator_checks": 0, "discriminator_block_count": 0, "discriminator_pass_count": 0, "discriminator_block_rate": 0.0, "discriminator_pass_rate": 0.0, "generator_success_window": 0, "generator_success_rate": 0.0, "gan_alignment_score": 0.0}, "notes": []}
@@ -35,7 +35,7 @@ Path: `/Users/jameschen/Workspace/nexus/.nexus/metrics/health_explain_timeseries
 
 ## Sample B: policy_memory.jsonl (last 50)
 
-Path: `/Users/jameschen/Workspace/nexus/.nexus/knowledge/policy_memory.jsonl`
+Path: `./.nexus/knowledge/policy_memory.jsonl`
 
 ```json
 {"rule_id": "POL-429", "condition": "HTTP 429 Quota Exceeded", "action": "Implement exponential backoff. Increase delay by 2x for each failure.", "confidence": 0.95, "status": "validated"}
@@ -70,7 +70,7 @@ Path: `/Users/jameschen/Workspace/nexus/.nexus/knowledge/policy_memory.jsonl`
 Run this every cycle to build enough baseline:
 
 ```bash
-cd /Users/jameschen/Workspace/nexus
+cd .
 uv run scripts/engine/nexus_cli.py nexus:health explain --output json
 ```
 

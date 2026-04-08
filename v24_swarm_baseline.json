@@ -1,0 +1,1 @@
+{"recall_at_5": 0.967, "p95_latency": "12.4ms", "tenants": 10, "concurrency": 50, "status": "BASELINE_LOCKED"}

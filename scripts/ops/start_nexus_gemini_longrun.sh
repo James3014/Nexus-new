@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 SRC_MANIFEST="$NEXUS_ROOT/task_manifest.longrun.yaml"
 DST_MANIFEST="$NEXUS_ROOT/task_manifest.yaml"
 START_SCRIPT="$NEXUS_ROOT/scripts/ops/start_nexus_gemini.sh"

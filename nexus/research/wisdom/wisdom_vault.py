@@ -6,7 +6,7 @@ from datetime import datetime
 from sentence_transformers import SentenceTransformer
 
 class WisdomVault:
-    def __init__(self, db_path="str(REPO_ROOT)/.nexus/vector_db/"):
+    def __init__(self, db_path=str(__import__("pathlib").Path(__file__).resolve().parents[3] / ".nexus/vector_db/")):
         self.db_path = os.path.expanduser(db_path)
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
         self.db = lancedb.connect(self.db_path)

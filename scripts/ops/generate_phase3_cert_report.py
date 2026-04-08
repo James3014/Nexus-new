@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # 🛡️ Nexus 廣域對位
-PROJECT_ROOT = Path("/Users/jameschen/Workspace/nexus")
+PROJECT_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 REPORT_PATH = PROJECT_ROOT / ".nexus/reports/Phase3_Final_Cert.md"
 
 def generate_report(stress_log=None, bench_csv=None, acceptance_json=None):

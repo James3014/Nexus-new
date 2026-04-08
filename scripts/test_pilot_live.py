@@ -16,7 +16,7 @@ def test_pilot_live():
         "repo": "https://github.com/nexus-friend/pilot-repo",
         "action": {
             "type": "create_file",
-            "path": "/Users/jameschen/Workspace/nexus/workspaces/Tenant_Friend/pilot_proof.txt",
+            "path": str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/Tenant_Friend/pilot_proof.txt"),
             "content": "Nexus OS v17: Live key injection confirmed."
         }
     }
@@ -31,7 +31,7 @@ def test_pilot_live():
         
         # 2. Verify Output & Sensing
         time.sleep(5)
-        proof_path = "/Users/jameschen/Workspace/nexus/workspaces/Tenant_Friend/pilot_proof.txt"
+        proof_path = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/Tenant_Friend/pilot_proof.txt")
         if os.path.exists(proof_path):
             with open(proof_path, "r") as f:
                 content = f.read()

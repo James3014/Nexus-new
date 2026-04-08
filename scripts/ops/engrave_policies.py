@@ -3,7 +3,7 @@ from pathlib import Path
 from nexus.services.memory import MemoryService
 
 def engrave():
-    project_root = "/Users/jameschen/Workspace/nexus"
+    project_root = str(__import__("pathlib").Path(__file__).resolve().parents[2])
     memory = MemoryService(project_root)
     
     policies = [

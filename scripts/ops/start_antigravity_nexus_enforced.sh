@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 MODEL="${1:-gpt-5.4-mini}"
 APPROVAL_MODE="${2:-full-auto}"
 PROMPT_FILE="${3:-/tmp/antigravity_nexus_task.md}"
@@ -13,7 +13,7 @@ if [[ ! -f "$PROMPT_FILE" ]]; then
 [nexus-enforced] prompt file missing: $PROMPT_FILE
 Create one first, e.g.:
   cat > /tmp/antigravity_nexus_task.md <<'TASK'
-  在 /Users/jameschen/Workspace/nexus 內完成指定任務，
+  在 . 內完成指定任務，
   並回報變更檔案、測試摘要與 gate 結果。
   TASK
 EOF

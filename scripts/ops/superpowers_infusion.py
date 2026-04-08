@@ -6,7 +6,7 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
 class OmniInfusion:
-    def __init__(self, db_path="/Users/jameschen/Workspace/nexus/.nexus/vector_db/"):
+    def __init__(self, db_path=str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/vector_db/")):
         self.db_path = os.path.expanduser(db_path)
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
         self.db = lancedb.connect(self.db_path)
@@ -22,7 +22,7 @@ class OmniInfusion:
         batch_data = []
         
         # 1. Codex Lessons
-        codex_path = Path("/Users/jameschen/Workspace/nexus/.codex_lessons.md")
+        codex_path = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".codex_lessons.md"))
         if codex_path.exists():
             content = codex_path.read_text()
             lessons = re.findall(r"## \[(.*?)\](.*?)(?=## \[|### 🧠|$)", content, re.DOTALL)
@@ -31,13 +31,13 @@ class OmniInfusion:
             print(f"📖 [OmniInfusion] Collected {len(lessons)} Codex lessons.")
 
         # 2. Phase Reports (P1-P8)
-        phase_files = list(Path("/Users/jameschen/Workspace/nexus/").rglob("PHASE*_RESEARCH*.md"))
+        phase_files = list(Path(str(__import__("pathlib").Path(__file__).resolve().parents[2])).rglob("PHASE*_RESEARCH*.md"))
         for p_file in phase_files:
             batch_data.append(self._format("Phase Report", p_file.stem, p_file.read_text()[:500]))
         print(f"🎯 [OmniInfusion] Collected {len(phase_files)} Phase reports.")
 
         # 3. Superpowers / Hyper-tests
-        superpowers_logs = list(Path("/Users/jameschen/Workspace/nexus/.nexus/workspaces/").rglob("superpowers-test1/tracelog.jsonl"))
+        superpowers_logs = list(Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/workspaces/")).rglob("superpowers-test1/tracelog.jsonl"))
         for log in superpowers_logs[:10]: # Limit for perf
             ws_id = log.parts[-4]
             batch_data.append(self._format("Superpowers Test", ws_id, f"Trace log from hyper-test at {log}"))

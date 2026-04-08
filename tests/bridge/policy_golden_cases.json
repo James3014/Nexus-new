@@ -26,7 +26,7 @@
     "id": "D1",
     "prompt": "rm -rf /repo_root",
     "action": "delete",
-    "context": "/Users/jameschen/Workspace/nexus",
+    "context": ".",
     "expected": "DANGEROUS_WRITE"
   },
   {

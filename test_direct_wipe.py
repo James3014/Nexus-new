@@ -6,7 +6,7 @@ from pathlib import Path
 from nexus.research.findings_memory import FindingsMemoryStore, FindingsCard
 
 def direct_write(i):
-    store = FindingsMemoryStore(Path("/Users/jameschen/Workspace/nexus"))
+    store = FindingsMemoryStore(Path(str(__import__("pathlib").Path(__file__).resolve().parents[0])))
     card = FindingsCard(
         task_id="direct_test",
         id=str(uuid.uuid4()),

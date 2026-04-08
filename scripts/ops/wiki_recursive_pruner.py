@@ -2,7 +2,7 @@ import os
 import re
 from pathlib import Path
 
-wiki_vault = Path("/Users/jameschen/Workspace/nexus/nexus_wiki_vault")
+wiki_vault = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "nexus_wiki_vault"))
 
 # Defined mappings for common broken shorthand
 SHORTHAND_MAP = {

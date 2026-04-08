@@ -24,7 +24,7 @@
 ## 2. 執行方式
 
 ```bash
-cd /Users/jameschen/Workspace/nexus
+cd .
 python3 Autoresearch/formal_research_hardening.py \
   --round-summary /path/to/round_summary.jsonl \
   --output-dir /path/to/output_dir

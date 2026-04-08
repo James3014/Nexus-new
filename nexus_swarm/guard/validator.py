@@ -53,7 +53,7 @@ class DeterministicValidator:
         }
 
 if __name__ == "__main__":
-    v = DeterministicValidator(Path("/Users/jameschen/Workspace/nexus"))
+    v = DeterministicValidator(Path(str(__import__("pathlib").Path(__file__).resolve().parents[2])))
     test_action = {"target_file": "scripts/engine/nexus_cli.py", "target_symbol": "nexus"}
     res = v.validate_action(test_action)
     print(res)

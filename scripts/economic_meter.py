@@ -5,7 +5,7 @@ from datetime import datetime
 # [SOTA 10/10] Nexus Economic Meter
 # Implementation based on Sir's expert "Economic Layer" principles (Phase 4).
 
-LEDGER_PATH = "/Users/jameschen/Workspace/nexus/workspaces/tenant_balance.json"
+LEDGER_PATH = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/tenant_balance.json")
 
 def record_earning(tenant_id, amount, reason):
     if not os.path.exists(LEDGER_PATH):

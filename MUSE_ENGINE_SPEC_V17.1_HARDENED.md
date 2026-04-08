@@ -190,7 +190,7 @@ level: L2
 
 ## 🛡️ 第一重：物理精準掃描 (Physical Audit) - [COMPLETED]
 
-**掃描時間**: 2026-03-26 20:38 **掃描範圍**: `/Users/jameschen/Workspace/nexus` (全域，含隱藏目錄)
+**掃描時間**: 2026-03-26 20:38 **掃描範圍**: `.` (全域，含隱藏目錄)
 
 ### 1. 核心開發與執行區 (Core & Exec)
 
@@ -223,7 +223,7 @@ level: L2
 
 ## 🛡️ 第二重：全量細節與配置掃描 (Full Scrutiny Audit) - [COMPLETED]
 
-**掃描時間**: 2026-03-26 20:52 **掃描範圍**: `/Users/jameschen/Workspace/nexus` (100% 遞歸遍歷)
+**掃描時間**: 2026-03-26 20:52 **掃描範圍**: `.` (100% 遞歸遍歷)
 
 ### 1. 全球級別的 AI 評測背甲 (The Benchmark Spine)
 
@@ -303,13 +303,13 @@ level: L2
 |檔案路徑 (Absolute)|大小 (Bytes)|性質 / 引用的其他檔案|核心功能|
 |---|---|---|---|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/nexus/core/commander.py|5612|`state_contracts`, `TraumaEngine`|狀態自動機切換 (P-D-R-A-C)|
-|`/Users/jameschen/Workspace/nexus/nexus/core/coordinator.py`|13644|`NexusPipeline`, `TokenAccumulator`|頂層引擎調度器 (Orchestrator)|
+|`./nexus/core/coordinator.py`|13644|`NexusPipeline`, `TokenAccumulator`|頂層引擎調度器 (Orchestrator)|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/nexus/core/state_contracts.py|9093|`pydantic`|定義 NexusState 數據契約與轉移禁地|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/nexus/core/context_hub.py|10907|`MemoryService`, `StateIO`, <br><br>![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>ToonRenderer|語義上下文壓縮與記憶注入|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/Workspace/nexus/nexus/containers.py|4203|`GitManager`, `LLMClient`, `SkillsRouter`|**DI 核心樞紐**；裝配所有服務與引擎|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/nexus/engine/phases/planner.py|7215|![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>NexusState, `Predictor`|任務計畫生成階段 (P-Phase)|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/rust.svg)<br><br>…/nexus/nexus-reflex/src/main.rs|8522|`cargo`, `tree-sitter`|獨立 Rust Binary；提供物理文件保護|
-|`/Users/jameschen/Workspace/nexus-core/src/lib.rs`|2112|`pyo3`|**PyO3 加速層**；協助 Python 直接調用 Rust 函數|
+|`.-core/src/lib.rs`|2112|`pyo3`|**PyO3 加速層**；協助 Python 直接調用 Rust 函數|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/scripts/core/parallel_spawner.py|1823|`openclaw bin`|同步併行啟動多個子代理任務|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>…/nexus/scripts/bench/benchmark_suite.py|5600|![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/brackets-yellow.svg)<br><br>cases/catalog.json, <br><br>![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/python.svg)<br><br>nexus_cli.py|工業級基準測試運作器|
 |![](vscode-file://vscode-app/Applications/Antigravity.app/Contents/Resources/app/extensions/theme-symbols/src/icons/files/brackets-yellow.svg)<br><br>…/nexus/workspaces/tenant_balance.json|473|`JSON`|**商業計費引擎**；記錄餘額與結晶收益|
@@ -606,7 +606,7 @@ Nexus Ultimate Total Atlas Integrated Verbatim (2026-03-27).
 ---
 
 ### 17.3 治理 HUD 硬化合約 (2.1-STABLE-HARDENED)
-- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `/Users/jameschen/Workspace/nexus/` 的絕對錨定。
+- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `./` 的絕對錨定。
 - [x] **ACL 命名空間扁平化**: 本地 App 權限引用必須使用扁平 `identifier` (如 `allowall`)，嚴禁在單一上下文環境下加註 `app:` 等無意義命名空間，以防編譯器與運行端靜默拒絕。
 - [x] **反黑屏守則 (Anti-Blackout UX)**: 治理 HUD 必須具備 `FatalBoundary` (React Error Boundary)。任何前端初始化崩潰必須物理顯示於畫面上，禁止「靜默黑屏」。
 - [x] **數據序列化對位**: 所有 Rust 治理結構體強制實裝 `#[serde(rename_all = "camelCase")]`，確保與前端 React 屬性讀取無縫對接。
@@ -621,20 +621,6 @@ Nexus Ultimate Total Atlas Integrated Verbatim (2026-03-27).
 | **WB_TASK_BLOCK_MISSING** | 區塊遺失 | 檢查檔案是否被手動修改導致標記受損 |
 
 <!-- nexus-anchor:governance-hardening -->
-<!-- nexus-writeback:bug-1775603416 -->
-### Auto Writeback: bug-1775603416
-
-- Applied at: `2026-04-08T02:12:25.428965+00:00`
-- Applied by: `startup-gate`
-- Delta artifact: `/Users/jameschen/Workspace/nexus/.nexus/reports/writeback/bug-1775603416_SPEC.delta.md`
-
-# SPEC Delta: bug-1775603416
-
-## Suggested Updates
-- Reflect learning loop outcome from `pipeline.crystallize`.
-- Document root cause: patch_apply_failed
-- Review protocol/startup gate expectations if this task changed delivery behavior.
-<!-- /nexus-writeback:bug-1775603416 -->
 <!-- nexus-writeback:nexus-learn-4 -->
 ### Auto Writeback: nexus-learn-4
 
@@ -932,7 +918,7 @@ uv run scripts/engine/nexus_cli.py nexus:release-ready
 - [x] 朋友版遠端安裝端點 `/install/nexus-pilot-friend.sh`
 
 ### 17.3 治理 HUD 硬化合約 (2.1-STABLE-HARDENED)
-- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `/Users/jameschen/Workspace/nexus/` 的絕對錨定。
+- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `./` 的絕對錨定。
 - [x] **ACL 命名空間扁平化**: 本地 App 權限引用必須使用扁平 `identifier` (如 `allowall`)，嚴禁在單一上下文環境下加註 `app:` 等無意義命名空間，以防編譯器與運行端靜默拒絕。
 - [x] **反黑屏守則 (Anti-Blackout UX)**: 治理 HUD 必須具備 `FatalBoundary` (React Error Boundary)。任何前端初始化崩潰必須物理顯示於畫面上，禁止「靜默黑屏」。
 - [x] **數據序列化對位**: 所有 Rust 治理結構體強制實裝 `#[serde(rename_all = "camelCase")]`，確保與前端 React 屬性讀取無縫對接。
@@ -957,6 +943,6 @@ uv run scripts/engine/nexus_cli.py nexus:release-ready
 
 %% 
 MUSE ENGINE SPEC v23.1 Addendum
-- Path: /Users/jameschen/Workspace/nexus/MUSE_ENGINE_SPEC_V17.1_HARDENED.md
+- Path: ./MUSE_ENGINE_SPEC_V17.1_HARDENED.md
 - Updated at 2026-04-05 23:31 (19-Layer Governance Rollout Committed)
 %%

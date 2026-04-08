@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-NEXUS_ROOT = Path("/Users/jameschen/Workspace/nexus")
+NEXUS_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 sys.path.append(str(NEXUS_ROOT)) # 🛡️ Enable local module imports
 
 from nexus_swarm.wisdom.lancedb_store import WisdomMemory

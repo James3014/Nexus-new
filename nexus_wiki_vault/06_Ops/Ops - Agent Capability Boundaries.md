@@ -36,7 +36,7 @@ priority: P2
 version: v1.0.0
 visibility: internal
 landscape: structural
-path: /Users/jameschen/Workspace/nexus/nexus_wiki_vault/06_Ops/Ops - Agent Capability Boundaries.md
+path: ./nexus_wiki_vault/06_Ops/Ops - Agent Capability Boundaries.md
 ---
 
 ## One-sentence summary

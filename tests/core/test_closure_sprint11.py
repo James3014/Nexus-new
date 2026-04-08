@@ -98,7 +98,7 @@ def test_benchmark_fingerprint_has_required_fields():
     commit_sha = "unknown"
     try:
         commit_sha = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=Path("/Users/jameschen/Workspace/nexus"), text=True
+            ["git", "rev-parse", "HEAD"], cwd=Path(str(__import__("pathlib").Path(__file__).resolve().parents[2])), text=True
         ).strip()
     except Exception:
         pass

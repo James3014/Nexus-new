@@ -1,8 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-NEXUS_ROOT="${NEXUS_ROOT:-/Users/jameschen/Workspace/nexus}"
-LONGRUN_SCRIPT="${LONGRUN_SCRIPT:-/Users/jameschen/Workspace/nexus/scripts/ops/start_nexus_gemini_longrun.sh}"
+NEXUS_ROOT="${NEXUS_ROOT:-.}"
+LONGRUN_SCRIPT="${LONGRUN_SCRIPT:-./scripts/ops/start_nexus_gemini_longrun.sh}"
 MODEL="${MODEL:-gemini-3.1-pro-preview}"
 APPROVAL_MODE="${APPROVAL_MODE:-yolo}"
 

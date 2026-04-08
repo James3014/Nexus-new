@@ -65,7 +65,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[Module - Policy and Learning Governance](../02_Modules/Module - Policy and Learning Governance.md)**: 政策管理與學習。
 
 ## Related modules / files
-- `nexus/core/`- **[Orchestrator Node](../02_Modules/Module - Core Orchestrator.md)**: 位於 `/Users/jameschen/Workspace/nexus/`。 [Code: scripts/engine/nexus_cli.py]
+- `nexus/core/`- **[Orchestrator Node](../02_Modules/Module - Core Orchestrator.md)**: 位於 `./`。 [Code: scripts/engine/nexus_cli.py]
 - **Vast State**: `.nexus/` 目錄。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ### Module Registry (全系統組件登記)

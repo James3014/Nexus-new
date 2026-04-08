@@ -2024,7 +2024,7 @@ def merge_v25(dry_run_first: bool, staging: bool, tag: str):
     
     if staging:
         click.echo(f"📦 [Merge:Staging] Promoting feature to v25 staging artifact...")
-        click.echo("📁 Artifact file:///Users/jameschen/Workspace/nexus/.nexus/artifacts/v25_staging.json created.")
+        click.echo("📁 Artifact file://./.nexus/artifacts/v25_staging.json created.")
 
     click.echo(f"🏁 [Merge:SUCCESS] Branch merged to main. Tagged {tag}.")
     click.echo("🛡️  NEXUS SINGULARITY OS EVOLVED TO V25.0 (120/100).")
@@ -3054,7 +3054,7 @@ def merge_v25(dry_run_first: bool, staging: bool, tag: str):
     
     if staging:
         click.echo(f"📦 [Merge:Staging] Promoting feature to v25 staging artifact...")
-        click.echo("📁 Artifact file:///Users/jameschen/Workspace/nexus/.nexus/artifacts/v25_staging.json created.")
+        click.echo("📁 Artifact file://./.nexus/artifacts/v25_staging.json created.")
 
     click.echo(f"🏁 [Merge:SUCCESS] Branch merged to main. Tagged {tag}.")
     click.echo("🛡️  NEXUS SINGULARITY OS EVOLVED TO V25.0 (120/100).")

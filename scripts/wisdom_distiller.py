@@ -7,13 +7,13 @@ from economic_meter import record_earning, measure_contribution
 # [SOTA 10/10] Privacy-preserving Wisdom Distiller v2
 # Implementation based on Sir's expert "Anonymous Wisdom Sharing" principles (Phase 3).
 
-GLOBAL_CRYSTALS = "/Users/jameschen/Workspace/nexus/global_crystals.jsonl"
-TENANT_CONFIG = "/Users/jameschen/Workspace/nexus/workspaces/tenants_config.json"
+GLOBAL_CRYSTALS = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "global_crystals.jsonl")
+TENANT_CONFIG = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/tenants_config.json")
 
 def anonymize_text(text):
     if not text: return ""
     # 1. Strip sensitive patterns (Repo paths, API keys, Tenant IDs)
-    text = re.sub(r"/Users/jameschen/Workspace/nexus/workspaces/[A-Z0-9_]+/", "/workspace/tenant/", text)
+    text = re.sub(rstr(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/[A-Z0-9_]+/"), "/workspace/tenant/", text)
     text = re.sub(r"sk-[a-zA-Z0-9-]{20,}", "sk-REDACTED", text)
     text = re.sub(r"tenant_[a-zA-Z0-9_]+", "tenant_REDACTED", text)
     
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         "lesson": "Always use DTO for table.questions binding in /Users/jameschen/Workspace/nexus/workspaces/A/"
     }
     # Initializing mock config for test
-    os.makedirs("/Users/jameschen/Workspace/nexus/workspaces", exist_ok=True)
+    os.makedirs(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces"), exist_ok=True)
     with open(TENANT_CONFIG, "w") as f:
         json.dump({"A": {"share_wisdom": True}}, f)
         

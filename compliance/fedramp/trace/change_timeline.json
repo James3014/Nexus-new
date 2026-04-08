@@ -1,32 +1,32 @@
 [
   {
     "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-08T14:03:39.661531",
+    "timestamp": "2026-04-08T11:10:11.958237",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-08T14:03:39.661299",
+    "timestamp": "2026-04-08T11:10:11.958055",
     "category": "Operational Report"
   },
   {
     "artifact": "wiki_eval_report.json",
-    "timestamp": "2026-04-08T14:03:04.495838",
+    "timestamp": "2026-04-08T11:09:41.365568",
     "category": "Operational Report"
   },
   {
     "artifact": "wiki_writeback_report.json",
-    "timestamp": "2026-04-08T14:03:04.431573",
+    "timestamp": "2026-04-08T11:09:41.304326",
     "category": "Operational Report"
   },
   {
     "artifact": "wiki_capability_coverage_report.json",
-    "timestamp": "2026-04-08T14:03:04.377259",
+    "timestamp": "2026-04-08T11:09:41.251921",
     "category": "Operational Report"
   },
   {
     "artifact": "wiki_drift_report.json",
-    "timestamp": "2026-04-08T14:03:04.302531",
+    "timestamp": "2026-04-08T11:09:41.178218",
     "category": "Operational Report"
   },
   {
@@ -117,6 +117,11 @@
   {
     "artifact": "v23_1_regression_check.md",
     "timestamp": "2026-04-05T23:39:10.571197",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "acceptance_check.json.bak",
+    "timestamp": "2026-04-02T18:30:16.595794",
     "category": "Operational Report"
   },
   {

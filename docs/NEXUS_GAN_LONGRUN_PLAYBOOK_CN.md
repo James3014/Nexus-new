@@ -66,7 +66,7 @@ uv run scripts/engine/nexus_cli.py nexus:health explain --output json
 
 說明：從現在開始，`nexus:health explain` 每次執行都會自動追加一筆同一份 time-series log（JSONL），不需要手動整理。
 
-- 固定路徑：`/Users/jameschen/Workspace/nexus/.nexus/metrics/health_explain_timeseries.jsonl`
+- 固定路徑：`./.nexus/metrics/health_explain_timeseries.jsonl`
 - 寫入模式：append-only（每次一行 JSON，保留完整歷史）
 - 主要欄位：`ts_utc`, `snapshot_score`, `snapshot_status`, `pipeline_health`, `phase_health`, `anti_hallucination`, `learning`, `self_healing`, `adversarial_metrics`, `notes`
 

@@ -9,7 +9,7 @@ from pathlib import Path
 # Purpose: Automate the conversion of high-value query results into Wiki documentation.
 # Policy: nexus_wiki_vault/06_Ops/Ops - Query Writeback Policy.md
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_writeback_report.json"
 

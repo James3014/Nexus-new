@@ -458,7 +458,7 @@ Expected: PASS
 
 - [ ] **Step 2: 手動驗證 CLI 啟動流程**
 
-Run: `/usr/bin/python3 /Users/jameschen/Workspace/nexus/scripts/nexus_chat_cli.py`
+Run: `/usr/bin/python3 ./scripts/nexus_chat_cli.py`
 Expected:
 - 可進 onboarding
 - 可看到主畫面

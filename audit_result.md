@@ -16,7 +16,7 @@
 
 ## 3. 驗收門禁：Acceptance Check 報告
 
-根據 `scripts/ops/nexus_acceptance_check.py` 產出之 [報告](file:///Users/jameschen/Workspace/nexus/.nexus/reports/acceptance_check.md)：
+根據 `scripts/ops/nexus_acceptance_check.py` 產出之 [報告](file://./.nexus/reports/acceptance_check.md)：
 - **Auto-Repair Success Rate**: 100% (PASS)
 - **Phantom False Positive Rate**: 8.0% (⚠ WARNING, threshold 3.0%)
 - **Regression Pass Rate**: 67.39% (🛑 FAIL, target 95%)

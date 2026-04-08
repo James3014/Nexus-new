@@ -67,6 +67,6 @@ def load_self_heal_candidates(
     max_candidates: int,
 ) -> List[RouteCandidate]:
     """載入 self-heal 專用修復候選。"""
-    from scripts.learning.compute_route_weights import load_mock_candidates
+    from nexus.core.learning.compute_route_weights import load_mock_candidates
     # 未來將升級為從 .nexus/inventory 加載真正的 Agents
     return load_mock_candidates(repo_root, phase)[:max_candidates]

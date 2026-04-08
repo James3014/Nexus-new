@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 
 # Path Configuration
-REPO_ROOT = "/Users/jameschen/Workspace/nexus"
+REPO_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[2])
 SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts/ops")
 STATUS_FILE = os.path.join(REPO_ROOT, ".nexus/task_scheduler_status.json")
 LOG_FILE = os.path.join(REPO_ROOT, ".nexus/task_scheduler.log")

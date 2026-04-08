@@ -4,7 +4,7 @@ import os
 import subprocess
 
 BASE_URL = "http://127.0.0.1:5001/enqueue"
-LOG_DIR = "/Users/jameschen/Workspace/nexus/logs/tenants"
+LOG_DIR = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "logs/tenants")
 
 def test_queue_isolation():
     print("// Nexus-Sentinel Test: Starting Queue Isolation & Async Integrity Audit...")

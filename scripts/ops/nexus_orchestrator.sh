@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 WORKTREE_BASE="$NEXUS_ROOT/worktrees"
 WORKERS=("worker-1" "worker-2" "worker-3" "worker-4")
 DEFAULT_MODEL="gemini-3-flash-preview"

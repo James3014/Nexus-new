@@ -47,7 +47,7 @@
 ---
 
 ## 🛠️ 技術前提 (Prerequisites)
-1. **Canonical Path Alignment**: 已完成 `/Users/jameschen/Workspace/nexus/scripts/core/` 檔案所有權標定。
+1. **Canonical Path Alignment**: 已完成 `./scripts/core/` 檔案所有權標定。
 2. **State Contract Versioning**: 需先將 `current_phase` 與 `retry_count` 等欄位寫入 `state_contracts.py`。
 
 ---

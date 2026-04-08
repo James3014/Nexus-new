@@ -5,7 +5,7 @@
 echo "🚀 Starting Nexus Swarm Phase 24 Shadow Audit..."
 
 # 1. Start a Small Fleet (5 Nodes)
-export NEXUS_ALLOWED_PATHS="/Users/jameschen/Workspace/nexus/scripts,/tmp/nexus"
+export NEXUS_ALLOWED_PATHS="./scripts,/tmp/nexus"
 echo "🛡️  Enforcing Security Boundaries: $NEXUS_ALLOWED_PATHS"
 
 # Setup ports 9201-9205

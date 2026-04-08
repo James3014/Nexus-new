@@ -266,7 +266,7 @@
    Compiling const-oid v0.10.2
    Compiling open v5.3.3
    Compiling shared_child v1.1.1
-   Compiling nexus-desk v0.1.0 (/Users/jameschen/Workspace/nexus/nexus-desk/src-tauri)
+   Compiling nexus-desk v0.1.0 (./nexus-desk/src-tauri)
    Compiling digest v0.11.2
    Compiling hashlink v0.11.0
    Compiling iana-time-zone v0.1.65

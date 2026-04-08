@@ -23,12 +23,12 @@ Agent 必須透過 Codex 具現化的 Pilot 入口進行掛載。這套系統已
 
 **安裝與初始化 (一鍵具現，推薦 Standalone)：**
 ```bash
-bash /Users/jameschen/Workspace/nexus/scripts/ops/install_nexus_pilot_friend_standalone.sh
+bash ./scripts/ops/install_nexus_pilot_friend_standalone.sh
 ```
 
 如果是開發者機器（已有完整 Nexus repo），才用 repo 安裝器：
 ```bash
-bash /Users/jameschen/Workspace/nexus/scripts/ops/install_nexus_pilot_friend.sh
+bash ./scripts/ops/install_nexus_pilot_friend.sh
 ```
 
 **啟動指令：**

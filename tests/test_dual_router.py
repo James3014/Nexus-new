@@ -5,7 +5,7 @@ import os
 
 class TestDualRouter(unittest.TestCase):
     def setUp(self):
-        self.project_root = "/Users/jameschen/Workspace/nexus"
+        self.project_root = str(__import__("pathlib").Path(__file__).resolve().parents[1])
         self.router = SkillsRouter(self.project_root)
 
     def test_dual_mode_palace_hit(self):

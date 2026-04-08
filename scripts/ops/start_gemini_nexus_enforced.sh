@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 MODEL="${1:-gemini-3-flash-preview}"
 APPROVAL_MODE="${2:-yolo}"
 PROMPT_FILE="${3:-/tmp/gemini_nexus_task.md}"
@@ -18,7 +18,7 @@ if [[ ! -f "$PROMPT_FILE" ]]; then
 [nexus-enforced] prompt file missing: $PROMPT_FILE
 Create one first, e.g.:
   cat > /tmp/gemini_nexus_task.md <<'TASK'
-  在 /Users/jameschen/Workspace/nexus 內實作你的任務（僅修改必要檔案），
+  在 . 內實作你的任務（僅修改必要檔案），
   並執行驗收命令後回報：變更檔案、測試摘要、gate 結果。
   TASK
 EOF

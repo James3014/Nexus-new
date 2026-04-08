@@ -46,7 +46,7 @@ version_scope: '[v17.1, v22, v23]'
 - **[Ops - Provenance Exceptions and Waivers](../06_Ops/Ops - Provenance Exceptions and Waivers.md)**: 為無法對位路徑提供豁免說明。
 
 ## Related modules / files
-- `/Users/jameschen/Workspace/nexus/`: Repo 根目錄。
+- `./`: Repo 根目錄。
 - `99_Schema/[AGENT_SCHEMA](../99_Schema/AGENT_SCHEMA.md).md`: 治理規約。
 
 ## Source notes

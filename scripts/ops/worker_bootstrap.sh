@@ -3,7 +3,7 @@ set -euo pipefail
 
 WORKER_ID="${1:-worker-1}"
 MODEL="${2:-gemini-3-flash-preview}"
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 WORKTREE_DIR="$NEXUS_ROOT/worktrees/$WORKER_ID"
 STATUS_FILE="$NEXUS_ROOT/.nexus/worker_status_${WORKER_ID}.json"
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # 🛡️ Nexus 戰甲切換器 v1.1 - [NEXUS v22 ACTIVE]
 
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 ARMOR=${1:-"v22"}
 
 # 預設行為：若無指令則回報 status

@@ -1,7 +1,7 @@
 {
   "ts_utc": "2026-03-28T00:53:47.328340+00:00",
-  "project_root": "/Users/jameschen/Workspace/nexus",
-  "workspace": "/Users/jameschen/Workspace/nexus/Autoresearch_runtime",
+  "project_root": ".",
+  "workspace": "./Autoresearch_runtime",
   "max_loops": 10,
   "stable_wins": 10,
   "loops_executed": 10,
@@ -14,7 +14,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_1_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_1_param_sweep_report.json"
     },
     {
       "loop": 2,
@@ -24,7 +24,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_2_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_2_param_sweep_report.json"
     },
     {
       "loop": 3,
@@ -34,7 +34,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_3_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_3_param_sweep_report.json"
     },
     {
       "loop": 4,
@@ -44,7 +44,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_4_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_4_param_sweep_report.json"
     },
     {
       "loop": 5,
@@ -54,7 +54,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_5_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_5_param_sweep_report.json"
     },
     {
       "loop": 6,
@@ -64,7 +64,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_6_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_6_param_sweep_report.json"
     },
     {
       "loop": 7,
@@ -74,7 +74,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_7_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_7_param_sweep_report.json"
     },
     {
       "loop": 8,
@@ -84,7 +84,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_8_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_8_param_sweep_report.json"
     },
     {
       "loop": 9,
@@ -94,7 +94,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_9_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_9_param_sweep_report.json"
     },
     {
       "loop": 10,
@@ -104,7 +104,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_v2_10_10_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_v2_10_10_param_sweep_report.json"
     }
   ],
   "converged": true,

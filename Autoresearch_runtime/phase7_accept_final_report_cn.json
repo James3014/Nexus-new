@@ -1,7 +1,7 @@
 {
   "ts_utc": "2026-03-28T00:28:21.768829+00:00",
-  "project_root": "/Users/jameschen/Workspace/nexus",
-  "workspace": "/Users/jameschen/Workspace/nexus/Autoresearch_runtime",
+  "project_root": ".",
+  "workspace": "./Autoresearch_runtime",
   "max_loops": 2,
   "stable_wins": 1,
   "loops_executed": 1,
@@ -14,7 +14,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_accept_1_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_accept_1_param_sweep_report.json"
     }
   ],
   "converged": true,

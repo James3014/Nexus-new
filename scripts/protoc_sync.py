@@ -5,7 +5,7 @@ import sys
 from datetime import datetime
 
 # --- CONFIG ---
-WORKSPACE_ROOT = "/Users/jameschen/Workspace/nexus"
+WORKSPACE_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[1])
 BRAIN_PATH = "/Users/jameschen/Downloads/obsidian/知識庫/01_Operations/WORKFLOW.md"
 STATE_FILE = os.path.join(WORKSPACE_ROOT, "STATE.yaml")
 PROTO_FILE = os.path.join(WORKSPACE_ROOT, "MUSE_PROTO.md")

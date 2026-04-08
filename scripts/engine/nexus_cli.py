@@ -79,7 +79,7 @@ def _log_perf_span(name, start_ts, end_ts, decision_id, metadata=None):
             "duration_ms": (end_ts - start_ts) * 1000,
             "metadata": metadata or {}
         }
-        _io_queue.put("/Users/jameschen/Workspace/nexus/.nexus/metrics/perf_spans.jsonl", json.dumps(payload, ensure_ascii=False) + "\n")
+        _io_queue.put(str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/metrics/perf_spans.jsonl"), json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
         pass
 

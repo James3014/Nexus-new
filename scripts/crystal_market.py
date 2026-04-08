@@ -5,7 +5,7 @@ from economic_meter import record_earning
 # [SOTA 10/10] Nexus Crystal Market
 # Implementation based on Sir's expert "Market Mechanism" principles (Phase 4).
 
-LEDGER_PATH = "/Users/jameschen/Workspace/nexus/workspaces/tenant_balance.json"
+LEDGER_PATH = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/tenant_balance.json")
 
 def transact_crystal(buyer_id, contributor_id, crystal_id, price):
     print(f"// Nexus-Market: Transaction attempt - [{buyer_id}] buying [{crystal_id}] from [{contributor_id}] for {price} tokens.")

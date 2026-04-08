@@ -7,7 +7,7 @@ from pathlib import Path
 # 🛡️ Nexus Wiki Changelog Autodraft (Agent S - v1.0)
 # [NEXUS IDENTITY: a670624 + CI-GUARDED]
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 REPORT_DIR = REPO_ROOT / ".nexus" / "reports"
 SNAPSHOT_PATH = REPORT_DIR / "wiki_slo_snapshot.json"
 HISTORY_PATH = REPORT_DIR / "wiki_slo_history.jsonl"

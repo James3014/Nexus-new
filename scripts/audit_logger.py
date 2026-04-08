@@ -5,7 +5,7 @@ from datetime import datetime
 # [SOTA 10/10] Multi-tenant Audit Logger
 # Implementation based on Sir's expert platform integrity principles.
 
-LOG_BASE = "/Users/jameschen/Workspace/nexus/logs/tenants"
+LOG_BASE = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "logs/tenants")
 
 def log_event(tenant_id, event, resource, result, request_id="N/A"):
     log_dir = os.path.join(LOG_BASE, tenant_id)

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 # Ensure we are using the .venv environment
-repo_root = Path("/Users/jameschen/Workspace/nexus")
+repo_root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 venv_packages = repo_root / ".venv" / "lib" / "python3.12" / "site-packages"
 if str(venv_packages) not in sys.path:
     sys.path.insert(0, str(venv_packages))

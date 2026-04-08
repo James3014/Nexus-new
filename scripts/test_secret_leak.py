@@ -4,7 +4,7 @@ import json
 import subprocess
 
 BASE_URL = "http://127.0.0.1:5001/reflex"
-LOG_DIR = "/Users/jameschen/Workspace/nexus/logs/tenants"
+LOG_DIR = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "logs/tenants")
 
 def test_secret_leak():
     print("// Nexus-Sentinel Test: Starting Secret Leak & Audit Integrity Audit...")
@@ -15,7 +15,7 @@ def test_secret_leak():
     payload_a = {
         "action": {
             "type": "create_file",
-            "path": "/Users/jameschen/Workspace/nexus/workspaces/A/leak_test_v2.txt",
+            "path": str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/A/leak_test_v2.txt"),
             "content": "Checking for keys..."
         }
     }
@@ -47,7 +47,7 @@ def test_secret_leak():
     payload_b = {
         "action": {
             "type": "create_file",
-            "path": "/Users/jameschen/Workspace/nexus/workspaces/B/leak_test_v2.txt",
+            "path": str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/B/leak_test_v2.txt"),
             "content": "Checking for keys..."
         }
     }

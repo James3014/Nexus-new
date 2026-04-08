@@ -39,7 +39,7 @@ def test_privacy():
 
     # 3. Global Hub Verification
     print("// Nexus-Distiller Test: Step 3 - Verifying Global Wisdom Hub...")
-    with open("/Users/jameschen/Workspace/nexus/global_crystals.jsonl", "r") as f:
+    with open(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "global_crystals.jsonl"), "r") as f:
         hub_content = f.read()
         if "sk-tenant-a-super-secret-key" in hub_content:
             print("!! PRIVACY BREACH: Raw secret found in Global Hub!")

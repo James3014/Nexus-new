@@ -61,7 +61,7 @@ class SourceOfTruthResolver:
 
 if __name__ == "__main__":
     # 測試
-    root = Path("str(REPO_ROOT)")
+    root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     tid = "test-task-001"
     resolver = SourceOfTruthResolver(root, tid)
     print(json.dumps(resolver.resolve(), indent=2))

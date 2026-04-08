@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 class DomainFirewall:
     """🛡️ Nexus v25.5 Domain-based Tool Firewall with BaseSkill mitigation."""
-    def __init__(self, tactical_map_path: str = 'str(REPO_ROOT)/nexus/config/tactical_map.json'):
+    def __init__(self, tactical_map_path: str = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "nexus/config/tactical_map.json")):
         try:
             with open(tactical_map_path, 'r') as f:
                 self.map = json.load(f)

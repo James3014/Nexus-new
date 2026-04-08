@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 # 🛡️ Nexus 廣域對位
-PROJECT_ROOT = Path("/Users/jameschen/Workspace/nexus")
+PROJECT_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 REGISTRY_PATH = PROJECT_ROOT / ".nexus/federation/node_registry.json"
 
 def run_stress_test(nodes: int, duration: int, parallel_tasks: int):

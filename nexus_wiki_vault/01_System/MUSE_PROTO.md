@@ -55,7 +55,7 @@ Waiver: 00_Home/[System Overview](../00_Home/System Overview.md).md
 1.  **Felo 討論先行 (Felo-First Gate)**：
     `search_web "當前任務核心問題與工具規範"` (由 Felo 獲取最新實證)。
 2.  **讀取物理狀態指紋**：
-    `view_file /Users/jameschen/Workspace/nexus/STATE.yaml`
+    `view_file ./STATE.yaml`
 3.  **同步最新消息頻道 (nexus-sync)**：
     `nexus-sync [session_id] poll 5`
 

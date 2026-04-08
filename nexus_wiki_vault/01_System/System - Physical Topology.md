@@ -11,7 +11,7 @@ related_pages:
   - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
   Conflicts|Unknowns]] and Conflicts]]]]'
 - '[Module - Core Orchestrator](../02_Modules/Module - Core Orchestrator.md)'
-source_of_truth: /Users/jameschen/Workspace/nexus/
+source_of_truth: ./
 status: active
 tags:
 - system
@@ -34,7 +34,7 @@ version_scope:
 本頁描述 Nexus 系統在檔案系統、執行序與存儲節點上的實體佈局與核心目錄結構。 [Reference: compiled-[topology](../00_Home/Vault Topology.md)]
 
 ## Role / responsibility
-- **路徑權威**: 定義 `/Users/jameschen/Workspace/nexus/` 下的各目錄用途。 [Reference: [System Overview](../00_Home/System Overview.md)]
+- **路徑權威**: 定義 `./` 下的各目錄用途。 [Reference: [System Overview](../00_Home/System Overview.md)]
 - **執行隔離**: 描述 `.venv` 環境與 Core 邏輯的區隔。 [Source: scripts/engine/nexus_cli.py]
 - **持久化映射**: 定義 `.nexus/` 目錄與 [LanceDB](../02_Modules/Module - Memory Repository.md) 實體節點的關聯。 [Reference: [Module - Memory Repository](../02_Modules/Module - Memory Repository.md)]
 
@@ -58,7 +58,7 @@ version_scope:
 - **[System - Unknowns and Conflicts](System - Unknowns and Conflicts.md)**: 登記路徑漂移或資源競爭問題。
 
 ## Related modules / files
-- `/Users/jameschen/Workspace/nexus/`: 系統根路徑。
+- `./`: 系統根路徑。
 - `nexusnexus/.nexus/workspaces/bug-1774969963/nexus/core/errors.py`: 定義路徑缺失導致的 InfrastructureError。 [Code: 00_Home/System Overview.md]
 
 ## Source notes

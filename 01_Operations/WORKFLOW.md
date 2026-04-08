@@ -1,5 +1,5 @@
 # 🎼 Muse-Core Agent Routing Index (v22 Hardened)
-# [MANDATORY] agent: MUST read /Users/jameschen/Workspace/nexus/docs/AGENT_MANDATORY_PROTOCOL.md first.
+# [MANDATORY] agent: MUST read ./docs/AGENT_MANDATORY_PROTOCOL.md first.
 # [MANDATORY] 回報 SHA + CI 狀態及開場白。
 
 # === 核心路徑 ===

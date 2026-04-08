@@ -65,7 +65,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[[Module - Policy and Learning Governance]]**: 政策管理與學習。
 
 ## Related modules / files
-- `nexus/core/`- **[[Module - Core Orchestrator|Orchestrator Node]]**: 位於 `/Users/jameschen/Workspace/nexus/`。 [Code: nexus_cli.py]
+- `nexus/core/`- **[[Module - Core Orchestrator|Orchestrator Node]]**: 位於 `./`。 [Code: nexus_cli.py]
 - **Vast State**: `.nexus/` 目錄。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ### Module Registry (全系統組件登記)
@@ -165,7 +165,7 @@ Waiver: 00_Home/[[System Overview]].md
 1.  **Felo 討論先行 (Felo-First Gate)**：
     `search_web "當前任務核心問題與工具規範"` (由 Felo 獲取最新實證)。
 2.  **讀取物理狀態指紋**：
-    `view_file /Users/jameschen/Workspace/nexus/STATE.yaml`
+    `view_file ./STATE.yaml`
 3.  **同步最新消息頻道 (nexus-sync)**：
     `nexus-sync [session_id] poll 5`
 
@@ -296,7 +296,7 @@ python3 scripts/engine/nexus_cli.py nexus:bug --[[task]] "fix hydration error on
 # Build a feature with top-tier resilience
 # 具備高韌性的新功能開發
 python3 scripts/engine/nexus_cli.py nexus:feature --[[task]] "migrate session storage to redis" --domain### 17.3 治理 HUD 硬化合約 (2.1-STABLE-HARDENED)
-- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `/Users/jameschen/Workspace/nexus/` 的絕對錨定。
+- [x] **路徑絕對化協議 (Absolute Path Invariant)**: 禁止在生產級治理帳本使用相對路徑。SQLite 連接必須硬化為 `./` 的絕對錨定。
 - [x] **ACL 命名空間扁平化**: 本地 App 權限引用必須使用扁平 `identifier` (如 `allowall`)，嚴禁在單一上下文環境下加註 `app:` 等無意義命名空間，以防編譯器與運行端靜默拒絕。
 - [x] **反黑屏守則 (Anti-Blackout UX)**: 治理 HUD 必須具備 `FatalBoundary` (React Error Boundary)。任何前端初始化崩潰必須物理顯示於畫面上，禁止「靜默黑屏」。
 - [x] **數據序列化對位**: 所有 Rust 治理結構體強制實裝 `#[serde(rename_all = "camelCase")]`，確保與前端 React 屬性讀取無縫對接。
@@ -334,7 +334,7 @@ Nexus Swarm 現在運行於 **v23.1 治理升級版**，此版本建立在 **v22
 
 %% 
 MUSE ENGINE SPEC v23.1 Addendum
-- Path: /Users/jameschen/Workspace/nexus/MUSE_ENGINE_SPEC_V17.1_HARDENED.md
+- Path: ./MUSE_ENGINE_SPEC_V17.1_HARDENED.md
 - Updated at 2026-04-05 23:28 (19-Layer Governance Rollout Committed)
 %%
 **[ZH]** Nexus 現在已在 `bug`、`feature`、`runner` 三條任務流接上交付門。使用 `--delivery-mode ask`，系統會在任務開始時主動詢問操作者，是否要啟用高標交付。

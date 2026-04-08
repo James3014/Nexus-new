@@ -1,0 +1,20 @@
+{
+  "report_id": "conv_metrics_20260317",
+  "summary": {
+    "total_cases": 1,
+    "success_rate": 1.0,
+    "avg_turns": 16.0,
+    "avg_clarifications": 0.0
+  },
+  "details": [
+    {
+      "case_id": "OFF-001",
+      "status": "PASS",
+      "turns": 16,
+      "clarifications": 0,
+      "corrections": 0,
+      "tokens": 0,
+      "phases": ["P", "D", "R", "A", "C"]
+    }
+  ]
+}

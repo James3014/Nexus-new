@@ -25,7 +25,7 @@ def generate_leaderboard():
         "global_sota": 82.3,
         "last_updated": time.ctime()
     }
-    with open("/Users/jameschen/Workspace/nexus/workspaces/leaderboard.json", "w") as f:
+    with open(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/leaderboard.json"), "w") as f:
         json.dump(leaderboard, f, indent=2)
     print("// Nexus-Swarm: Leaderboard generated at workspaces/leaderboard.json")
 

@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Paths
-REPO_ROOT = "/Users/jameschen/Workspace/nexus"
+REPO_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[2])
 OBSIDIAN_ROOT = "/Users/jameschen/Downloads/obsidian/知識庫/01_Projects/nexus/docs"
 INDEX_MD = "docs/INDEX.md"
 TASK_STATUS = ".nexus/task_status.json"

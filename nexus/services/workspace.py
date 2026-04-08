@@ -8,7 +8,7 @@ import subprocess
 import typing
 
 # 🔗 核心技能路徑 (Phase 3 & 6)
-KB_DIR = os.getenv("NEXUS_KB_DIR", "~/Downloads/obsidian/知識庫")
+KB_DIR = os.getenv("NEXUS_KB_DIR", "/Users/jameschen/Downloads/obsidian/知識庫")
 CONTEXT_INJECTOR_BIN = os.getenv("MUSE_CORE_CONTEXT_INJECTOR", "")
 FLASH_INGEST_BIN = os.getenv("MUSE_CORE_FLASH_INGEST", "")
 UV_BIN = shutil.which("uv") or "uv"

@@ -29,7 +29,7 @@ def test_federation():
     # 3. Verify SOTA Leaderboard
     print("// Nexus-Federation Test: Step 3 - Verifying Global SOTA Leaderboard...")
     generate_leaderboard()
-    with open("/Users/jameschen/Workspace/nexus/workspaces/leaderboard.json", "r") as f:
+    with open(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/leaderboard.json"), "r") as f:
         board = json.load(f)
         sota = board.get("global_sota")
         print(f"// Global SOTA: {sota}% (Target >= 81%)")

@@ -2,7 +2,7 @@ import asyncio
 from nexus.core.router import SkillsRouter
 
 async def verify_billing_gate():
-    router = SkillsRouter("/Users/jameschen/Workspace/nexus")
+    router = SkillsRouter(str(__import__("pathlib").Path(__file__).resolve().parents[1]))
     
     # 🧪 Test Case 1: Active Tenant
     active_ctx = {"tenant_id": "corp_gold", "mode": "palace"}

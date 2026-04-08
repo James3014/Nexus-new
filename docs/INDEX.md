@@ -4,7 +4,7 @@
 - **主線任務**：建立 `P->X->D->R->A->C` 階段健康自治（可監測、可自癒、可自優化）。
 - **當前操作**：優化 `INDEX.md` 資訊架構，清理環境並準備啟動 Nexus Worker。
 - **單一執行入口**：`uv run scripts/nexus_cli.py nexus:runner`
-- **實時狀態彙報**：[EXEC_LIVE_STATUS.md](file:///Users/jameschen/Workspace/nexus/docs/EXEC_LIVE_STATUS.md)
+- **實時狀態彙報**：[EXEC_LIVE_STATUS.md](file://./docs/EXEC_LIVE_STATUS.md)
 
 ## 🏆 目標導航
 - [x] Goal 1: 建構 Phase Health 監測基礎層
@@ -21,9 +21,9 @@
 - [x] **Autonomic Learning (Trauma)**：失敗驅動調權，系統具備自癒學習能力 (TDD PASSED)
 
 ### Done (已完成)
-- **物理收斂 WP-4**：完成 `wt-wp4-1` 至主線的實體合併與測試驗收 (2026-03-19)。參閱 [重構PR任務包_超細版](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-17_Nexus_重構PR任務包_超細版.md)。
+- **物理收斂 WP-4**：完成 `wt-wp4-1` 至主線的實體合併與測試驗收 (2026-03-19)。參閱 [重構PR任務包_超細版](file://./docs/archive/ERA-B/2026-03-17_Nexus_重構PR任務包_超細版.md)。
 - **文檔歸檔與環境清理**：將 20 餘份 ERA-A/B 歷史文檔移入 `docs/archive` 目錄。
-- **Phantom Success Guard**：實施防再犯 5 條規則，並通過全量 Gate 驗證。參閱 [Phantom_Success_RCA](file:///Users/jameschen/Workspace/nexus/docs/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md)。
+- **Phantom Success Guard**：實施防再犯 5 條規則，並通過全量 Gate 驗證。參閱 [Phantom_Success_RCA](file://./docs/2026-03-19_Phantom_Success_Incident_RCA_and_Prevention.md)。
 - **主管進程修復**：解決 macOS Seatbelt 權限導致的 supervisor 啟動問題。
 - **Token 審計通車**：已成功打通 `raw token` 來源，具備真實帳單擷取與審計能力。
 
@@ -43,7 +43,7 @@
 - `ERA-B`：治理過渡（runner/task_manifest/phase_task）。
 - `ERA-C`：當前主線（精準收斂 + phase health autonomy）。
 
-詳細內容請見 [DOC_LIFECYCLE_MAP.md](file:///Users/jameschen/Workspace/nexus/docs/DOC_LIFECYCLE_MAP.md)。
+詳細內容請見 [DOC_LIFECYCLE_MAP.md](file://./docs/DOC_LIFECYCLE_MAP.md)。
 
 ## 執行規則 (PM/Agent 硬規則)
 1. **SSoT 權威**：所有討論與決策一律先更新本檔（`INDEX.md`），隨後才是執行。
@@ -55,23 +55,6 @@
 ## 🛠️ 維護與同步
 
 <!-- nexus-anchor:evolution -->
-<!-- nexus-writeback:bug-1775603416 -->
-### Auto Writeback: bug-1775603416
-
-- Applied at: `2026-04-08T02:12:25.426849+00:00`
-- Applied by: `startup-gate`
-- Delta artifact: `/Users/jameschen/Workspace/nexus/.nexus/reports/writeback/bug-1775603416_INDEX.delta.md`
-
-# INDEX Delta: bug-1775603416
-
-- Source: `pipeline.crystallize`
-- Success: `False`
-- Root Cause: patch_apply_failed
-- Pending Writeback: `True`
-
-## Rejection History
-- none
-<!-- /nexus-writeback:bug-1775603416 -->
 <!-- nexus-writeback:nexus-learn-4 -->
 ### Auto Writeback: nexus-learn-4
 
@@ -115,27 +98,27 @@
 <!-- /nexus-anchor:evolution -->
 
 ## Sync Targets
-- [INDEX.md](file:///Users/jameschen/Workspace/nexus/docs/INDEX.md)
-- [SYSTEM_ARCHITECTURE_BLUEPRINT.md](file:///Users/jameschen/Workspace/nexus/docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md)
-- [2026-03-18_Nexus_Phase_Health_Implementation_Plan.md](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md)
-- [EXEC_LIVE_STATUS.md](file:///Users/jameschen/Workspace/nexus/docs/EXEC_LIVE_STATUS.md)
+- [INDEX.md](file://./docs/INDEX.md)
+- [SYSTEM_ARCHITECTURE_BLUEPRINT.md](file://./docs/SYSTEM_ARCHITECTURE_BLUEPRINT.md)
+- [2026-03-18_Nexus_Phase_Health_Implementation_Plan.md](file://./docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md)
+- [EXEC_LIVE_STATUS.md](file://./docs/EXEC_LIVE_STATUS.md)
 
 ---
 
 ## 📈 計劃完工核對表 (ERA-C Sync)
 | 計劃檔 | 狀態 | 判定 | 備註 |
 |---|---|---|---|
-| [Phase_Health_實作計畫](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md) | `DONE` | 已完 | 全量核心工程任務已通過實體校準。 |
-| [大腦自癒生態系 L4](file:///Users/jameschen/Workspace/nexus/docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md) | `DONE` | 已全通 | M1-M3 已通 (含 Trauma 捕捉與靜默審計)。 |
-| [WP-4_收斂任務包](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-17_Nexus_重構PR任務包_超細版.md) | `DONE` | 已完 | 資料已物理收斂至 main。 |
-| [TRU-101_修復任務單](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-A/2026-03-17_TRU-101_修復任務單.md) | `DONE` | 已完 | 空值修復與欄位拆分已落地。 |
-| [TRU-101_驗收修正清單](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_TRU-101_驗收修正版與待修清單.md) | `DONE` | 已完 | 已通過 gate 驗證。 |
-| [記憶與學習v2.1](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md) | `DONE` | 已完 | M1+M2 通過校準 (LanceDB 語義檢索入口已打通)。 |
-| [Incident_Copilot_v0.2](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md) | `DONE` | 已完 | v0.2 邏輯已落地，具備 429/OAuth 自覺偵測與 RCA 適配。 |
-| [NightShift_路線圖](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_Nexus_NightShift_整合分級路線圖.md) | `TODO` | 待動 | 涉及夜間背景執行治理。 |
-| [工作區搬遷規劃](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_工作區搬遷規劃.md) | `DONE` | 已完 | 已切換至 `/Workspace/nexus`。 |
-| [記憶技術棧7選項](file:///Users/jameschen/Workspace/nexus/docs/archive/ERA-B/2026-03-18_記憶技術棧7選項_取捨與導入順序.md) | `DONE` | 已完 | 決定採用 LanceDB + JSONL。 |
-| [CAPABILITY_矩陣](file:///Users/jameschen/Workspace/nexus/docs/16_CAPABILITY_SPEC_MATRIX.md) | `DONE` | 已完 | v9-Stable 版本，全量核心能力已通過實體校準。 |
+| [Phase_Health_實作計畫](file://./docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md) | `DONE` | 已完 | 全量核心工程任務已通過實體校準。 |
+| [大腦自癒生態系 L4](file://./docs/2026-03-18_Nexus_Phase_Health_Implementation_Plan.md) | `DONE` | 已全通 | M1-M3 已通 (含 Trauma 捕捉與靜默審計)。 |
+| [WP-4_收斂任務包](file://./docs/archive/ERA-B/2026-03-17_Nexus_重構PR任務包_超細版.md) | `DONE` | 已完 | 資料已物理收斂至 main。 |
+| [TRU-101_修復任務單](file://./docs/archive/ERA-A/2026-03-17_TRU-101_修復任務單.md) | `DONE` | 已完 | 空值修復與欄位拆分已落地。 |
+| [TRU-101_驗收修正清單](file://./docs/archive/ERA-B/2026-03-18_TRU-101_驗收修正版與待修清單.md) | `DONE` | 已完 | 已通過 gate 驗證。 |
+| [記憶與學習v2.1](file://./docs/archive/ERA-B/2026-03-18_Nexus_記憶與學習v2_重構後計畫與TODO.md) | `DONE` | 已完 | M1+M2 通過校準 (LanceDB 語義檢索入口已打通)。 |
+| [Incident_Copilot_v0.2](file://./docs/archive/ERA-B/2026-03-18_Nexus_Incident_Copilot_v0.1_計畫與TODO.md) | `DONE` | 已完 | v0.2 邏輯已落地，具備 429/OAuth 自覺偵測與 RCA 適配。 |
+| [NightShift_路線圖](file://./docs/archive/ERA-B/2026-03-18_Nexus_NightShift_整合分級路線圖.md) | `TODO` | 待動 | 涉及夜間背景執行治理。 |
+| [工作區搬遷規劃](file://./docs/archive/ERA-B/2026-03-18_工作區搬遷規劃.md) | `DONE` | 已完 | 已切換至 `/Workspace/nexus`。 |
+| [記憶技術棧7選項](file://./docs/archive/ERA-B/2026-03-18_記憶技術棧7選項_取捨與導入順序.md) | `DONE` | 已完 | 決定採用 LanceDB + JSONL。 |
+| [CAPABILITY_矩陣](file://./docs/16_CAPABILITY_SPEC_MATRIX.md) | `DONE` | 已完 | v9-Stable 版本，全量核心能力已通過實體校準。 |
 
 ---
 %% 

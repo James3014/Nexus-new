@@ -9,7 +9,7 @@
 ❌ Regression Tests FAILED
 ============================= test session starts ==============================
 platform darwin -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
-rootdir: /Users/jameschen/Workspace/nexus
+rootdir: .
 configfile: pytest.ini
 plugins: anyio-4.12.1, asyncio-1.3.0
 asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
@@ -17,7 +17,7 @@ collected 0 items / 1 error
 
 ==================================== ERRORS ====================================
 _______________ ERROR collecting tests/test_v9_regression_p1.py ________________
-ImportError while importing test module '/Users/jameschen/Workspace/nexus/tests/test_v9_regression_p1.py'.
+ImportError while importing test module './tests/test_v9_regression_p1.py'.
 Hint: make sure your test modules/packages have valid Python names.
 Traceback:
 /opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module

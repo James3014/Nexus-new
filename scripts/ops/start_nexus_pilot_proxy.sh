@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT="/Users/jameschen/Workspace/nexus"
+ROOT="."
 LOG_DIR="$ROOT/logs/pilot"
 mkdir -p "$LOG_DIR"
 

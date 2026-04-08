@@ -39,7 +39,7 @@ class NexusSandbox:
 # --- Simulation Logic ---
 if __name__ == "__main__":
     # 1. Prepare a Mock Project with a bug
-    mock_root = Path("/Users/jameschen/Workspace/nexus/research_lab/phase_2_sandbox/mock_proj")
+    mock_root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "research_lab/phase_2_sandbox/mock_proj"))
     src_file = mock_root / "src" / "logic.py"
     src_file.parent.mkdir(parents=True, exist_ok=True)
     src_file.write_text("def calculate(a, b):\n    return a / b  # Bug: ZeroDivisionError not handled")

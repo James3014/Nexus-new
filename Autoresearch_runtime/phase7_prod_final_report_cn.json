@@ -1,7 +1,7 @@
 {
   "ts_utc": "2026-03-28T00:21:57.461143+00:00",
-  "project_root": "/Users/jameschen/Workspace/nexus",
-  "workspace": "/Users/jameschen/Workspace/nexus/Autoresearch_runtime",
+  "project_root": ".",
+  "workspace": "./Autoresearch_runtime",
   "max_loops": 10,
   "stable_wins": 3,
   "loops_executed": 3,
@@ -14,7 +14,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_prod_1_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_prod_1_param_sweep_report.json"
     },
     {
       "loop": 2,
@@ -24,7 +24,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_prod_2_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_prod_2_param_sweep_report.json"
     },
     {
       "loop": 3,
@@ -34,7 +34,7 @@
         "learning_rate": 0.4
       },
       "apply_rc": 0,
-      "sweep_report": "/Users/jameschen/Workspace/nexus/.nexus/metrics/phase7_prod_3_param_sweep_report.json"
+      "sweep_report": "./.nexus/metrics/phase7_prod_3_param_sweep_report.json"
     }
   ],
   "converged": true,

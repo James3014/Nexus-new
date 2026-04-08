@@ -4,7 +4,7 @@ from nexus.core.router import SkillsRouter
 from scripts.engine.critique_engine import RationalizationError
 
 async def run_final_fusion_tests():
-    router = SkillsRouter("/Users/jameschen/Workspace/nexus")
+    router = SkillsRouter(str(__import__("pathlib").Path(__file__).resolve().parents[1]))
     print("🚀 [Integration:START] Executing Phase 36 Fusion Tests...")
 
     # 🛡️ Test 1: Domain Firewall + BaseSkill

@@ -19,7 +19,7 @@ class SpecGuardV2:
         r"sdd\.os",             # Legacy repo references
         r"os\.system\(",        # Unsafe syscalls
         r"subprocess\.check_output\(shell=True\)",
-        r"~/sdd\.os",
+        r"/Users/jameschen/sdd\.os",
     ]
 
     def __init__(self, spec_path: str = "MUSE_ENGINE_SPEC.md"):

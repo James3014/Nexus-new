@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from collections import defaultdict
 
-repo_root = Path("/Users/jameschen/Workspace/nexus")
+repo_root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 wiki_vault = repo_root / "nexus_wiki_vault"
 
 print("🔍 [Nexus:Normalizer] Building Multi-Index for Collision Detection...")

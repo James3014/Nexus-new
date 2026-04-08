@@ -7,7 +7,7 @@ from pathlib import Path
 # 🛡️ Nexus Wiki Coverage Audit (Agent G - WS-A Hardened v2.1)
 # Purpose: Quantify true governance coverage for mandatory domains and enforce 100% Key Path.
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_coverage_report.json"
 KEYPATH_REPORT_PATH = REPO_ROOT / ".nexus" / "reports" / "wiki_keypath_coverage_report.json"

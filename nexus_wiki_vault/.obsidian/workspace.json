@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "07_Compliance/Incident_Trace_Log.md",
+                "file": "Reference/docs/00_PROJECT_INDEX.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Incident_Trace_Log"
+              "title": "00_PROJECT_INDEX"
             }
           }
         ]
@@ -182,11 +182,6 @@
   },
   "active": "70d8cc88b587a980",
   "lastOpenFiles": [
-    "07_Compliance/Compliance_Dashboard.md",
-    "07_Compliance/Current_Compliance_Status.md",
-    "07_Compliance/Incident_Trace_Log.md",
-    "Reference/docs/00_PROJECT_INDEX.md",
-    "07_Compliance",
     "04_Research/RESEARCH_STATUS_REPORT.md",
     "04_Research/Research - DeepScientist Integration.md",
     "04_Research",

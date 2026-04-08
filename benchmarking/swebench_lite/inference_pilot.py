@@ -8,7 +8,7 @@ from pathlib import Path
 DATASET_NAME = "princeton-nlp/SWE-bench_Verified"
 MODEL_NAME = "nexus-v16"
 LIMIT = 5
-OUTPUT_FILE = "/Users/jameschen/Workspace/nexus/benchmarking/swebench_lite/predictions_pilot.jsonl"
+OUTPUT_FILE = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "benchmarking/swebench_lite/predictions_pilot.jsonl")
 NEXUS_CLI = "/Users/jameschen/.local/bin/uv run scripts/engine/nexus_cli.py"
 
 def run_nexus_inference(instance_id, problem_statement):
@@ -25,9 +25,9 @@ def run_nexus_inference(instance_id, problem_statement):
         # In a real scenario, we would parse the actual diff from Nexus output
         # For this pilot, we'll simulate or capture the output
         # NOTE: Nexus usually writes results to .nexus/runs/
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(__import__("pathlib").Path(__file__).resolve().parents[2]))
         # Find the latest task directory
-        latest_task = sorted(Path("/Users/jameschen/Workspace/nexus/.nexus/runs").glob("task-*"), key=os.path.getmtime)[-1]
+        latest_task = sorted(Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/runs")).glob("task-*"), key=os.path.getmtime)[-1]
         # We assume Nexus generated a diff or similar. 
         # In this POC, we'll try to find any .patch file or use the .musestate logs
         # Actually, let's assume Nexus produces a 'patch.diff' or similar if integrated

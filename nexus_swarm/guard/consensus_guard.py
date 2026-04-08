@@ -7,7 +7,7 @@ from .validator import DeterministicValidator
 from .approver import ConsensusApprover
 
 class ConsensusGuard:
-    def __init__(self, repo_root: Path = Path("/Users/jameschen/Workspace/nexus")):
+    def __init__(self, repo_root: Path = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))):
         self.validator = DeterministicValidator(repo_root)
         self.approver = ConsensusApprover()
         from nexus_swarm.wisdom.feedback_api import FeedbackAPI

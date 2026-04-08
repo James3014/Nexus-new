@@ -1,7 +1,7 @@
 # Nexus Learning Loop Closed-Loop Report
 
 Date: 2026-04-03
-Repo: `/Users/jameschen/Workspace/nexus`
+Repo: `.`
 Scope: `main` Python 主線的 learning / write-back / delivery 閉環
 
 ## 1. 結論
@@ -29,8 +29,8 @@ Scope: `main` Python 主線的 learning / write-back / delivery 閉環
 
 但 repo 目前不是全乾淨：
 
-- [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](/Users/jameschen/Workspace/nexus/MUSE_ENGINE_SPEC_V17.1_HARDENED.md) 可能被 runtime auto writeback 修改
-- [.codex_lessons.md](/Users/jameschen/Workspace/nexus/.codex_lessons.md) 是執行時 artifact，目前未提交
+- [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](./MUSE_ENGINE_SPEC_V17.1_HARDENED.md) 可能被 runtime auto writeback 修改
+- [.codex_lessons.md](./.codex_lessons.md) 是執行時 artifact，目前未提交
 - `.nexus/events/*`、`.nexus/reports/*` 屬於執行證據，不在 commit 範圍
 - `nexus-desk` 與其他大量 dirty 檔案屬於另一條工作線，與本次 learning loop commit 無關
 
@@ -44,9 +44,9 @@ Scope: `main` Python 主線的 learning / write-back / delivery 閉環
 ### 4.1 Startup Gate
 
 檔案：
-- [nexus_cli.py](/Users/jameschen/Workspace/nexus/scripts/engine/nexus_cli.py)
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
-- [ci_gate.py](/Users/jameschen/Workspace/nexus/scripts/ops/ci_gate.py)
+- [nexus_cli.py](./scripts/engine/nexus_cli.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
+- [ci_gate.py](./scripts/ops/ci_gate.py)
 
 行為：
 - 主線 CLI 啟動時會跑 `run_protocol_startup_gate(...)`
@@ -65,10 +65,10 @@ Scope: `main` Python 主線的 learning / write-back / delivery 閉環
 ### 4.2 Lesson Crystallization
 
 檔案：
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
-- [pipeline_crystal.py](/Users/jameschen/Workspace/nexus/nexus/engine/pipeline_crystal.py)
-- [coordinator.py](/Users/jameschen/Workspace/nexus/nexus/engine/coordinator.py)
-- [steward.py](/Users/jameschen/Workspace/nexus/scripts/steward.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
+- [pipeline_crystal.py](./nexus/engine/pipeline_crystal.py)
+- [coordinator.py](./nexus/engine/coordinator.py)
+- [steward.py](./scripts/steward.py)
 
 行為：
 - `finalize_learning_loop(...)` 會收斂：
@@ -76,7 +76,7 @@ Scope: `main` Python 主線的 learning / write-back / delivery 閉環
   - `phantom_success_reason`
   - `rejection_history`
 - 呼叫 `MemorySteward.crystallize(...)`
-- 寫入 [.codex_lessons.md](/Users/jameschen/Workspace/nexus/.codex_lessons.md)
+- 寫入 [.codex_lessons.md](./.codex_lessons.md)
 
 目的：
 - 不只留下 machine event
@@ -85,16 +85,16 @@ Scope: `main` Python 主線的 learning / write-back / delivery 閉環
 ### 4.3 Write-Back Todo 與 Delta Artifact
 
 檔案：
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
 
 輸出：
-- [.nexus/reports/writeback_todo.json](/Users/jameschen/Workspace/nexus/.nexus/reports/writeback_todo.json)
-- [.nexus/reports/writeback](/Users/jameschen/Workspace/nexus/.nexus/reports/writeback)
+- [.nexus/reports/writeback_todo.json](./.nexus/reports/writeback_todo.json)
+- [.nexus/reports/writeback](./.nexus/reports/writeback)
 
 todo 預設目標：
-- [.codex_lessons.md](/Users/jameschen/Workspace/nexus/.codex_lessons.md)
-- [INDEX.md](/Users/jameschen/Workspace/nexus/docs/INDEX.md)
-- [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](/Users/jameschen/Workspace/nexus/MUSE_ENGINE_SPEC_V17.1_HARDENED.md)
+- [.codex_lessons.md](./.codex_lessons.md)
+- [INDEX.md](./docs/INDEX.md)
+- [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](./MUSE_ENGINE_SPEC_V17.1_HARDENED.md)
 
 delta artifact 類型：
 - `*_INDEX.delta.md`
@@ -106,9 +106,9 @@ delta artifact 類型：
 ### 4.4 Delivery Status 遞進
 
 檔案：
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
-- [coordinator.py](/Users/jameschen/Workspace/nexus/nexus/engine/coordinator.py)
-- [pipeline_crystal.py](/Users/jameschen/Workspace/nexus/nexus/engine/pipeline_crystal.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
+- [coordinator.py](./nexus/engine/coordinator.py)
+- [pipeline_crystal.py](./nexus/engine/pipeline_crystal.py)
 
 狀態規則：
 - 沒有 write-back 義務：`fully_delivered`
@@ -120,15 +120,15 @@ delta artifact 類型：
 ### 4.5 Auto-Apply Writeback Deltas
 
 檔案：
-- [continuous_learning.py](/Users/jameschen/Workspace/nexus/nexus/services/continuous_learning.py)
+- [continuous_learning.py](./nexus/services/continuous_learning.py)
 
 行為：
 - `refresh_writeback_status(...)` 在預設情況下會：
   - 讀取 `writeback_todo.json`
   - 找對應 delta artifact
   - 自動把 delta 內容附加到：
-    - [INDEX.md](/Users/jameschen/Workspace/nexus/docs/INDEX.md)
-    - [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](/Users/jameschen/Workspace/nexus/MUSE_ENGINE_SPEC_V17.1_HARDENED.md)
+    - [INDEX.md](./docs/INDEX.md)
+    - [MUSE_ENGINE_SPEC_V17.1_HARDENED.md](./MUSE_ENGINE_SPEC_V17.1_HARDENED.md)
   - 使用 marker 避免重複套用
   - 完成後升級 delivery status
   - 寫入 `.nexus/events/writeback_completion.jsonl`
@@ -148,9 +148,9 @@ delta artifact 類型：
 ### 5.1 重依賴 fallback
 
 檔案：
-- [lewm_predictor.py](/Users/jameschen/Workspace/nexus/nexus/learning/lewm_predictor.py)
-- [vector_cache.py](/Users/jameschen/Workspace/nexus/nexus/learning/vector_cache.py)
-- [vector_rag.py](/Users/jameschen/Workspace/nexus/nexus/core/vector_rag.py)
+- [lewm_predictor.py](./nexus/learning/lewm_predictor.py)
+- [vector_cache.py](./nexus/learning/vector_cache.py)
+- [vector_rag.py](./nexus/core/vector_rag.py)
 
 修復內容：
 - `torch` 缺失時不再 import-time 爆炸
@@ -162,9 +162,9 @@ delta artifact 類型：
 ### 5.2 CLI 舊預期漂移
 
 檔案：
-- [cli_commands_service.py](/Users/jameschen/Workspace/nexus/nexus/services/cli_commands_service.py)
-- [test_cli_commands.py](/Users/jameschen/Workspace/nexus/tests/test_cli_commands.py)
-- [test_coordinator.py](/Users/jameschen/Workspace/nexus/tests/engine/test_coordinator.py)
+- [cli_commands_service.py](./nexus/services/cli_commands_service.py)
+- [test_cli_commands.py](./tests/test_cli_commands.py)
+- [test_coordinator.py](./tests/engine/test_coordinator.py)
 
 修復內容：
 - `hud()` 缺失 `time` import 已修

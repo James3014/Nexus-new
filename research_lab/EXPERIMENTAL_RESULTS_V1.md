@@ -26,5 +26,5 @@
 
 ## 4. 研究結論 (Final Verdict)
 - **技術可行性**：100%。透過 `tempfile` 與 `shutil` 的配合，Nexus 已具備「虛擬實驗」的能力。
-- **安全性評估**：極高。這種模式允許 Agent 進行激進的嘗試 (Extreme Mutation)，即使代碼崩潰也不會影響 `/Users/jameschen/Workspace/nexus/` 的正常運作。
+- **安全性評估**：極高。這種模式允許 Agent 進行激進的嘗試 (Extreme Mutation)，即使代碼崩潰也不會影響 `./` 的正常運作。
 - **下一步建議**：將此 Sandbox 類正式整合進 `nexus/health/executor.py`，作為所有 `safe_execute` 動作的強制閘門。

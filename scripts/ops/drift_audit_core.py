@@ -6,7 +6,7 @@ import ast
 from pathlib import Path
 
 # Setup Path for Graphify Internal Modules
-repo_root = Path("/Users/jameschen/Workspace/nexus")
+repo_root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 WIKI_ROOT = repo_root / "nexus_wiki_vault"
 PROJECT_ROOT = repo_root
 

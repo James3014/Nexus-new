@@ -11,7 +11,7 @@ from datetime import datetime
 # 🛡️ Nexus Wiki Linter v1.4 - Automated Audit Edition
 # Purpose: CI Integration, Tier-based Enforcement, and Waiver Expiry Control.
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
 EXTERNAL_SCHEMAS = Path("/Users/jameschen/Workspace/schemas")
 SKIP_DIRS = ["99_Schema"]

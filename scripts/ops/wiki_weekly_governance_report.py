@@ -7,7 +7,7 @@ from pathlib import Path
 # 🛡️ Nexus Wiki Weekly Governance Report Generator v1.1
 # Purpose: Aggregate all Wiki governance metrics into a single human-readable weekly report.
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 REPORT_DIR = REPO_ROOT / ".nexus" / "reports"
 OUTPUT_PATH = REPO_ROOT / "nexus_wiki_vault" / "06_Ops" / "Ops - Weekly Governance Report.md"
 

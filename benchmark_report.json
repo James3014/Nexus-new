@@ -1,0 +1,57 @@
+{
+    "timestamp": "2026-03-14T08:34:33.468103",
+    "mode": "LIVE",
+    "resolution_rate": 100.0,
+    "avg_duration": "0.2s",
+    "total_tasks": 6,
+    "success_count": 6,
+    "top_skills": [
+        "codebaseinvestigator",
+        "SafePatcher",
+        "FlashJudge"
+    ],
+    "detailed_results": [
+        {
+            "task": "fix next.js hydration error on dynamic routes",
+            "success": true,
+            "duration": 0.25238490104675293,
+            "tokens": 2500,
+            "score": 9.0
+        },
+        {
+            "task": "resolve memory leak in file processing daemon",
+            "success": true,
+            "duration": 0.23855113983154297,
+            "tokens": 2500,
+            "score": 9.0
+        },
+        {
+            "task": "fix cors error on cross-domain api calls",
+            "success": true,
+            "duration": 0.24170804023742676,
+            "tokens": 2500,
+            "score": 9.0
+        },
+        {
+            "task": "correct broken image paths in markdown renderer",
+            "success": true,
+            "duration": 0.22512197494506836,
+            "tokens": 2500,
+            "score": 9.0
+        },
+        {
+            "task": "fix jwt token expiration mismatch",
+            "success": true,
+            "duration": 0.23317813873291016,
+            "tokens": 2500,
+            "score": 9.0
+        },
+        {
+            "task": "resolve docker container restart loop",
+            "success": true,
+            "duration": 0.2305290699005127,
+            "tokens": 2500,
+            "score": 9.0
+        }
+    ]
+}

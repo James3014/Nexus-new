@@ -24,7 +24,7 @@ class AutoResearchNightShift:
         self.max_rounds = max_rounds
         self.budget_sec = budget_min * 60
         self.target_file = target_file
-        self.project_root = Path("/Users/jameschen/Workspace/nexus")
+        self.project_root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[1]))
         self.worktree_mgr = WorkspaceManager(str(self.project_root))
         self.hub = ContextHub(self.project_root)
         

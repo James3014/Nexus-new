@@ -35,7 +35,7 @@ def test_os_kernel():
 
     # 4. Verify SOTA Leap in Leaderboard
     print("// Nexus-Singularity Test: Step 4 - Verifying SOTA Performance Leap...")
-    with open("/Users/jameschen/Workspace/nexus/workspaces/leaderboard.json", "r") as f:
+    with open(str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/leaderboard.json"), "r") as f:
         board = json.load(f)
         new_sota = board.get("global_sota")
         print(f"// New System SOTA: {new_sota}% (Goal: > 85%)")

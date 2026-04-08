@@ -24,7 +24,7 @@ def test_final_verify_accepts_health_column(tmp_path, monkeypatch):
     try:
         with redirect_stdout(stdout):
             runpy.run_path(
-                "/Users/jameschen/Workspace/nexus/final_verify.py",
+                str(__import__("pathlib").Path(__file__).resolve().parents[2] / "final_verify.py"),
                 run_name="__main__",
             )
     except SystemExit as exc:
@@ -43,7 +43,7 @@ def test_export_eval_report_accepts_tokens_and_health_columns(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
 
     runpy.run_path(
-        "/Users/jameschen/Workspace/nexus/scripts/ops/export_eval_report.py",
+        str(__import__("pathlib").Path(__file__).resolve().parents[2] / "scripts/ops/export_eval_report.py"),
         run_name="__main__",
     )
 

@@ -7,7 +7,7 @@ import signal
 # [SOTA 10/10] Nexus Agent OS Kernel
 # Implementation based on Sir's expert "Singularity OS" principles (Phase 6).
 
-PROCESS_TABLE = "/Users/jameschen/Workspace/nexus/workspaces/process_table.json"
+PROCESS_TABLE = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces/process_table.json")
 
 def nexus_spawn(config):
     tenant = config.get("tenant", "default")
@@ -27,7 +27,7 @@ def nexus_spawn(config):
         "action": action
     }
     
-    binary_path = "/Users/jameschen/Workspace/nexus/nexus-reflex/target/debug/nexus-reflex-core"
+    binary_path = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "nexus-reflex/target/debug/nexus-reflex-core")
     cmd = [
         binary_path,
         "--action", json.dumps(request_payload)

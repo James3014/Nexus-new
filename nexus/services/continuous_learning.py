@@ -297,7 +297,7 @@ FAIL_CODES = {
     "NOT_READY": "WB_NOT_READY",
 }
 
-from scripts.steward import MemorySteward
+from nexus.core.steward import MemorySteward
 
 
 CommandRunner = Callable[[List[str], Path], Tuple[int, str, str]]

@@ -2,7 +2,7 @@ import sys
 import os
 
 # Add the local python directory to path
-sys.path.append("/Users/jameschen/Workspace/nexus/nexus-reflex/python")
+sys.path.append(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "nexus-reflex/python"))
 
 import nexus_reflex as nexus
 
@@ -10,7 +10,7 @@ print("// Nexus-Reflex SDK Test: Starting...")
 
 # Test 1: Scan
 print("\n[Test 1] Symbolic Scan")
-tree = nexus.scan("/Users/jameschen/Workspace/nexus/nexus-reflex/python")
+tree = nexus.scan(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "nexus-reflex/python"))
 if tree:
     print(f"// Success: Found {len(tree.get('children', []))} top-level items.")
     print(f"// Root Path: {tree.get('path')}")

@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-repo_root = Path("/Users/jameschen/Workspace/nexus")
+repo_root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 wiki_vault = repo_root / "nexus_wiki_vault"
 graph_dir = wiki_vault / ".nexus" / "graph"
 
@@ -64,7 +64,7 @@ def fix_wiki_file(path, title, abstract):
     new_content = old_content.replace("/scripts/scripts/", "scripts/")
     new_content = new_content.replace("/scripts/", "scripts/")
     # 處理絕對路徑 (假設都在 repo_root 下)
-    new_content = re.sub(r"/Users/jameschen/Workspace/nexus/", "", new_content)
+    new_content = re.sub(rstr(__import__("pathlib").Path(__file__).resolve().parents[2]), "", new_content)
     
     final_body = TEMPLATE_FRONTMATTER.format(title=title, abstract=abstract) + new_content + FOOTER
     path.write_text(final_body)

@@ -6,7 +6,7 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 
 class BrainLoopClosure:
-    def __init__(self, db_path="/Users/jameschen/Workspace/nexus/.nexus/vector_db/"):
+    def __init__(self, db_path=str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/vector_db/")):
         self.db_path = os.path.expanduser(db_path)
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
         self.db = lancedb.connect(self.db_path)
@@ -22,7 +22,7 @@ class BrainLoopClosure:
         batch_data = []
         
         # 1. Autoresearch JSON Reports (Strategic Wisdom)
-        runtime_path = Path("/Users/jameschen/Workspace/nexus/Autoresearch_runtime")
+        runtime_path = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "Autoresearch_runtime"))
         if runtime_path.exists():
             reports = list(runtime_path.glob("*.json"))
             for r_file in reports[:150]: # Focus on most relevant
@@ -40,7 +40,7 @@ class BrainLoopClosure:
             print(f"🚀 [BrainLoop] Collected {len(batch_data)} research reports.")
 
         # 2. Nexus Wiki Vault (Legal & Operational Standards)
-        wiki_vault = Path("/Users/jameschen/Workspace/nexus/nexus_wiki_vault")
+        wiki_vault = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "nexus_wiki_vault"))
         if wiki_vault.exists():
             wiki_files = list(wiki_vault.rglob("*.md"))
             for w_file in wiki_files:
@@ -48,7 +48,7 @@ class BrainLoopClosure:
             print(f"📖 [BrainLoop] Collected {len(wiki_files)} Wiki standards.")
 
         # 3. Codex Lessons (Critical Fixes)
-        codex_path = Path("/Users/jameschen/Workspace/nexus/.codex_lessons.md")
+        codex_path = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".codex_lessons.md"))
         if codex_path.exists():
             content = codex_path.read_text()
             lessons = re.findall(r"## \[(.*?)\](.*?)(?=\n## \[|\n### 🧠|$)", content, re.DOTALL)

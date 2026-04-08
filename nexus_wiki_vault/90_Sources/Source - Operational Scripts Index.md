@@ -94,7 +94,7 @@ version_scope: '[v22, v23]'
 | **Repair** | **repair_template_generator.py**| 修復模板生成。 | [Source: scripts/engine/repair_template_generator.py] |
 | **Audit** | **ci_graph_impact.py** | 圖響亮審計。 | [Source: scripts/engine/ci_graph_impact.py] |
 | **Audit** | **nx_impact.py** | 系統響亮定量。 | [Source: scripts/engine/nx_impact.py] |
-| **Audit** | **critique_engine.py** | 批判引擎。 | [Source: scripts/engine/critique_engine.py] |
+| **Audit** | **critique_engine.py** | 批判引擎。 | [Source: nexus/core/engine/critique_engine.py] |
 | **Patch** | **hybrid_patcher.py** | 混合修補器。 | [Source: scripts/engine/hybrid_patcher.py] |
 | **Logic** | **intent_classifier.py** | 意圖分類器。 | [Source: scripts/engine/intent_classifier.py] |
 | **Logic** | **l6_gate.py** | L6 智慧閘門。 | [Source: scripts/engine/l6_gate.py] |

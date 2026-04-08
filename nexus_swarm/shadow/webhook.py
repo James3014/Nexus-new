@@ -14,7 +14,7 @@ logger = logging.getLogger("NEXUS-SHADOW")
 
 app = FastAPI(title="Nexus Shadow Audit Webhook (v22)")
 
-NEXUS_ROOT = Path("/Users/jameschen/Workspace/nexus")
+NEXUS_ROOT = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 QUEUE_FILE = NEXUS_ROOT / ".nexus" / "shadow" / "queue.json"
 
 class PRPayload(BaseModel):

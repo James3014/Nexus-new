@@ -2,7 +2,7 @@
 set -e
 
 echo "🛡️ Phase 5: Forensic Sealing Starting..."
-WORKDIR="/Users/jameschen/Workspace/nexus/nexus-desk"
+WORKDIR="./nexus-desk"
 cd $WORKDIR
 
 # P0 Build

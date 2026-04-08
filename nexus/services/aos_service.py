@@ -23,8 +23,8 @@ class AosService:
             click.echo("\n🛡️ [Nexus:AOS] Governance Verification (v23 Hardened)")
             click.echo("-" * 65)
             # 這裡原本包含大量 import，重構後封裝在此
-            from scripts.engine.nexus_transaction import TransactionManager
-            from scripts.ops.nexus_probe import EnvProber
+            from nexus.core.engine.nexus_transaction import TransactionManager
+            from nexus.core.ops.nexus_probe import EnvProber
             
             tx = TransactionManager(self.repo_root)
             click.echo(f"🟢 P0 TransactionManager: ACTIVE")

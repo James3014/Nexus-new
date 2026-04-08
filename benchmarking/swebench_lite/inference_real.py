@@ -8,7 +8,7 @@ from pathlib import Path
 DATASET_NAME = "princeton-nlp/SWE-bench_Verified"
 MODEL_NAME = "nexus-v16"
 LIMIT = 1  # Start with 1 to verify the full chain
-OUTPUT_FILE = "/Users/jameschen/Workspace/nexus/benchmarking/swebench_lite/predictions_real_1.jsonl"
+OUTPUT_FILE = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "benchmarking/swebench_lite/predictions_real_1.jsonl")
 
 def run_nexus_inference(instance_id, problem_statement):
     print(f"Launching Nexus for {instance_id}...")
@@ -22,10 +22,10 @@ def run_nexus_inference(instance_id, problem_statement):
     ]
     try:
         # Run Nexus
-        subprocess.run(cmd, capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+        subprocess.run(cmd, capture_output=True, text=True, cwd=str(__import__("pathlib").Path(__file__).resolve().parents[2]))
         
         # Find the latest task directory
-        runs_dir = Path("/Users/jameschen/Workspace/nexus/.nexus/runs")
+        runs_dir = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".nexus/runs"))
         task_dirs = sorted(runs_dir.glob("task-*"), key=os.path.getmtime)
         if not task_dirs:
             return ""

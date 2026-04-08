@@ -9,7 +9,7 @@ This archive contains the complete physical evidence for the 100% success rate a
 - **/hell**: 10 Enterprise-level 0-day/Kernel exploits.
 
 ## 📊 Master Data
-- [nexus_master_benchmark_40.jsonl](file:///Users/jameschen/Workspace/nexus/nexus_sota_records/nexus_master_benchmark_40.jsonl)
+- [nexus_master_benchmark_40.jsonl](file://./nexus_sota_records/nexus_master_benchmark_40.jsonl)
 
 ## 🏆 Final SOTA Certification
 - **Total Tasks**: 40

@@ -4,7 +4,7 @@
 echo "🛡️ $(date): Running Nexus production maintenance..."
 
 # 設定工作目錄
-cd /Users/jameschen/Workspace/nexus/
+cd ./
 
 # 1. Memory Hygiene: TTL cleanup (保留 90 天)
 echo "🧹 Phase 1: Memory Hygiene (TTL 90 Days)..."

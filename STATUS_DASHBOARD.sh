@@ -2,7 +2,7 @@
 # Nexus v17.0 Status Dashboard
 # 🚀 提供 100% 透明的浸泡測試 (Soak Test) 實時觀測
 
-NEXUS_ROOT="/Users/jameschen/Workspace/nexus"
+NEXUS_ROOT="."
 STATE_FILE="$NEXUS_ROOT/.nexus/runner_supervisor_state.json"
 ACCEPTANCE_FILE="$NEXUS_ROOT/.nexus/reports/acceptance_check.md"
 REPORTS_DIR="$NEXUS_ROOT/docs"

@@ -7,7 +7,7 @@ from audit_logger import log_event
 # [SOTA 10/10] Multi-tenant Aware Worker
 # Implementation based on Sir's expert "Tenant-Aware Workers" principles (Phase 2B).
 
-WORKSPACES_ROOT = "/Users/jameschen/Workspace/nexus/workspaces"
+WORKSPACES_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "workspaces")
 
 def process_job(tenant_id, job_path):
     with open(job_path, "r") as f:

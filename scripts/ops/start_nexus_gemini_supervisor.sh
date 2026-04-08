@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SUPERVISOR="$SCRIPT_DIR/nexus_longrun_supervisor.sh"
-NEXUS_ROOT="${NEXUS_ROOT:-/Users/jameschen/Workspace/nexus}"
+NEXUS_ROOT="${NEXUS_ROOT:-.}"
 STATE_DIR="$NEXUS_ROOT/.nexus"
 PID_FILE="$STATE_DIR/runner_supervisor.pid"
 STATE_FILE="$STATE_DIR/runner_supervisor_state.json"

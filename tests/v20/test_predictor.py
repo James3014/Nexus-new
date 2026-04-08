@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 @pytest.fixture
 def predictor():
-    root = Path("/Users/jameschen/Workspace/nexus")
+    root = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     p = LatentPredictorV20(root)
     # Mock RAG 為控制變因
     p.rag = MagicMock()

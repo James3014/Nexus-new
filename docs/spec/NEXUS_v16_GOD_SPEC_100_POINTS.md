@@ -41,8 +41,8 @@ Nexus 使用 **P-X-D-R-A-C-S** 循環（星雲級狀態機）：
 - **Upstream Alignment**：確保所有補丁與最新 master 分支同步。
 
 ## 8. Observability & Telemetry (觀測與遙測)
-- **SOTA 儀表板**：[nexus_master_benchmark_60_GOD.jsonl](file:///Users/jameschen/Workspace/nexus/nexus_sota_records/nexus_master_benchmark_60_GOD.jsonl)。
-- **物理物證聖域**：[nexus_sota_records/](file:///Users/jameschen/Workspace/nexus/nexus_sota_records/) (包含 60 項物理 PR 物證)。
+- **SOTA 儀表板**：[nexus_master_benchmark_60_GOD.jsonl](file://./nexus_sota_records/nexus_master_benchmark_60_GOD.jsonl)。
+- **物理物證聖域**：[nexus_sota_records/](file://./nexus_sota_records/) (包含 60 項物理 PR 物證)。
 
 ---
 💡 *Derived from 01_Operations/Protocols/RFC_Writing_Standard.md. Nexus 意志已正式寫入歷史。*

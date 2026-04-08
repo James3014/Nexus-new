@@ -9,7 +9,7 @@ def test_completion_gate_cli_writes_verified_report(
 ) -> None:
     verify_file = tmp_path / "verify.txt"
     verify_file.write_text("/bin/echo ok-1\n/bin/echo ok-2\n", encoding="utf-8")
-    monkeypatch.chdir("/Users/jameschen/Workspace/nexus")
+    monkeypatch.chdir(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -44,7 +44,7 @@ def test_completion_gate_cli_requires_artifact_for_delivery_ready(
     artifact.write_text("proof", encoding="utf-8")
     artifact_file = tmp_path / "artifacts.txt"
     artifact_file.write_text(f"{artifact}\n", encoding="utf-8")
-    monkeypatch.chdir("/Users/jameschen/Workspace/nexus")
+    monkeypatch.chdir(str(__import__("pathlib").Path(__file__).resolve().parents[2]))
     monkeypatch.setattr(
         "sys.argv",
         [

@@ -1,6 +1,6 @@
 {
   "ts_utc": "2026-03-28T00:37:31.948709+00:00",
-  "workspace": "/Users/jameschen/Workspace/nexus/Autoresearch_runtime",
+  "workspace": "./Autoresearch_runtime",
   "rounds": 5,
   "proof_ratio_min_threshold": 95.0,
   "metrics": {

@@ -10,9 +10,9 @@ def test_write_phase_metrics_updates_run_file_and_live_status(tmp_path):
     status_file = project_root / "docs" / "EXEC_LIVE_STATUS.md"
     status_file.write_text("# Live\n", encoding="utf-8")
 
-    script = Path("/Users/jameschen/Workspace/nexus/scripts/ops/write_phase_metrics.py")
+    script = Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "scripts/ops/write_phase_metrics.py"))
     proc = subprocess.run(
-        ["/Users/jameschen/Workspace/nexus/.venv/bin/python", str(script)],
+        [str(__import__("pathlib").Path(__file__).resolve().parents[2] / ".venv/bin/python"), str(script)],
         cwd=project_root,
         capture_output=True,
         text=True,

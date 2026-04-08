@@ -28,7 +28,7 @@
 
 ## 🛠️ 基礎設施 (Infrastructure)
 
-- **Vector Store**: [LanceDB](file:///Users/jameschen/Workspace/nexus/nexus-swarm/wisdom/wisdom_memory) (Vector search + Metadata filter).
+- **Vector Store**: [LanceDB](file://./nexus-swarm/wisdom/wisdom_memory) (Vector search + Metadata filter).
 - **Embedding**: `all-MiniLM-L6-v2` (Local-first, 384-dim).
 - **HITL Dashboard**: 在 Nexus Desk `ArmorStatsPanel.tsx` 整合三鍵反饋介面。
 - **[Wisdom Guardrails]**:
