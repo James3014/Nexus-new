@@ -1,9 +1,9 @@
 active_topology:
-  best_id: v0.8-G16-13
-  fitness: 0.5548
-  gen: 16
+  best_id: v0.8-G17-0
+  fitness: 0.99
+  gen: 17
   meta_params:
     dna_dim: 128
     mutation_rate: 0.045000000000000005
-  timestamp: '2026-04-08T22:49:20.245608+00:00'
+  timestamp: '2026-04-08T22:54:51.848350+00:00'
   version: v0.8
