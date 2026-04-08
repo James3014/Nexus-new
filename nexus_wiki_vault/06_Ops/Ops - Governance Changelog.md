@@ -61,3 +61,7 @@ version_scope: '[v17.1, v22, v23]'
 
 ---
 [[System Overview]]- [2026-04-08] 物理淨化：執行依賴解耦與路徑動態化 (Phase 3 Purge)。
+## [2026-04-09] Governance Suite Restoration
+- **CLI**: Restored `nexus:status`, `nexus:acceptance-check`, and `nexus:contract-check`.
+- **OPS**: Added `--json` support to `nexus_acceptance_check.py`.
+- **NAS**: v0.7 engine entities integrated into core governance.

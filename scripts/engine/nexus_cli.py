@@ -13,6 +13,34 @@ def nexus():
     """⚖️ Nexus v23 NAS Hardened CLI"""
     pass
 
+@nexus.group(name="nexus")
+def nexus_group():
+    """🛡️ Nexus Core Governance Commands"""
+    pass
+
+@nexus_group.command(name="status")
+def status():
+    """📊 Show system status and trust scores."""
+    subprocess.run([sys.executable, str(REPO_ROOT / "scripts/ops/enterprise_audit_v22.py")], check=True)
+
+@nexus_group.command(name="acceptance-check")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def acceptance_check(as_json):
+    """✅ Run full system acceptance check."""
+    cmd = [sys.executable, str(REPO_ROOT / "scripts/ops/nexus_acceptance_check.py")]
+    if as_json: cmd.append("--json")
+    subprocess.run(cmd, check=True)
+
+@nexus_group.command(name="contract-check")
+@click.option("--contract-file", required=True)
+@click.option("--mode", default="any")
+@click.option("--min-hits", default=1, type=int)
+def contract_check(contract_file, mode, min_hits):
+    """⚖️ Run task contract verification."""
+    # 呼叫 ci_gate 的合約檢查功能
+    cmd = [sys.executable, str(REPO_ROOT / "scripts/ops/ci_gate.py"), "--dry-run", "--closeout-contract-path", contract_file]
+    subprocess.run(cmd, check=True)
+
 @nexus.command(name="run")
 def run():
     """🚀 Run NAS Evolution & Launch Swarms"""

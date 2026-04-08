@@ -357,6 +357,7 @@ def main():
     parser.add_argument("--exclude-sources", default="calibration.sim")
     parser.add_argument("--exclude-tasks", default="")
     
+    parser.add_argument("--json", action="store_true", help="Output as JSON.")
     args = parser.parse_args()
     project_root = Path(args.project_root).resolve()
     output_dir = project_root / args.output_dir
