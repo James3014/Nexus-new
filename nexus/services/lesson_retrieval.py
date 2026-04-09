@@ -62,6 +62,9 @@ def retrieve_relevant_lessons_raw(
             continue
             
         lesson["_score"] = score
+        lesson["_memory_source"] = lesson.get("_memory_source", "local")
+        lesson["_trust_weight"] = lesson.get("_trust_weight", 1.0)
+        lesson["_source_repo"] = lesson.get("_source_repo", "local")
         hits.append(lesson)
     
     hits.sort(key=lambda x: x["_score"], reverse=True)
@@ -155,16 +158,16 @@ def inject_lesson_context(
     total_tokens = 0
     
     for lesson in retrieved_lessons:
-        src = lesson["_memory_source"]
+        src = lesson.get("_memory_source", "local")
         weight = lesson.get("_trust_weight", 1.0)
         repo = lesson.get("_source_repo", "local")
         
-        reusable = ', '.join(lesson.get('reusable_when', [])[:3])
+        reusable = ', '.join(lesson.get('reusable_when', [])[:3]) if isinstance(lesson.get('reusable_when'), list) else 'General'
         block = (
-            f"\n**Lesson {lesson['task_id']}** (Source: {src}@{repo}, Trust: {weight:.2f})\n"
-            f"Root cause: {lesson['root_cause']}\n"
-            f"Fix: {lesson['corrective_action']}\n"
-            f"Reusable when: {reusable or 'General'}\n"
+            f"\n**Lesson {lesson.get('task_id', 'unknown')}** (Source: {src}@{repo}, Trust: {weight:.2f})\n"
+            f"Root cause: {lesson.get('root_cause', 'Unknown root cause')}\n"
+            f"Fix: {lesson.get('corrective_action', 'No fix provided')}\n"
+            f"Reusable when: {reusable}\n"
         )
         
         est_tokens = len(block) // 4 + 10
@@ -181,12 +184,13 @@ def inject_lesson_context(
         state["metadata"]["retrieved_lessons"] = {
             "count": len(retrieved_lessons),
             "used": len(context_blocks),
-            "lesson_ids": [l["lesson_id"] for l in retrieved_lessons],
-            "lesson_sources": [l["_memory_source"] for l in retrieved_lessons],
-            "shared_used": sum(1 for l in retrieved_lessons if l["_memory_source"] == "shared"),
+            "lesson_ids": [l.get("lesson_id", "unknown") for l in retrieved_lessons],
+            "lesson_sources": [l.get("_memory_source", "local") for l in retrieved_lessons],
+            "shared_used": sum(1 for l in retrieved_lessons if l.get("_memory_source") == "shared"),
             "prompt_context": "".join(context_blocks).strip(),
         }
     
+    return state, total_tokens
 
 # --- P2-B: Hybrid Retrieval Implementation ---
 

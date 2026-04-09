@@ -971,6 +971,14 @@ def finalize_learning_loop(
                     ".nexus/reports/auditresult.json",
                 ],
             )
+        
+        # 🚀 F4: Automate Vector Indexing (P2-A)
+        try:
+            from nexus.services.memory_indexer import rebuild_memory_index
+            rebuild_memory_index(root)
+            logging.info(f"💎 [LearningLoop] Memory index rebuilt for task {task_id}")
+        except Exception as e:
+            logging.warning(f"⚠️ [LearningLoop] Vector indexing failed: {e}")
     # --------------------------------------------
 
     delta_paths = _write_delta_artifacts(root, state, success, source)
@@ -1021,14 +1029,36 @@ def finalize_learning_loop(
     _append_jsonl(root / ".nexus" / "events" / "learning_loop.jsonl", loop_event)
     # 🚀 [v0.2/v0.3] Soul-Palace Belief Revision Linkage
     try:
+        from nexus.services.mem_palace import MemPalace
         from scripts.ops.brain_loop_closure import BrainLoopClosure
-        loop = BrainLoopClosure(root)
+        
         if not success:
-            # 模擬偵測到與前提衝突，觸發修訂 (實務上會根據 root_cause 判定)
-            # 這裡暫時以 task_id 作為範例觸發點
-            loop.propagate_belief_revision("B-001", "superseded")
+            palace = MemPalace(str(root))
+            loop = BrainLoopClosure(root)
+            
+            # 1. 動態鎖定當前任務相關的信念 (S5 Hardening)
+            active_beliefs = palace.list_beliefs(status="ACTIVE")
+            task_id = getattr(state, "task_id", "unknown")
+            
+            # 尋找映射：這可能是由當前任務建立的信念，或內容包含任務 ID 的信念
+            to_revise = []
+            for b in active_beliefs:
+                b_id = b.get("id")
+                b_content = str(b.get("content", ""))
+                
+                # 判定邏輯：精確匹配 ID 或 模糊匹配內容 (Actual Schema: ['id', 'content', ...])
+                if b_id == task_id or task_id in b_content:
+                    to_revise.append(b_id)
+            
+            # 2. 執行修訂傳播
+            for b_id in to_revise:
+                loop.propagate_belief_revision(b_id, "superseded")
+                logging.info(f"🧠 [SoulPalace:C] Dynamic belief revision triggered: {b_id} -> superseded")
+                
+            if not to_revise:
+                logging.debug(f"🧠 [SoulPalace:C] No active beliefs found correlating with failed task {task_id}")
     except Exception as e:
-        logging.warning(f"⚠️ [SoulPalace:C] Belief revision failed: {e}")
+        logging.warning(f"⚠️ [SoulPalace:C] Dynamic belief revision failed: {e}")
 
     return {
         "lessons_written": lessons_written,

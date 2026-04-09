@@ -89,6 +89,18 @@ def validate_and_filter_lessons(
             if ts < cutoff:
                 continue
                 
+            # 🛡️ S3: Deep Type Sanitization & Sanitization
+            # Ensure reusable_when is a List[str]
+            rw = lesson.get("reusable_when", [])
+            if not isinstance(rw, list):
+                rw = [str(rw)] if rw else []
+            lesson["reusable_when"] = [str(i)[:200] for i in rw] # Truncate items
+            
+            # Sanitize core text fields
+            lesson["root_cause"] = str(lesson.get("root_cause", ""))[:1000]
+            lesson["corrective_action"] = str(lesson.get("corrective_action", ""))[:2000]
+            lesson["task_id"] = str(lesson.get("task_id", "unknown"))[:100]
+                
             valid.append(lesson)
         except (ValueError, KeyError, TypeError):
             continue

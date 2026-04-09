@@ -55,3 +55,46 @@ class MemPalace:
             if not any(pattern in content for pattern in blacklist):
                 clean_candidates.append(cand)
         return clean_candidates
+
+    def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
+        """🕍 列出指定狀態的所有信念節點。"""
+        try:
+            import lancedb
+            db_path = self.project_root / ".nexus" / "vector_db"
+            if not db_path.exists(): return []
+            db = lancedb.connect(str(db_path))
+            res = db.list_tables()
+            tables = res if isinstance(res, list) else (res.tables if hasattr(res, "tables") else res)
+            if "nexus_soul_palace" not in tables:
+                return []
+            table = db.open_table("nexus_soul_palace")
+            df = table.to_pandas()
+            if status != "ALL" and "status" in df.columns:
+                df = df[df["status"].str.upper() == status.upper()]
+            return df.to_dict("records")
+        except Exception as e:
+            logger.warning(f"🕍 [MemPalace] list_beliefs failed: {e}")
+            return []
+
+    def get_belief(self, belief_id: str) -> Optional[Dict[str, Any]]:
+        """🕍 取得單一信念的完整記錄。"""
+        # ID 精確匹配或關鍵字模糊匹配
+        beliefs = self.list_beliefs(status="ALL")
+        for b in beliefs:
+            if b.get("id") == belief_id or belief_id in str(b.get("content", "")):
+                return b
+        return None
+
+    def get_router_bias(self) -> Optional[List[float]]:
+        """🕍 取得最新的 v0.9 FedAvg global_router_bias。"""
+        dna_path = self.project_root / "configs" / "federated_dna.yaml"
+        if not dna_path.exists():
+            return None
+        try:
+            import yaml
+            with open(dna_path, "r") as f:
+                dna = yaml.safe_load(f)
+            return dna.get("global_router_bias")
+        except Exception as e:
+            logger.warning(f"🕍 [MemPalace] get_router_bias failed: {e}")
+            return None

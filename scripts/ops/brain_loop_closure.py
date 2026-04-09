@@ -79,7 +79,9 @@ class BrainLoopClosure:
     # --- Knowledge Fusion Logic ---
 
     def _clean_table(self):
-        if self.table_name in self.db.table_names():
+        res = self.db.list_tables()
+        tables = res if isinstance(res, list) else (res.tables if hasattr(res, "tables") else res)
+        if self.table_name in tables:
             self.db.drop_table(self.table_name)
 
     def collect_knowledge(self):

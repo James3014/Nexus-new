@@ -32,6 +32,7 @@ class PromptBuilder:
         }
         # 🟢 P3: SolidPrefixProtocol (Byte Cache)
         self.prefix_hash = hashlib.sha256(json.dumps(self.NEXUS_PRIMER).encode()).hexdigest()[:16]
+        self._wisdom_vault = None
 
     def _load_config(self) -> Dict[str, Any]:
         """載入 models.yaml 配置。"""
@@ -96,6 +97,26 @@ Rules:
 {tools_section}
 """
 
+    def _get_wisdom_context(self, task: str) -> str:
+        """從 WisdomVault (nexus_knowledge) 檢索語義相關的歷史智慧。"""
+        try:
+            if self._wisdom_vault is None:
+                from nexus.research.wisdom.wisdom_vault import WisdomVault
+                db_path = str(self.project_root / ".nexus" / "vector_db")
+                self._wisdom_vault = WisdomVault(db_path=db_path)
+            
+            results = self._wisdom_vault.search_wisdom(task, limit=2)
+            if results is None or results.empty:
+                return ""
+            entries = []
+            for _, row in results.iterrows():
+                task_text = row.get("task", "N/A")
+                res_text = row.get("resolution", "N/A")
+                entries.append(f"- {task_text}: {res_text}")
+            return "\n".join(entries)
+        except Exception:
+            return ""
+
     def build_task_prompt(self, task: str, context_brief: str, task_id: str = "unknown", model_hint: str = "flash") -> str:
         """組裝任務指令並注入橋接回饋。"""
         config = self._load_config()
@@ -105,17 +126,29 @@ Rules:
         template = model_cfg.get("template", "[Nexus Task]\nTask: [Nexus Task]")
         
         # 1. 注入 Lessons (成功經驗 - P1-D 升級版)
-        retrieved_data = self._get_lessons_v22(task)
-        lesson_str = retrieved_data.get("prompt_context", "None")
+        try:
+            retrieved_data = self._get_lessons_v22(task)
+            lesson_str = retrieved_data.get("prompt_context", "None")
+        except Exception as e:
+            logger.warning(f"⚠️ [PromptBuilder] Lesson retrieval circuit-breaker triggered: {e}")
+            lesson_str = "None (Memory Service Unavailable)"
         
         # 2. 注入 Physical Feedback (失敗教訓)
         feedback_str = self._get_consensus_feedback(task_id)
         
-        # 3. 組合最終 Prompt
+        # 3. 注入 Wisdom Patterns (歷史模式 - 🆕 接線)
+        try:
+            wisdom_str = self._get_wisdom_context(task)
+            wisdom_section = f"\n\n### [Wisdom Patterns]\n{wisdom_str}" if wisdom_str else ""
+        except Exception as e:
+            logger.warning(f"⚠️ [PromptBuilder] Wisdom retrieval circuit-breaker triggered: {e}")
+            wisdom_section = ""
+        
+        # 4. 組合最終 Prompt
         physical_section = f"\n### [Physical Feedback: VETOED]\n{feedback_str}" if feedback_str else ""
         
         prompt = template.replace("[Nexus Task]", 
-                                 f"{task}{physical_section}\n\n### [Crystal Lessons]\n{lesson_str}\n\n### [Context Brief]\n{context_brief}")
+                                 f"{task}{physical_section}\n\n### [Crystal Lessons]\n{lesson_str}{wisdom_section}\n\n### [Context Brief]\n{context_brief}")
         return prompt
 
     def build_full_payload(self, phase: str, task: str, diff: str, task_id: str = "unknown", model_hint: str = "flash") -> str:
