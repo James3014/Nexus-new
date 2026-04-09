@@ -88,7 +88,15 @@ def delegate(task_name):
     """📡 [Supervisor] Decompose and delegate task to fleet."""
     subprocess.run([sys.executable, str(REPO_ROOT / "scripts/ops/supervisor_engine.py"), task_name], check=True)
 
+# --- External Command Registration ---
+try:
+    from scripts.engine.commands.ui_explorer import register as register_ui_explorer
+    register_ui_explorer(nexus_group, REPO_ROOT)
+except ImportError as e:
+    click.echo(f"⚠️  [Nexus:CLI] Could not load ui_explorer module: {e}")
+
 # --- v0.9 聯邦指令 (RESTORED) ---
+
 @nexus.command(name="fed-init")
 @click.option("--tenants", default=10)
 def fed_init(tenants):

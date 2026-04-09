@@ -57,6 +57,7 @@ version_scope:
 | **Handoff Builder** | 構建模型間移交的物理數據封裝。 | [Source: nexus/core/handoff_builder.py] |
 | **Handoff Bundle** | 包含完整上下文與資源權限的移交包。 | [Source: nexus/core/handoff_bundle.py] |
 | **[[BELIEF]] Engine** | 信念修正引擎，管理 Wisdom Prior 與 Router Bias。 | [Source: nexus/services/mem_palace.py] |
+| **OutputGuard** | **[NEW] Context Shield**：物理日誌截斷與上下文護欄。 | [Source: scripts/engine/output_guard.py] |
 
 ## Belief Revision System (信念修正系統 v0.9)
 
@@ -91,6 +92,7 @@ Nexus 採用 **Belief Revision** 框架來處理隨著時間與證據演進的�
 - `nexus/core/context_hub.py`: 上下文樞紐。 [Code: nexus/core/context_hub.py]
 - `nexus/core/crystal.py`: 知識晶體。 [Code: nexus/core/crystal.py]
 - `nexus/core/vector_rag.py`: RAG 引擎。 [Code: nexus/core/vector_rag.py]
+- `scripts/engine/output_guard.py`: 物理上下文護欄。
 
 ## Source notes
 - v22 Engine Spec: 要求 RAG 召回精度 (Precision@3) 必須 > 0.85 以避免幻覺。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]

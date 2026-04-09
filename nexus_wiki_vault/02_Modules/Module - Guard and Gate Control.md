@@ -45,6 +45,9 @@ version_scope:
 | **Tool Lock** | 硬性禁止在非預期階段調用特定敏感工具。 | [Source: nexus/core/tool_lockdown.py] |
 | **ACL Engine** | 具體執行權限清單 (Allowlist) 的查詢與匹配。 | [Source: nexus/core/access_control_list.py] |
 | **Injection Guard** | 檢測並防止針對工具參數的惡意注入攻擊。 | [Source: nexus/core/jit_tool_injector.py] |
+| **Autonomous Repair** | **[Phase 8]** 偵測失敗並驅動 ReAct 修復迴圈。 | [Source: scripts/ops/autonomous_repair_loop.py] |
+| **Rollback Guard** | **[Phase 8]** 確保修復失敗時能安全撤回髒修改。 | [Source: scripts/ops/rollback_guard.py] |
+| **Critique Engine** | **[Phase 8]** 反合理化邏輯，防止 Agent 規避測試。 | [Source: scripts/engine/critique_engine.py] |
 
 ## Upstream
 - **[System Overview](../00_Home/System Overview.md)**: 安全架構全景。
@@ -57,6 +60,14 @@ version_scope:
 ## Related modules / files
 - `nexus/core/capability_gate.py`: 權限閘門。 [Code: nexus/core/capability_gate.py]
 - `nexus/core/access_control_list.py`: 存取控制。 [Code: nexus/core/access_control_list.py]
+- `scripts/ops/ci_gate.py`: 控制所有物理守門與自癒觸發。
+
+## Physical Enforcement Gate (物理強制執行 - Protocol v2.1)
+
+依據 **🛡️ AGENT 強制執行規約 v2.1**，Nexus 採用「物理預檢」作為執行前置：
+1. **儀式啟動**: 每次啟動必須通過 `_nexus_preflight.sh`。
+2. **存證檢查**: 任務結算必須產生 `acceptance_summary.json` 並通過 `contract-check`。
+3. **路徑硬化**: 在 Mac 環境下強制鎖定 `uv` 執行路徑，防止環境漂移導致的守門失效。
 
 ## Source notes
 - v22 Engine Spec: 要求安全性檢查必須在工具真正執行前 10ms 內完成鎖定。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]

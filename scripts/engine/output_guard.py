@@ -11,8 +11,35 @@ import time
 from pathlib import Path
 
 # Hard limits (aligned with Goose shell.rs constants)
-OUTPUT_LIMIT_LINES = 2000
-OUTPUT_LIMIT_BYTES = 50_000
+# Dynamic limits based on signal density (Phase 9: Semantic Guard)
+LIMITS = {
+    "HIGH_SIGNAL": (4000, 100_000),  # Tracebacks / Panic
+    "NORMAL": (2000, 50_000),
+    "LOW_SIGNAL": (500, 15_000),     # Repetitive noise
+}
+
+
+def _classify_output_density(text: str) -> str:
+    """📊 Classify output by signal density."""
+    lines = text.splitlines()
+    if not lines:
+        return "NORMAL"
+
+    # 1. High Signal detection (Tracebacks / Panic)
+    high_signal_patterns = [
+        r"Traceback", r"Panic at", r"SEGFAULT", r"AssertionError",
+        r"SUMMARY: \d+ failed",
+    ]
+    if any(re.search(p, text, re.I) for p in high_signal_patterns):
+        return "HIGH_SIGNAL"
+
+    # 2. Low Signal detection (Repetitive noise)
+    unique_lines = len(set(lines))
+    total_lines = len(lines)
+    if total_lines > 100 and (unique_lines / total_lines) < 0.2:
+        return "LOW_SIGNAL"
+
+    return "NORMAL"
 
 
 def truncate_output(text: str, label: str = "output") -> str:
@@ -22,11 +49,14 @@ def truncate_output(text: str, label: str = "output") -> str:
     2. Extracts context-rich snippets (Head + Fail Context)
     3. Returns a succinct summary for the LLM
     """
+    density = _classify_output_density(text)
+    limit_lines, limit_bytes = LIMITS[density]
+
     lines = text.splitlines()
     total_lines = len(lines)
     total_bytes = len(text.encode("utf-8"))
 
-    if total_lines <= OUTPUT_LIMIT_LINES and total_bytes <= OUTPUT_LIMIT_BYTES:
+    if total_lines <= limit_lines and total_bytes <= limit_bytes:
         return text
 
     # --- Start Truncation Logic ---
@@ -60,6 +90,7 @@ def truncate_output(text: str, label: str = "output") -> str:
 
     summary = [
         f"⚠️ [OutputGuard] Output truncated ({total_lines} lines, {total_bytes} bytes).",
+        f"📊 Signal Density: {density}",
         f"📁 Full log saved to: {log_file}",
         "\n--- [Head Context (First 50 lines)] ---",
         *head,

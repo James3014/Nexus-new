@@ -23,6 +23,7 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 
 ## Role / responsibility
 - **v22**: 負責 production readiness、orchestration、self-healing、governance 與 release discipline。
+    - **[NEW] Phase 8 (Autonomous Integrity)**: 引入 Context Shield、ReAct 修復迴圈與 Rollback 保護。
 - **v23**: 負責 wisdom memory、online learning、predictive healing 與 consensus guard。
 - **定位**: 作為 Nexus Swarm 的編排平向 (Governance Plane)，確保任務執行具有可追溯性與智慧演化能力。
 
@@ -48,6 +49,11 @@ Nexus 是一個以 **P-X-D-R-A-C** 為主生命週期、以 `.nexus` 與 schema/
 - **[Agent Onboarding - Command Pack](Agent Onboarding - Command Pack.md)**: 常用指令速查。
 - **[Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)**: CI 失敗修復指南。
 - **[Agent Onboarding - Implementation Map](Agent Onboarding - Implementation Map.md)**: 實作路徑地圖。
+
+### 🛡️ 治理合規與規約 (Governance & Protocols)
+- **[Protocol - Engineering Discipline](../05_Protocols/Protocol%20-%20Engineering%20Discipline.md)**: [New] 反合理化與 TDD 強制規範。
+- **[Protocol - Context Hygiene](../05_Protocols/Protocol%20-%20Context%20Hygiene.md)**: [New] Context Shield 與日誌長度物理護欄。
+- **[Flow - Recursive Auto-Repair](../03_Flows/Flow%20-%20Recursive%20Auto-Repair.md)**: [New] ReAct 自治修復與回滾機制流程。
 - **[Ops - Governance Changelog](../06_Ops/Ops - Governance Changelog.md)**: 治理變更日誌。
 
 ### 🛡️ Governance & Quality
