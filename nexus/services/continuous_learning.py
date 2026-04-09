@@ -981,6 +981,36 @@ def finalize_learning_loop(
             logging.warning(f"⚠️ [LearningLoop] Vector indexing failed: {e}")
     # --------------------------------------------
 
+    # 🧬 [Phase 13] Skill Win Rate 回寫 (經驗沉澱)
+    try:
+        from nexus.learning.skill_lifecycle import record_usage
+        from nexus.learning.skill_registry import SkillRegistry
+
+        skill_id = getattr(state, "task_id", "unknown")
+        skills_dir = root / "skills" / "learned"
+        outcome = "success" if success else "failure"
+
+        # 1. 記錄使用事件
+        if skills_dir.exists() and skill_id != "unknown":
+            record_usage(skills_dir, skill_id, skill_id, outcome)
+
+        # 2. 重新計算 win_rate 並回寫 Registry
+        registry_path = root / ".nexus" / "registry" / "shared_skills.db"
+        if registry_path.exists() and skill_id != "unknown":
+            registry = SkillRegistry(registry_path)
+            existing = registry.get_by_task_id(skill_id)
+            if existing:
+                # Assuming repair_success acts as absolute success count and retry_count as failures/retries
+                total_uses = existing.get("repair_success", 0) + existing.get("retry_count", 0)
+                successes = existing.get("repair_success", 0)
+                if success:
+                    successes += 1
+                total_uses += 1
+                win_rate = float(successes) / total_uses if total_uses > 0 else 0.0
+                registry.update_win_rate(skill_id, win_rate)
+    except Exception as e:
+        logging.warning(f"⚠️ [Phase13] Skill win_rate writeback failed: {e}")
+
     delta_paths = _write_delta_artifacts(root, state, success, source)
 
     writeback_required = _should_require_writeback(state)

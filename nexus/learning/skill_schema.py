@@ -26,6 +26,9 @@ class SkillFrontmatter:
     trust_level: str = "auto-generated"
     task_type: str = "unknown"
     keywords: List[str] = field(default_factory=list)
+    languages: List[str] = field(default_factory=list)
+    file_patterns: List[str] = field(default_factory=list)
+    win_rate: float = 0.0
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
     
     # --- 全六階段學習信號 ---

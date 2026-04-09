@@ -56,6 +56,32 @@ class MemPalace:
                 clean_candidates.append(cand)
         return clean_candidates
 
+    def get_skill_constraints(self) -> Dict[str, Any]:
+        """🛡️ 從活躍信念中提取技能約束規則（包含 7 天 TTL 控制）。"""
+        beliefs = self.list_beliefs(status="ACTIVE")
+        constraints = {"require": [], "forbid": [], "prefer": []}
+        now = datetime.now(timezone.utc)
+        for b in beliefs:
+            # 檢查 7 天 TTL (Time-To-Live)
+            created_at_str = b.get("updated_at") or b.get("created_at")
+            if created_at_str:
+                try:
+                    # Parse timestamp, default to skipping if older than 7 days
+                    created_time = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                    if (now - created_time).days > 7:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+                    
+            content = str(b.get("content", "")).lower()
+            if "禁止" in content or "forbid" in content:
+                constraints["forbid"].append(content)
+            if "優先" in content or "prefer" in content:
+                constraints["prefer"].append(content)
+            if "必須" in content or "require" in content:
+                constraints["require"].append(content)
+        return constraints
+
     def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
         """🕍 列出指定狀態的所有信念節點。"""
         try:

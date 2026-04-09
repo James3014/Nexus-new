@@ -56,15 +56,28 @@ class SkillRegistry:
                     iaov_steps      TEXT,
                     readiness_checklist TEXT,
                     portability_markers TEXT,
+                    languages       TEXT,
+                    file_patterns   TEXT,
+                    win_rate        REAL DEFAULT 0.0,
                     created_at      TEXT NOT NULL,
                     updated_at      TEXT NOT NULL
                 )
             """)
-            # Migration: Ensure v2.0 columns exist (Safe against duplicates via PRAGMA)
-            for col in ["decision_boundary", "iaov_steps", "readiness_checklist", "portability_markers"]:
+            # Migration: Ensure v2.0 & Phase 13 columns exist (Safe against duplicates via PRAGMA)
+            for col, col_type in [
+                ("orchestration_pattern", "TEXT"),
+                ("context_fingerprint", "TEXT"),
+                ("decision_boundary", "TEXT"), 
+                ("iaov_steps", "TEXT"), 
+                ("readiness_checklist", "TEXT"), 
+                ("portability_markers", "TEXT"),
+                ("languages", "TEXT"),
+                ("file_patterns", "TEXT"),
+                ("win_rate", "REAL DEFAULT 0.0")
+            ]:
                 try:
-                    conn.execute(f"ALTER TABLE skills ADD COLUMN {col} TEXT")
-                except sqlite3.OperationalError: pass # Already exists內容分析其性質及性能性能內容性能性能。內容且對量。性能分析。
+                    conn.execute(f"ALTER TABLE skills ADD COLUMN {col} {col_type}")
+                except sqlite3.OperationalError: pass
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_type ON skills(task_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_trust_level ON skills(trust_level)")
@@ -86,9 +99,9 @@ class SkillRegistry:
                         verification_exit_codes, embedding_model_version, repair_success,
                         retry_count, pattern_reuse_rate, orchestration_pattern, 
                         context_fingerprint, decision_boundary, iaov_steps,
-                        readiness_checklist, portability_markers, created_at, updated_at
+                        readiness_checklist, portability_markers, languages, file_patterns, win_rate, created_at, updated_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                 """, (
                     skill_id,
@@ -117,6 +130,9 @@ class SkillRegistry:
                     json.dumps(skill.iaov_steps),
                     json.dumps(skill.readiness_checklist),
                     json.dumps(skill.portability_markers),
+                    json.dumps(skill.languages),
+                    json.dumps(skill.file_patterns),
+                    float(skill.win_rate),
                     skill.created_at,
                     now
                 ))
@@ -180,6 +196,72 @@ class SkillRegistry:
             rows = cursor.fetchall()
             
         return [dict(row) for row in rows]
+        
+    def search_by_affinity(
+        self,
+        languages: List[str] = None,
+        file_patterns: List[str] = None,
+        task_type: Optional[str] = None,
+        min_win_rate: float = 0.0,
+        max_results: int = 3
+    ) -> List[Dict[str, Any]]:
+        """Search skills natively prioritizing language, file patterns and win rate."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            
+            conditions = []
+            params = []
+            
+            if task_type:
+                conditions.append("task_type = ?")
+                params.append(task_type)
+                
+            if languages:
+                lang_likes = []
+                for lang in languages:
+                    lang_likes.append("languages LIKE ?")
+                    params.append(f"%\"{lang}\"%")
+                conditions.append(f"({' OR '.join(lang_likes)})")
+                
+            if file_patterns:
+                pat_likes = []
+                for pat in file_patterns:
+                    pat_likes.append("file_patterns LIKE ?")
+                    params.append(f"%\"{pat}\"%")
+                conditions.append(f"({' OR '.join(pat_likes)})")
+
+                
+            conditions.append("win_rate >= ?")
+            params.append(min_win_rate)
+                
+            query = "SELECT * FROM skills"
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+                
+            query += """ 
+                ORDER BY win_rate DESC,
+                  CASE trust_level
+                    WHEN 'production' THEN 4
+                    WHEN 'tested' THEN 3
+                    WHEN 'reviewed' THEN 2
+                    ELSE 1
+                  END DESC
+                LIMIT ?
+            """
+            params.append(max_results)
+            
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+            
+        return [dict(row) for row in rows]
+        
+    def update_win_rate(self, task_id: str, win_rate: float) -> None:
+        """Update the win rate of an existing skill by task_id."""
+        try:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                conn.execute("UPDATE skills SET win_rate = ? WHERE task_id = ?", (win_rate, task_id))
+        except sqlite3.Error as exc:
+            logger.error("skill_registry_update_winrate_failed [%s]: %s", task_id, exc)
         
     def get_by_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Fetch all node variants of a skill by its task_id (favoring local first)."""

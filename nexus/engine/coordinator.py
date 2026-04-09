@@ -80,6 +80,21 @@ class NexusEngine:
         self.memory = MemoryService(self.project_root)
         self.hub = NexusHub(self.project_root)
         
+        from nexus.services.mem_palace import MemPalace
+        self.mem_palace = MemPalace(str(self.project_root))
+        
+        registry_path = self.project_root / ".nexus" / "registry" / "shared_skills.db"
+        self.skill_registry = SkillRegistry(registry_path) if registry_path.exists() else None
+        
+        from nexus.core.context_hub import ContextHub
+        self.context_hub = kwargs.get("context_hub") or ContextHub(
+            str(self.project_root), 
+            memory_service=self.memory, 
+            run_dir=str(self.run_dir),
+            skill_registry=self.skill_registry,
+            mem_palace=self.mem_palace
+        )
+        
         # 核心組件對位
         # 核心組件對位 (由 DI 容器注入)
         self.reporter = kwargs.get("reporter", self.hub)
@@ -283,7 +298,7 @@ class NexusEngine:
         
         # --- 🧠 [Phase 11] Autonomic Routing ---
         from nexus.engine.autonomic_router import AutonomicRouter
-        arouter = AutonomicRouter(self.memory)
+        arouter = AutonomicRouter(project_root=str(self.project_root), memory_service=self.memory, mem_palace=getattr(self, "mem_palace", None))
         
         # 🧪 [Dead Code Resurrected] 獲取上下文預路由決策
         pre_routing = self.context_hub.make_pre_routing_decision(task_id, state.metadata) if self.context_hub else {}

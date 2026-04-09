@@ -23,6 +23,8 @@ class ContextHub:
         memory_service: Optional[Any] = None,
         run_dir: Optional[str] = None,
         nexus_fs: Optional[Any] = None,
+        skill_registry: Optional[Any] = None,
+        mem_palace: Optional[Any] = None,
     ):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
@@ -31,6 +33,8 @@ class ContextHub:
             project_root, run_dir=run_dir
         )
         self.nexus_fs = nexus_fs
+        self.skill_registry = skill_registry
+        self.mem_palace = mem_palace
 
         from nexus.services.prompt_builder import PromptBuilder
 
@@ -102,18 +106,23 @@ class ContextHub:
     ) -> Dict[str, Any]:
         """組裝診斷階段所需的 Context Pack。"""
         state = self.state_io.load_global_state()
+        
+        hotspots = list(set([
+            str(v.get("file") if isinstance(v, dict) else getattr(v, "file", ""))
+            for v in violations
+        ]))
+        hotspots = [h for h in hotspots if h and h != "None"]
+        
         pack = {
             "task_id": state.task_id,
             "failure_summary": summary,
             "violations": violations[:10],  # 截斷以保持 token 效率
-            "hotspots": list(set([
-                (v.get("file") if isinstance(v, dict) else getattr(v, "file", None))
-                for v in violations
-            ])),
+            "hotspots": hotspots,
             "history_summary": [steps.summary for steps in state.steps_history[-3:]],
             "contract_version": "1.5.2",
             "memory_reminders": self._inject_memory_reminders("D"),
         }
+        pack["recommended_skills"] = self._recommend_skills(summary, hotspots[:5])
         return pack
 
     def _get_l0_rules(self) -> str:
@@ -261,7 +270,76 @@ class ContextHub:
             "worktree_uuid": state.metadata.get("worktree_uuid", "main-branch"),
             "memory_reminders": self._inject_memory_reminders("R"),
         }
+        pack["recommended_skills"] = self._recommend_skills(diagnosis.summary, diagnosis.hotspots)
         return pack
+
+    def _recommend_skills(self, task_desc: str, target_files: List[str] = None) -> List[Dict]:
+        """
+        從任務描述和目標檔案中提取語言特徵，向 SkillRegistry 檢索 Top 3 高勝率技能。
+        """
+        if not self.skill_registry:
+            return []
+            
+        target_files = target_files or []
+        _EXT_LANG_MAP = {".py": "python", ".rs": "rust", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".go": "go"}
+        
+        languages = set()
+        file_patterns = set()
+        
+        for f in target_files:
+            if f and "." in f:
+                ext = f[f.rfind("."):]
+                file_patterns.add(f"*{ext}")
+                lang = _EXT_LANG_MAP.get(ext)
+                if lang:
+                    languages.add(lang)
+                    
+        candidates = self.skill_registry.search_by_affinity(
+            languages=list(languages),
+            file_patterns=list(file_patterns),
+            min_win_rate=0.3,
+            max_results=5
+        )
+        
+        if self.mem_palace:
+            candidates = self.mem_palace.verify(candidates)
+            constraints = self.mem_palace.get_skill_constraints()
+            
+            # Extract concrete keywords from governance phrases (skip Chinese stopwords)
+            _STOPWORDS = {"禁止", "使用", "不能", "不可", "禁用", "避免", "forbid", "不允許", "優先", "必須", "require", "prefer"}
+            
+            def _extract_keywords(phrase: str) -> List[str]:
+                import re as _re
+                tokens = _re.split(r"[\s,，\u3000]+", phrase.lower())
+                return [t for t in tokens if t and t not in _STOPWORDS and len(t) > 1]
+            
+            forbid_kws = []
+            for f in constraints.get("forbid", []):
+                forbid_kws.extend(_extract_keywords(f))
+            prefer_kws = []
+            for p in constraints.get("prefer", []):
+                prefer_kws.extend(_extract_keywords(p))
+            
+            filtered = []
+            for cand in candidates:
+                content = str(cand).lower()
+                if any(kw in content for kw in forbid_kws):
+                    continue
+                filtered.append(cand)
+                
+            def score_cand(c):
+                cnt = str(c).lower()
+                return sum(1 for kw in prefer_kws if kw in cnt)
+                
+            filtered.sort(key=score_cand, reverse=True)
+            candidates = filtered
+            
+        return [{
+            "skill_id": c.get("task_id", ""),
+            "name": c.get("name", ""),
+            "winning_hypothesis": c.get("winning_hypothesis", ""),
+            "win_rate": c.get("win_rate", 0.0)
+        } for c in candidates[:3]]
 
     def record_crystal_lesson(
         self,

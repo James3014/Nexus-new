@@ -27,9 +27,10 @@ class AutonomicRouter:
         "self_heal_threshold": 0.8
     }
 
-    def __init__(self, project_root: str = ".", memory_service=None, config: Optional[Dict] = None):
+    def __init__(self, project_root: str = ".", memory_service=None, config: Optional[Dict] = None, mem_palace=None):
         self.project_root = Path(project_root).resolve()
         self.memory = memory_service
+        self.mem_palace = mem_palace
         self.config_path = self.project_root / ".nexus" / "config" / "router_nas.json"
         
         if config:
@@ -60,6 +61,19 @@ class AutonomicRouter:
         """主動路由決策矩陣"""
         pre_routing = pre_routing or {}
         
+        effective_config = self.config.copy()
+        
+        # 0. MemPalace 信念偏好 (Soft Override)
+        if self.mem_palace:
+            try:
+                bias = self.mem_palace.get_router_bias()
+                if bias and len(bias) >= 4:
+                    # bias = [standard_weight, swarm_weight, research_weight, self_heal_weight]
+                    if bias[1] > 0.7:
+                        effective_config["token_threshold"] = int(effective_config["token_threshold"] * 0.9)
+            except Exception as e:
+                logger.warning("MemPalace router bias failed: %s", e)
+        
         # 1. 檢查歷史故障模式 (Self-Heal Priority)
         # ... (rest of logic)
         # 如果 MemoryService 命中強大的故障教訓，優先考慮自癒模式
@@ -75,10 +89,10 @@ class AutonomicRouter:
         # 2. 檢查重試次數 (Escalation to Swarm)
         # 如果單機模式已失敗多次，強制升級為蜂群進行並行探索
         retry_count = state.audit.retry_count if hasattr(state, "audit") else 0
-        if retry_count >= self.config["retry_threshold"]:
+        if retry_count >= effective_config["retry_threshold"]:
             return ExecutionPlan(
                 mode="swarm",
-                reason=f"Escalation: Retry count ({retry_count}) exceeded threshold ({self.config['retry_threshold']}).",
+                reason=f"Escalation: Retry count ({retry_count}) exceeded threshold ({effective_config['retry_threshold']}).",
                 confidence=1.0
             )
 
@@ -87,16 +101,16 @@ class AutonomicRouter:
         if est_tokens is None:
             est_tokens = 0
             
-        if est_tokens > self.config["token_threshold"]:
+        if est_tokens > effective_config["token_threshold"]:
             return ExecutionPlan(
                 mode="swarm",
-                reason=f"Complexity: Estimated tokens ({est_tokens}) exceeds density threshold ({self.config['token_threshold']}).",
+                reason=f"Complexity: Estimated tokens ({est_tokens}) exceeds density threshold ({effective_config['token_threshold']}).",
                 confidence=0.85
             )
 
         # 4. 關鍵詞感應 (Intent Recognition)
         desc_lower = task_desc.lower()
-        if any(re.search(kw, desc_lower) for kw in self.config["research_keywords"]):
+        if any(re.search(kw, desc_lower) for kw in effective_config["research_keywords"]):
             return ExecutionPlan(
                 mode="research_first",
                 reason="Intent: Task description indicates academic or deep-research requirement.",

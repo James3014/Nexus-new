@@ -23,6 +23,18 @@ def _build_yaml_frontmatter(fm: SkillFrontmatter) -> str:
     lines.append(f'created_at: "{fm.created_at}"')
     lines.append(f"task_id: {fm.task_id}")
     
+    if fm.languages:
+        lines.append(f"languages: {json.dumps(fm.languages)}")
+    else:
+        lines.append("languages: []")
+        
+    if fm.file_patterns:
+        lines.append(f"file_patterns: {json.dumps(fm.file_patterns)}")
+    else:
+        lines.append("file_patterns: []")
+        
+    lines.append(f"win_rate: {fm.win_rate}")
+    
     lines.append("success_metric:")
     lines.append(f"  repair_success: {'true' if fm.success_metric.repair_success else 'false'}")
     lines.append(f"  retry_count: {fm.success_metric.retry_count}")
@@ -161,6 +173,18 @@ def _build_skill_frontmatter_obj(
         pattern_reuse_rate=outcome_event.get("metrics", {}).get("pattern_reuse_rate", 0.0)
     )
     
+    _EXT_LANG_MAP = {".py": "python", ".rs": "rust", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".go": "go", ".md": "markdown", ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml"}
+    file_patterns = set()
+    languages = set()
+    for patch in repair_result.get("patches", []):
+        f = str(patch.get("file", ""))
+        if f and "." in f:
+            ext = f[f.rfind("."):]
+            file_patterns.add(f"*{ext}")
+            lang = _EXT_LANG_MAP.get(ext)
+            if lang:
+                languages.add(lang)
+                
     return SkillFrontmatter(
         name=name_slug,
         description=repair_result.get("diagnosis", "未提供")[:100].replace('\n', ' '),
@@ -168,6 +192,9 @@ def _build_skill_frontmatter_obj(
         success_metric=success_metric,
         task_type=outcome_event.get("task_type", "unknown"),
         keywords=[outcome_event.get("task_type", "unknown")] + (["research"] if research_pack else []),
+        languages=list(languages),
+        file_patterns=list(file_patterns),
+        win_rate=0.0, # Will be initialized to 0.0 for new skills
         plan_strategy=outcome_event.get("plan_strategy_used", ""),
         winning_hypothesis=str(research_pack.get("winner", {}).get("hypothesis_id", "")) if research_pack else "",
         phantom_patterns=list(outcome_event.get("phantom_pattern_history", [])),
