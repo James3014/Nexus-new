@@ -68,6 +68,7 @@ class PipelineContext:
     research_pack: Any = None
     pack: dict = field(default_factory=dict)
     event_store: Any = None  # For R16
+    outcome_v2: Optional[NexusOutcomeV2] = None
 
 class NexusPipeline(
     PipelineStagesMixin, 
@@ -89,35 +90,46 @@ class NexusPipeline(
 
     def _register_default_plugins(self):
         """Registers the standard P-X-R phases as plugins."""
-        if not self.engine.phases:
+        if not hasattr(self.engine, 'phases') or not self.engine.phases:
             return
             
         from nexus.engine.phase_plugin import PhasePlugin, PhaseResult
 
         class _LegacyPhaseAdapter(PhasePlugin):
             def __init__(self, name, handler, pipeline):
-                super().__init__(name, priority={"P": 10, "X": 20, "D": 25, "R": 30}.get(name, 100))
+                priority_map = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40, "C": 50}
+                super().__init__(name, priority=priority_map.get(name, 100))
                 self.handler = handler
                 self.pipeline = pipeline
 
-            def should_run(self, ctx):
+            def should_run(self, ctx: PipelineContext):
                 if self.name == "X":
                     force = bool(ctx.state.metadata.get("benchmark_force_research"))
-                    return force or bool(ctx.state.metadata.get("research_route", {}).get("should_research"))
+                    should = bool(ctx.state.metadata.get("research_route", {}).get("should_research"))
+                    return force or should
                 return True
 
-            def execute(self, pipeline, ctx) -> PhaseResult:
+            def execute(self, pipeline, ctx: PipelineContext) -> PhaseResult:
                 # 調用 Pipeline 的內部 _stage_* 方法以保持指標與事件收集
                 method_map = {
                     "P": pipeline._stage_plan,
                     "X": pipeline._stage_research,
                     "D": pipeline._stage_diagnose,
+                    "C": pipeline._stage_crystallize,
                 }
                 if self.name in method_map:
-                    method_map[self.name](ctx, ctx.tracer)
-                    return PhaseResult(status="success", mutations={}, events=[])
+                    try:
+                        if self.name == "C":
+                            success = ctx.state.metadata.get("pipeline_success", False)
+                            method_map[self.name](ctx, success, ctx.tracer)
+                        else:
+                            method_map[self.name](ctx, ctx.tracer)
+                        return PhaseResult(status="success", mutations={}, events=[])
+                    except Exception as e:
+                        logger.error(f"Phase {self.name} execution failed: {e}")
+                        return PhaseResult(status="FAILED", mutations={}, events=[])
                 
-                # 對於 R 階段，由於它是循環的一部分，我們先保持原樣或進行特殊處理
+                # R/A 階段通常由 _repair_audit_loop 統一管理
                 return PhaseResult(status="skip", mutations={}, events=[])
 
         # 🛡️ Sprint 15 Logic: 強制 Core 階段映射到 Pipeline Mixins 以維持架構完整性
@@ -127,7 +139,7 @@ class NexusPipeline(
             if p_handler:
                 self.registry.register(_LegacyPhaseAdapter(name, p_handler, self))
 
-        # 註冊其餘非核心階段
+        # 註冊其餘階段（包括 C 結晶階段）
         for name, p_handler in self.engine.phases.items():
             if name in core_phases or not p_handler:
                 continue
@@ -147,6 +159,9 @@ class NexusPipeline(
         tracer = NexusTracer()
         task_id = kwargs.pop("task_id", f"{task_type}-{int(time.time())}")
         
+        # Identity Enforcement Log
+        logger.info(f"🛡️ Nexus Battlesuit activated for task: {task_id}")
+
         with tracer.pipeline_span(task_id, **{"nexus.mode": kwargs.get("mode", "developer")}) as (root_span, trace_id, span_id):
             return self._run_pipeline_inner(task_id, trace_id, span_id, task_desc, task_type, context, tracer, **kwargs)
 
@@ -164,7 +179,9 @@ class NexusPipeline(
             state.metadata.update(context)
             
         self.engine.policy_manager.apply_policy_to_state(state, task_desc)
+        # Ensure description persists after policy logic
         state.metadata["task_description"] = task_desc
+        
         self.engine.state_io.save_global_state(state)
         self.engine.commander.next_step(status="started")
         
@@ -184,6 +201,7 @@ class NexusPipeline(
             researcher=self.engine.phases.get("X"),
             repairer=self.engine.phases.get("R"),
             pack={"task": task_desc}, # 🛡️ Ensure BasePhaseHandler.execute sees the task
+            outcome_v2=NexusOutcomeV2(task_id=task_id)
         )
         return ctx
 
@@ -199,6 +217,12 @@ class NexusPipeline(
         health_score = ctx.health_evaluator.evaluate(ctx.state, success)
         logger.info(f"📊 Final Health: {health_score:.1f}% | Success: {success}")
 
+        # Update Outcome V2 telemetry
+        if ctx.outcome_v2:
+            ctx.outcome_v2.success = success
+            ctx.outcome_v2.health_score = health_score
+            ctx.outcome_v2.terminal_state = ctx.state.metadata.get("pipeline_terminal_state", "UNKNOWN")
+
         self.engine.state_io.save_global_state(ctx.state)
         
         terminal_state = ctx.state.metadata.get("pipeline_terminal_state", "UNKNOWN")
@@ -212,21 +236,24 @@ class NexusPipeline(
 
         if terminal_state == "HUMAN_REVIEW":
             logger.error("🛑 Pipeline 終止於 HUMAN_REVIEW，需人工介入")
-            from nexus.core.handoff_bundle import HandoffBundleWriter
-            writer = HandoffBundleWriter(self.engine.project_root)
-            writer.create(
-                triggering_phase="pipeline_terminal",
-                reason=ctx.state.metadata.get("human_review_reason", "HUMAN_REVIEW triggered"),
-                task_id=ctx.task_id,
-                trace_id=ctx.state.metadata.get("trace_id", ""),
-                decision_id=str(ctx.state.metadata.get("last_decision_id", "")),
-                agent_history=[h.phase for h in ctx.state.steps_history],
-                state_variables={
-                    "escalation_count": ctx.state.metadata.get("escalation_count", 0),
-                    "sandbox_mode": ctx.state.metadata.get("sandbox_mode", "unknown"),
-                },
-            )
-        elif ctx.state.metadata.get("pipeline_terminal_state") == "ESCALATED":
+            try:
+                writer = HandoffBundleWriter(self.engine.project_root)
+                writer.create(
+                    triggering_phase="pipeline_terminal",
+                    reason=ctx.state.metadata.get("human_review_reason", "HUMAN_REVIEW triggered"),
+                    task_id=ctx.task_id,
+                    trace_id=ctx.state.metadata.get("trace_id", ""),
+                    decision_id=str(ctx.state.metadata.get("last_decision_id", "")),
+                    agent_history=[h.phase for h in ctx.state.steps_history],
+                    state_variables={
+                        "escalation_count": ctx.state.metadata.get("escalation_count", 0),
+                        "sandbox_mode": ctx.state.metadata.get("sandbox_mode", "unknown"),
+                        "final_health": health_score
+                    },
+                )
+            except Exception as e:
+                logger.error(f"Handoff bundle creation failed: {e}")
+        elif terminal_state == "ESCALATED":
             logger.warning("📢 Pipeline 終止於 ESCALATED，Coordinator 應重新規劃")
         return success
 
@@ -235,12 +262,17 @@ class NexusPipeline(
         ctx = self._init_pipeline_state(task_id, trace_id, span_id, task_desc, task_type, context, **kwargs)
         ctx.tracer = tracer
         
+        success = True
+        
         # 1. 執行線性階段 (P -> X -> D)
         for plugin in self.registry.get_ordered_plugins():
             if plugin.name in ("P", "X", "D"):
+                if not plugin.should_run(ctx):
+                    logger.info("⏩ Skipping phase: %s", plugin.name)
+                    continue
+                    
                 logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
                 
-                from nexus.core.events import NexusEvent
                 ctx.event_store.append(NexusEvent(
                     event_id=f"evt_start_{plugin.name}_{int(time.time()*1000)}",
                     task_id=ctx.task_id,
@@ -249,24 +281,43 @@ class NexusPipeline(
                     payload={"name": plugin.name}
                 ))
                 
-                result = plugin.execute(self, ctx)
-                
-                ctx.event_store.append(NexusEvent(
-                    event_id=f"evt_end_{plugin.name}_{int(time.time()*1000)}",
-                    task_id=ctx.task_id,
-                    phase=plugin.name,
-                    event_type="phase_end",
-                    payload={"status": result.status}
-                ))
-                
-                if result.status == "FAILED":
-                    logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
-                    break 
+                try:
+                    result = plugin.execute(self, ctx)
+                    
+                    ctx.event_store.append(NexusEvent(
+                        event_id=f"evt_end_{plugin.name}_{int(time.time()*1000)}",
+                        task_id=ctx.task_id,
+                        phase=plugin.name,
+                        event_type="phase_end",
+                        payload={"status": result.status}
+                    ))
+                    
+                    if result.status == "FAILED":
+                        logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
+                        success = False
+                        ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                        break
+                except Exception as e:
+                    logger.exception(f"Unhandled failure in plugin {plugin.name}: {e}")
+                    success = False
+                    ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                    break
             
         # 2. 執行複雜循環階段 (R/A)
-        success = self._repair_audit_loop(ctx, tracer)
+        if success:
+            try:
+                success = self._repair_audit_loop(ctx, tracer)
+            except Exception as e:
+                logger.exception(f"Fatal error in Repair-Audit loop: {e}")
+                success = False
+                ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
         
         # 3. 執行結晶與結案
         # --- C Stage: Crystallize ---
-        self._stage_crystallize(ctx, success, tracer)
+        ctx.state.metadata["pipeline_success"] = success
+        try:
+            self._stage_crystallize(ctx, success, tracer)
+        except Exception as e:
+            logger.error(f"Crystallize stage encountered an error (non-fatal): {e}")
+            
         return self._finalize_and_report(ctx, success, tracer)
