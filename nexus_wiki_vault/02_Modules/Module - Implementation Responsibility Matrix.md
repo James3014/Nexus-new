@@ -98,6 +98,7 @@ version_scope:
 |---|---|---|---|---|
 | CLI Entry | `scripts/nexus_cli.py` | 舊介面相容與入口轉接 | CLI process | `uv run scripts/nexus_cli.py nexus:status` |
 | Command Surface | `scripts/engine/nexus_cli.py` | 命令群定義與 protocol gate | command result JSON/text | `uv run scripts/engine/nexus_cli.py nexus:probe` |
+| Physical Core (Proxy) | `packages/core/src/main.rs` | 高性能異步 I/O 與資產防禦 | `nexus-core` bin | `export PATH="$HOME/.cargo/bin:$PATH"; cargo build` |
 | Orchestration | `nexus/core/orchestrator.py` | review loop、strike、token 追蹤 | 參見 `[Module - Core Orchestrator Deep Dive](Module - Core Orchestrator Deep Dive.md)` | `uv run pytest tests/test_v9_regression_p1.py` |
 | State Persistence | `nexus/core/state_repository.py` | `NexusState` 讀寫與回載 | state jsonl | `./nexus` state 檢核 |
 | Policy & Governance | `nexus/core/policy_manager.py` | episode/policy 記錄與代謝 | 參見 `[Module - Policy and Learning Governance](Module - Policy and Learning Governance.md)` | `uv run scripts/ops/ci_gate.py --dry-run` |

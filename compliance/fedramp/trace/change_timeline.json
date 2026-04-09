@@ -1,38 +1,53 @@
 [
   {
-    "artifact": "singularity_summary.json",
-    "timestamp": "2026-04-09T08:21:16.476637",
+    "artifact": "writeback_todo.json",
+    "timestamp": "2026-04-09T14:48:55.943210",
     "category": "Operational Report"
   },
   {
-    "artifact": "singularity_abyss.log",
-    "timestamp": "2026-04-09T08:21:16.460503",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "singularity_drift.log",
-    "timestamp": "2026-04-09T08:21:12.898656",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "singularity_duel.log",
-    "timestamp": "2026-04-09T08:21:12.728957",
+    "artifact": "acceptance_summary.json",
+    "timestamp": "2026-04-09T14:19:17.620883",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-09T06:40:37.512067",
+    "timestamp": "2026-04-09T14:19:10.577110",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-09T06:40:37.511873",
+    "timestamp": "2026-04-09T14:19:10.576919",
     "category": "Operational Report"
   },
   {
-    "artifact": "writeback_todo.json",
-    "timestamp": "2026-04-08T22:58:02.565891",
+    "artifact": "singularity_summary.json",
+    "timestamp": "2026-04-09T11:50:02.700268",
     "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_duel.log",
+    "timestamp": "2026-04-09T11:50:02.699919",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_drift.log",
+    "timestamp": "2026-04-09T11:50:02.698218",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_abyss.log",
+    "timestamp": "2026-04-09T11:50:02.697877",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "p8.3_autopilot_bench.json",
+    "timestamp": "2026-04-09T11:18:34.317304",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "enterprise_audit.json",
+    "timestamp": "2026-04-09T11:07:54.171244",
+    "category": "Audit Report"
   },
   {
     "artifact": "wiki_eval_report.json",
@@ -53,11 +68,6 @@
     "artifact": "wiki_drift_report.json",
     "timestamp": "2026-04-08T14:03:04.302531",
     "category": "Operational Report"
-  },
-  {
-    "artifact": "enterprise_audit.json",
-    "timestamp": "2026-04-08T11:09:40.458088",
-    "category": "Audit Report"
   },
   {
     "artifact": "closeout_status.json",

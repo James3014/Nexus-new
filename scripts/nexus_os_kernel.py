@@ -27,7 +27,7 @@ def nexus_spawn(config):
         "action": action
     }
     
-    binary_path = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "nexus-reflex/target/debug/nexus-reflex-core")
+    binary_path = str(__import__("pathlib").Path(__file__).resolve().parents[1] / "packages/core/target/debug/nexus-core")
     cmd = [
         binary_path,
         "--action", json.dumps(request_payload)

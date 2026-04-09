@@ -313,14 +313,10 @@ level: L5.7 Eternal
 |---|---|---|---|---|
 
 |**Nerve Core**|`nexus/`|1.1 MB|Python|決策、編排與狀態合約|
-
 |**Muscle v16**|`nexus-rust-v16/`|911 MB|Rust|聯邦化聖戰編排與 HTTP 治理 (Port 8516)|
-
-|**Reflex v17**|`nexus-reflex/`|178 MB|Rust|下一代符號掃描與多租戶隔離反射|
-
-|**Nexus Core**|`nexus-core/`|149 MB|Rust|基礎核心邏輯|
-
-|**Swarm**|`nexus-swarm/`|8.1 MB|Go|**[新發現]** Swarm 任務資料庫與 Manager (Go)|
+|**Nexus Core**|`packages/core/`|149 MB|Rust|**[Active]** 高性能異步 I/O 與多租戶隔離反射|
+|**Reflex v17**|`.nexus/vault/poc_archive/nexus-reflex/`|178 MB|Rust|**[Legacy]** 符號掃描與隔離原型|
+|**Swarm**|`nexus_swarm/`|8.1 MB|Go|Swarm 任務資料庫與 Manager (Go)|
 
 ### 2. 環境與治理 (Env & Governance)
 
