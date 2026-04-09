@@ -6,7 +6,7 @@
 ## 🔩 核心組件
 1. **Supervisor Engine**: 負責任務的語義拆解 (Decomposition)。
 2. **Sensory Probe (Style Ingester)**: 負責吞噬外部環境審美，即時同步 \`DESIGN.md\`。
-3. **Metabolism Checkpoint**: 建立物理斷點，確保任務續傳 (Resume) 能力。
+3. **Session Metabolism Engine (AutoDream)**: 取代了暴力的字串截斷，透過語義蒸餾 (Distillation) 將數萬 Token 的繁雜 Task Tree、失敗教訓與核心信念（Beliefs）壓縮成一顆極其輕量的 `session_seed.json` (結晶種子)。這不僅建立了物理斷點確保續傳 (Resume) 能力，更是阻斷 LLM「幻覺連鎖反應」與達成「超低延遲啟動 (TTFT)」的核心無損蒸餾機。
 
 ## 🛠️ 操作指令
 - \`nexus delegate <task>\`: 發動全艦隊合力開發。
