@@ -58,8 +58,8 @@ class BrainLoopClosure:
 
         # 2. 尋找直接受影響的 Artifacts (depends_on / derived_from)
         affected_artifact_ids = [
-            e["to_id"] for e in edges 
-            if e["from_id"] == belief_id and e["type"] in ["depends_on", "derived_from"]
+            e.get("to_id") for e in edges 
+            if e.get("from_id") == belief_id and e.get("type") in ["depends_on", "derived_from"]
         ]
 
         # 3. 標記 Artifacts 為 Stale
