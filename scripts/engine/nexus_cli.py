@@ -47,6 +47,21 @@ def acceptance_check(as_json):
     if as_json: cmd.append("--json")
     subprocess.run(cmd, check=True)
 
+@nexus_group.command(name="distill")
+@click.option("--goal", default="Continuous Improvement")
+def distill(goal):
+    """🌬️ [Metabolism] Distill session essence and reset brain."""
+    from nexus.services.metabolism_engine import metabolism
+    # 模擬當前 context
+    ctx = {
+        "goal": goal,
+        "done": ["Phase 1-3 Fusion", "Physical Preflight"],
+        "todo": ["Quantum Fleet Expansion", "AGI Distillation"]
+    }
+    tx = metabolism.distill(ctx)
+    click.echo(f"💎 Session crystallized. Arweave TX: {tx}")
+    click.echo(f"🌬️ [ACTION] Brain reset required. Please restart with the seed in .nexus/metabolism/session_seed.json")
+
 @nexus.command(name="meta-warmup")
 @click.option("--seed", default="v07-best")
 @click.option("--population", default=64)
