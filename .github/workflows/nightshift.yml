@@ -33,11 +33,6 @@ jobs:
           MUSE_RUN_CODEX_LOOP: 1
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate Visualization 📊
-        run: |
-          python3 scripts/plot_curve.py --csv optimization_curve_fix_cors_error.csv --out curve_cors.png
-          python3 scripts/plot_curve.py --csv optimization_curve_hydration_error.csv --out curve_hydration.png
-
       - name: Commit Evolutions 🚀
         run: |
           git config --global user.name "Nexus-AutoResearch[bot]"
