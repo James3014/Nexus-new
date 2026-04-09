@@ -22,7 +22,7 @@ jobs:
       - name: Install Dependencies 🛠️
         run: |
           pip install uv
-          uv pip install -e .
+          uv pip install --system -e .
           echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
 
       - name: Execute Swarm AutoResearch 🐝
