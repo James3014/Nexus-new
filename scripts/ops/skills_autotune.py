@@ -8,6 +8,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import sys
+
+# Ensure nexus package is in path for metabolism
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from nexus.core.decorators import nexus_metabolize
 
 
 @dataclass
@@ -353,6 +358,7 @@ def run_autotune(
     return 0
 
 
+@nexus_metabolize(task_name="Nexus Skill Autotune Engine")
 def main() -> int:
     parser = argparse.ArgumentParser(description="Nexus skill auto-tuning helper.")
     parser.add_argument("--project-root", default=str(Path(__file__).resolve().parents[2]))

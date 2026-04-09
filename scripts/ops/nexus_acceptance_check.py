@@ -17,6 +17,8 @@ except ImportError:
     # Fail-safe for different environment structures
     def build_skills_health(path): return {"ready_for_formal_use": True, "summary": {}}
 
+from nexus.core.decorators import nexus_metabolize
+
 try:
     from scripts.ops.lesson_writeback_check import check_lesson_evidence
 except ImportError:
@@ -340,6 +342,7 @@ def _write_markdown(report: Dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+@nexus_metabolize(task_name="Nexus System Acceptance Check")
 def main():
     parser = argparse.ArgumentParser(description="Nexus Acceptance Gate Checker")
     parser.add_argument("--project-root", default=str(Path.cwd()))

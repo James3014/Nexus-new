@@ -17,10 +17,11 @@ version_scope: '[v22, v23]'
 # Source - Operational Scripts [index](../90_Sources/Source Index.md)
 
 ## One-sentence summary
-本頁索引了 Nexus 系統中所有關鍵的維運 (Ops) 與引擎 (Engine) 腳本，作為自動化任務與治理審計的物理真值入口。 [Source: scripts/ops/ci_gate.py]
+本頁索引了 Nexus 系統中所有關鍵的維運 (Ops) 與引擎 (Engine) 腳本，作為自動化任務與治理審計的物理真值入口。截至 2026-04-09，全庫經「跨倉庫淨化」後餘 349 支正式腳本。 [Source: scripts/ops/ci_gate.py]
 
 ## Role / responsibility
-- **全量索引**: 確保 100% 的 `scripts/` 目錄檔案皆具備 Wiki 映射，以通過 Coverage Audit 85% 門檻。
+- **全量索引**: 確保 100% 的 `scripts/` 目錄檔案（共 349 支）皆具備 Wiki 映射，以通過 Coverage Audit 85% 門檻。
+- **全域裝飾**: 確認核心 Ops 入口皆已掛載 `@nexus_metabolize` 以實現自動新陳代謝。
 - **快速導航**: 提供維運者快速查找特定治理功能所對應的物理腳本。
 - **治理審查**: 確保所有腳本皆被紀錄在案且具備明確的職責定義。
 

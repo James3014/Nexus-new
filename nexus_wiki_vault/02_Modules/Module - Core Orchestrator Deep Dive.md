@@ -35,6 +35,7 @@ version_scope: '[v22, v23]'
 | **PDRAC Controller** | 實施 Plan -> Research -> Do -> Review -> Audit -> Commit 硬性階段。 | [Source: nexus/core/swarm_orchestrator.py] |
 | **Wait Loop** | 非同步等待子任務完成並防止執行死結。 | [Source: nexus/core/swarm_orchestrator.py] |
 | **State Synchronizer** | 將運行時狀態同步回 `StateRepository`。 | [Source: nexus/core/swarm_orchestrator.py] |
+| **Session Metabolism** | 使用 `@nexus_metabolize` 全域裝飾器，在任務執行結束後自動進行「經驗提煉」與「故障特徵提取」，驅動下一階段的自愈環路。 | [Source: nexus/core/decorators.py] |
 
 ## Upstream
 - **[System Overview](../00_Home/System Overview.md)**: 核心邏輯架構導航。

@@ -1,8 +1,12 @@
-#!/usr/bin/env python3
+import sys
 import json
 import argparse
 from pathlib import Path
 from datetime import datetime
+
+# Ensure nexus package is in path for metabolism
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from nexus.core.decorators import nexus_metabolize
 
 def generate_lewm_report(project_root: Path):
     runs_dir = project_root / ".nexus" / "runs"
@@ -161,6 +165,7 @@ def generate_latent_report(project_root: Path):
                 print(f"{run_path.name:<25} | {f_tokens:<15} | {a_tokens:<15} | {error:.1%}")
         except: continue
 
+@nexus_metabolize(task_name="Nexus Guard Compliance Audit")
 def main():
     parser = argparse.ArgumentParser(description="Nexus Guard Audit")
     parser.add_argument("--lewm-report", action="store_true", help="Generate JEPA Latent Planning report")

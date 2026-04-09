@@ -23,6 +23,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEMINI_BIN = Path("/Users/jameschen/.npm-global/bin/gemini")
 DEFAULT_LOCK = Path("/tmp/nexus_gemini_invoke.lock")
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from nexus.core.decorators import nexus_metabolize
 AUTH_PROMPT = "Opening authentication page in your browser. Do you want to continue? [Y/n]:"
 
 
@@ -97,6 +102,7 @@ def _read_prompt(prompt: str | None, prompt_file: str | None) -> str:
     raise ValueError("One of --prompt or --prompt-file is required.")
 
 
+@nexus_metabolize(task_name="Headless Gemini Invoker")
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reliable Gemini+Nexus headless invoker")
     parser.add_argument("--model", default="gemini-3-flash-preview")

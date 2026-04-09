@@ -1,12 +1,16 @@
-#!/usr/bin/env python3
 import os
 import re
 import yaml
 import argparse
 import subprocess
 import json
-from pathlib import Path
 from datetime import datetime
+import sys
+from pathlib import Path
+
+# Ensure nexus package is in path for metabolism
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from nexus.core.decorators import nexus_metabolize
 
 # 🛡️ Nexus Wiki Linter v1.4 - Automated Audit Edition
 # Purpose: CI Integration, Tier-based Enforcement, and Waiver Expiry Control.
@@ -208,6 +212,7 @@ def get_git_changed_files():
     except:
         return []
 
+@nexus_metabolize(task_name="Nexus Wiki Architecture Linter")
 def main():
     parser = argparse.ArgumentParser(description="🛡️ Nexus Wiki Linter v1.4")
     parser.add_argument("--changed-only", action="store_true", help="Only check files changed in Git.")

@@ -42,6 +42,7 @@ class SessionMetabolism:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "current_objective": session_context.get("goal", "Continuous Evolution"),
             "completed_tasks": session_context.get("done", []),
+            "errors": session_context.get("errors", []),
             "checkpoint": self.load_checkpoint(),
             "active_beliefs": self._get_active_beliefs(),
             "design_specs": self._get_design_specs(),

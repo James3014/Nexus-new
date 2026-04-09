@@ -4,10 +4,12 @@ import argparse
 import sys
 import os
 from pathlib import Path
-from playwright.async_api import async_playwright
-from nexus.core.web_dom_mapper import WebDomMapper
-from nexus.core.web_action_executor import WebActionExecutor
-from nexus.core.web_prompts import WebPrompts
+import sys
+
+# Ensure nexus package is in path for metabolism
+# scripts/ui-validator.py -> scripts/ -> root/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from nexus.core.decorators import nexus_metabolize
 
 async def agent_get_action(task: str, dom_text: str) -> str:
     """
@@ -70,10 +72,14 @@ async def agent_get_action(task: str, dom_text: str) -> str:
 
     return json.dumps({"action": "finish", "value": "No elements found, ending session."})
 
+@nexus_metabolize(task_name="UI Autonomous Exploration")
 async def run_ui_validation(url, agentic_mode=False, task=None, max_steps=5):
     """
     執行 UI 驗證。支援傳統矩陣測試或自主代理模式。
     """
+    from nexus.core.web_dom_mapper import WebDomMapper
+    from nexus.core.web_action_executor import WebActionExecutor
+    from playwright.async_api import async_playwright
     results = {
         "status": "pending",
         "task_id": f"ui-task-{os.getpid()}",
@@ -83,6 +89,7 @@ async def run_ui_validation(url, agentic_mode=False, task=None, max_steps=5):
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
+        # ... remainder of run_ui_validation logic
         context = await browser.new_context(record_video_dir=".nexus/reports/videos")
         page = await context.new_page()
         
@@ -119,29 +126,15 @@ async def run_ui_validation(url, agentic_mode=False, task=None, max_steps=5):
         
         await browser.close()
     
-    # 綁定 AutoDream 語義蒸餾 (Session Metabolism)
-    try:
-        from nexus.services.metabolism_engine import metabolism
-        # 從步驟中提煉經驗
-        session_context = {
-            "goal": f"UI Exploration: {task}" if agentic_mode else f"UI Matrix Validation: {url}",
-            "done": [{"action": s.get("action"), "status": s.get("status")} for s in results["steps"]],
-        }
-        tx_id = metabolism.distill(session_context)
-        results["metabolism_tx"] = tx_id
-        print(f"🧬 [Metabolism] UI exploration experience crystallized to Seed ({tx_id}).")
-    except ImportError as e:
-        print(f"⚠️ [Metabolism] Could not bind SessionMetabolism: {e}")
-
     return results
 
-if __name__ == "__main__":
+@nexus_metabolize(task_name="UI Validator CLI")
+def main():
     parser = argparse.ArgumentParser(description="Nexus v0.9 UI Validator (Agentic Explorer)")
     parser.add_argument("--url", required=True)
     parser.add_argument("--agentic-mode", action="store_true", help="Enable autonomous agent mode")
     parser.add_argument("--task", type=str, help="Natural language task for the agent")
     parser.add_argument("--max-steps", type=int, default=5, help="Maximum steps for agent exploration")
-    
     args = parser.parse_args()
     
     # 執行並輸出結果 JSON
@@ -152,4 +145,7 @@ if __name__ == "__main__":
         max_steps=args.max_steps
     ))
     print(json.dumps(final_report, indent=2, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
 

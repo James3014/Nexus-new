@@ -89,8 +89,15 @@ version_scope: '[v17.1, v22, v23]'
 - **S5 (Intelligence)**: Activated dynamic belief revision linkage in the learning loop, enabling autonomous "belief rescission" upon failure.
 - **Evolution**: Optimized LanceDB lookup logic to support newer response models (ListTablesResponse).
 
-## [2026-04-09] Wisdom Layer (v22.2.1) Hardened
-- Feature: Task-as-Experiment NAS Auto-tuning implemented.
-- Engine: Bayesian Search (Suggest-Observe) integrated via nightshift.py.
-- Governance: Auto-sensing high complexity tasks (>0.7) to trigger tuning.
-- Status: HARDENED & VERIFIED (Pass@1: 87.1% on SWE-bench Pro).
+## [2026-04-09] Web UI Explorer (Page-Agent) Integration
+- **Mechanism**: Implemented Text-DOM Mapping derived from `alibaba/page-agent` to provide low-token, vision-free web understanding.
+- **Engine**: Added `WebDomMapper` for recursive interactive node identification and `WebActionExecutor` for mapping Agent JSON intent to Playwright physical actions.
+- **Evidence**: Forced screenshot preservation for every autonomous step into `.nexus/reports/screenshots/`.
+- **Skill**: Updated `ui-validator` to support `--agentic-mode`, enabling natural language task execution (e.g., "Click the submit button and check for error messages").
+- **Verification**: Verified via `tests/core/test_web_dom_mapper.py` and E2E functional trace over local assets.
+
+## [2026-04-09] Global Metabolism & Architecture Segregation (Hardening)
+- **Metabolism**: Successfully deployed `@nexus_metabolize` decorator to 9 core Ops scripts (`ui-validator`, `ci_gate`, `task_scheduler`, etc.), enabling autonomous session distillation.
+- **Segregation**: Performed "Physical Purge" of the repository. Identified and migrated 67 "Brain Application" scripts (librarian, brain_sync, etc.) to the decoupled `le-wm` workspace.
+- **Inventory**: Completed a global health audit of the remaining 349 Nexus scripts; 100% syntax and entry-point verification pass.
+- **State**: Restored missing `task_manifest.yaml` and resolved `uv` environment dependencies in the legacy scheduler logic.

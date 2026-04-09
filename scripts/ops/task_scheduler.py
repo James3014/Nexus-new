@@ -4,6 +4,12 @@ import subprocess
 import logging
 import json
 from datetime import datetime
+import sys
+from pathlib import Path
+
+# Ensure nexus package is in path for metabolism
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from nexus.core.decorators import nexus_metabolize
 
 # Path Configuration
 REPO_ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[2])
@@ -38,12 +44,14 @@ def update_status(state, loop_count):
     with open(STATUS_FILE, "w") as f:
         json.dump(status, f, indent=2)
 
+@nexus_metabolize(task_name="Nexus Task Scheduler Daemon")
 def main():
     import sys
     is_once = "--once" in sys.argv or "--dry-run" in sys.argv
     print(f"🚀 [Nexus-Scheduler] Starting {'Dry-Run' if is_once else 'Autonomous Daemon'}...")
     logging.info(f"Nexus Scheduler Starting (once={is_once})...")
     loop_count = 0
+    VENV_PYTHON = os.path.join(REPO_ROOT, ".venv/bin/python")
     
     while True:
         loop_count += 1
@@ -51,7 +59,7 @@ def main():
         update_status("SYNCING", loop_count)
         
         # 1. Sync INDEX.md to task_manifest.yaml
-        rc, out = run_command("uv run scripts/ops/index_to_manifest.py")
+        rc, out = run_command(f"{VENV_PYTHON} scripts/ops/index_to_manifest.py")
         if rc != 0:
             print("  [!] Index Sync Failed.")
             if is_once: sys.exit(1)
@@ -70,8 +78,8 @@ def main():
         print("  [GATE] Performing Final Integrity Check and Index Sync...")
         update_status("GATING", loop_count)
         if not is_once:
-            run_command("uv run scripts/ops/ci_gate.py")
-        run_command("uv run python scripts/ops/post_index_update.py")
+            run_command(f"{VENV_PYTHON} scripts/ops/ci_gate.py")
+        run_command(f"{VENV_PYTHON} scripts/ops/post_index_update.py")
         
         print(f"✅ [Round {loop_count}] Batch completed.")
         update_status("IDLE", loop_count)

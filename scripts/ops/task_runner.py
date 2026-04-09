@@ -20,6 +20,7 @@ from nexus.delivery.gate import evaluate_completion
 from nexus.delivery.models import CompletionRequest, TaskLevel
 from nexus.delivery.report import write_report_bundle
 from nexus.core.task_graph import topo_sort
+from nexus.core.decorators import nexus_metabolize
 wt_manager = GitWorktreeManager(ROOT)
 incident_adapter = IncidentRCAAdapter(ROOT)
 MANIFEST = ROOT / os.environ.get("MANIFEST", "task_manifest.yaml")
@@ -278,6 +279,7 @@ def execute_single_task(task: dict, run_cmd: str, manifest_defaults: dict, polic
         if wt_path:
             wt_manager.remove_worktree(tid)
 
+@nexus_metabolize(task_name="Nexus Multi-Task Runner")
 def main():
     import argparse
     parser = argparse.ArgumentParser()

@@ -7,12 +7,15 @@ import argparse
 import subprocess
 from pathlib import Path
 
+# Add project root to sys.path before importing core modules
 ROOT = Path(__file__).resolve().parents[2]
-WIKI_DRIFT_REPORT = ROOT / ".nexus" / "reports" / "wiki_drift_report.json"
-VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
-
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from nexus.core.decorators import nexus_metabolize
+
+WIKI_DRIFT_REPORT = ROOT / ".nexus" / "reports" / "wiki_drift_report.json"
+VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
@@ -192,6 +195,7 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
         except Exception as e:
             print(f"⚠️ Error parsing writeback report: {e}")
 
+@nexus_metabolize(task_name="CI Gate Quality Audit")
 def main():
     parser = argparse.ArgumentParser(description="Nexus CI Gate - Release Governance")
     parser.add_argument("--strict", action="store_true", help="Enforce all checks")
