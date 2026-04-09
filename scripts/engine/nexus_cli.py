@@ -92,8 +92,14 @@ def delegate(task_name):
 try:
     from scripts.engine.commands.ui_explorer import register as register_ui_explorer
     register_ui_explorer(nexus_group, REPO_ROOT)
+    
+    from scripts.engine.commands.swarm import register as register_swarm
+    register_swarm(nexus_group, REPO_ROOT)
+    
+    from scripts.engine.commands.stress_test import register as register_stress_test
+    register_stress_test(nexus_group, REPO_ROOT)
 except ImportError as e:
-    click.echo(f"⚠️  [Nexus:CLI] Could not load ui_explorer module: {e}")
+    click.echo(f"⚠️  [Nexus:CLI] Could not load external command module: {e}")
 
 # --- v0.9 聯邦指令 (RESTORED) ---
 
