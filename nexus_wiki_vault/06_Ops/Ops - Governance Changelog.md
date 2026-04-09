@@ -69,3 +69,10 @@ version_scope: '[v17.1, v22, v23]'
 - **Phase**: Transition from Meta-Learning (v0.8) to Federated Averaging (v0.9).
 - **Scope**: Multi-tenant DNA aggregation (FedAvg) + Differential Privacy (DP).
 - **Scale**: Target 5000+ virtual swarm nodes.
+
+## [2026-04-09] v23.7 Fleet Command & Sensory Sensory Expansion
+- **Fleet Command**: Implemented `SupervisorEngine` for task decomposition and multi-tenant delegation.
+- **Sensory Expansion**: Integrated `StyleIngester` for automated `DESIGN.md` updates from external URLs.
+- **Reliability**: Launched `Checkpointing` and `nexus resume` for physical task recovery.
+- **Protocol**: Enabled `MCP Server` for standardizing knowledge resource access.
+
