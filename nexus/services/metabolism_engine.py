@@ -28,12 +28,13 @@ class SessionMetabolism:
         
         # 1. 提取核心精華 (Essence)
         essence = {
-            "version": "v23.5-FUSION",
+            "version": "v23.5-FUSION-BELIEF",
             "last_commit": os.popen("git rev-parse --short HEAD").read().strip(),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "current_objective": session_context.get("goal", "Continuous Evolution"),
             "completed_tasks": session_context.get("done", []),
             "pending_tasks": session_context.get("todo", []),
+            "active_beliefs": self._get_active_beliefs(), # 🛡️ 注入長期信念
             "learned_lessons": self._get_recent_lessons()
         }
         
@@ -49,6 +50,28 @@ class SessionMetabolism:
         # 3. 模擬 Arweave 存證
         arweave_tx = f"ar_tx_distilled_{int(datetime.now().timestamp())}"
         return arweave_tx
+
+    def _get_active_beliefs(self) -> list:
+        """從 .nexusknowledge/beliefs.jsonl 提取活躍信念"""
+        beliefs_path = self.project_root / ".nexusknowledge" / "beliefs.jsonl"
+        if not beliefs_path.exists():
+            return []
+        
+        active = []
+        try:
+            with open(beliefs_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    data = json.loads(line)
+                    # 僅保留高置信度的活躍信念
+                    if data.get("confidence", 0) > 0.9 and data.get("status") != "superseded":
+                        active.append({
+                            "id": data.get("belief_id") or data.get("id"),
+                            "content": data.get("content")
+                        })
+        except Exception as e:
+            logger.error(f"Error reading beliefs for distillation: {e}")
+            
+        return active[-5:] # 僅帶走最重要的前 5 條
 
     def _get_recent_lessons(self) -> list:
         """從 .codex_lessons.md 讀取最後三條教訓"""
