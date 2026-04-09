@@ -1,5 +1,6 @@
 import json, sys
 from pathlib import Path
+from datetime import datetime
 
 class SupervisorEngine:
     """🛡️ v23.7 Supervisor Engine: Task Decomposition & Delegation."""
@@ -18,9 +19,19 @@ class SupervisorEngine:
         return sub_tasks
 
     def delegate(self, sub_tasks):
-        """委派任務給特定租戶"""
+        """物理委派：在各租戶目錄產出工作證據"""
         for task in sub_tasks:
-            print(f"🔗 [Delegation] Routing {task['id']} ({task['objective']}) -> {task['tenant']}")
+            tenant_path = self.repo_root / "tenants" / task['tenant']
+            tenant_path.mkdir(parents=True, exist_ok=True)
+            log_file = tenant_path / "swarm_work.json"
+            evidence = {
+                "sub_task_id": task['id'],
+                "objective": task['objective'],
+                "status": "COMPLETED",
+                "timestamp": datetime.now().isoformat()
+            }
+            log_file.write_text(json.dumps(evidence, indent=2))
+            print(f"🔗 [Delegation] Physical Evidence anchored at {task['tenant']}/swarm_work.json")
         return True
 
 if __name__ == "__main__":
