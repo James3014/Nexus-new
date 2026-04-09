@@ -2,6 +2,11 @@
   "total_skills": 187,
   "base_skills": ["core", "manifest", "pdrac"],
   "quadrants": {
+    "Q0_Command_Center": {
+      "max_tools": 3,
+      "skills": ["supervisor", "orchestrate", "resume"],
+      "priority": "absolute"
+    },
     "Q1_Critical_Core": {
       "max_tools": 5,
       "skills": ["audit", "enforce", "billing"],
