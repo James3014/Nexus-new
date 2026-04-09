@@ -44,6 +44,8 @@ version_scope:
 | Gate pass but [task](../Reference/task.md) incomplete | 格式過關但語義未完成 | 強制提案模板與語義驗收 | `nexus_task_contract_guard.py` |
 | Auto-fix side effects | 順手改到無關檔案 | 任務邊界契約 + forbidden paths | `contract-check` + diff review |
 | Dry-run blind spots | dry-run 綠燈但實際不穩 | 補報表摘要與分級阻斷 | `ci_gate.py --full-dry-run` |
+| Optional dependency blocks local autonomy | 本地 runner 啟動即因缺少研究依賴中斷 | 將 Bayesian / research 類能力設為可降級，不可作為自治主循環硬依賴 | `pytest tests/test_nightshift_local_convergence.py` |
+| CLI schema drift in OAuth wrapper | Provider CLI 成功回應，但戰甲因欄位名變更而解析錯誤 | Gateway 必須容忍 `output` / `response` 等版本差異，並加 regression test | `pytest tests/test_battlesuit_gateway.py` + gateway smoke |
 | Repeated wiki path errors | `missing_path` 重複出現 | 路徑正規化與 alias map | `wiki_drift_audit.py` |
 | Truth command policy regressions | unsafe command 或誤傷 | 指令白名單 + 詞邊界檢查 | `wiki_truth_claims_check.py` |
 

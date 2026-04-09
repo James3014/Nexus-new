@@ -70,6 +70,18 @@ class BattlesuitGateway:
         "violations": ["list of rule violations"],
     }
 
+    def _build_system_instruction(
+        self,
+        output_schema: Dict[str, Any],
+        system_instruction: Optional[str] = None,
+    ) -> str:
+        base = system_instruction or "You are the pilot of the Nexus Battlesuit v16."
+        return (
+            f"{base} "
+            "Return ONLY valid JSON. Do not wrap the answer in markdown. "
+            f"Required output shape: {json.dumps(output_schema, ensure_ascii=False)}"
+        )
+
     def _build_error_result(self, summary, category="gateway_error"):
         return {
             "status": "FAIL",
@@ -103,18 +115,31 @@ class BattlesuitGateway:
         full_content = f"{prompt}\n\n[PAYLOAD/DIFF]\n{payload}"
         
         # 🛡️ 核心邏輯：僅允許透過 CLI 路徑進行通訊
-        return self._ask_via_cli(full_content, model_name, phase)
+        sys_msg = self._build_system_instruction(self.OUTPUT_SCHEMA)
+        return self._ask_via_cli(full_content, model_name, sys_msg)
 
-    def _ask_via_cli(self, content, model_name, phase):
+    def ask_structured(
+        self,
+        prompt: str,
+        payload: str,
+        *,
+        phase: str = "R",
+        output_schema: Optional[Dict[str, Any]] = None,
+        system_instruction: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> tuple[Any, str]:
+        """Night Shift / automation path: request arbitrary structured JSON through the battlesuit."""
+        selected_model = model_name or self.model_selector(phase)
+        full_content = f"{prompt}\n\n[PAYLOAD]\n{payload}"
+        schema = output_schema or self.OUTPUT_SCHEMA
+        sys_msg = self._build_system_instruction(schema, system_instruction)
+        return self._ask_via_cli(full_content, selected_model, sys_msg)
+
+    def _ask_via_cli(self, content, model_name, sys_msg):
         """🛡️ Battlesuit Forwarding: 透過外部實體工具獲取認知判斷。"""
         import time
         max_retries = 3
         last_err = ""
-        
-        sys_msg = (
-            "You are the pilot of the Nexus Battlesuit v16. "
-            f"Return ONLY valid JSON matching: {json.dumps(self.OUTPUT_SCHEMA)}"
-        )
 
         for attempt in range(max_retries):
             try:
@@ -142,8 +167,12 @@ class BattlesuitGateway:
                     # but it depends on the version. Let's be robust.
                     resp_json = json.loads(raw_stdout)
                     
-                    # 提取主要輸出
-                    output_text = resp_json.get("output", raw_stdout)
+                    # Gemini CLI has used both "output" and "response" across versions.
+                    output_text = (
+                        resp_json.get("output")
+                        or resp_json.get("response")
+                        or raw_stdout
+                    )
                     
                     # 提取 Token 資訊 (從 gemini CLI 的 JSON 結構中)
                     tokens_total = 0
