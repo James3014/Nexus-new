@@ -15,6 +15,9 @@
 - **target_url**: 待測 UI 的網址或本地路徑（str）。
 - **browsers**: 測試瀏覽器清單（list, 預設為 ["chromium"]）。
 - **generate_video**: 是否生成測試錄影證據（bool, 預設為 true）。
+- **agentic_mode**: 是否啟用自主代理模式（bool, 預設為 false）。
+- **task**: 在自主模式下要完成的自然語言任務描述（str）。
+- **max_steps**: 自主模式最大執行步數（int, 預設為 10）。
 
 ## 輸出合約
 - **interaction_matrix**: 矩陣結果報告（JSON）。
