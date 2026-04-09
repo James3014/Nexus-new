@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Secure Login Portal</title>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .login-box { background: #1e293b; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); width: 300px; }
+        input { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #334155; background: #0f172a; color: white; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2563eb; }
+        .hidden { display: none !important; }
+        #modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: #1e293b; padding: 2rem; border-radius: 8px; text-align: center; border: 1px solid #10b981; }
+    </style>
+</head>
+<body>
+    <div class="login-box" id="loginForm">
+        <h2>System Login</h2>
+        <input type="text" id="username" placeholder="Enter Operator ID">
+        <input type="password" id="password" placeholder="Passcode">
+        <button id="submitBtn">Authenticate</button>
+        <p id="errorMsg" class="hidden" style="color: #ef4444; font-size: 0.8rem; margin-top: 10px;">Access Denied. Invalid credentials.</p>
+    </div>
+
+    <div id="modal" class="hidden">
+        <div class="modal-content">
+            <h2 style="color: #10b981;">Authentication Successful</h2>
+            <p>Welcome back, Commander.</p>
+            <button id="proceedBtn">Proceed to Dashboard</button>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('submitBtn').addEventListener('click', () => {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const btn = document.getElementById('submitBtn');
+            const errorMsg = document.getElementById('errorMsg');
+            
+            btn.innerText = "Authenticating...";
+            btn.disabled = true;
+
+            setTimeout(() => {
+                if (user === "nexus_admin" && pass === "singularity") {
+                    errorMsg.classList.add('hidden');
+                    document.getElementById('loginForm').classList.add('hidden');
+                    document.getElementById('modal').classList.remove('hidden');
+                } else {
+                    errorMsg.classList.remove('hidden');
+                    btn.innerText = "Authenticate";
+                    btn.disabled = false;
+                }
+            }, 800); // Simulate network delay
+        });
+        
+        document.getElementById('proceedBtn').addEventListener('click', () => {
+            document.body.innerHTML = "<h1>Dashboard Loaded. Operation Normal.</h1>";
+        });
+    </script>
+</body>
+</html>

@@ -43,7 +43,7 @@ class WebDomMapper:
 
         const getSimplifiedText = (el) => {
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-                return el.placeholder || el.value || '';
+                return el.value || el.placeholder || '';
             }
             return el.innerText ? el.innerText.trim().substring(0, 50) : '';
         };
