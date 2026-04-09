@@ -32,24 +32,7 @@ class AutoResearchNightShift:
         self.feynman_auditor = DualTrackAudit()
         self.compute_tier = "CLOUD" # Default
 
-    def run_replication_experiment(self, candidate_patch: str):
-        """
-        🚀 FNE v2.0: Tiered Compute Replication
-        Runs the candidate patch through Feynman's /replicate loop.
-        """
-        print(f"🌙 [NightShift] Starting Tiered Replication (Current Tier: {self.compute_tier})...")
-        try:
-            # Simulate Modal Call
-            if self.compute_tier == "CLOUD":
-                print("☁️ [Feynman] Executing on Modal Cloud GPU...")
-                # Mocking a cloud success
-                return True
-        except Exception as e:
-            print(f"⚠️ Cloud execution failed: {e}. Falling back to LOCAL.")
-            self.compute_tier = "LOCAL"
-            
-        print("🏠 [Feynman] Executing on Local Docker Swarm...")
-        return True
+        # 🏠 [Feynman] Local Initialization
         from nexus.research.findings_memory import FindingsMemoryStore
         self.memory_store = FindingsMemoryStore(self.project_root)
         self.best_score = 0.0
@@ -74,6 +57,24 @@ class AutoResearchNightShift:
         from nexus.connectors.webhook_connector import WebhookConnector
         webhook_url = os.environ.get("NEXUS_WEBHOOK_URL", "")
         self.connector = WebhookConnector(webhook_url)
+
+    def run_replication_experiment(self, candidate_patch: str):
+        """
+        🚀 FNE v2.0: Tiered Compute Replication
+        Runs the candidate patch through Feynman's /replicate loop.
+        """
+        print(f"🌙 [NightShift] Starting Tiered Replication (Current Tier: {self.compute_tier})...")
+        try:
+            # Simulate Modal Call
+            if self.compute_tier == "CLOUD":
+                print("☁️ [Feynman] Executing on Modal Cloud GPU...")
+                # Mocking a cloud success
+                return True
+        except Exception as e:
+            print(f"⚠️ Cloud execution failed: {e}. Falling back to LOCAL.")
+            self.compute_tier = "LOCAL"
+            
+        return True
 
     def _log_trace(self, round_id: int, status: str, score: float):
         """記錄優化軌跡並推送。"""

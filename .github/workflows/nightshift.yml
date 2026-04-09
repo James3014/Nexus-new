@@ -7,7 +7,9 @@ on:
 
 jobs:
   autoresearch:
-    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -28,7 +30,7 @@ jobs:
       - name: Execute Swarm AutoResearch 🐝
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
-          uv run python scripts/nightshift.py --tasks "cors,hydration,redis" --max_rounds 20 --swarm --workers 4
+          python scripts/nightshift.py --tasks "cors,hydration,redis" --max_rounds 20 --swarm --workers 4
         env:
           MUSE_RUN_CODEX_LOOP: 1
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
