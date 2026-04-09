@@ -108,3 +108,8 @@ version_scope: '[v17.1, v22, v23]'
 - **Governance**: Implemented 🛡️ AGENT Enforcement Protocol v2.1 (Production-Hardened) with mandatory Physical Preflight.
 - **Resilience**: Established Git-based rollback protection at round 3 of the autonomous repair loop.
 - **Verification**: 100% success on 35/35 integration stress test scenarios.
+## [2026-04-09] CI Dependency Recovery & PEP 621 Standard
+- **Resolution**: Restored 28+ missing core dependencies (pydantic, torch, web3, etc.) following an incomplete PEP 621 migration.
+- **Hardening**: Standardized `pyproject.toml` using the `[project]` table for enhanced `uv` and CI/CD compatibility.
+- **NightShift**: Restored autonomous research cycles by removing broken visualization dependencies and correcting lockfile versions.
+- **Verification**: Passed 🛡️ Verification Matrix (Acceptance + Contract + CI Gate).

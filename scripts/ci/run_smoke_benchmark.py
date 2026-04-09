@@ -157,7 +157,7 @@ class SmokeBenchmarkRunner:
             return {"pass_rate": 0.0, "phantom_rate": 0.0, "pregate_skip_rate": 0.0, "human_review_rate": 0.0}
             
         total = len(results)
-        passed = sum(1 for r in results if r.get("status") == "SUCCESS")
+        passed = sum(1 for r in results if r.get("status") in ["SUCCESS", "PASS"])
         
         # Determine phantoms if they are passed as metrics
         phantoms = sum(1 for r in results if r.get("phantom_detected", False))

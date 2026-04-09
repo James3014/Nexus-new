@@ -17,12 +17,12 @@ jobs:
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install Dependencies 🛠️
         run: |
           pip install uv
-          uv sync --frozen --no-dev
+          uv pip install -e .
           echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
 
       - name: Execute Swarm AutoResearch 🐝
