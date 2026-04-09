@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	_ "github.com/lib/pq"
+	"google.golang.org/grpc/keepalive"
 )
 
 type NodeState struct {
@@ -22,15 +23,39 @@ type NodeState struct {
 type swarmServer struct {
 	pb.UnimplementedSwarmManagerServer
 	fed.UnimplementedFederationServer
-	mu    sync.RWMutex
-	nodes map[string]*NodeState
-	db    *DB
+	mu         sync.RWMutex
+	nodes      map[string]*NodeState
+	db         *DB
+	upsertChan chan *NodeState
 }
 
 func newSwarmServer(db *DB) *swarmServer {
-	return &swarmServer{
-		nodes: make(map[string]*NodeState),
-		db:    db,
+	s := &swarmServer{
+		nodes:      make(map[string]*NodeState),
+		db:         db,
+		upsertChan: make(chan *NodeState, 1000), // Buffered channel for scale
+	}
+	go s.runUpsertWorker()
+	return s
+}
+
+func (s *swarmServer) runUpsertWorker() {
+	if s.db == nil {
+		return
+	}
+	log.Printf("👷 [DB Worker] Starting async upsert worker")
+	for node := range s.upsertChan {
+		if err := s.db.UpsertNode(
+			node.NodeId,
+			node.Region,
+			node.Health,
+			node.AdvertiseAddr,
+			node.CpuPercent,
+			node.MemoryPercent,
+			int(node.ActiveTasks),
+		); err != nil {
+			log.Printf("[DB Worker] Upsert failed for %s: %v", node.NodeId, err)
+		}
 	}
 }
 
@@ -53,10 +78,12 @@ func (s *swarmServer) RegisterNode(ctx context.Context, req *pb.RegisterNodeRequ
 
 	log.Printf("[NEXUS v22] Node %s registered in region %s (Trace: %s)", req.NodeId, req.Region, req.Traceparent)
 
-	// 🛡️ [v22/v24] Persistence
+	// 🛡️ [v22/v24] Async Persistence
 	if s.db != nil {
-		if err := s.db.UpsertNode(req.NodeId, req.Region, "HEALTHY", req.AdvertiseAddr, 0, 0, 0); err != nil {
-			log.Printf("[DB] Upsert failed: %v", err)
+		select {
+		case s.upsertChan <- s.nodes[req.NodeId]:
+		default:
+			log.Printf("[WARNING] Upsert channel full, dropping persistence for %s", req.NodeId)
 		}
 	}
 
@@ -78,10 +105,12 @@ func (s *swarmServer) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (
 		node.LastSeenUnix = time.Now().Unix()
 		node.Health = "HEALTHY"
 
-		// 🛡️ [v22/v24] Persistence
+		// 🛡️ [v22/v24] Async Persistence
 		if s.db != nil {
-			if err := s.db.UpsertNode(req.NodeId, node.Region, "HEALTHY", node.AdvertiseAddr, req.CpuPercent, req.MemoryPercent, int(req.ActiveTasks)); err != nil {
-				log.Printf("[DB] Upsert failed: %v", err)
+			select {
+			case s.upsertChan <- node:
+			default:
+				// Do not block heartbeat if DB worker is busy
 			}
 		}
 	} else {
@@ -144,7 +173,19 @@ func main() {
 		log.Fatalf("failed to load TLS keys: %v", err)
 	}
 
-	s := grpc.NewServer(grpc.Creds(creds))
+	// 🛡️ [v22/v24] gRPC Keepalive & Tuning
+	var kasp = keepalive.ServerParameters{
+		MaxConnectionIdle:     15 * time.Second,
+		MaxConnectionAge:      30 * time.Second,
+		MaxConnectionAgeGrace: 5 * time.Second,
+		Time:                  5 * time.Second,
+		Timeout:               1 * time.Second,
+	}
+
+	s := grpc.NewServer(
+		grpc.Creds(creds),
+		grpc.KeepaliveParams(kasp),
+	)
 	swarmSrv := newSwarmServer(db)
 	pb.RegisterSwarmManagerServer(s, swarmSrv)
 	fed.RegisterFederationServer(s, swarmSrv)

@@ -5,7 +5,6 @@ import (
 	"log"
 
 	pb "nexus-swarm/api/proto"
-	fed "nexus-swarm/api/proto"
 )
 
 // 🛡️ [v22/v24] DispatchTask with Federation Support
@@ -26,7 +25,8 @@ func (s *swarmServer) DispatchTask(ctx context.Context, req *pb.DispatchTaskRequ
 		peerMu.RLock()
 		defer peerMu.RUnlock()
 
-		targetCluster := selectBestCluster(req.PreferredRegion)
+		// 🛡️ Note: PreferredRegion removed from proto in v22, using default.
+		targetCluster := selectBestCluster("")
 		if targetCluster != "" {
 			log.Printf("🛡️ Task %s routing to federation cluster: %s", req.TaskId, targetCluster)
 			
