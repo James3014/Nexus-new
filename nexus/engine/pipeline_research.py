@@ -4,7 +4,11 @@ import json
 import subprocess
 import sys
 import time
+import logging
 from nexus.research.research_pack import build_research_pack
+
+# Configure logging for the research pipeline
+logger = logging.getLogger(__name__)
 
 class PipelineResearchMixin:
     """🧪 Mixin for experimental research logic in NexusPipeline."""
@@ -18,7 +22,9 @@ class PipelineResearchMixin:
         rounds: int,
         stable_wins: int,
         proof_ratio_min: float,
+        timeout_sec: int = 300,  # Nexus-AutoResearch Rules v7.2 budget
     ) -> Dict[str, Any]:
+        """Executes the Phase 7 autotune loop and collects research artifacts."""
         workspace_path = Path(workspace).expanduser()
         workspace_path = self._resolve_workspace_path(workspace_path)
         
@@ -26,7 +32,23 @@ class PipelineResearchMixin:
         start_ts = time.time()
         
         cmd = self._prepare_research_cmd(workspace_path, rounds, stable_wins, proof_ratio_min, prefix)
-        rc = subprocess.call(cmd, cwd=str(self.engine.project_root))
+        
+        try:
+            # Execute research script with timeout enforcement
+            process = subprocess.run(
+                cmd,
+                cwd=str(self.engine.project_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec
+            )
+            rc = process.returncode
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Research task {task_id} exceeded budget of {timeout_sec}s.")
+            rc = -1
+        except Exception as e:
+            logger.error(f"Unexpected error in research subprocess: {e}")
+            rc = -2
         
         report_path = workspace_path / f"{prefix}_final_report_cn.json"
         report = self._load_research_report(report_path)
@@ -35,11 +57,13 @@ class PipelineResearchMixin:
         return self._build_research_result(task_desc, report, rc, elapsed, report_path)
 
     def _resolve_workspace_path(self, path: Path) -> Path:
+        """Resolves path relative to project root if not absolute."""
         if not path.is_absolute():
             return (self.engine.project_root / path).resolve()
         return path.resolve()
 
     def _prepare_research_cmd(self, workspace_path: Path, rounds: int, stable_wins: int, proof_ratio_min: float, prefix: str) -> List[str]:
+        """Constructs the subprocess command for the autotune loop."""
         script = self.engine.project_root / "scripts" / "ops" / "phase7_autotune_loop.py"
         return [
             sys.executable,
@@ -54,14 +78,18 @@ class PipelineResearchMixin:
         ]
 
     def _load_research_report(self, report_path: Path) -> Dict[str, Any]:
+        """Loads and parses the research JSON report safely."""
         if report_path.exists():
             try:
-                return json.loads(report_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+                content = report_path.read_text(encoding="utf-8").strip()
+                if content:
+                    return json.loads(content)
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"Failed to load research report at {report_path}: {e}")
         return {}
 
     def _build_research_result(self, task_desc: str, report: Dict[str, Any], rc: int, elapsed: float, report_path: Path) -> Dict[str, Any]:
+        """Transforms raw report data into a structured ResearchPack."""
         history = list(report.get("history", []) or [])
         hypotheses = []
         experiments = []
@@ -69,33 +97,57 @@ class PipelineResearchMixin:
         for idx, row in enumerate(history, start=1):
             best = dict(row.get("best", {}) or {})
             hid = f"H{idx}"
+            
+            # Construct readable description from parameters
+            desc = ", ".join([f"{k}={v}" for k, v in best.items()]) or "default autotune"
+            
+            # Align with Nexus-AutoResearch Rules v7.2: prioritize val_flashjudge metric
+            is_kept = int(row.get("apply_rc", 1) or 1) == 0
+            metric_val = row.get("val_flashjudge", 1.0 if is_kept else 0.0)
+            
             hypotheses.append({
                 "id": hid,
-                "description": f"min_samples={best.get('min_samples')} baseline={best.get('baseline')} learning_rate={best.get('learning_rate')}",
-                "confidence": 0.8 if int(row.get("apply_rc", 1) or 1) == 0 else 0.4,
+                "description": desc,
+                "confidence": 0.8 if is_kept else 0.4,
             })
             experiments.append({
-                "round": idx, "hypothesis": hid,
-                "metric": 1.0 if int(row.get("apply_rc", 1) or 1) == 0 else 0.0,
-                "kept": int(row.get("apply_rc", 1) or 1) == 0,
+                "round": idx, 
+                "hypothesis": hid,
+                "metric": metric_val,
+                "kept": is_kept,
                 "sweep_report": row.get("sweep_report"),
             })
 
         from nexus.research.research_pack import ResearchContext
+        
+        converged = bool(report.get("converged"))
+        status = "SUCCESS" if converged and rc == 0 else "FAIL"
+        if rc == -1: status = "TIMEOUT"
+        
         ctx = ResearchContext(
-            task=task_desc, mode="experimental", source="AUTORESEARCH_PHASE7_LOOP",
+            task=task_desc, 
+            mode="experimental", 
+            source="AUTORESEARCH_PHASE7_LOOP",
             reason="router_selected_experimental",
-            hypotheses=hypotheses, experiments=experiments,
+            hypotheses=hypotheses, 
+            experiments=experiments,
             winner={
                 "hypothesis_id": f"H{len(history)}" if history else "",
-                "patch_diff": "", "final_metric": 1.0 if bool(report.get("converged")) else 0.0,
+                "patch_diff": report.get("final_patch", ""), 
+                "final_metric": report.get("final_score", 1.0 if converged else 0.0),
                 "params": dict(report.get("final_best", {}) or {}),
                 "report_path": str(report_path),
             },
             eliminated=[h["id"] for h in hypotheses[:-1]] if hypotheses else [],
             rounds=int(report.get("loops_executed", len(history)) or len(history)),
-            time_sec=elapsed, status="SUCCESS" if bool(report.get("converged")) and rc == 0 else "FAIL",
-            findings=[f"phase7_loop_rc={rc}", f"converged={bool(report.get('converged'))}", f"report={report_path}"],
+            time_sec=elapsed, 
+            status=status,
+            findings=[
+                f"phase7_loop_rc={rc}", 
+                f"converged={converged}", 
+                f"final_score={report.get('final_score')}",
+                f"report={report_path}"
+            ],
             raw={"report": report, "return_code": rc},
         )
         return build_research_pack(ctx=ctx)
