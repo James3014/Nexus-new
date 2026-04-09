@@ -2,6 +2,7 @@
 import sys
 import json
 import argparse
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -43,16 +44,22 @@ def validate_contract(contract_path: Path) -> Dict[str, Any]:
         }
 
     # Validation logic
+    current_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+    expected_sha = data.get("commit_sha")
+
     checks = {
         "linter_ok": data.get("linter_exit_code") == 0,
         "ci_gate_ok": data.get("ci_gate_exit_code") == 0,
         "tests_ok": data.get("required_tests_passed") is True,
-        "commit_ok": bool(data.get("commit_sha") and str(data.get("commit_sha")).strip()),
+        "commit_ok": current_sha == expected_sha,
         "files_ok": isinstance(data.get("changed_files"), list) and len(data.get("changed_files")) > 0
     }
     
     all_ok = all(checks.values())
     
+    if not checks["commit_ok"]:
+        print(f"❌ SHA MISMATCH: current={current_sha}, expected={expected_sha}")
+
     return {
         "ok": all_ok,
         "checks": checks,

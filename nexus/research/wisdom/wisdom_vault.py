@@ -3,12 +3,12 @@ import json
 import lancedb
 from pathlib import Path
 from datetime import datetime
-from sentence_transformers import SentenceTransformer
+from nexus.services.memory_embedding import get_model
 
 class WisdomVault:
     def __init__(self, db_path=str(__import__("pathlib").Path(__file__).resolve().parents[3] / ".nexus/vector_db/")):
         self.db_path = os.path.expanduser(db_path)
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.model = get_model()
         self.db = lancedb.connect(self.db_path)
         self.table_name = "nexus_knowledge" # 原生核心智慧表
         
@@ -51,7 +51,7 @@ class WisdomVault:
             return
 
         # 🛡️ 核心表寫入
-        if self.table_name in self.db.table_names():
+        if self.table_name in self.db.list_tables():
             table = self.db.open_table(self.table_name)
             table.add(batch_data)
             print(f"✅ [WisdomVault] Fused {len(batch_data)} records into {self.table_name}.")
@@ -60,7 +60,7 @@ class WisdomVault:
 
     def search_wisdom(self, query: str, limit: int = 3):
         """🔍 原生語義檢索。"""
-        if self.table_name not in self.db.table_names():
+        if self.table_name not in self.db.list_tables():
             return None
         table = self.db.open_table(self.table_name)
         query_vector = self.model.encode(query).tolist()

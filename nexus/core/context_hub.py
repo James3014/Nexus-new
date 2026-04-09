@@ -22,6 +22,7 @@ class ContextHub:
         project_root: str,
         memory_service: Optional[Any] = None,
         run_dir: Optional[str] = None,
+        nexus_fs: Optional[Any] = None,
     ):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
@@ -29,6 +30,7 @@ class ContextHub:
         self.memory_service = memory_service or MemoryService(
             project_root, run_dir=run_dir
         )
+        self.nexus_fs = nexus_fs
 
         from nexus.services.prompt_builder import PromptBuilder
 
@@ -48,15 +50,21 @@ class ContextHub:
         """🧠 Pre-routing: 決定是否需要外部 research、特定模式或審核層級。"""
         context = context or {}
         if self._is_benchmark_run(context):
-            return {"external_needed": False, "mode": "benchmark", "priority": "normal", "audit_level": "full"}
+            return {"external_needed": False, "mode": "benchmark", "priority": "normal", "audit_level": "full", "nas_autotune_needed": False}
             
         state = self.state_io.load_global_state()
         task_type = state.metadata.get("task_type", "standard")
         
+        # 🧪 [Wisdom Layer] 動態判斷是否需要 NAS 自動調優
+        complexity_score = context.get("complexity_score", 0.0)
+        autotune_needed = complexity_score > 0.7 or any(kw in task_id.lower() for kw in ["0-day", "blackhole", "critical", "hardest"])
+
         decision = {
             "external_needed": self._determine_external_needed(task_id, context),
-            "mode": task_type, "priority": "normal",
+            "mode": task_type, 
+            "priority": "high" if autotune_needed else "normal",
             "audit_level": self._determine_audit_level(task_type, state),
+            "nas_autotune_needed": autotune_needed
         }
         return decision
 
@@ -80,8 +88,10 @@ class ContextHub:
         return "full"
 
     def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
-        """🔌 Hook: 呼叫 MemoryService 取得 per-round 記憶。"""
+        """🔌 Hook: 呼叫 NexusFS 或 MemoryService 取得 per-round 記憶。"""
         try:
+            if self.nexus_fs:
+                return {"reminders": self.nexus_fs.search(f"memory_v9_{phase}"), "total_sources": -1}
             return self.memory_service.cached_search(f"memory_v9_{phase}")
         except Exception as e:
             print(f"⚠️ [MemoryHook] Injection failed: {e}")

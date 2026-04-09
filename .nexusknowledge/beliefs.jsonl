@@ -1,10 +1,1 @@
-{"id": "B-RULE-001", "wing": "ENGINE", "room": "IO_STANDARDS", "type": "belief", "content": "external::async::mandatory::timeout.", "layer": 1, "status": "superseded", "timestamp": "2026-04-08T15:00:55.024307", "updated_at": "2026-04-08T15:05:18.419464"}
-{"id": "B-EXPIRED-001", "status": "superseded", "content": "Old path standard"}
-{"belief_id": "B-FED-SINGULARITY-001", "content": "Robust aggregation requires Median-based rejection and IQR thresholding.", "source": "v0.9_singularity_test", "confidence": 0.995, "timestamp": "2026-04-09T00:28:15.482209+00:00"}
-{"belief_id": "B-FED-SINGULARITY-001", "content": "Robust aggregation requires Median-based rejection and IQR thresholding.", "source": "v0.9_singularity_test", "confidence": 0.995, "timestamp": "2026-04-09T01:02:36.433139+00:00"}
-{"belief_id": "B-X-FORCE-ISOLATION", "content": "CRITICAL: Any task with complexity > 0.9 MUST use separate subprocess isolation.", "type": "planning_rule", "confidence": 1.0, "timestamp": "2026-04-09T01:04:20.157011+00:00"}
-{"belief_id": "B-PROTOCOL-V1", "content": "PROTOCOL UPDATED: Use SHA-256 instead of MD5.", "revised": true, "timestamp": "2026-04-09T01:04:20.158051+00:00"}
-{"belief_id": "B-X-FORCE-ISOLATION", "content": "CRITICAL: Any task with complexity > 0.9 MUST use separate subprocess isolation.", "type": "planning_rule", "confidence": 1.0, "timestamp": "2026-04-09T01:05:13.360849+00:00"}
-{"belief_id": "B-PROTOCOL-V1", "content": "PROTOCOL UPDATED: Use SHA-256 instead of MD5.", "revised": true, "timestamp": "2026-04-09T01:05:13.365419+00:00"}
-{"belief_id": "B-FED-SINGULARITY-001", "content": "Robust aggregation requires Median-based rejection and IQR thresholding.", "source": "v0.9_singularity_test", "confidence": 0.995, "timestamp": "2026-04-09T02:05:04.411737+00:00"}
-{"belief_id": "B-FED-SINGULARITY-001", "content": "Robust aggregation requires Median-based rejection and IQR thresholding.", "source": "v0.9_singularity_test", "confidence": 0.995, "timestamp": "2026-04-09T02:09:25.665659+00:00"}
+{"id": "B-TEST-task-failure-1775705879", "task": "task-failure-1775705879", "content": "The belief that this test will fail correctly", "status": "active", "updated_at": "2026-04-09T00:00:00Z"}

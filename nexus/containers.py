@@ -20,6 +20,7 @@ from nexus.services.predictor import Predictor
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.engine.phases.research import ResearchPhaseHandler
 from nexus.engine.phases.repair import RepairPhaseHandler
+from nexus.services.nexus_fs import NexusFS
 
 def _create_nexus_engine(**kwargs):
     from nexus.engine.coordinator import NexusEngine
@@ -99,11 +100,17 @@ class NexusContainer(containers.DeclarativeContainer):
         project_root=project_root
     )
 
+    nexus_fs = providers.Singleton(
+        NexusFS,
+        project_root=project_root
+    )
+
     context_hub = providers.Singleton(
         ContextHub,
         project_root=project_root,
         memory_service=memory_service,
-        run_dir=run_dir
+        run_dir=run_dir,
+        nexus_fs=nexus_fs
     )
 
     commander = providers.Singleton(

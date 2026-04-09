@@ -59,9 +59,16 @@ class AutoResearchNightShift:
         # 🧬 DeepScientist Integration: Bayesian Optimizer
         from nexus.research.bayesian_engine import BayesianResearchOptimizer, ResearchSearchSpace
         self.space = ResearchSearchSpace()
-        self.space.add_dimension("temperature", 0.0, 1.0)
-        self.space.add_dimension("top_p", 0.1, 1.0)
+        self.space.add_dimension("temperature", 0.1, 0.9)
+        self.space.add_dimension("top_p", 0.7, 1.0)
+        self.space.add_dimension("nas_aggression", 0.1, 1.0)
         self.optimizer = BayesianResearchOptimizer(self.space)
+        self.optimization_curve_path = self.project_root / "optimization_curve.csv"
+        
+        # Initialize CSV
+        if not self.optimization_curve_path.exists():
+            with open(self.optimization_curve_path, "w") as f:
+                f.write("round,temperature,top_p,nas_aggression,score\n")
         
         # 🔌 Webhook Connector
         from nexus.connectors.webhook_connector import WebhookConnector

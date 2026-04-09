@@ -23,7 +23,32 @@ class LanceDBStorage(MemoryStorage):
         return compressed
 
     def retrieve(self, query: str, **kwargs) -> List[Dict[str, Any]]:
-        return []
+        """🛡️ Fallback: Keyword search across tenant JSONL backups."""
+        results = []
+        limit = kwargs.get("limit", 10)
+        tenant_dirs = list((self.project_root / ".nexus" / "tenants").glob("*/lancedb/*.jsonl"))
+        
+        for jsonl_path in tenant_dirs:
+            try:
+                with open(jsonl_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if query.lower() in line.lower():
+                            results.append(json.loads(line.strip()))
+                            if len(results) >= limit:
+                                return results
+            except Exception:
+                continue
+        return results
+
+    def search(self, query: str, table: str = "default", limit: int = 5) -> List[Dict[str, Any]]:
+        """🚀 Semantic Search: Delegates to MemoryRepository FTS."""
+        from nexus.services.memory_repository import MemoryRepository
+        repo = MemoryRepository(self.project_root / ".nexus" / "knowledge" / "lancedb")
+        try:
+            df = repo.search_fts(table_name=table, query=query, limit=limit)
+            return df.to_dict("records") if not df.empty else []
+        except Exception:
+            return []
 
 class LocalCacheStore(CacheStore):
     def __init__(self):

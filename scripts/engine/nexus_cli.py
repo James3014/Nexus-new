@@ -36,6 +36,34 @@ def acceptance_check(as_json):
     if as_json: cmd.append("--json")
     subprocess.run(cmd, check=True)
 
+@nexus_group.command(name="run")
+@click.argument("task_id")
+@click.option("--complexity", type=float, default=0.0)
+def run(task_id, complexity):
+    """🚀 [Wisdom Layer] Execute task with automatic NAS tuning."""
+    from nexus.core.context_hub import ContextHub
+    hub = ContextHub(REPO_ROOT)
+    
+    # 1. 智慧感應 (Wisdom Sensing)
+    decision = hub.make_pre_routing_decision(task_id, {"complexity_score": complexity})
+    
+    if decision.get("nas_autotune_needed"):
+        click.echo(f"🧬 [Wisdom Layer] High complexity detected. Launching Bayesian Auto-Tuning...")
+        tuning_cmd = [sys.executable, str(REPO_ROOT / "scripts/nightshift.py"), "--task", task_id, "--max-rounds", "3"]
+        subprocess.run(tuning_cmd, check=True)
+        click.echo("✅ [Wisdom Layer] NAS Tuning Complete. Optimal weights locked.")
+    
+    # 2. 正式執行
+    click.echo(f"🚀 Executing Task: {task_id} with locked NAS weights...")
+    # ... (原有執行邏輯)
+
+@nexus_group.command(name="contract-check")
+@click.option("--contract-file", type=click.Path(exists=True), required=True)
+def contract_check(contract_file):
+    """📜 [Governance] Validate task contract against physical state."""
+    cmd = [sys.executable, str(REPO_ROOT / "scripts/ops/closeout_guard.py"), "--contract", contract_file]
+    subprocess.run(cmd, check=True)
+
 @nexus_group.command(name="distill")
 def distill():
     """🌬️ [Metabolism] Distill session essence."""

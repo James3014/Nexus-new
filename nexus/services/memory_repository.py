@@ -55,7 +55,7 @@ class MemoryRepository:
         new_record["drawer_id"] = hashlib.md5(f"{tenant_id}:{content}".encode()).hexdigest()
         new_record["aaak_content"] = self.compress_to_aaak(content)
         
-        db = self._get_db(tenant_id)
+        db = self._get_db()
         if not db or table_name not in db.list_tables():
             self.add_rows(table_name, [new_record])
             return "NEW_INITIAL"
@@ -129,3 +129,43 @@ class MemoryRepository:
         if not db or table_name not in db.list_tables():
             return pd.DataFrame()
         return db.open_table(table_name).to_pandas()
+
+    def search_fts_across_tables(self, query: str, tables: List[str], limit: int = 10) -> pd.DataFrame:
+        """🚀 跨表全文搜尋 (NexusFS grep 的後端)。"""
+        all_results = []
+        for table_name in tables:
+            try:
+                df = self.search_fts(table_name, query, limit=limit)
+                if not df.empty:
+                    df["_source_table"] = table_name
+                    all_results.append(df)
+            except Exception as e:
+                logger.debug(f"FTS search failed on {table_name}: {e}")
+                continue
+        
+        if not all_results:
+            return pd.DataFrame()
+        
+        combined = pd.concat(all_results, ignore_index=True)
+        if "_score" in combined.columns:
+            combined = combined.sort_values("_score", ascending=False).head(limit)
+        return combined
+
+    def search_fts(self, table_name: str, query: str, limit: int = 10, fallback_columns: List[str] = None) -> pd.DataFrame:
+        """執行單表全文搜尋。"""
+        db = self._get_db()
+        if not db or table_name not in db.list_tables():
+            return pd.DataFrame()
+            
+        table = db.open_table(table_name)
+        try:
+            # 優先執行 FTS
+            return table.search(query).limit(limit).to_pandas()
+        except Exception:
+            # 如果 FTS 索引不存在，退回到關鍵字過濾
+            df = table.to_pandas()
+            if df.empty or not fallback_columns or np is None:
+                return pd.DataFrame()
+            
+            mask = np.column_stack([df[col].str.contains(query, case=False, na=False) for col in fallback_columns]).any(axis=1)
+            return df[mask].head(limit)
