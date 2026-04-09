@@ -4,6 +4,7 @@ import json
 import yaml
 import hashlib
 from nexus.core.capability_gate import CapabilityGate
+from nexus.services.mem_palace import MemPalace
 
 class PromptBuilder:
     """
@@ -16,6 +17,9 @@ class PromptBuilder:
         self.config_path = self.project_root / "nexus" / "config" / "models.yaml"
         # P1-D: Updated lesson source to structured JSONL
         self.lesson_path = self.project_root / ".nexus" / "knowledge" / "lesson_events.jsonl"
+        
+        # 🏰 Wisdom Triad: Initialize MemPalace
+        self.mem_palace = MemPalace(str(self.project_root))
         
         # 內建核心規制 (原本在 ContextHub)
         self.NEXUS_PRIMER = {
@@ -117,6 +121,23 @@ Rules:
         except Exception:
             return ""
 
+    def _get_ethical_constraints(self) -> str:
+        """從 MemPalace (L1 記憶殿堂) 提取倫理與架構禁止規則。"""
+        try:
+            constraints = self.mem_palace.get_skill_constraints()
+            sections = []
+            if constraints["forbid"]:
+                sections.append("🚫 [FORBID/禁止]\n" + "\n".join([f"- {c}" for c in constraints["forbid"]]))
+            if constraints["require"]:
+                sections.append("🛡️ [REQUIRE/必須]\n" + "\n".join([f"- {c}" for c in constraints["require"]]))
+            if constraints["prefer"]:
+                sections.append("💡 [PREFER/優先]\n" + "\n".join([f"- {c}" for c in constraints["prefer"]]))
+            
+            return "\n\n".join(sections) if sections else "None (Constitutional Firewall Clean)"
+        except Exception as e:
+            return f"Error retrieving constraints: {e}"
+
+
     def build_task_prompt(self, task: str, context_brief: str, task_id: str = "unknown", model_hint: str = "flash") -> str:
         """組裝任務指令並注入橋接回饋。"""
         config = self._load_config()
@@ -144,11 +165,15 @@ Rules:
             logger.warning(f"⚠️ [PromptBuilder] Wisdom retrieval circuit-breaker triggered: {e}")
             wisdom_section = ""
         
-        # 4. 組合最終 Prompt
+        # 4. 注入 Ethical & Architectural Constraints (🆕 智慧三元組最終塊)
+        constraint_str = self._get_ethical_constraints()
+        constraint_section = f"\n\n### [Ethical & Architectural Constraints]\n{constraint_str}"
+
+        # 5. 組合最終 Prompt
         physical_section = f"\n### [Physical Feedback: VETOED]\n{feedback_str}" if feedback_str else ""
         
         prompt = template.replace("[Nexus Task]", 
-                                 f"{task}{physical_section}\n\n### [Crystal Lessons]\n{lesson_str}{wisdom_section}\n\n### [Context Brief]\n{context_brief}")
+                                 f"{task}{physical_section}\n\n### [Crystal Lessons]\n{lesson_str}{wisdom_section}{constraint_section}\n\n### [Context Brief]\n{context_brief}")
         return prompt
 
     def build_full_payload(self, phase: str, task: str, diff: str, task_id: str = "unknown", model_hint: str = "flash") -> str:

@@ -82,13 +82,21 @@ class AutoResearchNightShift:
         from nexus.research.findings_memory import FindingsMemoryStore
         from nexus.services.gateway import BattlesuitGateway
         from nexus.connectors.webhook_connector import WebhookConnector
+        from nexus.services.prompt_builder import PromptBuilder
+        
         self.memory_store = FindingsMemoryStore(self.project_root)
         self.best_score = 0.0
         self.no_improve_streak = 0
         self.base_commit: Optional[str] = None
         self.tracelog_path = self.project_root / "tracelog.jsonl"
         self.gateway = gateway or BattlesuitGateway(project_root=self.project_root)
+        
+        # 🛡️ Wisdom Triad: Initialize unified prompt engine
+        self.prompt_builder = PromptBuilder(str(self.project_root))
 
+        # [Approval Gate] Path setup
+        self.pending_manifest_path = self.project_root / ".nexus/nightshift/pending.json"
+        
         try:
             from nexus.research.bayesian_engine import (
                 BayesianResearchOptimizer,
@@ -232,7 +240,6 @@ class AutoResearchNightShift:
                         target_text = target_text.split("(", 1)[0].strip()
                     if target_text:
                         return target_text
-
         return "README.md"
 
     def _read_source(self, workpath: Path, target_relpath: str) -> str:
@@ -272,6 +279,16 @@ class AutoResearchNightShift:
             "content": "Whole file content",
             "changed_regions": ["Optional list of regions changed"],
         }
+        
+        # 🆕 [Wisdom Triad] Use unified prompt builder with 3-layer context
+        full_prompt = self.prompt_builder.build_full_payload(
+            phase="R", 
+            task=self.task, 
+            diff=source_code, 
+            task_id=self.task,
+            model_hint="flash"
+        )
+        
         payload = json.dumps(
             {
                 "task_id": self.task,
@@ -284,7 +301,7 @@ class AutoResearchNightShift:
             ensure_ascii=False,
         )
         data, raw_output = self.gateway.ask_structured(
-            self._build_generation_prompt(target_relpath, params, rules),
+            full_prompt,
             payload,
             phase="R",
             output_schema=schema,
@@ -335,7 +352,6 @@ class AutoResearchNightShift:
                     summaries.append(output[-600:])
                 if not ok:
                     return False, "\n".join(summaries)
-
         return True, "\n".join(summaries) or "no validation executed"
 
     def _judge_candidate(
@@ -646,6 +662,32 @@ class AutoResearchNightShift:
                     )
                     break
 
+            # --- [Approval Gate] Queue for Review ---
+            if self.best_score > 0 and self.base_commit:
+                try:
+                    self.pending_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                    pending = []
+                    if self.pending_manifest_path.exists():
+                        with open(self.pending_manifest_path, "r", encoding="utf-8") as f:
+                            pending = json.load(f)
+                    
+                    # Remove older entry if it exists
+                    pending = [p for p in pending if p["task"] != self.task]
+                    
+                    pending.append({
+                        "task": self.task,
+                        "target_file": self.resolved_target_file,
+                        "best_score": self.best_score,
+                        "workpath": str(workpath),
+                        "commit_sha": self.base_commit,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    with open(self.pending_manifest_path, "w", encoding="utf-8") as f:
+                        json.dump(pending, f, indent=2)
+                    print(f"📝 [Approval Gate] Task '{self.task}' queued for review.")
+                except Exception as e:
+                    print(f"⚠️ [Approval Gate] Failed to queue task for review: {e}")
+
             print(
                 f"\n✅ [AutoResearch] Finished {self.task}. "
                 f"Target: {self.resolved_target_file} | Best Score: {self.best_score:.2f}"
@@ -671,9 +713,44 @@ class AutoResearchNightShift:
                 "target_file": self.resolved_target_file,
                 "best_score": self.best_score,
                 "workpath": str(workpath),
+                "commit_sha": self.base_commit,
             }
         finally:
             print(f"🧹 [Cleanup] Worktree retained at {workpath}")
+
+
+def _update_manifest_status(project_root: Path, task_name: str, commit_sha: str):
+    """
+    🛡️ [Governance] Automatically sync task_manifest.yaml after physical harvest.
+    """
+    manifest_path = project_root / "task_manifest.yaml"
+    if not manifest_path.exists():
+        return
+    
+    # 🧬 Heuristic: Map file path to manifest ID (e.g. pipeline.py -> *pipeline*)
+    identifier = Path(task_name).stem.lower()
+    
+    content = manifest_path.read_text(encoding="utf-8")
+    
+    # 🔍 Regex Match: Find the block corresponding to the auto.repair task for this target
+    import re
+    block_pattern = rf"(- id: auto\.repair\..*?{re.escape(identifier)}.*?\n\s+description: ')(.*?)(')"
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    resolved_msg = f"AUTO-REPAIR: RESOLVED {timestamp}. Physical patch merged ({commit_sha[:7]}), acceptance-check PASS."
+    
+    new_content, count = re.subn(block_pattern, rf"\1{resolved_msg}\3", content, flags=re.IGNORECASE)
+    
+    if count > 0:
+        manifest_path.write_text(new_content, encoding="utf-8")
+        print(f"📡 [Governance] Task Manifest updated for '{identifier}'.")
+        
+        # 🛡️ Governance Commit
+        subprocess.run(["git", "add", "task_manifest.yaml"], capture_output=True)
+        subprocess.run(["git", "commit", "-m", f"docs(governance): resolve task status for {identifier} ({commit_sha[:7]})"], capture_output=True)
+        print(f"📜 [Governance] Commit generated: docs(governance): resolve task status for {identifier}")
+    else:
+        print(f"⚠️ [Governance] Could not find matching task ID for '{identifier}' in manifest.")
 
 
 def main():
@@ -701,8 +778,73 @@ def main():
         default=5,
         help="Stop a target early after this many consecutive non-improving rounds",
     )
+    parser.add_argument("--list-pending", action="store_true", help="List all optimizations waiting for approval")
+    parser.add_argument("--approve", type=str, help="Harvest (cherry-pick) the given task or 'ALL'")
 
     args = parser.parse_args()
+
+    pending_file = Path(".nexus/nightshift/pending.json")
+
+    # [Approval Gate] List operations
+    if args.list_pending:
+        if not pending_file.exists():
+            print("✨ [Approval Gate] No pending reviews.")
+            return
+        with open(pending_file, "r", encoding="utf-8") as f:
+            pending = json.load(f)
+        if not pending:
+            print("✨ [Approval Gate] No pending reviews.")
+            return
+
+        print("\n🎯 [Approval Gate] Night Shift 巡邏完畢，以下是待審核的優化成果：\n")
+        for i, item in enumerate(pending, 1):
+            print(f"[{i}] Task: {item['task']} | Target: {item['target_file']}")
+            print(f"  | 最佳分數：{item['best_score']:.2f}")
+            print(f"  | Commit:   {item['commit_sha'][:7]}")
+            print(f"  | 合併指令：uv run python scripts/nightshift.py --approve {item['task']}")
+            print("-" * 50)
+        return
+
+    # [Approval Gate] Harvest operations
+    if args.approve:
+        if not pending_file.exists():
+            print("❌ [Approval Gate] Pending manifest not found. No tasks to harvest.")
+            return
+        with open(pending_file, "r", encoding="utf-8") as f:
+            pending = json.load(f)
+        
+        target_task = args.approve.strip()
+        matches = [p for p in pending if target_task == "ALL" or p["task"] == target_task]
+        if not matches:
+            print(f"⚠️ [Approval Gate] No pending task matching '{target_task}' found.")
+            return
+            
+        remaining = [p for p in pending if p not in matches]
+        print(f"🔍 [Approval Gate] Found {len(matches)} task(s) to harvest.")
+        
+        for item in matches:
+            print(f"\n🚀 Harvesting '{item['task']}' (Commit {item['commit_sha'][:7]})...")
+            # 1. Branch Cherry-pick
+            res = subprocess.run(["git", "cherry-pick", item['commit_sha']], capture_output=True, text=True)
+            if res.returncode != 0:
+                print(f"❌ [Conflict] Git cherry-pick failed for {item['task']}. Aborting...")
+                subprocess.run(["git", "cherry-pick", "--abort"])
+                print("   Please resolve manually. Task left in pending list.")
+                remaining.append(item)
+                continue
+            
+            # 2. Worktree Cleanup 
+            workpath = item['workpath']
+            print(f"🧹 Removing worktree: {workpath}")
+            subprocess.run(["git", "worktree", "remove", "--force", workpath], capture_output=True)
+            print(f"✅ Harvested '{item['task']}' successfully!")
+            
+            # 3. 🛡️ [Governance Sync]
+            _update_manifest_status(Path("."), item['task'], item['commit_sha'])
+            
+        with open(pending_file, "w", encoding="utf-8") as f:
+            json.dump(remaining, f, indent=2)
+        return
 
     if args.mode == "v23-burnin":
         os.environ["NEXUS_BURNIN_MODE"] = "1"

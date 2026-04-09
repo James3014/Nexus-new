@@ -134,5 +134,3 @@ tasks:
   priority: MEDIUM
   depends_on: []
 
-- id: auto.repair.repair_unit_test_dummy
-  description: 'AUTO-REPAIR: RESOLVED 2026-04-10. Physical patch merged (abc1234), acceptance-check PASS.'
