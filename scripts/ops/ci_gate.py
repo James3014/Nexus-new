@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from nexus.core.decorators import nexus_metabolize
+from scripts.engine.output_guard import truncate_output
 
 WIKI_DRIFT_REPORT = ROOT / ".nexus" / "reports" / "wiki_drift_report.json"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
@@ -20,14 +21,27 @@ VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+
+    # 🛡️ Apply Context Shield / Hard Truncation
+    stdout = truncate_output(res.stdout or "", label=f"{name}_stdout")
+    stderr = truncate_output(res.stderr or "", label=f"{name}_stderr")
+
     if res.returncode == 0:
         print(f"✅ {name} PASSED")
-        return True, res.stdout
+        return True, stdout
     else:
-        print(f"❌ {name} FAILED")
-        print(res.stdout)
-        print(res.stderr)
-        return False, res.stderr
+        print(f"❌ {name} FAILED (RC: {res.returncode})")
+        print(stdout)
+        print(stderr)
+
+        # Save failure summary for the ReAct Loop
+        summary_file = ROOT / ".nexus" / "reports" / "last_failure_summary.txt"
+        summary_file.parent.mkdir(parents=True, exist_ok=True)
+        summary_file.write_text(
+            f"Step: {name}\nExit Code: {res.returncode}\n\nSTDOUT:\n{stdout}\n\nSTDERR:\n{stderr}"
+        )
+
+        return False, stderr
 
 def run_protocol_check(dry_run: bool):
     print(f"\n🚀 [CI-Gate] Running Agent Protocol Check {'(Dry-run)' if dry_run else ''}...")
@@ -205,6 +219,7 @@ def main():
     parser.add_argument("--wiki-eval-enforce-level", choices=["off", "warn", "strict"], default="warn", help="Eval regression enforcement level")
     parser.add_argument("--require-closeout-contract", action="store_true", help="Block CI if done contract closeout check fails")
     parser.add_argument("--closeout-contract-path", default=".nexus/reports/done_contract.json", help="Path to done contract JSON")
+    parser.add_argument("--auto-heal", action="store_true", help="Launch autonomous repair loop on failure")
     args = parser.parse_args()
 
     if args.dry_run:
@@ -317,7 +332,13 @@ def main():
         "DI & Contract Regression",
         f'"{VENV_PYTHON}" -m pytest tests/contracts/ tests/test_container_orchestration.py -q',
     )
-    if not success and not args.dry_run: sys.exit(1)
+    if not success:
+        if args.auto_heal:
+            print("\n🚨 [CI-Gate] Failure detected. Launching RELENTLESS REPAIR LOOP...")
+            repair_cmd = [str(VENV_PYTHON), "scripts/ops/autonomous_repair_loop.py"]
+            subprocess.run(repair_cmd)
+        elif not args.dry_run:
+            sys.exit(1)
 
     print("\n🎉 [CI-Gate] ALL QUALITY GATES PASSED!")
 
