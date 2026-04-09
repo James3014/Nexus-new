@@ -76,3 +76,9 @@ version_scope: '[v17.1, v22, v23]'
 - **Reliability**: Launched `Checkpointing` and `nexus resume` for physical task recovery.
 - **Protocol**: Enabled `MCP Server` for standardizing knowledge resource access.
 
+
+## [2026-04-09] Physical Integrity Hardening
+- **CI Gate**: Implemented `run_integrity_check` to scan for core class/method life-signs.
+- **Safety**: Added `smoke_test_all.sh` for cross-generation functional validation.
+- **Enforcement**: Mandatory life-sign check before any release or promotion.
+

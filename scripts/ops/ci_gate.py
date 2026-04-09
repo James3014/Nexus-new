@@ -95,8 +95,34 @@ def run_closeout_contract_check(dry_run: bool, contract_path: str):
         print(f"❌ [CI-BLOCK] Closeout Contract Check FAILED (Return Code: {res.returncode})")
     return False
 
+def run_integrity_check():
+    """🛡️ [CI-Gate] Physical Integrity Check (Life-Sign Scan)"""
+    print("\n🚀 [CI-Gate] Running Physical Integrity Check...")
+    required_sigs = {
+        "scripts/ops/evolution_engine_v08.py": ["class EvolutionEngineV08"],
+        "scripts/ops/federated_engine_v09.py": ["class FederatedEngineV09", "def fed_sync"],
+        "scripts/ops/supervisor_engine.py": ["class SupervisorEngine", "def run_swarm_mission"],
+        "scripts/engine/nexus_cli.py": ["def fed_run", "def meta_run", "def delegate"]
+    }
+    
+    for path, sigs in required_sigs.items():
+        p = ROOT / path
+        if not p.exists():
+            print(f"❌ [INTEGRITY] Missing file: {path}")
+            return False
+        content = p.read_text()
+        for sig in sigs:
+            if sig not in content:
+                print(f"❌ [INTEGRITY] Life-sign missing in {path}: '{sig}'")
+                return False
+    print("✅ Physical Integrity Check PASSED (All Life-Signs detected).")
+    return True
+
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
+    if not run_integrity_check():
+        print("❌ [CI-BLOCK] Physical Integrity Violation!")
+        return 1
     checks = {
         "venv_python": VENV_PYTHON.exists(),
         "contracts_dir": (ROOT / "tests" / "contracts").exists(),
