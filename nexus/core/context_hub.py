@@ -143,19 +143,30 @@ class ContextHub:
 
     def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000) -> str:
         """
-        🚀 19 層智慧 Context 組裝引擎。
-        目標：L0+L1 常駐，L2-L19 按需壓縮，總消耗 -30%。
+        🚀 19 層智慧 Context 組裝引擎 (含 Phase 10 Auto-Compact)。
+        目標：L0+L1 常駐，超過預算 70% 時自動熵減。
         """
         l0 = self._get_l0_rules()
         l1 = self._get_l1_index()
         
-        # 保留 L0/L1 預算
-        remaining_budget = int(budget * 0.7) # 強制執行 30% 減量
+        state = self.state_io.load_global_state()
+        history = state.metadata.get("chat_history", [])
         
-        context_parts = [l0, l1]
-        # 略過簡化邏輯... 僅展示核心注入
-        print(f"🛠️ [ContextHub] Assembling 19-layer context (Budget: {remaining_budget} tokens)")
+        # 🧪 [Phase 10] Auto-Compact 觸發器
+        # 粗略估計：1 token ≈ 4 字符。預控比例：70%
+        estimated_history_tokens = len(str(history)) // 4
         
+        if estimated_history_tokens > (budget * 0.7):
+            print(f"✂️ [ContextHub:AUTO-COMPACT] History ({estimated_history_tokens} tokens) exceeds 70% budget. Triggering Entropy Pruning.")
+            compact_history = prune_dialogue(history)
+            context_parts = [l0, l1, "--- COMPACT HISTORY ---", compact_history]
+        else:
+            # 正常組裝
+            context_parts = [l0, l1]
+            if history:
+                context_parts.append(str(history[-3:])) # 預設僅顯示最近 3 輪
+
+        print(f"🛠️ [ContextHub] Assembling 19-layer context (Final Size Estimate: {len(str(context_parts))//4} tokens)")
         return "\n".join(context_parts)
 
     def assemble_research_pack(self, query: str, results: List[Dict]) -> Dict[str, Any]:

@@ -281,6 +281,29 @@ class NexusEngine:
         
         print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {forecast.get('est_tokens', 0)}, ROI: {forecast.get('roi_score', 0.0):.2f}")
         
+        # --- 🧠 [Phase 11] Autonomic Routing ---
+        from nexus.engine.autonomic_router import AutonomicRouter
+        arouter = AutonomicRouter(self.memory)
+        
+        # 🧪 [Dead Code Resurrected] 獲取上下文預路由決策
+        pre_routing = self.context_hub.make_pre_routing_decision(task_id, state.metadata) if self.context_hub else {}
+        exec_plan = arouter.route(task_desc, state, forecast, pre_routing=pre_routing)
+        
+        state.metadata["autonomic_route"] = exec_plan.mode
+        state.metadata["autonomic_reason"] = exec_plan.reason
+        state.metadata["est_tokens"] = forecast.get("est_tokens", 0)
+        
+        if exec_plan.mode == "swarm":
+            state.metadata["swarm_mode"] = True
+            print(f"🧠 [Autonomic] Auto-escalated to SWARM: {exec_plan.reason}")
+        elif exec_plan.mode == "research_first":
+            state.metadata["force_external"] = True
+            print(f"🧠 [Autonomic] Auto-routed to RESEARCH_FIRST: {exec_plan.reason}")
+        elif exec_plan.mode == "self_heal" and self.ash_selector:
+            print(f"🧠 [Autonomic] Priority: SELF_HEAL triggered by memory match.")
+            # ASH 邏輯將由下方的 gate_eval 觸發或直接介入
+        # ----------------------------------------
+
         # 🛡️ 治理閘門：委託 GateEvaluator 進行 Phase D 判定
         proceed, reason = self.gate_eval.should_proceed("D", forecast, risk)
         if not proceed:
@@ -388,6 +411,16 @@ class NexusEngine:
                     task_id, skill_id, passed, gate_results, state.metadata
                 )
                 self._crystallize(payload)
+                
+                # 🧠 [Phase 12] 自主演化：NAS 閾值自動微調 (100% 自動背景執行)
+                try:
+                    from nexus.learning.router_nas_tuner import RouterNASTuner
+                    tuner = RouterNASTuner(self.project_root, self.memory)
+                    tune_res = tuner.auto_tune_from_log()
+                    if tune_res.get("updated"):
+                        logger.info(f"🧬 [NAS] Threshold Evolved: {tune_res.get('old')} -> {tune_res.get('new')}")
+                except Exception as e:
+                    logger.error(f"⚠️ [NAS] Automatic tuning failed: {e}")
                 learning_finalize = finalize_learning_loop(
                     self.project_root,
                     state,

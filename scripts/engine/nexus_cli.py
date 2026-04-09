@@ -49,8 +49,11 @@ def run(task_id, complexity):
     
     if decision.get("nas_autotune_needed"):
         click.echo(f"🧬 [Wisdom Layer] High complexity detected. Launching Bayesian Auto-Tuning...")
-        tuning_cmd = [sys.executable, str(REPO_ROOT / "scripts/nightshift.py"), "--task", task_id, "--max-rounds", "3"]
-        subprocess.run(tuning_cmd, check=True)
+        tuning_cmd = [sys.executable, str(REPO_ROOT / "scripts/nightshift.py"), "--task", task_id, "--max_rounds", "3"]
+        # 🛡️ 物理強化：注入 PYTHONPATH 確保子進程能找到 nexus 庫
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{REPO_ROOT}:{env.get('PYTHONPATH', '')}"
+        subprocess.run(tuning_cmd, env=env, check=True)
         click.echo("✅ [Wisdom Layer] NAS Tuning Complete. Optimal weights locked.")
     
     # 2. 正式執行

@@ -36,9 +36,21 @@ class SkillRouter:
 
     def get_next_stage(self, current_stage: str, result: Dict[str, Any]) -> str:
         """
-        🔮 路由決策邏輯 (待對接 Phase 3 Bayesian 卷積)
+        🔮 路由決策邏輯 (v24.5 Adaptive Bayesian)
+        職責: 根據執行結果動態決定下一個階段，支援回溯。
         """
-        # 預設線性流程
+        # 1. 回溯邏輯: 如果在修復階段 (R) 失敗次數過多，跳回診斷 (D)
+        retry_count = result.get("retry_count", 0)
+        if current_stage == "R" and retry_count >= 3:
+            print(f"🔄 [SkillRouter] Failures in R ({retry_count}) >= 3. Backtracking: R -> D")
+            return "D"
+
+        # 2. 外部依賴跳轉: 如果診斷 (D) 發現需要外部知識，跳到研究 (X)
+        if current_stage == "D" and result.get("external_needed", False):
+            print(f"🔄 [SkillRouter] External dependency detected in D. Routing: D -> X")
+            return "X"
+
+        # 3. 預設線性流程
         stages = list(self.STAGE_MAP.keys())
         try:
             idx = stages.index(current_stage)

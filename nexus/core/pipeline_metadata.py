@@ -81,3 +81,6 @@ class PipelineMetadata(TypedDict, total=False):
     plan_strategy_used: str
     cycle_root_cause: str
     cycle_analysis: Dict[str, Any]
+    
+    # --- Context & Chat (Phase 10) ---
+    chat_history: List[Dict[str, Any]]

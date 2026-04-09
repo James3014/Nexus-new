@@ -112,20 +112,27 @@ class Commander:
         """R 階段：修復 (對接 v5 repair)"""
         print("🛠️ [Commander] Triggering R-stage: Execution...")
         
-        # 💰 P5.9: 成本預判 Hook
-        from nexus.core.cost_hook import CostHook
-        hook = CostHook()
-        # 假設從 metadata 獲取即將執行的指令與參數
-        next_cmd = state.metadata.get("next_command", "safe_patch")
-        params = state.metadata.get("next_params", {"target_file": state.metadata.get("target_file")})
+        # ⚓ [Phase 10] Universal ToolHook 管線
+        from nexus.core.harness import default_director
         
-        predicted = hook.predict_cost(next_cmd, params)
-        remaining = state.metadata.get("budget_token", 5000) - state.total_token_usage
+        # 準備上下文
+        harness_context = {
+            "phase": "R",
+            "budget_remaining": state.metadata.get("budget_token", 5000) - state.total_token_usage,
+            "project_root": self.project_root,
+        }
         
-        status = hook.budget_check(predicted, remaining)
+        tool_name = "repair" # 這裡是邏輯工具名
+        args = state.metadata.get("next_params", {"target_file": state.metadata.get("target_file")})
+        
+        status, messages = default_director.run_pre_execute(tool_name, args, harness_context)
+        
         if status == "BLOCKED":
-            print(f"🛑 [Commander:COST] Task BLOCKED! Predicted {predicted} > {remaining}")
-            return "COST_EXCEEDED"
+            print(f"🛑 [Commander:HARNESS] Blocked! Reason: {'; '.join(messages)}")
+            return "HARNESS_BLOCKED"
+            
+        if status == "WARN":
+            print(f"⚠️ [Commander:HARNESS] Warning: {'; '.join(messages)}")
             
         return "RUN_SKILL:repair"
 
