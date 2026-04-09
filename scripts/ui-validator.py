@@ -119,6 +119,20 @@ async def run_ui_validation(url, agentic_mode=False, task=None, max_steps=5):
         
         await browser.close()
     
+    # 綁定 AutoDream 語義蒸餾 (Session Metabolism)
+    try:
+        from nexus.services.metabolism_engine import metabolism
+        # 從步驟中提煉經驗
+        session_context = {
+            "goal": f"UI Exploration: {task}" if agentic_mode else f"UI Matrix Validation: {url}",
+            "done": [{"action": s.get("action"), "status": s.get("status")} for s in results["steps"]],
+        }
+        tx_id = metabolism.distill(session_context)
+        results["metabolism_tx"] = tx_id
+        print(f"🧬 [Metabolism] UI exploration experience crystallized to Seed ({tx_id}).")
+    except ImportError as e:
+        print(f"⚠️ [Metabolism] Could not bind SessionMetabolism: {e}")
+
     return results
 
 if __name__ == "__main__":
