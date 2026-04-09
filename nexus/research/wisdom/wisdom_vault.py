@@ -51,18 +51,21 @@ class WisdomVault:
             return
 
         # 🛡️ 核心表寫入
-        if self.table_name in self.db.list_tables():
+        try:
             table = self.db.open_table(self.table_name)
             table.add(batch_data)
             print(f"✅ [WisdomVault] Fused {len(batch_data)} records into {self.table_name}.")
-        else:
-            print(f"⚠️ [WisdomVault] Table {self.table_name} missing from {self.db_path}")
+        except Exception:
+            self.db.create_table(self.table_name, data=batch_data)
+            print(f"✅ [WisdomVault] Created {self.table_name} with {len(batch_data)} records.")
 
     def search_wisdom(self, query: str, limit: int = 3):
         """🔍 原生語義檢索。"""
-        if self.table_name not in self.db.list_tables():
+        # list_tables() might return an object, so we extract table names or just try open_table.
+        try:
+            table = self.db.open_table(self.table_name)
+        except Exception:
             return None
-        table = self.db.open_table(self.table_name)
         query_vector = self.model.encode(query).tolist()
         results = table.search(query_vector).limit(limit).to_pandas()
         return results

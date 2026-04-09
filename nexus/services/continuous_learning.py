@@ -1090,6 +1090,25 @@ def finalize_learning_loop(
     except Exception as e:
         logging.warning(f"⚠️ [SoulPalace:C] Dynamic belief revision failed: {e}")
 
+    # 🧬 [Phase 14] Auto-Distill Findings into Skills (FindingsDistiller)
+    try:
+        from nexus.research.findings_memory import FindingsMemoryStore
+        from nexus.learning.skill_registry import SkillRegistry
+        from nexus.research.wisdom.wisdom_vault import WisdomVault
+        from nexus.research.findings_distiller import FindingsDistiller
+
+        registry_path = root / ".nexus" / "registry" / "shared_skills.db"
+        if registry_path.exists():
+            store = FindingsMemoryStore(root)
+            registry = SkillRegistry(registry_path)
+            vault = WisdomVault(str(root))
+            distiller = FindingsDistiller(store, registry, vault)
+            distilled_ids = distiller.distill_batch(limit=50)
+            if distilled_ids:
+                logging.info(f"🧪 [Phase14] Auto-distilled {len(distilled_ids)} new skills: {distilled_ids}")
+    except Exception as e:
+        logging.warning(f"⚠️ [Phase14] Findings distillation failed: {e}")
+
     return {
         "lessons_written": lessons_written,
         "writeback_required": writeback_required,

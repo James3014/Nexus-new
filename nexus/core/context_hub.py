@@ -35,6 +35,7 @@ class ContextHub:
         self.nexus_fs = nexus_fs
         self.skill_registry = skill_registry
         self.mem_palace = mem_palace
+        self.wisdom_vault = None  # Will be injected in coordinator or by DI
 
         from nexus.services.prompt_builder import PromptBuilder
 
@@ -123,6 +124,7 @@ class ContextHub:
             "memory_reminders": self._inject_memory_reminders("D"),
         }
         pack["recommended_skills"] = self._recommend_skills(summary, hotspots[:5])
+        pack["wisdom_prior"] = self._inject_wisdom_prior(summary, hotspots[:5])
         return pack
 
     def _get_l0_rules(self) -> str:
@@ -271,6 +273,7 @@ class ContextHub:
             "memory_reminders": self._inject_memory_reminders("R"),
         }
         pack["recommended_skills"] = self._recommend_skills(diagnosis.summary, diagnosis.hotspots)
+        pack["wisdom_prior"] = self._inject_wisdom_prior(diagnosis.summary, diagnosis.hotspots)
         return pack
 
     def _recommend_skills(self, task_desc: str, target_files: List[str] = None) -> List[Dict]:
@@ -340,6 +343,49 @@ class ContextHub:
             "winning_hypothesis": c.get("winning_hypothesis", ""),
             "win_rate": c.get("win_rate", 0.0)
         } for c in candidates[:3]]
+
+    def _inject_wisdom_prior(self, task_desc: str, target_files: List[str]) -> Dict[str, Any]:
+        """
+        從 WisdomVault (LanceDB) 語義檢索最相關的歷史實驗智慧。
+        包含 BattleSwarm 歷史 winner 的策略與參數。
+        """
+        if not self.wisdom_vault:
+            return {}
+
+        query = f"{task_desc} files:{' '.join(target_files[:3])}"
+        try:
+            results = self.wisdom_vault.search_wisdom(query, limit=3)
+            if results is None or results.empty:
+                return {}
+
+            def extract_score(text: str) -> float:
+                lines = text.split("\n")
+                for line in lines:
+                    if "Audit Score:" in line:
+                        try:
+                            return float(line.split(":")[1].strip())
+                        except:
+                            pass
+                return 0.0
+
+            top = results.iloc[0]
+            
+            battle_history = []
+            for _, r in results.iterrows():
+                battle_history.append({
+                    "strategy": r.get("task", ""),
+                    "score": extract_score(r.get("resolution", ""))
+                })
+                
+            return {
+                "prior_strategy": top.get("task", ""),
+                "prior_confidence": float(top.get("_distance", 0.5)),
+                "battle_history": battle_history,
+                "suggestion": top.get("resolution", "")
+            }
+        except Exception as e:
+            print(f"⚠️ [_inject_wisdom_prior] Failed to search wisdom vault: {e}")
+            return {}
 
     def record_crystal_lesson(
         self,

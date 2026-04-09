@@ -86,6 +86,9 @@ class NexusEngine:
         registry_path = self.project_root / ".nexus" / "registry" / "shared_skills.db"
         self.skill_registry = SkillRegistry(registry_path) if registry_path.exists() else None
         
+        from nexus.research.wisdom.wisdom_vault import WisdomVault
+        self.wisdom_vault = WisdomVault(str(self.project_root))
+        
         from nexus.core.context_hub import ContextHub
         self.context_hub = kwargs.get("context_hub") or ContextHub(
             str(self.project_root), 
@@ -94,6 +97,13 @@ class NexusEngine:
             skill_registry=self.skill_registry,
             mem_palace=self.mem_palace
         )
+        self.context_hub.wisdom_vault = self.wisdom_vault
+        
+        from nexus.engine.battle_swarm import BattleSwarm
+        self.battle_swarm = BattleSwarm(str(self.project_root), run_dir=str(self.run_dir))
+        
+        from nexus.engine.reflex_loop import ReflexLoop
+        self.reflex_loop = ReflexLoop(str(self.project_root), memory_service=self.memory)
         
         # 核心組件對位
         # 核心組件對位 (由 DI 容器注入)
@@ -416,10 +426,53 @@ class NexusEngine:
                         state.metadata["lewm_sim_status"] = sim_status
                 # ----------------------------------------
                 
-                passed, gate_results = run_cli_pregate(
-                    project_root=self.run_dir,
-                    commands=verify_cmds
-                )
+                # ⚔️ Layer 4: BattleSwarm Trigger (Real-time Swarm on first failure)
+                if attempt == 2 and hasattr(self, "battle_swarm"):
+                    self.battle_swarm.default_workers = self.reflex_loop.config.get("battle_workers", 4) if hasattr(self, "reflex_loop") else 4
+                    logger.info(f"⚔️ [BattleSwarm] Triggering Layer 4 Parallel Repair with {self.battle_swarm.default_workers} workers...")
+                    
+                    def swarm_worker(strategy, wt_path, tid, desc, ctx):
+                        # 在每個 Worktree 中獨立平行驗證
+                        wt_passed, wt_gates = run_cli_pregate(project_root=wt_path, commands=verify_cmds)
+                        score = (sum(1 for g in wt_gates if g["passed"]) / max(len(wt_gates), 1)) * 10.0
+                        return {"passed": wt_passed, "score": score}
+                        
+                    battle_result = self.battle_swarm.trigger_battle(
+                        task_id=task_id, 
+                        desc=task_desc, 
+                        context=state.metadata, 
+                        execute_fn=swarm_worker
+                    )
+                    
+                    if battle_result.get("status") == "winner_found":
+                        winner = battle_result["winner"]
+                        logger.info(f"🏆 [BattleSwarm] Winner Strategy {winner['strategy']} applied.")
+                        
+                        # 找到 winning branch 並合併
+                        branches = battle_result.get("branches_to_clean", [])
+                        winner_branch = next((b for b in branches if winner["strategy"] in b), None)
+                        if winner_branch:
+                            subprocess.run(["git", "merge", "--squash", winner_branch], cwd=str(self.project_root), capture_output=True)
+                        
+                        passed = True
+                        gate_results = [{"status": "PASSED_VIA_SWARM", "passed": True}]
+                        
+                        # 立即蒸餾此結果
+                        from nexus.research.findings_distiller import FindingsDistiller
+                        from nexus.research.findings_memory import FindingsMemoryStore
+                        if hasattr(self, "wisdom_vault"):
+                            distiller = FindingsDistiller(FindingsMemoryStore(self.project_root), self.skill_registry, self.wisdom_vault)
+                            distiller.distill_battle_results(battle_result, task_id)
+                    else:
+                        # Swarm failed, fallback to standard pregate on current tree
+                        passed, gate_results = run_cli_pregate(project_root=self.run_dir, commands=verify_cmds)
+                        
+                    self.battle_swarm.cleanup(battle_result)
+                else:
+                    passed, gate_results = run_cli_pregate(
+                        project_root=self.run_dir,
+                        commands=verify_cmds
+                    )
                 
                 # 💎 結晶化：委託 MetricsAggregator 聚合數據
                 payload = self.metrics_agg.aggregate_crystallize_payload(
@@ -427,15 +480,14 @@ class NexusEngine:
                 )
                 self._crystallize(payload)
                 
-                # 🧠 [Phase 12] 自主演化：NAS 閾值自動微調 (100% 自動背景執行)
+                # 🧠 [Phase 14c] 神經反射：ReflexLoop 背景參數優化 (NAS + SwarmWorkers)
                 try:
-                    from nexus.learning.router_nas_tuner import RouterNASTuner
-                    tuner = RouterNASTuner(self.project_root, self.memory)
-                    tune_res = tuner.auto_tune_from_log()
-                    if tune_res.get("updated"):
-                        logger.info(f"🧬 [NAS] Threshold Evolved: {tune_res.get('old')} -> {tune_res.get('new')}")
+                    if hasattr(self, "reflex_loop"):
+                        changes = self.reflex_loop.run_cycle()
+                        if changes:
+                            logger.info(f"🧬 [ReflexLoop] Tuned components: {list(changes.keys())}")
                 except Exception as e:
-                    logger.error(f"⚠️ [NAS] Automatic tuning failed: {e}")
+                    logger.error(f"⚠️ [ReflexLoop] Background optimization failed: {e}")
                 learning_finalize = finalize_learning_loop(
                     self.project_root,
                     state,
