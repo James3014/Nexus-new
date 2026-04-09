@@ -1,0 +1,7 @@
+{
+  "version": "v0.8",
+  "dna_dim": 128,
+  "target_fitness": 0.98,
+  "meta_optimizer": "HyperNEAT",
+  "initialized_at": "2026-04-08T22:46:25.719047+00:00"
+}

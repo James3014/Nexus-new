@@ -35,3 +35,18 @@ class EvolutionEngine:
         with open(self.config_path, "w") as f:
             yaml.dump({"active_topology": best}, f)
         return best
+
+    def meta_init(self):
+        """v0.8 Meta-Learning Initialization"""
+        # 擴展 DNA 維度
+        self.meta_state_path = self.repo_root / ".nexusknowledge/meta_learning_state.json"
+        state = {
+            "version": "v0.8",
+            "dna_dim": 128,
+            "target_fitness": 0.98,
+            "meta_optimizer": "HyperNEAT",
+            "initialized_at": datetime.now(timezone.utc).isoformat()
+        }
+        self.meta_state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.meta_state_path.write_text(json.dumps(state, indent=2))
+        return state
