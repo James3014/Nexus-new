@@ -35,6 +35,7 @@ class SessionMetabolism:
             "completed_tasks": session_context.get("done", []),
             "pending_tasks": session_context.get("todo", []),
             "active_beliefs": self._get_active_beliefs(), # 🛡️ 注入長期信念
+            "design_specs": self._get_design_specs(),   # 🎨 注入設計靈魂
             "learned_lessons": self._get_recent_lessons()
         }
         
@@ -72,6 +73,19 @@ class SessionMetabolism:
             logger.error(f"Error reading beliefs for distillation: {e}")
             
         return active[-5:] # 僅帶走最重要的前 5 條
+
+    def _get_design_specs(self) -> dict:
+        """從 DESIGN.md 提取核心設計規範"""
+        design_path = self.project_root / "nexus_wiki_vault" / "99_Schema" / "DESIGN.md"
+        if not design_path.exists():
+            return {}
+        
+        # 簡單提取氛圍與禁忌 (模擬)
+        return {
+            "atmosphere": "Hardened Industrial, Terminal-First",
+            "critical_donts": ["No rounded corners", "No gradients"],
+            "critical_dos": ["Must provide physical evidence", "High information density"]
+        }
 
     def _get_recent_lessons(self) -> list:
         """從 .codex_lessons.md 讀取最後三條教訓"""
