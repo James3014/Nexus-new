@@ -35,3 +35,9 @@ nexus.log
 
 isolated_swarm/
 .gstack/
+
+# Isolated Runtime Artifacts and Drift
+logs/
+benchmarks/
+desk/
+nexus-desk/
