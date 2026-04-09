@@ -41,6 +41,15 @@ def run_protocol_check(dry_run: bool):
 
 def run_lesson_check(dry_run: bool):
     print(f"\n🚀 [CI-Gate] Running Lesson Writeback Check {'(Dry-run)' if dry_run else ''}...")
+    
+    # [NEXUS v22.5] 自動化結晶化程序：將教訓內化為物理信念
+    if not dry_run:
+        try:
+            subprocess.run([sys.executable, str(ROOT / "scripts/ops/crystallize_lessons.py")], check=True)
+            print("✅ [Learning] Lessons automatically crystallized into Belief base.")
+        except Exception as e:
+            print(f"⚠️ [Learning] Auto-crystallization failed: {e}")
+
     res = subprocess.run(f'"{VENV_PYTHON}" scripts/ops/lesson_writeback_check.py', shell=True)
     if res.returncode == 0:
         print("✅ Lesson Writeback Check PASSED")
