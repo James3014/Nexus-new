@@ -82,3 +82,9 @@ version_scope: '[v17.1, v22, v23]'
 - **Safety**: Added `smoke_test_all.sh` for cross-generation functional validation.
 - **Enforcement**: Mandatory life-sign check before any release or promotion.
 
+## [2026-04-09] Memory & Learning Loop Production Hardening (S2-S5)
+- **S2 (Performance)**: Upgraded `memory_indexer.py` to incremental `merge_insert`, reducing vector indexing I/O overhead.
+- **S3 (Security)**: Hardened `federated_lessons.py` with strict type sanitization and truncation for multi-tenant data safety.
+- **S4 (Availability)**: Integrated Circuit Breaker patterns in `prompt_builder.py` to ensure core prompt generation stability.
+- **S5 (Intelligence)**: Activated dynamic belief revision linkage in the learning loop, enabling autonomous "belief rescission" upon failure.
+- **Evolution**: Optimized LanceDB lookup logic to support newer response models (ListTablesResponse).

@@ -13,6 +13,23 @@
 - \`nexus resume\`: 從最後一個物理斷點恢復執行。
 - \`nexus style-ingest <url>\`: 同步外部設計魂魄。
 
+## 🧬 Federated Learning v0.9 (艦隊演化)
+
+Nexus v0.9 將單機 NAS 優化提升至 **聯邦學習 (Federated Learning)** 級別，實現跨租戶的智慧聚合與隱私保護。
+
+### 核心機制：FedAvg + DP-SGD
+- **聚合演算法**: `FedAvg` (Federated Averaging)，透過 `np.mean` 彙整各租戶的 16 維 `router_bias_delta`。
+- **隱私防禦**: `DP-SGD` (Differential Privacy)，注入 **拉普拉斯噪聲 (Laplace Noise)**。
+    - **隱私預算 (ε)**: 1.0
+    - **靈敏度縮放**: 0.002
+- **目標 Fitness**: **0.995** (SOTA 級別收斂)。
+
+### 物理實作
+- **入口腳本**: `uv run scripts/ops/federated_engine_v09.py`
+- **數據載體**: `tenants/tenant-000~009/dna_delta.json`
+- **全域 DNA**: `configs/federated_dna.yaml`
+
 ## 📈 治理要求
 - 所有的 Swarm 工作必須產出物理證據 (\`swarm_work.json\`)。
 - 所有的總合產物必須產出最終清單 (\`mission_complete.json\`)。
+- **聯邦同步**: 必須維持 10/10 的租戶聚合比例，否則 CI 守門拒絕發版。

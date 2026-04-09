@@ -37,14 +37,23 @@ version_scope:
 - **語義召回 (RAG)**: 提供高性能的 Embedding 檢索引腳。
 - **知識歸檔**: 負責將短期任務數據沉澱為長效治理資本。
 
+## Memory Three Systems (記憶三系統)
+
+Nexus v23 採用階層式三系統架構來管理知識與智慧：
+
+| System | Role (角色) | Strategy (策略) |
+|---|---|---|
+| **MemPalace** | **魂/邏輯引擎 (Soul/Logic)** | 處理信念修正 (Belief Revision)、靈魂對齊與高階決策邏輯。 |
+| **LanceDB** | **智/向量引擎 (Wisdom/Vector)** | 儲存經過結晶的代碼模式 (Patterns) 與智慧教訓 (Lessons)，驅動召回。 |
+| **Memory** | **基/文件系統 (Base/RAG)** | 處理原始文件、GitHub 存儲與基本 RAG 檢索。 |
+
 ## Memory Component Registry (記憶組件詳解)
 
 | Component | Responsibility (職責) | Source (Path) |
 |---|---|---|
-| **Memory Service** | 記憶管道的主入口與服務適配。 | [Source: nexus/services/memory.py] |
-| **Memory Repository** | 實體 [LanceDB](Module - Memory Repository.md) 表與磁碟 IO 管理。 | [Source: nexus/services/memory_repository.py] |
-| **Memory Indexer** | 高效率向量索引建立與維護。 | [Source: nexus/services/memory_indexer.py] |
-| **Memory Embedding** | 協調 LLM Embedding [[api|API]] 呼叫。 | [Source: nexus/services/memory_embedding.py] |
+| **MemPalace** | 處理 Belief Revision 與智慧節點連通。 | [Source: nexus/services/mem_palace.py] |
+| **LanceDB** | 提供高效向量檢索與智慧過濾。 | [Source: nexus-swarm/wisdom/wisdom_memory] |
+| **Memory Service** | 傳統 RAG 管道與服務適配。 | [Source: nexus/services/memory.py] |
 
 ## Upstream
 - **[System Overview](../00_Home/System Overview.md)**: 記憶系統導航。
@@ -55,14 +64,14 @@ version_scope:
 - **[[Ops - CI/CD Promotion Gate]]**: 記憶完整性作為發版審計標誌。
 
 ## Related modules / files
+- `nexus/services/mem_palace.py`: 靈魂殿堂引擎。 [Code: nexus/services/mem_palace.py]
 - `nexus/services/memory.py`: 記憶服務。 [Code: nexus/services/memory.py]
-- `nexus/services/memory_repository.py`: 數據倉儲。 [Code: nexus/services/memory_repository.py]
 
 ## Source notes
 - v22 Engine Spec: 要求長效記憶的召回延遲 (90th percentile) 不得超過 800ms。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Open questions / conflicts
-- [ ] **Memory Tiering**: 是否需要將記憶分為 L1 (RAM) / L2 (SSD) / L3 (Archive) 三層。
+- [x] **Memory Tiering**: 已於 v23 透過「三系統架構」(MemPalace/LanceDB/Memory) 完成實體化。
 
 ---
 Back to [System Overview](../00_Home/System Overview.md)

@@ -56,6 +56,28 @@ version_scope:
 | **Gemini Handoff** | 多模型間的狀態移送與上下文對齊。 | [Source: nexus/core/gemini_handoff.py] |
 | **Handoff Builder** | 構建模型間移交的物理數據封裝。 | [Source: nexus/core/handoff_builder.py] |
 | **Handoff Bundle** | 包含完整上下文與資源權限的移交包。 | [Source: nexus/core/handoff_bundle.py] |
+| **[[BELIEF]] Engine** | 信念修正引擎，管理 Wisdom Prior 與 Router Bias。 | [Source: nexus/services/mem_palace.py] |
+
+## Belief Revision System (信念修正系統 v0.9)
+
+Nexus 採用 **Belief Revision** 框架來處理隨著時間與證據演進的「動態事實」。這使 Agent 具備「撤回過時判定」與「根據新證據修正偏置」的能力。
+
+### 核心定義 (Definitions)
+- **[[BELIEF]]**: `Wisdom Prior` + `Router Bias` 的結合。
+- **目的**: 將「記住舊資料」提升為「維護當前有效之判斷」。
+
+### 演進軌跡 (Evolution Path)
+
+| Version | Belief Dimension | Logic (邏輯) |
+|---|---|---|
+| **v0.7** | 8-dim | 靜態 `Prior` 硬編碼偏好。 |
+| **v0.8** | 128-dim | 單機 `Meta-Optimizer` 回寫之 `dna_delta`。 |
+| **v0.9** | **16-dim** | **聯邦智慧 (Federated Wisdom)** 基於 10 Tenants 聚合之 `global_router_bias`。 |
+
+### 核心操作 (AGM Inspired)
+- **Expansion (擴張)**: 納入新證據，生成新信念。
+- **Revision (修正)**: 基於新證據修改舊有的 Wisdom Prior。
+- **Contraction (撤回)**: 移除已判定為無效或衝突的 Belief，傳導影響至下游 Artifacts。
 
 ## Upstream
 - **[System Overview](../00_Home/System Overview.md)**: 全域智慧架構導航。
