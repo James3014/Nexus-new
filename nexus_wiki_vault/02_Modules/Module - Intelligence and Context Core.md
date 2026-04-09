@@ -10,6 +10,7 @@ related_pages:
 - '[Module - Memory Pipeline Deep Dive](Module - Memory Pipeline Deep Dive.md)'
 - '[Module - Implementation Responsibility
   Matrix](Module - Implementation Responsibility Matrix.md)'
+- '[Module - Skill Memory Closed Loop](Module - Skill Memory Closed Loop.md)'
 source_of_truth: nexus/core/context_hub.py
 status: active
 tags:
@@ -87,6 +88,7 @@ Nexus 採用 **Belief Revision** 框架來處理隨著時間與證據演進的�
 ## Downstream
 - **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 智慧模組與物理檔案映射。
 - **[Module - Memory Pipeline Deep Dive](Module - Memory Pipeline Deep Dive.md)**: 技術細節實作對接。
+- **[Module - Skill Memory Closed Loop](Module - Skill Memory Closed Loop.md)**: Belief 信念如何透過 ContextHub 過濾技能並回寫路由器偏誤 (Phase 13)。
 
 ## Related modules / files
 - `nexus/core/context_hub.py`: 上下文樞紐。 [Code: nexus/core/context_hub.py]

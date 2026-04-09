@@ -10,6 +10,7 @@ related_pages:
 - '[Module - Intelligence and Context Core](Module - Intelligence and Context Core.md)'
 - '[Module - Implementation Responsibility
   Matrix](Module - Implementation Responsibility Matrix.md)'
+- '[Module - Skill Memory Closed Loop](Module - Skill Memory Closed Loop.md)'
 source_of_truth: nexus/services/memory.py
 status: active
 tags:
@@ -62,6 +63,7 @@ Nexus v23 採用階層式三系統架構來管理知識與智慧：
 
 ## Downstream
 - **[Module - Implementation Responsibility Matrix](Module - Implementation Responsibility Matrix.md)**: 記憶模組與物理檔案映射.
+- **[Module - Skill Memory Closed Loop](Module - Skill Memory Closed Loop.md)**: 三系統閉環資料流與技能選取整合 (Phase 13).
 - **[[Ops - CI/CD Promotion Gate]]**: 記憶完整性作為發版審計標誌。
 
 ## Related modules / files
@@ -73,6 +75,7 @@ Nexus v23 採用階層式三系統架構來管理知識與智慧：
 
 ## Open questions / conflicts
 - [x] **Memory Tiering**: 已於 v23 透過「三系統架構」(MemPalace/LanceDB/Memory) 完成實體化。
+- [x] **Memory-Skill Integration**: 已於 Phase 13 透過 `ContextHub._recommend_skills()` 與 `SkillRegistry.search_by_affinity()` 完成閉環。詳見 [Module - Skill Memory Closed Loop](Module - Skill Memory Closed Loop.md)。
 
 ---
 Back to [System Overview](../00_Home/System Overview.md)
