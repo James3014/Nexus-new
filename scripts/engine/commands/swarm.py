@@ -20,7 +20,14 @@ def register(nexus_group, REPO_ROOT):
     @click.option("--delivery-mode", default="standard", help="Execution priority: low|standard|high")
     def swarm_run(task_name, verbose_prompt, delivery_mode):
         """🚀 Initiate swarm mission with cognitive awareness."""
-        print(f"🧬 [Nexus:Swarm] Initiating mission for task: {task_name}")
+        # 🛡️ 物理化任務 ID 安全化 (防止檔名衝突與特殊字元)
+        import hashlib
+        task_slug = task_name[:20].replace("/", "_").replace(" ", "_")
+        task_hash = hashlib.md5(task_name.encode()).hexdigest()[:8]
+        safe_task_id = f"swarm_{task_slug}_{task_hash}"
+        
+        print(f"🧬 [Nexus:Swarm] Initiating mission: {safe_task_id}")
+        print(f"📄 Task Description: {task_name}")
         
         # 🛡️ 物理化認知注入 (Self-Awareness)
         if verbose_prompt:
@@ -28,10 +35,11 @@ def register(nexus_group, REPO_ROOT):
                 from nexus.core.agent_awareness import NexusSelfAwareness
                 awareness = NexusSelfAwareness()
                 print("--- DEBUG: Injected Self-Awareness Prompt ---")
+                # 修正 API 呼叫名稱
                 print(awareness.get_self_awareness_prompt())
                 print("--------------------------------------------")
-            except ImportError:
-                print("⚠️  [Nexus:Swarm] Self-Awareness module not found, skipping injection.")
+            except (ImportError, AttributeError) as e:
+                print(f"⚠️  [Nexus:Swarm] Self-Awareness injection failed: {e}")
 
         # 🚀 執行真實任務 (接入 NexusEngine)
         try:
@@ -41,9 +49,9 @@ def register(nexus_group, REPO_ROOT):
             config = EngineConfig(project_root=REPO_ROOT, delivery_mode=delivery_mode)
             engine = NexusEngine(config=config)
             
-            print(f"📡 [Nexus:Swarm] Dispatching task '{task_name}' to engine (Mode: {delivery_mode})...")
-            # 實行 run_bug 作為實體任務測試
-            success = engine.run_bug(bug_id=task_name)
+            print(f"📡 [Nexus:Swarm] Dispatching task '{safe_task_id}' to engine (Mode: {delivery_mode})...")
+            # 使用安全 ID 呼叫引擎
+            success = engine.run_bug(bug_id=safe_task_id, desc=task_name)
             
             if success:
                 print("✅ [Nexus:Swarm] Mission Succeeded.")
