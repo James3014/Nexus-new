@@ -30,7 +30,7 @@ jobs:
         run: pip install uv
 
       - name: Install Nexus dependencies
-        run: uv pip install -e .
+        run: uv pip install --system -e .
 
       - name: Run Smoke Benchmark
         run: |
