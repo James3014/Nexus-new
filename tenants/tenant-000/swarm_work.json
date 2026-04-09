@@ -1,6 +1,6 @@
 {
-  "sub_task_id": "SUB-001",
-  "objective": "Architecture Design",
-  "status": "COMPLETED",
-  "timestamp": "2026-04-09T09:58:09.015403"
+  "task": "ARCH",
+  "worker": "tenant-000",
+  "artifact": "docs/inventory_spec.md",
+  "timestamp": "2026-04-09T10:00:03.440974"
 }

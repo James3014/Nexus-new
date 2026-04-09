@@ -1,17 +1,37 @@
 [
   {
-    "artifact": "writeback_todo.json",
-    "timestamp": "2026-04-08T22:58:02.565891",
+    "artifact": "singularity_summary.json",
+    "timestamp": "2026-04-09T08:21:16.476637",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_abyss.log",
+    "timestamp": "2026-04-09T08:21:16.460503",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_drift.log",
+    "timestamp": "2026-04-09T08:21:12.898656",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_duel.log",
+    "timestamp": "2026-04-09T08:21:12.728957",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-08T14:03:39.661531",
+    "timestamp": "2026-04-09T06:40:37.512067",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-08T14:03:39.661299",
+    "timestamp": "2026-04-09T06:40:37.511873",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "writeback_todo.json",
+    "timestamp": "2026-04-08T22:58:02.565891",
     "category": "Operational Report"
   },
   {
