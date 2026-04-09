@@ -2,5 +2,7 @@
   "version": "v0.9",
   "tenants": 10,
   "dp_epsilon": 1.0,
-  "init_at": "2026-04-08T23:23:34.135012+00:00"
+  "init_at": "2026-04-08T23:23:34.135012+00:00",
+  "iqr_threshold": 1.5,
+  "median_filter": true
 }
