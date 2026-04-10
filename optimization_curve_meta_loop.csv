@@ -1,0 +1,8 @@
+round,global_nas_aggression,system_entropy_tolerance,creativity_gradient_slope,memory_half_life_days,backpressure_nerve_threshold,system_harmony_score
+1,0.50,50.0,0.10,7,0.15,0.720
+5,0.65,40.0,0.15,10,0.18,0.840
+10,0.72,35.0,0.18,14,0.20,0.915
+15,0.78,32.0,0.22,18,0.23,0.965
+18,0.82,30.0,0.24,20,0.24,0.988
+19,0.84,28.0,0.25,21,0.25,0.995
+20,0.85,25.0,0.25,21,0.25,0.999
