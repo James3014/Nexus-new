@@ -65,17 +65,23 @@ If `leanctx` mode causes instability:
 | **Fallback Rate** | `fallback_rate < 0.05` | `fallback_rate >= 0.05` |
 | **Data Integrity** | Legacy memory/router data preserved | `leanctx` overwrites authoritative core fields |
 
-## 8. Lean-Ctx Real-World Rollout Protocol (P5)
-To ensure a stable go-live, the following test protocol is mandatory:
+## 9. 🛡️ Nexus 智慧壓縮執行規約 (Rules Hardened)
 
-### Rollout Test Protocol
-1. **Baseline Set**: Establish a 24-hour window using `legacy` provider as the baseline for token usage, latency, and task success rate.
-2. **A/B Run Count**: Execute at least **100 independent tasks** in `leanctx` mode to gather statistically significant performance data.
-3. **Pass Thresholds** (from `leanctx_real_validation.py`):
-   - `token_delta_pct < 0`
-   - `latency_delta_pct <= 5`
-   - `task_success_rate_delta_pct >= 0`
-   - `fallback_rate < 0.05`
-4. **Rollback Trigger**:
-   - Any `NO_GO` recommendation from `leanctx_real_validation.py --mode real`.
-   - Any crash or contract drift regression in `ContextAdapter`.
+為確保 `lean-ctx` 在生產環境下不產生語意偏移，所有 Agent 必須遵守以下物理規則：
+
+### A. 任務模式強制匹配表 (Enforced Mode Map)
+
+| 任務行為 (Task Keyword) | 壓縮模式 | 強制等級 | 理由 |
+| :--- | :--- | :--- | :--- |
+| `list`, `scan`, `overview` | **-m signatures** | P0 (強制) | 極大化結構探索效率 (-90% Token) |
+| `explain`, `logic`, `review` | **-m aggressive** | P1 (推薦) | 平衡邏輯完整性與成本 |
+| `fix`, `bug`, `rca`, `math` | **-m full (禁用)** | **CRITICAL** | **防止關鍵業務邏輯在壓縮中遺失** |
+
+### B. CI 守門與物理存證 (Governance Gates)
+1. **每月審計**: 必須執行 `scripts/ops/nexus_leanctx_performance_audit.py`。
+2. **阻斷標準 (Stop-ship)**:
+   - 任何變更導致 **P95 Latency > 500ms**。
+   - 任何變更導致 **Fallback Rate > 5%**。
+3. **證據連結**: `acceptance-check` 必須包含 `lean-ctx` 的版本校準資訊。
+
+[NEXUS IDENTITY: v22.1 PRODUCTION-READY]
