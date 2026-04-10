@@ -949,67 +949,55 @@ def finalize_learning_loop(
     *,
     success: bool,
     source: str,
+    bayesian_params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """🛡️ Finalize Learning (v24.0 Bayesian Hardened Loop)"""
     root = Path(project_root)
     steward = MemorySteward(root)
     violations = list(_iter_lesson_candidates(state, success))
     lessons_written = bool(violations) and bool(steward.crystallize(violations))
 
-    # --- P1-C: Structured Lesson Persistence ---
+    # --- P1-C: Unified Structured Lesson Persistence (v24.0) ---
     if lessons_written:
+        from nexus.research.findings_memory import FindingsMemoryStore, FindingsCard
+        store = FindingsMemoryStore(root)
         task_id = getattr(state, "task_id", "unknown")
+        
         for v in violations:
-            persist_structured_lesson(
-                repo_root=root,
+            event = build_structured_lesson(
                 task_id=task_id,
                 raw_lesson=v.get("reason", "Unknown Issue"),
                 category=v.get("category", "UNKNOWN"),
                 root_cause=v.get("reason", "Unknown Issue"),
                 corrective_action=v.get("suggestion", "N/A"),
-                artifact_refs=[
-                    ".nexus/reports/acceptancecheck.json",
-                    ".nexus/reports/auditresult.json",
-                ],
             )
-        
-        # 🚀 F4: Automate Vector Indexing (P2-A)
-        try:
-            from nexus.services.memory_indexer import rebuild_memory_index
-            rebuild_memory_index(root)
-            logging.info(f"💎 [LearningLoop] Memory index rebuilt for task {task_id}")
-        except Exception as e:
-            logging.warning(f"⚠️ [LearningLoop] Vector indexing failed: {e}")
-    # --------------------------------------------
+            # 🚀 Unified Handshake: LessonEvent -> FindingsCard
+            card = FindingsCard.from_lesson_event(event)
+            store.write(card)
+            upsert_lesson_event(root / ".nexus" / "knowledge" / "lesson_events.jsonl", event)
 
-    # 🧬 [Phase 13] Skill Win Rate 回寫 (經驗沉澱)
+    # 🧬 [Phase 13] Bayesian-Adaptive Skill Win Rate
     try:
-        from nexus.learning.skill_lifecycle import record_usage
         from nexus.learning.skill_registry import SkillRegistry
-
         skill_id = getattr(state, "task_id", "unknown")
-        skills_dir = root / "skills" / "learned"
-        outcome = "success" if success else "failure"
-
-        # 1. 記錄使用事件
-        if skills_dir.exists() and skill_id != "unknown":
-            record_usage(skills_dir, skill_id, skill_id, outcome)
-
-        # 2. 重新計算 win_rate 並回寫 Registry
         registry_path = root / ".nexus" / "registry" / "shared_skills.db"
+        
         if registry_path.exists() and skill_id != "unknown":
             registry = SkillRegistry(registry_path)
             existing = registry.get_by_task_id(skill_id)
             if existing:
-                # Assuming repair_success acts as absolute success count and retry_count as failures/retries
-                total_uses = existing.get("repair_success", 0) + existing.get("retry_count", 0)
-                successes = existing.get("repair_success", 0)
-                if success:
-                    successes += 1
-                total_uses += 1
-                win_rate = float(successes) / total_uses if total_uses > 0 else 0.0
-                registry.update_win_rate(skill_id, win_rate)
+                # 🧪 Bayesian Adjustment: nas_aggression affects the penalty of failure
+                nas_aggression = (bayesian_params or {}).get("nas_aggression", 0.5)
+                penalty_weight = 1.0 - (nas_aggression * 0.5) # Higher aggression = less penalty for failures
+                
+                total_uses = existing.get("repair_success", 0) + existing.get("retry_count", 0) + 1
+                successes = existing.get("repair_success", 0) + (1 if success else 0)
+                
+                # Non-linear win_rate calculation
+                win_rate = (float(successes) / total_uses) * penalty_weight
+                registry.update_win_rate(skill_id, min(1.0, win_rate))
     except Exception as e:
-        logging.warning(f"⚠️ [Phase13] Skill win_rate writeback failed: {e}")
+        logging.warning(f"⚠️ [Phase13] Bayesian Skill writeback failed: {e}")
 
     delta_paths = _write_delta_artifacts(root, state, success, source)
 

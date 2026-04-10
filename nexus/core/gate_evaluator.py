@@ -49,15 +49,15 @@ class AcceptancePolicy:
 
 class GateEvaluator:
     """
-    ⚖️ 治理閘門判定器 (GateEvaluator)
-    負責 PDRAC 指令在各個 Phase 的通行判定內容。內容及對等。性能分析。
+    ⚖️ 治理閘門判定器 (GateEvaluator v24.0 Hardened)
+    負責 PDRAC 指令在各個 Phase 的通行判定與司法解釋。
     """
     def __init__(self, policy: typing.Optional[AcceptancePolicy] = None):
         self.policy = policy or AcceptancePolicy()
 
     def should_proceed(self, phase: str, forecast: dict, risk: dict) -> typing.Tuple[bool, str]:
         """
-        核心判定邏輯：依據 Phase 與風險分析決定是否前進內容及對等分析內容量。
+        核心判定邏輯：具備司法解釋的高維度通行判定。
         """
         # ROI/Risk 判定 (Phase P -> D)
         if phase == "D":
@@ -65,17 +65,27 @@ class GateEvaluator:
             reject_prob = risk.get("reject_prob", 0.0)
             
             if roi < self.policy.d_risk_threshold:
-                return False, f"low_roi: {roi:.2f} < {self.policy.d_risk_threshold}"
+                reason = f"POLICY_VIOLATION[D-ROI]: {roi:.2f} below threshold {self.policy.d_risk_threshold}. Strategy too expensive."
+                return False, reason
             
             if reject_prob > self.policy.max_risk_prob:
-                return False, f"high_risk: {reject_prob:.2f} > {self.policy.max_risk_prob}"
+                reason = f"POLICY_VIOLATION[D-RISK]: {reject_prob:.2f} exceeds safety limit {self.policy.max_risk_prob}."
+                return False, reason
                 
             return True, "passed_p_to_d_gate"
 
         # 審計與驗證判定 (Phase V/A)
         if phase == "A":
             audit_passed = forecast.get("audit_passed", False)
-            return audit_passed, "governance_audit_decision"
+            drift = forecast.get("drift_score", 0.0)
+            
+            if not audit_passed:
+                return False, "POLICY_VIOLATION[A-AUDIT]: Feynman Audit rejected code integrity."
+            
+            if drift > self.policy.drift_max:
+                return False, f"POLICY_VIOLATION[A-DRIFT]: Semantic drift {drift:.2f} exceeds {self.policy.drift_max}."
+                
+            return True, "governance_audit_decision"
 
         return True, "default_pass"
 

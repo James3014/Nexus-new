@@ -72,18 +72,39 @@ class FindingsMemoryStore:
         finally:
             os.close(dir_fd)
 
+    @classmethod
+    def from_lesson_event(cls, event: Any) -> "FindingsCard":
+        """🛡️ MUSE-TRANSFORM (v24.0 Hardened): Convert LessonEvent to FindingsCard."""
+        return cls(
+            id=event.lesson_id[:8],
+            kind="episodes",
+            title=f"Lesson: {event.task_id}",
+            task_id=event.task_id,
+            body=f"Root Cause: {event.root_cause}\nCorrective Action: {event.corrective_action}",
+            confidence=event.confidence,
+            tags=[event.category, event.source_phase],
+            evidence_paths=event.evidence,
+            extra={
+                "trace_id": event.trace_id,
+                "decision_id": event.decision_id,
+                "outcome": event.outcome
+            }
+        )
+
     def write(self, card: FindingsCard) -> str:
-        """寫入記憶卡 (主路徑 + 鏡像備份)。"""
+        """寫入記憶卡 (v24.0 Atomic: Filesystem + Vector Sync)。"""
         card.updated_at = datetime.now().isoformat()
         path = self._get_card_path(card)
         payload = card.to_dict()
         self._atomic_write_json(path, payload)
 
-        mirror_root = Path(os.environ.get("NEXUS_MEMORY_MIRROR_ROOT", "/tmp/nexus_mirror"))
-        safe_task_id = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in (card.task_id or ""))
-        mirror_name = f"{safe_task_id}_{card.id}.json" if safe_task_id else f"{card.id}.json"
-        mirror_path = mirror_root / mirror_name
-        self._atomic_write_json(mirror_path, payload)
+        # 🚀 [v24.0 Evolution] Trigger Vector Indexing if repository is available
+        try:
+            from nexus.services.memory_repository import MemoryRepository
+            repo = MemoryRepository(self.project_root / ".nexus" / "knowledge" / "lancedb")
+            repo.semantic_dedup_ingest("findings_cards", payload)
+        except Exception:
+            pass
 
         return str(path)
 

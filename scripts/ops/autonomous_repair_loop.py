@@ -117,47 +117,40 @@ def run_repair_loop():
         # 1. Recall prior wisdom (Phase 9: Anamnesis)
         wisdom = _recall_prior_wisdom(failure_context, mem)
 
+        # 🧪 [Round 20 Evolution] Integrate Feynman Audit results into prompt
+        from scripts.ops.feynman_bridge import DualTrackAudit
+        auditor = DualTrackAudit()
+        audit_findings = auditor.run_advisory_audit(failure_context, "Self-Healing Constraint")
+        audit_context = f"\n[FEYNMAN ADVISORY]: {audit_findings['warnings']}" if audit_findings['warnings'] else ""
+
+        # 🧪 [Bayesian Temperature Gradient]
+        # Round 1: 0.2 (Precise) -> Round 5: 0.9 (Creative)
+        temp_gradient = 0.2 + (current_round - 1) * 0.15
+        nas_aggression = 0.5 + (current_round - 1) * 0.1
+
         # 2. Construct the Repair Prompt
         prompt = (
-            "NEXUS AUTONOMOUS REPAIR MISSION\n"
-            f"{wisdom}\n\n"
-            "The system failed a CI check. Here is the context:\n"
+            "NEXUS AUTONOMOUS REPAIR MISSION (v24.0 Hardened)\n"
+            f"{wisdom}\n{audit_context}\n\n"
+            "The system failed a CI check. Context:\n"
             f"{failure_context}\n\n"
-            "GOAL: Fix the issue identified in the STDERR.\n"
+            f"STRATEGY: Use Bayesian-gradient approach (Temp: {temp_gradient:.2f}).\n"
         )
-        
+
         if repair_history:
-            prompt += "\n[RECENT ATTEMPTS (Failure History)]\n"
-            for i, h in enumerate(repair_history[-2:]):
-                prompt += f"- Attempt {i+1}: {h}\n"
-            prompt += "⚠️ 注意：以上嘗試已驗證無效，請更換思路、深挖 Root Cause。\n"
+            prompt += "\n[FAILURE TRACE]\n"
+            for i, h in enumerate(repair_history):
+                prompt += f"- Round {i+1} failed attempt: {h}\n"
+            prompt += "⚠️ SWITCH REASONING: Previous rounds failed. Deepen investigation.\n"
 
-        prompt += (
-            "\nINSTRUCTIONS:\n"
-            "- Output ONLY the shell commands required to fix it, one per line.\n"
-            "- Do not explain yourself.\n"
-            "- Focus on minimal, precise changes.\n"
-        )
-
-        if current_round >= ROLLBACK_TRIGGER_ROUND:
-            print(
-                f"🚨 [Round {current_round}] Persistence detected. "
-                "Triggering Deep Breath & Observation..."
-            )
-            if current_round == ROLLBACK_TRIGGER_ROUND:
-                guard.reset_to_head()
-                prompt += "\nNOTE: Last attempts failed. Environment has been restored.\n"
-            
-            obs = _deep_breath(failure_context, ROOT)
-            prompt += f"{obs}\n"
-            prompt += "⚠️ 注意：你已進入「深呼吸模式」。請基於觀察結果而非猜測進行修復。\n"
-            
-        # 3. Invoke Gemini for Fixes
+        # 3. Invoke Gemini for Fixes with Dynamic Params
         invoke_cmd = [
             str(VENV_PYTHON), str(INVOKE_SCRIPT),
             "--prompt", prompt,
             "--preflight",
+            "--temperature", f"{temp_gradient:.2f}"
         ]
+
 
         print("📡 Consulting Zenith (Gemini) for repair strategy...")
         res = subprocess.run(invoke_cmd, capture_output=True, text=True)

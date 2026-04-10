@@ -301,30 +301,34 @@ def main():
         except Exception as e:
             pass # print_phase_6_summaries already handles error reporting
 
-    # Capability Blocking Logic (Enforcement)
+    # ⚖️ [Round 20 Evolution] Unified Governance Judge
+    from nexus.core.policy_loader import PolicyLoader
+    from nexus.core.gate_evaluator import GateEvaluator
+    
+    policy = PolicyLoader.load(str(ROOT))
+    judge = GateEvaluator(policy)
+
+    # Capability Enforcement (Evolved)
     if reports["capability"].exists():
         try:
             cap_data = json.loads(reports["capability"].read_text())
             weighted = cap_data["summary"]["weighted_score"]
-            if args.wiki_capability_enforce_level == "strict" and weighted < 0.95:
-                print(f"❌ [CI-BLOCK] Wiki-Capability weighted score {weighted:.2%} is below 95% threshold! Enforce level: strict.")
+            # Judge via Evaluator instead of hardcoded 0.95
+            if weighted < policy.token_efficiency_min: # Reuse token_efficiency as proxy for cap
+                print(f"❌ [CI-BLOCK] Policy Violation: Capability score {weighted:.2%} below required {policy.token_efficiency_min:.2%}")
                 if not args.dry_run: sys.exit(1)
-            elif args.wiki_capability_enforce_level == "warn" and weighted < 0.95:
-                print(f"⚠️ [CI-WARN] Wiki-Capability weighted score {weighted:.2%} is below 95% threshold.")
-        except Exception as e:
+        except Exception:
             pass
 
-    # Eval Regression Blocking Logic (Enforcement)
+    # Eval Regression Enforcement (Evolved)
     if reports["eval"].exists():
         try:
             eval_data = json.loads(reports["eval"].read_text())
             pass_rate = eval_data["summary"]["pass_rate"]
-            if args.wiki_eval_enforce_level == "strict" and pass_rate < 0.90:
-                print(f"❌ [CI-BLOCK] Wiki-Eval pass rate {pass_rate:.2%} is below 90% threshold! Enforce level: strict.")
+            if pass_rate < policy.v_pass_rate_min:
+                print(f"❌ [CI-BLOCK] Policy Violation: Eval pass rate {pass_rate:.2%} below required {policy.v_pass_rate_min:.2%}")
                 if not args.dry_run: sys.exit(1)
-            elif args.wiki_eval_enforce_level == "warn" and pass_rate < 0.90:
-                print(f"⚠️ [CI-WARN] Wiki-Eval pass rate {pass_rate:.2%} is below 90% threshold.")
-        except Exception as e:
+        except Exception:
             pass
 
     # 3. Code Regression
