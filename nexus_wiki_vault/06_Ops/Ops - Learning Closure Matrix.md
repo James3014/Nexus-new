@@ -53,6 +53,8 @@ version_scope:
 | X-Ray observer scan stall on legacy input | `XRayObserver("path")` 以字串傳入時被逐字元掃描，導致測試/巡檢看似卡死 | Observer 入口必須接受 `str | list[str]` 並在單路徑模式保持舊版 source 格式，避免破壞舊契約 | `pytest tests/test_xray_integration.py -vv` |
 | Gemini+Nexus battlesuit timeout loop | 透過 `BattlesuitGateway.ask_structured` 呼叫 `gemini-3-flash-preview` 時連續回傳 `Gateway Exhausted: TIMEOUT`，導致無法完成自動 patch 迭代 | 對戰甲路徑固定執行 preflight（`NEXUS_GATEWAY_TIMEOUT_SEC=45`, `NEXUS_GATEWAY_MAX_RETRIES=1`）+ 小任務 smoke；若連續超時，立即切換為「保留 Nexus 路徑證據 + 本地驗收補位」並回寫 lessons | gateway smoke + `uv run pytest -q tests/core/test_context_adapter_unit.py tests/test_leanctx_adapter.py` |
 | Lean-Ctx Context Drift | `lean-ctx` subprocess returns malformed JSON, timeouts, or exits with non-zero code | Implement `ContextAdapter` contract hardening with explicit deterministic fallback tests | `pytest tests/contracts/test_context_adapter_drift.py` |
+| Lean-Ctx Missing Binary | `ContextAdapter` fallbacks but rollout report shows `NO_GO` | Enforce missing-binary check in pre-deployment validation and go-live gate | `python3 scripts/ops/leanctx_real_validation.py --mode real` |
+| Optional external dependency drift | 上游 `lean-ctx` 更新後輸出/性能門檻偏移，導致看似可用但不達上線標準 | 將 provider 保持 optional，並以 `leanctx_real_validation.py` 門檻(`token<0`,`latency<=10`,`success>=0`,`fallback<0.05`)作為唯一 Go gate；未達標立即回退 legacy | `uv run python scripts/ops/leanctx_real_validation.py --mode real --tasks 20` |
 
 ## Upstream
 - `.nexus/reports/wiki_drift_report.json`: 漂移訊號來源。 [Source: .nexus/reports/wiki_drift_report.json]
