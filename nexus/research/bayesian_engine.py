@@ -18,16 +18,16 @@ class ResearchSearchSpace:
     def __init__(self):
         self.dimensions: List[SearchDimension] = []
 
-    def add_dimension(self, name: str, low: float, high: float, dim_type: str = "real"):
+    def add_dimension(self, name: str, low: float, high: float, dim_type: str = "real") -> None:
         self.dimensions.append(SearchDimension(name=name, dim_type=dim_type, bounds=(low, high)))
         
-    def add_categorical(self, name: str, options: List[Any]):
+    def add_categorical(self, name: str, options: List[Any]) -> None:
         self.dimensions.append(SearchDimension(name=name, dim_type="categorical", bounds=options))
 
 class BayesianResearchOptimizer:
     """
     🧠 Bayesian Optimization Engine (Pure Python/Numpy Implementation)
-    基於高斯過程 (GP) 的輕量級超參優化器。
+    基於高斯過程 (GP) 的輕量級超參優化器，具有數值穩定性與 O(N^2) 預測效能優化。
     """
     def __init__(self, space: Union[ResearchSearchSpace, List[SearchDimension]], noise: float = 1e-6):
         if isinstance(space, ResearchSearchSpace):
@@ -35,25 +35,23 @@ class BayesianResearchOptimizer:
         else:
             self.dimensions = space
         self.noise = noise
-        self.X_observed = []
-        self.y_observed = []
+        self.X_observed: List[np.ndarray] = []
+        self.y_observed: List[float] = []
         self.length_scale = 1.0
         
     def _normalize_x(self, params: Dict[str, Any]) -> np.ndarray:
         """將字典參數正規化為 [0, 1] 向量。"""
-        x = []
-        for dim in self.dimensions:
+        x = np.zeros(len(self.dimensions))
+        for i, dim in enumerate(self.dimensions):
             val = params[dim.name]
-            if dim.dim_type == "real" or dim.dim_type == "integer":
+            if dim.dim_type in ("real", "integer"):
                 low, high = dim.bounds
-                norm_val = (val - low) / (high - low)
-                x.append(norm_val)
+                diff = high - low
+                x[i] = (val - low) / diff if diff > 0 else 0.5
             elif dim.dim_type == "categorical":
-                # 簡易標籤編碼，正規化到 [0, 1]
-                idx = dim.bounds.index(val)
-                norm_val = idx / (len(dim.bounds) - 1) if len(dim.bounds) > 1 else 0.5
-                x.append(norm_val)
-        return np.array(x)
+                idx = dim.bounds.index(val) if val in dim.bounds else 0
+                x[i] = idx / (len(dim.bounds) - 1) if len(dim.bounds) > 1 else 0.5
+        return x
 
     def _denormalize_x(self, x_norm: np.ndarray) -> Dict[str, Any]:
         """從 [0, 1] 向量還原為原始參數。"""
@@ -68,15 +66,17 @@ class BayesianResearchOptimizer:
                 params[dim.name] = int(round(low + val * (high - low)))
             elif dim.dim_type == "categorical":
                 idx = int(round(val * (len(dim.bounds) - 1)))
-                params[dim.name] = dim.bounds[min(idx, len(dim.bounds) - 1)]
+                idx = max(0, min(idx, len(dim.bounds) - 1))
+                params[dim.name] = dim.bounds[idx]
         return params
 
     def _kernel(self, X1: np.ndarray, X2: np.ndarray) -> np.ndarray:
-        """RBF Kernel."""
+        """RBF Kernel with numerical stability."""
         sqdist = np.sum(X1**2, 1).reshape(-1, 1) + np.sum(X2**2, 1) - 2 * np.dot(X1, X2.T)
+        sqdist = np.maximum(sqdist, 0.0)  # Avoid negative distances due to float errors
         return np.exp(-0.5 / self.length_scale**2 * sqdist)
 
-    def observe(self, params: Dict[str, Any], score: float):
+    def observe(self, params: Dict[str, Any], score: float) -> None:
         """記錄一個觀測點 (參數與得分)。"""
         self.X_observed.append(self._normalize_x(params))
         self.y_observed.append(score)
@@ -89,15 +89,22 @@ class BayesianResearchOptimizer:
         X = np.array(self.X_observed)
         y = np.array(self.y_observed).reshape(-1, 1)
         
-        K = self._kernel(X, X) + self.noise * np.eye(len(X))
-        L = np.linalg.cholesky(K)
+        K = self._kernel(X, X)
+        K[np.diag_indices_from(K)] += self.noise
         
+        try:
+            L = np.linalg.cholesky(K)
+        except np.linalg.LinAlgError:
+            # Jitter fallback for non-positive definite kernels
+            K[np.diag_indices_from(K)] += 1e-4
+            L = np.linalg.cholesky(K)
+            
         K_s = self._kernel(X, X_s)
         Lk = np.linalg.solve(L, K_s)
         mu = np.dot(Lk.T, np.linalg.solve(L, y)).reshape(-1)
         
-        K_ss = self._kernel(X_s, X_s)
-        s2 = np.diag(K_ss) - np.sum(Lk**2, axis=0)
+        # Calculate variance efficiently: diag of RBF kernel is 1, avoiding O(N^2) memory/compute
+        s2 = np.ones(X_s.shape[0]) - np.sum(Lk**2, axis=0)
         return mu, np.sqrt(np.maximum(s2, 1e-9))
 
     def suggest(self, n_candidates: int = 1000) -> Dict[str, Any]:
@@ -116,9 +123,11 @@ class BayesianResearchOptimizer:
         # 3. 計算 EI (Expected Improvement)
         y_max = np.max(self.y_observed)
         improvement = mu - y_max
-        Z = improvement / sigma
-        ei = improvement * norm.cdf(Z) + sigma * norm.pdf(Z)
         
+        with np.errstate(divide='ignore', invalid='ignore'):
+            Z = improvement / sigma
+            ei = np.where(sigma > 1e-9, improvement * norm.cdf(Z) + sigma * norm.pdf(Z), 0.0)
+            
         # 4. 取得 EI 最大點
         best_idx = np.argmax(ei)
         return self._denormalize_x(X_candidates[best_idx])
@@ -129,4 +138,4 @@ class BayesianResearchOptimizer:
             return False
         
         recent_scores = self.y_observed[-patience:]
-        return max(recent_scores) - min(recent_scores) < tolerance
+        return (max(recent_scores) - min(recent_scores)) < tolerance
