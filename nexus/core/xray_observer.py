@@ -130,9 +130,14 @@ class XRayObserver:
             with open(path, 'r') as f:
                 lines = f.readlines()
             for line in lines:
+                normalized = line.strip()
                 if line.startswith('FROM'):
                     base_image = line.split()[1]
                     self.results.crossings.append({"source": source_id, "target": f"docker://{base_image}"})
+                if normalized.startswith("RUN ") and "pip install" in normalized:
+                    self.results.risks.append(
+                        f"{source_id}: Network-active installation detected in Dockerfile RUN step."
+                    )
         except Exception as e:
             self.results.risks.append(f"{source_id}: Scan failed: {str(e)}")
 

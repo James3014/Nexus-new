@@ -10,6 +10,15 @@ except ImportError:
     HAS_WATCHDOG = False
     # Mock for initialization
     class FileSystemEventHandler: pass
+    class Observer:
+        def schedule(self, *args, **kwargs):
+            return None
+        def start(self):
+            return None
+        def stop(self):
+            return None
+        def join(self):
+            return None
 
 class NexusFSWatcher(FileSystemEventHandler):
     """

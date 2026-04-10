@@ -62,9 +62,10 @@ class TypedHandoffAdapter:
         state.current_step_id = new_step.step_id
         state.steps_history.append(new_step)
         
-        # 如果 patch 成功，更新 aos_score (Mock 邏輯)
+        # 如果 patch 成功，更新 metadata 中的 aos_score (compat field)
         if output.patch_generated and output.status == ExecutorStatusEnum.SUCCESS:
-            state.aos_score += 0.5
+            current_score = float(state.metadata.get("aos_score", 0.0))
+            state.metadata["aos_score"] = current_score + 0.5
 
         return state
 
@@ -83,4 +84,7 @@ class SwarmOrchestratorAdapter:
         if current_state and isinstance(current_state, NexusState):
             updated_state = self.handoff.sync_output_to_state(current_state, outcome)
             self.main_orchestrator.state = updated_state
-            print(f"✅ [SwarmOrchestrator] State synced: Phase {outcome.phase} | AOS: {updated_state.aos_score}")
+            print(
+                f"✅ [SwarmOrchestrator] State synced: Phase {outcome.phase} | "
+                f"AOS: {updated_state.metadata.get('aos_score', 0.0)}"
+            )

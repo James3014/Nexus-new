@@ -183,7 +183,9 @@ def run_autotune(
     for event in outcome_events:
         total_events_seen += 1
         source = event.get("source", "unknown")
-        if source not in include_sources:
+        # Keep backward compatibility: legacy outcome events without explicit source
+        # should still participate in tuning.
+        if source not in include_sources and source != "unknown":
             events_excluded_by_source += 1
             continue
 

@@ -37,9 +37,15 @@ class SessionMetabolism:
         """Compatibility gate used by legacy metabolism tests."""
         return int(token_usage or 0) >= int(self.token_limit * self.threshold)
 
-    def distill(self, session_context: Dict[str, Any]) -> str:
+    def distill(self, session_context: Dict[str, Any], p_manager: Any | None = None) -> str:
         """📉 語義壓縮：將繁雜的對話提煉為結晶 Seed。"""
         logger.info("🧪 [Metabolism:DISTILLING] Crystallizing session essence...")
+        if p_manager is not None:
+            try:
+                from nexus.core.p_loop_manager import PPhase
+                p_manager.transition_to(PPhase.P4_METABOLIZE, {"action": "metabolism.distill"})
+            except Exception:
+                pass
         essence = {
             "version": "v23.7-FLEET-COMMAND",
             "last_commit": os.popen("git rev-parse --short HEAD").read().strip(),

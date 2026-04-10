@@ -7,6 +7,43 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+
+class NexusCLI:
+    """Compatibility shim for legacy callers that import NexusCLI from this module."""
+
+    def __init__(self, silent: bool = True, project_root: Path | None = None):
+        from nexus.engine.config import EngineConfig
+        from nexus.engine.coordinator import NexusEngine
+        from nexus.app.command_service import NexusCommandService, TaskRequest
+
+        class _CompatService:
+            def __init__(self, command_service: NexusCommandService):
+                self._command_service = command_service
+
+            def execute_bug(self, task: str, delivery_mode: str = "standard", bug_id: str | None = None, **kwargs):
+                request = TaskRequest(
+                    task=task,
+                    task_id=bug_id,
+                    delivery_mode=delivery_mode,
+                    verify_commands=kwargs.get("verify_commands"),
+                    artifact_paths=kwargs.get("artifact_paths"),
+                )
+                return self._command_service.execute_bug(request)
+
+            def execute_feature(self, task: str, domain: str | None = None, delivery_mode: str = "standard", **kwargs):
+                request = TaskRequest(
+                    task=task,
+                    domain=domain,
+                    delivery_mode=delivery_mode,
+                    verify_commands=kwargs.get("verify_commands"),
+                    artifact_paths=kwargs.get("artifact_paths"),
+                )
+                return self._command_service.execute_feature(request)
+
+        config = EngineConfig(project_root=project_root or REPO_ROOT)
+        command_service = NexusCommandService(NexusEngine(config))
+        self.service = _CompatService(command_service)
+
 @click.group()
 def nexus():
     """⚖️ Nexus v23.7 Fleet Command & Sensory CLI"""

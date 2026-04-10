@@ -71,7 +71,7 @@ class DualTrackAudit:
         diff_lower = pr_diff.lower()
         if "todo" in diff_lower or "fixme" in diff_lower:
             findings["status"] = "WARN"
-            findings["warnings"].append("Logic Leak: Unresolved markers detected.")
+            findings["warnings"].append("Logic Leak: TODO/FIXME unresolved markers detected.")
             findings["error_category"] = "HYGIENE"
         
         if "none" in diff_lower and ("attributeerror" in diff_lower or "typeerror" in diff_lower):
@@ -89,7 +89,7 @@ class DualTrackAudit:
         # Atomic Write Protection
         if findings["status"] != "PASS":
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_path = COMPLIANCE_AUDIT_DIR / f"feynman_evolved_{timestamp}.json"
+            report_path = COMPLIANCE_AUDIT_DIR / f"feynman_warnings_{timestamp}.json"
             try:
                 with open(report_path, "w") as f:
                     json.dump(findings, f, indent=2)

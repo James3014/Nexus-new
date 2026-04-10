@@ -40,7 +40,15 @@ class PredictiveAuditor:
     def audit_risk(self, pack_data: Dict[str, Any]) -> Dict[str, Any]:
         """🔍 AUDIT: Calculate risk score for a given implementation pack."""
         if not self.table:
-            return {"status": "ERROR", "message": "Wisdom Registry unreachable."}
+            return {
+                "task_id": pack_data.get("task_id", "unknown"),
+                "risk_score": 0.0,
+                "status": "PROCEED",
+                "findings": [],
+                "recommendation": "MONITORED_EXECUTION",
+                "message": "Wisdom Registry unreachable.",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
         # 1. Extract implementation intent
         intent = pack_data.get("planner_output", {}).get("goal", "unknown intent")

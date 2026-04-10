@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+from datetime import datetime, timezone
 from nexus.core.state_contracts import NexusState, AestheticViolation
 from nexus.core.event_bus import NexusEventBus
 from scripts.engine.critique_engine import CritiqueEngine
@@ -55,7 +56,9 @@ class DualLoopOrchestrator:
     async def dual_diagnose(self, executor_input: Any) -> Any:
         """🧬 Phase D (Diagnosis): 大腦 + 物理守門人共識決策 (v23 Hardened)"""
         import asyncio
-        logger.info(f"🕵️ [Consensus] Initiating Brain + Physical Auditor check for: {executor_input.task_id}")
+        raw_task_id = getattr(executor_input, "task_id", "unknown")
+        task_id = raw_task_id if isinstance(raw_task_id, str) and raw_task_id.strip() else "unknown"
+        logger.info(f"🕵️ [Consensus] Initiating Brain + Physical Auditor check for: {task_id}")
         
         # 核心 1: 大腦 (Gemini 主推理)
         async def brain_propose():
@@ -67,11 +70,12 @@ class DualLoopOrchestrator:
         physical_task = asyncio.create_task(self.physical_audit(executor_input))
         
         results = await asyncio.gather(brain_task, physical_task)
-        return self.consensus_merge(results, executor_input.task_id)
+        return self.consensus_merge(results, task_id)
 
     async def physical_audit(self, executor_input: Any) -> Dict[str, Any]:
         """🛡️ Physical Auditor: 執行 X-Ray 與美學硬化檢查 (v23 Extreme Enabled)"""
-        task_id = getattr(executor_input, "task_id", "unknown")
+        raw_task_id = getattr(executor_input, "task_id", "unknown")
+        task_id = raw_task_id if isinstance(raw_task_id, str) and raw_task_id.strip() else "unknown"
         veto_count = self.veto_counts.get(task_id, 0)
         
         if veto_count >= 3:
@@ -86,7 +90,11 @@ class DualLoopOrchestrator:
         report = observer.scan(recursive=False)
         
         # 2. 實體對接美學引擎 (CritiqueEngine)
-        engine = CritiqueEngine(Path(self.project_root) / ".nexus-soul.md")
+        try:
+            engine = CritiqueEngine(Path(self.project_root) / ".nexus-soul.md")
+        except TypeError:
+            # Backward-compatible path for constructors that do not accept args.
+            engine = CritiqueEngine()
         # 模擬對當前異動檔案進行美學檢查
         aesthetic_result = {"status": "PASS", "critique_score": 95}
         
@@ -126,7 +134,8 @@ class DualLoopOrchestrator:
                 physical_result["suggested_temp"] = 0.1
             
             # 觸發橋接回饋
-            self._bridge_feedback(task_id, physical_result)
+            if task_id != "unknown":
+                self._bridge_feedback(task_id, physical_result)
             return physical_result
             
         if brain_result and brain_result["status"] == "PASS":
@@ -151,8 +160,8 @@ class DualLoopOrchestrator:
             except: pass
             
         new_entry = {
-            "task_id": task_id,
-            "timestamp": logger.name, # 這裡模擬 timestamp
+            "task_id": str(task_id),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": "VETOED",
             "reason": veto_result.get("reason", "Unknown physical violation"),
             "suggestion": "請重新審視代碼美學與依賴安全性，避免使用高風險系統調用或 Slop 佔位符。"

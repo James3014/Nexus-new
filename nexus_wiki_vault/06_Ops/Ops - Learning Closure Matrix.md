@@ -49,6 +49,7 @@ version_scope:
 | MCP malformed-response test mismatch | 失敗簽名是 `TIMEOUT`，但測試僅接受 `Timeout/empty response` 導致假紅燈 | 針對錯誤訊息做同義容忍（含大小寫/等價字串），避免 brittle assertion | `pytest tests/services/test_mcp_delegator.py` |
 | Repeated wiki path errors | `missing_path` 重複出現 | 路徑正規化與 alias map | `wiki_drift_audit.py` |
 | Truth command policy regressions | unsafe command 或誤傷 | 指令白名單 + 詞邊界檢查 | `wiki_truth_claims_check.py` |
+| Legacy compatibility regression in mixed v9/v22 stack | 新治理/新接口上線後，舊測試依賴的 `NexusCLI`、`run_clean`、`route`、`sync_all` 等入口缺失或語義漂移 | 每次重構後執行「兼容契約測試批次」並保留 shim 層；新功能不能直接移除舊入口 | `pytest tests/test_task_runner_phase_task.py tests/test_v9_regression_p1.py tests/test_skills_router_builtin.py tests/test_wisdom_synthesis.py` |
 
 ## Upstream
 - `.nexus/reports/wiki_drift_report.json`: 漂移訊號來源。 [Source: .nexus/reports/wiki_drift_report.json]

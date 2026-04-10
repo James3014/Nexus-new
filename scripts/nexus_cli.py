@@ -187,5 +187,21 @@ class NexusCLI(CliCommandsService):
             return rc1
         return engine_cli.subprocess.call([sys.executable, str(acceptance_script)])
 
+    def run_clean(self, dry_run: bool = False):
+        """Remove known root noise files while preserving .nexus/knowledge assets."""
+        targets = [
+            self.project_root / ".musestate",
+            self.project_root / "plan.json",
+            self.project_root / "events_sourced.jsonl",
+        ]
+        for target in targets:
+            if not target.exists():
+                continue
+            if dry_run:
+                continue
+            if target.is_file():
+                target.unlink(missing_ok=True)
+        return 0
+
 if __name__ == "__main__":
     main()

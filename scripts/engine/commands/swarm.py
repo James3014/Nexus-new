@@ -4,6 +4,22 @@ import click
 import subprocess
 from pathlib import Path
 
+
+def execute(cli, args):
+    """Legacy command entrypoint used by tests and older CLI adapters."""
+    success = cli.service.execute_bug(
+        args.task,
+        delivery_mode=args.delivery_mode,
+        verify_commands=list(args.verify or []),
+        artifact_paths=list(args.artifact or []),
+    )
+    cli._print_delivery_summary("Swarm", args.delivery_mode)
+    if success:
+        print("✅ [Nexus:Swarm] Mission Succeeded.")
+    else:
+        print("❌ [Nexus:Swarm] Mission Failed.")
+    return success
+
 def register(nexus_group, REPO_ROOT):
     """
     🧬 註冊 Swarm 認知模組。
