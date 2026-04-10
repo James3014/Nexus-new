@@ -151,14 +151,45 @@ class BattlesuitGateway:
         custom_env = os.environ.copy()
         custom_env["HOME"] = "/Users/jameschen"
         custom_env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{custom_env.get('PATH', '')}"
-        
-        node_bin = "/opt/homebrew/bin/node"
-        gemini_entry = "/opt/homebrew/bin/gemini"
+
+        # Resolve binaries dynamically to avoid hard failure on host-specific paths.
+        node_bin = self._resolve_binary(
+            env=custom_env,
+            env_key="NEXUS_NODE_BIN",
+            candidates=(
+                "/opt/homebrew/bin/node",
+                "/usr/local/bin/node",
+                "/usr/bin/node",
+            ),
+            binary_name="node",
+        )
+        gemini_entry = self._resolve_binary(
+            env=custom_env,
+            env_key="NEXUS_GEMINI_BIN",
+            candidates=(
+                "/Users/jameschen/.npm-global/bin/gemini",
+                "/opt/homebrew/bin/gemini",
+                "/usr/local/bin/gemini",
+            ),
+            binary_name="gemini",
+        )
+        if not gemini_entry:
+            if tmp_payload.exists():
+                tmp_payload.unlink()
+            return self._build_error_result(
+                "Gateway bootstrap failed: cannot locate 'gemini' binary",
+                category="binary_missing",
+            ), "gemini_missing"
         
         for attempt in range(max_retries):
             try:
                 with open(tmp_payload, "rb") as f_in:
-                    cmd = [node_bin, gemini_entry, "-m", model_name, "-p", sys_msg, "--output-format", "json"]
+                    # Prefer direct CLI execution; fallback to explicit node runtime when needed.
+                    cmd = [gemini_entry, "-m", model_name, "-p", sys_msg, "--output-format", "json"]
+                    if node_bin:
+                        cmd_with_node = [node_bin, gemini_entry, "-m", model_name, "-p", sys_msg, "--output-format", "json"]
+                    else:
+                        cmd_with_node = None
                     
                     res = subprocess.run(
                         cmd,
@@ -171,7 +202,23 @@ class BattlesuitGateway:
                         timeout=dynamic_timeout
                     )
                 
-                if "login" in (res.stderr or "").lower():
+                # Retry with explicit node if gemini shim cannot find node runtime.
+                stderr_lower = (res.stderr or "").lower()
+                if res.returncode != 0 and cmd_with_node and "env: node: no such file or directory" in stderr_lower:
+                    with open(tmp_payload, "rb") as f_in2:
+                        res = subprocess.run(
+                            cmd_with_node,
+                            stdin=f_in2,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            env=custom_env,
+                            cwd="/tmp",
+                            timeout=dynamic_timeout
+                        )
+                    stderr_lower = (res.stderr or "").lower()
+
+                if "login" in stderr_lower:
                     logger.warning("⚙️ [Gateway] OAuth session expired. Please re-run 'gemini login'.")
                     time.sleep(2)
                     continue
@@ -207,6 +254,25 @@ class BattlesuitGateway:
                 
         if tmp_payload.exists(): tmp_payload.unlink()
         return self._build_error_result(f"Gateway Exhausted: {last_err}"), last_err
+
+    def _resolve_binary(
+        self,
+        *,
+        env: Dict[str, str],
+        env_key: str,
+        candidates: tuple[str, ...],
+        binary_name: str,
+    ) -> Optional[str]:
+        env_override = env.get(env_key)
+        if env_override and Path(env_override).exists():
+            return env_override
+        found = shutil.which(binary_name, path=env.get("PATH", ""))
+        if found:
+            return found
+        for candidate in candidates:
+            if Path(candidate).exists():
+                return candidate
+        return None
 
     def _parse_json_result(self, raw_text, tokens_total, capture_status):
         """解析模型產出的 JSON 內容。"""

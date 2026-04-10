@@ -65,7 +65,8 @@ class AutoResearchNightShift:
         target_file: str = DEFAULT_TARGET_FILE,
         convergence_patience: int = 5,
         gateway: Any = None,
-        model_name: Optional[str] = "gemini-3-flash-preview",
+        model_name: Optional[str] = "gemini-3.1-pro-preview",
+        fallback_model_name: Optional[str] = "gemini-3-flash-preview",
     ):
         self.task = task.strip()
         self.max_rounds = max_rounds
@@ -97,8 +98,9 @@ class AutoResearchNightShift:
         self.base_commit: Optional[str] = None
         self.tracelog_path = self.project_root / f"tracelog_{self.task.replace('/', '_')}.jsonl"
         self.gateway = gateway or BattlesuitGateway(project_root=self.project_root)
-        # 🛡️ Hardened Model Selection
+        # 🛡️ Hardened Model Selection (Primary + Fallback)
         self.model_name = model_name
+        self.fallback_model_name = fallback_model_name
 
         # 🛡️ Wisdom Triad: Initialize unified prompt engine
         try:
@@ -150,12 +152,29 @@ class AutoResearchNightShift:
             current_code = target_path.read_text(encoding="utf-8") if target_path.exists() else "# New File"
             
             if self.memory_store:
-                previous_lessons = self.memory_store.get_relevant_lessons(self.task)
+                # FindingsMemoryStore v24 does not expose get_relevant_lessons/get_wisdom_patterns.
+                # Recover task-relevant context via keyword search + recent cards.
+                matched_cards = self.memory_store.search(self.task, scope="both")[:5]
+                if not matched_cards:
+                    matched_cards = self.memory_store.list_recent(scope="task", kind="episodes", limit=3)
+                lesson_lines = []
+                for c in matched_cards:
+                    title = getattr(c, "title", "")
+                    body = getattr(c, "body", "")
+                    lesson_lines.append(f"{title}: {body[:180]}")
+                previous_lessons = "\n".join(lesson_lines) if lesson_lines else "None."
+
+                wisdom_cards = self.memory_store.list_recent(scope="global", kind="decisions", limit=3)
+                wisdom_lines = []
+                for c in wisdom_cards:
+                    title = getattr(c, "title", "")
+                    hints = ", ".join(getattr(c, "retrieval_hints", [])[:4])
+                    wisdom_lines.append(f"{title} | hints={hints}")
+                wisdom_patterns = "\n".join(wisdom_lines) if wisdom_lines else "None."
+
                 # 🚀 P1-D: Turbo Pruning restored (500 chars)
                 if len(previous_lessons) > 500:
                     previous_lessons = previous_lessons[:500] + "... [TURBO]"
-                    
-                wisdom_patterns = self.memory_store.get_wisdom_patterns(self.task)
                 if len(wisdom_patterns) > 500:
                     wisdom_patterns = wisdom_patterns[:500] + "... [TURBO]"
             else:
@@ -166,20 +185,55 @@ class AutoResearchNightShift:
             previous_lessons = f"Error: {e}"
             wisdom_patterns = "None."
 
-        # 🛡️ Wisdom Triad Check: Force model_name to gemini-3-flash-preview
-        print(f"📡 [Battlesuit] Calling Gemini CLI ({self.model_name})... Optimized context.")
-        start_gen = time.time()
-        prompt, raw_content = self.gateway.ask_structured(
-            prompt=f"Optimize the following code in {self.resolved_target_file}.\n\n[SOURCE]\n{current_code}\n\nLessons: {previous_lessons}\nWisdom: {wisdom_patterns}",
-            payload=f"Target: {self.resolved_target_file}\nParams: {params}\nReturn the FULL file content in the 'patch' field.",
-            phase="R",
-            model_name=self.model_name
-        )
-        elapsed = time.time() - start_gen
-        print(f"✅ [Battlesuit] Generation complete in {elapsed:.1f}s.")
+        prompt = {"status": "FAIL", "summary": "No model response", "patch": ""}
+        raw_content = ""
+        candidate_models = [self.model_name]
+        if self.fallback_model_name and self.fallback_model_name not in candidate_models:
+            candidate_models.append(self.fallback_model_name)
+
+        for idx, model in enumerate(candidate_models, start=1):
+            print(f"📡 [Battlesuit] Calling Gemini CLI ({model})... Optimized context.")
+            start_gen = time.time()
+            prompt, raw_content = self.gateway.ask_structured(
+                prompt=f"Optimize the following code in {self.resolved_target_file}.\n\n[SOURCE]\n{current_code}\n\nLessons: {previous_lessons}\nWisdom: {wisdom_patterns}",
+                payload=f"Target: {self.resolved_target_file}\nParams: {params}\nReturn the FULL file content in the 'patch' field.",
+                phase="R",
+                output_schema={
+                    "status": "APPROVED | REJECTED | FAIL",
+                    "summary": "Short explanation",
+                    "patch": "Full target file content as plain text",
+                    "violations": ["list of rule violations"],
+                },
+                model_name=model,
+            )
+            elapsed = time.time() - start_gen
+            print(f"✅ [Battlesuit] Generation complete in {elapsed:.1f}s.")
+
+            summary_text = str(prompt.get("summary", "") or "")
+            raw_text = str(raw_content or "")
+            failed = str(prompt.get("status", "")).upper() == "FAIL"
+            has_patch = bool(prompt.get("patch", ""))
+            should_fallback = failed and self._is_quota_or_capacity_error(summary_text + "\n" + raw_text)
+            # Also fallback on empty patch from primary model.
+            if not should_fallback and not has_patch and idx < len(candidate_models):
+                should_fallback = True
+                print("⚠️ [Battlesuit] Empty patch detected. Trying fallback model...")
+
+            if should_fallback and idx < len(candidate_models):
+                print(f"⚠️ [Battlesuit] Capacity/Quota issue on {model}. Switching to fallback model...")
+                continue
+            break
 
         if prompt.get("status") == "FAIL":
-            return RoundOutcome(0.0, "", "GENERATION_FAILED", prompt.get("summary", "Unknown failure"))
+            # Fallback path: when structured JSON coercion fails, try to recover
+            # a full-file candidate from raw model output.
+            recovered_patch = self._recover_patch_from_raw(raw_content)
+            if recovered_patch:
+                prompt["patch"] = recovered_patch
+                prompt["status"] = "APPROVED"
+                prompt["summary"] = f"{prompt.get('summary', 'Unknown failure')} | recovered_from_raw"
+            else:
+                return RoundOutcome(0.0, "", "GENERATION_FAILED", prompt.get("summary", "Unknown failure"))
 
         candidate_code = prompt.get("patch", "")
         if not candidate_code:
@@ -191,14 +245,62 @@ class AutoResearchNightShift:
 
         # 3. 🧪 Feynman Audit (Physical Verification)
         print(f"🧪 [Audit] Verifying physical integrity of {self.resolved_target_file}...")
-        audit_result = self.feynman_auditor.audit_file(str(target_path))
-        
+        audit_score, audit_summary = self._run_flashjudge(candidate_code)
+
         return RoundOutcome(
-            score=audit_result.score,
+            score=audit_score,
             candidate=candidate_code,
-            status="SUCCESS" if audit_result.score >= 0.8 else "AUDIT_REJECTED",
-            summary=audit_result.summary
+            status="SUCCESS" if audit_score >= 0.8 else "AUDIT_REJECTED",
+            summary=audit_summary
         )
+
+    def _recover_patch_from_raw(self, raw_content: str) -> str:
+        """Recover candidate code when the gateway cannot parse structured JSON."""
+        text = (raw_content or "").strip()
+        if not text:
+            return ""
+        # Prefer fenced code blocks first.
+        import re
+        fenced = re.search(r"```(?:python)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+        if fenced:
+            return fenced.group(1).strip()
+        # If output is plain text that looks like code, use it directly.
+        if any(token in text for token in ("def ", "class ", "import ", "print(", "if __name__")):
+            return text
+        return ""
+
+    def _run_flashjudge(self, candidate_code: str) -> tuple[float, str]:
+        """
+        Compatibility layer for DualTrackAudit API variants.
+        """
+        # Legacy implementation path (if available in older bridge variants)
+        if hasattr(self.feynman_auditor, "audit_file"):
+            result = self.feynman_auditor.audit_file(self.resolved_target_file)  # type: ignore[attr-defined]
+            score = float(getattr(result, "score", 0.0) or 0.0)
+            summary = str(getattr(result, "summary", ""))
+            return score, summary
+
+        # Current bridge API
+        findings = self.feynman_auditor.run_advisory_audit(candidate_code, self.task)
+        status = str(findings.get("status", "WARN")).upper()
+        warnings = findings.get("warnings", [])
+        summary = "PASS" if status == "PASS" else "; ".join(warnings) if warnings else status
+        score = 1.0 if status == "PASS" else 0.6
+        return score, summary
+
+    def _is_quota_or_capacity_error(self, text: str) -> bool:
+        t = (text or "").lower()
+        patterns = (
+            "quota",
+            "429",
+            "rate limit",
+            "resource exhausted",
+            "capacity",
+            "timeout",
+            "exceeded",
+            "unavailable",
+        )
+        return any(p in t for p in patterns)
 
     def run(self):
         """🚀 [AutoResearch] Night Shift v24.0 Eternal: Bayesian Warm-Start Enabled."""
@@ -345,7 +447,8 @@ def main():
     parser.add_argument("--budget_min", type=int, default=5)
     parser.add_argument("--target_file", default=DEFAULT_TARGET_FILE)
     parser.add_argument("--convergence_patience", type=int, default=5)
-    parser.add_argument("--model", default="gemini-3-flash-preview", help="Target LLM model")
+    parser.add_argument("--model", default="gemini-3.1-pro-preview", help="Primary LLM model")
+    parser.add_argument("--fallback-model", default="gemini-3-flash-preview", help="Fallback LLM model when quota/capacity issues occur")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
@@ -381,11 +484,27 @@ def main():
         print(f"🐝 [Swarm] Launching {args.parallel} workers...")
         with ProcessPoolExecutor(max_workers=args.parallel) as executor:
             for task_name in task_list:
-                shift = AutoResearchNightShift(task_name, args.max_rounds, args.budget_min, args.target_file, args.convergence_patience, model_name=args.model)
+                shift = AutoResearchNightShift(
+                    task_name,
+                    args.max_rounds,
+                    args.budget_min,
+                    args.target_file,
+                    args.convergence_patience,
+                    model_name=args.model,
+                    fallback_model_name=args.fallback_model,
+                )
                 executor.submit(shift.run)
     else:
         for task_name in task_list:
-            shift = AutoResearchNightShift(task_name, args.max_rounds, args.budget_min, args.target_file, args.convergence_patience, model_name=args.model)
+            shift = AutoResearchNightShift(
+                task_name,
+                args.max_rounds,
+                args.budget_min,
+                args.target_file,
+                args.convergence_patience,
+                model_name=args.model,
+                fallback_model_name=args.fallback_model,
+            )
             shift.run()
 
 if __name__ == "__main__":
