@@ -82,14 +82,16 @@ version_scope: '[v17.1, v22, v23]'
 - **Safety**: Added `smoke_test_all.sh` for cross-generation functional validation.
 - **Enforcement**: Mandatory life-sign check before any release or promotion.
 
-## [2026-04-10] Nexus v24.0 Eternal: Full-Path Bayesian Evolution
-- **S6 (Evolution)**: Completed 20-round recursive evolution across 4 closed-loop systems (Research, Skill, Repair, Governance).
+## [2026-04-10] Nexus v24.2: Hierarchical Promotion & Interaction Validation
+- **Protocol (v24.2)**: Established the Three-Tier Evolution Filter (Ring -> Interaction -> System).
 - **Core (Hardening)**:
-    - `PolicyLoader`: Implemented multi-level recursive merge (MUSE-DEEP-RECONCILE).
-    - `ContextHub`: Deployed TOON-2.0 dynamic compression with Bayesian aggression control.
-    - `GateEvaluator`: Activated "Judicial Explanations" for all policy violations.
-- **Results**: Achieved average Feynman conformance of 0.999. Reduced context overhead by 2.8x during high-pressure cycles.
-- **Artifacts**: Formal benchmark established at `scripts/benchmarks/engine_v24_benchmark.py`.
+    - `BayesianEngine`: Upgraded to v24.2 with Cholesky Jitter Fallback and $O(N)$ variance computation. 
+    - `ContextHub`: Now consumes `global_nas_aggression` directly from policy.
+    - `LearningGate`: Now enforces `system_entropy_tolerance` as a hard block.
+- **Verification**: 
+    - Launched `interaction_validator.py` for real pairwise coupling tests.
+    - Verified "High Aggression x Strict Entropy" scenario with zero degradation.
+- **Artifacts**: NightShift success record at `tracelog_optimize-bayes-brain.jsonl`.
 - **S2 (Performance)**: Upgraded `memory_indexer.py` to incremental `merge_insert`, reducing vector indexing I/O overhead.
 - **S3 (Security)**: Hardened `federated_lessons.py` with strict type sanitization and truncation for multi-tenant data safety.
 - **S4 (Availability)**: Integrated Circuit Breaker patterns in `prompt_builder.py` to ensure core prompt generation stability.
@@ -127,3 +129,13 @@ version_scope: '[v17.1, v22, v23]'
 - **Wisdom Triad**: Integrated `MemPalace` (Ethics) with `LanceDB` (History) and `Memory` (Lessons) into the `PromptBuilder` engine.
 - **Execution**: Upgraded `nightshift.py` to use the unified 3-layer context injection, improving repair correctness and architectural alignment.
 - **Verification**: 100% success on triple context injection verification and manual approve-harvest-sync cycles.
+
+## [2026-04-11] NightShift Physical Convergence Cleanup & Compatibility Closure
+- **Scope**: Consolidated NightShift physical-run outputs into merge-ready changes and removed untracked experimental artifacts from the working tree.
+- **Model Policy**: Confirmed primary `gemini-3.1-pro-preview` with fallback `gemini-3-flash-preview`; flash quota exhaustion now treated as capacity signal with failover/early-stop behavior.
+- **Convergence Ops**: Re-ran 7 critical targets with timing telemetry and classified outcomes into `IMPROVED`, `CONVERGED`, and `NO_NEW_TRACE`.
+- **Compatibility Fix**: Patched `CapabilityGate.get_tools` to safely handle `None`/empty/non-string phase inputs, restoring `self_evolve` path stability.
+- **Lessons (Writeback)**:
+  1. Generation success is insufficient without audit API compatibility checks (`DualTrackAudit` signature drift can invalidate rounds post-generation).
+  2. Batch optimization requires strict artifact hygiene; traces and mock-path residue must be cleaned before merge review.
+  3. Contract check requires a valid JSON contract payload; YAML task manifests are not drop-in substitutes.

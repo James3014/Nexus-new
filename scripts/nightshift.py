@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import time
+import shutil
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
@@ -101,6 +102,7 @@ class AutoResearchNightShift:
         # 🛡️ Hardened Model Selection (Primary + Fallback)
         self.model_name = model_name
         self.fallback_model_name = fallback_model_name
+        self.model_exhausted: Dict[str, str] = {}
 
         # 🛡️ Wisdom Triad: Initialize unified prompt engine
         try:
@@ -124,6 +126,44 @@ class AutoResearchNightShift:
             optimizer_cls = SimpleResearchOptimizer
         self.space.add_dimension("temperature", 0.1, 0.9)
         self.optimizer = optimizer_cls(self.space)
+
+    def _candidate_models(self) -> list[str]:
+        ordered: list[str] = []
+        for model in (self.model_name, self.fallback_model_name):
+            if model and model not in ordered and model not in self.model_exhausted:
+                ordered.append(model)
+        return ordered
+
+    def _probe_model_capacity(self, model_name: str, timeout_sec: int = 20) -> bool:
+        """Fast preflight: returns False when model is clearly quota/capacity exhausted."""
+        gemini_bin = os.getenv("NEXUS_GEMINI_BIN") or shutil.which("gemini") or "/Users/jameschen/.npm-global/bin/gemini"
+        if not gemini_bin or not Path(gemini_bin).exists():
+            return True
+        try:
+            res = subprocess.run(
+                [gemini_bin, "-m", model_name, "-p", "Reply with exactly OK", "--output-format", "json"],
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+            output = f"{res.stdout}\n{res.stderr}".lower()
+            if res.returncode != 0 and self._is_quota_or_capacity_error(output):
+                return False
+            return True
+        except subprocess.TimeoutExpired:
+            return True
+        except Exception:
+            return True
+
+    def _preflight_models(self) -> None:
+        candidates = [m for m in (self.model_name, self.fallback_model_name) if m]
+        for model in candidates:
+            if model in self.model_exhausted:
+                continue
+            ok = self._probe_model_capacity(model)
+            if not ok:
+                self.model_exhausted[model] = "preflight_quota_or_capacity_exhausted"
+                print(f"⚠️ [Preflight] Model unavailable by quota/capacity: {model}")
 
     def _resolve_target_file(self) -> str:
         """Resolve task string to an explicit editable file path."""
@@ -196,15 +236,36 @@ class AutoResearchNightShift:
 
         prompt = {"status": "FAIL", "summary": "No model response", "patch": ""}
         raw_content = ""
-        candidate_models = [self.model_name]
-        if self.fallback_model_name and self.fallback_model_name not in candidate_models:
-            candidate_models.append(self.fallback_model_name)
+        candidate_models = self._candidate_models()
+        if not candidate_models:
+            return RoundOutcome(
+                0.0,
+                "",
+                "MODEL_EXHAUSTED",
+                f"All candidate models exhausted: {self.model_exhausted}",
+            )
 
         for idx, model in enumerate(candidate_models, start=1):
+            def _build_generation_prompt(compact: bool = False) -> str:
+                if not compact:
+                    return (
+                        f"Optimize the following code in {self.resolved_target_file}.\n\n"
+                        f"[SOURCE]\n{current_code}\n\n"
+                        f"Lessons: {previous_lessons}\nWisdom: {wisdom_patterns}"
+                    )
+                compact_code = current_code[:6000]
+                compact_lessons = previous_lessons[:180]
+                compact_wisdom = wisdom_patterns[:180]
+                return (
+                    f"Optimize {self.resolved_target_file}. Keep behavior stable and return full file text only.\n\n"
+                    f"[SOURCE-COMPACT]\n{compact_code}\n\n"
+                    f"Lessons: {compact_lessons}\nWisdom: {compact_wisdom}"
+                )
+
             print(f"📡 [Battlesuit] Calling Gemini CLI ({model})... Optimized context.")
             start_gen = time.time()
             prompt, raw_content = self.gateway.ask_structured(
-                prompt=f"Optimize the following code in {self.resolved_target_file}.\n\n[SOURCE]\n{current_code}\n\nLessons: {previous_lessons}\nWisdom: {wisdom_patterns}",
+                prompt=_build_generation_prompt(compact=False),
                 payload=f"Target: {self.resolved_target_file}\nParams: {params}\nReturn the FULL file content in the 'patch' field.",
                 phase="R",
                 output_schema={
@@ -222,11 +283,38 @@ class AutoResearchNightShift:
             raw_text = str(raw_content or "")
             failed = str(prompt.get("status", "")).upper() == "FAIL"
             has_patch = bool(prompt.get("patch", "") or prompt.get("content", ""))
-            should_fallback = failed and self._is_quota_or_capacity_error(summary_text + "\n" + raw_text)
+            failure_text = summary_text + "\n" + raw_text
+            if failed and self._is_timeout_error(failure_text):
+                print(f"⚠️ [Battlesuit] Timeout on {model}. Retrying once with compact prompt...")
+                start_gen = time.time()
+                prompt, raw_content = self.gateway.ask_structured(
+                    prompt=_build_generation_prompt(compact=True),
+                    payload=f"Target: {self.resolved_target_file}\nParams: {params}\nReturn the FULL file content in the 'patch' field.",
+                    phase="R",
+                    output_schema={
+                        "status": "APPROVED | REJECTED | FAIL",
+                        "summary": "Short explanation",
+                        "patch": "Full target file content as plain text",
+                        "violations": ["list of rule violations"],
+                    },
+                    model_name=model,
+                )
+                elapsed = time.time() - start_gen
+                print(f"✅ [Battlesuit] Compact retry complete in {elapsed:.1f}s.")
+                summary_text = str(prompt.get("summary", "") or "")
+                raw_text = str(raw_content or "")
+                failed = str(prompt.get("status", "")).upper() == "FAIL"
+                has_patch = bool(prompt.get("patch", "") or prompt.get("content", ""))
+                failure_text = summary_text + "\n" + raw_text
+            quota_or_capacity = failed and self._is_quota_or_capacity_error(failure_text)
+            should_fallback = quota_or_capacity
             # Also fallback on empty patch from primary model.
             if not should_fallback and not has_patch and idx < len(candidate_models):
                 should_fallback = True
                 print("⚠️ [Battlesuit] Empty patch detected. Trying fallback model...")
+
+            if failed and self._is_hard_quota_error(failure_text):
+                self.model_exhausted[model] = summary_text[:200] or "quota_or_capacity"
 
             if should_fallback and idx < len(candidate_models):
                 print(f"⚠️ [Battlesuit] Capacity/Quota issue on {model}. Switching to fallback model...")
@@ -234,6 +322,13 @@ class AutoResearchNightShift:
             break
 
         if prompt.get("status") == "FAIL":
+            if candidate_models and all(m in self.model_exhausted for m in candidate_models):
+                return RoundOutcome(
+                    0.0,
+                    "",
+                    "MODEL_EXHAUSTED",
+                    f"All tried models exhausted in round: {self.model_exhausted}",
+                )
             # Fallback path: when structured JSON coercion fails, try to recover
             # a full-file candidate from raw model output.
             recovered_patch = self._recover_patch_from_raw(raw_content)
@@ -333,6 +428,23 @@ class AutoResearchNightShift:
         )
         return any(p in t for p in patterns)
 
+    def _is_timeout_error(self, text: str) -> bool:
+        t = (text or "").lower()
+        return ("timeout" in t) or ("timed out" in t)
+
+    def _is_hard_quota_error(self, text: str) -> bool:
+        t = (text or "").lower()
+        patterns = (
+            "quota",
+            "quota_exhausted",
+            "terminalquotaerror",
+            "429",
+            "rate limit",
+            "resource exhausted",
+            "capacity on this model",
+        )
+        return any(p in t for p in patterns)
+
     def run(self):
         """🚀 [AutoResearch] Night Shift v24.0 Eternal: Bayesian Warm-Start Enabled."""
         print(f"🚀 [AutoResearch] Starting Night Shift for: {self.task}")
@@ -342,9 +454,12 @@ class AutoResearchNightShift:
         self._warm_start_optimizer()
 
         self.resolved_target_file = self._resolve_target_file()
+        self._preflight_models()
 
         # 🏗️ Lease Workspace
-        task_id, branch_name, workpath = self.worktree_mgr.lease(self.task, "nightshift")
+        lease_task_id = f"{self.task}-{int(time.time())}"
+        lease_branch = f"nightshift-{int(time.time())}"
+        task_id, branch_name, workpath = self.worktree_mgr.lease(lease_task_id, lease_branch)
         if not workpath:
             print("❌ [AutoResearch] Failed to lease workspace.")
             return {"status": "FAILED", "reason": "workspace_lease_failed"}
@@ -359,6 +474,11 @@ class AutoResearchNightShift:
 
                 outcome = self._run_round(round_id, workpath)
                 self.optimizer.observe({"temperature": 0.5}, outcome.score)
+
+                if outcome.status == "MODEL_EXHAUSTED":
+                    self._log_trace(round_id, "MODEL_EXHAUSTED", 0.0, outcome.summary)
+                    print("🛑 [AutoResearch] All models exhausted by quota/capacity. Stopping task early.")
+                    break
 
                 if outcome.status == "SCORED" and outcome.score > self.best_score:
                     print(f"⭐ [AutoResearch] New best score: {outcome.score:.2f} (Round {round_id})")
@@ -381,6 +501,9 @@ class AutoResearchNightShift:
                     subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=workpath, capture_output=True)
                     self.no_improve_streak += 1
                     self._log_trace(round_id, outcome.status, outcome.score, outcome.summary)
+                    if outcome.status == "GENERATION_FAILED" and self._is_quota_or_capacity_error(outcome.summary):
+                        print("🛑 [AutoResearch] Generation blocked by quota/capacity. Stopping to avoid empty retries.")
+                        break
 
                 if self.no_improve_streak >= self.convergence_patience:
                     print(f"🎯 [AutoResearch] Convergence reached after {self.no_improve_streak} rounds.")
