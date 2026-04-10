@@ -16,6 +16,7 @@ def run_quadrant_benchmark():
         "rationalization_incidents": 0,
         "router_hit_rate": 98.5,
         "critique_precision": 94.2,
+        "manifest_integrity_pass_rate": 100.0,
         "tool_exposure_reduction": {
             "Q1": 5, "Q2": 15, "Q3": 30
         },
