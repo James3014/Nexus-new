@@ -82,8 +82,8 @@ def evaluate_metrics(metrics: Dict[str, object], tasks: int) -> Dict[str, object
     reasons: List[str] = []
     if not (report["token_delta_pct"] < 0):
         reasons.append("token_delta_pct must be < 0")
-    if not (report["latency_delta_pct"] <= 10):
-        reasons.append("latency_delta_pct must be <= 10")
+    if not (report["latency_delta_pct"] <= 5):
+        reasons.append("latency_delta_pct must be <= 5")
     if not (report["task_success_rate_delta_pct"] >= 0):
         reasons.append("task_success_rate_delta_pct must be >= 0")
     if not (report["fallback_rate"] < 0.05):
