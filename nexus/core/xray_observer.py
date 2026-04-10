@@ -17,8 +17,10 @@ class XRayObserver:
     限制：當前版本僅限於單一目錄靜態分析。
     """
     
-    def __init__(self, target_dirs: List[str]):
-        self.target_dirs = target_dirs
+    def __init__(self, target_dirs: List[str] | str):
+        # Backward compatibility: older callers pass a single string path.
+        self.target_dirs = [target_dirs] if isinstance(target_dirs, str) else target_dirs
+        self._legacy_source_format = isinstance(target_dirs, str)
         self.results = XRayResult()
 
     def scan(self, recursive: bool = True) -> XRayResult:
@@ -99,7 +101,7 @@ class XRayObserver:
                 return
 
             # 通用的 Source 識別格式: repo::filename
-            source_id = f"{repo_id}::{filename}"
+            source_id = filename if self._legacy_source_format else f"{repo_id}::{filename}"
 
             if filename.endswith('.py'):
                 with open(path, 'r', encoding='utf-8') as f:
