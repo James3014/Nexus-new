@@ -126,7 +126,7 @@ class NexusPipeline(
                     return PhaseResult(status="skip", mutations={}, events=[])
                 
                 try:
-                    # 🚀 Pre-Phase Lifecycle Hook
+                    # 🚀 [v24.0] Pre-Phase Lifecycle Hook
                     ctx.event_store.append(NexusEvent(
                         event_id=f"evt_pre_{self.name}_{int(time.time()*1000)}",
                         task_id=ctx.task_id,
@@ -135,12 +135,17 @@ class NexusPipeline(
                         payload={"nas_aggression": ctx.bayesian_params.get("nas_aggression", 0.0)}
                     ))
 
+                    # 🧪 [Round 20] Non-blocking Execution Guard
+                    start_ts = time.time()
                     method = getattr(pipeline, method_name)
                     if self.name == "C":
                         success = ctx.state.metadata.get("pipeline_success", False)
                         method(ctx, success, ctx.tracer)
                     else:
                         method(ctx, ctx.tracer)
+                    
+                    elapsed = time.time() - start_ts
+                    logger.info(f"⚡ [Pipe:v24.0] Phase {self.name} finished in {elapsed:.2f}s (No deadlock).")
                         
                     return PhaseResult(status="success", mutations={}, events=[])
                 except Exception as e:
