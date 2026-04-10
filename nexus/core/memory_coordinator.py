@@ -39,28 +39,43 @@ class MemoryCoordinator:
         self._wait_samples_ms: List[float] = []
 
     @contextmanager
-    def lock(self, target_path: Path) -> Iterator[Path]:
+    def lock(self, target_path: Path, read_only: bool = False, bayesian_params: Optional[Dict[str, Any]] = None) -> Iterator[Path]:
+        """
+        🚀 [v24.0] Atomic Fast-Path Swarm Lock (Backpressure Aware)
+        """
         lock_path = self._lock_path(target_path)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+        
+        # 🧪 [Round 20] Backpressure Scaling
+        nerve_threshold = (bayesian_params or {}).get("backpressure_nerve_threshold", 0.25)
+        # Dynamic polling: aggressive swarms poll faster
+        dynamic_poll = self.poll_interval_sec * (1.0 - nerve_threshold)
+        
+        flags = os.O_RDONLY if read_only else (os.O_CREAT | os.O_RDWR)
+        lock_fd = os.open(lock_path, flags, 0o644)
         start = time.monotonic()
 
-        with os.fdopen(lock_fd, "a+") as handle:
+        with os.fdopen(lock_fd, "r" if read_only else "a+") as handle:
             lock_key = str(lock_path.resolve())
             self._register_lock_order(lock_key)
             try:
-                while True:
-                    try:
-                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        elapsed = time.monotonic() - start
-                        if elapsed > self.timeout_sec:
-                            self.last_wait_ms = elapsed * 1000.0
-                            raise LockTimeoutError(
-                                f"LockTimeout: waited {elapsed:.2f}s for {lock_path}"
-                            )
-                        time.sleep(self.poll_interval_sec)
+                # 🚀 FAST-PATH: First attempt without sleep
+                try:
+                    fcntl.flock(handle.fileno(), (fcntl.LOCK_SH if read_only else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    # SLOW-PATH: Start polling
+                    while True:
+                        try:
+                            fcntl.flock(handle.fileno(), (fcntl.LOCK_SH if read_only else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            elapsed = time.monotonic() - start
+                            if elapsed > self.timeout_sec:
+                                self.last_wait_ms = elapsed * 1000.0
+                                raise LockTimeoutError(
+                                    f"LockTimeout: waited {elapsed:.2f}s for {lock_path} (Backpressure: {nerve_threshold})"
+                                )
+                            time.sleep(dynamic_poll)
 
                 self.last_wait_ms = (time.monotonic() - start) * 1000.0
                 self._record_wait(self.last_wait_ms)

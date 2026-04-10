@@ -17,31 +17,33 @@ class AmbiguityGuard:
         "normalization_engine.py": {"owner": "naming_standard", "proxy": "AGENT_SCHEMA.md"}
     }
 
-    def scan_plan(self, plan_data: Dict[str, Any]) -> List[str]:
-        """🔍 掃描雙重來源與判定歧義。"""
+    def scan_plan(self, plan_data: Dict[str, Any]) -> Tuple[List[str], Dict[str, Any]]:
+        """🔍 掃描歧義並執行 JIT 護欄注入 (v24.0 Active Armory)"""
         warnings = []
+        jit_injections = {"required_tools": [], "verification_steps": []}
         
         # 1. 檢查 ViewModel 是否存在
         if "view_model" not in plan_data:
-            warnings.append("⚠️ Missing ViewModel block (v25.6 Requirement Violation)")
+            warnings.append("⚠️ Missing ViewModel block (v24.0 Requirement Violation)")
+            jit_injections["required_tools"].append("generate_view_model")
         
         # 2. 檢查真相源衝突 (AGENTSCHEMA 2.1)
-        # 模擬偵測：若 view_model 包含額外 data_proxy 則視為衝突
         view_model = plan_data.get("view_model", {})
         proxy = view_model.get("data_proxy", "")
         if "manifest.json" not in proxy and proxy != "":
              warnings.append(f"❌ Parallel Truth Detected: {proxy} (Should only ref manifest.json)")
+             jit_injections["verification_steps"].append("Verify data_proxy points ONLY to manifest.json")
 
         # 3. 檢查命名規範 (Blade 1 整合)
-        # 若存在 A_PASSED 則報警
         raw_content = json.dumps(plan_data)
         if "A_PASSED" in raw_content or "APASSED" in raw_content:
-            warnings.append("❌ Naming Drift Detected: 'A_PASSED' detected (Run normalization_engine first)")
+            warnings.append("❌ Naming Drift Detected: 'A_PASSED' detected")
+            jit_injections["required_tools"].append("run_normalization_engine")
 
-        return warnings
+        return warnings, jit_injections
 
     def audit_governance(self, plan_path: str):
-        """⚖️ 執行 P6a Draft 之前的終極判定。"""
+        """⚖️ 執行 P6a Draft 之前的終極判定 (v24.0 JIT Edition)。"""
         if not Path(plan_path).exists():
             logger.error(f"File not found: {plan_path}")
             return 1
@@ -53,9 +55,9 @@ class AmbiguityGuard:
                 logger.error("Invalid JSON format.")
                 return 1
 
-        warnings = self.scan_plan(data)
+        warnings, jit = self.scan_plan(data)
         
-        print("--- 🛡️ AMBIGUITY-GUARD AUDIT REPORT ---")
+        print("--- 🛡️ AMBIGUITY-GUARD AUDIT REPORT (v24.0) ---")
         if not warnings:
             print("Status: 🟢 CLEAN (0 Ambiguities Found)")
             print("Action: PROMOTE TO P6a DRAFT")
@@ -64,6 +66,14 @@ class AmbiguityGuard:
             print(f"Status: 🔴 REJECTED ({len(warnings)} Warnings)")
             for w in warnings:
                 print(w)
+            print("\n🔧 JIT Injections Suggested for Next Round:")
+            print(json.dumps(jit, indent=2))
+            
+            # 🚀 Auto-Inject into the plan for the next loop
+            data["_jit_guard_suggestions"] = jit
+            with open(plan_path, "w") as f:
+                json.dump(data, f, indent=2)
+                
             return 1
 
 if __name__ == "__main__":

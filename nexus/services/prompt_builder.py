@@ -79,8 +79,8 @@ class PromptBuilder:
         except Exception:
             return ""
 
-    def build_system_prompt(self, phase: str, model_hint: str = "flash") -> str:
-        """建立系統層級的指導 Prompt (含教育模式)"""
+    def build_system_prompt(self, phase: str, model_hint: str = "flash", bayesian_params: Optional[Dict[str, Any]] = None) -> str:
+        """建立系統層級的指導 Prompt (v24.0 Bayesian Warm-Start)"""
         primer_section = "\n".join([f"  - {r}" for r in self.NEXUS_PRIMER["constitutional_rules"]])
         guard_section = "\n".join([f"  - {g}" for g in self.NEXUS_PRIMER["logic_guard"]])
         
@@ -89,8 +89,18 @@ class PromptBuilder:
         tools_section = f"Available Tools (Current Phase: {phase}):\n" + \
                         "\n".join([f"  - {t}" for t in tools_info["available_tools"]])
         
-        return f"""### [Nexus v23 Constitution]
+        # 🧪 [Round 20] Meta-Parameter Injection (The 9 Rings)
+        aggression = (bayesian_params or {}).get("global_nas_aggression", 0.5)
+        slope = (bayesian_params or {}).get("creativity_gradient_slope", 0.1)
+        
+        reasoning_style = "EXPLORATORY & AGGRESSIVE (Prioritize structural refactoring over quick hacks)" if aggression > 0.7 \
+                          else "CONSERVATIVE & PRECISE (Focus on minimal viable fixes, avoid side effects)"
+
+        return f"""### [Nexus v24.0 Eternal Constitution]
 Phase: {phase}
+Meta-State: Aggression={aggression:.2f}, Slope={slope:.2f}
+Reasoning Style: {reasoning_style}
+
 Rules:
 {primer_section}
 

@@ -57,46 +57,49 @@ async def fetch_remote_lessons(session: aiohttp.ClientSession, source: str) -> L
 def validate_and_filter_lessons(
     lessons: List[Dict[str, Any]], 
     min_confidence: float = 0.7, 
-    max_age_days: int = 30
+    max_age_days: int = 30,
+    bayesian_params: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
-    """品質過濾 + 治理門禁 (Schema + Integrity)"""
+    """🛡️ 品質過濾 + 聯邦治理門禁 (v24.0 Bayesian Trust Decay)"""
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
     valid = []
     
     REQUIRED_FIELDS = ["lesson_id", "task_id", "category", "root_cause", "corrective_action", "confidence", "schema_version"]
     
+    # 🧪 [Round 20] Meta-Parameter Integration
+    aggression = (bayesian_params or {}).get("global_nas_aggression", 0.85)
+    entropy_tolerance = (bayesian_params or {}).get("system_entropy_tolerance", 25.0)
+    
+    # 動態調整信任門檻：侵略性越高，願意接受越低信心的外部經驗
+    dynamic_min_confidence = max(0.4, min_confidence - (aggression * 0.2))
+
     for lesson in lessons:
         try:
-            # 1. Schema check
-            if lesson.get("schema_version") != "lesson_event.v1":
-                continue
-            
-            # 2. Integrity check
-            if not all(field in lesson for field in REQUIRED_FIELDS):
+            # 1. Schema & Integrity check
+            if lesson.get("schema_version") != "lesson_event.v1" or not all(field in lesson for field in REQUIRED_FIELDS):
                 continue
                 
-            # 3. Quality threshold
-            if lesson.get("confidence", 0) < min_confidence:
+            # 2. 🧪 [v24.0] Bayesian Confidence Gate
+            if lesson.get("confidence", 0) < dynamic_min_confidence:
                 continue
             
-            # 4. Success outcome only
+            # 3. 🧪 [v24.0] Entropy Hard-Block (防止壞租戶污染)
+            lesson_entropy = float(lesson.get("entropy_score", 0.0))
+            if lesson_entropy > entropy_tolerance:
+                # 拒絕高亂度經驗
+                continue
+
             if lesson.get("outcome") == "failure":
                 continue
                 
-            # 5. Recency
             ts_str = lesson["timestamp_utc"].replace("Z", "+00:00")
             ts = datetime.fromisoformat(ts_str)
             if ts < cutoff:
                 continue
                 
-            # 🛡️ S3: Deep Type Sanitization & Sanitization
-            # Ensure reusable_when is a List[str]
+            # 🛡️ Deep Type Sanitization
             rw = lesson.get("reusable_when", [])
-            if not isinstance(rw, list):
-                rw = [str(rw)] if rw else []
-            lesson["reusable_when"] = [str(i)[:200] for i in rw] # Truncate items
-            
-            # Sanitize core text fields
+            lesson["reusable_when"] = [str(i)[:200] for i in (rw if isinstance(rw, list) else [str(rw)])]
             lesson["root_cause"] = str(lesson.get("root_cause", ""))[:1000]
             lesson["corrective_action"] = str(lesson.get("corrective_action", ""))[:2000]
             lesson["task_id"] = str(lesson.get("task_id", "unknown"))[:100]

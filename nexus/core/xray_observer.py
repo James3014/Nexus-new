@@ -22,13 +22,12 @@ class XRayObserver:
         self.results = XRayResult()
 
     def scan(self, recursive: bool = True) -> XRayResult:
-        """執行全域/多目錄靜態掃描 (v23 Cross-Repo Hardened)"""
+        """執行全域/多目錄靜態掃描 (v24.0 Cross-Repo Evolved)"""
         for target in self.target_dirs:
             target_path = os.path.abspath(os.path.expanduser(target))
             if not os.path.exists(target_path):
                 continue
             
-            # 使用目錄名稱作為 Repo 前綴
             repo_id = os.path.basename(target_path) if os.path.isdir(target_path) else "standalone"
             
             if os.path.isfile(target_path):
@@ -36,8 +35,46 @@ class XRayObserver:
             else:
                 self._scan_dir(repo_id, target_path, recursive)
                 
-        self.results.summary = f"v23 X-Ray Cross-Repo Scan complete. Symbols: {len(self.results.symbols)} | Crossings: {len(self.results.crossings)}"
+        # 🧪 [Round 20] X-Ray Active Refactoring Trigger
+        # Detect files with extreme coupling (High Crossings)
+        crossing_counts = {}
+        for crossing in self.results.crossings:
+            src = crossing["source"]
+            crossing_counts[src] = crossing_counts.get(src, 0) + 1
+            
+        for src, count in crossing_counts.items():
+            if count > 15:
+                # 🚀 Autonomic FindingsCard Generation for Technical Debt
+                self.results.risks.append(f"{src}: ⚠️ EXTREME COUPLING DETECTED ({count} imports). Refactoring mandatory.")
+                self._inject_refactoring_card(src, count)
+
+        self.results.summary = f"v24.0 X-Ray Scan complete. Symbols: {len(self.results.symbols)} | Crossings: {len(self.results.crossings)} | Risks: {len(self.results.risks)}"
         return self.results
+
+    def _inject_refactoring_card(self, source_id: str, count: int):
+        """🧠 自動將高耦合度問題注入為系統級長期任務"""
+        try:
+            from nexus.research.findings_memory import FindingsMemoryStore, FindingsCard
+            from datetime import datetime
+            import hashlib
+            
+            store = FindingsMemoryStore(".")
+            card_id = hashlib.md5(f"refactor_{source_id}".encode()).hexdigest()[:8]
+            
+            card = FindingsCard(
+                id=card_id,
+                kind="episodes",
+                title=f"Technical Debt: {source_id}",
+                task_id="auto-refactor-xray",
+                body=f"Root Cause: Module {source_id} exceeds coupling threshold with {count} crossings.\nCorrective Action: Apply Dependency Inversion or Facade pattern to decouple {source_id}.",
+                confidence=1.0, # Mathematical certainty
+                tags=["ARCHITECTURE", "REFACTORING_REQUIRED"],
+                evidence_paths=[],
+                updated_at=datetime.utcnow().isoformat()
+            )
+            store.write(card)
+        except Exception:
+            pass
 
     def _scan_dir(self, repo_id: str, directory: str, recursive: bool):
         """掃描目錄（支援多 Repo 名稱空間分離）"""
