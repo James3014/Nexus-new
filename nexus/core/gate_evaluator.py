@@ -5,46 +5,61 @@ from dataclasses import dataclass, field
 @dataclass
 class AcceptancePolicy:
     """
-    📜 Nexus 治理政策門檻 (Phase 2 Hardened)
-    支持外部 YAML 加載與物理回退機制內容性能及性能。內容內容內容及性能內容性能性能性能。內容內容內容及性質。內容且對量分析。性能分析。
+    📜 Nexus 治理政策門檻 (v24.0 Meta-Hardened)
+    支持外部 YAML 加載、物理回退與九環元參數控制。
     """
-    # [gates] 區塊內容內容及性能內容性能性能性能內容及性能。
+    # [gates] 區塊
     d_risk_threshold: float = 0.5
     max_risk_prob: float = 0.8
     v_pass_rate_min: float = 80.0
     max_forecast_tokens: int = 50000
-    
-    # [health] 區塊內容內容及性能內容性能性能性能內容及性能內容。
+
+    # [health] 區塊
     drift_max: float = 0.5
     token_efficiency_min: float = 0.7
 
+    # 🌌 [meta_evolution] 區塊 (v24.0 九環共振)
+    global_nas_aggression: float = 0.85
+    system_entropy_tolerance: float = 25.0
+    creativity_gradient_slope: float = 0.25
+    memory_half_life_days: int = 21
+    backpressure_nerve_threshold: float = 0.25
+
     @staticmethod
     def default() -> "AcceptancePolicy":
-        """獲取內置基準政策內容性能及性能。內容內容內容及性能。內容性能性能。內容及性質。性能分析。"""
+        """獲取內置基準政策。"""
         return AcceptancePolicy()
 
     @staticmethod
     def from_dict(data: dict) -> "AcceptancePolicy":
         """
-        🔗 層級式政策映射 (Hierarchical Mapping)
-        從字典中物理提取 gates 與 health 區塊內容內容內容及性能。內容及性能。內容性能。
-        支援覆寫邏輯：環境特定配置將覆蓋全域預設內容及對度。內容性能。
+        🔗 階層式政策映射 (v24.0 Hardened)
+        支持 gates, health 與 meta_evolution 區塊的物理提取。
         """
         policy = AcceptancePolicy.default()
         gates = data.get("gates", {})
         health = data.get("health", {})
+        meta = data.get("meta_evolution", {})
 
-        # 🎯 物理映射：Gates 區塊內容分析內容性能性能內容。內容內容內容。
+        # 🎯 物理映射：Gates
         policy.d_risk_threshold = gates.get("d_risk_threshold", policy.d_risk_threshold)
         policy.max_risk_prob = gates.get("max_risk", gates.get("max_risk_prob", policy.max_risk_prob))
         policy.v_pass_rate_min = gates.get("v_pass_rate_min", policy.v_pass_rate_min)
         policy.max_forecast_tokens = gates.get("max_forecast_tokens", policy.max_forecast_tokens)
-        
-        # 🎯 物理映射：Health 區塊內容解析內容。內容、性質。性能分析。
+
+        # 🎯 物理映射：Health
         policy.drift_max = health.get("drift_max", policy.drift_max)
         policy.token_efficiency_min = health.get("token_efficiency_min", policy.token_efficiency_min)
 
+        # 🌌 物理映射：Meta-Evolution (The 9 Rings)
+        policy.global_nas_aggression = meta.get("global_nas_aggression", policy.global_nas_aggression)
+        policy.system_entropy_tolerance = meta.get("system_entropy_tolerance", policy.system_entropy_tolerance)
+        policy.creativity_gradient_slope = meta.get("creativity_gradient_slope", policy.creativity_gradient_slope)
+        policy.memory_half_life_days = meta.get("memory_half_life_days", policy.memory_half_life_days)
+        policy.backpressure_nerve_threshold = meta.get("backpressure_nerve_threshold", policy.backpressure_nerve_threshold)
+
         return policy
+
 
 
 class GateEvaluator:
