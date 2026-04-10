@@ -10,7 +10,7 @@ from nexus.research.research_pack import build_research_pack
 logger = logging.getLogger(__name__)
 
 class PipelineStagesMixin:
-    """🛤️ Mixin for P-X-D stage methods in NexusPipeline."""
+    """🛤️ Mixin for P-X-D stage methods in NexusPipeline (v24.0 Master Loop Hardened)."""
     
     def _register_phase_decision(self, ctx: PipelineContextProtocol, phase: str, skill_id: str) -> str:
         ctx.decision_counter += 1
@@ -38,23 +38,28 @@ class PipelineStagesMixin:
 
     def _stage_plan(self, ctx: PipelineContextProtocol, tracer: Any) -> None:
         with tracer.phase_span('P', task_id=ctx.task_id) as p_span:
-            # --- P Stage: Plan ---
+            # --- P Stage: Plan (v24.0 Hardened - Learning Injected) ---
             ctx.state.current_phase = "P"
             p_decision_id = self._register_phase_decision(ctx, "P", "planner")
+            
+            # 🧪 [Round 20] Bayesian Parameter Injection from current context
+            nas_aggression = (ctx.bayesian_params or {}).get("nas_aggression", 0.7)
+            ctx.kwargs["nas_aggression"] = nas_aggression
             
             try:
                 ki = KnowledgeIndex(self.engine.project_root, use_embedding=True)
                 p_hints = ki.search_similar(ctx.task_desc, top_k=2, threshold=0.2, task_type=ctx.task_type)
                 strategies = [fm.plan_strategy for fm, _ in p_hints if fm.plan_strategy]
                 if strategies:
-                    ctx.kwargs["plan_hint"] = f"歷史成功策略: {strategies[0]}"
+                    ctx.kwargs["plan_hint"] = f"歷史成功策略: {strategies[0]} | Aggression: {nas_aggression:.2f}"
                     ctx.state.metadata["inherited_plan_strategy"] = strategies[0]
-                    logger.info("📋 P 階段：繼承歷史策略 → %s", strategies[0])
+                    logger.info("📋 P 階段：繼承歷史策略並注入貝葉斯參數 (Aggression: %.2f)", nas_aggression)
             except (ImportError, FileNotFoundError, Exception) as exc:
                 logger.debug("p_phase_learning_skip: %s", exc)
 
             decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
-            ctx.prediction = ctx.planner.run(ctx.state, {"task": ctx.task_desc, **ctx.kwargs})
+            # 🚀 [v24.0] Pass Bayesian params to the Planner
+            ctx.prediction = ctx.planner.run(ctx.state, {"task": ctx.task_desc, **ctx.kwargs}, bayesian_params=ctx.bayesian_params)
             ctx.accumulator.record(ctx.state, "P", ctx.prediction)
             self.engine._add_step_to_history(
                 ctx.state, "P", metadata={"prediction": ctx.prediction, "decision_id": p_decision_id, "skill_id": "planner"}
@@ -129,7 +134,7 @@ class PipelineStagesMixin:
 
     def _stage_diagnose(self, ctx: PipelineContextProtocol, tracer: Any) -> None:
         with tracer.phase_span('D', task_id=ctx.task_id) as d_span:
-            # --- D Stage: Diagnose ---
+            # --- D Stage: Diagnose (v24.0 Judicial Risk Aware) ---
             ctx.state.current_phase = "D"
             d_decision_id = self._register_phase_decision(ctx, "D", "diagnose-pack")
             
@@ -137,6 +142,11 @@ class PipelineStagesMixin:
                 ctx.pack = ctx.hub.assemble_diag_pack([], ctx.task_desc)
             else:
                 ctx.pack = ctx.hub.assemble_feature_pack(plan=ctx.prediction)
+
+            # 🚀 [v24.0] Integrate Judicial Risk Awareness from previous Audit failures
+            if ctx.state.metadata.get("last_audit_failure"):
+                ctx.pack["critical_policy_risks"] = [ctx.state.metadata["last_audit_failure"]]
+                logger.info("⚖️ D 階段：已標註歷史政策風險點以強化診斷")
 
             if ctx.research_pack:
                 ctx.pack["research_context"] = ctx.research_pack

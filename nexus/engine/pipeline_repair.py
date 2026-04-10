@@ -27,17 +27,26 @@ class PipelineRepairMixin:
     """🛠️ Mixin for Repair/Audit loop logic in NexusPipeline."""
 
     def _execute_single_repair(self, ctx: PipelineContextProtocol, tracer: Any, repair_attempts: int) -> dict:
-        """Executes a single repair attempt (Phase R)."""
+        """Executes a single repair attempt (Phase R - v24.0 Bayesian Hardened)."""
         self._prepare_repair_context(ctx, repair_attempts)
 
         with tracer.phase_span('R', task_id=ctx.task_id) as r_span:
-            # Core repair execution
-            res = ctx.repairer.run(ctx.state, ctx.pack)
+            # 🧪 [Round 20] Inject Bayesian params based on previous trauma
+            r_params = ctx.bayesian_params.copy()
+            if repair_attempts > 1:
+                r_params["temperature"] = 0.2 + (repair_attempts * 0.15)
+                logger.info(f"🔥 [Bayesian-Repair] Scaling temperature to {r_params['temperature']:.2f}")
+
+            res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
             ctx.accumulator.record(ctx.state, "R", res, overhead=100)
 
         r_out = self._process_repair_response(ctx, res, repair_attempts)
+        
+        # 🚀 [v24.0] Immediate Intra-loop learning trigger
+        if r_out["status"] == "REJECTED":
+            self._record_intra_loop_trauma(ctx, r_out)
 
-        # CLI Pregate validation if repair was not rejected by the model itself
+        # CLI Pregate validation
         if r_out["status"] != "REJECTED":
             r_out["status"] = self._run_pregate_if_needed(ctx, r_out["status"], r_out["result"])
 
@@ -51,6 +60,19 @@ class PipelineRepairMixin:
             }
         )
         return r_out
+
+    def _record_intra_loop_trauma(self, ctx: PipelineContextProtocol, r_out: dict):
+        """🛡️ [v24.0] 記錄失敗基因，防止修復循環陷入死胡同。"""
+        try:
+            from nexus.core.state_contracts import TraumaRecord
+            trauma = TraumaRecord(
+                failure_signature=f"REPAIR_FAIL_{ctx.state.current_step_id}",
+                penalty=-0.3 * ctx.state.retry_count,
+                expiry=None # Eternal for current task
+            )
+            ctx.state.autonomic_weights.trauma_records.append(trauma)
+            logger.info("🧠 [Learning] Intra-loop trauma recorded for next iteration.")
+        except Exception: pass
 
     def _prepare_repair_context(self, ctx: PipelineContextProtocol, repair_attempts: int) -> None:
         """Prepares context required for repair (RCA, skill context)."""

@@ -23,15 +23,20 @@ class PipelineCrystalMixin:
     """💎 Mixin for Crystallize stage methods in NexusPipeline."""
     
     def _stage_crystallize(self, ctx: PipelineContextProtocol, success: bool, tracer: Any) -> None:
-        """主入口：執行 C 階段結晶邏輯。"""
+        """主入口：執行 C 階段結晶邏輯 (v24.0 Hardened - Immediate Learning)."""
+        logger.info(f"💎 [Phase C] Crystallizing Master Loop: {ctx.task_id}")
+        
+        # 🧪 [Round 20] Dynamic Signal Scoring
+        # Ensure latest Bayesian params are captured
+        ctx.state.metadata["final_nas_aggression"] = ctx.bayesian_params.get("nas_aggression", 0.7)
+
         signals = self._collect_crystal_signals(ctx, success, tracer)
         
-        # 🔧 FIX: 先觸發 LearningScorer 計算 pattern_reuse_rate / next_run_hit_rate，
-        # 再寫入 outcome event，否則 learning signal 永遠為 0.0。
         try:
             from nexus.core.learning_evidence import LearningEvidenceBuilder
             from nexus.core.learning_scorer import LearningScorer
             evidence = LearningEvidenceBuilder.build(ctx.state)
+            # 🚀 [v24.0] Apply cross-phase learning scores
             LearningScorer.apply(ctx.state, evidence)
         except Exception as exc:
             logger.warning("pre_crystallize_learning_score_failed: %s", exc)
@@ -41,13 +46,14 @@ class PipelineCrystalMixin:
         else:
             self._handle_crystallize_failure(ctx)
 
-        learning_finalize = None
         try:
-            learning_finalize = finalize_learning_loop(
+            # 🚀 [v24.0] Immediate Bayesian Feedback to Learning Loop
+            finalize_learning_loop(
                 getattr(self.engine, "project_root", Path(".")),
                 ctx.state,
                 success=success,
                 source="pipeline.crystallize",
+                bayesian_params=ctx.bayesian_params # 🧪 Pass-through evolved params
             )
         except Exception as exc:
             logger.warning("continuous_learning_finalize_failed: %s", exc)

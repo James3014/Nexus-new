@@ -10,10 +10,31 @@ from nexus.research.research_pack import build_research_pack
 # Configure logging for the research pipeline
 logger = logging.getLogger(__name__)
 
-class PipelineResearchMixin:
-    """🧪 Mixin for experimental research logic in NexusPipeline."""
-    
-    def _run_experimental_research(
+    def _stage_research(self, ctx: Any, tracer: Any):
+        """🧬 Phase X: Cross-Plane Research (v24.0 Hardened)"""
+        logger.info(f"🔍 [Phase X] Initiating Master Loop Research for: {ctx.task_id}")
+        
+        # 🧪 [Round 20 Evolution] Warm Start from historical data
+        nas_aggression = ctx.bayesian_params.get("nas_aggression", 0.7)
+        if nas_aggression > 0.8:
+            logger.info("🔥 [Phase X] High Aggression detected. Forcing deep-path exploration.")
+            
+        research_result = self._run_experimental_research(
+            task_id=ctx.task_id,
+            task_desc=ctx.task_desc,
+            workspace=str(ctx.state.metadata.get("worktree_path", "/tmp")),
+            rounds=int(5 * (1.0 + nas_aggression)),
+            stable_wins=2,
+            proof_ratio_min=0.8
+        )
+        
+        # 🧪 [Round 20] Compile State for Phase D
+        ctx.state.metadata["diagnostic_map"] = {
+            "findings": research_result.get("findings", []),
+            "winner_params": research_result.get("winner", {}).get("params", {}),
+            "evolution_score": research_result.get("winner", {}).get("final_metric", 0.0)
+        }
+        return True
         self,
         *,
         task_id: str,
