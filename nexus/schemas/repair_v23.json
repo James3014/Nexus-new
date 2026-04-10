@@ -1,0 +1,76 @@
+{
+  "properties": {
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    },
+    "reasoning_mode": {
+      "default": "INTUITIVE",
+      "title": "Reasoning Mode",
+      "type": "string"
+    },
+    "rewrite_trace": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Rewrite Trace",
+      "type": "array"
+    },
+    "resolved_invariants": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Resolved Invariants",
+      "type": "array"
+    },
+    "resolved_proof_obligations": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Resolved Proof Obligations",
+      "type": "array"
+    },
+    "equivalence_claim": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Equivalence Claim"
+    },
+    "risk_delta": {
+      "default": 0.0,
+      "title": "Risk Delta",
+      "type": "number"
+    },
+    "derivation_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Derivation Ref"
+    },
+    "patch_hash": {
+      "title": "Patch Hash",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "patch_hash"
+  ],
+  "title": "NexusRepair",
+  "type": "object"
+}
