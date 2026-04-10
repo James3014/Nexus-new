@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from pathlib import Path
 
 class SkillRouter:
@@ -14,25 +14,25 @@ class SkillRouter:
         "A": "analysis",
         "C": "decision"
     }
+    _STAGES = tuple(STAGE_MAP.keys())
 
     def __init__(self, skills_dir: Optional[Path] = None):
-        self.skills_dir = skills_dir or Path("nexus/research/skills")
+        self.skills_dir = skills_dir if skills_dir is not None else Path("nexus/research/skills")
 
     def get_skill_path(self, stage_code: str) -> Optional[Path]:
         """獲取階段代碼 (P/X/D/R/A/C) 對應的 SKILL.md 路徑。"""
         folder = self.STAGE_MAP.get(stage_code)
-        if not folder:
-            return None
-        return self.skills_dir / folder / "SKILL.md"
+        return self.skills_dir / folder / "SKILL.md" if folder else None
 
     def load_skill_content(self, stage_code: str) -> str:
         """加載 SKILL.md 的內容。"""
         path = self.get_skill_path(stage_code)
-        if not path or not path.exists():
-            return f"# Skill Placeholder for {stage_code}\n(No SKILL.md found)"
-        
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+        if path:
+            try:
+                return path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                pass
+        return f"# Skill Placeholder for {stage_code}\n(No SKILL.md found)"
 
     def get_next_stage(self, current_stage: str, result: Dict[str, Any]) -> str:
         """
@@ -47,15 +47,14 @@ class SkillRouter:
 
         # 2. 外部依賴跳轉: 如果診斷 (D) 發現需要外部知識，跳到研究 (X)
         if current_stage == "D" and result.get("external_needed", False):
-            print(f"🔄 [SkillRouter] External dependency detected in D. Routing: D -> X")
+            print("🔄 [SkillRouter] External dependency detected in D. Routing: D -> X")
             return "X"
 
         # 3. 預設線性流程
-        stages = list(self.STAGE_MAP.keys())
         try:
-            idx = stages.index(current_stage)
-            if idx + 1 < len(stages):
-                return stages[idx + 1]
+            idx = self._STAGES.index(current_stage)
+            if idx + 1 < len(self._STAGES):
+                return self._STAGES[idx + 1]
         except ValueError:
             pass
         return "C" # 最終收斂

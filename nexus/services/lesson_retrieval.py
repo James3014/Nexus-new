@@ -1,8 +1,7 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import json
 import re
-from datetime import datetime, timezone
 
 from nexus.services.continuous_learning import load_jsonl
 from nexus.services.lesson_resolver import (
@@ -10,7 +9,6 @@ from nexus.services.lesson_resolver import (
     get_resolution_context
 )
 from nexus.services.memory_embedding import embed_texts
-import lancedb
 
 
 def retrieve_relevant_lessons(
@@ -39,9 +37,18 @@ def retrieve_relevant_lessons_raw(
 ) -> List[Dict[str, Any]]:
     """通用檢索邏輯 - 支援 List[Dict] 直接檢索"""
     task_terms = set(re.findall(r'\w+', task_description.lower()))
+    if not task_terms:
+        return []
+
     hits = []
+    task_len = len(task_terms)
+    diag_category = diagnosis.get('category') if diagnosis else None
     
     for lesson in reversed(lessons):
+        # 3. Confidence filter (Do this first to fail fast)
+        if lesson.get('confidence', 0) < confidence_threshold:
+            continue
+
         # 1. Keyword match
         rc = lesson.get('root_cause', '').lower()
         rw = ' '.join(lesson.get('reusable_when', []))
@@ -51,15 +58,11 @@ def retrieve_relevant_lessons_raw(
         if overlap == 0:
             continue
             
-        score = overlap / max(len(task_terms), 1)
+        score = overlap / task_len
         
         # 2. Category match bonus (1.5x)
-        if diagnosis and diagnosis.get('category') == lesson.get('category'):
+        if diag_category and diag_category == lesson.get('category'):
             score *= 1.5
-        
-        # 3. Confidence filter
-        if lesson.get('confidence', 0) < confidence_threshold:
-            continue
             
         lesson["_score"] = score
         lesson["_memory_source"] = lesson.get("_memory_source", "local")
@@ -104,7 +107,7 @@ def retrieve_enhanced_lessons(
         raw_hits = retrieve_relevant_lessons_raw(shared_pool, task_description, diagnosis, max_results=max_results)
         
         for hit in raw_hits:
-            env = envelope_map.get(hit["lesson_id"])
+            env = envelope_map.get(hit.get("lesson_id"))
             if not env: continue
             
             # Apply trust penalty
@@ -149,7 +152,7 @@ def inject_lesson_context(
     state: Dict[str, Any],
     retrieved_lessons: List[Dict[str, Any]],
     max_tokens: int = 800,
-) -> tuple[Dict[str, Any], int]:
+) -> Tuple[Dict[str, Any], int]:
     """將檢索到的教訓注入 Prompt，增加來源與信任元數據"""
     if not retrieved_lessons:
         return state, 0
@@ -162,7 +165,8 @@ def inject_lesson_context(
         weight = lesson.get("_trust_weight", 1.0)
         repo = lesson.get("_source_repo", "local")
         
-        reusable = ', '.join(lesson.get('reusable_when', [])[:3]) if isinstance(lesson.get('reusable_when'), list) else 'General'
+        rw = lesson.get('reusable_when', [])
+        reusable = ', '.join(rw[:3]) if isinstance(rw, list) else 'General'
         block = (
             f"\n**Lesson {lesson.get('task_id', 'unknown')}** (Source: {src}@{repo}, Trust: {weight:.2f})\n"
             f"Root cause: {lesson.get('root_cause', 'Unknown root cause')}\n"
@@ -212,41 +216,37 @@ def retrieve_lancedb_candidates(
         query_vector = embed_texts([query_text])[0]
         
         # 向量搜尋 + Metadata Filter (對齊 v22 record_type)
-        import pandas as pd
         search_result = table.search(query_vector)
         if hasattr(search_result, "where"):
             search_result = search_result.where("record_type IN ('local_lesson', 'shared_lesson')")
         if hasattr(search_result, "limit"):
             search_result = search_result.limit(max_candidates)
 
-        if hasattr(search_result, "to_pandas"):
-            hits = search_result.to_pandas()
-        elif hasattr(search_result, "to_list"):
-            import pandas as pd
-            hits = pd.DataFrame(search_result.to_list())
-        else:
-            import pandas as pd
-            hits = pd.DataFrame([])
+        hits = []
+        if hasattr(search_result, "to_list"):
+            hits = search_result.to_list()
+        elif hasattr(search_result, "to_arrow"):
+            hits = search_result.to_arrow().to_pylist()
+        elif hasattr(search_result, "to_pandas"):
+            hits = search_result.to_pandas().to_dict('records')
 
-        if getattr(hits, "empty", True) and hasattr(table, "_rows"):
-            import pandas as pd
+        if not hits and hasattr(table, "_rows"):
             rows = [r for r in list(getattr(table, "_rows", [])) if r.get("record_type") in ("local_lesson", "shared_lesson")]
-            rows = rows[:max_candidates]
-            for r in rows:
+            hits = rows[:max_candidates]
+            for r in hits:
                 r.setdefault("_distance", 0.1)
-            hits = pd.DataFrame(rows)
         
         candidates = []
-        for _, row in hits.iterrows():
+        for row in hits:
             payload = json.loads(row["payload_json"])
             # shared_lesson 的 payload 是 fusion_payload (已含 lesson)
             # 注入元數據用於 P1-F 兼容
             payload["_memory_backend"] = "lancedb"
-            payload["_vector_distance"] = float(row["_distance"])
-            payload["_score"] = 1.0 - float(row["_distance"])
-            payload["_trust_tier"] = row["trust_tier"]
-            payload["_score_hint"] = float(row["score_hint"] or 0.85)
-            payload["_memory_source"] = "local" if row["record_type"] == "local_lesson" else "shared"
+            payload["_vector_distance"] = float(row.get("_distance", 0.1))
+            payload["_score"] = 1.0 - payload["_vector_distance"]
+            payload["_trust_tier"] = row.get("trust_tier")
+            payload["_score_hint"] = float(row.get("score_hint") or 0.85)
+            payload["_memory_source"] = "local" if row.get("record_type") == "local_lesson" else "shared"
             candidates.append(payload)
         return candidates
     except Exception as e:
@@ -264,17 +264,19 @@ def retrieve_lexical_candidates(repo_root: Path, query_text: str, max_candidates
     
     # 載入並注入原數據 (對齊 P1-F 預期)
     lessons = []
-    for l in load_jsonl(local_path):
-        l["_memory_source"] = "local"
-        l["_trust_tier"] = "local"
-        lessons.append(l)
+    if local_path.exists():
+        for l in load_jsonl(local_path):
+            l["_memory_source"] = "local"
+            l["_trust_tier"] = "local"
+            lessons.append(l)
         
-    for env in load_jsonl(shared_path):
-        l = env.get("lesson", {})
-        l["_memory_source"] = "shared"
-        l["_trust_tier"] = env.get("trust_tier", "peer")
-        l["_score_hint"] = float(env.get("local_weight", 0.85))
-        lessons.append(l)
+    if shared_path.exists():
+        for env in load_jsonl(shared_path):
+            l = env.get("lesson", {})
+            l["_memory_source"] = "shared"
+            l["_trust_tier"] = env.get("trust_tier", "peer")
+            l["_score_hint"] = float(env.get("local_weight", 0.85))
+            lessons.append(l)
     
     # 2. 執行字面檢索
     return retrieve_relevant_lessons_raw(lessons, query_text, max_results=max_candidates)
@@ -318,12 +320,12 @@ def retrieve_with_resolution(
     backend = "lancedb" if any(c.get("_memory_backend") == "lancedb" for c in raw_candidates) else "legacy"
     
     return {
-        "status": context["status"],
+        "status": context.get("status", "unknown"),
         "best_lesson_id": context.get("best_lesson_id"),
         "best_lesson": context.get("best_lesson"),
         "lessons": [r.lesson for r in resolved_scores[:max_results]],
         "consensus_score": context.get("consensus_score", 0.0),
-        "prompt_context": context["prompt_context"],
+        "prompt_context": context.get("prompt_context", ""),
         "metadata": {
             **context,
             "backend_used": backend,

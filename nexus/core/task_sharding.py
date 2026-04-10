@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict
 import logging
 import uuid
 from nexus.core.state_contracts import NexusState
@@ -15,7 +15,6 @@ class TaskSharding:
     @classmethod
     def decompose(cls, state: NexusState) -> Dict[str, Any]:
         """將 `task_description` 分解為拓樸結構"""
-        task_desc = state.metadata.get("task_description", "")
         parent_id = state.task_id
         trace_id = state.trace_id or str(uuid.uuid4())
         
