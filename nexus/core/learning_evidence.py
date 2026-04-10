@@ -18,7 +18,9 @@ class LearningEvidence:
     proof_present: bool
     proof_type: str
     proof_value: str
-
+    # 🧪 [v24.0] Bayesian & Entropy Tracking
+    bayesian_aggression: float
+    entropy_score: float
 
 class LearningEvidenceBuilder:
     _VALID_PROOF_TYPES = {"git_diff", "git_diff_checksum", "checksum"}
@@ -46,6 +48,13 @@ class LearningEvidenceBuilder:
         proof_value = str(metadata.get("last_proof_value", metadata.get("proof_value", "")) or "").strip()
         proof_present = bool(proof_type and proof_value and proof_type.lower() in LearningEvidenceBuilder._VALID_PROOF_TYPES)
 
+        # 🧪 [v24.0 Evolution] Extract Bayesian and Entropy metrics
+        bayesian_aggression = float(metadata.get("final_nas_aggression", 0.5))
+        escalation_count = int(metadata.get("escalation_count", 0))
+        veto_count = int(metadata.get("veto_count", 0))
+        # Calculate cognitive entropy: higher escalations/vetos mean higher entropy
+        entropy_score = float(escalation_count * 10 + veto_count * 5 + int(state.retry_count or 0) * 3)
+
         return LearningEvidence(
             success=success,
             phases=phases,
@@ -57,6 +66,8 @@ class LearningEvidenceBuilder:
             proof_present=proof_present,
             proof_type=proof_type,
             proof_value=proof_value,
+            bayesian_aggression=bayesian_aggression,
+            entropy_score=entropy_score
         )
 
     @staticmethod
