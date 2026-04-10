@@ -1,5 +1,5 @@
 # 🛡️ Compliance Status: Nexus Enterprise v22.5
-- **Timestamp**: 2026-04-09 11:07:54
+- **Timestamp**: 2026-04-10 13:47:20
 - **Commit SHA**: `d11aaff8d8cd10234dbfec74e2d5a6a012796cce`
 - **Nexus Participation Ratio**: 85.0%
 
@@ -7,8 +7,8 @@
 | Dimension | Status | Metrics |
 |-----------|--------|---------|
 | Isolation | ✅ PASS | leakage: 0.0 |
-| Hallucination | ✅ PASS | rate: 0.0 |
-| Concurrency | ✅ PASS | p95_latency: 4.097322508496854, recall: 0.98 |
+| Hallucination | ❌ FAIL | rate: 0.01 |
+| Concurrency | ✅ PASS | p95_latency: 4.037106357277844, recall: 0.98 |
 | Security | ✅ PASS | audit_trail: PRESENT |
 | Integration | ✅ PASS | latency: 2.3 |
 

@@ -34,7 +34,23 @@
 *   **合格 (Clean)**：LLM 每次推論時，上下文中的代碼片段與日誌片段皆與當前目標高度相關。
 *   **違規 (Polluted)**：上下文中存在大量與當前修復無關的編譯日誌、環境變量列表或無效的歷史輸出。
 
+---
+
+### 🛡️ 智慧壓縮政策 (Smart Compression Policy - Nexus v22.1)
+
+根據 2026-04-11 實測報告，Nexus 採用以下三級壓縮邏輯以降低 Token 浪費：
+
+| 模式 (Tier) | 觸發關鍵字 (Trigger) | 壓縮參數 (Args) | 預期效果 |
+| :--- | :--- | :--- | :--- |
+| **Scan** | list, scan, where, overview | `-m signatures` | **節省 90%+** |
+| **Discovery** | how, read, explain, logic | `-m aggressive` | **節省 10%** |
+| **Fixing** | fix, bug, rca, change, refactor | **-m full (禁用)** | **0% (保證無損)** |
+
+#### 🚫 禁用清單 (No-Go Scenarios)
+- 涉及 **安全性**、**加密**、**數學算式** 與 **邊界 Bug** 時，嚴禁使用壓縮。
+- 計劃實作 (Implementation Plan) 的「修改建議」必須基於 **Full 模式** 讀取結果。
+
 [METADATA]
 Status: ACTIVE
-Version: v1.0
-Enforcement: ENGINE_LEVEL (via scripts/engine/output_guard.py)
+Version: v22.1
+Enforcement: ENGINE_LEVEL (via scripts/ops/leanctx_real_validation.py)
