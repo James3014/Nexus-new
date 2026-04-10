@@ -1,7 +1,7 @@
 import json
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import UTC, datetime
 
 class WisdomSynthesizer:
     """
@@ -12,6 +12,10 @@ class WisdomSynthesizer:
         self.project_root = project_root
         self.template_dir = project_root / ".nexus" / "knowledge" / "templates"
         self.template_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _utc_now_iso_z() -> str:
+        return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
     def synthesize_template(self, task_id: str, i_pack: dict, score: float):
         """
@@ -31,7 +35,7 @@ class WisdomSynthesizer:
             "typical_data_models": i_pack.get("data_models", []),
             "common_edge_cases": i_pack.get("edge_cases", []),
             "successful_formulas": ["acceptancePassed && auditPassed"],
-            "last_updated": datetime.utcnow().isoformat() + "Z"
+            "last_updated": self._utc_now_iso_z()
         }
 
         with open(template_path, "w") as f:
@@ -47,7 +51,7 @@ class WisdomSynthesizer:
         lesson_file = self.project_root / ".nexus" / "knowledge" / "lesson_events.jsonl"
         event = {
             "lesson_id": f"IMPL-{int(datetime.now().timestamp())}",
-            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            "timestamp_utc": self._utc_now_iso_z(),
             "category": category, # e.g., "SPEC_QUALITY", "SOT_DRIFT"
             "task_id": task_id,
             "outcome": outcome,

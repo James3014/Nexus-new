@@ -2,7 +2,14 @@ from pathlib import Path
 import sys
 import types
 import math
+import warnings
 from contextlib import contextmanager
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*doesn't match a supported version.*",
+    category=Warning,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

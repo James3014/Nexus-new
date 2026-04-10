@@ -53,11 +53,15 @@ class DualTrackAudit:
     def __init__(self):
         COMPLIANCE_AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
-    def run_advisory_audit(self, pr_diff: str, task_spec: str) -> Dict[str, Any]:
+    def run_advisory_audit(self, pr_diff: str = "", task_spec: str = "", **kwargs) -> Dict[str, Any]:
         """
         Simulates calling Feynman's /audit to compare the PR diff against the original Spec.
         Returns the findings and writes a compliance warning file if drift is detected.
         """
+        # Compatibility Layer for 'candidate' and 'task' keyword arguments
+        pr_diff = pr_diff or kwargs.get("candidate", "")
+        task_spec = task_spec or kwargs.get("task", "")
+        
         start_time = time.time()
         
         # 🚀 Mocking Feynman's LLM /audit call

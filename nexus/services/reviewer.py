@@ -59,6 +59,10 @@ class GatewayReviewLoop(NexusOrchestrator):
         patcher_obj = kwargs.get("patcher") or SafePatcher(lock_dir="/tmp", project_root=str(self.project_root))
         workspace_obj = kwargs.get("workspace") or WorkspaceManager(str(self.project_root))
         
+        from nexus.core.context_hub import ContextHub
+        from nexus.core.context_adapter import ContextAdapter
+        raw_hub = kwargs.get("context_hub") or ContextHub(str(self.project_root), run_dir=run_dir)
+        
         infra = NexusInfraHub(
             git=git_obj,
             workspace=workspace_obj,
@@ -67,7 +71,7 @@ class GatewayReviewLoop(NexusOrchestrator):
         )
         intel = NexusIntelHub(
             llm=llm_obj,
-            context_hub=kwargs.get("context_hub") or ContextHub(str(self.project_root), run_dir=run_dir),
+            context_hub=ContextAdapter(raw_hub),
             commander=kwargs.get("commander") or Commander(run_dir, state_io_obj, router_obj)
         )
         gov = NexusGovHub(
