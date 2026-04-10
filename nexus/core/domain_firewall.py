@@ -29,3 +29,7 @@ class DomainFirewall:
             return True
             
         return False
+
+    def validate_v23_reasoning(self, domain: str, mode: str):
+        policy = self.map.get("reasoning_policy", {}).get(domain, "INTUITIVE")
+        return mode == policy
