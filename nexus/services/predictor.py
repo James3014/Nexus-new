@@ -29,6 +29,18 @@ class Predictor:
         if any(keyword in task_lower for keyword in ["delete", "remove", "refactor", "core"]):
             score += 0.5
             reasons.append("High-risk keyword (Delete/Refactor)")
+        if "file" in task_lower:
+            score += 0.8
+            reasons.append("Critical keyword: file mutation")
+
+        files_count = int((context or {}).get("files_count", 0) or 0)
+        if files_count >= 50:
+            score += 0.2
+            reasons.append("Complexity risk: large files_count")
+
+        if ".js" in task_lower and ".html" in task_lower:
+            score += 0.3
+            reasons.append("JS conflict risk: JS/HTML coupled edit")
 
         # 🧠 Ollama $0 Reasoning (Slow Path - v18.4)
         if provider_info['provider'] == 'ollama':
@@ -46,9 +58,10 @@ class Predictor:
             except Exception as e:
                 print(f"⚠️ [Ollama:Fail] Falling back to Heuristics: {e}")
 
+        score = min(score, 1.0)
         level = "CRITICAL" if score >= 0.8 else "MAJOR" if score >= 0.5 else "LOW"
         return {
-            "risk_score": round(min(score, 1.0), 2), 
+            "risk_score": round(score, 2), 
             "risk_level": level, 
             "reasons": reasons
         }

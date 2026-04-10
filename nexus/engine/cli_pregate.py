@@ -5,6 +5,7 @@ import subprocess
 import logging
 import os
 import sys
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -106,5 +107,16 @@ def _auto_detect_verify_commands(project_root: Path) -> List[str]:
     # Go
     if (project_root / "go.mod").exists():
         cmds.append("go test ./... 2>&1")
+
+    # Node.js
+    package_json = project_root / "package.json"
+    if package_json.exists():
+        try:
+            data = json.loads(package_json.read_text(encoding="utf-8"))
+            scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+            if isinstance(scripts, dict) and scripts.get("test"):
+                cmds.append("npm test --silent 2>&1")
+        except Exception as exc:
+            logger.debug("package_json_parse_failed: %s", exc)
     
     return cmds

@@ -64,7 +64,11 @@ class NexusCommandService:
 
         commands = list(verify_commands or [])
         if not commands:
-            commands = suggest_verification_commands(self.engine.project_root, task_name)
+            rust_manifest = self.engine.project_root / "nexus-core" / "Cargo.toml"
+            if rust_manifest.exists() and ("rust" in task_name.lower() or "nexus-core" in task_name.lower()):
+                commands = ["cargo test --manifest-path nexus-core/Cargo.toml"]
+            else:
+                commands = suggest_verification_commands(self.engine.project_root, task_name)
         if not commands:
             self.last_completion_error = "high_delivery_requires_verify_commands"
             return False
@@ -119,14 +123,16 @@ class NexusCommandService:
     def execute_feature(self, request: TaskRequest):
         """Execute a feature task through the sole delivery-aware service boundary."""
         import time
+        context = {"delivery_mode": request.delivery_mode}
+        if request.swarm_mode:
+            context["swarm_mode"] = True
+        if request.use_sota_cache:
+            context["use_sota_cache"] = True
+        if request.execution_context:
+            context.update(request.execution_context)
         success = self.engine.run_feature(
             task=request.task,
-            context={
-                "delivery_mode": request.delivery_mode, 
-                "swarm_mode": request.swarm_mode,
-                "use_sota_cache": request.use_sota_cache,
-                **(request.execution_context or {})
-            },
+            context=context,
             domain=request.domain,
             dry_run=request.plan_only,
             skill=request.skill
@@ -134,7 +140,7 @@ class NexusCommandService:
         if not success:
             return False
         return self._run_completion_gate(
-            task_name=request.task_id or f"feat-{int(time.time())}",
+            task_name=request.task,
             task_level=TaskLevel.FEATURE,
             delivery_mode=request.delivery_mode,
             verify_commands=request.verify_commands,

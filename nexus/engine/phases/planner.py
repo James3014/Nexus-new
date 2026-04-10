@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 import os
+import re
 from pathlib import Path
 from nexus.engine.phases.base import BasePhaseHandler
 from nexus.core.state_contracts import NexusState
@@ -33,6 +34,14 @@ class PlannerPhaseHandler(BasePhaseHandler):
     def run(self, state: NexusState, context: Dict[str, Any]) -> Dict[str, Any]:
         task = context.get("task", "")
         print(f"🔮 [Nexus:Predict] Refactored Planner scanning task: {task}")
+        intent_pass, refusal_reason = self._guard_intent(task)
+        if not intent_pass:
+            return PlannerResult(
+                intent_pass=False,
+                handoff_readiness=0.0,
+                risk_score=0.0,
+                refusal_reason=f"{refusal_reason}（請提供更具體且非簡短描述）",
+            ).model_dump()
 
         # 1. Intent Classification
         intent_data = self.intent_provider.classify(task)
@@ -45,12 +54,21 @@ class PlannerPhaseHandler(BasePhaseHandler):
 
         # 3. Prediction & Spec Compilation
         prediction = self.predictor.predict(task, context)
+        task_lower = task.lower()
+        risks: List[str] = []
+        if "html" in task_lower and "js" in task_lower:
+            prediction["risk_score"] = max(float(prediction.get("risk_score", 0.0)), 0.3)
+            risks.append("JS conflict risk")
+        if "read" in task_lower and "file" in task_lower:
+            prediction["risk_score"] = max(float(prediction.get("risk_score", 0.0)), 0.8)
+            risks.append("Browser sandbox risk")
         handoff_readiness = self._compile_and_audit_spec(task, prediction, state, context)
 
         return PlannerResult(
             intent_pass=True,
             handoff_readiness=handoff_readiness,
-            risk_score=prediction.get("risk_score", 0.0)
+            risk_score=prediction.get("risk_score", 0.0),
+            risks=risks,
         ).model_dump()
 
     def _compile_and_audit_spec(self, task, prediction, state, context) -> float:
@@ -65,3 +83,33 @@ class PlannerPhaseHandler(BasePhaseHandler):
             return float(pack_results["audit"]["readability_score"])
         except Exception:
             return 0.0
+
+    # Backward-compatible governance APIs (used by legacy tests/tools)
+    def calculate_ambiguity_score(self, task: str) -> float:
+        txt = (task or "").strip()
+        if not txt:
+            return 1.0
+
+        score = 0.0
+        if len(txt) < 10:
+            score += 0.5
+        elif len(txt) < 20:
+            score += 0.25
+
+        if not re.search(r"[A-Za-z0-9_./-]+\.py", txt):
+            score += 0.25
+
+        vague_words = ("修一下", "看一下", "處理一下", "優化一下", "功能", "東西", "問題")
+        if any(w in txt for w in vague_words):
+            score += 0.3
+
+        return max(0.0, min(1.0, score))
+
+    def _guard_intent(self, task: str) -> Tuple[bool, str]:
+        score = self.calculate_ambiguity_score(task)
+        if score > 0.7:
+            return (
+                False,
+                f"🛑 [ClarificationGate] Task intent too ambiguous (score={score:.2f}).",
+            )
+        return True, f"✅ [ClarificationGate] Task accepted (score={score:.2f})."

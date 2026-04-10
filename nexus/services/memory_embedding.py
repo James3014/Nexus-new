@@ -38,6 +38,12 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
         embeddings = model.encode(texts)
         if hasattr(embeddings, "tolist"):
             embeddings = embeddings.tolist()
+
+        # Normalize single-vector outputs to 2D shape.
+        if embeddings and isinstance(embeddings, list):
+            first = embeddings[0]
+            if isinstance(first, (int, float)):
+                embeddings = [embeddings]
         
         # 驗證維度
         if any(len(v) != EMBED_DIM for v in embeddings):

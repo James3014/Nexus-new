@@ -53,7 +53,23 @@ class DiskJanitor:
     def rotate_usage_log(self, skills_dir: Path):
         """Rotate .usage_log.jsonl to .usage_log.YYYYMMDD.jsonl and optionally gzip."""
         log_path = skills_dir / ".usage_log.jsonl"
-        
+        now = time.time()
+        retention_seconds = self.config.retention_days * 86400
+        deleted_count = 0
+
+        if log_path.exists():
+            max_bytes = int(self.config.max_log_size_mb * 1024 * 1024)
+            if log_path.stat().st_size > max_bytes:
+                stamp = time.strftime("%Y%m%d", time.localtime(now))
+                rotated = skills_dir / f".usage_log.{stamp}.jsonl"
+                if rotated.exists():
+                    rotated = skills_dir / f".usage_log.{stamp}.{int(now)}.jsonl"
+                shutil.move(str(log_path), str(rotated))
+                with open(rotated, "rb") as src, gzip.open(f"{rotated}.gz", "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                rotated.unlink(missing_ok=True)
+                log_path.touch()
+
         for gz_file in skills_dir.glob(".usage_log.*.jsonl.gz"):
             if now - gz_file.stat().st_mtime > retention_seconds:
                 gz_file.unlink()

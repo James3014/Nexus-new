@@ -235,7 +235,7 @@ class BattlesuitGateway:
                     resp_json = json.loads(raw_stdout)
                     output_text = resp_json.get("output") or resp_json.get("response") or raw_stdout
                     
-                    tokens_total = 100
+                    tokens_total = 0
                     stats = resp_json.get("stats", {}).get("models", {})
                     if isinstance(stats, dict):
                         for m_stats in stats.values():

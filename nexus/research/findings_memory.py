@@ -35,6 +35,28 @@ class FindingsCard:
     def from_dict(cls, data: Dict[str, Any]) -> "FindingsCard":
         return cls(**data)
 
+    @classmethod
+    def from_lesson_event(cls, event: Any) -> "FindingsCard":
+        """Compatibility factory: convert LessonEvent payload to FindingsCard."""
+        return cls(
+            id=str(getattr(event, "lesson_id", ""))[:8] or str(uuid.uuid4())[:8],
+            kind="episodes",
+            title=f"Lesson: {getattr(event, 'task_id', 'unknown')}",
+            task_id=str(getattr(event, "task_id", "")),
+            body=(
+                f"Root Cause: {getattr(event, 'root_cause', '')}\n"
+                f"Corrective Action: {getattr(event, 'corrective_action', '')}"
+            ),
+            confidence=str(getattr(event, "confidence", "medium")),
+            tags=[str(getattr(event, "category", "")), str(getattr(event, "source_phase", ""))],
+            evidence_paths=list(getattr(event, "evidence", []) or []),
+            extra={
+                "trace_id": getattr(event, "trace_id", ""),
+                "decision_id": getattr(event, "decision_id", ""),
+                "outcome": getattr(event, "outcome", ""),
+            },
+        )
+
 class FindingsMemoryStore:
     """
     🏗️ 記憶儲存引擎

@@ -21,6 +21,7 @@ DB_CORE_PATH = ".nexus/memory/memory_index.lancedb"
 # 配額 (Disk Quotas)
 QUOTA_RUN_MANIFESTS = 50
 QUOTA_OUTCOME_EVENTS = 1000
+_DB_CACHE: Dict[str, Any] = {}
 
 class IndexerError(RuntimeError):
     pass
@@ -33,7 +34,10 @@ def stable_hash(*parts: str) -> str:
 def connect_memory_db(repo_root: Path):
     db_path = repo_root / DB_CORE_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    return lancedb.connect(str(db_path))
+    key = str(db_path.resolve())
+    if key not in _DB_CACHE:
+        _DB_CACHE[key] = lancedb.connect(str(db_path))
+    return _DB_CACHE[key]
 
 # P2-A Schema 定義 (對齊 v22 治理欄位)
 class MemoryIndexRecord(LanceModel):
@@ -262,11 +266,14 @@ def rebuild_memory_index(repo_root: Path) -> Dict[str, Any]:
         row["embedding"] = emb
         rows.append(row)
         
-    # 5. 增量 Upsert
-    table.merge_insert("record_id") \
-         .when_not_matched_insert_all() \
-         .when_matched_update_all() \
-         .execute(rows)
+    # 5. 增量 Upsert (fallback to add() for lightweight/stub tables)
+    if hasattr(table, "merge_insert"):
+        table.merge_insert("record_id") \
+             .when_not_matched_insert_all() \
+             .when_matched_update_all() \
+             .execute(rows)
+    else:
+        table.add(rows)
     
     return {
         "status": "ok", 

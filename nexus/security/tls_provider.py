@@ -34,12 +34,23 @@ class TLSProvider:
             self._run_openssl([
                 "req", "-x509", "-newkey", "rsa:4096", "-days", "3650",
                 "-nodes", "-keyout", str(self.ca_key), "-out", str(self.ca_cert),
-                "-subj", "/C=US/O=Nexus Singularity/CN=Nexus Root CA"
+                "-subj", "/C=US/O=Nexus Singularity/CN=Nexus Root CA",
+                "-addext", "basicConstraints=critical,CA:TRUE",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                "-addext", "subjectKeyIdentifier=hash",
             ])
 
         if not self.node_cert.exists() or not self.node_key.exists():
             logger.info("Generating cert for node %s", self.node_id)
             csr_path = self.certs_dir / f"{self.node_id}.csr"
+            leaf_ext = self.certs_dir / f"{self.node_id}_ext.cnf"
+            leaf_ext.write_text(
+                "basicConstraints=critical,CA:FALSE\n"
+                "keyUsage=critical,digitalSignature,keyEncipherment\n"
+                "extendedKeyUsage=serverAuth,clientAuth\n"
+                "subjectAltName=DNS:localhost,IP:127.0.0.1\n",
+                encoding="utf-8",
+            )
             
             # Create CSR
             self._run_openssl([
@@ -52,7 +63,8 @@ class TLSProvider:
             self._run_openssl([
                 "x509", "-req", "-in", str(csr_path),
                 "-CA", str(self.ca_cert), "-CAkey", str(self.ca_key),
-                "-CAcreateserial", "-out", str(self.node_cert), "-days", "365", "-sha256"
+                "-CAcreateserial", "-out", str(self.node_cert), "-days", "365", "-sha256",
+                "-extfile", str(leaf_ext),
             ])
             
             if csr_path.exists():

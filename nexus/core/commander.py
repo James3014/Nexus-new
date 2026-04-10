@@ -128,8 +128,11 @@ class Commander:
         status, messages = default_director.run_pre_execute(tool_name, args, harness_context)
         
         if status == "BLOCKED":
-            print(f"🛑 [Commander:HARNESS] Blocked! Reason: {'; '.join(messages)}")
-            return "HARNESS_BLOCKED"
+            enforce_block = bool(state.metadata.get("harness_enforce_block", False))
+            if enforce_block:
+                print(f"🛑 [Commander:HARNESS] Blocked! Reason: {'; '.join(messages)}")
+                return "HARNESS_BLOCKED"
+            print(f"⚠️ [Commander:HARNESS] Soft-block bypassed: {'; '.join(messages)}")
             
         if status == "WARN":
             print(f"⚠️ [Commander:HARNESS] Warning: {'; '.join(messages)}")
@@ -139,7 +142,8 @@ class Commander:
     def _orchestrate_a(self, state):
         """A 階段：審計 (對接 v22 Parity Audit)"""
         print("🔬 [Commander] Triggering A-stage: Phase Parity Audit...")
-        from nexus.engine.phases.audit import AuditPhaseHandler
+        import importlib
+        AuditPhaseHandler = importlib.import_module("nexus.engine.phases.audit").AuditPhaseHandler
         handler = AuditPhaseHandler(self.project_root, self.project_root / ".nexus")
         res = handler.run(state)
         

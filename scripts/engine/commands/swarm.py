@@ -48,10 +48,11 @@ def register(nexus_group, REPO_ROOT):
             
             config = EngineConfig(project_root=REPO_ROOT, delivery_mode=delivery_mode)
             engine = NexusEngine(config=config)
+            run_bug = getattr(engine, "run_bug")
             
             print(f"📡 [Nexus:Swarm] Dispatching task '{safe_task_id}' to engine (Mode: {delivery_mode})...")
             # 使用安全 ID 呼叫引擎
-            success = engine.run_bug(bug_id=safe_task_id, desc=task_name)
+            success = run_bug(bug_id=safe_task_id, desc=task_name)
             
             if success:
                 print("✅ [Nexus:Swarm] Mission Succeeded.")

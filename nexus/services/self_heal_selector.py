@@ -67,6 +67,29 @@ def load_self_heal_candidates(
     max_candidates: int,
 ) -> List[RouteCandidate]:
     """載入 self-heal 專用修復候選。"""
-    from nexus.core.learning.compute_route_weights import load_mock_candidates
-    # 未來將升級為從 .nexus/inventory 加載真正的 Agents
-    return load_mock_candidates(repo_root, phase)[:max_candidates]
+    try:
+        from nexus.core.learning.compute_route_weights import load_mock_candidates  # type: ignore
+        return load_mock_candidates(repo_root, phase)[:max_candidates]
+    except Exception:
+        # Legacy fallback candidate set for environments without core.learning module.
+        defaults = [
+            RouteCandidate(
+                route_id="rust-v16",
+                provider="swarm",
+                armor_id="v16",
+                phase=phase,
+                base_weight=0.82,
+                success_rate=0.8,
+                regression_pass_rate=0.9,
+            ),
+            RouteCandidate(
+                route_id="legacy-core-router",
+                provider="legacy",
+                armor_id="legacy",
+                phase=phase,
+                base_weight=0.45,
+                success_rate=0.6,
+                regression_pass_rate=0.8,
+            ),
+        ]
+        return defaults[:max_candidates]

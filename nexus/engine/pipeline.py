@@ -64,6 +64,9 @@ class PipelineContext:
     decision_counter: int = 0
     prediction: Any = None
     research_pack: Any = None
+    planner: Any = None
+    researcher: Any = None
+    repairer: Any = None
     pack: dict = field(default_factory=dict)
     event_store: Any = None  # Atomic Sinking (R16)
     outcome_v2: Optional[NexusOutcomeV2] = None

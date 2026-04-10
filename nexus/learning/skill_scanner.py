@@ -73,7 +73,7 @@ COMPLIANCE_PATTERNS: List[Tuple[str, str, bool]] = [
 ]
 
 
-def scan_skill(content: str) -> ScanResult:
+def scan_skill(content: str, enforce_compliance: bool = False) -> ScanResult:
     """Scan skill content for security threats.
 
     Returns a ScanResult indicating whether the content is safe,
@@ -96,13 +96,14 @@ def scan_skill(content: str) -> ScanResult:
             warnings.append(f"🟡 WARN: {reason} (偵測到 {len(matches)} 處)")
 
     # --- Compliance Checks (v2.0 Readiness Gate) ---
-    for pattern, reason, is_block in COMPLIANCE_PATTERNS:
-        if not re.search(pattern, content, re.MULTILINE | re.DOTALL):
-            msg = f"📁 COMPLIANCE: {reason}"
-            if is_block:
-                blocked.append(f"🔴 BLOCK: {msg}")
-            else:
-                warnings.append(f"🟡 WARN: {msg}")
+    if enforce_compliance:
+        for pattern, reason, is_block in COMPLIANCE_PATTERNS:
+            if not re.search(pattern, content, re.MULTILINE | re.DOTALL):
+                msg = f"📁 COMPLIANCE: {reason}"
+                if is_block:
+                    blocked.append(f"🔴 BLOCK: {msg}")
+                else:
+                    warnings.append(f"🟡 WARN: {msg}")
 
     safe = len(blocked) == 0
     if not safe:

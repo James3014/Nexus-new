@@ -23,8 +23,8 @@ def run_step(name, cmd):
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
     # 🛡️ Apply Context Shield / Hard Truncation
-    stdout = truncate_output(res.stdout or "", label=f"{name}_stdout")
-    stderr = truncate_output(res.stderr or "", label=f"{name}_stderr")
+    stdout = truncate_output(str(getattr(res, "stdout", "") or ""), label=f"{name}_stdout")
+    stderr = truncate_output(str(getattr(res, "stderr", "") or ""), label=f"{name}_stderr")
 
     if res.returncode == 0:
         print(f"✅ {name} PASSED")
@@ -127,7 +127,11 @@ def run_integrity_check():
         if not p.exists():
             print(f"❌ [INTEGRITY] Missing file: {path}")
             return False
-        content = p.read_text()
+        try:
+            content = p.read_text()
+        except OSError:
+            print(f"❌ [INTEGRITY] Unreadable file: {path}")
+            return False
         for sig in sigs:
             if sig not in content:
                 print(f"❌ [INTEGRITY] Life-sign missing in {path}: '{sig}'")

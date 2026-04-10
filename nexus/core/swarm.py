@@ -241,7 +241,8 @@ class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
         super().__init__(engine, task, model)
         self.peer_id = peer_id or f"Peer-{os.getpid()}"
         self.sse_url = "http://localhost:8080/nexus-sync/poc"
-        self.manifest_path = PROJECT_ROOT / ".nexus" / "swarm" / "manifest.json"
+        base_root = Path(getattr(self.engine, "project_root", Path.cwd()))
+        self.manifest_path = base_root / ".nexus" / "swarm" / "manifest.json"
         
     def broadcast_decision(self, decision_type: str, data: Dict):
         """🛡️ 廣播決策 (Shared Decisions)"""

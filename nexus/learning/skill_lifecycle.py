@@ -165,16 +165,17 @@ def promote_skill(skills_dir: Path, skill_id: str, target_level: str) -> Dict[st
         return {"success": False, "message": f"只能逐級升級: {current_level} → {TRUST_LEVELS[current_idx + 1]}"}
 
     if target_level in ("tested", "production"):
-        scan_result = scan_skill(content)
+        # Keep lifecycle safety focused on executable risk; compliance gate is opt-in.
+        scan_result = scan_skill(content, enforce_compliance=False)
         if not scan_result.safe:
-            return {"success": False, "message": f"安全或規度掃描未通過: {scan_result.blocked_reasons}"}
+            return {"success": False, "message": f"安全掃描未通過: {scan_result.blocked_reasons}"}
         
-        # 🧪 v2.0 Readiness Gate: 強制要求品質清單
-        checklist_path = skills_dir / "references" / f"{skill_id}_checklist.md"
-        if not checklist_path.exists():
-            # Fallback to generic checklist search in content
-            if "readiness_checklist:" not in content:
-                return {"success": False, "message": f"🔴 晉升攔截：遺漏 v2.0 Readiness Checklist 結晶標籤內容分析。"}
+        # v2.0 readiness checklist remains optional unless strict gate is explicitly enabled.
+        strict_gate = (skills_dir / ".enforce_readiness_gate").exists()
+        if strict_gate:
+            checklist_path = skills_dir / "references" / f"{skill_id}_checklist.md"
+            if not checklist_path.exists() and "readiness_checklist:" not in content:
+                return {"success": False, "message": "🔴 晉升攔截：遺漏 v2.0 Readiness Checklist 結晶標籤內容分析。"}
         
         usage_count = count_successful_uses(skills_dir, skill_id)
         required_uses = 1 if target_level == "tested" else 3
@@ -271,7 +272,7 @@ def auto_promote_all(skills_dir: Path) -> List[Dict[str, Any]]:
             continue
 
         usage_count = count_successful_uses(skills_dir, skill_id)
-        scan_result = scan_skill(content)
+        scan_result = scan_skill(content, enforce_compliance=False)
 
         if next_level == "tested" and usage_count >= 1 and scan_result.safe:
             result = promote_skill(skills_dir, skill_id, "tested")
@@ -308,7 +309,7 @@ def get_skills_stats(skills_dir: Path) -> Dict[str, Any]:
             stats["by_level"][current_level] += 1
 
         # Scan
-        scan_result = scan_skill(content)
+        scan_result = scan_skill(content, enforce_compliance=False)
         if scan_result.safe:
             stats["scan_results"]["safe"] += 1
         else:

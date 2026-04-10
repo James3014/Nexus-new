@@ -37,7 +37,11 @@ class PipelineRepairMixin:
                 r_params["temperature"] = 0.2 + (repair_attempts * 0.15)
                 logger.info(f"🔥 [Bayesian-Repair] Scaling temperature to {r_params['temperature']:.2f}")
 
-            res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
+            try:
+                res = ctx.repairer.run(ctx.state, ctx.pack, bayesian_params=r_params)
+            except TypeError:
+                # Backward compatibility for older repairer signatures.
+                res = ctx.repairer.run(ctx.state, ctx.pack)
             ctx.accumulator.record(ctx.state, "R", res, overhead=100)
 
         r_out = self._process_repair_response(ctx, res, repair_attempts)

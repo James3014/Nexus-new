@@ -15,6 +15,10 @@ class HealthEvaluator:
         budget = state.config.budget_token if hasattr(state.config, "budget_token") else 5000
         # Increased penalty: scale by 1.5x budget threshold
         m.token_efficiency = max(0.0, 1.0 - (state.total_token_usage / (budget * 1.5)))
+        state.tokens.total_usage = int(state.total_token_usage or 0)
+        state.tokens.capture_status = "estimated"
+        state.metadata.setdefault("plan_density_score", 1.0)
+        state.metadata.setdefault("thinking_depth_score", 0.05)
 
         # 4. Drift Index
         m.drift_index = 0.0

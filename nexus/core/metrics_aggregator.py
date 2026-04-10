@@ -65,7 +65,14 @@ class MetricsAggregator:
             "phase": phase,
             "skill_id": skill_id,
             "pass": passed,
+            "fail": not passed,
             "passed": passed,
+            "phantom_blocked": bool(metadata.get("phantom_blocked", False)),
+            "repair_success": bool(metadata.get("repair_success", passed)),
+            "proof_present": bool(
+                str(metadata.get("proof_type", "") or "").strip()
+                and str(metadata.get("proof_value", "") or "").strip()
+            ),
             "metrics": {
                 "pass_rate": pass_rate,
                 "gate_passed": passed_count,

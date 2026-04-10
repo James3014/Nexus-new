@@ -88,3 +88,7 @@ class NexusHub:
         """Calculates current learning metrics."""
         # Minimal skeleton for integration
         return {"ready_for_formal_use": True, "score": 100.0}
+
+    def make_pre_routing_decision(self, task_id: str, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """Compatibility shim for pipeline planning stage."""
+        return {"external_needed": False, "mode": "default", "priority": "normal", "audit_level": "full"}

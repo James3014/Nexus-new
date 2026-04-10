@@ -71,11 +71,12 @@ class PolicyManager:
         from nexus.plugins.sentinel_plugin import evaluate_neural_intent
         
         # 🧬 [Neural Reflex] v3.2.4 P1 Track 2: 意圖導通性質分析成果。內容其及性能。
-        state.intent = getattr(state, 'intent', task_description or "")
-        
-        if not evaluate_neural_intent(state.intent):
+        intent_text = str(task_description or state.metadata.get("intent", ""))
+        state.metadata["intent"] = intent_text
+
+        if not evaluate_neural_intent(intent_text):
             state.metadata["neural_veto"] = True # Veto 標記性質分析內容。
-            logger.warning(f"[Sentinel V3.2] RISK VETO: {state.intent[:50]}...")
+            logger.warning(f"[Sentinel V3.2] RISK VETO: {intent_text[:50]}...")
             state.policy_applied = False
             return # 🛡️ 物理其及性質內容攔截：不進行語義檢索。內容性能。
         else:

@@ -59,7 +59,16 @@ class PipelineStagesMixin:
 
             decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
             # 🚀 [v24.0] Pass Bayesian params to the Planner
-            ctx.prediction = ctx.planner.run(ctx.state, {"task": ctx.task_desc, **ctx.kwargs}, bayesian_params=ctx.bayesian_params)
+            planner_input = {"task": ctx.task_desc, **ctx.kwargs}
+            try:
+                ctx.prediction = ctx.planner.run(
+                    ctx.state,
+                    planner_input,
+                    bayesian_params=ctx.bayesian_params,
+                )
+            except TypeError:
+                # Backward compatibility for older planner signatures.
+                ctx.prediction = ctx.planner.run(ctx.state, planner_input)
             ctx.accumulator.record(ctx.state, "P", ctx.prediction)
             self.engine._add_step_to_history(
                 ctx.state, "P", metadata={"prediction": ctx.prediction, "decision_id": p_decision_id, "skill_id": "planner"}

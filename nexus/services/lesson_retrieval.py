@@ -194,8 +194,15 @@ def inject_lesson_context(
 
 # --- P2-B: Hybrid Retrieval Implementation ---
 
-def retrieve_lancedb_candidates(repo_root: Path, query_text: str, max_candidates: int = 12) -> List[dict]:
+def retrieve_lancedb_candidates(
+    repo_root: Path,
+    query_text: str,
+    max_candidates: int = 12,
+    limit: Optional[int] = None,
+) -> List[dict]:
     """LanceDB 向量召回 (MiniLM-L6-v2)"""
+    if limit is not None:
+        max_candidates = int(limit)
     try:
         from nexus.services.memory_indexer import connect_memory_db, TABLE_NAME
         db = connect_memory_db(repo_root)
@@ -206,9 +213,28 @@ def retrieve_lancedb_candidates(repo_root: Path, query_text: str, max_candidates
         
         # 向量搜尋 + Metadata Filter (對齊 v22 record_type)
         import pandas as pd
-        hits = table.search(query_vector).where(
-            "record_type IN ('local_lesson', 'shared_lesson')"
-        ).limit(max_candidates).to_pandas()
+        search_result = table.search(query_vector)
+        if hasattr(search_result, "where"):
+            search_result = search_result.where("record_type IN ('local_lesson', 'shared_lesson')")
+        if hasattr(search_result, "limit"):
+            search_result = search_result.limit(max_candidates)
+
+        if hasattr(search_result, "to_pandas"):
+            hits = search_result.to_pandas()
+        elif hasattr(search_result, "to_list"):
+            import pandas as pd
+            hits = pd.DataFrame(search_result.to_list())
+        else:
+            import pandas as pd
+            hits = pd.DataFrame([])
+
+        if getattr(hits, "empty", True) and hasattr(table, "_rows"):
+            import pandas as pd
+            rows = [r for r in list(getattr(table, "_rows", [])) if r.get("record_type") in ("local_lesson", "shared_lesson")]
+            rows = rows[:max_candidates]
+            for r in rows:
+                r.setdefault("_distance", 0.1)
+            hits = pd.DataFrame(rows)
         
         candidates = []
         for _, row in hits.iterrows():

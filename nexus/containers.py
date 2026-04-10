@@ -130,6 +130,8 @@ class NexusContainer(containers.DeclarativeContainer):
         sig = inspect.signature(OrchestratorConfig)
         config_keys = sig.parameters.keys()
         config_args = {k: kwargs.pop(k) for k in config_keys if k in kwargs}
+        config_args.setdefault("task", "container-bootstrap")
+        config_args.setdefault("skill_id", "container-default")
         config = OrchestratorConfig(**config_args)
         # 過濾 DI 框架注入的非業務參數 (如 scope)
         import inspect

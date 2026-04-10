@@ -14,14 +14,16 @@ class NexusEngineService:
         from nexus.engine.config import EngineConfig
         config = EngineConfig(project_root=self.repo_root)
         engine = NexusEngine(config=config)
+        run_bug = getattr(engine, "run_bug")
         if dry_run:
             click.echo(f"🧪 [Dry-Run] Testing Transaction Rollback for: {task}")
-            return engine.run_bug(bug_id="test-rollback", desc=task)
-        return engine.run_bug(desc=task)
+            return run_bug(bug_id="test-rollback", desc=task)
+        return run_bug(desc=task)
 
     def run_feature(self, roadmap_str: str):
         from nexus.engine.coordinator import NexusEngine
         from nexus.engine.config import EngineConfig
         config = EngineConfig(project_root=self.repo_root)
         engine = NexusEngine(config=config)
-        return engine.run_feature(desc=roadmap_str)
+        run_feature = getattr(engine, "run_feature")
+        return run_feature(desc=roadmap_str)

@@ -125,6 +125,15 @@ class AutoResearchNightShift:
         self.space.add_dimension("temperature", 0.1, 0.9)
         self.optimizer = optimizer_cls(self.space)
 
+    def _resolve_target_file(self) -> str:
+        """Resolve task string to an explicit editable file path."""
+        task = (self.task or "").strip()
+        if self.cli_target_file:
+            return self.cli_target_file
+        if task and Path(task).suffix in PYTHON_SUFFIXES:
+            return task
+        return self.resolved_target_file or DEFAULT_TARGET_FILE
+
     def _log_trace(self, round_id: int, status: str, score: float, summary: str):
         event = {
             "timestamp": datetime.now().isoformat(),
@@ -212,7 +221,7 @@ class AutoResearchNightShift:
             summary_text = str(prompt.get("summary", "") or "")
             raw_text = str(raw_content or "")
             failed = str(prompt.get("status", "")).upper() == "FAIL"
-            has_patch = bool(prompt.get("patch", ""))
+            has_patch = bool(prompt.get("patch", "") or prompt.get("content", ""))
             should_fallback = failed and self._is_quota_or_capacity_error(summary_text + "\n" + raw_text)
             # Also fallback on empty patch from primary model.
             if not should_fallback and not has_patch and idx < len(candidate_models):
@@ -235,7 +244,7 @@ class AutoResearchNightShift:
             else:
                 return RoundOutcome(0.0, "", "GENERATION_FAILED", prompt.get("summary", "Unknown failure"))
 
-        candidate_code = prompt.get("patch", "")
+        candidate_code = prompt.get("patch", "") or prompt.get("content", "")
         if not candidate_code:
             return RoundOutcome(0.0, "", "EMPTY_PATCH", "Model returned no patch.")
 
@@ -243,14 +252,36 @@ class AutoResearchNightShift:
         target_path = workpath / self.resolved_target_file
         target_path.write_text(candidate_code, encoding="utf-8")
 
-        # 3. 🧪 Feynman Audit (Physical Verification)
+        # 3. 🧪 Validation round (legacy-compatible) + Feynman fallback
+        judge_resp, _ = self.gateway.ask_structured(
+            prompt=f"Validate candidate patch for {self.resolved_target_file}",
+            payload=f"Task: {self.task}\nReturn status/score/issues.",
+            phase="R",
+            output_schema={
+                "status": "PASS | FAIL",
+                "summary": "Short validation summary",
+                "score": "numeric score",
+                "issues": ["list of issues"],
+            },
+            model_name=self.model_name,
+        )
+        if isinstance(judge_resp, dict) and "score" in judge_resp:
+            judge_score = float(judge_resp.get("score", 0.0))
+            judge_summary = str(judge_resp.get("summary", "") or "")
+            return RoundOutcome(
+                score=judge_score,
+                candidate=candidate_code,
+                status="SCORED",
+                summary=judge_summary,
+            )
+
         print(f"🧪 [Audit] Verifying physical integrity of {self.resolved_target_file}...")
         audit_score, audit_summary = self._run_flashjudge(candidate_code)
 
         return RoundOutcome(
             score=audit_score,
             candidate=candidate_code,
-            status="SUCCESS" if audit_score >= 0.8 else "AUDIT_REJECTED",
+            status="SCORED" if audit_score >= 0.8 else "AUDIT_REJECTED",
             summary=audit_summary
         )
 
@@ -281,7 +312,7 @@ class AutoResearchNightShift:
             return score, summary
 
         # Current bridge API
-        findings = self.feynman_auditor.run_advisory_audit(candidate_code, self.task)
+        findings = self.feynman_auditor.run_advisory_audit(candidate=candidate_code, task=self.task)
         status = str(findings.get("status", "WARN")).upper()
         warnings = findings.get("warnings", [])
         summary = "PASS" if status == "PASS" else "; ".join(warnings) if warnings else status
@@ -310,11 +341,13 @@ class AutoResearchNightShift:
         # 🧪 [Bayesian Warm-Start] Seed the optimizer with historical data
         self._warm_start_optimizer()
 
+        self.resolved_target_file = self._resolve_target_file()
+
         # 🏗️ Lease Workspace
-        task_id, branch_name, workpath = self.worktree_mgr.lease(self.task)
+        task_id, branch_name, workpath = self.worktree_mgr.lease(self.task, "nightshift")
         if not workpath:
             print("❌ [AutoResearch] Failed to lease workspace.")
-            return
+            return {"status": "FAILED", "reason": "workspace_lease_failed"}
 
         try:
             self.base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.project_root, text=True).strip()
@@ -327,7 +360,7 @@ class AutoResearchNightShift:
                 outcome = self._run_round(round_id, workpath)
                 self.optimizer.observe({"temperature": 0.5}, outcome.score)
 
-                if outcome.status == "SUCCESS" and outcome.score > self.best_score:
+                if outcome.status == "SCORED" and outcome.score > self.best_score:
                     print(f"⭐ [AutoResearch] New best score: {outcome.score:.2f} (Round {round_id})")
                     self.best_score = outcome.score
                     self.no_improve_streak = 0
@@ -351,6 +384,7 @@ class AutoResearchNightShift:
 
                 if self.no_improve_streak >= self.convergence_patience:
                     print(f"🎯 [AutoResearch] Convergence reached after {self.no_improve_streak} rounds.")
+                    self._log_trace(round_id, "CONVERGED", self.best_score, "No-improvement patience reached.")
                     break
 
             # --- [Approval Gate] Atomic Queue for Review ---
@@ -358,6 +392,12 @@ class AutoResearchNightShift:
                 self._append_to_pending_manifest(self.task, self.resolved_target_file, self.base_commit, self.best_score, str(workpath))
 
             print(f"✅ [AutoResearch] Finished {self.task}. Best Score: {self.best_score:.2f}")
+            return {
+                "status": "COMPLETED",
+                "task": self.task,
+                "target_file": self.resolved_target_file,
+                "best_score": self.best_score,
+            }
 
         finally:
             print(f"🧹 [Cleanup] Worktree at {workpath} retained for review.")

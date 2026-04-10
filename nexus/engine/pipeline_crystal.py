@@ -46,9 +46,10 @@ class PipelineCrystalMixin:
         else:
             self._handle_crystallize_failure(ctx)
 
+        learning_finalize: Dict[str, Any] = {}
         try:
             # 🚀 [v24.0] Immediate Bayesian Feedback to Learning Loop
-            finalize_learning_loop(
+            learning_finalize = finalize_learning_loop(
                 getattr(self.engine, "project_root", Path(".")),
                 ctx.state,
                 success=success,
@@ -59,10 +60,7 @@ class PipelineCrystalMixin:
             logger.warning("continuous_learning_finalize_failed: %s", exc)
             
         self.engine.state_io.save_global_state(ctx.state)
-        next_status = "completed"
-        if isinstance(learning_finalize, dict) and learning_finalize.get("writeback_required"):
-            next_status = "pending_writeback"
-        self.engine.commander.next_step(status=next_status, state=ctx.state)
+        self.engine.commander.next_step(status="completed", state=ctx.state)
 
     def _collect_crystal_signals(self, ctx: PipelineContextProtocol, success: bool, tracer: Any) -> dict:
         """收集結晶所需的信號與元數據。"""

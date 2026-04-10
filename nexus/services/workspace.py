@@ -1,6 +1,7 @@
 from pathlib import Path
 #!/usr/bin/env python3
 import os
+import logging
 import uuid
 import fcntl
 import shutil
@@ -12,6 +13,7 @@ KB_DIR = os.getenv("NEXUS_KB_DIR", "/Users/jameschen/Downloads/obsidian/知識�
 CONTEXT_INJECTOR_BIN = os.getenv("MUSE_CORE_CONTEXT_INJECTOR", "")
 FLASH_INGEST_BIN = os.getenv("MUSE_CORE_FLASH_INGEST", "")
 UV_BIN = shutil.which("uv") or "uv"
+logger = logging.getLogger(__name__)
 
 
 
@@ -65,8 +67,9 @@ class WorkspaceManager:
             branch_name: typing.Optional[str] = None):
         """🛡️ Nexus Workspace Leasing (v24.0 Hardened)"""
         # 🧬 Ensure uniqueness by combining task_id with a shortened UUID
+        explicit_task = bool(task_id)
         task_id = (task_id or "nexus-task")
-        unique_id = f"{task_id[:16]}-{str(uuid.uuid4())[:4]}"
+        unique_id = task_id if explicit_task else f"{task_id[:16]}-{str(uuid.uuid4())[:4]}"
         branch_name = branch_name or f"isolated/task-{unique_id}"
         work_path = self.workspace_base / unique_id
 

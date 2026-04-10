@@ -95,9 +95,10 @@ class ContextHub:
     def _inject_memory_reminders(self, phase: str) -> Dict[str, Any]:
         """🔌 Hook: 呼叫 NexusFS 或 MemoryService 取得 per-round 記憶。"""
         try:
+            if self.memory_service and hasattr(self.memory_service, "cached_search"):
+                return self.memory_service.cached_search(f"memory_v9_{phase}")
             if self.nexus_fs:
                 return {"reminders": self.nexus_fs.search(f"memory_v9_{phase}"), "total_sources": -1}
-            return self.memory_service.cached_search(f"memory_v9_{phase}")
         except Exception as e:
             print(f"⚠️ [MemoryHook] Injection failed: {e}")
         return {"reminders": [], "total_sources": 0}
@@ -154,9 +155,16 @@ class ContextHub:
 
     def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000, bayesian_params: Optional[Dict[str, Any]] = None) -> str:
         """
-        🚀 19-layer Context Assembly Engine (v24.0 Bayesian Hardened).
-        Goal: MUSE-CONTEXT-24 Dynamic Entropy Management.
+        🚀 19-layer Context Assembly Engine (v24.2 Hierarchical Hardened).
         """
+        # 🧪 [v24.2] 優先從政策讀取全局元參數
+        from nexus.core.policy_loader import PolicyLoader
+        policy = PolicyLoader.load(self.project_root)
+        
+        nas_aggression = (bayesian_params or {}).get("nas_aggression")
+        if nas_aggression is None:
+            nas_aggression = policy.global_nas_aggression # 物理對接最高憲法
+            
         l0 = self._get_l0_rules()
         l1 = self._get_l1_index()
         
@@ -164,8 +172,6 @@ class ContextHub:
         history = state.metadata.get("chat_history", [])
         
         # 🧪 [Bayesian-Guided Retrieval]
-        nas_aggression = (bayesian_params or {}).get("nas_aggression", 0.7)
-        # Higher aggression means smaller context window but more relevant memory
         memory_limit = 3 if nas_aggression > 0.8 else 10
         
         # 🧪 [TOON-2.0 Rendering]

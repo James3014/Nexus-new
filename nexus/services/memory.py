@@ -332,7 +332,7 @@ class MemoryService:
             "phase": phase,  # Direct field for governance audit
             "confidence": confidence,
             "semantic_drift": drift,
-            "source": "self_heal.route_weight",
+            "source": "self_heal_route_weight",
             "governance_level": "adaptive",
             "tags": ["self_heal_route", "learning_generated"],
             "zero_decay": False,
@@ -344,7 +344,8 @@ class MemoryService:
             "metadata": {
                 "cycle_status": str(cycle_status),
                 "fault_hash": str(fault_hash or ""),
-                "weight_raw": float(weight)
+                "weight_raw": float(weight),
+                "route_weight": float(weight),
             }
         }
 

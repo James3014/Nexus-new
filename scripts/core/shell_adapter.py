@@ -44,6 +44,7 @@ class ShellAdapter:
                 "cat": "type"
             },
             "darwin": {
+                "ls -G": "ls -G",
                 "ls": "ls -G", # Mac 預設彩色
             }
         }

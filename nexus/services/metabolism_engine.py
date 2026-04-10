@@ -33,6 +33,10 @@ class SessionMetabolism:
             return {}
         return json.loads(self.stack_path.read_text())
 
+    def should_distill(self, token_usage: int) -> bool:
+        """Compatibility gate used by legacy metabolism tests."""
+        return int(token_usage or 0) >= int(self.token_limit * self.threshold)
+
     def distill(self, session_context: Dict[str, Any]) -> str:
         """📉 語義壓縮：將繁雜的對話提煉為結晶 Seed。"""
         logger.info("🧪 [Metabolism:DISTILLING] Crystallizing session essence...")

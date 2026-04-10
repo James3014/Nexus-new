@@ -53,6 +53,22 @@ class StateIO:
         )
         logger.debug(f"💾 [StateIO:v24.0] State synced for {state.task_id}")
 
+    def load_global_state(self, task_id: Optional[str] = None) -> NexusState:
+        """Back-compat loader used by legacy pipeline/context code."""
+        if task_id:
+            hot = self._hot_state_cache.get(task_id)
+            if hot is not None:
+                return hot
+        elif self._hot_state_cache:
+            # Return latest cached state when caller does not specify task_id.
+            return next(reversed(self._hot_state_cache.values()))
+
+        try:
+            return self.repository.load()
+        except Exception as exc:
+            logger.debug("state_load_fallback: %s", exc)
+            return NexusState(task_id=task_id or "new-task")
+
     def write_contract(self, filename: str, data: Any):
         self.contract_writer.write(filename, data)
 
