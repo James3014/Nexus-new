@@ -35,22 +35,16 @@ class CapabilityGate:
             "write_memory", "read_memory"
         ]
 
-    def get_tools(self, phase_str: Optional[str]) -> List[str]:
+    def get_tools(self, phase_str: str) -> List[str]:
         """獲取特定階段的合法工具清單"""
-        if not isinstance(phase_str, str):
-            return PHASE_TOOLS[Phase.P]
-        normalized = phase_str.strip()
-        if not normalized:
-            return PHASE_TOOLS[Phase.P]
-
         try:
             # 優先轉換為 Phase 枚舉 (名稱匹配)
-            phase_upper = normalized.upper()
+            phase_upper = phase_str.upper()
             if phase_upper in Phase.__members__:
                 return PHASE_TOOLS[Phase[phase_upper]]
             
             # 其次透過值匹配，取代原本的 O(N) 迴圈
-            return PHASE_TOOLS[Phase(normalized.lower())]
+            return PHASE_TOOLS[Phase(phase_str.lower())]
         except (KeyError, ValueError):
             return PHASE_TOOLS[Phase.P]
 
