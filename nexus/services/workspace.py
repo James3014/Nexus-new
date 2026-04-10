@@ -63,20 +63,26 @@ class WorkspaceManager:
 
     def lease(self, task_id: typing.Optional[str] = None,
             branch_name: typing.Optional[str] = None):
-        """租借一個全新、隔離的 Git 工作位面。"""
-        task_id = (task_id or str(uuid.uuid4()))[:8]
-        branch_name = branch_name or f"isolated/task-{task_id}"
-        work_path = self.workspace_base / task_id
+        """🛡️ Nexus Workspace Leasing (v24.0 Hardened)"""
+        # 🧬 Ensure uniqueness by combining task_id with a shortened UUID
+        task_id = (task_id or "nexus-task")
+        unique_id = f"{task_id[:16]}-{str(uuid.uuid4())[:4]}"
+        branch_name = branch_name or f"isolated/task-{unique_id}"
+        work_path = self.workspace_base / unique_id
+
+        # 🧪 [Auto-GC] Cleanup stale worktrees (>24h)
+        self._auto_gc()
 
         print(f"🏗️ [Provisioning] Leasing workspace: {task_id} at {work_path}")
 
-        # 建立隔離分支與 Worktree
+        # 建立隔離分支與 Worktree (Optimized Index Handling)
         try:
             subprocess.run(
                 ["git", "worktree", "add", "-b", branch_name, str(work_path), "HEAD"],
                 cwd=self.project_root,
                 check=True,
                 capture_output=True,
+                timeout=45
             )
 
             injector_bin = CONTEXT_INJECTOR_BIN or (
@@ -92,15 +98,24 @@ class WorkspaceManager:
                         res.stdout, encoding="utf-8"
                     )
                     print("✅ [Injection] CONTEXT_SYNC.md generated in sandbox.")
-            else:
-                print(
-                    f"⚠️ [Injection Warning] Context injector not found at {injector_bin}. Skipping brain sync."
-                )
-
+            
             return task_id, branch_name, work_path
-        except subprocess.CalledProcessError as e:
-            print(f"❌ [FAILED] Lease failed: {e.stderr.decode()}")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            logger.error(f"❌ [FAILED] Lease failed or timed out: {e}")
             return None, None, None
+
+    def _auto_gc(self):
+        """🧹 Automatic Garbage Collection for stale sandboxes (>24h)."""
+        import time
+        now = time.time()
+        for folder in self.workspace_base.glob("*"):
+            if folder.is_dir():
+                if now - folder.stat().st_mtime > 86400:
+                    try:
+                        logger.info(f"🧹 [Auto-GC] Pruning stale workspace: {folder.name}")
+                        subprocess.run(["git", "worktree", "remove", "--force", str(folder)], cwd=self.project_root, capture_output=True)
+                    except Exception:
+                        pass
 
     def sync_staged_to_sandbox(self, sandbox_path):
         """將主工作區的 Staged 內容同步至沙盒。"""

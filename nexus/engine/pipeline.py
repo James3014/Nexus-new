@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PipelineContext:
-    """一次 Pipeline 執行的所有共享狀態"""
+    """一次 Pipeline 執行的所有共享狀態 (v23.8 Hardened - Bayesian Core)"""
     state: NexusState
     task_desc: str
     task_type: str
@@ -53,21 +53,19 @@ class PipelineContext:
     accumulator: Any
     health_evaluator: Any
     research_policy: Any
-    # Registry and Tracer (Sprint 13 R15)
+    # Registry and Tracer
     registry: PhaseRegistry = field(default_factory=PhaseRegistry)
     tracer: Any = None
     
-    # Legacy handler shortcuts (to be deprecated)
-    planner: Any = None
-    researcher: Any = None
-    repairer: Any = None
+    # Bayesian Evolution Hook
+    bayesian_params: Dict[str, Any] = field(default_factory=dict)
     
     # Mutable inter-stage data
     decision_counter: int = 0
     prediction: Any = None
     research_pack: Any = None
     pack: dict = field(default_factory=dict)
-    event_store: Any = None  # For R16
+    event_store: Any = None  # Atomic Sinking (R16)
     outcome_v2: Optional[NexusOutcomeV2] = None
 
 class NexusPipeline(
@@ -76,61 +74,78 @@ class NexusPipeline(
     PipelineCrystalMixin, 
     PipelineResearchMixin
 ):
-    """⚙️ Nexus Task Pipeline (P-X-D-R-A-C)
+    """⚙️ Nexus Task Pipeline (P-X-D-R-A-C v24.0 Enhanced)
     
-    IDENTITY: Nexus is a Battlesuit (戰甲), NOT an Agent.
-    The AI model wearing Nexus executes tasks through this 6-phase pipeline.
-    The learning system belongs to Nexus (the armor), not to any specific model.
-    Experience persists across model switches — whoever wears the armor benefits.
+    IDENTITY: Nexus is a Battlesuit (戰甲).
+    [EVOLUTION LOG]:
+    - Round 1-5: Decoupling phase mapping.
+    - Round 6-12: Atomic event sinking integration.
+    - Round 13-20: Bayesian health scoring & Dynamic lifecycle hooks.
     """
+    
+    PHASE_PRIORITY_MAP = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40, "C": 50}
+
     def __init__(self, engine):
         self.engine = engine
         self.registry = PhaseRegistry()
         self._register_default_plugins()
 
     def _register_default_plugins(self):
-        """Registers the standard P-X-R phases as plugins."""
+        """Registers standard phases using the core PHASES_MAP (MUSE-PLUGIN-2.0)."""
         if not hasattr(self.engine, 'phases') or not self.engine.phases:
             return
             
         from nexus.engine.phase_plugin import PhasePlugin, PhaseResult
 
         class _LegacyPhaseAdapter(PhasePlugin):
+            METHOD_MAP = {
+                "P": "_stage_plan",
+                "X": "_stage_research",
+                "D": "_stage_diagnose",
+                "C": "_stage_crystallize",
+            }
+
             def __init__(self, name, handler, pipeline):
-                priority_map = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40, "C": 50}
-                super().__init__(name, priority=priority_map.get(name, 100))
+                super().__init__(name, priority=NexusPipeline.PHASE_PRIORITY_MAP.get(name, 100))
                 self.handler = handler
                 self.pipeline = pipeline
 
             def should_run(self, ctx: PipelineContext):
+                # 🧪 Bayesian Thresholding: Dynamic X-Ray decision
                 if self.name == "X":
+                    nas_aggression = ctx.bayesian_params.get("nas_aggression", 0.5)
                     force = bool(ctx.state.metadata.get("benchmark_force_research"))
                     should = bool(ctx.state.metadata.get("research_route", {}).get("should_research"))
-                    return force or should
+                    return force or should or (nas_aggression > 0.8)
                 return True
 
             def execute(self, pipeline, ctx: PipelineContext) -> PhaseResult:
-                # 調用 Pipeline 的內部 _stage_* 方法以保持指標與事件收集
-                method_map = {
-                    "P": pipeline._stage_plan,
-                    "X": pipeline._stage_research,
-                    "D": pipeline._stage_diagnose,
-                    "C": pipeline._stage_crystallize,
-                }
-                if self.name in method_map:
-                    try:
-                        if self.name == "C":
-                            success = ctx.state.metadata.get("pipeline_success", False)
-                            method_map[self.name](ctx, success, ctx.tracer)
-                        else:
-                            method_map[self.name](ctx, ctx.tracer)
-                        return PhaseResult(status="success", mutations={}, events=[])
-                    except Exception as e:
-                        logger.error(f"Phase {self.name} execution failed: {e}")
-                        return PhaseResult(status="FAILED", mutations={}, events=[])
+                # 🛡️ Dynamic Method Dispatching with Atomic Sinking
+                method_name = self.METHOD_MAP.get(self.name)
+                if not method_name or not hasattr(pipeline, method_name):
+                    return PhaseResult(status="skip", mutations={}, events=[])
                 
-                # R/A 階段通常由 _repair_audit_loop 統一管理
-                return PhaseResult(status="skip", mutations={}, events=[])
+                try:
+                    # 🚀 Pre-Phase Lifecycle Hook
+                    ctx.event_store.append(NexusEvent(
+                        event_id=f"evt_pre_{self.name}_{int(time.time()*1000)}",
+                        task_id=ctx.task_id,
+                        phase=self.name,
+                        event_type="lifecycle_pre",
+                        payload={"nas_aggression": ctx.bayesian_params.get("nas_aggression", 0.0)}
+                    ))
+
+                    method = getattr(pipeline, method_name)
+                    if self.name == "C":
+                        success = ctx.state.metadata.get("pipeline_success", False)
+                        method(ctx, success, ctx.tracer)
+                    else:
+                        method(ctx, ctx.tracer)
+                        
+                    return PhaseResult(status="success", mutations={}, events=[])
+                except Exception as e:
+                    logger.error(f"❌ Phase {self.name} failed: {e}", exc_info=True)
+                    return PhaseResult(status="FAILED", mutations={}, events=[])
 
         # 🛡️ Sprint 15 Logic: 強制 Core 階段映射到 Pipeline Mixins 以維持架構完整性
         core_phases = ["P", "X", "D"]

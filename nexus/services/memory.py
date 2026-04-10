@@ -78,7 +78,7 @@ class MemoryService:
                 except (OSError, json.JSONDecodeError) as e:
                     logger.warning(f"Failed to load fault lessons during init: {e}")
         except Exception as e:
-            logger.error(f"MemoryService auto-init failed: {e}")
+            logger.warning(f"MemoryService auto-init warning (non-fatal): {e}")
 
     def semantic_search(self, query: str, table_name: str = "policy", limit: int = 3) -> List[Dict]:
         """🧬 語義檢索實作 (M2-Active)"""

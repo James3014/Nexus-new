@@ -133,4 +133,54 @@ tasks:
   run: nexus:runner --task repair_phase_R
   priority: MEDIUM
   depends_on: []
+- id: auto.repair.core_metrics_aggregator
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/metrics_aggregator.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_research_gear
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/research/gear.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_shogun
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/shogun.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_swarm
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/swarm.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_memory_coordinator
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/memory_coordinator.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_policy_loader
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/policy_loader.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_skill_outcomes
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/skill_outcomes.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_handoff_bundle
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/handoff_bundle.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_pipeline_metadata
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/pipeline_metadata.py
+  priority: HIGH
+  depends_on: []
+- id: auto.repair.core_access_control_list
+  description: 'AUTO-REPAIR: Core module health audit & baseline optimization (Target: 80% Compliance)'
+  run: nexus:benchmark --framework health-audit --target nexus/core/access_control_list.py
+  priority: HIGH
+  depends_on: []
 

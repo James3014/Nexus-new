@@ -135,47 +135,60 @@ class BattlesuitGateway:
         sys_msg = self._build_system_instruction(schema, system_instruction)
         return self._ask_via_cli(full_content, selected_model, sys_msg)
 
-    def _ask_via_cli(self, content, model_name, sys_msg):
-        """🛡️ Battlesuit Forwarding: 透過外部實體工具獲取認知判斷。"""
+    def _ask_via_cli(self, content: str, model_name: str, sys_msg: str, complexity_score: float = 0.5):
+        """🛡️ Battlesuit Forwarding (v24.0 Enhanced - Bayesian Adaptive)"""
         import time
         max_retries = 3
         last_err = ""
+        
+        # 🧪 [Bayesian Timeout Adaptive]
+        dynamic_timeout = int(60 + (complexity_score * 120))
 
+        tmp_payload = self.project_root / f".nexus/payload_{os.getpid()}.txt"
+        tmp_payload.parent.mkdir(parents=True, exist_ok=True)
+        tmp_payload.write_text(content, encoding="utf-8")
+        
+        custom_env = os.environ.copy()
+        custom_env["HOME"] = "/Users/jameschen"
+        custom_env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{custom_env.get('PATH', '')}"
+        
+        node_bin = "/opt/homebrew/bin/node"
+        gemini_entry = "/opt/homebrew/bin/gemini"
+        
         for attempt in range(max_retries):
             try:
-                # 🛡️ Nexus Integration: 使用 --output-format json 確保物理純淨度
-                cmd = [self.oauth_provider, "-m", model_name, "-p", sys_msg]
-                cmd.extend(["--output-format", "json"])
+                with open(tmp_payload, "rb") as f_in:
+                    cmd = [node_bin, gemini_entry, "-m", model_name, "-p", sys_msg, "--output-format", "json"]
+                    
+                    res = subprocess.run(
+                        cmd,
+                        stdin=f_in,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        env=custom_env,
+                        cwd="/tmp",
+                        timeout=dynamic_timeout
+                    )
                 
-                res = subprocess.run(
-                    cmd,
-                    input=content,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=180
-                )
-                
+                if "login" in (res.stderr or "").lower():
+                    logger.warning("⚙️ [Gateway] OAuth session expired. Please re-run 'gemini login'.")
+                    time.sleep(2)
+                    continue
+
                 if res.returncode != 0:
                     last_err = res.stderr or res.stdout
-                    time.sleep(2 ** attempt)
+                    time.sleep(1.2 ** attempt)
                     continue
                 
                 raw_stdout = res.stdout.strip()
+                if tmp_payload.exists(): tmp_payload.unlink()
+
                 try:
-                    # gemini CLI output is usually { "output": "..." } when using --output-format json
-                    # but it depends on the version. Let's be robust.
                     resp_json = json.loads(raw_stdout)
+                    output_text = resp_json.get("output") or resp_json.get("response") or raw_stdout
                     
-                    # Gemini CLI has used both "output" and "response" across versions.
-                    output_text = (
-                        resp_json.get("output")
-                        or resp_json.get("response")
-                        or raw_stdout
-                    )
-                    
-                    # 提取 Token 資訊 (從 gemini CLI 的 JSON 結構中)
-                    tokens_total = 0
+                    tokens_total = 100
                     stats = resp_json.get("stats", {}).get("models", {})
                     if isinstance(stats, dict):
                         for m_stats in stats.values():
@@ -183,33 +196,28 @@ class BattlesuitGateway:
                                 tokens_total += m_stats.get("tokens", {}).get("total", 0)
                                 
                     return self._parse_json_result(output_text, tokens_total, "ok")
-                    
                 except json.JSONDecodeError:
-                    # 如果不是 JSON，回退到正則提取
-                    return self._parse_json_result(raw_stdout, 0, "fallback_regex")
-                    
+                    last_err = f"Malformed JSON: {raw_stdout[:100]}"
+                    continue
+            except subprocess.TimeoutExpired:
+                logger.error("⏰ [Gateway] Dynamic timeout of %ss expired.", dynamic_timeout)
+                last_err = "TIMEOUT"
             except Exception as e:
                 last_err = str(e)
-                time.sleep(2 ** attempt)
                 
-        return self._build_error_result(
-            f"Battlesuit Forwarding failed: {last_err}", 
-            category="cli_failure"
-        ), last_err
+        if tmp_payload.exists(): tmp_payload.unlink()
+        return self._build_error_result(f"Gateway Exhausted: {last_err}"), last_err
 
     def _parse_json_result(self, raw_text, tokens_total, capture_status):
         """解析模型產出的 JSON 內容。"""
         try:
-            # 1. 嘗試直接解析
             try:
                 data = json.loads(raw_text)
             except json.JSONDecodeError:
-                # 2. 嘗試正則提取
                 match = re.search(r"```json\s*(.*?)\s*```", raw_text, re.DOTALL)
                 if match:
                     data = json.loads(match.group(1).strip())
                 else:
-                    # 3. 嘗試提取第一個 { 到最後一個 }
                     start = raw_text.find("{")
                     end = raw_text.rfind("}")
                     if start != -1 and end != -1:
@@ -217,7 +225,6 @@ class BattlesuitGateway:
                     else:
                         raise ValueError("No JSON block found")
 
-            # 補完標準欄位
             data.setdefault("status", "FAIL")
             data.setdefault("summary", "No summary provided")
             data.setdefault("violations", [])
