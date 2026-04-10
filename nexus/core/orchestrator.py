@@ -70,14 +70,41 @@ class NexusOrchestrator:
             # Update constraints based on new self.mode
             self.max_strikes = 3 if self.mode != "audit" else 1
 
-    def run_review(self) -> dict:
-        """核心門禁審核邏輯"""
-        print(f"🎭 [Orchestrator] Reviewing task: {self.task} | Mode: {self.execution_mode}")
+    def _do_loop(self) -> bool:
+        """核心執行循環 (v24.0 Hardened - Interaction Enabled)"""
+        strikes = 0
+        while strikes < self.max_strikes:
+            # 🧪 [Round 20] Hot-Apply Human Guidance
+            self._hot_sync_human_guidance()
+            
+            # ... 原有執行邏輯 (P-D-R-A) ...
+            success = self._execute_pdrac_sequence()
+            if success: return True
+            
+            strikes += 1
+            print(f"⚠️ [Strike {strikes}/{self.max_strikes}] Task failed. Analyzing recovery path...")
+            
+            # 🧪 [Round 20] Breakpoint for Human Command
+            if self.execution_mode == "pilot":
+                print("🛑 [Breakpoint] Entering Command mode for manual correction...")
+                # 此處對接 UI 請求輸入
+                user_feedback = self._wait_for_human_intervention()
+                if user_feedback:
+                    self.set_execution_mode("pilot", f"Human intervention: {user_feedback[:20]}")
+                    continue # 利用新指引重試
 
-        # 1. Setup Environment
-        # 2. Strike Loop
-        success = self._do_loop()
-        return {
+        return False
+
+    def _hot_sync_human_guidance(self):
+        """🛡️ 熱同步使用者意志至 ContextHub 與 Policy"""
+        guidance_path = Path(".nexus/knowledge/human_guidance.jsonl")
+        if guidance_path.exists():
+            # 模擬讀取並更新 internal params
+            pass
+
+    def _wait_for_human_intervention(self) -> Optional[str]:
+        """模擬等待使用者輸入"""
+        return "Optimize for thread safety explicitly."
             "status": "PASS" if success else "FAIL",
             "summary": "Orchestrator loop finished",
             "success": success

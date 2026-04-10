@@ -57,16 +57,21 @@ class MemPalace:
         return clean_candidates
 
     def get_skill_constraints(self) -> Dict[str, Any]:
-        """🛡️ 從活躍信念中提取技能約束規則（包含 7 天 TTL 控制）。"""
+        """🛡️ 從活躍且高信任度的信念中提取技能約束規則 (v24.0 Hardened)。"""
         beliefs = self.list_beliefs(status="ACTIVE")
         constraints = {"require": [], "forbid": [], "prefer": []}
         now = datetime.now(timezone.utc)
+        
         for b in beliefs:
+            # 🧪 [Round 20] Entropy Filtering: Skip UNTRUSTED beliefs
+            if b.get("trust_level") == "UNTRUSTED":
+                logger.info(f"🛡️ [MemPalace] Ignoring high-entropy belief: {b.get('id')}")
+                continue
+
             # 檢查 7 天 TTL (Time-To-Live)
             created_at_str = b.get("updated_at") or b.get("created_at")
             if created_at_str:
                 try:
-                    # Parse timestamp, default to skipping if older than 7 days
                     created_time = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
                     if (now - created_time).days > 7:
                         continue

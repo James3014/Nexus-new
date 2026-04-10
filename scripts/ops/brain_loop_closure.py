@@ -38,43 +38,51 @@ class BrainLoopClosure:
             for item in data:
                 f.write(json.dumps(item, ensure_ascii=False) + '\n')
 
-    def propagate_belief_revision(self, belief_id: str, new_status: str):
-        """🚀 [v0.2] 沿 Dependency Graph 傳播信念修訂影響"""
+    def propagate_belief_revision(self, belief_id: str, new_status: str, reason: str = "Unspecified"):
+        """🚀 [v24.0 Hardened] 沿 Dependency Graph 雙向傳播信念修訂影響 (含向量同步)"""
         beliefs = self.load_jsonl(self.beliefs_path)
         artifacts = self.load_jsonl(self.artifacts_path)
         edges = self.load_jsonl(self.edges_path)
         
-        # 1. 更新 Belief 狀態
-        found = False
-        for b in beliefs:
-            if b.get("id") == belief_id:
-                b["status"] = new_status
-                b["updated_at"] = datetime.utcnow().isoformat()
-                found = True
-                break
-        if not found:
-            print(f"⚠️ [v0.2] Belief ID {belief_id} not found.")
+        # 1. 更新 Belief 狀態與熵值
+        target_belief = next((b for b in beliefs if b.get("id") == belief_id), None)
+        if not target_belief:
+            print(f"⚠️ [v24.0] Belief ID {belief_id} not found.")
             return
 
-        # 2. 尋找直接受影響的 Artifacts (depends_on / derived_from)
-        affected_artifact_ids = [
-            e.get("to_id") for e in edges 
-            if e.get("from_id") == belief_id and e.get("type") in ["depends_on", "derived_from"]
-        ]
+        target_belief["status"] = new_status
+        target_belief["updated_at"] = datetime.utcnow().isoformat()
+        # 🧪 [Round 20] 增加修正計數 (Entropy Tracking)
+        target_belief["revision_count"] = target_belief.get("revision_count", 0) + 1
+        if target_belief["revision_count"] > 3:
+            target_belief["trust_level"] = "UNTRUSTED"
 
-        # 3. 標記 Artifacts 為 Stale
+        # 2. 同步移除向量庫索引 (防止認知污染)
+        if new_status in ["retracted", "superseded", "failed"]:
+            try:
+                # 🧪 Atomic Vector Sync
+                self.db.open_table(self.table_name).delete(f"task = '[Belief] {belief_id}'")
+                print(f"🧹 [BrainLoop:Sync] Removed retracted belief {belief_id} from Vector DB.")
+            except Exception: pass
+
+        # 3. 尋找受影響的 Artifacts (Downstream)
+        affected_ids = [e.get("to_id") for e in edges if e.get("from_id") == belief_id]
         for art in artifacts:
-            if art.get("id") in affected_artifact_ids:
-                if new_status in ["retracted", "superseded"]:
-                    art["status"] = "stale"
-                    art["stale_reason"] = f"Underlying belief {belief_id} became {new_status}"
-                    art["updated_at"] = datetime.utcnow().isoformat()
-                    print(f"🛡️ [v0.2] Artifact {art['id']} marked STALE due to {belief_id}")
+            if art.get("id") in affected_ids:
+                art["status"] = "stale"
+                art["stale_reason"] = f"Origin belief {belief_id} rescinded: {reason}"
 
-        # 4. 存檔
+        # 4. [Round 20] 反向溯源 (Upstream Propagation)
+        # 如果 Artifact 失敗，撤銷所有支撐它的 Beliefs
+        if new_status == "failed":
+            upstream_belief_ids = [e.get("from_id") for e in edges if e.get("to_id") == belief_id and e.get("type") == "supports"]
+            for ub_id in upstream_belief_ids:
+                print(f"🔄 [BrainLoop:Reverse] Artifact failure triggering rescission of upstream belief {ub_id}")
+                self.propagate_belief_revision(ub_id, "retracted", reason=f"Upstream support for failed artifact {belief_id}")
+
         self.save_jsonl(self.beliefs_path, beliefs)
         self.save_jsonl(self.artifacts_path, artifacts)
-        print(f"✅ [v0.2] Propagation complete for belief {belief_id}")
+        print(f"✅ [BrainLoop:v24.0] Full-path revision complete for {belief_id}")
 
     # --- Knowledge Fusion Logic ---
 
