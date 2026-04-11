@@ -38,3 +38,11 @@
 Status: ACTIVE
 Version: v1.0 (2026-04-11)
 Enforcement: ENGINE_LEVEL (via nexus/core/planner_executor.py)
+
+---
+
+### 📊 物理效能實證 (v23 Evidence)
+根據 2026-04-11 的超難任務壓力測試，採用 Formal 模式可達到：
+- **4.0x 的推理加速**：減少多輪試錯產生的延遲。
+- **21% 的成功率淨增**：透過「不變量保護」消滅幻覺定位。
+詳細數據請參閱 [[Ops - Performance Benchmarks]]。
