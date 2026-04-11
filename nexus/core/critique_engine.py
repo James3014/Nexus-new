@@ -9,6 +9,20 @@ class RationalizationError(Exception):
 
 class CritiqueEngine:
 
+    def anti_rationalization_preflight(self, claim: str, evidence: dict):
+        """🛡️ 高風險結論前的強制物理自省。"""
+        questions = [
+            "Which invariant still might fail?",
+            "Is the current evidence sufficient to REFUTE my own claim?",
+            "Have I mistaken a narrative summary for a physical test?"
+        ]
+        if evidence.get("confidence_level") == "HIGH":
+            # 檢查 known_gaps
+            if not evidence.get("known_gaps"):
+                raise RationalizationError("🚨 High confidence claim MUST include known_gaps to prevent rationalization.")
+        return questions
+
+
     RESTRICTED_CLAIMS = [
         "solved", "fixed", "closure", "verified", "production-ready", 
         "industrial-grade", "100%", "bit-perfect"

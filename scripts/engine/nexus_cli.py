@@ -1,3 +1,14 @@
+
+def validate_claim_integrity(evidence_path: str):
+    """🛡️ 硬性物理守門：驗證結論與證據的匹配度。"""
+    import json
+    if not os.path.exists(evidence_path): return False
+    with open(evidence_path, "r") as f:
+        data = json.load(f)
+    if data.get("claim_state") == "VERIFIED" and data.get("confidence_level") != "HIGH":
+        return False
+    return True
+
 #!/usr/bin/env python3
 import sys, os, json, subprocess, yaml, click
 from pathlib import Path
