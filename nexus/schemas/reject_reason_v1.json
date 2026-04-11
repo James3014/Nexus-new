@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Nexus Reject Reason",
+  "type": "object",
+  "required": ["task_id", "pattern_class", "why_rejected", "required_next_step"],
+  "properties": {
+    "task_id": { "type": "string" },
+    "pattern_class": {
+      "enum": [
+        "OVERCLAIM_NO_EVIDENCE",
+        "SUMMARY_AS_PROOF",
+        "FIELD_NAME_EQUIVALENCE_FALLACY",
+        "SANITIZER_SCOPE_CONFUSION",
+        "TOY_MODEL_AS_ALIGNMENT",
+        "UNRESOLVED_CONFLICT_IGNORED"
+      ]
+    },
+    "why_rejected": { "type": "string" },
+    "missing_evidence": { "type": "array", "items": { "type": "string" } },
+    "required_next_step": { "type": "string" }
+  }
+}

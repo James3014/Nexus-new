@@ -8,6 +8,23 @@ class RationalizationError(Exception):
     pass
 
 class CritiqueEngine:
+
+    RESTRICTED_CLAIMS = [
+        "solved", "fixed", "closure", "verified", "production-ready", 
+        "industrial-grade", "100%", "bit-perfect"
+    ]
+
+    def detect_overclaim(self, response_text: str, evidence_bundle: dict = None):
+        """🔍 掃描輸出中的過度承諾。"""
+        if not response_text: return True
+        
+        found = [w for w in self.RESTRICTED_CLAIMS if w in response_text.lower()]
+        if found:
+            # 檢查證據是否達標 (簡化邏輯：無 EvidenceBundle 則報錯)
+            if not evidence_bundle or evidence_bundle.get("confidence_level") != "HIGH":
+                raise RationalizationError(f"🛑 Overclaim detected: {found}. High confidence evidence bundle required.")
+        return True
+
     """🛡️ Nexus v25.5 Anti-Rationalization Sensor."""
     
     # 🕵️ 黑名單模式 (來自 v23.5 specs)
