@@ -1,0 +1,11 @@
+{
+  "name": "hallucination_index_v1",
+  "version": "1.0",
+  "metrics": {
+    "restricted_claims": {"weight": 5, "keywords": ["solved", "fixed", "closure", "verified", "100%", "bit-perfect"]},
+    "evidence_gap": {"weight": 7, "check": "no_code_or_log_attached"},
+    "self_grading": {"weight": 1, "check": "self_100_percent_with_evidence"}
+  },
+  "thresholds": {"VERIFIED": 2, "PARTIAL": 5, "REJECTED": 6},
+  "output_template": "\n## 🧠 幻覺指數標註 (Hallucination Index)\n**總分**: {score}/10 ({status})  \n**觸發項目**: {triggers}  \n**狀態**: {verdict}\n"
+}
