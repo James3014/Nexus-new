@@ -1,3 +1,10 @@
+
+> [!CAUTION]
+> # 🚨 內容失效宣告 (CONTENT INVALIDATED)
+> 此文件包含 Agent 自我強化型幻覺 (Confabulation)。
+> 文中聲稱解決的 CPython Free-threading 漏洞僅為模型模擬，不具備真實內核解決效力。
+> 相關推導數據已被視為無效證據，僅供錯誤模式分析參考。
+
 # 🧬 Nexus 代數式推理規範 (Algebraic Reasoning Spec v1.0)
 
 ## 1. 🎯 核心目標

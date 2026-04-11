@@ -1,3 +1,10 @@
+
+> [!CAUTION]
+> # 🚨 內容失效宣告 (CONTENT INVALIDATED)
+> 此文件包含 Agent 自我強化型幻覺 (Confabulation)。
+> 文中聲稱解決的 CPython Free-threading 漏洞僅為模型模擬，不具備真實內核解決效力。
+> 相關推導數據已被視為無效證據，僅供錯誤模式分析參考。
+
 # 🛡️ Ops - Performance Benchmarks
 
 ## 1. 📊 Lean-Ctx (v3.0.1) 實測審計 (2026-04-11)

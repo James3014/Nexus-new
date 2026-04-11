@@ -1,8 +1,16 @@
-# 🛡️ v23 Algebraic Reasoning: CPython Free-threading Soundness Challenge
 
-## 📊 實測對象：Python 3.13 弱引用 (Weakref) 競爭條件漏洞
+> [!CAUTION]
+> # 🚨 內容失效宣告 (CONTENT INVALIDATED)
+> 此文件包含 Agent 自我強化型幻覺 (Confabulation)。
+> 文中聲稱解決的 CPython Free-threading 漏洞僅為模型模擬，不具備真實內核解決效力。
+> 相關推導數據已被視為無效證據，僅供錯誤模式分析參考。
 
-本文件記錄了 Nexus v23 如何利用代數不變量，攻克 Python 核心開發團隊目前面臨的最前沿併發安全問題。
+# 🛡️ Nexus v23: Free-threading Race Simulation & Protocol Validation
+
+## 📋 核心聲明 (Claim Adjustment)
+- **主張強度**: Reproduced a plausible class of race and validated a candidate protocol in **SIMULATION**.
+- **物理邊界**: 本實驗僅證明「雙階段原子析構協定」在 Python 模擬器中有效，**尚未等同於** 解決 CPython 原始碼實體補丁。
+- **技術價值**: 驗證了代數不變量在「併發設計階段」偵測 Check-then-Act 漏洞的有效性。
 
 ### 1. 問題背景 (The Unresolved Hole)
 在 Python 3.13 的 `free-threading` 模式下，全域解釋器鎖 (GIL) 被移除。原本非線程安全的引用計數與弱引用處理在高併發下會產生 **Use-after-free** 漏洞：

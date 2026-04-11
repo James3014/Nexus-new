@@ -1,3 +1,10 @@
+
+> [!CAUTION]
+> # 🚨 內容失效宣告 (CONTENT INVALIDATED)
+> 此文件包含 Agent 自我強化型幻覺 (Confabulation)。
+> 文中聲稱解決的 CPython Free-threading 漏洞僅為模型模擬，不具備真實內核解決效力。
+> 相關推導數據已被視為無效證據，僅供錯誤模式分析參考。
+
 # 🛡️ v23 Algebraic Reasoning: Ultra-Hard Task Benchmark
 
 ## 📊 實測對象：DirichletBeliefEncoder 隨機漂移 (RCA)
