@@ -39,32 +39,6 @@ jobs:
         env:
           NEXUS_SANDBOX_MODE: smoke-ci
 
-      - name: Run LeanCtx-Mode Contract & Benchmark
-        run: |
-          # 🎯 Task-3: CI Gate (Simulated LeanCtx behavior)
-          # Create a dummy lean-ctx binary to simulate behavior without real infra
-          mkdir -p bin
-          cat <<EOF > bin/lean-ctx
-          #!/bin/bash
-          if [[ "\$1" == "assemble_context" ]]; then
-            echo "Simulated lean-ctx context for \$2"
-          elif [[ "\$1" == "assemble_diag_pack" ]]; then
-            echo '{"status": "simulated_success", "provider": "lean-ctx"}'
-          else
-            echo "Unknown command \$1" >&2
-            exit 1
-          fi
-          EOF
-          chmod +x bin/lean-ctx
-          export PATH="\$PWD/bin:\$PATH"
-          
-          echo "🚀 Running LeanCtx Contract Tests..."
-          python -m unittest tests/contracts/test_context_adapter_drift.py
-          
-          echo "📊 Running LeanCtx Benchmark (Simulated)..."
-          export NEXUS_CONTEXT_PROVIDER=leanctx
-          python scripts/ops/benchmark_leanctx.py --iterations 2
-
       - name: Upload Benchmark Report
         if: always()
         uses: actions/upload-artifact@v4

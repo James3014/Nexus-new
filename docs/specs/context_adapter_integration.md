@@ -33,21 +33,3 @@ To ensure system stability, the `ContextAdapter` implements a **fail-safe** mech
 If `leanctx` mode causes instability:
 1.  **Immediate**: `export NEXUS_CONTEXT_PROVIDER=legacy`.
 2.  **Permanent**: Remove `NEXUS_CONTEXT_PROVIDER` from the environment configuration (e.g., `.env` or CI/CD secrets).
-
-## 6. P4 Production-Readiness Checklist
-🎯 **Task-4: Docs (Rollout & Go/No-Go)**
-
-### Rollout Checklist (P4)
-- [ ] **Contract Verification**: All contract drift tests (timeout, malformed JSON, missing binary) pass in CI.
-- [ ] **Performance Baseline**: Simulated `leanctx` benchmark show latency within 10% of legacy for assembly.
-- [ ] **Fallback Verification**: End-to-end smoke test confirms fallback to legacy when `lean-ctx` binary is simulated-broken.
-- [ ] **Simulated CI Gate**: `nexus-smoke.yml` successfully runs the `leanctx-mode` test leg.
-- [ ] **Observability**: Warning logs for `lean-ctx` failures are visible in standard output/logs.
-
-### Go/No-Go Criteria
-| Metric | Threshold (Go) | Threshold (No-Go) |
-| :--- | :--- | :--- |
-| **Contract Stability** | 100% pass on drift tests | Any regression in fallback logic |
-| **P95 Latency** | < 2.0s for assembly | > 5.0s (triggers timeout) |
-| **Fallback Success Rate** | 100% (No crash on failure) | Any crash due to provider failure |
-| **Data Integrity** | Legacy memory/router data preserved | `leanctx` overwrites authoritative core fields |
