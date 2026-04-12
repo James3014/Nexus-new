@@ -195,9 +195,7 @@ def acceptance_check(as_json, evidence_path):
 def run(task_id, complexity):
     """🚀 [Wisdom Layer] Execute task with automatic NAS tuning."""
     from nexus.core.context_hub import ContextHub
-    from nexus.core.context_adapter import ContextAdapter
-    raw_hub = ContextHub(REPO_ROOT)
-    hub = ContextAdapter(raw_hub)
+    hub = ContextHub(REPO_ROOT)
     
     # 1. 智慧感應 (Wisdom Sensing)
     decision = hub.make_pre_routing_decision(task_id, {"complexity_score": complexity})

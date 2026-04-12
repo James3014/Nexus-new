@@ -53,12 +53,8 @@ class DualTrackAudit:
     def __init__(self):
         COMPLIANCE_AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
-    def run_advisory_audit(self, pr_diff: str = "", task_spec: str = "", **kwargs) -> Dict[str, Any]:
+    def run_advisory_audit(self, pr_diff: str, task_spec: str) -> Dict[str, Any]:
         """🛡️ Phase A Verifier (v24.0 Enhanced): Deep Semantic Audit."""
-        # Compatibility Layer for 'candidate' and 'task' keyword arguments
-        pr_diff = pr_diff or kwargs.get("candidate", "")
-        task_spec = task_spec or kwargs.get("task", "")
-        
         start_time = time.time()
         
         logger.info("FeynmanVerifier: Executing 20-round evolved semantic scan...")

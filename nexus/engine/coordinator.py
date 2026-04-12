@@ -99,15 +99,13 @@ class NexusEngine:
         self.wisdom_vault = WisdomVault(str(self.project_root))
         
         from nexus.core.context_hub import ContextHub
-        from nexus.core.context_adapter import ContextAdapter
-        raw_hub = kwargs.get("context_hub") or ContextHub(
+        self.context_hub = kwargs.get("context_hub") or ContextHub(
             str(self.project_root), 
             memory_service=self.memory, 
             run_dir=str(self.run_dir),
             skill_registry=self.skill_registry,
             mem_palace=self.mem_palace
         )
-        self.context_hub = ContextAdapter(raw_hub)
         self.context_hub.wisdom_vault = self.wisdom_vault
         self.commander = kwargs.get("commander")
         if self.commander is None:
