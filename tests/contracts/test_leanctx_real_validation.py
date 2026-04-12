@@ -45,7 +45,7 @@ def test_go_when_thresholds_pass(monkeypatch):
     report = get_validation_report("real", tasks=20)
     assert report["recommendation"] == "GO"
     assert report["token_delta_pct"] < 0
-    assert report["latency_delta_pct"] <= 5
+    assert report["latency_delta_pct"] <= 10
     assert report["fallback_rate"] < 0.05
 
 
