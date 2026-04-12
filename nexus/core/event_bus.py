@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import logging
 import json
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class NexusEventBus:
             local_payload = payload.copy()
             local_payload["_seq"] = cls._global_seq
             local_payload["internal_ts"] = time.time()
+            local_payload.setdefault("_trace_id", str(uuid.uuid4()))
             
             record = {
                 "event_type": event_type,
@@ -66,13 +68,13 @@ class NexusEventBus:
         
         # 廣播（在鎖外執行以避免死鎖，但順序已由文件保證）
         for handler in cls._subscribers.get(event_type, []):
-            try: handler(payload)
+            try: handler(local_payload)
             except Exception: pass
 
         # 遠端廣播
         if cls._remote_broadcaster:
             try:
-                cls._remote_broadcaster(event_type, payload)
+                cls._remote_broadcaster(event_type, local_payload)
             except Exception as e:
                 logger.error("Remote broadcast error for %s: %s", event_type, e)
 
