@@ -61,7 +61,7 @@ class SoulPalaceEngine:
         # 寫入 LanceDB (Layer 3 Deep Search)
         vector = self.model.encode(content).tolist()
         table_data = [{**record, "vector": vector}]
-        if self.table_name in self.db.table_names():
+        if self.table_name in self.db.list_tables():
             table = self.db.open_table(self.table_name)
             table.add(table_data)
         else:

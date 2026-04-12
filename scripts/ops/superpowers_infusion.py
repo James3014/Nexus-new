@@ -14,7 +14,7 @@ class OmniInfusion:
         
     def _clean_table(self):
         """🧹 WIPE the old hollow core."""
-        if self.table_name in self.db.table_names():
+        if self.table_name in self.db.list_tables():
             self.db.drop_table(self.table_name)
             print(f"🧹 [OmniInfusion] Truncated {self.table_name}")
 
