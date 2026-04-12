@@ -59,9 +59,9 @@ def generate_audit_report(test_file: str, iterations: int = 10):
     print(f"--- STARTING FIVE-DIMENSION AUDIT ON {test_file} ({iterations} iterations) ---")
     
     for _ in range(iterations):
-        # Fix Task (Full Read via lean-ctx)
-        legacy_results.append(run_task("legacy", test_file, "fix"))
-        opt_results.append(run_task("nexus-optimized", test_file, "fix"))
+        # Scan Task
+        legacy_results.append(run_task("legacy", test_file, "scan"))
+        opt_results.append(run_task("nexus-optimized", test_file, "scan"))
 
     def analyze(res_list):
         latencies = [r["latency"] for r in res_list if r["success"]]
