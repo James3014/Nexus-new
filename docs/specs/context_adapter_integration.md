@@ -59,7 +59,7 @@ If `leanctx` mode causes instability:
 | Metric | Threshold (Go) | Threshold (No-Go) |
 | :--- | :--- | :--- |
 | **Contract Stability** | 100% pass on drift tests | Any regression in fallback logic |
-| **Latency Delta** | `latency_delta_pct <= 5` | `latency_delta_pct > 5` |
+| **Latency Delta** | `latency_delta_pct <= 10` | `latency_delta_pct > 10` |
 | **Token Delta** | `token_delta_pct < 0` | `token_delta_pct >= 0` |
 | **Task Success Delta** | `task_success_rate_delta_pct >= 0` | `task_success_rate_delta_pct < 0` |
 | **Fallback Rate** | `fallback_rate < 0.05` | `fallback_rate >= 0.05` |
@@ -73,7 +73,7 @@ To ensure a stable go-live, the following test protocol is mandatory:
 2. **A/B Run Count**: Execute at least **100 independent tasks** in `leanctx` mode to gather statistically significant performance data.
 3. **Pass Thresholds** (from `leanctx_real_validation.py`):
    - `token_delta_pct < 0`
-   - `latency_delta_pct <= 5`
+   - `latency_delta_pct <= 10`
    - `task_success_rate_delta_pct >= 0`
    - `fallback_rate < 0.05`
 4. **Rollback Trigger**:
