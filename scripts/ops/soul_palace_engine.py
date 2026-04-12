@@ -2,7 +2,7 @@ import os
 import json
 import lancedb
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer
 
@@ -44,16 +44,15 @@ class SoulPalaceEngine:
         compressed = self.aaak_compress(content) if layer == 1 else content
         
         record = {
-            "id": f"{k_type[0].upper()}-{datetime.utcnow().timestamp()}",
+            "id": f"{k_type[0].upper()}-{datetime.now(UTC).timestamp()}",
             "wing": spatial["wing"],
             "room": spatial["room"],
             "type": k_type,
             "content": compressed,
             "layer": layer,
             "status": "active",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
-        
         # 寫入 JSONL (Beliefs or Artifacts)
         target = self.beliefs_path if k_type == "belief" else self.artifacts_path
         with open(target, 'a', encoding='utf-8') as f:
