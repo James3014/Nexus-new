@@ -1,3 +1,5 @@
+import tempfile
+import shutil
 from pathlib import Path
 import unittest
 import json
@@ -7,8 +9,10 @@ from nexus.services.memory import MemoryService, FaultLesson
 
 class TestMemoryService(unittest.TestCase):
     def setUp(self):
-        self.project_root = Path("/tmp/nexus_test_memory")
-        self.project_root.mkdir(parents=True, exist_ok=True)
+        # 使用動態臨時目錄，避免多進程/多測試競態
+        self.test_dir = tempfile.mkdtemp(prefix="nexus_test_memory_")
+        self.project_root = Path(self.test_dir)
+        
         # Create some mock data files
         (self.project_root / "obsidian").mkdir(parents=True, exist_ok=True)
         with open(self.project_root / "obsidian/crystal_lessons.jsonl", "w") as f:
@@ -17,8 +21,8 @@ class TestMemoryService(unittest.TestCase):
         self.service = MemoryService(project_root=str(self.project_root))
 
     def tearDown(self):
-        import shutil
-        shutil.rmtree(self.project_root)
+        # 強制清理且忽略錯誤
+        shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_aggregate_memory(self):
         result = self.service.aggregate_memory()
