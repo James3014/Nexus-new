@@ -1,5 +1,6 @@
 import functools
 import asyncio
+import inspect
 import traceback
 import time
 from typing import Any, Callable, Optional
@@ -73,7 +74,7 @@ def nexus_metabolize(task_name: Optional[str] = None):
                 metabolism.distill(session_context)
                 raise e
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         return wrapper
     return decorator
