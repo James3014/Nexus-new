@@ -9,6 +9,8 @@ dependencies = [
     "lancedb>=0.4.0",
     "pandas>=2.0.0",
     "requests>=2.31.0",
+    "urllib3<2.6",
+    "charset-normalizer<3.5",
     "filelock>=3.0.0",
     "grpcio>=1.50.0",
     "grpcio-tools>=1.50.0",
