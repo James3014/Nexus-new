@@ -5,7 +5,11 @@
   - `uv run scripts/engine/nexus_cli.py nexus research:run --run-id local-smoke --scope docs/research/autoresearch_control_plane_spec.md --dry-run --report-file .nexus/reports/research/local-smoke.json`
   - `uv run scripts/engine/nexus_cli.py nexus research:route --task-desc \"fix flaky timeout in websocket\" --candidate-count 3 --root-cause-confidence 0.7 --output-json`
   - `uv run scripts/engine/nexus_cli.py nexus research:benchmark --manifest-file /tmp/research-benchmark-manifest.json --report-file .nexus/reports/research/benchmark-report.json`
+  - `uv run scripts/engine/nexus_cli.py nexus research:benchmark --manifest-file /tmp/research-benchmark-ab.json --mode ab --ab-trials 5 --report-file .nexus/reports/research/benchmark-ab-report.json`
   - `uv run scripts/engine/nexus_cli.py nexus research:sprint --task \"Fix deadlock in transfer\" --target-file nexus/demo/bank_transfer.py --test-file tests/demo/test_concurrency_hard.py --candidate-count 1 --max-rounds 1 --no-llm-mode --safe-mode`
+  - `uv run scripts/engine/nexus_cli.py nexus research:benchmark --manifest-file docs/research/research_benchmark_ab_template.json --mode ab --ab-trials 5 --report-file .nexus/reports/research/benchmark-ab-report.json`
+  - `uv run scripts/engine/nexus_cli.py nexus research:auto-flow --task-desc \"Fix deadlock in transfer\" --target-file nexus/demo/bank_transfer_bench_ab_small.py --test-file tests/demo/test_concurrency_bench_ab_small.py --task-type bug --candidate-count 1 --root-cause-confidence 0.95 --output-json`
+  - `uv run scripts/engine/nexus_cli.py run-bug \"Fix deadlock in transfer\" --auto-flow --target-file nexus/demo/bank_transfer_bench_ab_small.py --test-file tests/demo/test_concurrency_bench_ab_small.py`
 - 報表路徑：
   - `.nexus/reports/research/*.json`
 

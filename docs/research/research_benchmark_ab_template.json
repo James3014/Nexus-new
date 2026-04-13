@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "id": "deadlock-small",
+      "task_desc": "Fix deadlock in transfer",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-stress",
+      "task_desc": "Fix flaky deadlock in transfer under stress",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 30,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    }
+  ]
+}

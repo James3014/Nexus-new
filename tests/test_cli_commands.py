@@ -574,6 +574,258 @@ def test_research_route_findings_reinjection(tmp_path, monkeypatch):
     data = json.loads(result.output)
     assert data["findings_hits"] == 0
     assert data["adjusted_root_cause_confidence"] == 1.0
+    assert "recommended_flow" in data
+
+
+def test_research_route_recommended_flow_baseline(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:route",
+            "--task-desc",
+            "fix typo in docs heading",
+            "--task-type",
+            "bug",
+            "--candidate-count",
+            "1",
+            "--root-cause-confidence",
+            "0.95",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["recommended_flow"] == "baseline"
+
+
+def test_research_route_recommended_flow_hyper_for_risky_task(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:route",
+            "--task-desc",
+            "fix flaky websocket timeout race",
+            "--task-type",
+            "bug",
+            "--candidate-count",
+            "1",
+            "--root-cause-confidence",
+            "0.9",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["recommended_flow"] == "hyper_sprint"
+    assert data["should_research"] is True
+
+
+def test_research_auto_flow_baseline(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    target = tmp_path / "demo.py"
+    target.write_text("print('buggy')\n", encoding="utf-8")
+    test_file = tmp_path / "tests" / "test_demo.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    def fake_generate_local_candidate(source, *_args, **_kwargs):
+        return source.replace("buggy", "fixed")
+
+    class _Res:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_subprocess_run(*_args, **_kwargs):
+        return _Res(returncode=0)
+
+    monkeypatch.setattr("nexus.research.local_sprint_mutator.generate_local_candidate", fake_generate_local_candidate)
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:auto-flow",
+            "--task-desc",
+            "fix typo in docs heading",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["chosen_flow"] == "baseline"
+    assert data["result"]["status"] == "SUCCESS"
+
+
+def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    target = tmp_path / "demo.py"
+    target.write_text("print('buggy')\n", encoding="utf-8")
+    test_file = tmp_path / "tests" / "test_demo.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    from nexus.research.sprint_service import SprintResult
+
+    def fake_run_hyper_sprint(*_args, **_kwargs):
+        return SprintResult(
+            status="SUCCESS",
+            reason="stage1_pass",
+            target_file="demo.py",
+            winner_source="local",
+            final_score=1.0,
+            elapsed_sec=0.1,
+            attempt_count=1,
+            model_calls=0,
+            quota_backoffs=0,
+            test_timeouts=0,
+            error_codes=[],
+            candidates=[],
+            pytest_cmd=["uv", "run", "pytest", "-q", "--maxfail=1", "tests/test_demo.py"],
+            promotable=True,
+            patch="print('fixed')\n",
+        )
+
+    class _Res:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_subprocess_run(*_args, **_kwargs):
+        return _Res(returncode=0)
+
+    monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:auto-flow",
+            "--task-desc",
+            "fix flaky websocket timeout race",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+            "--force-flow",
+            "hyper_sprint",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["chosen_flow"] == "hyper_sprint"
+    assert data["result"]["status"] == "SUCCESS"
+
+
+def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    target = tmp_path / "demo.py"
+    target.write_text("print('buggy')\n", encoding="utf-8")
+    test_file = tmp_path / "tests" / "test_demo.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    class _Res:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_subprocess_run(*_args, **_kwargs):
+        return _Res(returncode=0)
+
+    called = {"hyper": 0}
+
+    def fake_run_hyper_sprint(*_args, **_kwargs):
+        called["hyper"] += 1
+        raise AssertionError("Hyper should not be called when baseline shortcut triggers")
+
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:auto-flow",
+            "--task-desc",
+            "fix flaky websocket timeout race",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+            "--baseline-fast-sec",
+            "99",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["chosen_flow"] == "baseline"
+    assert data["guard"]["early_baseline_shortcut"] is True
+    assert called["hyper"] == 0
+
+
+def test_run_bug_auto_flow_requires_scope_files(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    result = runner.invoke(nexus, ["run-bug", "fix deadlock", "--auto-flow"])
+    assert result.exit_code != 0
+    assert "--auto-flow requires --target-file and --test-file" in result.output
+
+
+def test_run_bug_auto_flow_delegates(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    called = {"count": 0}
+
+    def fake_auto_flow(**_kwargs):
+        called["count"] += 1
+        return (
+            {
+                "chosen_flow": "baseline",
+                "result": {"status": "SUCCESS", "elapsed_sec": 0.1},
+            },
+            tmp_path / ".nexus" / "reports" / "research" / "auto-flow-report.json",
+        )
+
+    monkeypatch.setattr("scripts.engine.nexus_cli._run_research_auto_flow_impl", fake_auto_flow)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "run-bug",
+            "fix deadlock",
+            "--auto-flow",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+        ],
+    )
+    assert result.exit_code == 0
+    assert called["count"] == 1
 
 def test_research_run_multi_candidate(tmp_path, monkeypatch):
     runner = CliRunner()
@@ -613,3 +865,88 @@ def test_research_benchmark(tmp_path, monkeypatch):
     assert report["total_cases"] == 1
     assert report["research_chosen_cases"] == 1
     assert "success_cases" in report
+
+
+def test_research_benchmark_ab_mode(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    target = tmp_path / "demo.py"
+    target.write_text("print('buggy')\n", encoding="utf-8")
+    test_file = tmp_path / "tests" / "test_demo.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    manifest_path = tmp_path / "manifest_ab.json"
+    manifest_path.write_text(json.dumps({
+        "cases": [
+            {
+                "id": "ab1",
+                "task_desc": "fix bug",
+                "target_file": "demo.py",
+                "test_file": "tests/test_demo.py",
+                "candidate_count": 1,
+            }
+        ]
+    }))
+
+    from nexus.research.sprint_service import SprintResult
+
+    def fake_run_hyper_sprint(*_args, **_kwargs):
+        return SprintResult(
+            status="SUCCESS",
+            reason="stage1_pass",
+            target_file="demo.py",
+            winner_source="local",
+            final_score=1.0,
+            elapsed_sec=0.1,
+            attempt_count=1,
+            model_calls=0,
+            quota_backoffs=0,
+            test_timeouts=0,
+            error_codes=[],
+            candidates=[],
+            pytest_cmd=["uv", "run", "pytest", "-q", "--maxfail=1", "tests/test_demo.py"],
+            promotable=True,
+            patch="print('fixed')\n",
+        )
+
+    def fake_generate_local_candidate(source, *_args, **_kwargs):
+        return source.replace("buggy", "fixed")
+
+    class _Res:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_subprocess_run(*args, **kwargs):
+        return _Res(returncode=0)
+
+    monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
+    monkeypatch.setattr("nexus.research.local_sprint_mutator.generate_local_candidate", fake_generate_local_candidate)
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:benchmark",
+            "--manifest-file",
+            str(manifest_path),
+            "--mode",
+            "ab",
+            "--ab-trials",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "A/B Benchmark Complete" in result.output
+
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "benchmark-report.json"
+    report = json.loads(report_path.read_text())
+    assert report["mode"] == "ab"
+    assert report["ab_trials"] == 2
+    case = report["per_case"][0]
+    assert case["baseline"]["summary"]["success_rate"] == 1.0
+    assert case["hyper_sprint"]["summary"]["success_rate"] == 1.0

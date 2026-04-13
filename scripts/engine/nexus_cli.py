@@ -245,18 +245,17 @@ def delegate(task_name):
     subprocess.run([sys.executable, str(REPO_ROOT / "scripts/ops/supervisor_engine.py"), task_name], check=True)
 
 
-@nexus_group.command(name="research:route")
-@click.option("--task-desc", required=True)
-@click.option("--task-type", default="bug")
-@click.option("--candidate-count", default=1, type=int)
-@click.option("--root-cause-confidence", default=1.0, type=float)
-@click.option("--findings-query")
-@click.option("--output-json", is_flag=True)
-def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json):
-    """🧠 Strategy Routing Layer: Decide whether to research and in what mode."""
+def _build_research_route(
+    *,
+    task_desc: str,
+    task_type: str,
+    candidate_count: int,
+    root_cause_confidence: float,
+    findings_query: str | None,
+) -> dict:
     from nexus.engine.policies.research_policy import ResearchPolicy
     from nexus.research.findings_memory import FindingsMemoryStore
-    
+
     findings_hits = 0
     historical_hints = []
     adjusted_root_cause_confidence = root_cause_confidence
@@ -266,40 +265,310 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
         findings_hits = len(hits)
         for h in hits:
             historical_hints.extend(h.retrieval_hints)
-            
+
         if findings_hits >= 1:
             adjusted_root_cause_confidence = max(0.0, root_cause_confidence - 0.15)
-            
+
     policy = ResearchPolicy()
     prediction = {
         "candidate_count": candidate_count,
-        "root_cause_confidence": adjusted_root_cause_confidence
+        "root_cause_confidence": adjusted_root_cause_confidence,
     }
     decision = policy.route({}, task_desc, task_type=task_type, prediction=prediction)
-    
-    out = {
-        "should_research": decision.should_research,
-        "mode": decision.mode,
-        "reason": decision.reason,
-        "rounds": decision.rounds,
-        "stable_wins": decision.stable_wins,
+
+    task_upper = (task_desc or "").upper()
+    hard_keywords = ["FLAKY", "RACE", "DEADLOCK", "TIMEOUT", "LATENCY", "WEBSOCKET", "SDK", "API"]
+    hard_signal = (
+        candidate_count > 1
+        or adjusted_root_cause_confidence < 0.75
+        or findings_hits > 0
+        or any(kw in task_upper for kw in hard_keywords)
+    )
+    recommended_flow = "hyper_sprint" if (decision.should_research or hard_signal) else "baseline"
+    if task_type == "feature":
+        recommended_flow = "hyper_sprint"
+    recommended_reason = "complex_or_risky_task" if recommended_flow == "hyper_sprint" else "clear_and_local_bug"
+
+    if recommended_flow == "hyper_sprint":
+        should_research = True
+        mode = decision.mode if decision.mode != "skip" else "external"
+        reason = decision.reason if decision.reason != "clear_root_cause" else recommended_reason
+    else:
+        should_research = False
+        mode = "skip"
+        reason = "clear_root_cause"
+
+    return {
+        "should_research": should_research,
+        "mode": mode,
+        "reason": reason,
+        "rounds": decision.rounds if should_research else 0,
+        "stable_wins": decision.stable_wins if should_research else 0,
         "findings_hits": findings_hits,
         "historical_hints": list(dict.fromkeys(historical_hints))[:3],  # Unique, max 3
         "adjusted_root_cause_confidence": adjusted_root_cause_confidence,
-        "require_codex_audit": adjusted_root_cause_confidence < 0.6
+        "require_codex_audit": adjusted_root_cause_confidence < 0.6,
+        "recommended_flow": recommended_flow,
+        "recommended_reason": recommended_reason,
     }
+
+
+@nexus_group.command(name="research:route")
+@click.option("--task-desc", required=True)
+@click.option("--task-type", default="bug")
+@click.option("--candidate-count", default=1, type=int)
+@click.option("--root-cause-confidence", default=1.0, type=float)
+@click.option("--findings-query")
+@click.option("--output-json", is_flag=True)
+def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json):
+    """🧠 Strategy Routing Layer: Decide whether to research and in what mode."""
+    out = _build_research_route(
+        task_desc=task_desc,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        root_cause_confidence=root_cause_confidence,
+        findings_query=findings_query,
+    )
     if output_json:
         click.echo(json.dumps(out, indent=2))
     else:
         click.echo(f"Should Research: {out['should_research']}")
         click.echo(f"Mode: {out['mode']}")
         click.echo(f"Reason: {out['reason']}")
+        click.echo(f"Recommended Flow: {out['recommended_flow']} ({out['recommended_reason']})")
         click.echo(f"Findings Hits: {out['findings_hits']}")
         click.echo(f"Adjusted RC Confidence: {out['adjusted_root_cause_confidence']}")
         if out["historical_hints"]:
             click.echo(f"Historical Hints: {out['historical_hints']}")
         if out["require_codex_audit"]:
             click.secho("⚠️ [Advisor] Low confidence detected. Codex Audit recommended.", fg="yellow", bold=True)
+
+
+@nexus_group.command(name="research:auto-flow")
+@click.option("--task-desc", required=True)
+@click.option("--target-file", required=True)
+@click.option("--test-file", required=True)
+@click.option("--task-type", default="bug")
+@click.option("--candidate-count", default=1, type=int)
+@click.option("--root-cause-confidence", default=1.0, type=float)
+@click.option("--findings-query")
+@click.option("--llm-mode/--no-llm-mode", default=False, show_default=True)
+@click.option("--timeout-sec", default=60, type=int, show_default=True)
+@click.option("--stage1-timeout-sec", default=20, type=int, show_default=True)
+@click.option("--max-time-ratio-guard", default=1.5, type=float, show_default=True)
+@click.option("--baseline-fast-sec", default=9.0, type=float, show_default=True, help="If baseline probe succeeds within this time, skip Hyper.")
+@click.option("--force-flow", type=click.Choice(["baseline", "hyper_sprint"]), default=None)
+@click.option("--report-file", default=".nexus/reports/research/auto-flow-report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def research_auto_flow(
+    task_desc,
+    target_file,
+    test_file,
+    task_type,
+    candidate_count,
+    root_cause_confidence,
+    findings_query,
+    llm_mode,
+    timeout_sec,
+    stage1_timeout_sec,
+    max_time_ratio_guard,
+    baseline_fast_sec,
+    force_flow,
+    report_file,
+    output_json,
+):
+    payload, out_path = _run_research_auto_flow_impl(
+        task_desc=task_desc,
+        target_file=target_file,
+        test_file=test_file,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        root_cause_confidence=root_cause_confidence,
+        findings_query=findings_query,
+        llm_mode=llm_mode,
+        timeout_sec=timeout_sec,
+        stage1_timeout_sec=stage1_timeout_sec,
+        max_time_ratio_guard=max_time_ratio_guard,
+        baseline_fast_sec=baseline_fast_sec,
+        force_flow=force_flow,
+        report_file=report_file,
+    )
+    if output_json:
+        click.echo(json.dumps(payload, indent=2))
+    else:
+        click.echo(f"Chosen Flow: {payload['chosen_flow']}")
+        click.echo(f"Status: {payload['result']['status']}")
+        click.echo(f"Elapsed: {payload['result']['elapsed_sec']} sec")
+        click.echo(f"Report: {out_path}")
+
+
+def _run_research_auto_flow_impl(
+    *,
+    task_desc: str,
+    target_file: str,
+    test_file: str,
+    task_type: str,
+    candidate_count: int,
+    root_cause_confidence: float,
+    findings_query: str | None,
+    llm_mode: bool,
+    timeout_sec: int,
+    stage1_timeout_sec: int,
+    max_time_ratio_guard: float,
+    baseline_fast_sec: float,
+    force_flow: str | None,
+    report_file: str,
+):
+    """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
+    import subprocess
+    import time
+    from nexus.research.local_sprint_mutator import generate_local_candidate
+    from nexus.research.sprint_service import SprintConfig, run_hyper_sprint
+
+    route = _build_research_route(
+        task_desc=task_desc,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        root_cause_confidence=root_cause_confidence,
+        findings_query=findings_query,
+    )
+    chosen_flow = force_flow or route["recommended_flow"]
+    guard_hit = False
+    target_path = (REPO_ROOT / target_file).resolve()
+    if not target_path.exists():
+        raise click.ClickException(f"Target file not found: {target_file}")
+    pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
+    original_code = target_path.read_text(encoding="utf-8")
+
+    def _run_baseline_apply() -> dict:
+        start = time.time()
+        ok = False
+        err = ""
+        try:
+            patched = generate_local_candidate(original_code, task_desc, "lock ordering", 0)
+            target_path.write_text(patched, encoding="utf-8")
+            res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
+            ok = res.returncode == 0
+            if not ok:
+                err = "pytest_failed"
+                target_path.write_text(original_code, encoding="utf-8")
+        except subprocess.TimeoutExpired:
+            err = "test_timeout"
+            target_path.write_text(original_code, encoding="utf-8")
+        return {
+            "flow": "baseline",
+            "status": "SUCCESS" if ok else "FAILED",
+            "elapsed_sec": round(time.time() - start, 4),
+            "error": err,
+            "report": {},
+        }
+
+    def _run_baseline_probe() -> dict:
+        # Probe run used by guard. Always restore original state.
+        start = time.time()
+        ok = False
+        err = ""
+        try:
+            patched = generate_local_candidate(original_code, task_desc, "lock ordering", 0)
+            target_path.write_text(patched, encoding="utf-8")
+            res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
+            ok = res.returncode == 0
+            if not ok:
+                err = "pytest_failed"
+        except subprocess.TimeoutExpired:
+            err = "test_timeout"
+        finally:
+            target_path.write_text(original_code, encoding="utf-8")
+        return {
+            "flow": "baseline_probe",
+            "status": "SUCCESS" if ok else "FAILED",
+            "elapsed_sec": round(time.time() - start, 4),
+            "error": err,
+        }
+
+    def _run_hyper_apply() -> dict:
+        start = time.time()
+        cfg = SprintConfig(
+            task=task_desc,
+            target_file=target_file,
+            test_file=test_file,
+            candidate_count=max(1, candidate_count),
+            max_rounds=1,
+            timeout_sec=timeout_sec,
+            safe_mode=True,
+            stage1_max_parallel=1,
+            stage1_timeout_sec=stage1_timeout_sec,
+            llm_mode=llm_mode,
+        )
+        res = run_hyper_sprint(repo_root=REPO_ROOT, config=cfg)
+        ok = res.status == "SUCCESS" and bool(res.patch)
+        err = ""
+        if ok:
+            target_path.write_text(res.patch, encoding="utf-8")
+        else:
+            err = res.reason
+        return {
+            "flow": "hyper_sprint",
+            "status": "SUCCESS" if ok else "FAILED",
+            "elapsed_sec": round(time.time() - start, 4),
+            "error": err,
+            "report": {
+                "status": res.status,
+                "reason": res.reason,
+                "winner_source": res.winner_source,
+                "error_codes": res.error_codes,
+                "attempt_count": res.attempt_count,
+            },
+        }
+
+    baseline_probe = None
+    early_baseline_shortcut = False
+    if chosen_flow == "baseline":
+        result = _run_baseline_apply()
+    else:
+        # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
+        baseline_probe = _run_baseline_probe()
+        if (
+            force_flow is None
+            and baseline_probe["status"] == "SUCCESS"
+            and baseline_probe["elapsed_sec"] <= baseline_fast_sec
+        ):
+            early_baseline_shortcut = True
+            target_path.write_text(original_code, encoding="utf-8")
+            result = _run_baseline_apply()
+            chosen_flow = "baseline"
+        else:
+            result = _run_hyper_apply()
+            if (
+                baseline_probe["status"] == "SUCCESS"
+                and result["status"] == "SUCCESS"
+                and baseline_probe["elapsed_sec"] > 0
+                and result["elapsed_sec"] > max_time_ratio_guard * baseline_probe["elapsed_sec"]
+            ):
+                guard_hit = True
+                target_path.write_text(original_code, encoding="utf-8")
+                result = _run_baseline_apply()
+                chosen_flow = "baseline"
+
+    payload = {
+        "schema_version": "1.0",
+        "task_desc": task_desc,
+        "task_type": task_type,
+        "route": route,
+        "chosen_flow": chosen_flow,
+        "guard": {
+            "hit": guard_hit,
+            "early_baseline_shortcut": early_baseline_shortcut,
+            "baseline_fast_sec": baseline_fast_sec,
+            "max_time_ratio_guard": max_time_ratio_guard,
+            "baseline_probe": baseline_probe,
+        },
+        "result": result,
+    }
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload, out_path
 
 
 @nexus_group.command(name="research:run")
@@ -670,14 +939,183 @@ def research_run(
 @click.option("--report-file", default=".nexus/reports/research/benchmark-report.json", type=click.Path())
 @click.option("--budget-limit", default=50.0, type=float)
 @click.option("--timeout-sec", default=30, type=int)
-def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
+@click.option("--mode", type=click.Choice(["gladiator", "ab"]), default="gladiator", show_default=True)
+@click.option("--ab-trials", default=3, type=int, show_default=True, help="Number of repeated runs per mode for A/B.")
+@click.option("--ab-llm-mode/--ab-no-llm-mode", default=False, show_default=True, help="Enable LLM mode inside Hyper-Sprint A/B runs.")
+def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mode, ab_trials, ab_llm_mode):
     """📊 [Control Plane] Gladiator Benchmark: Real evaluation for multiple cases."""
     import json
+    import time
+    import subprocess
     from nexus.engine.policies.research_policy import ResearchPolicy
+    from nexus.research.local_sprint_mutator import generate_local_candidate
+    from nexus.research.sprint_service import SprintConfig, run_hyper_sprint
     from nexus.research.unified_evaluator import UnifiedEvaluator
     
     manifest = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
     cases = manifest.get("cases", [])
+
+    if mode == "ab":
+        def _pct(values, q):
+            if not values:
+                return 0.0
+            arr = sorted(float(v) for v in values)
+            if len(arr) == 1:
+                return round(arr[0], 4)
+            pos = (len(arr) - 1) * q
+            lo = int(pos)
+            hi = min(lo + 1, len(arr) - 1)
+            frac = pos - lo
+            return round(arr[lo] * (1 - frac) + arr[hi] * frac, 4)
+
+        def _summarize_runs(runs):
+            total = len(runs)
+            successes = sum(1 for r in runs if r.get("ok"))
+            durations = [float(r.get("elapsed_sec", 0.0)) for r in runs]
+            timeout_count = sum(1 for r in runs if r.get("timeout"))
+            quota_events = [r for r in runs if r.get("quota_event")]
+            quota_success = sum(1 for r in quota_events if r.get("ok"))
+            return {
+                "runs": total,
+                "success_rate": round(successes / total, 4) if total else 0.0,
+                "p50_time_sec": _pct(durations, 0.5),
+                "p95_time_sec": _pct(durations, 0.95),
+                "timeout_rate": round(timeout_count / total, 4) if total else 0.0,
+                "resilience_on_quota": round(quota_success / len(quota_events), 4) if quota_events else None,
+                "quota_event_count": len(quota_events),
+            }
+
+        per_case = []
+        for case in cases:
+            cid = case.get("id", "unknown")
+            task_desc = case.get("task_desc", "")
+            target_file = case.get("target_file")
+            test_file = case.get("test_file")
+            prepare_command = case.get("prepare_command")
+            baseline_hint = case.get("baseline_hint", "lock ordering")
+            candidate_count = int(case.get("candidate_count", 1))
+            stage1_timeout_sec = int(case.get("stage1_timeout_sec", timeout_sec))
+
+            if not target_file or not test_file:
+                per_case.append({
+                    "id": cid,
+                    "status": "invalid_case",
+                    "reason": "target_file and test_file are required for --mode ab",
+                })
+                continue
+
+            if prepare_command:
+                subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+
+            target_path = (REPO_ROOT / target_file).resolve()
+            if not target_path.exists():
+                per_case.append({
+                    "id": cid,
+                    "status": "invalid_case",
+                    "reason": f"target file missing: {target_file}",
+                })
+                continue
+
+            pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
+            baseline_runs = []
+            hyper_runs = []
+
+            for trial in range(max(1, ab_trials)):
+                if prepare_command:
+                    subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+
+                original = target_path.read_text(encoding="utf-8")
+                t0 = time.time()
+                timeout_flag = False
+                quota_flag = False
+                ok = False
+                try:
+                    patched = generate_local_candidate(original, task_desc, baseline_hint, trial)
+                    target_path.write_text(patched, encoding="utf-8")
+                    res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
+                    ok = res.returncode == 0
+                except subprocess.TimeoutExpired:
+                    timeout_flag = True
+                finally:
+                    target_path.write_text(original, encoding="utf-8")
+                baseline_runs.append({
+                    "trial": trial + 1,
+                    "ok": ok,
+                    "elapsed_sec": round(time.time() - t0, 4),
+                    "timeout": timeout_flag,
+                    "quota_event": quota_flag,
+                })
+
+                if prepare_command:
+                    subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+
+                t1 = time.time()
+                h_timeout = False
+                h_ok = False
+                h_quota = False
+                cfg = SprintConfig(
+                    task=task_desc,
+                    target_file=target_file,
+                    test_file=test_file,
+                    candidate_count=max(1, candidate_count),
+                    max_rounds=1,
+                    timeout_sec=timeout_sec,
+                    safe_mode=True,
+                    stage1_max_parallel=1,
+                    stage1_timeout_sec=stage1_timeout_sec,
+                    llm_mode=ab_llm_mode,
+                )
+                result = run_hyper_sprint(repo_root=REPO_ROOT, config=cfg)
+                if result.patch:
+                    target_path.write_text(result.patch, encoding="utf-8")
+                h_ok = result.status == "SUCCESS" and bool(result.patch)
+                if prepare_command:
+                    subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+                if "quota" in result.error_codes:
+                    h_quota = True
+                hyper_runs.append({
+                    "trial": trial + 1,
+                    "ok": h_ok,
+                    "elapsed_sec": round(time.time() - t1, 4),
+                    "timeout": h_timeout,
+                    "quota_event": h_quota,
+                    "status": result.status,
+                    "reason": result.reason,
+                    "winner_source": result.winner_source,
+                    "error_codes": result.error_codes,
+                })
+
+            baseline_summary = _summarize_runs(baseline_runs)
+            hyper_summary = _summarize_runs(hyper_runs)
+            p50_time_ratio = 0.0
+            if baseline_summary["p50_time_sec"] > 0:
+                p50_time_ratio = round(hyper_summary["p50_time_sec"] / baseline_summary["p50_time_sec"], 4)
+
+            per_case.append({
+                "id": cid,
+                "task_desc": task_desc,
+                "baseline": {"runs": baseline_runs, "summary": baseline_summary},
+                "hyper_sprint": {"runs": hyper_runs, "summary": hyper_summary},
+                "delta": {
+                    "success_rate": round(hyper_summary["success_rate"] - baseline_summary["success_rate"], 4),
+                    "timeout_rate": round(hyper_summary["timeout_rate"] - baseline_summary["timeout_rate"], 4),
+                    "p50_time_ratio": p50_time_ratio,
+                },
+            })
+
+        summary = {
+            "mode": "ab",
+            "total_cases": len(cases),
+            "ab_trials": max(1, ab_trials),
+            "ab_llm_mode": bool(ab_llm_mode),
+            "per_case": per_case,
+        }
+        report_path = (REPO_ROOT / report_file).resolve()
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        click.echo(f"📊 A/B Benchmark Complete: {len(per_case)}/{len(cases)} cases. Report: {report_file}")
+        return
+
     results = []
     policy = ResearchPolicy()
     evaluator = UnifiedEvaluator(budget_limit=budget_limit)
@@ -937,8 +1375,38 @@ def meta_run(count, hybrid):
 
 @nexus.command(name="run-bug")
 @click.argument("task")
-def run_bug(task):
+@click.option("--auto-flow/--no-auto-flow", default=False, show_default=True)
+@click.option("--target-file", required=False, help="Target source file for auto-flow execution.")
+@click.option("--test-file", required=False, help="Scoped test file for auto-flow execution.")
+@click.option("--root-cause-confidence", default=1.0, type=float, show_default=True)
+@click.option("--candidate-count", default=1, type=int, show_default=True)
+@click.option("--findings-query", required=False)
+def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, candidate_count, findings_query):
     """Legacy bug-dispatch alias kept for CLI thinning contract tests."""
+    if auto_flow:
+        if not target_file or not test_file:
+            raise click.ClickException("--auto-flow requires --target-file and --test-file")
+        payload, out_path = _run_research_auto_flow_impl(
+            task_desc=task,
+            target_file=target_file,
+            test_file=test_file,
+            task_type="bug",
+            candidate_count=candidate_count,
+            root_cause_confidence=root_cause_confidence,
+            findings_query=findings_query,
+            llm_mode=False,
+            timeout_sec=60,
+            stage1_timeout_sec=20,
+            max_time_ratio_guard=1.5,
+            baseline_fast_sec=9.0,
+            force_flow=None,
+            report_file=".nexus/reports/research/auto-flow-report.json",
+        )
+        click.echo(f"Chosen Flow: {payload['chosen_flow']}")
+        click.echo(f"Status: {payload['result']['status']}")
+        click.echo(f"Elapsed: {payload['result']['elapsed_sec']} sec")
+        click.echo(f"Report: {out_path}")
+        return
     click.echo(f"dispatch bug: {task}")
 
 if __name__ == "__main__":
