@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -54,6 +55,7 @@ class SprintResult:
     test_timeouts: int
     error_codes: list[str] = field(default_factory=list)
     rejection_summary: dict[str, int] = field(default_factory=dict)
+    learning_trace: dict[str, Any] = field(default_factory=dict)
     candidates: list[CandidateEval] = field(default_factory=list)
     pytest_cmd: list[str] = field(default_factory=list)
     promotable: bool = False
@@ -327,6 +329,29 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
+    learning_trace: dict[str, Any] = {
+        "retrieval_hits": 0,
+        "retrieval_hints": [],
+        "mempalace_verified": False,
+        "memory_written": False,
+        "arweave_tx_id": None,
+    }
+
+    # Learning loop (retrieve): pull recent hints before candidate generation.
+    historical_hints: list[str] = []
+    try:
+        from nexus.research.findings_memory import FindingsMemoryStore
+
+        store = FindingsMemoryStore(repo_root)
+        hits = store.search(config.task, scope="both")
+        learning_trace["retrieval_hits"] = len(hits)
+        for h in hits:
+            historical_hints.extend(h.retrieval_hints)
+        historical_hints = list(dict.fromkeys(historical_hints))[:3]
+        learning_trace["retrieval_hints"] = historical_hints
+    except Exception as exc:  # noqa: BLE001
+        learning_trace["retrieval_error"] = str(exc)
+        store = None
 
     def _semantic_guard(source: str, candidate: str, task: str) -> tuple[bool, str]:
         if candidate.strip() == source.strip():
@@ -360,8 +385,66 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             summary[code] = summary.get(code, 0) + 1
         return summary
 
+    def _persist_learning(
+        *,
+        status: str,
+        reason: str,
+        winner_source: str,
+        final_score: float,
+        summary: dict[str, int],
+        codes: list[str],
+    ) -> None:
+        # Learning loop (govern + write): MemPalace verify -> Findings write (LanceDB sync via repository).
+        try:
+            from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+            from nexus.services.mem_palace import MemPalace
+
+            local_store = store or FindingsMemoryStore(repo_root)
+            card = FindingsCard(
+                kind="episodes",
+                title=f"Hyper-Sprint {status}: {Path(config.target_file).name}",
+                task_id=f"hs-{int(time.time())}",
+                tags=["hyper_sprint", status.lower(), winner_source],
+                retrieval_hints=learning_trace.get("retrieval_hints", []),
+                confidence="high" if status == "SUCCESS" else "medium",
+                body=(
+                    f"Task: {config.task}\n"
+                    f"Target: {config.target_file}\n"
+                    f"Status: {status}\n"
+                    f"Reason: {reason}\n"
+                    f"Score: {final_score}\n"
+                    f"Error Codes: {codes}\n"
+                    f"Rejection Summary: {summary}\n"
+                ),
+                extra={
+                    "winner_source": winner_source,
+                    "attempt_count": len(candidates),
+                    "error_codes": codes,
+                    "rejection_summary": summary,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+            palace = MemPalace(str(repo_root))
+            clean = palace.verify([card.to_dict()])
+            if not clean:
+                learning_trace["mempalace_verified"] = False
+                learning_trace["memory_rejected"] = True
+                return
+            learning_trace["mempalace_verified"] = True
+            clean_card = FindingsCard.from_dict(clean[0])
+            local_store.write(clean_card)
+            learning_trace["memory_written"] = True
+            tx_id = palace.trigger_arweave_distillation(clean[0])
+            learning_trace["arweave_tx_id"] = tx_id
+        except Exception as exc:  # noqa: BLE001
+            learning_trace["memory_error"] = str(exc)
+
     for idx in range(max(1, config.candidate_count)):
-        hint = policy.get_mutation_hint(idx % max(1, config.candidate_count), task_desc=config.task)
+        hint = policy.get_mutation_hint(
+            idx % max(1, config.candidate_count),
+            task_desc=config.task,
+            historical_hints=historical_hints,
+        )
         used_source = "local"
         try:
             if llm_generator is not None:
@@ -431,11 +514,22 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             test_timeouts=test_timeouts,
             error_codes=sorted(set(error_codes)),
             rejection_summary={},
+            learning_trace=learning_trace,
             pytest_cmd=pytest_cmd,
         )
 
     best = max(candidates, key=lambda c: c.score)
     if best.score < 1.0:
+        final_codes = sorted(set(error_codes + ["stage1_failed"]))
+        rejection_summary = _build_rejection_summary(candidates, final_codes)
+        _persist_learning(
+            status="FAILED",
+            reason="stage1_no_passing_candidate",
+            winner_source=best.source,
+            final_score=best.score,
+            summary=rejection_summary,
+            codes=final_codes,
+        )
         return SprintResult(
             status="FAILED",
             reason="stage1_no_passing_candidate",
@@ -447,8 +541,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             model_calls=model_calls,
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
-            error_codes=sorted(set(error_codes + ["stage1_failed"])),
-            rejection_summary=_build_rejection_summary(candidates, error_codes + ["stage1_failed"]),
+            error_codes=final_codes,
+            rejection_summary=rejection_summary,
+            learning_trace=learning_trace,
             candidates=candidates,
             pytest_cmd=pytest_cmd,
             patch=best.candidate_code,
@@ -487,6 +582,16 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     elif config.llm_mode and "quota" in error_codes:
         final_reason = "dayshift_skipped_due_quota_fallback"
 
+    final_codes = sorted(set(error_codes))
+    rejection_summary = _build_rejection_summary(candidates, error_codes)
+    _persist_learning(
+        status="SUCCESS",
+        reason=final_reason,
+        winner_source=best.source,
+        final_score=final_score,
+        summary=rejection_summary,
+        codes=final_codes,
+    )
     return SprintResult(
         status="SUCCESS",
         reason=final_reason,
@@ -498,8 +603,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         model_calls=model_calls,
         quota_backoffs=quota_backoffs,
         test_timeouts=test_timeouts,
-        error_codes=sorted(set(error_codes)),
-        rejection_summary=_build_rejection_summary(candidates, error_codes),
+        error_codes=final_codes,
+        rejection_summary=rejection_summary,
+        learning_trace=learning_trace,
         candidates=candidates,
         pytest_cmd=pytest_cmd,
         promotable=final_score >= 0.9,

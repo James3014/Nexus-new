@@ -357,6 +357,10 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
 @click.option("--stage1-timeout-sec", default=20, type=int, show_default=True)
 @click.option("--max-time-ratio-guard", default=1.5, type=float, show_default=True)
 @click.option("--baseline-fast-sec", default=9.0, type=float, show_default=True, help="If baseline probe succeeds within this time, skip Hyper.")
+@click.option("--history-window", default=5, type=int, show_default=True, help="Recent runs considered for conservative fallback.")
+@click.option("--history-fail-threshold", default=2, type=int, show_default=True, help="If Hyper fails this many times in history window, fallback to baseline.")
+@click.option("--dynamic-timeout-multiplier", default=2.5, type=float, show_default=True, help="Hyper stage1 timeout multiplier based on baseline probe time.")
+@click.option("--min-dynamic-stage1-timeout", default=12, type=int, show_default=True, help="Lower bound for dynamic stage1 timeout.")
 @click.option("--force-flow", type=click.Choice(["baseline", "hyper_sprint"]), default=None)
 @click.option("--report-file", default=".nexus/reports/research/auto-flow-report.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
@@ -373,6 +377,10 @@ def research_auto_flow(
     stage1_timeout_sec,
     max_time_ratio_guard,
     baseline_fast_sec,
+    history_window,
+    history_fail_threshold,
+    dynamic_timeout_multiplier,
+    min_dynamic_stage1_timeout,
     force_flow,
     report_file,
     output_json,
@@ -390,6 +398,10 @@ def research_auto_flow(
         stage1_timeout_sec=stage1_timeout_sec,
         max_time_ratio_guard=max_time_ratio_guard,
         baseline_fast_sec=baseline_fast_sec,
+        history_window=history_window,
+        history_fail_threshold=history_fail_threshold,
+        dynamic_timeout_multiplier=dynamic_timeout_multiplier,
+        min_dynamic_stage1_timeout=min_dynamic_stage1_timeout,
         force_flow=force_flow,
         report_file=report_file,
     )
@@ -416,6 +428,10 @@ def _run_research_auto_flow_impl(
     stage1_timeout_sec: int,
     max_time_ratio_guard: float,
     baseline_fast_sec: float,
+    history_window: int,
+    history_fail_threshold: int,
+    dynamic_timeout_multiplier: float,
+    min_dynamic_stage1_timeout: int,
     force_flow: str | None,
     report_file: str,
 ):
@@ -433,6 +449,30 @@ def _run_research_auto_flow_impl(
         findings_query=findings_query,
     )
     chosen_flow = force_flow or route["recommended_flow"]
+    flow_key = f"{target_file}|{test_file}"
+    history_path = (REPO_ROOT / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
+
+    def _read_history() -> dict:
+        if history_path.exists():
+            try:
+                return json.loads(history_path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+        return {}
+
+    def _write_history(data: dict) -> None:
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    history_data = _read_history()
+    recent = list(history_data.get(flow_key, []))
+    recent_window = recent[-max(1, history_window):]
+    recent_hyper_fails = sum(1 for item in recent_window if item.get("flow") == "hyper_sprint" and item.get("status") == "FAILED")
+    history_forced_baseline = False
+    if force_flow is None and chosen_flow == "hyper_sprint" and recent_hyper_fails >= max(1, history_fail_threshold):
+        chosen_flow = "baseline"
+        history_forced_baseline = True
+
     guard_hit = False
     target_path = (REPO_ROOT / target_file).resolve()
     if not target_path.exists():
@@ -488,6 +528,10 @@ def _run_research_auto_flow_impl(
 
     def _run_hyper_apply() -> dict:
         start = time.time()
+        effective_stage1_timeout = stage1_timeout_sec
+        if baseline_probe and baseline_probe.get("elapsed_sec", 0) > 0:
+            dynamic_timeout = int(round(float(baseline_probe["elapsed_sec"]) * max(1.0, dynamic_timeout_multiplier)))
+            effective_stage1_timeout = max(stage1_timeout_sec, min_dynamic_stage1_timeout, dynamic_timeout)
         cfg = SprintConfig(
             task=task_desc,
             target_file=target_file,
@@ -497,7 +541,7 @@ def _run_research_auto_flow_impl(
             timeout_sec=timeout_sec,
             safe_mode=True,
             stage1_max_parallel=1,
-            stage1_timeout_sec=stage1_timeout_sec,
+            stage1_timeout_sec=effective_stage1_timeout,
             llm_mode=llm_mode,
         )
         res = run_hyper_sprint(repo_root=REPO_ROOT, config=cfg)
@@ -519,6 +563,7 @@ def _run_research_auto_flow_impl(
                 "error_codes": res.error_codes,
                 "rejection_summary": res.rejection_summary,
                 "attempt_count": res.attempt_count,
+                "effective_stage1_timeout_sec": effective_stage1_timeout,
             },
         }
 
@@ -560,6 +605,9 @@ def _run_research_auto_flow_impl(
         "guard": {
             "hit": guard_hit,
             "early_baseline_shortcut": early_baseline_shortcut,
+            "history_forced_baseline": history_forced_baseline,
+            "recent_hyper_failures": recent_hyper_fails,
+            "history_window": max(1, history_window),
             "baseline_fast_sec": baseline_fast_sec,
             "max_time_ratio_guard": max_time_ratio_guard,
             "baseline_probe": baseline_probe,
@@ -569,6 +617,16 @@ def _run_research_auto_flow_impl(
     out_path = (REPO_ROOT / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    recent.append(
+        {
+            "flow": chosen_flow,
+            "status": result["status"],
+            "reason": result.get("error", ""),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    history_data[flow_key] = recent[-200:]
+    _write_history(history_data)
     return payload, out_path
 
 
@@ -1412,6 +1470,10 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
             stage1_timeout_sec=20,
             max_time_ratio_guard=1.5,
             baseline_fast_sec=9.0,
+            history_window=5,
+            history_fail_threshold=2,
+            dynamic_timeout_multiplier=2.5,
+            min_dynamic_stage1_timeout=12,
             force_flow=None,
             report_file=".nexus/reports/research/auto-flow-report.json",
         )

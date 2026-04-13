@@ -36,6 +36,7 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     assert res.model_calls == 0
     assert res.promotable is True
     assert res.attempt_count == 1
+    assert "retrieval_hits" in res.learning_trace
 
 
 def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
@@ -96,6 +97,56 @@ def test_run_hyper_sprint_semantic_guard_for_feature(monkeypatch, tmp_path: Path
     assert res.status == "FAILED"
     assert "semantic_guard" in res.error_codes
     assert res.rejection_summary.get("semantic_guard_low_delta_feature", 0) >= 1
+
+
+def test_run_hyper_sprint_learning_trace_persist_path(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeGenerator:
+        source = "local"
+
+        def generate(self, **_kwargs):
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    class FakeStore:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def search(self, *_args, **_kwargs):
+            return []
+
+        def write(self, *_args, **_kwargs):
+            return "ok"
+
+    class FakePalace:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def verify(self, cards):
+            return cards
+
+        def trigger_arweave_distillation(self, _data):
+            return "ARW-test"
+
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+    monkeypatch.setattr("nexus.research.findings_memory.FindingsMemoryStore", FakeStore)
+    monkeypatch.setattr("nexus.services.mem_palace.MemPalace", FakePalace)
+
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert res.learning_trace.get("mempalace_verified") is True
+    assert res.learning_trace.get("memory_written") is True
+    assert res.learning_trace.get("arweave_tx_id") == "ARW-test"
 
 
 def test_write_sprint_report(tmp_path: Path):
