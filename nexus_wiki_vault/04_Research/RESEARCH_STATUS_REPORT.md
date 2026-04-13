@@ -24,6 +24,12 @@ version_scope: '[v22.2, v23]'
 ## 🎯 整合概況
 本文件記錄了 Nexus Singularity OS 與 DeepScientist 研究框架的深度硬化整合成果。系統已通過 Swarm-100（100 筆並發）高壓測試，具備工業級穩定度。
 
+### 🚀 Research 2.0 (Gladiator & MemPalace) [2026-04-13 新增]
+- **語義多樣化 (Codex Pivot)**: `ResearchPolicy` 具備語義偏移能力，動態生成高熵戰術。
+- **物理隔離沙盒 (Swarm Gladiator)**: 引入 `SwarmBroker`，實現 `.nexus-swarm-*` 的動態租用與物理隔離平行測試，徹底消除代碼覆寫競爭。
+- **顧問升級門檻 (AgentOpt Gate)**: 當根因信心度 `< 0.6` 時，自動觸發 Codex 介入警告，實現「便宜模型執行，強模型審計」的優雅降級。
+- **記憶代謝與永生 (Memory Metabolism)**: 戰勝策略將通過 AAAK Judge (MemPalace) 雜訊壓縮，原子寫入 LanceDB (向量) 與 SQLite (索引)，並獲取 Arweave TX ID，實現跨 Session 知識傳承。
+
 ### 🧬 研究循環 (P-D-X-R-A-C)
 - **P (Plan)**: 由 `context_hub.py` 驅動，整合 `FindingsCard` 記憶注入。
 - **D (Design)**: `gear.py (v18.4)` 與 `SkillRouter` 動態分發。
