@@ -237,7 +237,7 @@ class KnowledgeIndex:
         🧬 [Phase 2.2] 僅索引高品質 UCC 證據內容及性能分析內容及其內容內容
         守則: 僅索引 confidence > 0.7 且 markdown 非空者內容內容。不執行權重回寫內容性能。
         """
-        if not self.db:
+        if self.db is None:
             logger.warning("⚠️ [Index:Skip] LanceDB unavailable, skipping indexing.")
             return
 
@@ -282,7 +282,7 @@ class KnowledgeIndex:
         """
         🧬 [Phase 2.2] C 階段語義檢索入口內容及性能分析內容及其內容內容
         """
-        if not self.db or "reach_evidence" not in self.db.list_tables():
+        if self.db is None or "reach_evidence" not in self.db.list_tables():
             return []
 
         try:

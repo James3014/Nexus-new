@@ -56,7 +56,7 @@ class MemoryRepository:
         new_record["aaak_content"] = self.compress_to_aaak(content)
         
         db = self._get_db()
-        if not db or table_name not in db.list_tables():
+        if db is None or table_name not in db.list_tables():
             self.add_rows(table_name, [new_record])
             return "NEW_INITIAL"
 
@@ -106,7 +106,8 @@ class MemoryRepository:
 
     def ensure_table(self, table_name: str, initial_data: List[Dict[str, Any]] = None, fts_column: Optional[str] = None):
         db = self._get_db()
-        if not db: return
+        if db is None:
+            return
         
         if table_name not in db.list_tables():
             if initial_data:
@@ -115,7 +116,8 @@ class MemoryRepository:
 
     def add_rows(self, table_name: str, rows: List[Dict[str, Any]]):
         db = self._get_db()
-        if not db: return
+        if db is None:
+            return
         if table_name not in db.list_tables():
             self.ensure_table(table_name, initial_data=rows)
         else:
@@ -126,7 +128,7 @@ class MemoryRepository:
 
     def get_all_rows(self, table_name: str) -> pd.DataFrame:
         db = self._get_db()
-        if not db or table_name not in db.list_tables():
+        if db is None or table_name not in db.list_tables():
             return pd.DataFrame()
         return db.open_table(table_name).to_pandas()
 
@@ -154,7 +156,7 @@ class MemoryRepository:
     def search_fts(self, table_name: str, query: str, limit: int = 10, fallback_columns: List[str] = None) -> pd.DataFrame:
         """執行單表全文搜尋。"""
         db = self._get_db()
-        if not db or table_name not in db.list_tables():
+        if db is None or table_name not in db.list_tables():
             return pd.DataFrame()
             
         table = db.open_table(table_name)
