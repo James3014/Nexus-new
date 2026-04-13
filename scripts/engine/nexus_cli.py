@@ -828,7 +828,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
 @click.option("--safe-mode/--no-safe-mode", default=True, show_default=True, help="Quota-safe mode: serialized candidates + local scoring.")
 @click.option("--stage1-max-parallel", default=1, type=int, show_default=True, help="Parallelism for Gladiator candidate evaluation.")
 @click.option("--stage1-timeout-sec", default=20, type=int, show_default=True, help="Per-candidate timeout in Gladiator stage.")
-@click.option("--llm-mode/--no-llm-mode", default=False, show_default=True, help="Enable/disable external LLM calls in Hyper-Sprint.")
+@click.option("--llm-mode/--no-llm-mode", default=False, show_default=True, help="Optional external LLM enhancement. Core sprint path remains local-first.")
 @click.option("--report-file", default=".nexus/reports/research/sprint-report.json", show_default=True, help="Machine-readable sprint report output path.")
 def research_sprint(task, target_file, test_file, candidate_count, max_rounds, timeout_sec, safe_mode, stage1_max_parallel, stage1_timeout_sec, llm_mode, report_file):
     """☀️ [Hyper-Sprint] Thin CLI wrapper for sprint service."""

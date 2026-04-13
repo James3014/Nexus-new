@@ -79,3 +79,41 @@ def test_write_sprint_report(tmp_path: Path):
     report_path = write_sprint_report(repo_root=tmp_path, result=res, report_file=".nexus/reports/research/sprint-test.json")
     assert report_path.exists()
     assert "sprint-test.json" in str(report_path)
+
+
+def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **_kwargs):
+            raise RuntimeError("HTTP 429 quota exhausted")
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, **_kwargs):
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert res.winner_source == "local"
+    assert "quota" in res.error_codes
+    assert "llm_fallback_local" in res.error_codes

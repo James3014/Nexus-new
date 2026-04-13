@@ -201,7 +201,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     target_path = repo_root / config.target_file
     source_code = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
-    generator: Any = LLMCandidateGenerator(repo_root, config.safe_mode) if config.llm_mode else LocalCandidateGenerator()
+    llm_generator: Optional[LLMCandidateGenerator] = LLMCandidateGenerator(repo_root, config.safe_mode) if config.llm_mode else None
+    local_generator = LocalCandidateGenerator()
     executor = SprintExecutor(repo_root, scope_files=scope_files, pytest_cmd=pytest_cmd, timeout_sec=config.stage1_timeout_sec)
 
     candidates: list[CandidateEval] = []
@@ -212,13 +213,45 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     for idx in range(max(1, config.candidate_count)):
         hint = policy.get_mutation_hint(idx % max(1, config.candidate_count), task_desc=config.task)
+        used_source = "local"
         try:
-            candidate_code, meta = generator.generate(source_code=source_code, task=config.task, mutation_hint=hint, seed=idx)
+            if llm_generator is not None:
+                try:
+                    candidate_code, meta = llm_generator.generate(
+                        source_code=source_code,
+                        task=config.task,
+                        mutation_hint=hint,
+                        seed=idx,
+                    )
+                    used_source = str(meta.get("source", "llm"))
+                except Exception as llm_exc:  # noqa: BLE001
+                    err = str(llm_exc).lower()
+                    if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
+                        quota_backoffs += 1
+                        error_codes.append("quota")
+                        error_codes.append("llm_fallback_local")
+                    else:
+                        error_codes.append("llm_error")
+                    candidate_code, meta = local_generator.generate(
+                        source_code=source_code,
+                        task=config.task,
+                        mutation_hint=hint,
+                        seed=idx,
+                    )
+                    used_source = str(meta.get("source", "local"))
+            else:
+                candidate_code, meta = local_generator.generate(
+                    source_code=source_code,
+                    task=config.task,
+                    mutation_hint=hint,
+                    seed=idx,
+                )
+                used_source = str(meta.get("source", "local"))
             model_calls += int(meta.get("model_calls", 0))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
-            ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=str(meta.get("source", generator.source)))
+            ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
         except Exception as exc:  # noqa: BLE001
-            ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=str(exc), source=generator.source)
+            ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=str(exc), source=used_source)
         if "timed out" in (ev.error or "").lower():
             test_timeouts += 1
             error_codes.append("test_timeout")
@@ -268,7 +301,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_score = best.score
     final_patch = best.candidate_code or source_code
     final_reason = "stage1_pass"
-    if config.llm_mode:
+    # Stage 2 is optional enhancement only. Core success must not depend on external quota.
+    if config.llm_mode and "quota" not in error_codes:
         swarm_dir = SwarmBroker(repo_root).acquire(timeout_sec=config.timeout_sec)
         if swarm_dir:
             try:
@@ -294,6 +328,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     final_reason = "dayshift_no_improve"
             finally:
                 SwarmBroker(repo_root).release(swarm_dir)
+    elif config.llm_mode and "quota" in error_codes:
+        final_reason = "dayshift_skipped_due_quota_fallback"
 
     return SprintResult(
         status="SUCCESS",

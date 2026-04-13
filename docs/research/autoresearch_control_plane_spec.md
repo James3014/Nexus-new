@@ -45,6 +45,7 @@
 
 ## 8. Hyper-Sprint Service (P1-P3 Refactor)
 - `research:sprint` 已改為薄 CLI，核心流程下沉至 `nexus/research/sprint_service.py`。
+- `research:sprint` 採 local-first：即使開啟 `--llm-mode`，LLM 失敗（含 429/quota）會自動降級 local candidate，不阻斷主流程。
 - 關注點分離：
   - `SprintConfig` / `SprintResult` / `CandidateEval`（資料模型）
   - `LocalCandidateGenerator` / `LLMCandidateGenerator`（候選生成）

@@ -21,3 +21,4 @@
 ## Failure-to-Lesson（2026-04-13）
 - Lesson RCP-001：`retain-last-n` 清理必須把「本輪新報表」納入總量計算；若先清理後寫入，會產生 off-by-one 保留錯誤。現已改為寫入後清理，且 reports 類型以「保留總量（含本輪）」執行。
 - Lesson ORCH-002：Gemini CLI 在 sandbox 可能因 OAuth callback 無法 `listen` 而失敗（`EPERM 0.0.0.0`）；Tab 協同需使用可授權的非 sandbox 執行，且長任務提示應以檔案載入避免 shell quoting 斷裂。
+- Lesson RCP-003：在此 repo 不應假設 `python` 可直接呼叫；腳本與驗證命令需統一使用 `uv run python ...`，避免 PATH 差異造成流程中斷。
