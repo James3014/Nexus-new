@@ -29,6 +29,11 @@ version_scope: '[v17.1, v22, v23]'
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
 | 2026-04-13 | **Research 2.0 Gladiator & Memory Metabolism Integration** | `nexus/research/`, `nexus/engine/policies/`, `nexus_cli.py` | Mid | Git revert | Antigravity |
+| 2026-04-13 | **Automated Nexus Repair (AOS-P0-P1)** | `scripts/engine/`, `tests/engine/` | Mid | Git revert | Antigravity |
+| 2026-04-11 | **Tiered Test Strategy & Control-Plane Docs** | `tests/research/`, `docs/research/`, `nexus_cli.py` | Low | Git revert | Antigravity |
+| 2026-04-10 | **Semantic Path Containment & Zero-Overshoot Budget** | `nexus/research/selector_rollback.py`, `nexus/research/unified_evaluator.py` | High | Git revert | Antigravity |
+| 2026-04-09 | **Article Organizer v1.5.0 & Localized Wiki Crystallization** | `scripts/ops/`, `.nexus/config/` | Low | Git revert | Antigravity |
+| 2026-04-08 | **Stabilize LanceDB Index Idempotency** | `nexus/services/memory_indexer.py` | Low | Git revert | Antigravity |
 | 2026-04-07 | **DeepScientist Research Integration** | `nexus/research/`, `nightshift.py`, `nexus_cli.py` | Low | Git revert | Antigravity |
 | 2026-04-07 | **Gemini Invocation Reliability Hardening** | `scripts/ops/gemini_nexus_invoke.py`, `AGENT_PROTOCOL_v2.md` | Low | Git revert | Codex |
 | 2026-04-06 | **Phase 3b: De-noising & Refinement Final Close-out** | `wiki_drift_audit`, `truth_claims`, `[Module - State Contracts](../02_Modules/Module - State Contracts.md)` | Low | Git revert | Antigravity |
