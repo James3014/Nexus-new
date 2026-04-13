@@ -31,7 +31,10 @@ class SessionMetabolism:
         """🔍 載入斷點：讀取任務堆疊。"""
         if not self.stack_path.exists():
             return {}
-        return json.loads(self.stack_path.read_text())
+        try:
+            return json.loads(self.stack_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
 
     def should_distill(self, token_usage: int) -> bool:
         """Compatibility gate used by legacy metabolism tests."""

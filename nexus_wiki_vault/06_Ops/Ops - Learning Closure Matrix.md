@@ -87,3 +87,15 @@ version_scope:
 - **Root Cause**: Tool default paths are workspace-root relative; worktrees require explicit path prefixing.
 - **Decision**: Re-synced files to correct worktree and verified with explicit path checks.
 - **Prevention**: Formalize worktree-relative file addressing in agent system instructions.
+
+## 2026-04-14: NightShift high-confidence landing still requires global contract verification
+- **Phenomenon**: `pytest -q` still fails (6 failures) and `acceptance-check` blocks when writeback evidence is missing.
+- **Root Cause**: Task-level NightShift score validates local objective, not full-repo contract compatibility and governance evidence.
+- **Decision**: Enforce isolated landing branch + full verification ladder (`pytest`, `acceptance-check`, `contract-check`) before merge.
+- **Prevention**: Treat `IMPROVED && rc=0` as candidate signal only; merge gate must include full-suite and Failure-to-Lesson writeback artifacts.
+
+## 2026-04-14: Worktree parity gaps can create false-negative gates
+- **Phenomenon**: isolated worktree lacked local `benchmarks` data and hit metabolism checkpoint path gaps, causing `pytest` failures not reproducible in main workspace.
+- **Root Cause**: some tests depend on local runtime artifacts and monkeypatched `Path.exists` paths; isolation tree did not mirror those non-git assets.
+- **Decision**: harden `SessionMetabolism.load_checkpoint()` to tolerate missing files and run cross-environment verification (`root data + branch code`) before judging regression severity.
+- **Prevention**: classify failures into code regressions vs environment parity gaps; only block merge on code regressions, and record parity assumptions in the runbook.

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from enum import Enum
 
 class Phase(str, Enum):
@@ -35,29 +35,39 @@ class CapabilityGate:
             "write_memory", "read_memory"
         ]
 
-    def get_tools(self, phase_str: str) -> List[str]:
+    def _normalize_phase(self, phase_str: Optional[str]) -> Optional[str]:
+        """Normalize nullable phase input into a non-empty token."""
+        if not isinstance(phase_str, str):
+            return None
+        normalized = phase_str.strip()
+        return normalized or None
+
+    def get_tools(self, phase_str: Optional[str]) -> List[str]:
         """獲取特定階段的合法工具清單"""
+        normalized = self._normalize_phase(phase_str)
+        if normalized is None:
+            return PHASE_TOOLS[Phase.P]
         try:
             # 優先轉換為 Phase 枚舉 (名稱匹配)
-            phase_upper = phase_str.upper()
+            phase_upper = normalized.upper()
             if phase_upper in Phase.__members__:
                 return PHASE_TOOLS[Phase[phase_upper]]
             
             # 其次透過值匹配，取代原本的 O(N) 迴圈
-            return PHASE_TOOLS[Phase(phase_str.lower())]
+            return PHASE_TOOLS[Phase(normalized.lower())]
         except (KeyError, ValueError):
             return PHASE_TOOLS[Phase.P]
 
-    def build_tools_json(self, phase_str: str) -> Dict[str, Any]:
+    def build_tools_json(self, phase_str: Optional[str]) -> Dict[str, Any]:
         """建立符合 PromptBuilder 格式的工具定義"""
         tools = self.get_tools(phase_str)
         tools_set = set(tools)
         return {
             "available_tools": tools,
             "hidden_tools": [t for t in self.ALL_TOOLS if t not in tools_set],
-            "phase": phase_str
+            "phase": self._normalize_phase(phase_str) or Phase.P.value
         }
 
-    def managed_toolsets(self, phase_str: str) -> List[str]:
+    def managed_toolsets(self, phase_str: Optional[str]) -> List[str]:
         """🎯 Composio P0: 獲取 JIT 精簡工具集"""
         return self.get_tools(phase_str)
