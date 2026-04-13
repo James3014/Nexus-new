@@ -130,8 +130,33 @@ class SprintExecutor:
         if not swarm_dir:
             return CandidateEval(seed=seed, score=0.0, hint=hint, error="broker_timeout", source=source)
         try:
+            target_rel = self.scope_files[0]
+            original = (self.repo_root / target_rel).read_text(encoding="utf-8") if (self.repo_root / target_rel).exists() else ""
+            if code == original:
+                return CandidateEval(
+                    seed=seed,
+                    score=0.2,
+                    hint=hint,
+                    error="no_change_candidate",
+                    candidate_code=code,
+                    source=source,
+                    elapsed_sec=round(time.time() - start, 4),
+                )
+            if Path(target_rel).suffix == ".py":
+                try:
+                    compile(code, target_rel, "exec")
+                except SyntaxError as exc:
+                    return CandidateEval(
+                        seed=seed,
+                        score=0.0,
+                        hint=hint,
+                        error=f"syntax_error:{exc.msg}",
+                        candidate_code=code,
+                        source=source,
+                        elapsed_sec=round(time.time() - start, 4),
+                    )
             self.broker.sync_scope(swarm_dir, scope_files=self.scope_files)
-            (swarm_dir / self.scope_files[0]).write_text(code, encoding="utf-8")
+            (swarm_dir / target_rel).write_text(code, encoding="utf-8")
             res = subprocess.run(
                 self.pytest_cmd,
                 capture_output=True,
@@ -189,6 +214,29 @@ class InPlaceSprintExecutor:
         target_path = self.repo_root / self.target_file
         original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
         try:
+            if code == original:
+                return CandidateEval(
+                    seed=seed,
+                    score=0.2,
+                    hint=hint,
+                    error="no_change_candidate",
+                    candidate_code=code,
+                    source=source,
+                    elapsed_sec=round(time.time() - start, 4),
+                )
+            if target_path.suffix == ".py":
+                try:
+                    compile(code, str(target_path), "exec")
+                except SyntaxError as exc:
+                    return CandidateEval(
+                        seed=seed,
+                        score=0.0,
+                        hint=hint,
+                        error=f"syntax_error:{exc.msg}",
+                        candidate_code=code,
+                        source=source,
+                        elapsed_sec=round(time.time() - start, 4),
+                    )
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(code, encoding="utf-8")
             res = subprocess.run(

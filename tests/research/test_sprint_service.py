@@ -2,6 +2,7 @@ from pathlib import Path
 
 from nexus.research.sprint_service import (
     CandidateEval,
+    InPlaceSprintExecutor,
     SprintConfig,
     run_hyper_sprint,
     write_sprint_report,
@@ -154,3 +155,31 @@ def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
     assert res.status == "SUCCESS"
     assert calls["inplace"] == 1
     assert calls["swarm"] == 0
+
+
+def test_inplace_executor_rejects_no_change_candidate(tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    ex = InPlaceSprintExecutor(
+        repo_root=tmp_path,
+        target_file="demo.py",
+        pytest_cmd=["uv", "run", "pytest", "-q", "--maxfail=1"],
+        timeout_sec=5,
+    )
+    ev = ex.evaluate_candidate(seed=0, hint="h", code="print('x')\n", source="local")
+    assert ev.score == 0.2
+    assert ev.error == "no_change_candidate"
+
+
+def test_inplace_executor_rejects_syntax_error(tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    ex = InPlaceSprintExecutor(
+        repo_root=tmp_path,
+        target_file="demo.py",
+        pytest_cmd=["uv", "run", "pytest", "-q", "--maxfail=1"],
+        timeout_sec=5,
+    )
+    ev = ex.evaluate_candidate(seed=0, hint="h", code="def broken(:\n    pass\n", source="local")
+    assert ev.score == 0.0
+    assert ev.error.startswith("syntax_error:")
