@@ -5,6 +5,7 @@
   - `uv run scripts/engine/nexus_cli.py nexus research:run --run-id local-smoke --scope docs/research/autoresearch_control_plane_spec.md --dry-run --report-file .nexus/reports/research/local-smoke.json`
   - `uv run scripts/engine/nexus_cli.py nexus research:route --task-desc \"fix flaky timeout in websocket\" --candidate-count 3 --root-cause-confidence 0.7 --output-json`
   - `uv run scripts/engine/nexus_cli.py nexus research:benchmark --manifest-file /tmp/research-benchmark-manifest.json --report-file .nexus/reports/research/benchmark-report.json`
+  - `uv run scripts/engine/nexus_cli.py nexus research:sprint --task \"Fix deadlock in transfer\" --target-file nexus/demo/bank_transfer.py --test-file tests/demo/test_concurrency_hard.py --candidate-count 1 --max-rounds 1 --no-llm-mode --safe-mode`
 - 報表路徑：
   - `.nexus/reports/research/*.json`
 
@@ -34,3 +35,10 @@
 - Nightly gate:
   - Workflow: `.github/workflows/research-nightly.yml`
   - 輸出 artifact: `nightly-report.json`
+
+## 5. Hyper-Sprint 報表欄位（P3）
+- 預設輸出：`.nexus/reports/research/sprint-report.json`
+- 核心欄位：
+  - `status`, `reason`, `final_score`, `winner_source`
+  - `attempt_count`, `model_calls`, `quota_backoffs`, `test_timeouts`
+  - `error_codes[]`, `candidates[]`

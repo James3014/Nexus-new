@@ -42,3 +42,15 @@
 ## 7. CI/Nightly Gate (P1-C/P1-D)
 - PR smoke: `.github/workflows/research-smoke.yml`
 - Nightly: `.github/workflows/research-nightly.yml`
+
+## 8. Hyper-Sprint Service (P1-P3 Refactor)
+- `research:sprint` 已改為薄 CLI，核心流程下沉至 `nexus/research/sprint_service.py`。
+- 關注點分離：
+  - `SprintConfig` / `SprintResult` / `CandidateEval`（資料模型）
+  - `LocalCandidateGenerator` / `LLMCandidateGenerator`（候選生成）
+  - `SprintExecutor`（sandbox + pytest 驗證）
+  - `promote_patch_to_branch`（交付）
+- 統一機器可讀報表（預設 `.nexus/reports/research/sprint-report.json`）：
+  - `status`, `reason`, `final_score`, `winner_source`
+  - `attempt_count`, `model_calls`, `quota_backoffs`, `test_timeouts`, `error_codes[]`
+  - `candidates[]`（每個候選的 score/error/source/elapsed）

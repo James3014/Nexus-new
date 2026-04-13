@@ -25,8 +25,11 @@ class DayShiftOptimizer:
         task_desc: str,
         max_rounds: int = 5,
         convergence_patience: int = 2,
-        model_name: str = "gemini-3.1-pro-preview",
-        fallback_model_name: str = "gemini-3-flash-preview"
+        model_name: str = "gemini-3-flash-preview",
+        fallback_model_name: str = "gemini-3.1-pro-preview",
+        test_timeout_sec: int = 60,
+        use_llm_scoring: bool = False,
+        min_round_delay_sec: float = 1.5,
     ):
         self.project_root = project_root.resolve()
         self.swarm_dir = swarm_dir.resolve()
@@ -36,6 +39,9 @@ class DayShiftOptimizer:
         self.convergence_patience = convergence_patience
         self.model_name = model_name
         self.fallback_model_name = fallback_model_name
+        self.test_timeout_sec = test_timeout_sec
+        self.use_llm_scoring = use_llm_scoring
+        self.min_round_delay_sec = min_round_delay_sec
         
         from nexus.services.gateway import BattlesuitGateway
         self.gateway = BattlesuitGateway(project_root=self.project_root)
@@ -60,7 +66,7 @@ class DayShiftOptimizer:
                 capture_output=True,
                 text=True,
                 cwd=self.swarm_dir,
-                timeout=60
+                timeout=self.test_timeout_sec
             )
             return res.returncode, res.stdout + "\n" + res.stderr
         except subprocess.TimeoutExpired:
@@ -115,9 +121,11 @@ class DayShiftOptimizer:
                 if self._is_quota_error(err_text):
                     logger.warning(f"⚠️ [DayShift] Quota exhausted on {model}, switching fallback.")
                     self.exhausted_models.add(model)
+                    time.sleep(self.min_round_delay_sec)
                     continue
                 else:
                     logger.warning(f"⚠️ [DayShift] Generation failed: {err_text}")
+                    time.sleep(self.min_round_delay_sec)
                     continue
 
             candidate_code = prompt_res.get("patch") or raw_content
@@ -136,15 +144,18 @@ class DayShiftOptimizer:
                 target_path.write_text(current_code, encoding="utf-8") # Rollback
                 self.no_improve_streak += 1
             else:
-                # Ask model for a score (simulated audit)
-                eval_res, _ = self.gateway.ask_structured(
-                    prompt=f"Evaluate the optimized code for {self.target_file} against performance & readability.",
-                    payload=f"Code:\n{candidate_code[:2000]}",
-                    phase="R",
-                    output_schema={"score": "float between 0 and 1.0", "summary": "str"},
-                    model_name=model
-                )
-                score = float(eval_res.get("score", 0.95)) # Default high if it passed tests
+                if self.use_llm_scoring:
+                    eval_res, _ = self.gateway.ask_structured(
+                        prompt=f"Evaluate the optimized code for {self.target_file} against performance & readability.",
+                        payload=f"Code:\n{candidate_code[:2000]}",
+                        phase="R",
+                        output_schema={"score": "float between 0 and 1.0", "summary": "str"},
+                        model_name=model
+                    )
+                    score = float(eval_res.get("score", 0.95))
+                else:
+                    # Quota-safe mode: test-pass implies high-confidence baseline score.
+                    score = 0.95
                 
                 if score > self.best_score and score >= 0.9:
                     logger.info(f"⭐ [DayShift] IMPROVED! New best score: {score} (rc={rc})")
@@ -160,6 +171,7 @@ class DayShiftOptimizer:
             if self.no_improve_streak >= self.convergence_patience:
                 logger.info(f"🎯 [DayShift] Convergence reached after {self.no_improve_streak} rounds.")
                 break
+            time.sleep(self.min_round_delay_sec)
 
         if self.winning_code and self.best_score >= 0.9:
             return {

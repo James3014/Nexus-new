@@ -818,6 +818,80 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
     click.echo(f"📊 Benchmark Complete: {success_count}/{len(cases)} cases passed. Report: {report_file}")
 
 
+@nexus_group.command(name="research:sprint")
+@click.option("--task", required=True, help="Task description or goal.")
+@click.option("--target-file", required=True, help="Target file to optimize.")
+@click.option("--test-file", required=False, help="Specific test file to run.")
+@click.option("--candidate-count", default=3, type=int, help="Number of gladiator candidates.")
+@click.option("--max-rounds", default=5, type=int, help="Number of DayShift optimization rounds.")
+@click.option("--timeout-sec", default=60, type=int, help="Timeout for tests.")
+@click.option("--safe-mode/--no-safe-mode", default=True, show_default=True, help="Quota-safe mode: serialized candidates + local scoring.")
+@click.option("--stage1-max-parallel", default=1, type=int, show_default=True, help="Parallelism for Gladiator candidate evaluation.")
+@click.option("--stage1-timeout-sec", default=20, type=int, show_default=True, help="Per-candidate timeout in Gladiator stage.")
+@click.option("--llm-mode/--no-llm-mode", default=False, show_default=True, help="Enable/disable external LLM calls in Hyper-Sprint.")
+@click.option("--report-file", default=".nexus/reports/research/sprint-report.json", show_default=True, help="Machine-readable sprint report output path.")
+def research_sprint(task, target_file, test_file, candidate_count, max_rounds, timeout_sec, safe_mode, stage1_max_parallel, stage1_timeout_sec, llm_mode, report_file):
+    """☀️ [Hyper-Sprint] Thin CLI wrapper for sprint service."""
+    import time
+    from nexus.research.sprint_service import (
+        SprintConfig,
+        promote_patch_to_branch,
+        run_hyper_sprint,
+        write_sprint_report,
+    )
+
+    cfg = SprintConfig(
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        candidate_count=candidate_count,
+        max_rounds=max_rounds,
+        timeout_sec=timeout_sec,
+        safe_mode=safe_mode,
+        stage1_max_parallel=stage1_max_parallel,
+        stage1_timeout_sec=stage1_timeout_sec,
+        llm_mode=llm_mode,
+    )
+
+    click.echo(f"🚀 [Hyper-Sprint] Starting for {target_file}...")
+    if not llm_mode:
+        click.echo("🧱 [Hyper-Sprint] Local mode ON: no external Gemini API/CLI calls.")
+    if safe_mode:
+        click.echo("🛡️ [Hyper-Sprint] Safe mode ON: throttled model usage to reduce 429 risk.")
+
+    result = run_hyper_sprint(repo_root=REPO_ROOT, config=cfg)
+    report_path = write_sprint_report(repo_root=REPO_ROOT, result=result, report_file=report_file)
+
+    if result.status != "SUCCESS":
+        click.secho("❌ [Hyper-Sprint] Failed.", fg="red")
+        click.echo(f"Reason: {result.reason}")
+        errs = [c.error for c in result.candidates if c.error]
+        if errs:
+            click.echo(f"Failure reasons: {', '.join(errs[:3])}")
+        click.echo(f"Report: {report_path}")
+        return
+
+    click.echo(f"🏆 [Hyper-Sprint] Winner source: {result.winner_source}")
+    click.echo(f"Final Score: {result.final_score}")
+    click.echo(f"Verification: {' '.join(result.pytest_cmd)}")
+    click.echo(f"Report: {report_path}")
+
+    if result.promotable and result.patch:
+        click.secho("\n=== [Hyper-Sprint Approval Gate] ===", fg="cyan", bold=True)
+        click.echo(f"Target File: {target_file}")
+        click.echo(f"Final Score: {result.final_score}")
+        if click.confirm("Do you want to promote this patch to an independent branch?"):
+            branch_name = promote_patch_to_branch(
+                repo_root=REPO_ROOT,
+                target_file=target_file,
+                patch_code=result.patch,
+                score=result.final_score,
+                run_id=str(int(time.time())),
+            )
+            click.secho(f"🎉 [Hyper-Sprint] Done! Code promoted to branch: {branch_name}", fg="green")
+        else:
+            click.echo("🛑 [Hyper-Sprint] Promotion cancelled by user.")
+
 # --- External Command Registration ---
 try:
     from scripts.engine.commands.ui_explorer import register as register_ui_explorer
