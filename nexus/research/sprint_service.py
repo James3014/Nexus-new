@@ -172,6 +172,65 @@ class SprintExecutor:
             self.broker.release(swarm_dir)
 
 
+class InPlaceSprintExecutor:
+    """
+    Fast local executor for local-first mode.
+    Applies candidate code in-place, runs scoped tests, then restores the original file.
+    """
+
+    def __init__(self, repo_root: Path, target_file: str, pytest_cmd: list[str], timeout_sec: int):
+        self.repo_root = repo_root
+        self.target_file = target_file
+        self.pytest_cmd = pytest_cmd
+        self.timeout_sec = timeout_sec
+
+    def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+        start = time.time()
+        target_path = self.repo_root / self.target_file
+        original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(code, encoding="utf-8")
+            res = subprocess.run(
+                self.pytest_cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_sec,
+                cwd=self.repo_root,
+            )
+            return CandidateEval(
+                seed=seed,
+                score=1.0 if res.returncode == 0 else 0.4,
+                hint=hint,
+                stdout=res.stdout,
+                candidate_code=code,
+                source=source,
+                elapsed_sec=round(time.time() - start, 4),
+            )
+        except subprocess.TimeoutExpired as exc:
+            return CandidateEval(
+                seed=seed,
+                score=0.0,
+                hint=hint,
+                error=str(exc),
+                candidate_code=code,
+                source=source,
+                elapsed_sec=round(time.time() - start, 4),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return CandidateEval(
+                seed=seed,
+                score=0.0,
+                hint=hint,
+                error=str(exc),
+                candidate_code=code,
+                source=source,
+                elapsed_sec=round(time.time() - start, 4),
+            )
+        finally:
+            target_path.write_text(original, encoding="utf-8")
+
+
 def promote_patch_to_branch(*, repo_root: Path, target_file: str, patch_code: str, score: float, run_id: str) -> str:
     branch_name = f"hyper-sprint/{run_id}"
     subprocess.run(["git", "checkout", "-b", branch_name], cwd=repo_root, check=True, capture_output=True)
@@ -203,7 +262,16 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     source_code = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
     llm_generator: Optional[LLMCandidateGenerator] = LLMCandidateGenerator(repo_root, config.safe_mode) if config.llm_mode else None
     local_generator = LocalCandidateGenerator()
-    executor = SprintExecutor(repo_root, scope_files=scope_files, pytest_cmd=pytest_cmd, timeout_sec=config.stage1_timeout_sec)
+    # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
+    if config.llm_mode:
+        executor = SprintExecutor(repo_root, scope_files=scope_files, pytest_cmd=pytest_cmd, timeout_sec=config.stage1_timeout_sec)
+    else:
+        executor = InPlaceSprintExecutor(
+            repo_root=repo_root,
+            target_file=config.target_file,
+            pytest_cmd=pytest_cmd,
+            timeout_sec=config.stage1_timeout_sec,
+        )
 
     candidates: list[CandidateEval] = []
     model_calls = 0

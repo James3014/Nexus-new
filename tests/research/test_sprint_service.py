@@ -26,7 +26,7 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
             return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
 
     monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="implement", target_file="demo.py", candidate_count=2, llm_mode=False, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
@@ -61,7 +61,7 @@ def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
             )
 
     monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
-    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
     cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
@@ -117,3 +117,40 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
     assert res.winner_source == "local"
     assert "quota" in res.error_codes
     assert "llm_fallback_local" in res.error_codes
+
+
+def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    calls = {"inplace": 0, "swarm": 0}
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, **_kwargs):
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeInPlaceExecutor:
+        def __init__(self, *_args, **_kwargs):
+            calls["inplace"] += 1
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    class FakeSwarmExecutor:
+        def __init__(self, *_args, **_kwargs):
+            calls["swarm"] += 1
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeInPlaceExecutor)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeSwarmExecutor)
+
+    cfg = SprintConfig(task="implement", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert calls["inplace"] == 1
+    assert calls["swarm"] == 0
