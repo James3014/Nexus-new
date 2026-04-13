@@ -77,3 +77,37 @@ class ResearchPolicy:
     def should_research(self, decision: Dict[str, Any], task_desc: str) -> bool:
         """Backward-compatible boolean check for older call sites."""
         return self.route(decision, task_desc).should_research
+
+    def get_mutation_hint(self, candidate_index: int, task_desc: str = "") -> str:
+        """Get a strategy hint for generating diverse candidates with semantic pivots."""
+        task_upper = (task_desc or "").upper()
+        
+        # Semantic Pivot Logic
+        pivots = []
+        if "TIMEOUT" in task_upper or "LATENCY" in task_upper:
+            pivots = [
+                "Pivot: Assume this is a race condition or deadlock, not just a simple timeout.",
+                "Pivot: Assume the root cause is resource starvation in the async event loop.",
+            ]
+        elif "MEMORY" in task_upper or "LEAK" in task_upper:
+            pivots = [
+                "Pivot: Assume it's a circular reference in a cache, not a buffer overflow.",
+                "Pivot: Assume the leak is in the cleanup of temporary swarm workspaces.",
+            ]
+        elif "WEBSOCKET" in task_upper or "STREAM" in task_upper:
+            pivots = [
+                "Pivot: Assume the connection state machine is desynchronized.",
+                "Pivot: Assume the issue is head-of-line blocking in the message queue.",
+            ]
+
+        # Base Strategies
+        base_strategies = [
+            "Conservative: Focus on the minimal required change to fix the specific issue without refactoring.",
+            "Aggressive/Refactor: Consider structural improvements or refactoring to address the root cause more robustly.",
+            "Performance/Heuristic: Focus on optimizing performance, resource usage, or applying best-practice heuristic patterns.",
+        ]
+        
+        combined = pivots + base_strategies
+        if candidate_index < 0:
+            return ""
+        return combined[candidate_index % len(combined)]

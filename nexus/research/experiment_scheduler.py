@@ -17,12 +17,13 @@ class ExperimentScheduler:
         self.experiments_root.mkdir(parents=True, exist_ok=True)
         self._active_candidates: Dict[str, Dict[str, Any]] = {}
 
-    def create_candidate(self, candidate_id: str, hypothesis: str, scope: List[str]) -> Dict[str, Any]:
+    def create_candidate(self, candidate_id: str, hypothesis: str, scope: List[str], mutation_hint: str = "") -> Dict[str, Any]:
         candidate_path = self.experiments_root / candidate_id
         candidate_path.mkdir(exist_ok=True)
         info = {
             "id": candidate_id, "hypothesis": hypothesis, "status": "created",
             "modifiable_scope": [str(Path(s)) for s in scope],
+            "mutation_hint": mutation_hint,
             "created_at": datetime.now(UTC).isoformat(),
             "path": str(candidate_path), "metrics": {}
         }
