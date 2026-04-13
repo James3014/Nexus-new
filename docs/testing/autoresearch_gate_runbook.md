@@ -1,5 +1,13 @@
 # AutoResearch 執行與守門手冊 (v1.0)
 
+## 0. 單一產品入口
+- 本地執行：
+  - `uv run scripts/engine/nexus_cli.py nexus research:run --run-id local-smoke --scope docs/research/autoresearch_control_plane_spec.md --dry-run --report-file .nexus/reports/research/local-smoke.json`
+  - `uv run scripts/engine/nexus_cli.py nexus research:route --task-desc \"fix flaky timeout in websocket\" --candidate-count 3 --root-cause-confidence 0.7 --output-json`
+  - `uv run scripts/engine/nexus_cli.py nexus research:benchmark --manifest-file /tmp/research-benchmark-manifest.json --report-file .nexus/reports/research/benchmark-report.json`
+- 報表路徑：
+  - `.nexus/reports/research/*.json`
+
 ## 1. 啟動流程
 1. **定義範圍**: 在任務描述或配置中明確 `modifiable_scope` (建議僅限研究用模組)。
 2. **配置評估**: 確保 `UnifiedEvaluator` 已配置固定 Seeds 與 Budget。
@@ -15,6 +23,14 @@
 | **資源耗盡** | **HUMAN TAKEOVER** | 超出 Budget 時暫停，由工程師評估是否繼續。 |
 
 ## 3. 失敗排查與清理
-- **磁碟空間**: 若出現 `Errno 28`，請執行 `rm -rf .nexus/experiments/*`。
+- **磁碟空間**: 可調高 `--retain-last-n` 的清理強度，或手動檢查 `.nexus/experiments` / `.nexus/backups`。
 - **回滾手動檢查**: 若自動回滾失敗，可檢查 `.nexus/backups/[CandidateID]` 進行手動恢復。
 - **併發控制**: 禁止在同一工作區並發執行多個研究實驗。
+
+## 4. CI 守門
+- PR smoke:
+  - Workflow: `.github/workflows/research-smoke.yml`
+  - 輸出 artifact: `pr-smoke-report.json`
+- Nightly gate:
+  - Workflow: `.github/workflows/research-nightly.yml`
+  - 輸出 artifact: `nightly-report.json`

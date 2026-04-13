@@ -130,3 +130,486 @@ def test_cli_closeout_missing_contract():
     result = runner.invoke(nexus, ["nexus:closeout", "--contract", "non_existent.json"])
     assert result.exit_code != 0
     assert "Contract file missing" in result.output
+
+
+def test_research_run_success(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    target = tmp_path / "docs" / "sample.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ok", encoding="utf-8")
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "r-success",
+            "--scope",
+            "docs/sample.txt",
+            "--candidate-src-root",
+            ".",
+            "--report-file",
+            ".nexus/reports/research/report-success.json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output.strip())
+    assert payload["status"] == "success"
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "report-success.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["run_id"] == "r-success"
+    assert report["status"] == "success"
+    assert report["winner"] == "candidate-main"
+    assert isinstance(report["top_k"], list) and report["top_k"]
+    assert "budget_summary" in report
+    assert "timestamps" in report
+
+
+def test_research_run_rollback_on_failed_gate(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    target = tmp_path / "docs" / "sample.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ok", encoding="utf-8")
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "r-fail",
+            "--scope",
+            "docs/sample.txt",
+            "--candidate-src-root",
+            ".",
+            "--budget-limit",
+            "0",
+            "--estimated-cost-per-round",
+            "1",
+            "--report-file",
+            ".nexus/reports/research/report-fail.json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output.strip())
+    assert payload["status"] == "failed"
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "report-fail.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert "below_threshold" in report["rejected_reasons"]
+    assert report["rollback_trace"]
+
+
+def test_research_governance_success(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    target = tmp_path / "docs" / "sample.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ok", encoding="utf-8")
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "gov-ok",
+            "--scope",
+            "docs/sample.txt",
+            "--max-parallel",
+            "2",
+            "--timeout-sec",
+            "300",
+            "--report-file",
+            ".nexus/reports/research/gov-ok.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-ok.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "success"
+
+
+def test_research_governance_low_disk(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    # Monkeypatch shutil.disk_usage to return low free space
+    import shutil
+    def mock_disk_usage(path):
+        return (100 * 1024**3, 99 * 1024**3, 1 * 1024**3)  # 1GB free
+    monkeypatch.setattr(shutil, "disk_usage", mock_disk_usage)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "gov-low-disk",
+            "--disk-watermark-gb",
+            "5.0",
+            "--report-file",
+            ".nexus/reports/research/gov-low-disk.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-low-disk.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert "low_disk_space" in report["rejected_reasons"]
+
+
+def test_research_governance_invalid_parallelism(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "gov-inv-par",
+            "--max-parallel",
+            "0",
+            "--report-file",
+            ".nexus/reports/research/gov-inv-par.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-par.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert "invalid_parallelism" in report["rejected_reasons"]
+
+
+def test_research_governance_invalid_timeout(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "gov-inv-timeout",
+            "--timeout-sec",
+            "-1",
+            "--report-file",
+            ".nexus/reports/research/gov-inv-timeout.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-timeout.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert "invalid_timeout" in report["rejected_reasons"]
+
+
+def test_research_governance_invalid_retries(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "gov-inv-retries",
+            "--max-retries",
+            "-1",
+            "--report-file",
+            ".nexus/reports/research/gov-inv-retries.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-retries.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert "invalid_retries" in report["rejected_reasons"]
+
+
+def test_research_governance_invalid_retain_n(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "gov-inv-retain",
+            "--retain-last-n",
+            "0",
+            "--report-file",
+            ".nexus/reports/research/gov-inv-retain.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-retain.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert "invalid_retain_n" in report["rejected_reasons"]
+
+
+def test_research_retain_cleanup_executor(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    target = tmp_path / "docs" / "sample.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ok", encoding="utf-8")
+
+    report_dir = tmp_path / ".nexus" / "reports" / "research"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    for idx in range(4):
+        old = report_dir / f"old-{idx}.json"
+        old.write_text("{}", encoding="utf-8")
+
+    exp_root = tmp_path / ".nexus" / "experiments"
+    backup_root = tmp_path / ".nexus" / "backups"
+    for idx in range(4):
+        (exp_root / f"exp-{idx}").mkdir(parents=True, exist_ok=True)
+        (backup_root / f"bak-{idx}").mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "retain-check",
+            "--scope",
+            "docs/sample.txt",
+            "--retain-last-n",
+            "2",
+            "--report-file",
+            ".nexus/reports/research/retain-check.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report = json.loads((report_dir / "retain-check.json").read_text(encoding="utf-8"))
+    assert report["retention"]["retain_last_n"] == 2
+    assert report["retention"]["cleaned"]["reports"] >= 1
+    assert report["retention"]["cleaned"]["experiments"] >= 1
+    assert report["retention"]["cleaned"]["backups"] >= 1
+    assert sum(1 for _ in report_dir.glob("*.json")) == 2
+    assert len([p for p in exp_root.iterdir() if p.is_dir()]) == 2
+    assert len([p for p in backup_root.iterdir() if p.is_dir()]) == 2
+
+
+def test_research_schema(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    target = tmp_path / "docs" / "sample.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ok", encoding="utf-8")
+
+    # Success Path
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "schema-success",
+            "--scope",
+            "docs/sample.txt",
+            "--report-file",
+            ".nexus/reports/research/schema-success.json",
+        ],
+    )
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "schema-success.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    
+    assert report["schema_version"] == "1.0"
+    assert "decision_log" in report
+    assert any("schedule" in step for step in report["decision_log"])
+    assert any("evaluate" in step for step in report["decision_log"])
+    assert any("select" in step for step in report["decision_log"])
+    
+    assert "top_k" in report
+    for item in report["top_k"]:
+        assert "candidate_id" in item
+        assert isinstance(item["average_score"], float)
+        assert isinstance(item["passed_gate"], bool)
+
+    assert "cost_curve" in report
+    cc = report["cost_curve"]
+    bs = report["budget_summary"]
+    assert cc["budget_limit"] == bs["limit"]
+    assert cc["total_cost"] == bs["used"]
+    assert cc["budget_remaining"] == bs["remaining"]
+    assert report["execution"]["max_parallel"] == 1
+    assert report["execution"]["max_retries"] == 0
+    assert "retention" in report
+
+    # Failed Path (Low Disk)
+    import shutil
+    def mock_disk_usage(path):
+        return (100 * 1024**3, 99 * 1024**3, 1 * 1024**3)  # 1GB free
+    monkeypatch.setattr(shutil, "disk_usage", mock_disk_usage)
+
+    result_fail = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "schema-fail",
+            "--disk-watermark-gb",
+            "5.0",
+            "--report-file",
+            ".nexus/reports/research/schema-fail.json",
+        ],
+    )
+    report_path_fail = tmp_path / ".nexus" / "reports" / "research" / "schema-fail.json"
+    report_fail = json.loads(report_path_fail.read_text(encoding="utf-8"))
+    assert report_fail["status"] == "failed"
+    assert "elimination_matrix" in report_fail
+    assert len(report_fail["elimination_matrix"]) > 0
+    assert report_fail["elimination_matrix"][0]["candidate_id"] == "candidate-main"
+    assert "low_disk_space" in report_fail["elimination_matrix"][0]["reason_codes"]
+
+
+
+def test_research_timeout(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    
+    # We use a very short timeout to trigger it quickly
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "timeout-test",
+            "--hypothesis",
+            "sleep-now",
+            "--timeout-sec",
+            "1",
+            "--report-file",
+            ".nexus/reports/research/timeout.json",
+        ],
+    )
+    # The command should succeed but report failure in the JSON
+    assert result.exit_code == 0
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "timeout.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    # Seed details should show timeout
+    for seed in report.get("candidate", {}).get("seed_details", []):
+        assert "timed out" in seed.get("error", "").lower()
+
+def test_research_cleanup(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    report_dir = tmp_path / ".nexus" / "reports" / "research"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Pre-create 5 reports
+    for i in range(5):
+        (report_dir / f"old-{i}.json").write_text("{}")
+        import time
+        time.sleep(0.01) # Ensure different mtimes
+        
+    # Run with retain-last-n=3
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "cleanup-test",
+            "--retain-last-n",
+            "3",
+            "--report-file",
+            ".nexus/reports/research/new.json",
+        ],
+    )
+    assert result.exit_code == 0
+    
+    # Should only have 3 reports left
+    remaining = list(report_dir.glob("*.json"))
+    assert len(remaining) == 3
+
+def test_research_route_findings_reinjection(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    
+    # Create a finding
+    finding_dir = tmp_path / ".nexus" / "memory" / "task" / "knowledge"
+    finding_dir.mkdir(parents=True, exist_ok=True)
+    finding_path = finding_dir / "f1.json"
+    finding_path.write_text(json.dumps({
+        "id": "f1",
+        "kind": "knowledge",
+        "title": "Websocket Bug",
+        "scope": "task",
+        "tags": ["ws"],
+        "retrieval_hints": ["websocket"],
+        "body": "hit",
+        "updated_at": "2026-04-13T12:00:00"
+    }))
+    
+    # Hit
+    result = runner.invoke(nexus, ["nexus", "research:route", "--task-desc", "Fix ws", "--findings-query", "websocket", "--output-json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["findings_hits"] == 1
+    assert data["adjusted_root_cause_confidence"] == 0.85
+    
+    # No Hit
+    result = runner.invoke(nexus, ["nexus", "research:route", "--task-desc", "Fix ws", "--findings-query", "missing", "--output-json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["findings_hits"] == 0
+    assert data["adjusted_root_cause_confidence"] == 1.0
+
+def test_research_run_multi_candidate(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    
+    result = runner.invoke(nexus, ["nexus", "research:run", "--candidate-count", "3", "--dry-run", "--min-score-threshold", "0.1"])
+    assert result.exit_code == 0
+    # The output of research:run is a JSON string in some cases, but wait
+    # In my implementation it's click.echo(json.dumps(...))
+    data = json.loads(result.output)
+    assert data["status"] == "success"
+    
+    report_file = data["report_file"]
+    with open(report_file, "r") as f:
+        report = json.load(f)
+    assert len(report["top_k"]) == 3
+    assert report["winner"] == "candidate-main"
+
+def test_research_benchmark(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "cases": [
+            {"id": "c1", "task_desc": "SDK bug", "task_type": "bug", "candidate_count": 1, "root_cause_confidence": 1.0}
+        ]
+    }))
+    
+    result = runner.invoke(nexus, ["nexus", "research:benchmark", "--manifest-file", str(manifest_path)])
+    assert result.exit_code == 0
+    assert "Benchmark Complete" in result.output
+    
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "benchmark-report.json"
+    assert report_path.exists()
+    report = json.loads(report_path.read_text())
+    assert report["total_cases"] == 1
+    assert report["research_chosen_cases"] == 1
+    assert "success_cases" in report

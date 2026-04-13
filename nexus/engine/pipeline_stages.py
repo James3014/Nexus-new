@@ -70,20 +70,42 @@ class PipelineStagesMixin:
                 # Backward compatibility for older planner signatures.
                 ctx.prediction = ctx.planner.run(ctx.state, planner_input)
             ctx.accumulator.record(ctx.state, "P", ctx.prediction)
+            
+            # 🚀 Pre-compute research routing decision for phase 'X' should_run auto-trigger
+            try:
+                # Use current metadata + prediction from Planner to decide if research is needed
+                decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
+                res_decision = ctx.research_policy.route(
+                    decision, ctx.task_desc, task_type=ctx.task_type, prediction=ctx.prediction, context=ctx.state.metadata
+                )
+                ctx.state.metadata["research_route"] = dataclasses.asdict(res_decision) if dataclasses.is_dataclass(res_decision) else {}
+                logger.info("📡 P 階段：預計算研究路由 (Should Research: %s, Reason: %s)", 
+                            res_decision.should_research, res_decision.reason)
+            except Exception as e:
+                logger.error("❌ P 階段：預計算研究路由失敗: %s", e)
+
             self.engine._add_step_to_history(
                 ctx.state, "P", metadata={"prediction": ctx.prediction, "decision_id": p_decision_id, "skill_id": "planner"}
             )
 
     def _stage_research(self, ctx: PipelineContextProtocol, tracer: Any) -> None:
         import json
+        from nexus.engine.policies.research_policy import ResearchDecision
         with tracer.phase_span('X', task_id=ctx.task_id) as x_span:
             # --- X Stage: Research ---
             force_research = bool(ctx.state.metadata.get("benchmark_force_research"))
-            decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
-            res_decision = ctx.research_policy.route(
-                decision, ctx.task_desc, task_type=ctx.task_type, prediction=ctx.prediction, context=ctx.state.metadata
-            )
-            ctx.state.metadata["research_route"] = dataclasses.asdict(res_decision) if dataclasses.is_dataclass(res_decision) else {}
+            
+            # 🚀 Re-use pre-computed route if available (auto-trigger fix)
+            precomputed = ctx.state.metadata.get("research_route")
+            if precomputed and isinstance(precomputed, dict):
+                res_decision = ResearchDecision(**precomputed)
+                logger.debug("🔬 X 階段：重用預計算路由 (Reason: %s)", res_decision.reason)
+            else:
+                decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
+                res_decision = ctx.research_policy.route(
+                    decision, ctx.task_desc, task_type=ctx.task_type, prediction=ctx.prediction, context=ctx.state.metadata
+                )
+                ctx.state.metadata["research_route"] = dataclasses.asdict(res_decision) if dataclasses.is_dataclass(res_decision) else {}
             
             if not ctx.dry_run and (force_research or res_decision.should_research):
                 ctx.state.current_phase = "X"

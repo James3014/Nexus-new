@@ -6,3 +6,18 @@
 | **候選淘汰機制** | ✅ 候選產生與對比 | ✅ 100+ Variants | ❌ 序列探索 | ✅ Score-based 淘汰 (P1) |
 | **安全回滾** | ✅ 直接覆蓋 | ❌ 無 (依賴 Git) | ✅ Git-based | ✅ 非破壞性治理回滾 (P1) |
 | **人機接管** | ❌ 全自動 | ❌ 全自動 | ✅ 核心 (可接管) | ✅ 狀態機接管點 (P0) |
+
+## 目前落地狀態（2026-04-13）
+- 已完成：
+  - `nexus research:run` 單一入口（P0）
+  - 治理參數與拒絕原因碼（P1-A）
+  - 報表 schema v1.0（P1-B）
+  - PR smoke gate（P1-C）
+  - Nightly gate（P1-D）
+- 仍待完成：
+  - 策略路由層（何時 research swarm / 何時單代理修復）
+  - 以策略訊號驅動的自動模式切換（research swarm / 單代理）產品化
+
+## Failure-to-Lesson（2026-04-13）
+- Lesson RCP-001：`retain-last-n` 清理必須把「本輪新報表」納入總量計算；若先清理後寫入，會產生 off-by-one 保留錯誤。現已改為寫入後清理，且 reports 類型以「保留總量（含本輪）」執行。
+- Lesson ORCH-002：Gemini CLI 在 sandbox 可能因 OAuth callback 無法 `listen` 而失敗（`EPERM 0.0.0.0`）；Tab 協同需使用可授權的非 sandbox 執行，且長任務提示應以檔案載入避免 shell quoting 斷裂。

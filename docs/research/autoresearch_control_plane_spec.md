@@ -11,3 +11,34 @@
 ## 4. 人機接管 (Human Takeover)
 - **中斷點**: 實驗停滯或指標異常偏移。
 - **Quest Repo**: 每次實驗自動建立 `.nexus/experiments/[ID]` 作為 Quest 工作目錄，包含 diff 與 log。
+
+## 5. 產品入口 (`nexus research:run`)
+- **入口命令**:
+  - `uv run scripts/engine/nexus_cli.py nexus research:run ...`
+  - `uv run scripts/engine/nexus_cli.py nexus research:route --task-desc \"...\" ...`
+  - `uv run scripts/engine/nexus_cli.py nexus research:benchmark --manifest-file ...`
+- **固定報表**: 預設輸出 `.nexus/reports/research/report.json`
+- **Schema v1.0** (machine-readable):
+  - `schema_version`
+  - `run_id`, `status`, `winner`
+  - `top_k[]`: `candidate_id`, `average_score`, `passed_gate`
+  - `elimination_matrix[]`: `candidate_id`, `reason_codes[]`
+  - `cost_curve`: `estimated_cost_per_round`, `total_cost`, `budget_limit`, `budget_remaining`
+  - `decision_log[]`, `rejected_reasons[]`, `rollback_trace[]`
+  - `budget_summary`, `timestamps`, `candidate`
+
+## 6. 治理參數 (P1-A)
+- `--candidate-count` (multi-candidate evaluate/select)
+- `--max-parallel`
+- `--max-retries`
+- `--timeout-sec`
+- `--retain-last-n`
+- `--disk-watermark-gb`
+- **執行層落地**:
+  - `max_parallel/max_retries/timeout_sec` 已接入 `UnifiedEvaluator.evaluate(...)` 實際執行器。
+  - `retain-last-n` 已接入清理執行器（reports / experiments / backups）。
+  - `research:route` 已接入 `ResearchPolicy.route(...)`，並可透過 findings 命中調整 `root_cause_confidence`。
+
+## 7. CI/Nightly Gate (P1-C/P1-D)
+- PR smoke: `.github/workflows/research-smoke.yml`
+- Nightly: `.github/workflows/research-nightly.yml`
