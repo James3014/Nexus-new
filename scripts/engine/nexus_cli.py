@@ -449,13 +449,25 @@ def research_run(
                 
                 if "real-run" in hypothesis.lower():
                     try:
-                        res = subprocess.run(
-                            [sys.executable, "-m", "pytest", "-q", "--maxfail=1"],
-                            capture_output=True, text=True, timeout=timeout_sec,
-                            cwd=REPO_ROOT
-                        )
-                        score = 1.0 if res.returncode == 0 else 0.4
-                        return {"seed": seed, "score": score, "cost": estimated_cost_per_round, "stdout": res.stdout}
+                        from nexus.research.swarm_broker import SwarmBroker
+                        broker = SwarmBroker(REPO_ROOT)
+                        swarm_dir = broker.acquire(timeout_sec=timeout_sec)
+                        if not swarm_dir:
+                            return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": "broker_timeout"}
+                        
+                        try:
+                            # Sync the necessary files to the isolated swarm directory
+                            broker.sync_scope(swarm_dir, scope_files=scope_list)
+                            
+                            res = subprocess.run(
+                                [sys.executable, "-m", "pytest", "-q", "--maxfail=1"],
+                                capture_output=True, text=True, timeout=timeout_sec,
+                                cwd=swarm_dir
+                            )
+                            score = 1.0 if res.returncode == 0 else 0.4
+                            return {"seed": seed, "score": score, "cost": estimated_cost_per_round, "stdout": res.stdout}
+                        finally:
+                            broker.release(swarm_dir)
                     except subprocess.TimeoutExpired:
                         return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": "timeout"}
                     except Exception as e:
@@ -719,11 +731,22 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
                 if real_cmd:
                     try:
                         import subprocess
-                        res = subprocess.run(
-                            real_cmd, shell=True, capture_output=True, text=True, timeout=timeout_sec,
-                            cwd=REPO_ROOT
-                        )
-                        return {"seed": seed, "score": 1.0 if res.returncode == 0 else 0.3, "cost": 1.0, "hint": mutation_hint}
+                        from nexus.research.swarm_broker import SwarmBroker
+                        broker = SwarmBroker(REPO_ROOT)
+                        swarm_dir = broker.acquire(timeout_sec=timeout_sec)
+                        if not swarm_dir:
+                            return {"seed": seed, "score": 0.0, "cost": 1.0, "error": "broker_timeout", "hint": mutation_hint}
+                        
+                        try:
+                            # Scope files logic can be improved later; sync essential configs
+                            broker.sync_scope(swarm_dir, scope_files=[])
+                            res = subprocess.run(
+                                real_cmd, shell=True, capture_output=True, text=True, timeout=timeout_sec,
+                                cwd=swarm_dir
+                            )
+                            return {"seed": seed, "score": 1.0 if res.returncode == 0 else 0.3, "cost": 1.0, "hint": mutation_hint}
+                        finally:
+                            broker.release(swarm_dir)
                     except Exception as e:
                         return {"seed": seed, "score": 0.0, "cost": 1.0, "error": str(e), "hint": mutation_hint}
 
