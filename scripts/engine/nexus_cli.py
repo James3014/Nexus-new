@@ -258,11 +258,15 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
     from nexus.research.findings_memory import FindingsMemoryStore
     
     findings_hits = 0
+    historical_hints = []
     adjusted_root_cause_confidence = root_cause_confidence
     if findings_query:
         store = FindingsMemoryStore(REPO_ROOT)
         hits = store.search(findings_query)
         findings_hits = len(hits)
+        for h in hits:
+            historical_hints.extend(h.retrieval_hints)
+            
         if findings_hits >= 1:
             adjusted_root_cause_confidence = max(0.0, root_cause_confidence - 0.15)
             
@@ -280,6 +284,7 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
         "rounds": decision.rounds,
         "stable_wins": decision.stable_wins,
         "findings_hits": findings_hits,
+        "historical_hints": list(dict.fromkeys(historical_hints))[:3],  # Unique, max 3
         "adjusted_root_cause_confidence": adjusted_root_cause_confidence,
         "require_codex_audit": adjusted_root_cause_confidence < 0.6
     }
@@ -291,6 +296,8 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
         click.echo(f"Reason: {out['reason']}")
         click.echo(f"Findings Hits: {out['findings_hits']}")
         click.echo(f"Adjusted RC Confidence: {out['adjusted_root_cause_confidence']}")
+        if out["historical_hints"]:
+            click.echo(f"Historical Hints: {out['historical_hints']}")
         if out["require_codex_audit"]:
             click.secho("⚠️ [Advisor] Low confidence detected. Codex Audit recommended.", fg="yellow", bold=True)
 
@@ -387,7 +394,15 @@ def research_run(
 
     if status == "success":
         from nexus.engine.policies.research_policy import ResearchPolicy
+        from nexus.research.findings_memory import FindingsMemoryStore
         policy = ResearchPolicy()
+        store = FindingsMemoryStore(REPO_ROOT)
+        
+        historical_hints = []
+        hits = store.search(hypothesis)
+        for h in hits:
+            historical_hints.extend(h.retrieval_hints)
+        historical_hints = list(dict.fromkeys(historical_hints))[:3]
 
         def _collect_workspace_files(paths: list[str]) -> list[str]:
             file_paths: list[str] = []
@@ -415,7 +430,7 @@ def research_run(
             candidates = [candidate_id] + [f"candidate-{i}" for i in range(2, candidate_count + 1)]
 
         for idx, current_cid in enumerate(candidates):
-            mutation_hint = policy.get_mutation_hint(idx, task_desc=hypothesis)
+            mutation_hint = policy.get_mutation_hint(idx, task_desc=hypothesis, historical_hints=historical_hints)
             decision_log.append(f"candidate:{current_cid}:start:mutation:{mutation_hint}")
             decision_log.append("schedule: start")
             # 1) schedule + backup
@@ -561,11 +576,43 @@ def research_run(
     total_cost = sum(r.get("total_cost", 0.0) for r in evaluator.scoreboard.values())
     last_eval_report = evaluator.scoreboard.get(winner or candidate_id, {})
     
+    # Phase 2 & 3: Metabolism & Persistence
+    arweave_tx_id = None
+    if status == "success" and winner:
+        try:
+            from nexus.services.mem_palace import MemPalace
+            from nexus.research.findings_memory import FindingsCard
+            palace = MemPalace(str(REPO_ROOT))
+            
+            seed_details = last_eval_report.get("seed_details", [])
+            hint = seed_details[0].get("hint", "") if seed_details else ""
+            
+            card = FindingsCard(
+                kind="episodes",
+                title=f"Gladiator Win: {hypothesis[:30]}",
+                task_id=run_id,
+                body=f"Hypothesis: {hypothesis}\nScope: {scope_list}\nWinner: {winner}",
+                confidence="high" if promoted else "medium",
+                tags=["gladiator", "research_run"],
+                retrieval_hints=[hint] if hint else []
+            )
+            
+            clean_cards = palace.verify([card.to_dict()])
+            if clean_cards:
+                store.write(FindingsCard.from_dict(clean_cards[0]))
+                arweave_tx_id = palace.trigger_arweave_distillation(clean_cards[0])
+                decision_log.append(f"metabolism: arweave_tx_id={arweave_tx_id}")
+            else:
+                decision_log.append("metabolism: rejected_by_aaak_judge")
+        except Exception as e:
+            decision_log.append(f"metabolism_error: {e}")
+            
     report_payload = {
         "schema_version": "1.0",
         "run_id": run_id,
         "status": status,
         "winner": winner,
+        "arweave_tx_id": arweave_tx_id,
         "top_k": top_k,
         "elimination_matrix": elimination_matrix,
         "decision_log": decision_log,
@@ -623,6 +670,9 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
     policy = ResearchPolicy()
     evaluator = UnifiedEvaluator(budget_limit=budget_limit)
     
+    from nexus.research.findings_memory import FindingsMemoryStore
+    store = FindingsMemoryStore(REPO_ROOT)
+    
     research_chosen_count = 0
     success_count = 0
     total_top1_score = 0.0
@@ -633,6 +683,12 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
         task_type = case.get("task_type", "bug")
         cand_count = case.get("candidate_count", 1)
         rc_conf = case.get("root_cause_confidence", 1.0)
+        
+        historical_hints = []
+        hits = store.search(task_desc)
+        for h in hits:
+            historical_hints.extend(h.retrieval_hints)
+        historical_hints = list(dict.fromkeys(historical_hints))[:3]
         
         # 1) Routing Decision
         prediction = {"candidate_count": cand_count, "root_cause_confidence": rc_conf}
@@ -657,7 +713,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
             
             def _gladiator_test_fn(seed: int) -> dict:
                 # 2.1) Use dynamic mutation hints for strategy diversity
-                mutation_hint = policy.get_mutation_hint(seed % (cand_count or 1), task_desc=task_desc)
+                mutation_hint = policy.get_mutation_hint(seed % (cand_count or 1), task_desc=task_desc, historical_hints=historical_hints)
                 
                 # 2.2) Real Subprocess Run if command provided
                 if real_cmd:
@@ -693,6 +749,34 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec):
             
             if case_res["status"] == "success":
                 success_count += 1
+                
+                # Phase 2 & 3: Metabolism & Persistence
+                try:
+                    from nexus.services.mem_palace import MemPalace
+                    from nexus.research.findings_memory import FindingsCard
+                    palace = MemPalace(str(REPO_ROOT))
+                    
+                    seed_details = eval_report.get("seed_details", [])
+                    hint = seed_details[0].get("hint", "") if seed_details else ""
+                    
+                    card = FindingsCard(
+                        kind="episodes",
+                        title=f"Gladiator Benchmark Win: {cid}",
+                        task_id=f"bench-{cid}",
+                        body=f"Task: {task_desc}\nType: {task_type}",
+                        confidence="high",
+                        tags=["gladiator", "research_benchmark"],
+                        retrieval_hints=[hint] if hint else []
+                    )
+                    
+                    clean_cards = palace.verify([card.to_dict()])
+                    if clean_cards:
+                        store.write(FindingsCard.from_dict(clean_cards[0]))
+                        tx_id = palace.trigger_arweave_distillation(clean_cards[0])
+                        case_res["arweave_tx_id"] = tx_id
+                except Exception as e:
+                    case_res["metabolism_error"] = str(e)
+                    
             total_top1_score += score
         
         results.append(case_res)

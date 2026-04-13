@@ -78,8 +78,14 @@ class ResearchPolicy:
         """Backward-compatible boolean check for older call sites."""
         return self.route(decision, task_desc).should_research
 
-    def get_mutation_hint(self, candidate_index: int, task_desc: str = "") -> str:
+    def get_mutation_hint(self, candidate_index: int, task_desc: str = "", historical_hints: List[str] = None) -> str:
         """Get a strategy hint for generating diverse candidates with semantic pivots."""
+        historical_hints = historical_hints or []
+        
+        # Prioritize historical winning hints if available
+        if historical_hints and candidate_index < len(historical_hints):
+            return f"Historical Winner (Priority): {historical_hints[candidate_index]}"
+
         task_upper = (task_desc or "").upper()
         
         # Semantic Pivot Logic
@@ -110,4 +116,7 @@ class ResearchPolicy:
         combined = pivots + base_strategies
         if candidate_index < 0:
             return ""
-        return combined[candidate_index % len(combined)]
+        
+        # Adjust index for non-historical items
+        adjusted_idx = candidate_index - len(historical_hints)
+        return combined[adjusted_idx % len(combined)]
