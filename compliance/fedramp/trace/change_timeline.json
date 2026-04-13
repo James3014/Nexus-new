@@ -1,22 +1,57 @@
 [
   {
+    "artifact": "acceptance_check.md",
+    "timestamp": "2026-04-13T08:13:08.099612",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "acceptance_check.json",
+    "timestamp": "2026-04-13T08:13:08.099290",
+    "category": "Operational Report"
+  },
+  {
     "artifact": "writeback_todo.json",
-    "timestamp": "2026-04-09T14:48:55.943210",
+    "timestamp": "2026-04-13T08:04:23.053824",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "last_failure_summary.txt",
+    "timestamp": "2026-04-11T05:54:16.362819",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "credible_sampling_report.json",
+    "timestamp": "2026-04-11T05:16:32.936255",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "enterprise_audit.json",
+    "timestamp": "2026-04-10T13:47:20.407035",
+    "category": "Audit Report"
+  },
+  {
+    "artifact": "NEXUS_BENCHMARK_REPORT.md",
+    "timestamp": "2026-04-10T03:15:01.100597",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "smoke_20260409_191501.json",
+    "timestamp": "2026-04-10T03:15:01.067105",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "smoke_20260409_191132.json",
+    "timestamp": "2026-04-10T03:11:32.461635",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "smoke_20260409_190712.json",
+    "timestamp": "2026-04-10T03:07:12.083796",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_summary.json",
     "timestamp": "2026-04-09T14:19:17.620883",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-09T14:19:10.577110",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-09T14:19:10.576919",
     "category": "Operational Report"
   },
   {
@@ -43,11 +78,6 @@
     "artifact": "p8.3_autopilot_bench.json",
     "timestamp": "2026-04-09T11:18:34.317304",
     "category": "Operational Report"
-  },
-  {
-    "artifact": "enterprise_audit.json",
-    "timestamp": "2026-04-09T11:07:54.171244",
-    "category": "Audit Report"
   },
   {
     "artifact": "wiki_eval_report.json",
