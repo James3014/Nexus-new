@@ -117,3 +117,7 @@ class HierarchicalGraphPlanner:
             subprocess.run(["git", "worktree", "remove", str(worktree_path), "--force"],
                            cwd=str(self.project_root), check=False)
             logger.info("virtual_workspace_cleaned [%s]", task_id)
+
+
+# Backward-compatible alias used by legacy tests/imports.
+TacticalGraphPlanner = HierarchicalGraphPlanner

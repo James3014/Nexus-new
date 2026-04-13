@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import json
-from datetime import datetime
+from datetime import datetime, UTC
 
 
 class GateSeverity(str, Enum):
@@ -103,7 +103,7 @@ def apply_policy_gate(
 
     # 持久化到 policy memory (.nexus/knowledge/policymemory.jsonl)
     policy_record = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "route_id": route_id,
         "phase": phase,
         "original_score": original_score,

@@ -41,3 +41,8 @@ logs/
 benchmarks/
 desk/
 nexus-desk/
+
+# Local test/runtime noise
+events_sourced.jsonl
+str(REPO_ROOT)/
+<MagicMock name='mock.run_dir.__truediv__()' id='*'>

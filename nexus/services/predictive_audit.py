@@ -28,7 +28,7 @@ class PredictiveAuditor:
         """🛡️ Connect to wisdom_registry table."""
         try:
             self.db = lancedb.connect(str(self.db_path))
-            if "wisdom_registry" not in self.db.table_names():
+            if "wisdom_registry" not in self.db.list_tables():
                 logger.warning("⚠️ [Auditor] wisdom_registry table not found. Run 'nexus wisdom sync' first.")
                 self.table = None
             else:

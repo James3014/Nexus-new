@@ -138,11 +138,17 @@ class BattlesuitGateway:
     def _ask_via_cli(self, content: str, model_name: str, sys_msg: str, complexity_score: float = 0.5):
         """🛡️ Battlesuit Forwarding (v24.0 Enhanced - Bayesian Adaptive)"""
         import time
-        max_retries = 3
+        max_retries = int(os.getenv("NEXUS_GATEWAY_MAX_RETRIES", "3"))
         last_err = ""
         
         # 🧪 [Bayesian Timeout Adaptive]
         dynamic_timeout = int(60 + (complexity_score * 120))
+        timeout_override = os.getenv("NEXUS_GATEWAY_TIMEOUT_SEC")
+        if timeout_override:
+            try:
+                dynamic_timeout = min(dynamic_timeout, max(5, int(timeout_override)))
+            except ValueError:
+                pass
 
         tmp_payload = self.project_root / f".nexus/payload_{os.getpid()}.txt"
         tmp_payload.parent.mkdir(parents=True, exist_ok=True)

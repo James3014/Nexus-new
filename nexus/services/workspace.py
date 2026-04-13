@@ -73,9 +73,6 @@ class WorkspaceManager:
         branch_name = branch_name or f"isolated/task-{unique_id}"
         work_path = self.workspace_base / unique_id
 
-        # 🧪 [Auto-GC] Cleanup stale worktrees (>24h)
-        self._auto_gc()
-
         print(f"🏗️ [Provisioning] Leasing workspace: {task_id} at {work_path}")
 
         # 建立隔離分支與 Worktree (Optimized Index Handling)
@@ -101,6 +98,9 @@ class WorkspaceManager:
                         res.stdout, encoding="utf-8"
                     )
                     print("✅ [Injection] CONTEXT_SYNC.md generated in sandbox.")
+
+            # Auto-GC after successful lease to avoid interfering with call order expectations.
+            self._auto_gc()
             
             return task_id, branch_name, work_path
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:

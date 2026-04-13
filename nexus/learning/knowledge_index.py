@@ -270,7 +270,7 @@ class KnowledgeIndex:
             try:
                 df = pd.DataFrame(valid_data)
                 table_name = "reach_evidence"
-                if table_name in self.db.table_names():
+                if table_name in self.db.list_tables():
                     self.db.table(table_name).add(df)
                 else:
                     self.db.create_table(table_name, data=df)
@@ -282,7 +282,7 @@ class KnowledgeIndex:
         """
         🧬 [Phase 2.2] C 階段語義檢索入口內容及性能分析內容及其內容內容
         """
-        if not self.db or "reach_evidence" not in self.db.table_names():
+        if not self.db or "reach_evidence" not in self.db.list_tables():
             return []
 
         try:

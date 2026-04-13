@@ -34,7 +34,7 @@ from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.services.memory import MemoryService
 from nexus.services.continuous_learning import finalize_learning_loop
-from nexus.core.engine.nexus_transaction import TransactionManager
+from scripts.engine.nexus_transaction import TransactionManager
 
 # ⚖️ 治理中心組件 (Governance Matrix)
 from nexus.core.gate_evaluator import GateEvaluator, AcceptancePolicy
@@ -42,6 +42,13 @@ from nexus.core.metrics_aggregator import MetricsAggregator
 from nexus.core.policy_loader import PolicyLoader
 
 logger = logging.getLogger(__name__)
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
 
 class RepairStrategy:
     """策略模式：決定修復路徑與權重優化"""
@@ -394,10 +401,12 @@ class NexusEngine:
             forecast = self.latent_forecaster.forecast_roi(task_desc)
             risk = self.latent_forecaster.predict_risk(task_desc)
         
-        state.metadata["forecast_tokens"] = forecast["est_tokens"]
-        state.metadata["forecast_roi"] = forecast["roi_score"]
+        est_tokens = _as_float(forecast.get("est_tokens", 0), 0.0)
+        roi_score = _as_float(forecast.get("roi_score", 0.0), 0.0)
+        state.metadata["forecast_tokens"] = est_tokens
+        state.metadata["forecast_roi"] = roi_score
         
-        print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {forecast.get('est_tokens', 0)}, ROI: {forecast.get('roi_score', 0.0):.2f}")
+        print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {est_tokens}, ROI: {roi_score:.2f}")
         
         # --- 🧠 [Phase 11] Autonomic Routing ---
         from nexus.engine.autonomic_router import AutonomicRouter

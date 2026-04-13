@@ -1,0 +1,380 @@
+{
+  "$defs": {
+    "PipelineMetadata": {
+      "properties": {
+        "task_description": {
+          "title": "Task Description",
+          "type": "string"
+        },
+        "pipeline_success": {
+          "title": "Pipeline Success",
+          "type": "boolean"
+        },
+        "pipeline_outcome": {
+          "additionalProperties": true,
+          "title": "Pipeline Outcome",
+          "type": "object"
+        },
+        "pipeline_terminal_state": {
+          "title": "Pipeline Terminal State",
+          "type": "string"
+        },
+        "swarm_mode": {
+          "title": "Swarm Mode",
+          "type": "boolean"
+        },
+        "task_graph_nodes": {
+          "title": "Task Graph Nodes",
+          "type": "integer"
+        },
+        "orchestration_pattern": {
+          "title": "Orchestration Pattern",
+          "type": "string"
+        },
+        "phase_decisions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Phase Decisions",
+          "type": "object"
+        },
+        "phase_skills": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Phase Skills",
+          "type": "object"
+        },
+        "inherited_plan_strategy": {
+          "title": "Inherited Plan Strategy",
+          "type": "string"
+        },
+        "research_route": {
+          "additionalProperties": true,
+          "title": "Research Route",
+          "type": "object"
+        },
+        "last_review_status": {
+          "title": "Last Review Status",
+          "type": "string"
+        },
+        "last_patch_generated": {
+          "title": "Last Patch Generated",
+          "type": "boolean"
+        },
+        "last_patch_apply_success": {
+          "title": "Last Patch Apply Success",
+          "type": "boolean"
+        },
+        "last_no_change_reason": {
+          "title": "Last No Change Reason",
+          "type": "string"
+        },
+        "last_proof_type": {
+          "title": "Last Proof Type",
+          "type": "string"
+        },
+        "last_proof_value": {
+          "title": "Last Proof Value",
+          "type": "string"
+        },
+        "sandbox_mode": {
+          "title": "Sandbox Mode",
+          "type": "string"
+        },
+        "rejection_history": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rejection History",
+          "type": "array"
+        },
+        "key_findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Key Findings",
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "sim_lewm": {
+          "title": "Sim Lewm",
+          "type": "boolean"
+        },
+        "lewm_sim_status": {
+          "title": "Lewm Sim Status",
+          "type": "string"
+        },
+        "lewm_prediction_cost": {
+          "title": "Lewm Prediction Cost",
+          "type": "number"
+        },
+        "lewm_rejected_cost": {
+          "title": "Lewm Rejected Cost",
+          "type": "number"
+        },
+        "benchmark_run": {
+          "title": "Benchmark Run",
+          "type": "boolean"
+        },
+        "auto_repair_enabled": {
+          "title": "Auto Repair Enabled",
+          "type": "boolean"
+        },
+        "task_type": {
+          "title": "Task Type",
+          "type": "string"
+        },
+        "response_mode": {
+          "title": "Response Mode",
+          "type": "string"
+        },
+        "phantom_success_reason": {
+          "title": "Phantom Success Reason",
+          "type": "string"
+        },
+        "known_phantom_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Known Phantom Patterns",
+          "type": "array"
+        },
+        "phantom_pattern_history": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Phantom Pattern History",
+          "type": "array"
+        },
+        "require_strict_proof": {
+          "title": "Require Strict Proof",
+          "type": "boolean"
+        },
+        "anti_hallucination_checks": {
+          "title": "Anti Hallucination Checks",
+          "type": "integer"
+        },
+        "anti_hallucination_block_count": {
+          "title": "Anti Hallucination Block Count",
+          "type": "integer"
+        },
+        "anti_hallucination_pass_count": {
+          "title": "Anti Hallucination Pass Count",
+          "type": "integer"
+        },
+        "escalation_count": {
+          "title": "Escalation Count",
+          "type": "integer"
+        },
+        "escalation_triggered": {
+          "title": "Escalation Triggered",
+          "type": "boolean"
+        },
+        "escalation_root_cause": {
+          "title": "Escalation Root Cause",
+          "type": "string"
+        },
+        "human_review_required": {
+          "title": "Human Review Required",
+          "type": "boolean"
+        },
+        "human_review_reason": {
+          "title": "Human Review Reason",
+          "type": "string"
+        },
+        "neural_veto": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Neural Veto"
+        },
+        "neural_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Neural Reason"
+        },
+        "pregate_skip": {
+          "title": "Pregate Skip",
+          "type": "boolean"
+        },
+        "pregate_skip_reason": {
+          "title": "Pregate Skip Reason",
+          "type": "string"
+        },
+        "cli_pregate_results": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Cli Pregate Results",
+          "type": "array"
+        },
+        "verification_commands": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verification Commands",
+          "type": "array"
+        },
+        "verification_exit_codes": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Verification Exit Codes",
+          "type": "array"
+        },
+        "matched_skills_count": {
+          "title": "Matched Skills Count",
+          "type": "integer"
+        },
+        "skill_context_loaded": {
+          "title": "Skill Context Loaded",
+          "type": "string"
+        },
+        "prior_winning_hypotheses": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prior Winning Hypotheses",
+          "type": "array"
+        },
+        "research_pack_path": {
+          "title": "Research Pack Path",
+          "type": "string"
+        },
+        "health_snapshot": {
+          "additionalProperties": true,
+          "title": "Health Snapshot",
+          "type": "object"
+        },
+        "self_heal_cycle": {
+          "additionalProperties": true,
+          "title": "Self Heal Cycle",
+          "type": "object"
+        },
+        "auto_repair_last_result": {
+          "additionalProperties": true,
+          "title": "Auto Repair Last Result",
+          "type": "object"
+        },
+        "nexus_outcome_v2": {
+          "additionalProperties": true,
+          "title": "Nexus Outcome V2",
+          "type": "object"
+        },
+        "plan_strategy_used": {
+          "title": "Plan Strategy Used",
+          "type": "string"
+        },
+        "cycle_root_cause": {
+          "title": "Cycle Root Cause",
+          "type": "string"
+        },
+        "cycle_analysis": {
+          "additionalProperties": true,
+          "title": "Cycle Analysis",
+          "type": "object"
+        },
+        "chat_history": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Chat History",
+          "type": "array"
+        }
+      },
+      "title": "PipelineMetadata",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "reasoning_mode": {
+      "default": "INTUITIVE",
+      "title": "Reasoning Mode",
+      "type": "string"
+    },
+    "formal_gate_passed": {
+      "default": false,
+      "title": "Formal Gate Passed",
+      "type": "boolean"
+    },
+    "obligation_coverage_pct": {
+      "default": 0.0,
+      "title": "Obligation Coverage Pct",
+      "type": "number"
+    },
+    "audit_notes_formal": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Audit Notes Formal",
+      "type": "array"
+    },
+    "audit_id": {
+      "title": "Audit Id",
+      "type": "string"
+    },
+    "repair_status": {
+      "title": "Repair Status",
+      "type": "string"
+    },
+    "smoke_status": {
+      "title": "Smoke Status",
+      "type": "string"
+    },
+    "prior_audit_failures": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Prior Audit Failures",
+      "type": "array"
+    },
+    "code_quality_score": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Code Quality Score"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/PipelineMetadata",
+      "default": {}
+    }
+  },
+  "required": [
+    "audit_id",
+    "repair_status",
+    "smoke_status",
+    "summary"
+  ],
+  "title": "AuditResult",
+  "type": "object"
+}

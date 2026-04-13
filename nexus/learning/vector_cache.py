@@ -49,7 +49,7 @@ class VectorCache:
         if not self.enabled or self.db is None:
             self._ensure_fallback_file()
             return
-        if self.table_name not in self.db.table_names():
+        if self.table_name not in self.db.list_tables():
             # 🛡️ 物理硬化：雙重對位 (Schema + Data) 封殺類型推斷錯誤
             schema = pa.schema([
                 pa.field("id", pa.string()),

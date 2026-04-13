@@ -1,7 +1,7 @@
 import json
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 
 class WisdomSynthesizer:
     """
@@ -31,7 +31,7 @@ class WisdomSynthesizer:
             "typical_data_models": i_pack.get("data_models", []),
             "common_edge_cases": i_pack.get("edge_cases", []),
             "successful_formulas": ["acceptancePassed && auditPassed"],
-            "last_updated": datetime.utcnow().isoformat() + "Z"
+            "last_updated": datetime.now(UTC).isoformat()
         }
 
         with open(template_path, "w") as f:
@@ -46,8 +46,8 @@ class WisdomSynthesizer:
         """
         lesson_file = self.project_root / ".nexus" / "knowledge" / "lesson_events.jsonl"
         event = {
-            "lesson_id": f"IMPL-{int(datetime.now().timestamp())}",
-            "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+            "lesson_id": f"IMPL-{int(datetime.now(UTC).timestamp())}",
+            "timestamp_utc": datetime.now(UTC).isoformat(),
             "category": category, # e.g., "SPEC_QUALITY", "SOT_DRIFT"
             "task_id": task_id,
             "outcome": outcome,

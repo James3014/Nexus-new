@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Nexus Evidence Bundle",
+  "type": "object",
+  "required": [
+    "claim_state",
+    "confidence_level",
+    "code_artifacts",
+    "upstream_alignment_checklist",
+    "known_gaps"
+  ],
+  "properties": {
+    "claim_state": {
+      "enum": ["IDEA", "HYPOTHESIS", "CANDIDATE_PATCH", "PARTIAL_VALIDATION", "VERIFIED", "STANDARDIZED", "REJECTED"]
+    },
+    "confidence_level": {
+      "enum": ["LOW", "MEDIUM", "HIGH"]
+    },
+    "code_artifacts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "實體代碼路徑"
+    },
+    "compile_commands": { "type": "array", "items": { "type": "string" } },
+    "runtime_commands": { "type": "array", "items": { "type": "string" } },
+    "sanitizer_logs": { "type": "string", "description": "ASAN/TSAN 物理日誌摘要" },
+    "upstream_alignment_checklist": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "尚未驗證或已知失效的邊界"
+    }
+  },
+  "definitions": {
+    "confidence_rules": {
+      "HIGH": "Requires code + logs + repro + alignment_checklist",
+      "MEDIUM": "Requires code + partial tests",
+      "LOW": "Inference or summary only"
+    }
+  }
+}

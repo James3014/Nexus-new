@@ -82,3 +82,8 @@ version_scope:
 
 ---
 [[System Overview]]
+## 2026-04-13: AutoResearch Control Plane Integration confuses file paths
+- **Phenomenon**: P3/P4 file operations went to main worktree instead of the isolation worktree.
+- **Root Cause**: Tool default paths are workspace-root relative; worktrees require explicit path prefixing.
+- **Decision**: Re-synced files to correct worktree and verified with explicit path checks.
+- **Prevention**: Formalize worktree-relative file addressing in agent system instructions.

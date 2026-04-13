@@ -72,14 +72,18 @@ def test_index_rebuild_and_semantic_recall(mock_repo):
     assert result_ctx["consensus_score"] > 0.4
 
 def test_index_idempotency(mock_repo):
-    """驗證冪等性：重複 rebuild 記錄數不應倒増。
+    """驗證冪等性：重複 rebuild 應避免冗餘處理。
     
-    注：P2-A v0.1 使用 Full Rebuild，所以兩次結果應相同。
+    注：P2-A v0.2 已轉向 Incremental Sync，
+    第二次執行時若無資料變動，records_processed 應為 0。
     """
     res1 = rebuild_memory_index(mock_repo)
+    assert res1["records_processed"] >= 2, "First run should process initial records"
+    
     res2 = rebuild_memory_index(mock_repo)
-    assert res1["records_processed"] == res2["records_processed"], (
-        f"Idempotency failed: {res1['records_processed']} != {res2['records_processed']}"
+    # 增量語義：第二次應為 0
+    assert res2["records_processed"] == 0, (
+        f"Incremental sync failed: expected 0 redundant records, got {res2['records_processed']}"
     )
 
 def test_hybrid_fallback_on_db_missing(mock_repo):

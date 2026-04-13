@@ -14,11 +14,17 @@ class DependencyProbe:
         self.workspace = Path(workspace)
         self._index: Dict[str, List[str]] = {}  # file_path -> imported_modules
 
+    def _should_skip(self, path: Path) -> bool:
+        """🚧 排除規則：隱藏、虛擬環境、工作區、外部相依等"""
+        skip_dirs = {".venv", ".nexus", ".worktrees", "SWE-bench", ".git", "node_modules", "__pycache__"}
+        path_str = str(path)
+        return any(d in path_str for d in skip_dirs)
+
     def build_index(self):
         """🔍 遍歷工作區並建立索引"""
         logger.info("📡 [DepProbe] Building dependency index for %s...", self.workspace.name)
         for py_file in self.workspace.rglob("*.py"):
-            if ".venv" in str(py_file) or ".nexus" in str(py_file):
+            if self._should_skip(py_file):
                 continue
             relative_path = str(py_file.relative_to(self.workspace))
             self._index[relative_path] = self._extract_imports(py_file)

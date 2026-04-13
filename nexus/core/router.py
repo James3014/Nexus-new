@@ -26,6 +26,18 @@ class DomainFirewall:
         return skill_id in quadrant.get("skills", [])
 
 class SkillsRouter:
+
+    SOT_HIERARCHY = ["code", "logs", "tests", "specs", "summary"]
+
+    def validate_sot_precedence(self, claim_evidence: list):
+        """🛡️ 強制真相權威優先序。"""
+        highest_idx = 99
+        for e in (claim_evidence or []):
+            if e in self.SOT_HIERARCHY:
+                idx = self.SOT_HIERARCHY.index(e)
+                highest_idx = min(highest_idx, idx)
+        return highest_idx
+
     """🔀 Nexus v26.0 General Contractor Hardened Router."""
     def __init__(self, project_root: str, run_dir: str = None):
         self.project_root = project_root

@@ -1,3 +1,5 @@
+import uuid
+
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, model_validator
 from .state_legacy import NexusStateLegacyMixin
@@ -43,6 +45,11 @@ class DiagnosisViolation(BaseModel):
     suggestion: Optional[str] = None
 
 class NexusDiagnosis(BaseModel):
+    reasoning_mode: str = "INTUITIVE"
+    violated_invariants: List[str] = []
+    failed_proof_obligations: List[str] = []
+    counterexamples: List[str] = []
+    derivation_ref: Optional[str] = None
     task_id: str
     status: str  # PASS, FAIL
     summary: str
@@ -69,7 +76,23 @@ class NexusResearch(BaseModel):
 
 # --- A 階段: Audit ---
 
+
+class NexusRepair(BaseModel):
+    task_id: str
+    reasoning_mode: str = "INTUITIVE"
+    rewrite_trace: List[str] = []
+    resolved_invariants: List[str] = []
+    resolved_proof_obligations: List[str] = []
+    equivalence_claim: Optional[str] = None
+    risk_delta: float = 0.0
+    derivation_ref: Optional[str] = None
+    patch_hash: str
+
 class AuditResult(BaseModel):
+    reasoning_mode: str = "INTUITIVE"
+    formal_gate_passed: bool = False
+    obligation_coverage_pct: float = 0.0
+    audit_notes_formal: List[str] = []
     audit_id: str
     repair_status: str  # PASSED, FAILED
     smoke_status: str  # PASSED, FAILED

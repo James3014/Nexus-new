@@ -1,0 +1,112 @@
+{
+  "$defs": {
+    "DiagnosisViolation": {
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "severity": {
+          "title": "Severity",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "suggestion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suggestion"
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "severity",
+        "reason"
+      ],
+      "title": "DiagnosisViolation",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "failure_signature": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failure Signature"
+    },
+    "hotspots": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Hotspots",
+      "type": "array"
+    },
+    "pseudo_flows": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Pseudo Flows",
+      "type": "array"
+    },
+    "violations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DiagnosisViolation"
+      },
+      "title": "Violations",
+      "type": "array"
+    },
+    "needs_external": {
+      "default": false,
+      "title": "Needs External",
+      "type": "boolean"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "task_id",
+    "status",
+    "summary"
+  ],
+  "title": "NexusDiagnosis",
+  "type": "object"
+}

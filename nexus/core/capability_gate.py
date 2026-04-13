@@ -35,29 +35,35 @@ class CapabilityGate:
             "write_memory", "read_memory"
         ]
 
-    def get_tools(self, phase_str: str) -> List[str]:
+    def get_tools(self, phase_str: Optional[str]) -> List[str]:
         """獲取特定階段的合法工具清單"""
+        if not isinstance(phase_str, str):
+            return PHASE_TOOLS[Phase.P]
+        normalized = phase_str.strip()
+        if not normalized:
+            return PHASE_TOOLS[Phase.P]
+
         try:
-            # 轉換為 Phase 枚舉 (支援簡稱與全稱)
-            if phase_str.upper() in Phase.__members__:
-                phase = Phase[phase_str.upper()]
-            else:
-                # 模糊匹配
-                found = [p for p in Phase if p.value == phase_str.lower()]
-                phase = found[0] if found else Phase.P
-                
-            return PHASE_TOOLS.get(phase, PHASE_TOOLS[Phase.P])
-        except Exception:
+            # 優先轉換為 Phase 枚舉 (名稱匹配)
+            phase_upper = normalized.upper()
+            if phase_upper in Phase.__members__:
+                return PHASE_TOOLS[Phase[phase_upper]]
+            
+            # 其次透過值匹配，取代原本的 O(N) 迴圈
+            return PHASE_TOOLS[Phase(normalized.lower())]
+        except (KeyError, ValueError):
             return PHASE_TOOLS[Phase.P]
 
     def build_tools_json(self, phase_str: str) -> Dict[str, Any]:
         """建立符合 PromptBuilder 格式的工具定義"""
         tools = self.get_tools(phase_str)
+        tools_set = set(tools)
         return {
             "available_tools": tools,
-            "hidden_tools": [t for t in self.ALL_TOOLS if t not in tools],
+            "hidden_tools": [t for t in self.ALL_TOOLS if t not in tools_set],
             "phase": phase_str
         }
+
     def managed_toolsets(self, phase_str: str) -> List[str]:
         """🎯 Composio P0: 獲取 JIT 精簡工具集"""
         return self.get_tools(phase_str)

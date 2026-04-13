@@ -79,7 +79,7 @@ class VectorRAG:
 
         df["vector"] = embeddings.tolist()
 
-        if self.table_name in self.db.table_names():
+        if self.table_name in self.db.list_tables():
             table = self.db.open_table(self.table_name)
             table.add(df)
         else:
@@ -111,7 +111,7 @@ class VectorRAG:
             print(f"🔍 [VectorRAG] Fallback query returned {len(results)} matches for: {task_query[:30]}...")
             return results
 
-        if self.table_name not in self.db.table_names():
+        if self.table_name not in self.db.list_tables():
             return []
 
         table = self.db.open_table(self.table_name)

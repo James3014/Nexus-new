@@ -1,3 +1,14 @@
+
+def validate_claim_integrity(evidence_path: str):
+    """🛡️ 硬性物理守門：驗證結論與證據的匹配度。"""
+    import json
+    if not os.path.exists(evidence_path): return False
+    with open(evidence_path, "r") as f:
+        data = json.load(f)
+    if data.get("claim_state") == "VERIFIED" and data.get("confidence_level") != "HIGH":
+        return False
+    return True
+
 #!/usr/bin/env python3
 import sys, os, json, subprocess, yaml, click
 from pathlib import Path
@@ -139,13 +150,44 @@ def status(as_json):
     else:
         subprocess.run([sys.executable, str(REPO_ROOT / "scripts/ops/enterprise_audit_v22.py")], check=True)
 
+def check_hallucination(evidence_path: str):
+    """🛡️ 執行幻覺指數審計。"""
+    import json
+    from nexus.core.hallucination_guard import HallucinationGuard
+    
+    if not os.path.exists(evidence_path): return True
+    
+    with open(evidence_path, "r") as f:
+        data = json.load(f)
+    
+    response = data.get("final_response", "")
+    evidence = data.get("evidence_bundle", {})
+    
+    guard = HallucinationGuard()
+    analysis = guard.analyze(response, evidence)
+    
+    if analysis["status"] == "REJECTED":
+        click.echo(f"❌ [Gate:REJECTED] Hallucination Index Too High: {analysis['score']}/10")
+        click.echo(f"🚩 Triggers: {analysis['triggers']}")
+        return False
+    
+    click.echo(guard.render())
+    return True
+
 @nexus_group.command(name="acceptance-check")
 @click.option("--json", "as_json", is_flag=True)
-def acceptance_check(as_json):
-    """✅ Run full system acceptance check."""
+@click.option("--evidence", "evidence_path", type=click.Path(exists=True))
+def acceptance_check(as_json, evidence_path):
+    """✅ Run full system acceptance check with Hallucination Guard."""
+    # 1. 執行實體驗收
     cmd = [sys.executable, str(REPO_ROOT / "scripts/ops/nexus_acceptance_check.py")]
     if as_json: cmd.append("--json")
     subprocess.run(cmd, check=True)
+    
+    # 2. 執行幻覺審計 (v23.13)
+    if evidence_path:
+        if not check_hallucination(evidence_path):
+            raise click.ClickException("Hallucination check failed.")
 
 @nexus_group.command(name="run")
 @click.argument("task_id")

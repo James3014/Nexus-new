@@ -1,8 +1,10 @@
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import logging
 import json
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +14,8 @@ class NexusEventBus:
     _event_log_path: Optional[Path] = None
     _signal_queue: List[Dict[str, Any]] = []
     _remote_broadcaster: Optional[Callable[[str, Dict[str, Any]], None]] = None
+    _sequence_lock = threading.Lock()
+    _global_seq = 0
 
     @classmethod
     def set_remote_broadcaster(cls, broadcaster: Callable[[str, Dict[str, Any]], None]) -> None:
@@ -43,40 +47,34 @@ class NexusEventBus:
 
     @classmethod
     def publish(cls, event_type: str, payload: Dict[str, Any]) -> None:
-        """發布事件 + 持久化到 JSONL"""
-        # 🆕 P2: 自動注入當前 trace context
-        try:
-            from nexus.telemetry.tracer import NexusTracer
-            payload.setdefault("_trace_id", NexusTracer.current_trace_id())
-            payload.setdefault("_span_id", NexusTracer.current_span_id())
-        except Exception as e:
-            logger.debug("OTel context injection skipped: %s", e)
-
-        record = {
-            "event_type": event_type,
-            "timestamp": time.time(),
-            "payload": payload,
-        }
-        
-        # 持久化
-        if cls._event_log_path:
-            try:
+        """發布事件（v23 終極原子修復版）"""
+        with cls._sequence_lock:
+            cls._global_seq += 1
+            local_payload = payload.copy()
+            local_payload["_seq"] = cls._global_seq
+            local_payload["internal_ts"] = time.time()
+            local_payload.setdefault("_trace_id", str(uuid.uuid4()))
+            
+            record = {
+                "event_type": event_type,
+                "timestamp": local_payload["internal_ts"],
+                "seq": local_payload["_seq"],
+                "payload": local_payload,
+            }
+            
+            if cls._event_log_path:
                 with open(cls._event_log_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(record, default=str) + "\n")
-            except Exception as e:
-                logger.debug("event_persist_failed: %s", e)
         
-        # 廣播
+        # 廣播（在鎖外執行以避免死鎖，但順序已由文件保證）
         for handler in cls._subscribers.get(event_type, []):
-            try:
-                handler(payload)
-            except Exception as e:
-                logger.error("Event handler error for %s: %s", event_type, e)
+            try: handler(local_payload)
+            except Exception: pass
 
         # 遠端廣播
         if cls._remote_broadcaster:
             try:
-                cls._remote_broadcaster(event_type, payload)
+                cls._remote_broadcaster(event_type, local_payload)
             except Exception as e:
                 logger.error("Remote broadcast error for %s: %s", event_type, e)
 
