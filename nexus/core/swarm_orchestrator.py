@@ -9,13 +9,15 @@ class TypedHandoffAdapter:
     功能：將執行器輸出 (ExecutorOutput) 標準化並同步至 NexusState。
     原則：重用既有契約，強化 Phase 核驗。
     """
-    VALID_PHASES = {"P", "D", "X", "R", "A", "C"}
+    VALID_PHASES = {"P", "D", "X", "R", "E", "S", "A", "C"}
     # 🧬 v22 Adaptive Mapping: 支援長名稱回退至核心字母
     PHASE_MAP = {
         "PLAN": "P", "PREPARE": "P",
         "DEBUG": "D", "DEVELOP": "D",
         "EXPLORE": "X", "X-RAY": "X", "OBSERVE": "X",
         "RESEARCH": "R", "REVIEW": "R",
+        "EVALUATE": "E", "TEST": "E",
+        "SELECT": "S", "PROMOTE": "S", "ROLLBACK": "S",
         "AUDIT": "A", "ACCEPT": "A",
         "CRYSTALLIZE": "C", "COMMIT": "C"
     }

@@ -47,3 +47,33 @@ def test_invalid_phase_validation():
     
     with pytest.raises(ValueError, match="Invalid phase: Z"):
         adapter.sync_output_to_state(state, invalid_output)
+
+def test_autoresearch_phases_handoff():
+    adapter = TypedHandoffAdapter()
+    state = NexusState(task_id="task_research")
+    
+    # 驗證 EVALUATE (E)
+    eval_output = ExecutorOutput(
+        executor_name="UnifiedEvaluator",
+        phase="EVALUATE",
+        status=ExecutorStatusEnum.SUCCESS,
+        patch_generated=False,
+        evidence_present=True,
+        raw_exit_code=0,
+        summary="Evaluated 3 seeds"
+    )
+    state = adapter.sync_output_to_state(state, eval_output)
+    assert state.current_phase == "E"
+    
+    # 驗證 SELECT (S)
+    select_output = ExecutorOutput(
+        executor_name="SelectorRollback",
+        phase="PROMOTE",
+        status=ExecutorStatusEnum.SUCCESS,
+        patch_generated=True,
+        evidence_present=True,
+        raw_exit_code=0,
+        summary="Promoted top-1 candidate"
+    )
+    state = adapter.sync_output_to_state(state, select_output)
+    assert state.current_phase == "S"
