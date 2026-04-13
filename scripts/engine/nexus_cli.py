@@ -517,6 +517,7 @@ def _run_research_auto_flow_impl(
                 "reason": res.reason,
                 "winner_source": res.winner_source,
                 "error_codes": res.error_codes,
+                "rejection_summary": res.rejection_summary,
                 "attempt_count": res.attempt_count,
             },
         }
@@ -975,6 +976,17 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
             timeout_count = sum(1 for r in runs if r.get("timeout"))
             quota_events = [r for r in runs if r.get("quota_event")]
             quota_success = sum(1 for r in quota_events if r.get("ok"))
+            reason_counts: dict[str, int] = {}
+            for r in runs:
+                if not r.get("ok"):
+                    for code in r.get("error_codes", []) or []:
+                        reason_counts[code] = reason_counts.get(code, 0) + 1
+                    reason = r.get("reason")
+                    if reason:
+                        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                    err = r.get("error")
+                    if err:
+                        reason_counts[err] = reason_counts.get(err, 0) + 1
             return {
                 "runs": total,
                 "success_rate": round(successes / total, 4) if total else 0.0,
@@ -983,6 +995,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                 "timeout_rate": round(timeout_count / total, 4) if total else 0.0,
                 "resilience_on_quota": round(quota_success / len(quota_events), 4) if quota_events else None,
                 "quota_event_count": len(quota_events),
+                "failure_reason_counts": reason_counts,
             }
 
         per_case = []

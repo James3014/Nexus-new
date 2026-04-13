@@ -26,3 +26,4 @@
 - Lesson RCP-005：A/B manifest 若依賴 `prepare_command` 產生目標檔，CLI 必須先執行 prepare 再做 target existence 檢查，否則會誤判 `invalid_case`。
 - Lesson RCP-006：Click 指令函式不可直接當一般函式呼叫（會進入 Click context 解析）；應抽出純 Python helper（impl 函式）供 CLI 與程式內重用。
 - Lesson RCP-007：Auto-flow 的 baseline 短路必須「先 probe 再決策是否跑 Hyper」；若先跑 Hyper 再 probe，會讓短路失效且導致不必要耗時。
+- Lesson RCP-008：語義守門（feature 低變更量拒收）會影響泛用 `implement` 類任務；task 描述需標準化為 bug/feature 語義，測試樣本也需對齊以避免誤判。

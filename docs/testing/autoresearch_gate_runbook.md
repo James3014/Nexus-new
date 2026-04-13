@@ -45,4 +45,4 @@
 - 核心欄位：
   - `status`, `reason`, `final_score`, `winner_source`
   - `attempt_count`, `model_calls`, `quota_backoffs`, `test_timeouts`
-  - `error_codes[]`, `candidates[]`
+  - `error_codes[]`, `candidates[]`, `rejection_summary{}`

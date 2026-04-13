@@ -29,7 +29,7 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="implement", target_file="demo.py", candidate_count=2, llm_mode=False, safe_mode=True)
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=2, llm_mode=False, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
     assert res.status == "SUCCESS"
     assert res.winner_source == "local"
@@ -46,7 +46,7 @@ def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
         source = "local"
 
         def generate(self, **_kwargs):
-            return "print('x')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+            return "print('y')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):
@@ -69,6 +69,33 @@ def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
     assert res.status == "FAILED"
     assert "test_timeout" in res.error_codes
     assert "stage1_failed" in res.error_codes
+
+
+def test_run_hyper_sprint_semantic_guard_for_feature(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeGenerator:
+        source = "local"
+
+        def generate(self, **_kwargs):
+            return "print('y')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **_kwargs):
+            raise AssertionError("Executor should not be called when semantic guard rejects candidate")
+
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="implement parser", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "FAILED"
+    assert "semantic_guard" in res.error_codes
+    assert res.rejection_summary.get("semantic_guard_low_delta_feature", 0) >= 1
 
 
 def test_write_sprint_report(tmp_path: Path):
@@ -150,7 +177,7 @@ def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeInPlaceExecutor)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeSwarmExecutor)
 
-    cfg = SprintConfig(task="implement", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
     assert res.status == "SUCCESS"
     assert calls["inplace"] == 1

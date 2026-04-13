@@ -53,6 +53,7 @@ class SprintResult:
     quota_backoffs: int
     test_timeouts: int
     error_codes: list[str] = field(default_factory=list)
+    rejection_summary: dict[str, int] = field(default_factory=dict)
     candidates: list[CandidateEval] = field(default_factory=list)
     pytest_cmd: list[str] = field(default_factory=list)
     promotable: bool = False
@@ -327,6 +328,38 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     test_timeouts = 0
     error_codes: list[str] = []
 
+    def _semantic_guard(source: str, candidate: str, task: str) -> tuple[bool, str]:
+        if candidate.strip() == source.strip():
+            return False, "no_change_candidate"
+        src_lines = {ln.strip() for ln in source.splitlines() if ln.strip()}
+        cand_lines = {ln.strip() for ln in candidate.splitlines() if ln.strip()}
+        changed_count = len(cand_lines - src_lines)
+        task_l = task.lower()
+        feature_words = ("implement", "add", "create", "introduce", "support", "enable")
+        if any(w in task_l for w in feature_words) and changed_count < 2:
+            return False, "semantic_guard_low_delta_feature"
+        return True, ""
+
+    def _build_rejection_summary(items: list[CandidateEval], codes: list[str]) -> dict[str, int]:
+        summary: dict[str, int] = {}
+        for c in items:
+            if c.error:
+                key = c.error
+                if c.error.startswith("syntax_error:"):
+                    key = "syntax_error"
+                elif "timed out" in c.error.lower():
+                    key = "test_timeout"
+                elif "quota" in c.error.lower() or "429" in c.error.lower():
+                    key = "quota"
+            elif c.score < 1.0:
+                key = "pytest_failed"
+            else:
+                continue
+            summary[key] = summary.get(key, 0) + 1
+        for code in codes:
+            summary[code] = summary.get(code, 0) + 1
+        return summary
+
     for idx in range(max(1, config.candidate_count)):
         hint = policy.get_mutation_hint(idx % max(1, config.candidate_count), task_desc=config.task)
         used_source = "local"
@@ -365,7 +398,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 used_source = str(meta.get("source", "local"))
             model_calls += int(meta.get("model_calls", 0))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
-            ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
+            guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task)
+            if not guard_ok:
+                ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=guard_reason, candidate_code=candidate_code, source=used_source)
+                error_codes.append("semantic_guard")
+            else:
+                ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
         except Exception as exc:  # noqa: BLE001
             ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=str(exc), source=used_source)
         if "timed out" in (ev.error or "").lower():
@@ -392,6 +430,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
             error_codes=sorted(set(error_codes)),
+            rejection_summary={},
             pytest_cmd=pytest_cmd,
         )
 
@@ -409,6 +448,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
             error_codes=sorted(set(error_codes + ["stage1_failed"])),
+            rejection_summary=_build_rejection_summary(candidates, error_codes + ["stage1_failed"]),
             candidates=candidates,
             pytest_cmd=pytest_cmd,
             patch=best.candidate_code,
@@ -459,6 +499,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         quota_backoffs=quota_backoffs,
         test_timeouts=test_timeouts,
         error_codes=sorted(set(error_codes)),
+        rejection_summary=_build_rejection_summary(candidates, error_codes),
         candidates=candidates,
         pytest_cmd=pytest_cmd,
         promotable=final_score >= 0.9,
