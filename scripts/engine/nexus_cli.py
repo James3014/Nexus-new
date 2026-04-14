@@ -10,6 +10,7 @@ def validate_claim_integrity(evidence_path: str):
     return True
 
 #!/usr/bin/env python3
+import re
 import sys, os, json, subprocess, yaml, click
 from pathlib import Path
 from datetime import datetime, timezone
@@ -157,6 +158,51 @@ def _render_hallucination_unverified(reason: str) -> None:
     click.echo("**狀態**: 🟡 需審核\n")
 
 
+def _task_requests_output_file(task_text: str) -> bool:
+    text = (task_text or "").lower()
+    intent_words = (
+        "write",
+        "save",
+        "output",
+        "export",
+        "rewrite",
+        "寫入",
+        "輸出",
+        "存到",
+        "落盤",
+        "重寫",
+    )
+    has_intent = any(word in text for word in intent_words)
+    has_path_hint = bool(
+        re.search(r"(/|\\|\.md\b|\.txt\b|\.json\b|\.ya?ml\b|\.csv\b)", text, re.IGNORECASE)
+    )
+    return has_intent and has_path_hint
+
+
+def _write_output_file(path: Path, payload: dict) -> Path:
+    out = path if path.is_absolute() else (REPO_ROOT / path).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+def _local_rewrite_text(text: str) -> str:
+    # Local-safe rewrite: normalize trailing spaces and repeated blank lines.
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    out_lines: list[str] = []
+    blank_streak = 0
+    for ln in lines:
+        if ln.strip() == "":
+            blank_streak += 1
+            if blank_streak > 1:
+                continue
+        else:
+            blank_streak = 0
+        out_lines.append(ln)
+    result = "\n".join(out_lines).strip() + "\n"
+    return result
+
+
 def check_hallucination(evidence_path: str | None):
     """🛡️ 執行幻覺指數審計（硬性：缺 evidence 直接視為 fail）。"""
     import json
@@ -205,8 +251,19 @@ def acceptance_check(as_json, evidence_path):
 @nexus_group.command(name="run")
 @click.argument("task_id")
 @click.option("--complexity", type=float, default=0.0)
-def run(task_id, complexity):
+@click.option(
+    "--output-file",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+    help="Optional explicit output file path. Writes machine-readable JSON payload.",
+)
+def run(task_id, complexity, output_file):
     """🚀 [Wisdom Layer] Execute task with automatic NAS tuning."""
+    if _task_requests_output_file(task_id) and not output_file:
+        raise click.ClickException(
+            "Task appears to request file output. Please provide --output-file to avoid silent non-write behavior."
+        )
+
     from nexus.core.context_hub import ContextHub
     hub = ContextHub(REPO_ROOT)
     
@@ -242,10 +299,106 @@ def run(task_id, complexity):
         timestamp=datetime.now().isoformat()
     )
     
-    with open(report_path, "w") as f:
-        json.dump(outcome.__dict__, f, indent=2)
-    
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(outcome.__dict__, f, indent=2, ensure_ascii=False)
+
+    payload = {
+        "task_id": task_id,
+        "complexity": complexity,
+        "status": outcome.terminal_state,
+        "failure_category": outcome.failure_category,
+        "exit_code": outcome.exit_code,
+        "timestamp": outcome.timestamp,
+        "report_path": str(report_path),
+        "io": {
+            "output_written": False,
+            "output_path": None,
+        },
+    }
+    if output_file:
+        written = _write_output_file(output_file, payload)
+        payload["io"]["output_written"] = True
+        payload["io"]["output_path"] = str(written)
+
     click.echo(f"✅ [Hyper-Sprint] Task completed. Machine-readable report: {report_path}")
+    click.echo(f"Output Written: {payload['io']['output_written']}")
+    click.echo(f"Output Path: {payload['io']['output_path'] or 'N/A'}")
+
+
+@nexus_group.command(name="content:rewrite")
+@click.option("--input-file", required=True, type=click.Path(exists=True, path_type=Path), help="Source text/markdown file.")
+@click.option("--output-file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="Output rewritten file path.")
+@click.option("--task", default="Rewrite for clarity while preserving meaning.", show_default=True, help="Rewrite instruction.")
+@click.option("--llm-mode/--no-llm-mode", default=False, show_default=True, help="Use LLM rewrite mode. Falls back to local-safe mode on failure.")
+@click.option("--report-file", default=".nexus/reports/content/rewrite-report.json", show_default=True, type=click.Path(path_type=Path))
+def content_rewrite(input_file, output_file, task, llm_mode, report_file):
+    """📝 Rewrite content with explicit file IO contract."""
+    source_path = input_file if input_file.is_absolute() else (REPO_ROOT / input_file).resolve()
+    out_path = output_file if output_file.is_absolute() else (REPO_ROOT / output_file).resolve()
+    report_path = report_file if report_file.is_absolute() else (REPO_ROOT / report_file).resolve()
+
+    original = source_path.read_text(encoding="utf-8")
+    rewritten = ""
+    method = "local_safe"
+    error = ""
+
+    if llm_mode:
+        try:
+            from nexus.services.gateway import BattlesuitGateway
+
+            gateway = BattlesuitGateway(project_root=REPO_ROOT)
+            prompt, raw = gateway.ask_structured(
+                prompt=(
+                    "You are rewriting a document.\n"
+                    f"Task: {task}\n"
+                    "Return only rewritten full text in field 'patch'."
+                ),
+                payload=f"[SOURCE]\n{original}",
+                phase="R",
+                output_schema={
+                    "status": "APPROVED | FAIL",
+                    "patch": "Full rewritten content",
+                    "summary": "Short note",
+                },
+                model_name="gemini-3-flash-preview",
+            )
+            rewritten = (prompt or {}).get("patch") or (raw or "")
+            if not rewritten.strip():
+                raise RuntimeError("empty_llm_output")
+            method = "llm"
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+            rewritten = _local_rewrite_text(original)
+            method = "local_safe_fallback"
+    else:
+        rewritten = _local_rewrite_text(original)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(rewritten, encoding="utf-8")
+
+    payload = {
+        "status": "SUCCESS",
+        "task": task,
+        "method": method,
+        "error": error,
+        "io": {
+            "input_path": str(source_path),
+            "output_path": str(out_path),
+            "output_written": True,
+        },
+        "stats": {
+            "input_chars": len(original),
+            "output_chars": len(rewritten),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    click.echo(f"✅ [Content-Rewrite] Completed. Method: {method}")
+    click.echo(f"Output Written: {payload['io']['output_written']}")
+    click.echo(f"Output Path: {payload['io']['output_path']}")
+    click.echo(f"Report: {report_path}")
 
 @nexus_group.command(name="contract-check")
 @click.option("--contract-file", type=click.Path(exists=True), required=True)
@@ -313,16 +466,23 @@ def _build_research_route(
 
     task_upper = (task_desc or "").upper()
     hard_keywords = ["FLAKY", "RACE", "DEADLOCK", "TIMEOUT", "LATENCY", "WEBSOCKET", "SDK", "API"]
-    hard_signal = (
-        candidate_count > 1
-        or adjusted_root_cause_confidence < 0.75
-        or findings_hits > 0
-        or any(kw in task_upper for kw in hard_keywords)
-    )
-    recommended_flow = "hyper_sprint" if (decision.should_research or hard_signal) else "baseline"
-    if task_type == "feature":
-        recommended_flow = "hyper_sprint"
-    recommended_reason = "complex_or_risky_task" if recommended_flow == "hyper_sprint" else "clear_and_local_bug"
+    has_hard_signal = any(kw in task_upper for kw in hard_keywords)
+    
+    # R2 Tuning: Feature/Refactor prefer baseline, Bugfix with risk prefers hyper
+    if task_type in ["feature", "refactor"]:
+        recommended_flow = "baseline"
+        recommended_reason = f"structural_task_type_{task_type}_prefer_baseline"
+    else:
+        # Bugfix case
+        is_risky_bug = (
+            candidate_count > 1
+            or adjusted_root_cause_confidence < 0.75
+            or findings_hits > 0
+            or has_hard_signal
+            or decision.should_research
+        )
+        recommended_flow = "hyper_sprint" if is_risky_bug else "baseline"
+        recommended_reason = "complex_bug_prefer_hyper" if is_risky_bug else "simple_bug_prefer_baseline"
 
     if recommended_flow == "hyper_sprint":
         should_research = True
@@ -333,7 +493,7 @@ def _build_research_route(
         mode = "skip"
         reason = "clear_root_cause"
 
-    risk_level = "HIGH" if hard_signal else "LOW"
+    risk_level = "HIGH" if (has_hard_signal or task_type == "feature") else "LOW"
     if adjusted_root_cause_confidence < 0.5:
         risk_level = "CRITICAL"
 
@@ -343,7 +503,7 @@ def _build_research_route(
         "files": [target_file] if target_file else [],
         "history": {"findings_hits": findings_hits, "hints_count": len(historical_hints)},
         "confidence": round(adjusted_root_cause_confidence, 2),
-        "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. Hard signal: {hard_signal}."
+        "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. TaskType: {task_type}."
     }
 
     return {
@@ -420,6 +580,7 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
 @click.option("--report-file", default=".nexus/reports/research/auto-flow-report.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
 @click.option("--explain-route", is_flag=True)
+@click.option("--output-file", type=click.Path(path_type=Path, dir_okay=False), default=None, help="Optional explicit JSON output file.")
 def research_auto_flow(
     task_desc,
     target_file,
@@ -441,6 +602,7 @@ def research_auto_flow(
     report_file,
     output_json,
     explain_route,
+    output_file,
 ):
     if explain_route:
         out = _build_research_route(
@@ -474,6 +636,7 @@ def research_auto_flow(
         min_dynamic_stage1_timeout=min_dynamic_stage1_timeout,
         force_flow=force_flow,
         report_file=report_file,
+        output_file=output_file,
     )
     if output_json:
         click.echo(json.dumps(payload, indent=2))
@@ -482,6 +645,9 @@ def research_auto_flow(
         click.echo(f"Status: {payload['result']['status']}")
         click.echo(f"Elapsed: {payload['result']['elapsed_sec']} sec")
         click.echo(f"Report: {out_path}")
+        io = payload.get("io", {})
+        click.echo(f"Output Written: {io.get('output_written', False)}")
+        click.echo(f"Output Path: {io.get('output_path') or 'N/A'}")
 
 
 
@@ -505,6 +671,7 @@ def _run_research_auto_flow_impl(
     min_dynamic_stage1_timeout: int,
     force_flow: str | None,
     report_file: str,
+    output_file: Path | None,
 ):
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
     import subprocess
@@ -684,10 +851,20 @@ def _run_research_auto_flow_impl(
             "baseline_probe": baseline_probe,
         },
         "result": result,
+        "io": {
+            "output_written": False,
+            "output_path": None,
+        },
     }
     out_path = (REPO_ROOT / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    if output_file:
+        written = _write_output_file(output_file, payload)
+        payload["io"]["output_written"] = True
+        payload["io"]["output_path"] = str(written)
+        # keep report + output payload in sync
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     recent.append(
         {
             "flow": chosen_flow,
