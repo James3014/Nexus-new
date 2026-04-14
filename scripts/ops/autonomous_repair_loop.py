@@ -26,7 +26,7 @@ from scripts.ops.rollback_guard import RollbackGuard
 from nexus.services.memory import MemoryService, FaultLesson
 
 SUMMARY_FILE = ROOT / ".nexus" / "reports" / "last_failure_summary.txt"
-INVOKE_SCRIPT = ROOT / "scripts" / "ops" / "gemini_nexus_invoke.py"
+ROUND_RUNNER = ROOT / "scripts" / "ops" / "run_gemini_nexus_round.sh"
 CI_GATE_SCRIPT = ROOT / "scripts" / "ops" / "ci_gate.py"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 MAX_ROUNDS = 5
@@ -143,25 +143,30 @@ def run_repair_loop():
                 prompt += f"- Round {i+1} failed attempt: {h}\n"
             prompt += "⚠️ SWITCH REASONING: Previous rounds failed. Deepen investigation.\n"
 
-        # 3. Invoke Gemini for Fixes with Dynamic Params
+        # 3. Invoke Gemini through Nexus-enforced round runner
+        prompt_path = ROOT / ".nexus" / "reports" / f"autorepair_round_{current_round}.md"
+        report_path = ROOT / ".nexus" / "reports" / f"autorepair_round_{current_round}.json"
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(prompt, encoding="utf-8")
         invoke_cmd = [
-            str(VENV_PYTHON), str(INVOKE_SCRIPT),
-            "--prompt", prompt,
-            "--preflight",
-            "--temperature", f"{temp_gradient:.2f}"
+            "bash", str(ROUND_RUNNER),
+            str(prompt_path),
+            str(report_path),
+            "300",
         ]
 
+        print("📡 Consulting Zenith (Gemini+Nexus) for repair strategy...")
+        res = subprocess.run(invoke_cmd, capture_output=True, text=True, cwd=str(ROOT))
 
-        print("📡 Consulting Zenith (Gemini) for repair strategy...")
-        res = subprocess.run(invoke_cmd, capture_output=True, text=True)
-
-        if res.returncode != 0:
-            print(f"❌ Gemini invocation failed (RC={res.returncode}): {res.stdout[:200]}")
+        if res.returncode != 0 or not report_path.exists():
+            print(f"❌ Gemini round failed (RC={res.returncode}): {res.stdout[:200]}")
             current_round += 1
             time.sleep(2)
             continue
 
-        repair_commands = res.stdout.strip().splitlines()
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        raw_output = report.get("output", "") if isinstance(report, dict) else ""
+        repair_commands = raw_output.strip().splitlines()
         strategy_summary = "; ".join([c for c in repair_commands if not c.startswith("#")])[:200]
         repair_history.append(strategy_summary)
 
