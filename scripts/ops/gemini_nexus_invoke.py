@@ -55,7 +55,8 @@ def _run_once(
     prompt: str,
     cwd: Path,
     timeout_sec: int,
-) -> tuple[int, str]:
+    inactivity_timeout_sec: int | None = None,
+) -> tuple[int, str, float, str]:
     cmd = [
         str(GEMINI_BIN),
         "-m",
@@ -66,20 +67,83 @@ def _run_once(
         "-p",
         prompt,
     ]
+    start_time = time.time()
+    output_chunks = []
+    return_code = 0
+    classification = "OK"
+
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=str(cwd),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=timeout_sec,
             env={**os.environ, "GEMINI_SANDBOX": "true"},
+            bufsize=1,
         )
-        output = f"{proc.stdout or ''}{proc.stderr or ''}"
-        return proc.returncode, output
-    except subprocess.TimeoutExpired as exc:
-        out = f"{exc.stdout or ''}{exc.stderr or ''}"
-        return 124, out
+
+        last_activity_time = time.time()
+        
+        # We need a way to read non-blockingly or with timeout
+        import selectors
+        sel = selectors.DefaultSelector()
+        sel.register(proc.stdout, selectors.EVENT_READ)
+
+        while True:
+            current_time = time.time()
+            elapsed = current_time - start_time
+            
+            # Wall clock timeout check
+            if elapsed > timeout_sec:
+                proc.kill()
+                classification = "TIMEOUT_WALLCLOCK"
+                return_code = 124
+                break
+            
+            # Inactivity timeout check
+            if inactivity_timeout_sec and (current_time - last_activity_time) > inactivity_timeout_sec:
+                proc.kill()
+                classification = "TIMEOUT_INACTIVITY"
+                return_code = 124
+                break
+
+            # Poll for output
+            events = sel.select(timeout=1.0)
+            if events:
+                line = proc.stdout.readline()
+                if line:
+                    output_chunks.append(line)
+                    last_activity_time = time.time()
+                else:
+                    # EOF
+                    break
+            
+            if proc.poll() is not None:
+                # Process finished but might still have data in pipe
+                remaining = proc.stdout.read()
+                if remaining:
+                    output_chunks.append(remaining)
+                break
+
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        else:
+            return_code = proc.returncode
+
+    except Exception as exc:
+        output_chunks.append(str(exc))
+        return_code = 1
+        classification = "ERROR"
+
+    final_output = "".join(output_chunks)
+    elapsed_sec = round(time.time() - start_time, 4)
+    
+    if classification == "OK":
+        classification = _classify(return_code, final_output)
+
+    return return_code, final_output, elapsed_sec, classification
 
 
 def _classify(exit_code: int, output: str) -> str:
@@ -110,10 +174,12 @@ def main() -> int:
     parser.add_argument("--prompt-file", default=None)
     parser.add_argument("--cwd", default=str(REPO_ROOT))
     parser.add_argument("--timeout-sec", type=int, default=180)
+    parser.add_argument("--inactivity-timeout-sec", type=int, default=0, help="Timeout if no output for N seconds (0=disabled)")
     parser.add_argument("--max-retries", type=int, default=2)
     parser.add_argument("--retry-backoff-sec", type=int, default=3)
     parser.add_argument("--lock-file", default=str(DEFAULT_LOCK))
     parser.add_argument("--preflight", action="store_true", help="Run a tiny probe before task execution")
+    parser.add_argument("--preflight-only", action="store_true", help="Run only preflight probe and exit")
     parser.add_argument("--report-file", default="", help="Optional json report file path")
     args = parser.parse_args()
 
@@ -124,6 +190,7 @@ def main() -> int:
     cwd = Path(args.cwd).resolve()
     lock_path = Path(args.lock_file).resolve()
     prompt = _read_prompt(args.prompt, args.prompt_file)
+    inact_timeout = args.inactivity_timeout_sec if args.inactivity_timeout_sec > 0 else None
 
     if not _acquire_lock(lock_path):
         report = {
@@ -137,14 +204,19 @@ def main() -> int:
     attempts: list[dict] = []
     try:
         if args.preflight:
-            p_code, p_out = _run_once(
+            p_code, p_out, p_elap, p_cls = _run_once(
                 model=args.model,
                 prompt="reply with exactly: OK",
                 cwd=cwd,
                 timeout_sec=min(30, args.timeout_sec),
+                inactivity_timeout_sec=inact_timeout,
             )
-            p_cls = _classify(p_code, p_out)
-            attempts.append({"phase": "preflight", "exit_code": p_code, "classification": p_cls})
+            attempts.append({
+                "phase": "preflight", 
+                "exit_code": p_code, 
+                "classification": p_cls,
+                "elapsed_sec": p_elap
+            })
             if p_cls != "OK" or "OK" not in p_out:
                 report = {
                     "status": "fail",
@@ -156,16 +228,32 @@ def main() -> int:
                     Path(args.report_file).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
                 print(json.dumps(report, ensure_ascii=False))
                 return 4
+            if args.preflight_only:
+                report = {
+                    "status": "ok",
+                    "reason": "preflight_ok",
+                    "attempts": attempts,
+                }
+                if args.report_file:
+                    Path(args.report_file).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+                print(json.dumps(report, ensure_ascii=False))
+                return 0
 
         for i in range(1, args.max_retries + 2):
-            code, output = _run_once(
+            code, output, elap, cls = _run_once(
                 model=args.model,
                 prompt=prompt,
                 cwd=cwd,
                 timeout_sec=args.timeout_sec,
+                inactivity_timeout_sec=inact_timeout,
             )
-            cls = _classify(code, output)
-            attempts.append({"phase": "task", "attempt": i, "exit_code": code, "classification": cls})
+            attempts.append({
+                "phase": "task", 
+                "attempt": i, 
+                "exit_code": code, 
+                "classification": cls,
+                "elapsed_sec": elap
+            })
             if cls == "OK":
                 report = {
                     "status": "ok",

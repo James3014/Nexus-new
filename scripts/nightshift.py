@@ -498,6 +498,26 @@ class AutoResearchNightShift:
 
     def _write_failure_lesson(self, reason: str, details: str) -> None:
         """Failure-to-Lesson writeback for blocked winners."""
+        reason_l = str(reason or "").lower()
+        if "timeout" in reason_l:
+            failure_class = "timeout"
+            corrective_action = "increase_timeout_or_reduce_scope"
+        elif "tier2" in reason_l or "acceptance" in reason_l:
+            failure_class = "tier2_gate_rejection"
+            corrective_action = "fix_regression_then_rerun_tier2"
+        elif "quota" in reason_l or "capacity" in reason_l:
+            failure_class = "quota_or_capacity"
+            corrective_action = "switch_fallback_model_or_local_mode"
+        else:
+            failure_class = reason_l or "unknown_failure"
+            corrective_action = "inspect_trace_and_refine_prompt_or_tests"
+
+        task_signature = f"{self.task}::{self.resolved_target_file}"
+        rejection_summary = {
+            "no_improve_streak": self.no_improve_streak,
+            "max_rounds": self.max_rounds,
+            "model_exhausted_count": len(self.model_exhausted),
+        }
         payload = {
             "date": datetime.now().strftime("%Y-%m-%d"),
             "task": self.task,
@@ -505,6 +525,10 @@ class AutoResearchNightShift:
             "reason": reason,
             "details": details[:2000],
             "decision": "winner_rejected",
+            "failure_class": failure_class,
+            "task_signature": task_signature,
+            "rejection_summary": rejection_summary,
+            "corrective_action": corrective_action,
         }
         self.lesson_writeback_path.parent.mkdir(parents=True, exist_ok=True)
         self.lesson_writeback_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -555,6 +579,10 @@ class AutoResearchNightShift:
                     "model_exhausted": self.model_exhausted,
                     "best_score": self.best_score,
                     "target_file": self.resolved_target_file,
+                    "failure_class": reason if status != "SUCCESS" else "none",
+                    "task_signature": self.task,
+                    "rejection_summary": {"rounds": self.max_rounds, "no_improve_streak": self.no_improve_streak},
+                    "corrective_action": "increase_budget" if "budget" in reason.lower() else "check_model_quota",
                     "timestamp": datetime.now().isoformat(),
                 },
             )
@@ -741,9 +769,15 @@ class AutoResearchNightShift:
             final_reason = "best_score_recorded" if self.best_score > 0 else "no_valid_candidate"
             
             # 物理硬化：自動分類失敗原因 (Phase 1)
-            failure_cat = SprintOutcome.SUCCESS.value if self.best_score > 0 else SprintOutcome.GENERATION_FAIL.value
-            if self.best_score == 0 and any(self._is_quota_or_capacity_error(str(t)) for t in self.trace_log):
+            failure_cat = SprintOutcome.SUCCESS.value if self.best_score > 0 else SprintOutcome.STAGE1_FAILED.value
+            
+            elapsed = time.time() - start_time
+            if elapsed > self.budget_sec:
+                failure_cat = SprintOutcome.TIME_BUDGET_EXCEEDED.value
+            elif self.best_score == 0 and any(self._is_quota_or_capacity_error(str(t)) for t in self.trace_log):
                 failure_cat = SprintOutcome.QUOTA_EXHAUSTED.value
+            elif self.best_score == 0 and any(self._is_timeout_error(str(t)) for t in self.trace_log):
+                failure_cat = SprintOutcome.HYPER_RUN_TIMEOUT.value
 
             self._save_json_report(final_status, failure_cat)
             

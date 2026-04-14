@@ -45,15 +45,31 @@ Validated benchmark. algorithm_success_rate=<x>. regression_rate=<y>. infra_bloc
 ```
 
 ### Step B: Dispatch Gemini+Nexus
+Always run preflight first to detect channel health before a heavy prompt:
+```bash
+cd /Users/jameschen/Workspace/nexus
+uv run python3 scripts/ops/gemini_nexus_invoke.py \
+  --preflight \
+  --preflight-only \
+  --prompt "reply with exactly: OK" \
+  --timeout-sec 30 \
+  --max-retries 0 \
+  --report-file .nexus/reports/gemini_preflight.json
+```
+
+If preflight is `OK`, run delegation with short-cycle timeout first:
 ```bash
 cd /Users/jameschen/Workspace/nexus
 rm -f /private/tmp/nexus_gemini_invoke.lock
 uv run python3 scripts/ops/gemini_nexus_invoke.py \
   --prompt-file /tmp/<round_task>.md \
-  --timeout-sec 700 \
+  --timeout-sec 180 \
+  --inactivity-timeout-sec 90 \
   --max-retries 0 \
   --report-file .nexus/reports/gemini_<round>_report.json
 ```
+
+Only use long timeout (e.g. 700) after one successful short-cycle round in the same session.
 
 ### Step C: Supervisor Validation (Codex)
 Run required validations yourself, do not trust only narrative:
@@ -85,11 +101,21 @@ If failed:
 2. `AUTH_LOOP`
 - Fix: run interactive gemini once; then retry invoke
 
-3. Long no-output hang
-- Fix:
-  - kill stale invoke processes
-  - switch to short-cycle prompt
-  - reduce scope to 1 blocker at a time
+3. `TIMEOUT` (even when preflight is OK)
+- Interpretation: delegation channel is alive, but prompt scope is too heavy for current session/model latency.
+- Fix sequence (mandatory):
+  - kill stale invoke processes + clear lock
+  - split into short-cycle prompt (one blocker, 1-3 files)
+  - keep timeout at 180-240
+  - supervisor runs benchmark locally after code patch
+  - if 2 consecutive `TIMEOUT` on short-cycle, mark `gemini_delegation_blocked` and fallback to local implementation for this round
+
+4. `preflight_failed` (classification is timeout)
+- Interpretation: current Gemini session is not healthy enough for delegated coding, even for probe prompts.
+- Fix sequence (mandatory):
+  - run one interactive `gemini` check in terminal
+  - re-run preflight-only once
+  - if still fails, set `gemini_delegation_blocked` and proceed with local implementation + supervisor verification
 
 4. Benchmark blocked by `semantic_guard/stage1_failed`
 - Fix: prioritize stage1 + semantic guard interop, not timeout tuning first

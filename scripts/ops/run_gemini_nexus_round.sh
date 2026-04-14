@@ -24,10 +24,20 @@ cd "$REPO_ROOT"
 echo "[Gemini+Nexus] clearing stale lock..."
 rm -f /private/tmp/nexus_gemini_invoke.lock || true
 
+echo "[Gemini+Nexus] preflight..."
+uv run python3 scripts/ops/gemini_nexus_invoke.py \
+  --preflight \
+  --preflight-only \
+  --prompt "reply with exactly: OK" \
+  --timeout-sec 30 \
+  --max-retries 0 \
+  --report-file .nexus/reports/gemini_preflight_round.json
+
 echo "[Gemini+Nexus] dispatch start..."
 uv run python3 scripts/ops/gemini_nexus_invoke.py \
   --prompt-file "$PROMPT_FILE" \
   --timeout-sec "$TIMEOUT_SEC" \
+  --inactivity-timeout-sec 90 \
   --max-retries 0 \
   --report-file "$REPORT_FILE"
 

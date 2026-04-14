@@ -35,3 +35,19 @@ uv run scripts/engine/nexus_cli.py nexus research:benchmark \
 - [ ] 完成 P1~P4 的收斂報表輸出。
 - [ ] 學習成果成功寫入 `policy_memory.jsonl`。
 - [ ] 通過 `ci_gate.py --dry-run` 檢核。
+
+## 🧪 Meta-Optimization Mode
+Run preset search to tune NightShift-compatible benchmark parameters safely.
+
+```bash
+uv run scripts/engine/nexus_cli.py nexus research:meta-opt \
+  --manifest-file docs/research/research_benchmark_ab_rate_limiter_only.json \
+  --presets-file docs/research/research_meta_presets_smoke.json \
+  --max-wall-time-sec 120 \
+  --report-file .nexus/reports/research/meta-opt-r13-smoke.json
+```
+
+Expected output:
+- machine-readable ranking of presets
+- selected preset under fail-closed policy
+- partial report when wall-time is exceeded

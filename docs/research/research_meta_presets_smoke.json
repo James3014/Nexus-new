@@ -1,0 +1,12 @@
+[
+  {
+    "name": "preset_v1_conservative",
+    "candidate_count": 1,
+    "ab_llm_mode": false
+  },
+  {
+    "name": "preset_v2_aggressive",
+    "candidate_count": 2,
+    "ab_llm_mode": true
+  }
+]

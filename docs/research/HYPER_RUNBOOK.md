@@ -38,3 +38,20 @@ uv run scripts/engine/nexus_cli.py nexus research:sprint \
 - [ ] 100% 通過基準測試 (Green in Baseline or Hyper)。
 - [ ] 產出 `.nexus/reports/research/sprint-report.json`。
 - [ ] 回歸率 (Regression Rate) < 5%。
+
+## 🧪 Meta-Optimization Mode
+Use meta-opt to tune Hyper/NightShift presets against a fixed benchmark set.
+
+```bash
+uv run scripts/engine/nexus_cli.py nexus research:meta-opt \
+  --manifest-file docs/research/research_benchmark_ab_10cases_mixed.json \
+  --presets-file docs/research/research_meta_presets_smoke.json \
+  --max-wall-time-sec 300 \
+  --report-file .nexus/reports/research/meta-opt-report.json
+```
+
+Selection policy:
+- reject presets with `regression_rate > 0.05`
+- maximize `algorithm_success_rate`
+- minimize `infra_blocked_rate`
+- minimize `time_to_green_p50`

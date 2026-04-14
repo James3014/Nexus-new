@@ -1319,11 +1319,12 @@ def research_run(
 @click.option("--report-file", default=".nexus/reports/research/benchmark-report.json", type=click.Path())
 @click.option("--budget-limit", default=50.0, type=float)
 @click.option("--timeout-sec", default=30, type=int)
+@click.option("--max-wall-time-sec", default=0, type=int, help="Maximum total execution time for the entire benchmark (0=unlimited).")
 @click.option("--mode", type=click.Choice(["gladiator", "ab"]), default="gladiator", show_default=True)
 @click.option("--ab-trials", default=3, type=int, show_default=True, help="Number of repeated runs per mode for A/B.")
 @click.option("--ab-llm-mode/--ab-no-llm-mode", default=False, show_default=True, help="Enable LLM mode inside Hyper-Sprint A/B runs.")
 @click.option("--llm-baseline", is_flag=True, help="Enable LLM assistance for baseline generation in feature/refactor cases.")
-def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mode, ab_trials, ab_llm_mode, llm_baseline):
+def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, max_wall_time_sec, mode, ab_trials, ab_llm_mode, llm_baseline):
     """📊 [Control Plane] Gladiator Benchmark: Real evaluation for multiple cases."""
     import json
     import time
@@ -1335,8 +1336,12 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
     
     manifest = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
     cases = manifest.get("cases", [])
+    benchmark_start_time = time.time()
+    time_budget_exceeded = False
 
     if mode == "ab":
+        import concurrent.futures
+
         def _pct(values, q):
             if not values:
                 return 0.0
@@ -1357,16 +1362,57 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
             quota_events = [r for r in runs if r.get("quota_event")]
             quota_success = sum(1 for r in quota_events if r.get("ok"))
             reason_counts: dict[str, int] = {}
+            
+            # Diagnostics
+            semantic_reject_count = 0
+            stage1_candidate_pass_count = 0
+            infra_blocked_count = 0
+            algorithm_fail_count = 0
+            stage1_reject_reasons: dict[str, int] = {}
+            
+            # Explicit classifications
+            stage1_failed_count = 0
+            stage1_no_passing_candidate_count = 0
+            hyper_run_timeout_count = 0
+            time_budget_exceeded_count = 0
+
             for r in runs:
+                codes = r.get("error_codes", []) or []
+                reason = r.get("reason")
+                if "stage1_failed" in codes:
+                    stage1_failed_count += 1
+                if "stage1_no_passing_candidate" in codes:
+                    stage1_no_passing_candidate_count += 1
+                if "hyper_run_timeout" in codes or reason == "hyper_run_timeout":
+                    hyper_run_timeout_count += 1
+                if "time_budget_exceeded" in codes or reason == "time_budget_exceeded":
+                    time_budget_exceeded_count += 1
+
                 if not r.get("ok"):
-                    for code in r.get("error_codes", []) or []:
+                    for code in codes:
                         reason_counts[code] = reason_counts.get(code, 0) + 1
-                    reason = r.get("reason")
                     if reason:
                         reason_counts[reason] = reason_counts.get(reason, 0) + 1
                     err = r.get("error")
                     if err:
                         reason_counts[err] = reason_counts.get(err, 0) + 1
+                
+                # Diagnostic field extraction
+                if "semantic_guard" in codes:
+                    semantic_reject_count += 1
+                if r.get("ok"):
+                    stage1_candidate_pass_count += 1
+                
+                err_str = (str(r.get("error") or "") + str(r.get("reason") or "")).lower()
+                infra_keywords = ["broker_timeout", "swarm_timeout", "capacity_error", "no_candidates", "time_budget_exceeded", "quota", "429"]
+                if any(k in err_str for k in infra_keywords) or any(k in str(codes).lower() for k in ["quota", "time_budget_exceeded"]):
+                    infra_blocked_count += 1
+                elif any(k in str(codes).lower() for k in ["stage1_failed", "stage1_no_passing_candidate", "generation_fail"]):
+                    algorithm_fail_count += 1
+                
+                for k, v in (r.get("rejection_summary") or {}).items():
+                    stage1_reject_reasons[k] = stage1_reject_reasons.get(k, 0) + v
+
             return {
                 "runs": total,
                 "success_rate": round(successes / total, 4) if total else 0.0,
@@ -1376,11 +1422,32 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                 "resilience_on_quota": round(quota_success / len(quota_events), 4) if quota_events else None,
                 "quota_event_count": len(quota_events),
                 "failure_reason_counts": reason_counts,
+                "semantic_reject_count": semantic_reject_count,
+                "stage1_candidate_pass_count": stage1_candidate_pass_count,
+                "stage1_reject_reasons": stage1_reject_reasons,
+                "infra_blocked_count": infra_blocked_count,
+                "algorithm_fail_count": algorithm_fail_count,
+                "stage1_failed_count": stage1_failed_count,
+                "stage1_no_passing_candidate_count": stage1_no_passing_candidate_count,
+                "hyper_run_timeout_count": hyper_run_timeout_count,
+                "time_budget_exceeded_count": time_budget_exceeded_count,
             }
 
         per_case = []
         for case in cases:
+            if max_wall_time_sec > 0 and (time.time() - benchmark_start_time) > max_wall_time_sec:
+                time_budget_exceeded = True
+            
             cid = case.get("id", "unknown")
+            if time_budget_exceeded:
+                per_case.append({
+                    "id": cid,
+                    "status": "infra_blocked",
+                    "reason": "time_budget_exceeded",
+                    "elapsed_sec": 0.0,
+                })
+                continue
+
             task_desc = case.get("task_desc", "")
             target_file = case.get("target_file")
             test_file = case.get("test_file")
@@ -1400,6 +1467,8 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                 })
                 continue
 
+            click.echo(f"▶️ [AB] case={cid} trials={max(1, ab_trials)} target={target_file}")
+
             if prepare_command:
                 subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
 
@@ -1417,6 +1486,15 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
             hyper_runs = []
 
             for trial in range(max(1, ab_trials)):
+                click.echo(f"   • trial={trial + 1}/{max(1, ab_trials)}")
+                if max_wall_time_sec > 0 and (time.time() - benchmark_start_time) > max_wall_time_sec:
+                    time_budget_exceeded = True
+                
+                if time_budget_exceeded:
+                    baseline_runs.append({"trial": trial + 1, "ok": False, "elapsed_sec": 0.0, "error": "time_budget_exceeded"})
+                    hyper_runs.append({"trial": trial + 1, "ok": False, "elapsed_sec": 0.0, "reason": "time_budget_exceeded"})
+                    continue
+
                 if prepare_command:
                     subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
 
@@ -1456,6 +1534,13 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                     "error": err,
                 })
 
+                if max_wall_time_sec > 0 and (time.time() - benchmark_start_time) > max_wall_time_sec:
+                    time_budget_exceeded = True
+                
+                if time_budget_exceeded:
+                    hyper_runs.append({"trial": trial + 1, "ok": False, "elapsed_sec": 0.0, "reason": "time_budget_exceeded"})
+                    continue
+
                 if prepare_command:
                     subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
 
@@ -1472,13 +1557,33 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                     stage1_timeout_sec=stage1_timeout_sec,
                     llm_mode=ab_llm_mode,
                 )
-                result = run_hyper_sprint(repo_root=REPO_ROOT, config=cfg)
-                if result.patch:
+                hyper_timeout_sec = max(10, int(stage1_timeout_sec + timeout_sec + 10))
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        fut = pool.submit(run_hyper_sprint, repo_root=REPO_ROOT, config=cfg)
+                        result = fut.result(timeout=hyper_timeout_sec)
+                except concurrent.futures.TimeoutError:
+                    result = None
+                if result and result.patch:
                     target_path.write_text(result.patch, encoding="utf-8")
-                h_ok = result.status == "SUCCESS" and bool(result.patch)
+                h_ok = bool(result) and result.status == "SUCCESS" and bool(result.patch)
                 if prepare_command:
                     subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
                 
+                if result is None:
+                    hyper_runs.append({
+                        "trial": trial + 1,
+                        "ok": False,
+                        "elapsed_sec": round(time.time() - t1, 4),
+                        "status": "FAIL",
+                        "reason": "hyper_run_timeout",
+                        "error_codes": ["timeout", "hyper_run_timeout"],
+                        "model_calls": 0,
+                        "rejection_summary": {},
+                        "timeout": True,
+                    })
+                    continue
+
                 hyper_runs.append({
                     "trial": trial + 1,
                     "ok": h_ok,
@@ -1487,6 +1592,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                     "reason": result.reason,
                     "error_codes": result.error_codes,
                     "model_calls": result.model_calls,
+                    "rejection_summary": result.rejection_summary,
                 })
 
             baseline_summary = _summarize_runs(baseline_runs)
@@ -1500,6 +1606,17 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                 "task_desc": task_desc,
                 "baseline": {"runs": baseline_runs, "summary": baseline_summary},
                 "hyper_sprint": {"runs": hyper_runs, "summary": hyper_summary},
+                "diagnostics": {
+                    "semantic_reject_count": hyper_summary.get("semantic_reject_count"),
+                    "stage1_candidate_pass_count": hyper_summary.get("stage1_candidate_pass_count"),
+                    "stage1_reject_reasons": hyper_summary.get("stage1_reject_reasons"),
+                    "infra_blocked_count": hyper_summary.get("infra_blocked_count"),
+                    "algorithm_fail_count": hyper_summary.get("algorithm_fail_count"),
+                    "stage1_failed": hyper_summary.get("stage1_failed_count"),
+                    "stage1_no_passing_candidate": hyper_summary.get("stage1_no_passing_candidate_count"),
+                    "hyper_run_timeout": hyper_summary.get("hyper_run_timeout_count"),
+                    "time_budget_exceeded": hyper_summary.get("time_budget_exceeded_count"),
+                },
                 "delta": {
                     "success_rate": round(hyper_summary["success_rate"] - baseline_summary["success_rate"], 4),
                     "timeout_rate": round(hyper_summary["timeout_rate"] - baseline_summary["timeout_rate"], 4),
@@ -1514,6 +1631,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
             "ab_trials": max(1, ab_trials),
             "ab_llm_mode": bool(ab_llm_mode),
             "per_case": per_case,
+            "time_budget_exceeded": time_budget_exceeded,
         }
         
         # Calculate Global Aggregates for P5
@@ -1523,13 +1641,22 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
         h_success_rate = round(h_successes / total_h_runs, 4) if total_h_runs else 0.0
         h_durations = [r["elapsed_sec"] for r in all_h_runs if r.get("ok")]
         h_p50_ttg = _pct(h_durations, 0.5)
-        h_retries = sum(int(r.get("attempt_count", 1)) for r in all_h_runs)
-        h_calls = sum(int(r.get("model_calls", 0)) for r in all_h_runs)
+        h_retries = sum(int(r.get("attempt_count", 1)) for r in all_h_runs if "attempt_count" in r)
+        h_calls = sum(int(r.get("model_calls", 0)) for r in all_h_runs if "model_calls" in r)
         
         # Regression Rate: Baseline OK but Hyper Fails
         regressions = 0
         baseline_ok_cases = 0
+        infra_blocked_cases = 0
+        measured_cases = 0
+        total_infra_blocked_runs = 0
         for c in per_case:
+            measured_cases += 1
+            if c.get("status") == "infra_blocked":
+                infra_blocked_cases += 1
+                total_infra_blocked_runs += ab_trials # Assuming all trials in this case would have been blocked
+                continue
+                
             if not isinstance(c.get("baseline"), dict): continue
             b_ok = any(r.get("ok") for r in c["baseline"]["runs"])
             if b_ok:
@@ -1537,12 +1664,23 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                 h_ok = any(r.get("ok") for r in c["hyper_sprint"]["runs"])
                 if not h_ok:
                     regressions += 1
+            h_sum = c.get("hyper_sprint", {}).get("summary", {})
+            total_infra_blocked_runs += h_sum.get("infra_blocked_count", 0)
+            if h_sum.get("success_rate", 0.0) == 0.0 and h_sum.get("infra_blocked_count", 0) > 0:
+                infra_blocked_cases += 1
+        
         regression_rate = round(regressions / baseline_ok_cases, 4) if baseline_ok_cases else 0.0
+        infra_blocked_rate = round(infra_blocked_cases / measured_cases, 4) if measured_cases else 0.0
+        
+        algorithm_total_runs = total_h_runs - total_infra_blocked_runs
+        algorithm_success_rate = round(h_successes / algorithm_total_runs, 4) if algorithm_total_runs > 0 else 0.0
 
         summary["aggregates"] = {
             "success_rate": h_success_rate,
+            "algorithm_success_rate": algorithm_success_rate,
             "time_to_green_p50": h_p50_ttg,
             "regression_rate": regression_rate,
+            "infra_blocked_rate": infra_blocked_rate,
             "total_retries": h_retries,
             "total_token_calls": h_calls,
         }
@@ -1557,6 +1695,9 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
             f.write("id\ttask_desc\tb_success\th_success\tdelta_success\th_p50_sec\th_calls\n")
             for c in per_case:
                 if "id" not in c: continue
+                if "baseline" not in c:
+                    f.write(f"{c['id']}\tN/A\t0.00%\t0.00%\t+0.00%\t0.00\t0\n")
+                    continue
                 b_s = c["baseline"]["summary"]["success_rate"]
                 h_s = c["hyper_sprint"]["summary"]["success_rate"]
                 h_p50 = c["hyper_sprint"]["summary"]["p50_time_sec"]
@@ -1583,6 +1724,8 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
         avg_r = sum(h["regression_rate"] for h in history) / len(history)
 
         click.echo(f"📊 A/B Benchmark Complete: {len(per_case)} cases. Report: {report_file}")
+        if time_budget_exceeded:
+            click.secho("⚠️ Time budget exceeded. Some cases were skipped.", fg="yellow")
         click.echo(f"📈 [Rolling-7] Avg Success: {avg_s:.2%}, Avg Regression: {avg_r:.2%}")
         click.echo(f"📄 TSV saved to: {tsv_path}")
         return
@@ -1599,7 +1742,19 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
     total_top1_score = 0.0
     
     for case in cases:
+        if max_wall_time_sec > 0 and (time.time() - benchmark_start_time) > max_wall_time_sec:
+            time_budget_exceeded = True
+
         cid = case.get("id", "unknown")
+        if time_budget_exceeded:
+            results.append({
+                "id": cid,
+                "status": "infra_blocked",
+                "reason": "time_budget_exceeded",
+                "score": 0.0
+            })
+            continue
+
         task_desc = case.get("task_desc", "")
         task_type = case.get("task_type", "bug")
         cand_count = case.get("candidate_count", 1)
@@ -1718,13 +1873,16 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
         "research_chosen_cases": research_chosen_count,
         "success_cases": success_count,
         "average_top1_score": total_top1_score / max(1, research_chosen_count),
-        "per_case": results
+        "per_case": results,
+        "time_budget_exceeded": time_budget_exceeded,
     }
     
     report_path = (REPO_ROOT / report_file).resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     click.echo(f"📊 Benchmark Complete: {success_count}/{len(cases)} cases passed. Report: {report_file}")
+    if time_budget_exceeded:
+        click.secho("⚠️ Time budget exceeded. Some cases were skipped.", fg="yellow")
 
 
 @nexus_group.command(name="research:sprint")
@@ -1800,6 +1958,158 @@ def research_sprint(task, target_file, test_file, candidate_count, max_rounds, t
             click.secho(f"🎉 [Hyper-Sprint] Done! Code promoted to branch: {branch_name}", fg="green")
         else:
             click.echo("🛑 [Hyper-Sprint] Promotion cancelled by user.")
+
+
+@nexus_group.command(name="research:meta-opt")
+@click.option("--manifest-file", required=True, type=click.Path(exists=True))
+@click.option("--presets-file", required=True, type=click.Path(exists=True))
+@click.option("--report-file", default=".nexus/reports/research/meta-opt-report.json", type=click.Path())
+@click.option("--max-wall-time-sec", default=300, type=int, show_default=True)
+def research_meta_opt(manifest_file, presets_file, report_file, max_wall_time_sec):
+    """🧪 [Meta-Optimization] Tune Hyper/NightShift preset configs via benchmark search."""
+    import json
+    import time
+
+    started_at = time.time()
+    manifest_path = (REPO_ROOT / manifest_file).resolve()
+    presets_path = (REPO_ROOT / presets_file).resolve()
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        presets = json.loads(presets_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(f"Invalid presets JSON: {exc}")
+
+    if not isinstance(presets, list) or not presets:
+        raise click.ClickException("presets-file must be a non-empty JSON list.")
+
+    rankings: list[dict[str, Any]] = []
+    partial = False
+
+    for idx, preset in enumerate(presets, start=1):
+        elapsed = time.time() - started_at
+        if max_wall_time_sec > 0 and elapsed >= max_wall_time_sec:
+            partial = True
+            break
+
+        if not isinstance(preset, dict):
+            rankings.append(
+                {
+                    "preset_name": f"preset_{idx}",
+                    "status": "invalid_preset",
+                    "error": "preset item must be object",
+                    "aggregates": {
+                        "algorithm_success_rate": 0.0,
+                        "regression_rate": 1.0,
+                        "infra_blocked_rate": 1.0,
+                        "time_to_green_p50": 0.0,
+                    },
+                }
+            )
+            continue
+
+        preset_name = str(preset.get("name", f"preset_{idx}"))
+        timeout_sec = int(preset.get("timeout_sec", 30))
+        preset_wall = int(preset.get("max_wall_time_sec", 120))
+        ab_trials = int(preset.get("ab_trials", 1))
+        ab_llm_mode = bool(preset.get("ab_llm_mode", False))
+        llm_baseline = bool(preset.get("llm_baseline", False))
+
+        run_report = out_path.parent / f"meta-opt-{preset_name}.json"
+        cmd = [
+            "uv",
+            "run",
+            "scripts/engine/nexus_cli.py",
+            "nexus",
+            "research:benchmark",
+            "--manifest-file",
+            str(manifest_path),
+            "--mode",
+            "ab",
+            "--ab-trials",
+            str(max(1, ab_trials)),
+            "--timeout-sec",
+            str(max(1, timeout_sec)),
+            "--max-wall-time-sec",
+            str(max(0, preset_wall)),
+            "--report-file",
+            str(run_report),
+        ]
+        if ab_llm_mode:
+            cmd.append("--ab-llm-mode")
+        else:
+            cmd.append("--ab-no-llm-mode")
+        if llm_baseline:
+            cmd.append("--llm-baseline")
+
+        click.echo(f"🧪 [Meta-Opt] ({idx}/{len(presets)}) preset={preset_name}")
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+
+        aggregates = {
+            "algorithm_success_rate": 0.0,
+            "regression_rate": 1.0,
+            "infra_blocked_rate": 1.0,
+            "time_to_green_p50": 0.0,
+        }
+        status = "ok" if proc.returncode == 0 else "failed"
+        error = ""
+        if proc.returncode != 0:
+            error = (proc.stderr or proc.stdout or "").strip()[:800]
+
+        if run_report.exists():
+            try:
+                report_payload = json.loads(run_report.read_text(encoding="utf-8"))
+                agg = report_payload.get("aggregates", {})
+                if isinstance(agg, dict):
+                    aggregates["algorithm_success_rate"] = float(
+                        agg.get("algorithm_success_rate", agg.get("success_rate", 0.0)) or 0.0
+                    )
+                    aggregates["regression_rate"] = float(agg.get("regression_rate", 1.0) or 0.0)
+                    aggregates["infra_blocked_rate"] = float(agg.get("infra_blocked_rate", 0.0) or 0.0)
+                    aggregates["time_to_green_p50"] = float(agg.get("time_to_green_p50", 0.0) or 0.0)
+            except Exception as exc:  # noqa: BLE001
+                status = "invalid_report"
+                error = f"invalid report parse: {exc}"
+
+        rankings.append(
+            {
+                "preset_name": preset_name,
+                "status": status,
+                "error": error,
+                "preset": preset,
+                "report_file": str(run_report),
+                "aggregates": aggregates,
+            }
+        )
+
+    eligible = [
+        r
+        for r in rankings
+        if r.get("status") == "ok" and r.get("aggregates", {}).get("regression_rate", 1.0) <= 0.05
+    ]
+    eligible_sorted = sorted(
+        eligible,
+        key=lambda r: (
+            -float(r["aggregates"].get("algorithm_success_rate", 0.0)),
+            float(r["aggregates"].get("infra_blocked_rate", 1.0)),
+            float(r["aggregates"].get("time_to_green_p50", 1e9)),
+        ),
+    )
+    selected = eligible_sorted[0] if eligible_sorted else None
+
+    result = {
+        "status": "ok" if selected else "no_eligible_preset",
+        "partial": partial,
+        "manifest_file": str(manifest_path),
+        "presets_file": str(presets_path),
+        "max_wall_time_sec": max_wall_time_sec,
+        "elapsed_sec": round(time.time() - started_at, 4),
+        "selected_preset": selected,
+        "rankings": eligible_sorted + [r for r in rankings if r not in eligible_sorted],
+    }
+    out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    click.echo(json.dumps(result, indent=2))
 
 # --- External Command Registration ---
 try:

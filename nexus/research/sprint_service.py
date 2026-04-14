@@ -356,12 +356,27 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     def _semantic_guard(source: str, candidate: str, task: str) -> tuple[bool, str]:
         if candidate.strip() == source.strip():
             return False, "no_change_candidate"
+        
+        # R7: Strict rejection for invalid AST/syntax
+        try:
+            compile(candidate, "<semantic_guard>", "exec")
+        except SyntaxError as exc:
+            return False, f"syntax_error: {exc}"
+
         src_lines = {ln.strip() for ln in source.splitlines() if ln.strip()}
         cand_lines = {ln.strip() for ln in candidate.splitlines() if ln.strip()}
         changed_count = len(cand_lines - src_lines)
         task_l = task.lower()
         feature_words = ("implement", "add", "create", "introduce", "support", "enable")
-        if any(w in task_l for w in feature_words) and changed_count < 2:
+        
+        is_feature = any(w in task_l for w in feature_words)
+        is_refactor = "refactor" in task_l
+        
+        # Allow structural changes for feature/refactor if AST is valid and delta >= 1
+        if (is_feature or is_refactor) and changed_count >= 1:
+            return True, ""
+
+        if is_feature and changed_count < 2:
             return False, "semantic_guard_low_delta_feature"
         return True, ""
 
@@ -385,6 +400,42 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             summary[code] = summary.get(code, 0) + 1
         return summary
 
+    def _classify_failure(reason: str, codes: list[str], summary: dict[str, int]) -> str:
+        reason_l = str(reason or "").lower()
+        normalized_codes = [str(c).lower() for c in (codes or [])]
+        if "time_budget_exceeded" in normalized_codes or "time_budget_exceeded" in reason_l:
+            return "time_budget_exceeded"
+        if "hyper_run_timeout" in normalized_codes or "hyper_run_timeout" in reason_l:
+            return "hyper_run_timeout"
+        if "stage1_no_passing_candidate" in normalized_codes:
+            return "stage1_no_passing_candidate"
+        if "stage1_failed" in normalized_codes:
+            return "stage1_failed"
+        if any(k in normalized_codes for k in ["quota", "429", "capacity"]):
+            return "quota_or_capacity"
+        if summary.get("syntax_error", 0) > 0:
+            return "syntax_error"
+        if summary.get("pytest_failed", 0) > 0:
+            return "pytest_failed"
+        if reason_l and reason_l != "success":
+            return reason_l
+        return "unknown_failure"
+
+    def _corrective_action_for(failure_class: str) -> str:
+        if "timeout" in failure_class:
+            return "increase_timeout_or_reduce_scope"
+        if failure_class in {"stage1_failed", "stage1_no_passing_candidate"}:
+            return "improve_stage1_candidate_generation"
+        if failure_class == "quota_or_capacity":
+            return "fallback_to_local_or_reduce_llm_load"
+        if failure_class == "syntax_error":
+            return "strengthen_candidate_syntax_guard"
+        if failure_class == "pytest_failed":
+            return "tighten_test_aligned_patching"
+        if failure_class == "time_budget_exceeded":
+            return "reduce_trials_or_raise_wall_time_budget"
+        return "review_failure_trace_and_refine_strategy"
+
     def _persist_learning(
         *,
         status: str,
@@ -400,6 +451,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             from nexus.services.mem_palace import MemPalace
 
             local_store = store or FindingsMemoryStore(repo_root)
+            failure_class = _classify_failure(reason, codes, summary) if status != "SUCCESS" else "none"
+            corrective_action = _corrective_action_for(failure_class)
             card = FindingsCard(
                 kind="episodes",
                 title=f"Hyper-Sprint {status}: {Path(config.target_file).name}",
@@ -421,6 +474,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     "attempt_count": len(candidates),
                     "error_codes": codes,
                     "rejection_summary": summary,
+                    "failure_class": failure_class,
+                    "target_file": config.target_file,
+                    "task_signature": config.task,
+                    "corrective_action": corrective_action,
                     "timestamp": datetime.now().isoformat(),
                 },
             )
@@ -503,7 +560,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     if not candidates:
         return SprintResult(
             status="FAILED",
-            reason="no_candidates",
+            reason=SprintOutcome.GENERATION_FAIL.value,
             target_file=config.target_file,
             winner_source="unknown",
             final_score=0.0,
@@ -520,11 +577,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     best = max(candidates, key=lambda c: c.score)
     if best.score < 1.0:
-        final_codes = sorted(set(error_codes + ["stage1_failed"]))
+        final_codes = sorted(set(error_codes + [SprintOutcome.STAGE1_FAILED.value]))
         rejection_summary = _build_rejection_summary(candidates, final_codes)
         _persist_learning(
             status="FAILED",
-            reason="stage1_no_passing_candidate",
+            reason=SprintOutcome.STAGE1_NO_PASSING_CANDIDATE.value,
             winner_source=best.source,
             final_score=best.score,
             summary=rejection_summary,
@@ -532,7 +589,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         )
         return SprintResult(
             status="FAILED",
-            reason="stage1_no_passing_candidate",
+            reason=SprintOutcome.STAGE1_NO_PASSING_CANDIDATE.value,
             target_file=config.target_file,
             winner_source=best.source,
             final_score=best.score,
