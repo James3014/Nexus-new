@@ -345,8 +345,12 @@ def _install_lancedb_stub() -> None:
         def __init__(self):
             self._tables = {}
 
-        def table_names(self):
+        def list_tables(self):
             return list(self._tables.keys())
+
+        def table_names(self):
+            # 保留墊片以相容舊測試，但內部調用新 API
+            return self.list_tables()
 
         def open_table(self, name):
             return self._tables.setdefault(name, _Table())

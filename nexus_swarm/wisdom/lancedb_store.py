@@ -18,7 +18,7 @@ class WisdomMemory:
         self.table = self._get_or_create_table()
     
     def _get_or_create_table(self):
-        if self.table_name in self.db.table_names():
+        if self.table_name in self.db.list_tables():
             return self.db.open_table(self.table_name)
         
         # 🛡️ Defining Nexus Wisdom Schema

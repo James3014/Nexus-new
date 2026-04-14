@@ -83,7 +83,7 @@ class EternalMemory:
                 with open(self.tx_ids_path, "r") as f: tx_records = json.load(f)
             
             tx_records.append({
-                "timestamp": str(asyncio.get_event_loop().time()),
+                "timestamp": str(time.time()),
                 "tx_id": tx_id,
                 "items_count": new_items
             })

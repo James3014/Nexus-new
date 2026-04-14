@@ -99,7 +99,6 @@ async def download_anchor(tx_id: str, output_dir: str = ".nexus/eternal/download
 
 if __name__ == "__main__":
     import sys
-    loop = asyncio.get_event_loop()
     if len(sys.argv) < 2:
         print("Usage: anchor.py --update | --verify <txid> | --download <txid>")
         sys.exit(1)
@@ -108,8 +107,8 @@ if __name__ == "__main__":
     if cmd == "--update":
         write_anchors()
     elif cmd == "--verify" and len(sys.argv) > 2:
-        loop.run_until_complete(verify_anchor(sys.argv[2]))
+        asyncio.run(verify_anchor(sys.argv[2]))
     elif cmd == "--download" and len(sys.argv) > 2:
-        loop.run_until_complete(download_anchor(sys.argv[2]))
+        asyncio.run(download_anchor(sys.argv[2]))
     else:
         print("Unknown command.")

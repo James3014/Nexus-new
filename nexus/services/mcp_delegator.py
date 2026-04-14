@@ -76,8 +76,9 @@ class MCPDelegator:
 
             async def read_response(request_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
                 """Read lines until a valid JSON-RPC response with matching ID is found."""
-                start_time = asyncio.get_event_loop().time()
-                while (asyncio.get_event_loop().time() - start_time) < self.timeout:
+                loop = asyncio.get_running_loop()
+                start_time = loop.time()
+                while (loop.time() - start_time) < self.timeout:
                     if process.stdout is None:
                         return None
                     line = await asyncio.wait_for(process.stdout.readline(), timeout=self.timeout)

@@ -244,10 +244,7 @@ class ResearchPhaseHandler(BasePhaseHandler):
                     "timestamp": time.time(),
                 }
             ]
-            has_list_tables = hasattr(db, "list_tables")
-            table_names = (
-                set(db.list_tables()) if has_list_tables else set(db.table_names())
-            )
+            table_names = set(db.list_tables())
             if table_name not in table_names:
                 db.create_table(table_name, data=data)
             else:
