@@ -190,6 +190,51 @@ def test_run_does_not_promote_when_tier2_fails(tmp_path):
     assert result["reason"] == "tier2_gate_rejected"
     assert called["queued"] is False
     assert shift.lesson_writeback_path.exists()
+    assert shift.last_learning_closure.get("status") == "REJECTED"
+    assert shift.last_learning_closure.get("memory_written") is True
+
+
+def test_persist_learning_closure_runs_verify_write_sync(monkeypatch, tmp_path):
+    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1, keep_worktree=True)
+    shift.project_root = tmp_path
+    shift.resolved_target_file = "target.py"
+    shift.best_score = 0.92
+
+    writes = {"count": 0}
+
+    class FakeStore:
+        def write(self, _card):
+            writes["count"] += 1
+            return str(tmp_path / ".nexus/memory/task/episodes/fake.json")
+
+    class FakePalace:
+        def __init__(self, _root):
+            pass
+
+        def verify(self, candidates):
+            return candidates
+
+        def sync(self):
+            return {"status": "SUCCESS", "synced_patterns": 3}
+
+        def trigger_arweave_distillation(self, _data):
+            return "ARW-nightshift"
+
+    shift.memory_store = FakeStore()
+    monkeypatch.setattr("nexus.services.mem_palace.MemPalace", FakePalace)
+
+    result = shift._persist_learning_closure(
+        status="SUCCESS",
+        reason="best_score_recorded",
+        final_score=0.92,
+    )
+
+    assert writes["count"] == 1
+    assert result.get("mempalace_verified") is True
+    assert result.get("memory_written") is True
+    assert result.get("lancedb_synced") is True
+    assert result.get("sync_status") == "SUCCESS"
+    assert result.get("arweave_tx_id") == "ARW-nightshift"
 
 
 def test_cleanup_worktree_remove_called_when_not_keep(tmp_path, monkeypatch):

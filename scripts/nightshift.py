@@ -95,6 +95,7 @@ class AutoResearchNightShift:
         except Exception as e:
             print(f"⚠️ [Memory Safety] Initialization warning: {e}. Falling back to passive mode.")
             self.memory_store = None # type: ignore
+        self.last_learning_closure: dict[str, Any] = {}
 
         self.best_score = 0.0
         self.no_improve_streak = 0
@@ -505,6 +506,78 @@ class AutoResearchNightShift:
         self.lesson_writeback_path.parent.mkdir(parents=True, exist_ok=True)
         self.lesson_writeback_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    def _persist_learning_closure(self, status: str, reason: str, final_score: float) -> dict[str, Any]:
+        """
+        NightShift learning closure:
+        1) MemPalace verify
+        2) FindingsMemoryStore write (includes LanceDB ingest in repository layer)
+        3) MemPalace sync
+        """
+        closure: dict[str, Any] = {
+            "status": status,
+            "reason": reason,
+            "score": final_score,
+            "mempalace_verified": False,
+            "memory_written": False,
+            "lancedb_synced": False,
+            "sync_status": "SKIPPED",
+        }
+        self.last_learning_closure = closure
+        if self.memory_store is None:
+            closure["sync_status"] = "MEMORY_DISABLED"
+            return closure
+
+        try:
+            from nexus.research.findings_memory import FindingsCard
+            from nexus.services.mem_palace import MemPalace
+
+            card = FindingsCard(
+                kind="episodes",
+                title=f"NightShift {status}: {Path(self.resolved_target_file).name}",
+                task_id=f"ns-{int(time.time())}",
+                tags=["nightshift", status.lower()],
+                confidence="high" if status == "SUCCESS" else "medium",
+                retrieval_hints=[self.task, self.resolved_target_file],
+                body=(
+                    f"Task: {self.task}\n"
+                    f"Target: {self.resolved_target_file}\n"
+                    f"Status: {status}\n"
+                    f"Reason: {reason}\n"
+                    f"Score: {final_score}\n"
+                    f"NoImproveStreak: {self.no_improve_streak}\n"
+                ),
+                extra={
+                    "model_name": self.model_name,
+                    "fallback_model_name": self.fallback_model_name,
+                    "model_exhausted": self.model_exhausted,
+                    "best_score": self.best_score,
+                    "target_file": self.resolved_target_file,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+            palace = MemPalace(str(self.project_root))
+            clean = palace.verify([card.to_dict()])
+            if not clean:
+                closure["reason"] = f"{reason} | mempalace_rejected"
+                return closure
+
+            closure["mempalace_verified"] = True
+            clean_card = FindingsCard.from_dict(clean[0])
+            write_path = self.memory_store.write(clean_card)
+            closure["memory_written"] = True
+            closure["memory_path"] = write_path
+            closure["lancedb_synced"] = True
+            sync_info = palace.sync()
+            closure["sync_status"] = str(sync_info.get("status", "UNKNOWN"))
+            closure["mempalace_sync"] = sync_info
+            tx_id = palace.trigger_arweave_distillation(clean[0])
+            closure["arweave_tx_id"] = tx_id
+            return closure
+        except Exception as exc:
+            closure["sync_status"] = "ERROR"
+            closure["error"] = str(exc)
+            return closure
+
     def _recover_patch_from_raw(self, raw_content: str) -> str:
         """Recover candidate code when the gateway cannot parse structured JSON."""
         text = (raw_content or "").strip()
@@ -647,6 +720,11 @@ class AutoResearchNightShift:
                         summary=tier2_summary,
                     )
                     self._write_failure_lesson("tier2_gate_rejection", tier2_summary)
+                    self._persist_learning_closure(
+                        status="REJECTED",
+                        reason=tier2_summary,
+                        final_score=self.best_score,
+                    )
                     return {
                         "status": "COMPLETED",
                         "task": self.task,
@@ -656,6 +734,13 @@ class AutoResearchNightShift:
                     }
                 self._append_to_pending_manifest(self.task, self.resolved_target_file, self.base_commit, self.best_score, str(workpath))
 
+            final_status = "SUCCESS" if self.best_score > 0 else "NO_IMPROVEMENT"
+            final_reason = "best_score_recorded" if self.best_score > 0 else "no_valid_candidate"
+            self._persist_learning_closure(
+                status=final_status,
+                reason=final_reason,
+                final_score=self.best_score,
+            )
             print(f"✅ [AutoResearch] Finished {self.task}. Best Score: {self.best_score:.2f}")
             return {
                 "status": "COMPLETED",
