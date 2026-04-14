@@ -1,12 +1,13 @@
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
+from enum import Enum
 
 # Schema Swell Prevention: Only approved top-level fields are allowed.
 # If you need to add a field, add it here AND update OUTCOME_SCHEMA_VERSION.
-OUTCOME_SCHEMA_VERSION = "v2.1"
+OUTCOME_SCHEMA_VERSION = "v2.2"
 _ALLOWED_FIELDS_V2 = {
     "outcome_version", "task_id", "trace_id", "span_id",
-    "terminal_state", "exit_code",
+    "terminal_state", "exit_code", "failure_category",
     "sandbox_mode", "pregate_skip", "pregate_skip_reason",
     "trust_level", "escalation_count",
     "verification_commands", "verification_exit_codes",
@@ -14,6 +15,17 @@ _ALLOWED_FIELDS_V2 = {
     "commit_sha", "model_version", "timestamp",
     "benchmark_version", "problem_set_version",
 }
+
+class SprintOutcome(str, Enum):
+    """標準化任務產出分類 (Phase 1 Reliability Hardening)"""
+    SUCCESS = "success"
+    QUOTA_EXHAUSTED = "quota_capacity"
+    TIER1_REJECT = "tier1_reject"
+    TIER2_REJECT = "tier2_reject"
+    SEMANTIC_NO_CHANGE = "semantic_no_change"
+    TEST_TIMEOUT = "test_timeout"
+    GENERATION_FAIL = "generation_fail"
+    UNKNOWN = "unknown"
 
 class SchemaError(ValueError):
     """Raised when an unauthorized field is injected into NexusOutcomeV2."""
@@ -30,7 +42,7 @@ class NexusOutcomeV1:
 
 @dataclass
 class NexusOutcomeV2:
-    """統一產出 Schema（Single Truth Object）v2.1"""
+    """統一產出 Schema（Single Truth Object）v2.2"""
     # 版本標識
     outcome_version: str = OUTCOME_SCHEMA_VERSION
     
@@ -42,6 +54,7 @@ class NexusOutcomeV2:
     # 終止語義
     terminal_state: str = "UNKNOWN"  # SUCCESS / FAILED / ESCALATED / HUMAN_REVIEW
     exit_code: int = -1
+    failure_category: str = SprintOutcome.UNKNOWN.value
     
     # 治理指標
     sandbox_mode: str = "unknown"

@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 from nexus.core.context_hub import ContextHub
 from nexus.services.workspace import WorkspaceManager
 from scripts.ops.feynman_bridge import DualTrackAudit
+from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
 
 
 DEFAULT_TARGET_FILE = ""
@@ -101,6 +102,7 @@ class AutoResearchNightShift:
         self.no_improve_streak = 0
         self.base_commit: Optional[str] = None
         self.tracelog_path = self.project_root / f"tracelog_{self.task.replace('/', '_')}.jsonl"
+        self.trace_log: List[Dict[str, Any]] = []
         self.gateway = gateway or BattlesuitGateway(project_root=self.project_root)
         # 🛡️ Hardened Model Selection (Primary + Fallback)
         self.model_name = model_name
@@ -198,6 +200,7 @@ class AutoResearchNightShift:
             "summary": summary,
             "target_file": self.resolved_target_file,
         }
+        self.trace_log.append(event)
         with open(self.tracelog_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(event) + "\n")
 
@@ -736,6 +739,14 @@ class AutoResearchNightShift:
 
             final_status = "SUCCESS" if self.best_score > 0 else "NO_IMPROVEMENT"
             final_reason = "best_score_recorded" if self.best_score > 0 else "no_valid_candidate"
+            
+            # 物理硬化：自動分類失敗原因 (Phase 1)
+            failure_cat = SprintOutcome.SUCCESS.value if self.best_score > 0 else SprintOutcome.GENERATION_FAIL.value
+            if self.best_score == 0 and any(self._is_quota_or_capacity_error(str(t)) for t in self.trace_log):
+                failure_cat = SprintOutcome.QUOTA_EXHAUSTED.value
+
+            self._save_json_report(final_status, failure_cat)
+            
             self._persist_learning_closure(
                 status=final_status,
                 reason=final_reason,
@@ -751,6 +762,25 @@ class AutoResearchNightShift:
 
         finally:
             self._cleanup_worktree(workpath)
+
+    def _save_json_report(self, terminal_state: str, failure_category: str):
+        """🛡️ [Phase 1] 產生標準化機器可讀報表"""
+        report_path = self.project_root / ".nexus" / "reports" / f"nightshift_{self.task.replace('/', '_')}.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        outcome = NexusOutcomeV2(
+            task_id=self.task,
+            trace_id=getattr(self, "base_commit", "unknown"),
+            terminal_state=terminal_state,
+            failure_category=failure_category,
+            exit_code=0 if terminal_state == "SUCCESS" else 1,
+            model_version=self.model_name,
+            timestamp=datetime.now().isoformat()
+        )
+        
+        with open(report_path, "w") as f:
+            json.dump(outcome.__dict__, f, indent=2)
+        print(f"📊 [Orchestrator] Machine-readable report saved to: {report_path}")
 
     def _cleanup_worktree(self, workpath: Path) -> None:
         resolved_workpath = Path(workpath).resolve()

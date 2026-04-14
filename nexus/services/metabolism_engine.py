@@ -15,17 +15,19 @@ class SessionMetabolism:
         self.project_root = Path(__file__).resolve().parents[2]
         self.stack_path = self.project_root / ".nexus" / "metabolism" / "task_stack.json"
 
-    def save_checkpoint(self, task_id: str, current_step: str, pending: List[str]):
+    def save_checkpoint(self, task_id: str, current_step: str, pending: List[str], terminal_state: str = "PENDING", failure_category: str = "unknown"):
         """💾 建立物理斷點：保存當前堆疊狀態。"""
         self.stack_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "task_id": task_id,
             "last_active_step": current_step,
             "pending_steps": pending,
+            "terminal_state": terminal_state,
+            "failure_category": failure_category,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         self.stack_path.write_text(json.dumps(data, indent=2))
-        logger.info(f"💾 [Checkpoint] Task {task_id} anchored at {current_step}.")
+        logger.info(f"💾 [Checkpoint] Task {task_id} anchored at {current_step} (State: {terminal_state}).")
 
     def load_checkpoint(self) -> Dict[str, Any]:
         """🔍 載入斷點：讀取任務堆疊。"""
