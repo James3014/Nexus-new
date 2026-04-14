@@ -264,6 +264,20 @@ def _enforce_hallucination_gate(final_response: str, evidence_bundle: dict) -> N
         )
 
 
+def _write_hallucination_evidence(path: str | None, final_response: str, evidence_bundle: dict) -> Path | None:
+    if not path:
+        return None
+    out = Path(path)
+    out = out if out.is_absolute() else (REPO_ROOT / out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "final_response": final_response,
+        "evidence_bundle": evidence_bundle,
+    }
+    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
 @nexus_group.command(name="acceptance-check")
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--evidence", "evidence_path", type=click.Path(exists=True))
@@ -436,8 +450,9 @@ def content_rewrite(input_file, output_file, task, llm_mode, report_file):
 @click.option("--source-file", required=False, type=click.Path(exists=True), help="Optional local source file override.")
 @click.option("--topic", default="", help="Optional topic tag.")
 @click.option("--report-file", default=".nexus/reports/learn/learn_report.json", show_default=True, type=click.Path())
+@click.option("--evidence-file", default=".nexus/reports/learn/evidence_ingest.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_ingest(source, source_file, topic, report_file, output_json):
+def learn_ingest(source, source_file, topic, report_file, evidence_file, output_json):
     """📚 Learn Mode: ingest source into claim+citation knowledge store."""
     from nexus.research.learn_mode import LearnModeService
 
@@ -445,14 +460,14 @@ def learn_ingest(source, source_file, topic, report_file, output_json):
     payload = service.ingest(source=source, source_file=source_file, topic=topic)
 
     # Enforce local hallucination gate using generated evidence.
-    _enforce_hallucination_gate(
-        final_response=f"Learn ingest finished for source: {source}.",
-        evidence_bundle={
-            "code_artifacts": ["nexus/research/learn_mode.py"],
-            "test_artifacts": [f"claims_count={payload.get('claims_count', 0)}"],
-            "command_artifacts": [f"source={source}", f"source_ref={payload.get('source_ref', '')}"],
-        },
-    )
+    final_response = f"Learn ingest finished for source: {source}."
+    evidence_bundle = {
+        "code_artifacts": ["nexus/research/learn_mode.py"],
+        "test_artifacts": [f"claims_count={payload.get('claims_count', 0)}"],
+        "command_artifacts": [f"source={source}", f"source_ref={payload.get('source_ref', '')}"],
+    }
+    _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
+    _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
 
     out_path = (REPO_ROOT / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -463,6 +478,7 @@ def learn_ingest(source, source_file, topic, report_file, output_json):
         click.echo(f"✅ Learn ingest complete: {source}")
         click.echo(f"Claims: {payload['claims_count']}, Verified: {payload['verified_claims_count']}")
         click.echo(f"Report: {out_path}")
+        click.echo(f"Evidence: {Path(evidence_file) if evidence_file else 'N/A'}")
 
 
 @nexus_group.command(name="learn:converge")
@@ -470,32 +486,33 @@ def learn_ingest(source, source_file, topic, report_file, output_json):
 @click.option("--max-rounds", default=3, type=int, show_default=True)
 @click.option("--pass-threshold", default=0.6, type=float, show_default=True)
 @click.option("--report-file", default=".nexus/reports/learn/converge_report.json", show_default=True, type=click.Path())
+@click.option("--evidence-file", default=".nexus/reports/learn/evidence_converge.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_converge(topic, max_rounds, pass_threshold, report_file, output_json):
+def learn_converge(topic, max_rounds, pass_threshold, report_file, evidence_file, output_json):
     """🔁 Learn Mode: run local KAL-style converge loop for a topic."""
     from nexus.research.learn_mode import LearnModeService
 
     service = LearnModeService(REPO_ROOT)
     payload = service.converge(topic=topic, max_rounds=max_rounds, pass_threshold=pass_threshold)
 
-    _enforce_hallucination_gate(
-        final_response=(
-            f"Converge status for topic {topic}: converged={payload.get('converged')}, "
-            f"pass_rate={payload.get('self_question_pass_rate')}."
-        ),
-        evidence_bundle={
-            "code_artifacts": ["nexus/research/learn_mode.py"],
-            "test_artifacts": [
-                f"claims_matched={payload.get('claims_matched', 0)}",
-                f"self_question_pass_rate={payload.get('self_question_pass_rate', 0.0)}",
-            ],
-            "command_artifacts": [f"topic={topic}"],
-            "benchmark_metrics": {
-                "success_rate": payload.get("self_question_pass_rate", 0.0),
-                "success_threshold": pass_threshold,
-            },
-        },
+    final_response = (
+        f"Converge status for topic {topic}: converged={payload.get('converged')}, "
+        f"pass_rate={payload.get('self_question_pass_rate')}."
     )
+    evidence_bundle = {
+        "code_artifacts": ["nexus/research/learn_mode.py"],
+        "test_artifacts": [
+            f"claims_matched={payload.get('claims_matched', 0)}",
+            f"self_question_pass_rate={payload.get('self_question_pass_rate', 0.0)}",
+        ],
+        "command_artifacts": [f"topic={topic}"],
+        "benchmark_metrics": {
+            "success_rate": payload.get("self_question_pass_rate", 0.0),
+            "success_threshold": pass_threshold,
+        },
+    }
+    _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
+    _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
 
     out_path = (REPO_ROOT / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -508,27 +525,29 @@ def learn_converge(topic, max_rounds, pass_threshold, report_file, output_json):
             f"Converged={payload['converged']} | pass_rate={payload['self_question_pass_rate']} | coverage={payload['coverage']}"
         )
         click.echo(f"Report: {out_path}")
+        click.echo(f"Evidence: {Path(evidence_file) if evidence_file else 'N/A'}")
 
 
 @nexus_group.command(name="ask")
 @click.option("--topic", required=True)
 @click.option("--top-k", default=5, type=int, show_default=True)
+@click.option("--evidence-file", default=".nexus/reports/learn/evidence_ask.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_ask(topic, top_k, output_json):
+def learn_ask(topic, top_k, evidence_file, output_json):
     """❓ Ask using cited claims only. If no cited evidence, return UNKNOWN."""
     from nexus.research.learn_mode import LearnModeService
 
     service = LearnModeService(REPO_ROOT)
     payload = service.ask(topic=topic, top_k=top_k)
 
-    _enforce_hallucination_gate(
-        final_response=str(payload.get("answer", "UNKNOWN")),
-        evidence_bundle={
-            "code_artifacts": ["nexus/research/learn_mode.py"],
-            "test_artifacts": [f"claims_used={payload.get('claims_used', 0)}"],
-            "command_artifacts": [f"topic={topic}"],
-        },
-    )
+    final_response = str(payload.get("answer", "UNKNOWN"))
+    evidence_bundle = {
+        "code_artifacts": ["nexus/research/learn_mode.py"],
+        "test_artifacts": [f"claims_used={payload.get('claims_used', 0)}"],
+        "command_artifacts": [f"topic={topic}"],
+    }
+    _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
+    _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
 
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -537,6 +556,29 @@ def learn_ask(topic, top_k, output_json):
         click.echo("UNKNOWN")
         return
     click.echo(payload["answer"])
+
+
+@nexus_group.command(name="learn:report")
+@click.option("--topic", default="", help="Optional topic filter for coverage and unresolved questions.")
+@click.option("--report-file", default=".nexus/reports/learn/learn_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def learn_report(topic, report_file, output_json):
+    """📈 Build unified learn report for governance and CI consumption."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.build_report(topic=topic)
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    click.echo("✅ Learn report generated")
+    click.echo(
+        f"sources={payload['sources_count']} claims={payload['claims_count']} coverage={payload['coverage']} converged={payload['converged']}"
+    )
+    click.echo(f"Report: {out_path}")
 
 
 @nexus_group.command(name="contract-check")

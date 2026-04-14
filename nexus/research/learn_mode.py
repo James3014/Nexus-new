@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,9 +35,11 @@ class LearnModeService:
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.knowledge_dir = project_root / ".nexus" / "knowledge"
+        self.raw_dir = self.knowledge_dir / "raw_sources"
         self.claims_path = self.knowledge_dir / "learn_claims.jsonl"
         self.reports_dir = project_root / ".nexus" / "reports" / "learn"
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
+        self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_path(self, p: str | Path) -> Path:
@@ -68,10 +71,29 @@ class LearnModeService:
                 break
         return claims
 
+    def _save_source_snapshot(self, source_ref: str, text: str) -> Path:
+        digest = hashlib.sha256(source_ref.encode("utf-8")).hexdigest()[:16]
+        out = self.raw_dir / f"{digest}.txt"
+        out.write_text(text, encoding="utf-8")
+        return out
+
     def _load_source_text(self, source: str, source_file: str | None = None) -> tuple[str, str]:
         if source_file:
             src_path = self._resolve_path(source_file)
             return src_path.read_text(encoding="utf-8"), f"file://{src_path}"
+        if source.startswith("repo:"):
+            repo = source.replace("repo:", "", 1).strip()
+            if "/" in repo:
+                owner, name = repo.split("/", 1)
+                for branch in ("main", "master"):
+                    url = f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/README.md"
+                    try:
+                        with request.urlopen(url, timeout=10) as resp:  # nosec: B310
+                            payload = resp.read().decode("utf-8", errors="ignore")
+                        if payload.strip():
+                            return payload, url
+                    except Exception:
+                        continue
         if source.startswith("http://") or source.startswith("https://"):
             with request.urlopen(source, timeout=10) as resp:  # nosec: B310 (user-provided url by design)
                 payload = resp.read().decode("utf-8", errors="ignore")
@@ -105,6 +127,7 @@ class LearnModeService:
 
     def ingest(self, source: str, source_file: str | None = None, topic: str = "") -> dict[str, Any]:
         text, source_ref = self._load_source_text(source, source_file=source_file)
+        snapshot_path = self._save_source_snapshot(source_ref, text)
         claims = self._split_to_claims(text, source_ref)
         self._append_claims(claims)
 
@@ -121,7 +144,7 @@ class LearnModeService:
             tags=["learn_mode", "ingest"] + ([topic] if topic else []),
             stage="scout",
             confidence="medium",
-            evidence_paths=[str(self.claims_path)],
+            evidence_paths=[str(self.claims_path), str(snapshot_path)],
             retrieval_hints=[topic or source],
             body=f"Ingested {len(claims)} claims from {source_ref}",
             task_id=f"learn-{int(datetime.now(timezone.utc).timestamp())}",
@@ -135,7 +158,9 @@ class LearnModeService:
             "source_ref": source_ref,
             "claims_count": len(claims),
             "verified_claims_count": verified_count,
+            "sources_count": 1,
             "claims_store": str(self.claims_path),
+            "source_snapshot_path": str(snapshot_path),
             "findings_card_path": card_path,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -170,6 +195,7 @@ class LearnModeService:
             "status": "SUCCESS",
             "topic": topic,
             "rounds_used": rounds_used,
+            "sources_count": len({c.get("source_url", "") for c in claims}),
             "claims_total": len(claims),
             "claims_matched": len(matched),
             "self_questions_total": total_questions,
@@ -234,3 +260,36 @@ class LearnModeService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    def build_report(self, topic: str = "") -> dict[str, Any]:
+        claims = self.load_claims()
+        sources = {c.get("source_url", "") for c in claims if c.get("source_url")}
+        matched = claims
+        unresolved_questions: list[str] = []
+        coverage = 1.0 if claims else 0.0
+        pass_rate = 1.0 if claims else 0.0
+        if topic:
+            tokens = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))
+            if tokens:
+                matched = []
+                for c in claims:
+                    blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
+                    if any(t in blob for t in tokens):
+                        matched.append(c)
+                coverage = 0.0 if not claims else len(matched) / len(claims)
+                pass_rate = min(1.0, len(matched) / max(3, len(tokens)))
+                if not matched:
+                    unresolved_questions = [f"Need cited claims for token: {t}" for t in sorted(tokens)]
+                elif pass_rate < 0.6:
+                    unresolved_questions = ["Need more cited claims to reach pass threshold 0.6"]
+
+        return {
+            "status": "SUCCESS",
+            "topic": topic,
+            "sources_count": len(sources),
+            "claims_count": len(claims),
+            "coverage": round(coverage, 4),
+            "self_question_pass_rate": round(pass_rate, 4),
+            "unresolved_questions": unresolved_questions,
+            "converged": pass_rate >= 0.6,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
