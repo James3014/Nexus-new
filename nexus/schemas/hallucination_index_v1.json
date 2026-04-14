@@ -16,9 +16,14 @@
     },
     "unverified_status": {
       "weight": 8,
-      "keywords": ["正在輸出", "生成中", "輸出中", "outputting", "generating", "completed", "done"],
+      "keywords": ["正在輸出", "生成中", "輸出中", "outputting", "generating"],
       "check": "status_claim_without_evidence",
       "word_boundary": false
+    },
+    "completion_claim_with_unmet_benchmark_threshold": {
+      "weight": 9,
+      "check": "completion_claim_with_unmet_benchmark_threshold",
+      "force_rejected": true
     },
     "contradiction_with_failed_artifacts": {
       "weight": 9,

@@ -50,6 +50,38 @@ def test_contradiction_with_failed_artifacts_forces_rejected():
     assert "contradiction_with_failed_artifacts" in analysis["triggers"]
 
 
+def test_completion_claim_with_unmet_benchmark_threshold_forces_rejected():
+    guard = HallucinationGuard()
+    response = "Round completed. Benchmark tuning is completed."
+    evidence = {
+        "benchmark_metrics": {
+            "success_rate": 0.40,
+            "success_threshold": 0.55,
+        },
+        "code_artifacts": ["scripts/engine/nexus_cli.py"],
+        "test_artifacts": ["success_rate: 0.40"],
+    }
+    analysis = guard.analyze(response, evidence)
+    assert analysis["status"] == "REJECTED"
+    assert "completion_claim_with_unmet_benchmark_threshold" in analysis["triggers"]
+
+
+def test_completion_claim_not_rejected_when_threshold_met():
+    guard = HallucinationGuard()
+    response = "Round completed with evidence attached."
+    evidence = {
+        "benchmark_metrics": {
+            "success_rate": 0.61,
+            "success_threshold": 0.55,
+        },
+        "code_artifacts": ["scripts/engine/nexus_cli.py"],
+        "test_artifacts": ["success_rate: 0.61"],
+    }
+    analysis = guard.analyze(response, evidence)
+    assert "completion_claim_with_unmet_benchmark_threshold" not in analysis["triggers"]
+    assert analysis["status"] in {"VERIFIED", "PARTIAL"}
+
+
 def test_render_output():
     guard = HallucinationGuard()
     guard.analyze("Clean response", {"code_artifacts": ["a.py"]})
