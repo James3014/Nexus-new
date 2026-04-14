@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib import request
 from urllib.parse import quote_plus
+import html
 
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
@@ -86,34 +87,149 @@ class LearnModeService:
         out.write_text(text, encoding="utf-8")
         return out
 
-    def _load_source_text(self, source: str, source_file: str | None = None) -> tuple[str, str]:
-        if source_file:
-            src_path = self._resolve_path(source_file)
-            return src_path.read_text(encoding="utf-8"), f"file://{src_path}"
+    def _http_get_text(self, url: str, timeout: int = 10) -> str:
+        with request.urlopen(url, timeout=timeout) as resp:  # nosec: B310
+            return resp.read().decode("utf-8", errors="ignore")
+
+    def _http_get_json(self, url: str, timeout: int = 10) -> dict[str, Any]:
+        data = self._http_get_text(url, timeout=timeout)
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+        return {}
+
+    @staticmethod
+    def _parse_github_repo(source: str) -> tuple[str, str] | None:
         if source.startswith("repo:"):
             repo = source.replace("repo:", "", 1).strip()
             if "/" in repo:
                 owner, name = repo.split("/", 1)
-                for branch in ("main", "master"):
-                    url = f"https://raw.githubusercontent.com/{owner}/{name}/{branch}/README.md"
-                    try:
-                        with request.urlopen(url, timeout=10) as resp:  # nosec: B310
-                            payload = resp.read().decode("utf-8", errors="ignore")
-                        if payload.strip():
-                            return payload, url
-                    except Exception:
-                        continue
+                return owner.strip(), name.strip().removesuffix(".git")
+
+        m = re.match(r"https?://github\.com/([^/]+)/([^/#?]+)", source)
+        if m:
+            return m.group(1).strip(), m.group(2).strip().removesuffix(".git")
+        return None
+
+    @staticmethod
+    def _looks_like_html(text: str) -> bool:
+        header = text[:2048].lower()
+        return "<html" in header or "<!doctype html" in header
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        if LearnModeService._looks_like_html(text):
+            t = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.IGNORECASE)
+            t = re.sub(r"<style[\s\S]*?</style>", " ", t, flags=re.IGNORECASE)
+            t = re.sub(r"<[^>]+>", " ", t)
+            t = html.unescape(t)
+            t = re.sub(r"\s+", " ", t)
+            return t.strip()
+        # markdown/text cleanup: keep structure but remove pathological whitespace.
+        lines = [ln.strip() for ln in text.splitlines()]
+        lines = [ln for ln in lines if ln and len(ln) >= 8]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _is_text_candidate(path: str) -> bool:
+        p = path.lower()
+        if p.endswith((".md", ".markdown", ".rst", ".txt", ".adoc")):
+            return True
+        if p.endswith((".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java")):
+            return True
+        return False
+
+    @staticmethod
+    def _path_priority(path: str) -> tuple[int, int]:
+        p = path.lower()
+        rank = 99
+        if p.startswith("readme"):
+            rank = 0
+        elif p.startswith("docs/"):
+            rank = 1
+        elif "/readme" in p:
+            rank = 2
+        elif p.endswith(".md"):
+            rank = 3
+        elif p.startswith("src/") or p.startswith("lib/"):
+            rank = 4
+        elif p.startswith("examples/"):
+            rank = 5
+        return (rank, len(path))
+
+    def _load_github_repo_documents(self, owner: str, repo: str, max_files: int = 24, max_total_chars: int = 400_000) -> list[tuple[str, str]]:
+        repo_meta = self._http_get_json(f"https://api.github.com/repos/{owner}/{repo}", timeout=12)
+        default_branch = str(repo_meta.get("default_branch") or "main")
+        tree_api = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
+        tree_data = self._http_get_json(tree_api, timeout=15)
+        tree_items = tree_data.get("tree", []) if isinstance(tree_data, dict) else []
+        if not isinstance(tree_items, list):
+            tree_items = []
+
+        candidates: list[str] = []
+        for item in tree_items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "blob":
+                continue
+            path = str(item.get("path") or "")
+            size = int(item.get("size") or 0)
+            if not path or size <= 0 or size > 200_000:
+                continue
+            if not self._is_text_candidate(path):
+                continue
+            candidates.append(path)
+
+        if not candidates:
+            # fallback to README only
+            candidates = ["README.md"]
+
+        candidates = sorted(set(candidates), key=self._path_priority)[:max_files]
+
+        docs: list[tuple[str, str]] = []
+        total_chars = 0
+        for path in candidates:
+            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/{path}"
+            try:
+                payload = self._http_get_text(raw_url, timeout=12)
+            except Exception:
+                continue
+            cleaned = self._clean_text(payload)
+            if len(cleaned) < 50:
+                continue
+            if total_chars + len(cleaned) > max_total_chars:
+                break
+            total_chars += len(cleaned)
+            docs.append((cleaned, raw_url))
+        return docs
+
+    def _load_source_documents(self, source: str, source_file: str | None = None) -> list[tuple[str, str]]:
+        if source_file:
+            src_path = self._resolve_path(source_file)
+            txt = self._clean_text(src_path.read_text(encoding="utf-8"))
+            return [(txt, f"file://{src_path}")]
+
+        repo_ref = self._parse_github_repo(source)
+        if repo_ref:
+            owner, name = repo_ref
+            docs = self._load_github_repo_documents(owner, name)
+            if docs:
+                return docs
+
         if source.startswith("http://") or source.startswith("https://"):
-            with request.urlopen(source, timeout=10) as resp:  # nosec: B310 (user-provided url by design)
-                payload = resp.read().decode("utf-8", errors="ignore")
-            return payload, source
+            payload = self._http_get_text(source, timeout=12)
+            return [(self._clean_text(payload), source)]
+
         # keyword/repo fallback path: treat source string itself as seed text
         seed = (
             f"Learning seed for topic: {source}. "
             f"This entry captures baseline context for {source}. "
             f"Additional evidence should be ingested with --source-file or URL."
         )
-        return seed, f"keyword://{source}"
+        return [(seed, f"keyword://{source}")]
 
     def _append_claims(self, claims: list[LearnClaim]) -> None:
         existing = {self._claim_key(c) for c in self.load_claims()}
@@ -140,9 +256,15 @@ class LearnModeService:
         return out
 
     def ingest(self, source: str, source_file: str | None = None, topic: str = "") -> dict[str, Any]:
-        text, source_ref = self._load_source_text(source, source_file=source_file)
-        snapshot_path = self._save_source_snapshot(source_ref, text)
-        claims = self._split_to_claims(text, source_ref)
+        docs = self._load_source_documents(source, source_file=source_file)
+        snapshot_paths: list[str] = []
+        claims: list[LearnClaim] = []
+        source_refs: list[str] = []
+        for text, source_ref in docs:
+            source_refs.append(source_ref)
+            snap = self._save_source_snapshot(source_ref, text)
+            snapshot_paths.append(str(snap))
+            claims.extend(self._split_to_claims(text, source_ref))
         self._append_claims(claims)
 
         # Learning closure hooks: MemPalace verify + Findings write
@@ -158,31 +280,77 @@ class LearnModeService:
             tags=["learn_mode", "ingest"] + ([topic] if topic else []),
             stage="scout",
             confidence="medium",
-            evidence_paths=[str(self.claims_path), str(snapshot_path)],
+            evidence_paths=[str(self.claims_path)] + snapshot_paths[:8],
             retrieval_hints=[topic or source],
-            body=f"Ingested {len(claims)} claims from {source_ref}",
+            body=f"Ingested {len(claims)} claims from {len(docs)} source docs.",
             task_id=f"learn-{int(datetime.now(timezone.utc).timestamp())}",
-            extra={"verified_claims": verified_count},
+            extra={"verified_claims": verified_count, "source_refs": source_refs[:12]},
         )
         card_path = store.write(card)
 
         report = {
             "status": "SUCCESS",
             "source": source,
-            "source_ref": source_ref,
+            "source_ref": source_refs[0] if source_refs else "",
+            "source_refs": source_refs[:20],
             "claims_count": len(claims),
             "verified_claims_count": verified_count,
-            "sources_count": 1,
+            "sources_count": len(set(source_refs)),
+            "documents_ingested": len(docs),
             "claims_store": str(self.claims_path),
-            "source_snapshot_path": str(snapshot_path),
+            "source_snapshot_path": snapshot_paths[0] if snapshot_paths else "",
+            "source_snapshot_paths": snapshot_paths[:20],
             "findings_card_path": card_path,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         return report
 
     def _extract_tokens(self, topic: str) -> set[str]:
-        tokens = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))
-        return {t for t in tokens if len(t) >= 3} or {"general"}
+        raw = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))
+        stop = {
+            "what",
+            "how",
+            "why",
+            "when",
+            "where",
+            "which",
+            "explain",
+            "describe",
+            "about",
+            "with",
+            "and",
+            "the",
+            "for",
+            "that",
+            "this",
+            "are",
+            "is",
+        }
+        tokens = {self._normalize_token(t) for t in raw if len(t) >= 3 and t not in stop}
+        return {t for t in tokens if t} or {"general"}
+
+    @staticmethod
+    def _normalize_token(tok: str) -> str:
+        t = tok.lower().strip("-_ ")
+        synonyms = {
+            "installation": "install",
+            "installed": "install",
+            "installing": "install",
+            "organization": "organize",
+            "organised": "organize",
+            "organized": "organize",
+            "rules": "rule",
+            "guidelines": "guideline",
+            "structures": "structure",
+            "methods": "method",
+        }
+        if t in synonyms:
+            t = synonyms[t]
+        for suf in ("ing", "tion", "ions", "ed", "es", "s"):
+            if len(t) > 5 and t.endswith(suf):
+                t = t[: -len(suf)]
+                break
+        return t
 
     def _is_valid_citation(self, c: dict[str, Any]) -> bool:
         src = str(c.get("source_url") or "")
@@ -322,7 +490,13 @@ class LearnModeService:
             if not self._is_valid_citation(c):
                 continue
             blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
-            score = sum(1 for t in tokens if t in blob)
+            words = {self._normalize_token(w) for w in re.findall(r"[a-z0-9_-]+", blob)}
+            score = 0
+            for t in tokens:
+                if t in words:
+                    score += 2
+                elif any(w.startswith(t) or t.startswith(w) for w in words if len(w) >= 4):
+                    score += 1
             if score > 0:
                 scored.append((score, c))
         scored.sort(key=lambda x: x[0], reverse=True)
