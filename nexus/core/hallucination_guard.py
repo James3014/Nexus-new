@@ -170,6 +170,29 @@ class HallucinationGuard:
         fail_markers = (" fail", "failed", "error", "traceback", "returncode\": 1", "returncode=1", "exit code: 1", "exit_code\": 1")
         return any(marker in evidence_blob for marker in fail_markers)
 
+    def _check_claim_completion_with_low_success(self) -> bool:
+        """
+        R3: 當回覆含完成宣稱且 evidence 顯示 success_rate < threshold，直接 REJECTED。
+        """
+        text = self.response_text.lower()
+        completion_keywords = ["completed", "done", "完成", "成功", "passed"]
+        has_completion_claim = any(kw in text for kw in completion_keywords)
+        if not has_completion_claim:
+            return False
+
+        # 解析 Evidence 中的 success_rate
+        test_artifacts = self.evidence_bundle.get("test_artifacts", [])
+        if not isinstance(test_artifacts, list):
+            return False
+
+        threshold = 0.55  # Round-3 門檻
+        for artifact in test_artifacts:
+            if isinstance(artifact, dict) and "aggregates" in artifact:
+                success_rate = artifact["aggregates"].get("success_rate", 1.0)
+                if float(success_rate) < threshold:
+                    return True
+        return False
+
     def _match_keywords(self, response_text: str, keywords: List[str], word_boundary: bool = True) -> List[str]:
         matches: List[str] = []
         for word in keywords:

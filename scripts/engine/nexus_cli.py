@@ -1249,14 +1249,15 @@ def research_run(
 @click.option("--mode", type=click.Choice(["gladiator", "ab"]), default="gladiator", show_default=True)
 @click.option("--ab-trials", default=3, type=int, show_default=True, help="Number of repeated runs per mode for A/B.")
 @click.option("--ab-llm-mode/--ab-no-llm-mode", default=False, show_default=True, help="Enable LLM mode inside Hyper-Sprint A/B runs.")
-def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mode, ab_trials, ab_llm_mode):
+@click.option("--llm-baseline", is_flag=True, help="Enable LLM assistance for baseline generation in feature/refactor cases.")
+def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mode, ab_trials, ab_llm_mode, llm_baseline):
     """📊 [Control Plane] Gladiator Benchmark: Real evaluation for multiple cases."""
     import json
     import time
     import subprocess
     from nexus.engine.policies.research_policy import ResearchPolicy
     from nexus.research.local_sprint_mutator import generate_local_candidate
-    from nexus.research.sprint_service import SprintConfig, run_hyper_sprint
+    from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator
     from nexus.research.unified_evaluator import UnifiedEvaluator
     
     manifest = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
@@ -1314,6 +1315,9 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
             baseline_hint = case.get("baseline_hint", "lock ordering")
             candidate_count = int(case.get("candidate_count", 1))
             stage1_timeout_sec = int(case.get("stage1_timeout_sec", timeout_sec))
+            task_type = "bug"
+            if "feature" in cid: task_type = "feature"
+            elif "refactor" in cid: task_type = "refactor"
 
             if not target_file or not test_file:
                 per_case.append({
@@ -1346,32 +1350,43 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                 original = target_path.read_text(encoding="utf-8")
                 t0 = time.time()
                 timeout_flag = False
-                quota_flag = False
                 ok = False
+                err = ""
                 try:
-                    patched = generate_local_candidate(original, task_desc, baseline_hint, trial)
-                    target_path.write_text(patched, encoding="utf-8")
-                    res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
-                    ok = res.returncode == 0
+                    # R3: Use LLM baseline if enabled and task is structural
+                    if llm_baseline and task_type in ["feature", "refactor"]:
+                        gen = LLMCandidateGenerator(REPO_ROOT, safe_mode=True)
+                        patched, meta = gen.generate(source_code=original, task=task_desc, mutation_hint=baseline_hint, seed=trial)
+                    else:
+                        patched = generate_local_candidate(original, task_desc, baseline_hint, trial)
+                    
+                    if patched == original:
+                        err = "no_mutation_generated"
+                    else:
+                        target_path.write_text(patched, encoding="utf-8")
+                        res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
+                        ok = res.returncode == 0
+                        if not ok: err = "test_failed"
                 except subprocess.TimeoutExpired:
                     timeout_flag = True
+                    err = "timeout"
+                except Exception as exc:
+                    err = str(exc)
                 finally:
                     target_path.write_text(original, encoding="utf-8")
+                
                 baseline_runs.append({
                     "trial": trial + 1,
                     "ok": ok,
                     "elapsed_sec": round(time.time() - t0, 4),
                     "timeout": timeout_flag,
-                    "quota_event": quota_flag,
+                    "error": err,
                 })
 
                 if prepare_command:
                     subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
 
                 t1 = time.time()
-                h_timeout = False
-                h_ok = False
-                h_quota = False
                 cfg = SprintConfig(
                     task=task_desc,
                     target_file=target_file,
@@ -1390,18 +1405,15 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
                 h_ok = result.status == "SUCCESS" and bool(result.patch)
                 if prepare_command:
                     subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
-                if "quota" in result.error_codes:
-                    h_quota = True
+                
                 hyper_runs.append({
                     "trial": trial + 1,
                     "ok": h_ok,
                     "elapsed_sec": round(time.time() - t1, 4),
-                    "timeout": h_timeout,
-                    "quota_event": h_quota,
                     "status": result.status,
                     "reason": result.reason,
-                    "winner_source": result.winner_source,
                     "error_codes": result.error_codes,
+                    "model_calls": result.model_calls,
                 })
 
             baseline_summary = _summarize_runs(baseline_runs)
