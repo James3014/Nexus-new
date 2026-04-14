@@ -58,6 +58,11 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "--question-count",
             "3",
             "--no-auto-research",
+            "--swarm-mode",
+            "--swarm-max-parallel",
+            "2",
+            "--per-source-timeout-sec",
+            "10",
             "--evidence-file",
             ".nexus/reports/learn/evidence_converge.json",
             "--output-json",
@@ -69,6 +74,8 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert converge_payload["self_question_pass_rate"] >= 0.5
     assert "question_set" in converge_payload
     assert "answered_questions" in converge_payload
+    assert "swarm" in converge_payload
+    assert "round_activity" in converge_payload
     assert (tmp_path / ".nexus" / "reports" / "learn" / "evidence_converge.json").exists()
 
     learn_report = runner.invoke(
@@ -93,6 +100,8 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "nexus",
             "ask",
             "--topic",
+            "nexus pipeline",
+            "--question",
             "What does Nexus learn mode do?",
             "--top-k",
             "3",
@@ -121,6 +130,8 @@ def test_learn_ask_returns_unknown_without_cited_claims(tmp_path, monkeypatch):
             "nexus",
             "ask",
             "--topic",
+            "nexus",
+            "--question",
             "nonexistent-domain-token-zzz",
             "--output-json",
         ],
@@ -157,6 +168,8 @@ def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypat
             "nexus",
             "ask",
             "--topic",
+            "nexus learn mode",
+            "--question",
             "nexus learn mode",
             "--min-evidence",
             "2",

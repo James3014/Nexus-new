@@ -488,6 +488,9 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
 @click.option("--question-count", default=5, type=int, show_default=True)
 @click.option("--auto-research/--no-auto-research", default=True, show_default=True)
 @click.option("--max-sources-per-round", default=2, type=int, show_default=True)
+@click.option("--swarm-mode/--no-swarm-mode", default=True, show_default=True)
+@click.option("--swarm-max-parallel", default=3, type=int, show_default=True)
+@click.option("--per-source-timeout-sec", default=25, type=int, show_default=True)
 @click.option("--report-file", default=".nexus/reports/learn/converge_report.json", show_default=True, type=click.Path())
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_converge.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
@@ -498,6 +501,9 @@ def learn_converge(
     question_count,
     auto_research,
     max_sources_per_round,
+    swarm_mode,
+    swarm_max_parallel,
+    per_source_timeout_sec,
     report_file,
     evidence_file,
     output_json,
@@ -513,6 +519,9 @@ def learn_converge(
         question_count=question_count,
         auto_research=auto_research,
         max_sources_per_round=max_sources_per_round,
+        swarm_mode=swarm_mode,
+        swarm_max_parallel=swarm_max_parallel,
+        per_source_timeout_sec=per_source_timeout_sec,
     )
 
     final_response = (
@@ -550,22 +559,23 @@ def learn_converge(
 
 @nexus_group.command(name="ask")
 @click.option("--topic", required=True)
+@click.option("--question", required=True, help="Question to answer using cited claims within topic scope.")
 @click.option("--top-k", default=5, type=int, show_default=True)
 @click.option("--min-evidence", default=1, type=int, show_default=True)
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_ask.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_ask(topic, top_k, min_evidence, evidence_file, output_json):
+def learn_ask(topic, question, top_k, min_evidence, evidence_file, output_json):
     """❓ Ask using cited claims only. If no cited evidence, return UNKNOWN."""
     from nexus.research.learn_mode import LearnModeService
 
     service = LearnModeService(REPO_ROOT)
-    payload = service.ask(topic=topic, top_k=top_k, min_evidence=min_evidence)
+    payload = service.ask(topic=topic, question=question, top_k=top_k, min_evidence=min_evidence)
 
     final_response = str(payload.get("answer", "UNKNOWN"))
     evidence_bundle = {
         "code_artifacts": ["nexus/research/learn_mode.py"],
         "test_artifacts": [f"claims_used={payload.get('claims_used', 0)}"],
-        "command_artifacts": [f"topic={topic}"],
+        "command_artifacts": [f"topic={topic}", f"question={question}"],
     }
     _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
     _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)

@@ -11,6 +11,7 @@ from urllib import request
 from urllib.parse import quote_plus
 import html
 import time
+import concurrent.futures
 
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
@@ -568,12 +569,36 @@ class LearnModeService:
         question_count: int = 5,
         auto_research: bool = True,
         max_sources_per_round: int = 2,
+        swarm_mode: bool = True,
+        swarm_max_parallel: int = 3,
+        per_source_timeout_sec: int = 25,
     ) -> dict[str, Any]:
         claims = self.load_claims()
         questions = self._build_question_set(topic, question_count=question_count)
         rounds_used = 0
         discovered_sources: list[str] = []
+        round_activity: list[dict[str, Any]] = []
         answered_q, unresolved_q = [], questions
+
+        def _ingest_one(src: str) -> dict[str, Any]:
+            started = time.time()
+            try:
+                rep = self.ingest(source=src, source_file=None, topic=topic)
+                return {
+                    "source": src,
+                    "ok": True,
+                    "claims_count": int(rep.get("claims_count", 0)),
+                    "documents_ingested": int(rep.get("documents_ingested", 0)),
+                    "elapsed_sec": round(time.time() - started, 4),
+                }
+            except Exception as exc:
+                return {
+                    "source": src,
+                    "ok": False,
+                    "error": str(exc),
+                    "elapsed_sec": round(time.time() - started, 4),
+                }
+
         while rounds_used < max_rounds:
             rounds_used += 1
             claims = self.load_claims()
@@ -582,12 +607,30 @@ class LearnModeService:
             converged = pass_rate >= pass_threshold
             if converged or not auto_research or rounds_used >= max_rounds:
                 break
-            for src in self._discover_sources(topic, max_sources=max_sources_per_round):
-                discovered_sources.append(src)
-                try:
-                    self.ingest(source=src, source_file=None, topic=topic)
-                except Exception:
-                    continue
+
+            sources = self._discover_sources(topic, max_sources=max_sources_per_round)
+            discovered_sources.extend(sources)
+            round_rec = {
+                "round": rounds_used,
+                "sources_discovered": sources,
+                "swarm_mode": bool(swarm_mode),
+                "ingest_results": [],
+            }
+            if swarm_mode and sources:
+                max_workers = max(1, min(swarm_max_parallel, len(sources)))
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    fut_map = {pool.submit(_ingest_one, src): src for src in sources}
+                    for fut in concurrent.futures.as_completed(fut_map, timeout=max(1, per_source_timeout_sec) * len(sources)):
+                        src = fut_map[fut]
+                        try:
+                            rec = fut.result(timeout=max(1, per_source_timeout_sec))
+                        except Exception as exc:
+                            rec = {"source": src, "ok": False, "error": f"swarm_timeout_or_error:{exc}"}
+                        round_rec["ingest_results"].append(rec)
+            else:
+                for src in sources:
+                    round_rec["ingest_results"].append(_ingest_one(src))
+            round_activity.append(round_rec)
 
         claims = self.load_claims()
         matched = [c for c in claims if self._is_valid_citation(c)]
@@ -610,6 +653,12 @@ class LearnModeService:
             "answered_questions": answered_q,
             "unresolved_questions": unresolved,
             "discovered_sources": discovered_sources,
+            "round_activity": round_activity,
+            "swarm": {
+                "enabled": bool(swarm_mode),
+                "max_parallel": int(max(1, swarm_max_parallel)),
+                "per_source_timeout_sec": int(max(1, per_source_timeout_sec)),
+            },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         report["learning_closure"] = self._persist_learning_closure(
@@ -628,14 +677,14 @@ class LearnModeService:
         )
         return report
 
-    def ask(self, topic: str, top_k: int = 5, min_evidence: int = 1) -> dict[str, Any]:
+    def ask(self, topic: str, question: str, top_k: int = 5, min_evidence: int = 1) -> dict[str, Any]:
         claims = self.load_claims()
-        tokens = self._extract_tokens(topic)
+        tokens = self._extract_tokens(question)
         if not tokens:
             closure = self._persist_learning_closure(
                 action="ask",
                 status="PARTIAL",
-                reason="empty_topic",
+                reason="empty_question",
                 topic_or_source=topic,
                 evidence_paths=[str(self.claims_path)],
                 retrieval_hints=[],
@@ -646,7 +695,8 @@ class LearnModeService:
                 "answer": "UNKNOWN",
                 "citations": [],
                 "topic": topic,
-                "reason": "empty_topic",
+                "question": question,
+                "reason": "empty_question",
                 "learning_closure": closure,
             }
 
@@ -702,6 +752,7 @@ class LearnModeService:
                 "answer": "UNKNOWN",
                 "citations": [],
                 "topic": topic,
+                "question": question,
                 "reason": "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage",
                 "token_coverage": round(token_coverage, 4),
                 "learning_closure": closure,
@@ -724,6 +775,7 @@ class LearnModeService:
         return {
             "status": "ANSWERED",
             "topic": topic,
+            "question": question,
             "answer": "\n".join(lines),
             "citations": citations,
             "claims_used": len(best),
