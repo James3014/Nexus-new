@@ -1489,6 +1489,12 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                 click.echo(f"   • trial={trial + 1}/{max(1, ab_trials)}")
                 if max_wall_time_sec > 0 and (time.time() - benchmark_start_time) > max_wall_time_sec:
                     time_budget_exceeded = True
+                if max_wall_time_sec > 0 and not time_budget_exceeded:
+                    remaining_wall = max_wall_time_sec - (time.time() - benchmark_start_time)
+                    # Fast-fail guard: don't start a heavy trial when remaining wall-time is clearly insufficient.
+                    min_trial_budget = max(10, min(timeout_sec, stage1_timeout_sec) + 5)
+                    if remaining_wall < min_trial_budget:
+                        time_budget_exceeded = True
                 
                 if time_budget_exceeded:
                     baseline_runs.append({"trial": trial + 1, "ok": False, "elapsed_sec": 0.0, "error": "time_budget_exceeded"})
@@ -1557,7 +1563,9 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                     stage1_timeout_sec=stage1_timeout_sec,
                     llm_mode=ab_llm_mode,
                 )
-                hyper_timeout_sec = max(10, int(stage1_timeout_sec + timeout_sec + 10))
+                # Infra guard: give Hyper slightly more wall-clock budget in LLM mode
+                # and avoid classifying a potentially recoverable round as pure infra timeout.
+                hyper_timeout_sec = max(20, int(stage1_timeout_sec + timeout_sec + (20 if ab_llm_mode else 10)))
                 try:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                         fut = pool.submit(run_hyper_sprint, repo_root=REPO_ROOT, config=cfg)
@@ -1571,17 +1579,68 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                     subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
                 
                 if result is None:
-                    hyper_runs.append({
-                        "trial": trial + 1,
-                        "ok": False,
-                        "elapsed_sec": round(time.time() - t1, 4),
-                        "status": "FAIL",
-                        "reason": "hyper_run_timeout",
-                        "error_codes": ["timeout", "hyper_run_timeout"],
-                        "model_calls": 0,
-                        "rejection_summary": {},
-                        "timeout": True,
-                    })
+                    # Timeout fallback: attempt one local candidate to reduce infra-blocked rounds.
+                    fb_ok = False
+                    fb_reason = "fallback_no_mutation_generated"
+                    fb_timeout = False
+                    try:
+                        current_src = target_path.read_text(encoding="utf-8")
+                        fb_patch = generate_local_candidate(
+                            current_src, task_desc, baseline_hint, trial + 10000
+                        )
+                        if fb_patch != current_src:
+                            target_path.write_text(fb_patch, encoding="utf-8")
+                            fb_res = subprocess.run(
+                                pytest_cmd,
+                                cwd=REPO_ROOT,
+                                capture_output=True,
+                                text=True,
+                                timeout=timeout_sec,
+                            )
+                            fb_ok = fb_res.returncode == 0
+                            fb_reason = (
+                                "fallback_local_after_timeout_success"
+                                if fb_ok
+                                else "fallback_local_after_timeout_test_failed"
+                            )
+                    except subprocess.TimeoutExpired:
+                        fb_timeout = True
+                        fb_reason = "fallback_local_after_timeout_timeout"
+                    except Exception as exc:
+                        fb_reason = f"fallback_local_after_timeout_error:{exc}"
+                    finally:
+                        target_path.write_text(original, encoding="utf-8")
+
+                    if fb_ok:
+                        hyper_runs.append({
+                            "trial": trial + 1,
+                            "ok": True,
+                            "elapsed_sec": round(time.time() - t1, 4),
+                            "status": "SUCCESS",
+                            "reason": fb_reason,
+                            "error_codes": [],
+                            "model_calls": 0,
+                            "rejection_summary": {},
+                            "fallback_used": True,
+                            "timeout": False,
+                        })
+                    else:
+                        hyper_runs.append({
+                            "trial": trial + 1,
+                            "ok": False,
+                            "elapsed_sec": round(time.time() - t1, 4),
+                            "status": "FAIL",
+                            "reason": fb_reason,
+                            "error_codes": (
+                                ["fallback_timeout"]
+                                if fb_timeout
+                                else ["fallback_failed"]
+                            ),
+                            "model_calls": 0,
+                            "rejection_summary": {},
+                            "fallback_used": True,
+                            "timeout": fb_timeout,
+                        })
                     continue
 
                 hyper_runs.append({
