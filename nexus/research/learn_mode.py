@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib import request
+from urllib.parse import quote_plus
 
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
@@ -71,6 +72,14 @@ class LearnModeService:
                 break
         return claims
 
+    @staticmethod
+    def _claim_key(claim: LearnClaim | dict[str, Any]) -> str:
+        if isinstance(claim, LearnClaim):
+            raw = f"{claim.claim}|{claim.source_url}|{claim.citation_span}"
+        else:
+            raw = f"{claim.get('claim','')}|{claim.get('source_url','')}|{claim.get('citation_span',[])}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
     def _save_source_snapshot(self, source_ref: str, text: str) -> Path:
         digest = hashlib.sha256(source_ref.encode("utf-8")).hexdigest()[:16]
         out = self.raw_dir / f"{digest}.txt"
@@ -107,9 +116,14 @@ class LearnModeService:
         return seed, f"keyword://{source}"
 
     def _append_claims(self, claims: list[LearnClaim]) -> None:
+        existing = {self._claim_key(c) for c in self.load_claims()}
         with self.claims_path.open("a", encoding="utf-8") as f:
             for c in claims:
+                key = self._claim_key(c)
+                if key in existing:
+                    continue
                 f.write(json.dumps(c.to_dict(), ensure_ascii=False) + "\n")
+                existing.add(key)
 
     def load_claims(self) -> list[dict[str, Any]]:
         if not self.claims_path.exists():
@@ -166,31 +180,111 @@ class LearnModeService:
         }
         return report
 
-    def converge(self, topic: str, max_rounds: int = 3, pass_threshold: float = 0.6) -> dict[str, Any]:
-        claims = self.load_claims()
+    def _extract_tokens(self, topic: str) -> set[str]:
         tokens = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))
-        if not tokens:
-            tokens = {"general"}
+        return {t for t in tokens if len(t) >= 3} or {"general"}
 
-        def _match(c: dict[str, Any]) -> bool:
-            blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
-            return any(t in blob for t in tokens)
+    def _is_valid_citation(self, c: dict[str, Any]) -> bool:
+        src = str(c.get("source_url") or "")
+        span = c.get("citation_span")
+        if not src or not isinstance(span, list) or len(span) != 2:
+            return False
+        try:
+            start, end = int(span[0]), int(span[1])
+            return end > start >= 0
+        except Exception:
+            return False
 
-        matched = [c for c in claims if _match(c)]
-        total_questions = min(5, max(3, len(tokens)))
-        answered = min(total_questions, len(matched))
-        pass_rate = 0.0 if total_questions == 0 else answered / total_questions
-        converged = pass_rate >= pass_threshold
-        rounds_used = 1
+    def _discover_sources(self, topic: str, max_sources: int = 3) -> list[str]:
+        tokens = sorted(self._extract_tokens(topic))
+        out: list[str] = []
+        claims = self.load_claims()
+        for c in claims:
+            src = str(c.get("source_url", ""))
+            if src.startswith("https://raw.githubusercontent.com/"):
+                m = re.search(r"githubusercontent\.com/([^/]+/[^/]+)/", src)
+                if m:
+                    out.append(f"repo:{m.group(1)}")
+        q = quote_plus(" ".join(tokens[:4]))
+        out.append(f"https://duckduckgo.com/html/?q={q}")
+        # stable unique
+        uniq = []
+        for s in out:
+            if s not in uniq:
+                uniq.append(s)
+        return uniq[:max_sources]
 
-        while not converged and rounds_used < max_rounds:
+    def _build_question_set(self, topic: str, question_count: int = 5) -> list[dict[str, Any]]:
+        tokens = sorted(self._extract_tokens(topic))
+        qs = []
+        for token in tokens[: max(3, question_count)]:
+            qs.append(
+                {
+                    "token": token,
+                    "question": f"What cited evidence explains '{token}' in topic context?",
+                }
+            )
+        return qs
+
+    def _answer_questions(self, questions: list[dict[str, Any]], claims: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        answered, unresolved = [], []
+        for q in questions:
+            token = q["token"]
+            matched = []
+            for c in claims:
+                if not self._is_valid_citation(c):
+                    continue
+                blob = f"{c.get('claim','')} {' '.join(c.get('topic_tags',[]))}".lower()
+                if token in blob:
+                    matched.append(
+                        {
+                            "source_url": c.get("source_url"),
+                            "citation_span": c.get("citation_span"),
+                            "claim": c.get("claim", ""),
+                        }
+                    )
+                if len(matched) >= 2:
+                    break
+            if matched:
+                answered.append({"token": token, "question": q["question"], "evidence": matched})
+            else:
+                unresolved.append({"token": token, "question": q["question"]})
+        return answered, unresolved
+
+    def converge(
+        self,
+        topic: str,
+        max_rounds: int = 3,
+        pass_threshold: float = 0.6,
+        question_count: int = 5,
+        auto_research: bool = True,
+        max_sources_per_round: int = 2,
+    ) -> dict[str, Any]:
+        claims = self.load_claims()
+        questions = self._build_question_set(topic, question_count=question_count)
+        rounds_used = 0
+        discovered_sources: list[str] = []
+        answered_q, unresolved_q = [], questions
+        while rounds_used < max_rounds:
             rounds_used += 1
-            # local-first loop: no auto web fetch in MVP; retain unresolved questions
-            answered = min(total_questions, answered + 1)
-            pass_rate = answered / total_questions
+            claims = self.load_claims()
+            answered_q, unresolved_q = self._answer_questions(questions, claims)
+            pass_rate = 0.0 if not questions else len(answered_q) / len(questions)
             converged = pass_rate >= pass_threshold
+            if converged or not auto_research or rounds_used >= max_rounds:
+                break
+            for src in self._discover_sources(topic, max_sources=max_sources_per_round):
+                discovered_sources.append(src)
+                try:
+                    self.ingest(source=src, source_file=None, topic=topic)
+                except Exception:
+                    continue
 
-        unresolved = [] if converged else [f"Need more evidence for topic token: {t}" for t in sorted(tokens)]
+        claims = self.load_claims()
+        matched = [c for c in claims if self._is_valid_citation(c)]
+        pass_rate = 0.0 if not questions else len(answered_q) / len(questions)
+        converged = pass_rate >= pass_threshold
+        unresolved = [] if converged else [f"Need cited evidence for token: {q['token']}" for q in unresolved_q]
         report = {
             "status": "SUCCESS",
             "topic": topic,
@@ -198,19 +292,22 @@ class LearnModeService:
             "sources_count": len({c.get("source_url", "") for c in claims}),
             "claims_total": len(claims),
             "claims_matched": len(matched),
-            "self_questions_total": total_questions,
-            "self_questions_answered": answered,
+            "self_questions_total": len(questions),
+            "self_questions_answered": len(answered_q),
             "self_question_pass_rate": round(pass_rate, 4),
             "coverage": round(0.0 if not claims else len(matched) / max(1, len(claims)), 4),
             "converged": converged,
+            "question_set": questions,
+            "answered_questions": answered_q,
             "unresolved_questions": unresolved,
+            "discovered_sources": discovered_sources,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         return report
 
-    def ask(self, topic: str, top_k: int = 5) -> dict[str, Any]:
+    def ask(self, topic: str, top_k: int = 5, min_evidence: int = 1) -> dict[str, Any]:
         claims = self.load_claims()
-        tokens = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))
+        tokens = self._extract_tokens(topic)
         if not tokens:
             return {
                 "status": "UNKNOWN",
@@ -222,20 +319,22 @@ class LearnModeService:
 
         scored: list[tuple[int, dict[str, Any]]] = []
         for c in claims:
+            if not self._is_valid_citation(c):
+                continue
             blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
             score = sum(1 for t in tokens if t in blob)
             if score > 0:
                 scored.append((score, c))
         scored.sort(key=lambda x: x[0], reverse=True)
-        best = [c for _, c in scored[:top_k]]
+        best = [c for _, c in scored[:top_k] if self._is_valid_citation(c)]
 
-        if not best:
+        if len(best) < max(1, min_evidence):
             return {
                 "status": "UNKNOWN",
                 "answer": "UNKNOWN",
                 "citations": [],
                 "topic": topic,
-                "reason": "no_cited_claims",
+                "reason": "insufficient_cited_claims",
             }
 
         lines = []
@@ -249,6 +348,7 @@ class LearnModeService:
                 {
                     "source_url": source_url,
                     "citation_span": span,
+                    "claim": c.get("claim", ""),
                 }
             )
         return {
@@ -257,12 +357,14 @@ class LearnModeService:
             "answer": "\n".join(lines),
             "citations": citations,
             "claims_used": len(best),
+            "min_evidence_required": max(1, min_evidence),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def build_report(self, topic: str = "") -> dict[str, Any]:
         claims = self.load_claims()
         sources = {c.get("source_url", "") for c in claims if c.get("source_url")}
+        valid_claims = [c for c in claims if self._is_valid_citation(c)]
         matched = claims
         unresolved_questions: list[str] = []
         coverage = 1.0 if claims else 0.0
@@ -287,6 +389,9 @@ class LearnModeService:
             "topic": topic,
             "sources_count": len(sources),
             "claims_count": len(claims),
+            "claims_with_valid_citation": len(valid_claims),
+            "citation_valid_ratio": round(0.0 if not claims else len(valid_claims) / len(claims), 4),
+            "top_sources": sorted(sources)[:5],
             "coverage": round(coverage, 4),
             "self_question_pass_rate": round(pass_rate, 4),
             "unresolved_questions": unresolved_questions,

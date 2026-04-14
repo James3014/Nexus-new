@@ -55,6 +55,9 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "2",
             "--pass-threshold",
             "0.5",
+            "--question-count",
+            "3",
+            "--no-auto-research",
             "--evidence-file",
             ".nexus/reports/learn/evidence_converge.json",
             "--output-json",
@@ -64,6 +67,8 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     converge_payload = json.loads(converge.output)
     assert converge_payload["status"] == "SUCCESS"
     assert converge_payload["self_question_pass_rate"] >= 0.5
+    assert "question_set" in converge_payload
+    assert "answered_questions" in converge_payload
     assert (tmp_path / ".nexus" / "reports" / "learn" / "evidence_converge.json").exists()
 
     learn_report = runner.invoke(
@@ -80,6 +85,7 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     report_payload = json.loads(learn_report.output)
     assert report_payload["status"] == "SUCCESS"
     assert report_payload["claims_count"] >= 1
+    assert report_payload["citation_valid_ratio"] > 0.0
 
     ask = runner.invoke(
         nexus,
@@ -90,6 +96,8 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "What does Nexus learn mode do?",
             "--top-k",
             "3",
+            "--min-evidence",
+            "1",
             "--evidence-file",
             ".nexus/reports/learn/evidence_ask.json",
             "--output-json",
@@ -121,6 +129,44 @@ def test_learn_ask_returns_unknown_without_cited_claims(tmp_path, monkeypatch):
     payload = json.loads(ask.output)
     assert payload["status"] == "UNKNOWN"
     assert payload["answer"] == "UNKNOWN"
+
+
+def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
+    claims_path.parent.mkdir(parents=True, exist_ok=True)
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claim": "Nexus learn mode stores cited claims.",
+                "source_url": "file:///tmp/src.md",
+                "citation_span": [0, 35],
+                "topic_tags": ["nexus", "learn"],
+                "created_at": "2026-04-14T00:00:00+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ask = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "ask",
+            "--topic",
+            "nexus learn mode",
+            "--min-evidence",
+            "2",
+            "--output-json",
+        ],
+    )
+    assert ask.exit_code == 0, ask.output
+    payload = json.loads(ask.output)
+    assert payload["status"] == "UNKNOWN"
+    assert payload["reason"] == "insufficient_cited_claims"
 
 
 def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
@@ -161,6 +207,10 @@ def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
             "learn:gate",
             "--topic",
             "nexus learn",
+            "--pass-threshold",
+            "0.3",
+            "--claims-min",
+            "1",
             "--contract-file",
             str(contract),
         ],

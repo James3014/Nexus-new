@@ -485,15 +485,35 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
 @click.option("--topic", required=True)
 @click.option("--max-rounds", default=3, type=int, show_default=True)
 @click.option("--pass-threshold", default=0.6, type=float, show_default=True)
+@click.option("--question-count", default=5, type=int, show_default=True)
+@click.option("--auto-research/--no-auto-research", default=True, show_default=True)
+@click.option("--max-sources-per-round", default=2, type=int, show_default=True)
 @click.option("--report-file", default=".nexus/reports/learn/converge_report.json", show_default=True, type=click.Path())
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_converge.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_converge(topic, max_rounds, pass_threshold, report_file, evidence_file, output_json):
+def learn_converge(
+    topic,
+    max_rounds,
+    pass_threshold,
+    question_count,
+    auto_research,
+    max_sources_per_round,
+    report_file,
+    evidence_file,
+    output_json,
+):
     """🔁 Learn Mode: run local KAL-style converge loop for a topic."""
     from nexus.research.learn_mode import LearnModeService
 
     service = LearnModeService(REPO_ROOT)
-    payload = service.converge(topic=topic, max_rounds=max_rounds, pass_threshold=pass_threshold)
+    payload = service.converge(
+        topic=topic,
+        max_rounds=max_rounds,
+        pass_threshold=pass_threshold,
+        question_count=question_count,
+        auto_research=auto_research,
+        max_sources_per_round=max_sources_per_round,
+    )
 
     final_response = (
         f"Converge status for topic {topic}: converged={payload.get('converged')}, "
@@ -531,14 +551,15 @@ def learn_converge(topic, max_rounds, pass_threshold, report_file, evidence_file
 @nexus_group.command(name="ask")
 @click.option("--topic", required=True)
 @click.option("--top-k", default=5, type=int, show_default=True)
+@click.option("--min-evidence", default=1, type=int, show_default=True)
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_ask.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_ask(topic, top_k, evidence_file, output_json):
+def learn_ask(topic, top_k, min_evidence, evidence_file, output_json):
     """❓ Ask using cited claims only. If no cited evidence, return UNKNOWN."""
     from nexus.research.learn_mode import LearnModeService
 
     service = LearnModeService(REPO_ROOT)
-    payload = service.ask(topic=topic, top_k=top_k)
+    payload = service.ask(topic=topic, top_k=top_k, min_evidence=min_evidence)
 
     final_response = str(payload.get("answer", "UNKNOWN"))
     evidence_bundle = {
@@ -584,6 +605,8 @@ def learn_report(topic, report_file, output_json):
 @nexus_group.command(name="learn:gate")
 @click.option("--topic", default="nexus", show_default=True)
 @click.option("--pass-threshold", default=0.6, type=float, show_default=True)
+@click.option("--citation-valid-min", default=0.95, type=float, show_default=True)
+@click.option("--claims-min", default=5, type=int, show_default=True)
 @click.option("--report-file", default=".nexus/reports/learn/learn_gate_report.json", show_default=True, type=click.Path())
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_gate.json", show_default=True, type=click.Path())
 @click.option(
@@ -594,7 +617,17 @@ def learn_report(topic, report_file, output_json):
 )
 @click.option("--skip-contract", is_flag=True)
 @click.option("--skip-ci", is_flag=True)
-def learn_gate(topic, pass_threshold, report_file, evidence_file, contract_file, skip_contract, skip_ci):
+def learn_gate(
+    topic,
+    pass_threshold,
+    citation_valid_min,
+    claims_min,
+    report_file,
+    evidence_file,
+    contract_file,
+    skip_contract,
+    skip_ci,
+):
     """🛡️ One-shot learn governance gate: report + evidence + acceptance + contract + ci(dry-run)."""
     from nexus.research.learn_mode import LearnModeService
 
@@ -623,6 +656,16 @@ def learn_gate(topic, pass_threshold, report_file, evidence_file, contract_file,
     }
     ev_path = _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
     _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
+
+    gate_failures = []
+    if float(payload.get("self_question_pass_rate", 0.0)) < pass_threshold:
+        gate_failures.append("self_question_pass_rate_below_threshold")
+    if float(payload.get("citation_valid_ratio", 0.0)) < citation_valid_min:
+        gate_failures.append("citation_valid_ratio_below_threshold")
+    if int(payload.get("claims_count", 0)) < claims_min:
+        gate_failures.append("claims_count_below_threshold")
+    if gate_failures:
+        raise click.ClickException(f"Learn gate blocked: {', '.join(gate_failures)}")
 
     # Mandatory acceptance with evidence
     subprocess.run(

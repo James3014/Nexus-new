@@ -277,13 +277,24 @@ def run_learn_check(mode: str, dry_run: bool, topic: str):
     claims = int(data.get("claims_count", 0))
     coverage = float(data.get("coverage", 0.0))
     converged = bool(data.get("converged", False))
-    print(f"📊 [Learn] claims={claims}, coverage={coverage:.2%}, converged={converged}")
+    citation_valid_ratio = float(data.get("citation_valid_ratio", 0.0))
+    pass_rate = float(data.get("self_question_pass_rate", 0.0))
+    print(
+        f"📊 [Learn] claims={claims}, coverage={coverage:.2%}, "
+        f"citation_valid_ratio={citation_valid_ratio:.2%}, pass_rate={pass_rate:.2%}, converged={converged}"
+    )
 
     if claims <= 0:
         print("❌ [CI-BLOCK] Learn claims_count is 0.")
         return False
     if mode == "smoke" and coverage <= 0.0:
         print("❌ [CI-BLOCK] Learn coverage is 0 in smoke mode.")
+        return False
+    if mode == "smoke" and citation_valid_ratio < 0.9:
+        print("❌ [CI-BLOCK] Learn citation_valid_ratio is below 90% in smoke mode.")
+        return False
+    if mode == "smoke" and pass_rate < 0.5:
+        print("❌ [CI-BLOCK] Learn self_question_pass_rate is below 50% in smoke mode.")
         return False
     return True
 
