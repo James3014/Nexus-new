@@ -1,10 +1,30 @@
 {
   "name": "hallucination_index_v1",
-  "version": "1.0",
+  "version": "1.1",
   "metrics": {
-    "restricted_claims": {"weight": 5, "keywords": ["solved", "fixed", "closure", "verified", "100%", "bit-perfect"]},
-    "evidence_gap": {"weight": 7, "check": "no_code_or_log_attached"},
-    "self_grading": {"weight": 1, "check": "self_100_percent_with_evidence"}
+    "restricted_claims": {
+      "weight": 5,
+      "keywords": ["solved", "fixed", "closure", "verified", "bit-perfect"]
+    },
+    "evidence_gap": {
+      "weight": 7,
+      "check": "no_code_or_log_attached"
+    },
+    "self_grading": {
+      "weight": 1,
+      "check": "self_100_percent_with_evidence"
+    },
+    "unverified_status": {
+      "weight": 8,
+      "keywords": ["正在輸出", "生成中", "輸出中", "outputting", "generating", "completed", "done"],
+      "check": "status_claim_without_evidence",
+      "word_boundary": false
+    },
+    "contradiction_with_failed_artifacts": {
+      "weight": 9,
+      "check": "contradiction_with_failed_artifacts",
+      "force_rejected": true
+    }
   },
   "thresholds": {"VERIFIED": 2, "PARTIAL": 5, "REJECTED": 6},
   "output_template": "\n## 🧠 幻覺指數標註 (Hallucination Index)\n**總分**: {score}/10 ({status})  \n**觸發項目**: {triggers}  \n**狀態**: {verdict}\n"

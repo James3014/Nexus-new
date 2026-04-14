@@ -1,17 +1,52 @@
 [
   {
-    "artifact": "writeback_todo.json",
-    "timestamp": "2026-04-14T07:59:37.611851",
+    "artifact": "nightshift_nexus_core_outcome_schema.py.json",
+    "timestamp": "2026-04-14T17:45:41.616161",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_nexus_core_outcome_schema.py.json",
+    "timestamp": "2026-04-14T17:38:16.393132",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_\u8acb\u5c07 _Users_jameschen_Downloads_obsidian_\u77e5\u8b58\u5eab_99_Inbox_\u4e00\u4eba\u516c\u53f8_\u5168\u6587\u63d0\u53d6.md \u7684\u524d 500 \u884c\u91cd\u9444\u70ba\u9ad8\u54c1\u8cea\u96fb\u5b50\u66f8\u683c\u5f0f\u3002\n\u8981\u6c42\uff1a\n1. \u4fee\u6b63 OCR \u932f\u5b57\uff08\u5982 \u95a3\u4fc2->\u95dc\u4fc2, \u4fca\u8a18->\u5f8c\u8a18\uff09\u3002\n2. \u7e2b\u5408\u65b7\u53e5\uff0c\u79fb\u9664\u91cd\u8907\u6a19\u984c\u3002\n3. \u79fb\u9664\u9801\u78bc\u3001\u5716\u7247\u6a19\u8a18\u3001\u66f8\u540d\u3002\n4. \u8f38\u51fa\u7d14\u7cb9\u7684 Markdown \u5167\u5bb9\uff0c\u4e0d\u8981\u89e3\u91cb\u3002.json",
+    "timestamp": "2026-04-14T17:21:19.567517",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-14T07:54:37.080266",
+    "timestamp": "2026-04-14T17:15:00.665454",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-14T07:54:37.080030",
+    "timestamp": "2026-04-14T17:15:00.665219",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hallucination_evidence.json",
+    "timestamp": "2026-04-14T17:14:54.399466",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_\u57f7\u884c\u300a\u4e00\u9031\u5de5\u4f5c 4 \u5c0f\u6642\u300b\u5168\u66f8\u8a9e\u7fa9\u91cd\u69cb\u8207\u7d50\u69cb\u9084\u539f\u3002\n\u8981\u6c42\uff1a\n1. 100% \u5b57\u5143\u5b88\u6046\u6bd4\u5c0d (\u76ee\u6a19\u5b57\u5143: 13501)\u3002\n2. \u7e2b\u5408\u65b7\u53e5\uff0c\u79fb\u9664 OCR \u80cc\u666f\u566a\u97f3 (imageXXX, PASSIONs...)\u3002\n3. \u5efa\u7acb\u6a19\u6e96 H2 \u7ae0\u7bc0\u6a19\u984c\u3002\n4. \u6700\u7d42\u7522\u51fa\u81f3 99_Inbox_\u4e00\u9031\u5de5\u4f5c4\u5c0f\u6642_\u5b8c\u6574\u4fee\u5fa9\u7248.md\u3002.json",
+    "timestamp": "2026-04-14T17:14:54.207367",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_\u57f7\u884c\u300a\u4e00\u4eba\u516c\u53f8\u300b\u5168\u66f8\u8a9e\u7fa9\u91cd\u69cb\u8207\u7d50\u69cb\u9084\u539f\u3002\n\u8981\u6c42\uff1a\n1. 100% \u5b57\u5143\u5b88\u6046\u6bd4\u5c0d (\u76ee\u6a19\u5b57\u5143: 3372)\u3002\n2. \u7e2b\u5408\u65b7\u53e5\uff0c\u79fb\u9664 OCR \u80cc\u666f\u566a\u97f3 (imageXXX, PASSIONs...)\u3002\n3. \u5efa\u7acb\u6a19\u6e96 H2 \u7ae0\u7bc0\u6a19\u984c\u3002\n4. \u6700\u7d42\u7522\u51fa\u81f3 99_Inbox_\u4e00\u4eba\u516c\u53f8_\u5b8c\u6574\u4fee\u5fa9\u7248.md\u3002.json",
+    "timestamp": "2026-04-14T17:14:08.469619",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_\u57f7\u884c\u300a3000\u5143\u958b\u59cb\u7684\u81ea\u4e3b\u4eba\u751f\u300b\u5168\u66f8\u8a9e\u7fa9\u91cd\u69cb\u8207\u7d50\u69cb\u9084\u539f\u3002\n\u76ee\u6a19\uff1a\n1. 100% \u5b57\u5143\u5b88\u6046\u6bd4\u5c0d\u3002\n2. \u7e2b\u5408\u65b7\u53e5\u4e26\u5efa\u7acb H2 \u7ae0\u7bc0\u6a19\u984c\u3002\n3. \u79fb\u9664 OCR \u6b98\u7559\u566a\u97f3 (imageXXX, PASSIONs...)\u3002\n4. \u6700\u7d42\u7522\u51fa\u81f3 99_Inbox_3000\u5143\u958b\u59cb\u7684\u81ea\u4e3b\u4eba\u751f_\u5b8c\u6574\u4fee\u5fa9\u7248.md\u3002.json",
+    "timestamp": "2026-04-14T17:13:16.281172",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "writeback_todo.json",
+    "timestamp": "2026-04-14T15:23:45.200803",
     "category": "Operational Report"
   },
   {
