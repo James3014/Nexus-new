@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "id": "smoke-deadlock-small",
+      "task_desc": "Fix deadlock in transfer (small)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 10,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    }
+  ]
+}

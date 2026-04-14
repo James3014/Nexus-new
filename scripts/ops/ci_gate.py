@@ -213,11 +213,49 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
         except Exception as e:
             print(f"⚠️ Error parsing writeback report: {e}")
 
+def run_benchmark_check(mode: str, dry_run: bool):
+    if mode == "off": return True
+    
+    print(f"\n🚀 [CI-Gate] Running Research Benchmark ({mode}) {'(Dry-run)' if dry_run else ''}...")
+    
+    manifest = "docs/research/research_benchmark_ab_smoke.json" if mode == "smoke" else "docs/research/research_benchmark_ab_10cases_seeded.json"
+    report = ROOT / ".nexus" / "reports" / "research" / f"benchmark-{mode}.json"
+    
+    cmd = f'"{VENV_PYTHON}" scripts/engine/nexus_cli.py nexus research:benchmark --manifest-file {manifest} --mode ab --ab-trials 2 --report-file {report}'
+    
+    # In CI, we usually want real execution, but if dry_run is true we can skip or run small
+    if dry_run and mode == "full":
+        print("⚠️ [DRY-RUN] Skipping full benchmark in dry-run mode.")
+        return True
+
+    res = subprocess.run(cmd, shell=True)
+    if res.returncode != 0:
+        print(f"❌ Benchmark execution FAILED (RC: {res.returncode})")
+        return False
+    
+    if report.exists():
+        try:
+            data = json.loads(report.read_text())
+            agg = data.get("aggregates", {})
+            reg_rate = agg.get("regression_rate", 0.0)
+            success_rate = agg.get("success_rate", 0.0)
+            print(f"📊 [Benchmark] Success: {success_rate:.2%}, Regression: {reg_rate:.2%}")
+            
+            if reg_rate > 0.05:
+                print(f"❌ [CI-BLOCK] Regression rate {reg_rate:.2%} exceeds 5% threshold!")
+                return False
+        except Exception as e:
+            print(f"⚠️ Error parsing benchmark report: {e}")
+            return False
+            
+    return True
+
 @nexus_metabolize(task_name="CI Gate Quality Audit")
 def main():
     parser = argparse.ArgumentParser(description="Nexus CI Gate - Release Governance")
     parser.add_argument("--strict", action="store_true", help="Enforce all checks")
     parser.add_argument("--dry-run", action="store_true", help="Audit only, no exit(1)")
+    parser.add_argument("--benchmark-mode", choices=["off", "smoke", "full"], default="off", help="Benchmark execution mode")
     parser.add_argument("--wiki-drift-enforce-level", choices=["off", "warn", "p0"], default="warn", help="Drift enforcement level")
     parser.add_argument("--wiki-capability-enforce-level", choices=["off", "warn", "strict"], default="warn", help="Capability enforcement level")
     parser.add_argument("--wiki-eval-enforce-level", choices=["off", "warn", "strict"], default="warn", help="Eval regression enforcement level")
@@ -284,6 +322,10 @@ def main():
         "Wiki Eval Regression",
         f'"{VENV_PYTHON}" scripts/ops/wiki_eval_regression.py',
     )
+    
+    # 2e. Research Benchmark (Phase 6)
+    if not run_benchmark_check(args.benchmark_mode, args.dry_run) and not args.dry_run:
+        sys.exit(1)
     
     # Report Summaries & Enforcement
     print_phase_6_summaries(wiki_sync_status=wiki_sync_status)

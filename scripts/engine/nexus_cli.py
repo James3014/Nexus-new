@@ -286,6 +286,7 @@ def _build_research_route(
     candidate_count: int,
     root_cause_confidence: float,
     findings_query: str | None,
+    target_file: str | None = None,
 ) -> dict:
     from nexus.engine.policies.research_policy import ResearchPolicy
     from nexus.research.findings_memory import FindingsMemoryStore
@@ -332,6 +333,19 @@ def _build_research_route(
         mode = "skip"
         reason = "clear_root_cause"
 
+    risk_level = "HIGH" if hard_signal else "LOW"
+    if adjusted_root_cause_confidence < 0.5:
+        risk_level = "CRITICAL"
+
+    explain = {
+        "task_type": task_type,
+        "risk": risk_level,
+        "files": [target_file] if target_file else [],
+        "history": {"findings_hits": findings_hits, "hints_count": len(historical_hints)},
+        "confidence": round(adjusted_root_cause_confidence, 2),
+        "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. Hard signal: {hard_signal}."
+    }
+
     return {
         "should_research": should_research,
         "mode": mode,
@@ -344,6 +358,7 @@ def _build_research_route(
         "require_codex_audit": adjusted_root_cause_confidence < 0.6,
         "recommended_flow": recommended_flow,
         "recommended_reason": recommended_reason,
+        "explain_payload": explain,
     }
 
 
@@ -354,7 +369,8 @@ def _build_research_route(
 @click.option("--root-cause-confidence", default=1.0, type=float)
 @click.option("--findings-query")
 @click.option("--output-json", is_flag=True)
-def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json):
+@click.option("--explain-route", is_flag=True)
+def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json, explain_route):
     """🧠 Strategy Routing Layer: Decide whether to research and in what mode."""
     out = _build_research_route(
         task_desc=task_desc,
@@ -363,6 +379,11 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
         root_cause_confidence=root_cause_confidence,
         findings_query=findings_query,
     )
+    if explain_route:
+        click.echo("--- ROUTE EXPLANATION ---")
+        click.echo(json.dumps(out["explain_payload"], indent=2))
+        return
+
     if output_json:
         click.echo(json.dumps(out, indent=2))
     else:
@@ -398,6 +419,7 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
 @click.option("--force-flow", type=click.Choice(["baseline", "hyper_sprint"]), default=None)
 @click.option("--report-file", default=".nexus/reports/research/auto-flow-report.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
+@click.option("--explain-route", is_flag=True)
 def research_auto_flow(
     task_desc,
     target_file,
@@ -418,7 +440,21 @@ def research_auto_flow(
     force_flow,
     report_file,
     output_json,
+    explain_route,
 ):
+    if explain_route:
+        out = _build_research_route(
+            task_desc=task_desc,
+            task_type=task_type,
+            candidate_count=candidate_count,
+            root_cause_confidence=root_cause_confidence,
+            findings_query=findings_query,
+            target_file=target_file,
+        )
+        click.echo("--- ROUTE EXPLANATION ---")
+        click.echo(json.dumps(out["explain_payload"], indent=2))
+        return
+
     payload, out_path = _run_research_auto_flow_impl(
         task_desc=task_desc,
         target_file=target_file,
@@ -446,6 +482,7 @@ def research_auto_flow(
         click.echo(f"Status: {payload['result']['status']}")
         click.echo(f"Elapsed: {payload['result']['elapsed_sec']} sec")
         click.echo(f"Report: {out_path}")
+
 
 
 def _run_research_auto_flow_impl(
@@ -1210,15 +1247,82 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, mo
 
         summary = {
             "mode": "ab",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "total_cases": len(cases),
             "ab_trials": max(1, ab_trials),
             "ab_llm_mode": bool(ab_llm_mode),
             "per_case": per_case,
         }
+        
+        # Calculate Global Aggregates for P5
+        all_h_runs = [r for c in per_case if isinstance(c.get("hyper_sprint"), dict) for r in c["hyper_sprint"]["runs"]]
+        total_h_runs = len(all_h_runs)
+        h_successes = sum(1 for r in all_h_runs if r.get("ok"))
+        h_success_rate = round(h_successes / total_h_runs, 4) if total_h_runs else 0.0
+        h_durations = [r["elapsed_sec"] for r in all_h_runs if r.get("ok")]
+        h_p50_ttg = _pct(h_durations, 0.5)
+        h_retries = sum(int(r.get("attempt_count", 1)) for r in all_h_runs)
+        h_calls = sum(int(r.get("model_calls", 0)) for r in all_h_runs)
+        
+        # Regression Rate: Baseline OK but Hyper Fails
+        regressions = 0
+        baseline_ok_cases = 0
+        for c in per_case:
+            if not isinstance(c.get("baseline"), dict): continue
+            b_ok = any(r.get("ok") for r in c["baseline"]["runs"])
+            if b_ok:
+                baseline_ok_cases += 1
+                h_ok = any(r.get("ok") for r in c["hyper_sprint"]["runs"])
+                if not h_ok:
+                    regressions += 1
+        regression_rate = round(regressions / baseline_ok_cases, 4) if baseline_ok_cases else 0.0
+
+        summary["aggregates"] = {
+            "success_rate": h_success_rate,
+            "time_to_green_p50": h_p50_ttg,
+            "regression_rate": regression_rate,
+            "total_retries": h_retries,
+            "total_token_calls": h_calls,
+        }
+
         report_path = (REPO_ROOT / report_file).resolve()
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        click.echo(f"📊 A/B Benchmark Complete: {len(per_case)}/{len(cases)} cases. Report: {report_file}")
+        
+        # TSV Output
+        tsv_path = report_path.with_suffix(".tsv")
+        with open(tsv_path, "w", encoding="utf-8") as f:
+            f.write("id\ttask_desc\tb_success\th_success\tdelta_success\th_p50_sec\th_calls\n")
+            for c in per_case:
+                if "id" not in c: continue
+                b_s = c["baseline"]["summary"]["success_rate"]
+                h_s = c["hyper_sprint"]["summary"]["success_rate"]
+                h_p50 = c["hyper_sprint"]["summary"]["p50_time_sec"]
+                h_c = sum(int(r.get("model_calls", 0)) for r in c["hyper_sprint"]["runs"])
+                f.write(f"{c['id']}\t{c['task_desc']}\t{b_s:.2%}\t{h_s:.2%}\t{h_s-b_s:+.2%}\t{h_p50:.2f}\t{h_c}\n")
+
+        # Rolling-7 Summary
+        history_file = REPO_ROOT / ".nexus/reports/research/benchmark-history.json"
+        history_file.parent.mkdir(parents=True, exist_ok=True)
+        history = []
+        if history_file.exists():
+            try: history = json.loads(history_file.read_text())
+            except: pass
+        history.append({
+            "ts": summary["timestamp"],
+            "success_rate": h_success_rate,
+            "ttg_p50": h_p50_ttg,
+            "regression_rate": regression_rate
+        })
+        history = history[-7:]
+        history_file.write_text(json.dumps(history, indent=2))
+        
+        avg_s = sum(h["success_rate"] for h in history) / len(history)
+        avg_r = sum(h["regression_rate"] for h in history) / len(history)
+
+        click.echo(f"📊 A/B Benchmark Complete: {len(per_case)} cases. Report: {report_file}")
+        click.echo(f"📈 [Rolling-7] Avg Success: {avg_s:.2%}, Avg Regression: {avg_r:.2%}")
+        click.echo(f"📄 TSV saved to: {tsv_path}")
         return
 
     results = []
