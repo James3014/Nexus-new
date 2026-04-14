@@ -203,6 +203,24 @@ def _local_rewrite_text(text: str) -> str:
     return result
 
 
+def _forward_to_nested_nexus(ctx: click.Context, subcommand: str) -> None:
+    """Compatibility forwarder for callers that forgot the nested `nexus` group."""
+    click.echo(
+        f"⚠️ [CLI-Compat] '{subcommand}' should be invoked as "
+        f"'uv run scripts/engine/nexus_cli.py nexus {subcommand} ...'. Forwarding now."
+    )
+    cmd = [
+        sys.executable,
+        str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+        "nexus",
+        subcommand,
+        *ctx.args,
+    ]
+    res = subprocess.run(cmd)
+    if res.returncode != 0:
+        raise click.exceptions.Exit(res.returncode)
+
+
 def check_hallucination(evidence_path: str | None):
     """🛡️ 執行幻覺指數審計（硬性：缺 evidence 直接視為 fail）。"""
     import json
@@ -1848,6 +1866,7 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
             root_cause_confidence=root_cause_confidence,
             findings_query=findings_query,
             llm_mode=False,
+            llm_baseline=False,
             timeout_sec=60,
             stage1_timeout_sec=20,
             max_time_ratio_guard=1.5,
@@ -1858,6 +1877,7 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
             min_dynamic_stage1_timeout=12,
             force_flow=None,
             report_file=".nexus/reports/research/auto-flow-report.json",
+            output_file=None,
         )
         click.echo(f"Chosen Flow: {payload['chosen_flow']}")
         click.echo(f"Status: {payload['result']['status']}")
@@ -1865,6 +1885,36 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
         click.echo(f"Report: {out_path}")
         return
     click.echo(f"dispatch bug: {task}")
+
+
+@nexus.command(
+    name="run",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.pass_context
+def compat_run(ctx: click.Context):
+    """Compatibility alias for `nexus run`."""
+    _forward_to_nested_nexus(ctx, "run")
+
+
+@nexus.command(
+    name="research:sprint",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.pass_context
+def compat_research_sprint(ctx: click.Context):
+    """Compatibility alias for `nexus research:sprint`."""
+    _forward_to_nested_nexus(ctx, "research:sprint")
+
+
+@nexus.command(
+    name="research:auto-flow",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.pass_context
+def compat_research_auto_flow(ctx: click.Context):
+    """Compatibility alias for `nexus research:auto-flow`."""
+    _forward_to_nested_nexus(ctx, "research:auto-flow")
 
 if __name__ == "__main__":
     nexus()

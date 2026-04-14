@@ -799,9 +799,11 @@ def test_run_bug_auto_flow_delegates(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
     called = {"count": 0}
+    captured = {}
 
     def fake_auto_flow(**_kwargs):
         called["count"] += 1
+        captured.update(_kwargs)
         return (
             {
                 "chosen_flow": "baseline",
@@ -826,6 +828,25 @@ def test_run_bug_auto_flow_delegates(tmp_path, monkeypatch):
     )
     assert result.exit_code == 0
     assert called["count"] == 1
+    assert captured["llm_baseline"] is False
+    assert captured["output_file"] is None
+
+
+def test_top_level_run_compat_forwards_to_nested_group(monkeypatch):
+    runner = CliRunner()
+    called = {}
+
+    def fake_subprocess_run(cmd, *args, **kwargs):
+        called["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", fake_subprocess_run)
+    result = runner.invoke(nexus, ["run", "fix deadlock", "--complexity", "0.3"])
+    assert result.exit_code == 0
+    assert "CLI-Compat" in result.output
+    cmd = called["cmd"]
+    assert "nexus" in cmd
+    assert "run" in cmd
 
 def test_research_run_multi_candidate(tmp_path, monkeypatch):
     runner = CliRunner()
