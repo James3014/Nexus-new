@@ -467,6 +467,17 @@ class LearnModeService:
             "this",
             "are",
             "is",
+            "does",
+            "did",
+            "do",
+            "repo",
+            "repository",
+            "project",
+            "plan",
+            "implement",
+            "implements",
+            "implementation",
+            "workflow",
         }
         tokens = {self._normalize_token(t) for t in raw if len(t) >= 3 and t not in stop}
         return {t for t in tokens if t} or {"general"}
@@ -718,11 +729,29 @@ class LearnModeService:
             if score > 0:
                 scored.append((score, c, token_hits))
         scored.sort(key=lambda x: x[0], reverse=True)
-        best_pairs = [(c, hits) for _, c, hits in scored[:top_k] if self._is_valid_citation(c)]
-        best = [c for c, _ in best_pairs]
+
+        # Greedy coverage-first selector: prioritize claims that add new token coverage,
+        # then break ties by base score.
+        best_pairs: list[tuple[dict[str, Any], set[str]]] = []
         covered_tokens: set[str] = set()
-        for _, hits in best_pairs:
+        pool = [(score, c, hits) for score, c, hits in scored if self._is_valid_citation(c)]
+        while pool and len(best_pairs) < top_k:
+            best_idx = 0
+            best_gain = -1
+            best_score = -1
+            for i, (score, _, hits) in enumerate(pool):
+                gain = len(hits - covered_tokens)
+                if gain > best_gain or (gain == best_gain and score > best_score):
+                    best_idx = i
+                    best_gain = gain
+                    best_score = score
+            score, c, hits = pool.pop(best_idx)
+            if not best_pairs and best_gain <= 0 and score <= 0:
+                break
+            best_pairs.append((c, hits))
             covered_tokens.update(hits)
+
+        best = [c for c, _ in best_pairs]
         token_coverage = 0.0 if not tokens else len(covered_tokens) / len(tokens)
         if len(tokens) >= 5:
             min_token_coverage = 0.6
@@ -798,28 +827,31 @@ class LearnModeService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def build_report(self, topic: str = "") -> dict[str, Any]:
+    def build_report(
+        self,
+        topic: str = "",
+        question_count: int = 5,
+        pass_threshold: float = 0.6,
+    ) -> dict[str, Any]:
         claims = self.load_claims()
         sources = {c.get("source_url", "") for c in claims if c.get("source_url")}
         valid_claims = [c for c in claims if self._is_valid_citation(c)]
-        matched = claims
+        matched = valid_claims
         unresolved_questions: list[str] = []
-        coverage = 1.0 if claims else 0.0
+        answered_questions: list[dict[str, Any]] = []
+        question_set: list[dict[str, Any]] = []
+        coverage = 0.0 if not claims else len(valid_claims) / len(claims)
         pass_rate = 1.0 if claims else 0.0
         if topic:
-            tokens = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))
-            if tokens:
-                matched = []
-                for c in claims:
-                    blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
-                    if any(t in blob for t in tokens):
-                        matched.append(c)
-                coverage = 0.0 if not claims else len(matched) / len(claims)
-                pass_rate = min(1.0, len(matched) / max(3, len(tokens)))
-                if not matched:
-                    unresolved_questions = [f"Need cited claims for token: {t}" for t in sorted(tokens)]
-                elif pass_rate < 0.6:
-                    unresolved_questions = ["Need more cited claims to reach pass threshold 0.6"]
+            question_set = self._build_question_set(topic, question_count=question_count)
+            answered_questions, unresolved_questions = self._answer_questions(question_set, valid_claims)
+            pass_rate = (
+                0.0 if not question_set else len(answered_questions) / len(question_set)
+            )
+            if pass_rate < pass_threshold and not unresolved_questions:
+                unresolved_questions = [
+                    f"Need more cited claims to reach pass threshold {pass_threshold}"
+                ]
 
         return {
             "status": "SUCCESS",
@@ -831,7 +863,9 @@ class LearnModeService:
             "top_sources": sorted(sources)[:5],
             "coverage": round(coverage, 4),
             "self_question_pass_rate": round(pass_rate, 4),
+            "question_set": question_set,
+            "answered_questions": answered_questions,
             "unresolved_questions": unresolved_questions,
-            "converged": pass_rate >= 0.6,
+            "converged": pass_rate >= pass_threshold,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

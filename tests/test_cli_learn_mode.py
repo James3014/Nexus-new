@@ -93,6 +93,8 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert report_payload["status"] == "SUCCESS"
     assert report_payload["claims_count"] >= 1
     assert report_payload["citation_valid_ratio"] > 0.0
+    assert "question_set" in report_payload
+    assert "answered_questions" in report_payload
 
     ask = runner.invoke(
         nexus,

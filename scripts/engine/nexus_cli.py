@@ -591,14 +591,20 @@ def learn_ask(topic, question, top_k, min_evidence, evidence_file, output_json):
 
 @nexus_group.command(name="learn:report")
 @click.option("--topic", default="", help="Optional topic filter for coverage and unresolved questions.")
+@click.option("--question-count", default=5, type=int, show_default=True)
+@click.option("--pass-threshold", default=0.6, type=float, show_default=True)
 @click.option("--report-file", default=".nexus/reports/learn/learn_report.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_report(topic, report_file, output_json):
+def learn_report(topic, question_count, pass_threshold, report_file, output_json):
     """📈 Build unified learn report for governance and CI consumption."""
     from nexus.research.learn_mode import LearnModeService
 
     service = LearnModeService(REPO_ROOT)
-    payload = service.build_report(topic=topic)
+    payload = service.build_report(
+        topic=topic,
+        question_count=question_count,
+        pass_threshold=pass_threshold,
+    )
     out_path = (REPO_ROOT / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
