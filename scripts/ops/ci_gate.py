@@ -250,12 +250,52 @@ def run_benchmark_check(mode: str, dry_run: bool):
             
     return True
 
+
+def run_learn_check(mode: str, dry_run: bool, topic: str):
+    if mode == "off":
+        return True
+
+    print(f"\n🚀 [CI-Gate] Running Learn Mode Check ({mode}) {'(Dry-run)' if dry_run else ''}...")
+    report = ROOT / ".nexus" / "reports" / "learn" / "learn-ci-smoke.json"
+    cmd = (
+        f'"{VENV_PYTHON}" scripts/engine/nexus_cli.py nexus learn:report '
+        f'--topic "{topic}" --report-file "{report}" --output-json'
+    )
+    res = subprocess.run(cmd, shell=True)
+    if res.returncode != 0:
+        print(f"❌ Learn report execution FAILED (RC: {res.returncode})")
+        return False
+    if not report.exists():
+        print("❌ Learn report missing after execution.")
+        return False
+    try:
+        data = json.loads(report.read_text())
+    except Exception as e:
+        print(f"❌ Learn report parse failed: {e}")
+        return False
+
+    claims = int(data.get("claims_count", 0))
+    coverage = float(data.get("coverage", 0.0))
+    converged = bool(data.get("converged", False))
+    print(f"📊 [Learn] claims={claims}, coverage={coverage:.2%}, converged={converged}")
+
+    if claims <= 0:
+        print("❌ [CI-BLOCK] Learn claims_count is 0.")
+        return False
+    if mode == "smoke" and coverage <= 0.0:
+        print("❌ [CI-BLOCK] Learn coverage is 0 in smoke mode.")
+        return False
+    return True
+
+
 @nexus_metabolize(task_name="CI Gate Quality Audit")
 def main():
     parser = argparse.ArgumentParser(description="Nexus CI Gate - Release Governance")
     parser.add_argument("--strict", action="store_true", help="Enforce all checks")
     parser.add_argument("--dry-run", action="store_true", help="Audit only, no exit(1)")
     parser.add_argument("--benchmark-mode", choices=["off", "smoke", "full"], default="off", help="Benchmark execution mode")
+    parser.add_argument("--learn-mode", choices=["off", "smoke"], default="off", help="Learn mode gate execution")
+    parser.add_argument("--learn-topic", default="nexus", help="Topic used by learn smoke gate")
     parser.add_argument("--wiki-drift-enforce-level", choices=["off", "warn", "p0"], default="warn", help="Drift enforcement level")
     parser.add_argument("--wiki-capability-enforce-level", choices=["off", "warn", "strict"], default="warn", help="Capability enforcement level")
     parser.add_argument("--wiki-eval-enforce-level", choices=["off", "warn", "strict"], default="warn", help="Eval regression enforcement level")
@@ -325,6 +365,10 @@ def main():
     
     # 2e. Research Benchmark (Phase 6)
     if not run_benchmark_check(args.benchmark_mode, args.dry_run) and not args.dry_run:
+        sys.exit(1)
+    
+    # 2f. Learn Mode Gate (Phase 6 Learn Lane)
+    if not run_learn_check(args.learn_mode, args.dry_run, args.learn_topic) and not args.dry_run:
         sys.exit(1)
     
     # Report Summaries & Enforcement

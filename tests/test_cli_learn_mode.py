@@ -1,5 +1,6 @@
 import json
 from click.testing import CliRunner
+from unittest.mock import MagicMock
 
 from scripts.engine import nexus_cli
 from scripts.engine.nexus_cli import nexus
@@ -120,3 +121,51 @@ def test_learn_ask_returns_unknown_without_cited_claims(tmp_path, monkeypatch):
     payload = json.loads(ask.output)
     assert payload["status"] == "UNKNOWN"
     assert payload["answer"] == "UNKNOWN"
+
+
+def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
+    claims_path.parent.mkdir(parents=True, exist_ok=True)
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claim": "Nexus learn gate validates evidence chain.",
+                "source_url": "file:///tmp/src.md",
+                "citation_span": [0, 40],
+                "topic_tags": ["nexus", "learn", "gate"],
+                "created_at": "2026-04-14T00:00:00+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    contract = tmp_path / ".nexus" / "config" / "task_contract.example.json"
+    contract.parent.mkdir(parents=True, exist_ok=True)
+    contract.write_text("{}", encoding="utf-8")
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", fake_run)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:gate",
+            "--topic",
+            "nexus learn",
+            "--contract-file",
+            str(contract),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert any("acceptance-check" in " ".join(map(str, c)) for c in calls)
+    assert any("contract-check" in " ".join(map(str, c)) for c in calls)
+    assert any("ci_gate.py" in " ".join(map(str, c)) for c in calls)

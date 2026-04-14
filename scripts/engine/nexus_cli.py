@@ -581,6 +581,109 @@ def learn_report(topic, report_file, output_json):
     click.echo(f"Report: {out_path}")
 
 
+@nexus_group.command(name="learn:gate")
+@click.option("--topic", default="nexus", show_default=True)
+@click.option("--pass-threshold", default=0.6, type=float, show_default=True)
+@click.option("--report-file", default=".nexus/reports/learn/learn_gate_report.json", show_default=True, type=click.Path())
+@click.option("--evidence-file", default=".nexus/reports/learn/evidence_gate.json", show_default=True, type=click.Path())
+@click.option(
+    "--contract-file",
+    default=".nexus/config/task_contract.example.json",
+    show_default=True,
+    type=click.Path(),
+)
+@click.option("--skip-contract", is_flag=True)
+@click.option("--skip-ci", is_flag=True)
+def learn_gate(topic, pass_threshold, report_file, evidence_file, contract_file, skip_contract, skip_ci):
+    """🛡️ One-shot learn governance gate: report + evidence + acceptance + contract + ci(dry-run)."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.build_report(topic=topic)
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    final_response = (
+        f"Validated learn gate. topic={topic}, coverage={payload.get('coverage', 0.0)}, "
+        f"self_question_pass_rate={payload.get('self_question_pass_rate', 0.0)}."
+    )
+    evidence_bundle = {
+        "code_artifacts": ["nexus/research/learn_mode.py", "scripts/engine/nexus_cli.py"],
+        "test_artifacts": [
+            f"claims_count={payload.get('claims_count', 0)}",
+            f"coverage={payload.get('coverage', 0.0)}",
+            f"self_question_pass_rate={payload.get('self_question_pass_rate', 0.0)}",
+        ],
+        "command_artifacts": [f"topic={topic}", f"report={out_path}"],
+        "benchmark_metrics": {
+            "success_rate": payload.get("self_question_pass_rate", 0.0),
+            "success_threshold": pass_threshold,
+        },
+    }
+    ev_path = _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
+    _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
+
+    # Mandatory acceptance with evidence
+    subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+            "nexus",
+            "acceptance-check",
+            "--evidence",
+            str(ev_path),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+            "nexus",
+            "acceptance-check",
+            "--json",
+            "--evidence",
+            str(ev_path),
+        ],
+        check=True,
+    )
+
+    if not skip_contract:
+        subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+                "nexus",
+                "contract-check",
+                "--contract-file",
+                contract_file,
+            ],
+            check=True,
+        )
+
+    if not skip_ci:
+        ci_cmd = [
+            sys.executable,
+            str(REPO_ROOT / "scripts/ops/ci_gate.py"),
+            "--dry-run",
+            "--wiki-drift-enforce-level",
+            "p0",
+            "--require-closeout-contract",
+            "--closeout-contract-path",
+            contract_file,
+            "--learn-mode",
+            "smoke",
+            "--learn-topic",
+            topic,
+        ]
+        subprocess.run(ci_cmd, check=True)
+
+    click.echo("✅ Learn gate PASSED")
+    click.echo(f"Report: {out_path}")
+    click.echo(f"Evidence: {ev_path}")
+
+
 @nexus_group.command(name="contract-check")
 @click.option("--contract-file", type=click.Path(exists=True), required=True)
 def contract_check(contract_file):
