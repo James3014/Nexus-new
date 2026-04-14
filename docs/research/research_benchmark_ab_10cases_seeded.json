@@ -1,0 +1,104 @@
+{
+  "cases": [
+    {
+      "id": "deadlock-small-t15-c1",
+      "task_desc": "Fix deadlock in transfer (small, tight timeout)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 15,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-small-t20-c1",
+      "task_desc": "Fix deadlock in transfer (small baseline)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-small-t20-c2",
+      "task_desc": "Fix deadlock in transfer (small, 2 candidates)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 20,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-small-t30-c1",
+      "task_desc": "Fix deadlock in transfer (small, relaxed timeout)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 30,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-small-t30-c2",
+      "task_desc": "Fix deadlock in transfer (small, exploration)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 30,
+      "baseline_hint": "ordering and non-blocking retry",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-stress-t20-c1",
+      "task_desc": "Fix deadlock under stress (tight timeout)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    },
+    {
+      "id": "deadlock-stress-t30-c1",
+      "task_desc": "Fix flaky deadlock in transfer under stress (baseline)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 30,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    },
+    {
+      "id": "deadlock-stress-t30-c2",
+      "task_desc": "Fix flaky deadlock in transfer under stress (2 candidates)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 30,
+      "baseline_hint": "lock ordering and contention reduction",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    },
+    {
+      "id": "deadlock-stress-t40-c1",
+      "task_desc": "Fix flaky deadlock in transfer under stress (relaxed timeout)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 40,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    },
+    {
+      "id": "deadlock-stress-t40-c2",
+      "task_desc": "Fix flaky deadlock in transfer under stress (exploration)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 40,
+      "baseline_hint": "ordering + bounded backoff",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    }
+  ]
+}
