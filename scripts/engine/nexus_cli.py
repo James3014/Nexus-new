@@ -252,6 +252,18 @@ def check_hallucination(evidence_path: str | None):
     click.echo(guard.render())
     return True
 
+
+def _enforce_hallucination_gate(final_response: str, evidence_bundle: dict) -> None:
+    from nexus.core.hallucination_guard import HallucinationGuard
+
+    guard = HallucinationGuard()
+    analysis = guard.analyze(final_response, evidence_bundle)
+    if analysis["status"] == "REJECTED":
+        raise click.ClickException(
+            f"Hallucination gate rejected response. score={analysis['score']} triggers={analysis['triggers']}"
+        )
+
+
 @nexus_group.command(name="acceptance-check")
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--evidence", "evidence_path", type=click.Path(exists=True))
@@ -417,6 +429,115 @@ def content_rewrite(input_file, output_file, task, llm_mode, report_file):
     click.echo(f"Output Written: {payload['io']['output_written']}")
     click.echo(f"Output Path: {payload['io']['output_path']}")
     click.echo(f"Report: {report_path}")
+
+
+@nexus_group.command(name="learn:ingest")
+@click.option("--source", required=True, help="Source identifier: URL, repo, or keyword.")
+@click.option("--source-file", required=False, type=click.Path(exists=True), help="Optional local source file override.")
+@click.option("--topic", default="", help="Optional topic tag.")
+@click.option("--report-file", default=".nexus/reports/learn/learn_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def learn_ingest(source, source_file, topic, report_file, output_json):
+    """📚 Learn Mode: ingest source into claim+citation knowledge store."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.ingest(source=source, source_file=source_file, topic=topic)
+
+    # Enforce local hallucination gate using generated evidence.
+    _enforce_hallucination_gate(
+        final_response=f"Learn ingest finished for source: {source}.",
+        evidence_bundle={
+            "code_artifacts": ["nexus/research/learn_mode.py"],
+            "test_artifacts": [f"claims_count={payload.get('claims_count', 0)}"],
+            "command_artifacts": [f"source={source}", f"source_ref={payload.get('source_ref', '')}"],
+        },
+    )
+
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"✅ Learn ingest complete: {source}")
+        click.echo(f"Claims: {payload['claims_count']}, Verified: {payload['verified_claims_count']}")
+        click.echo(f"Report: {out_path}")
+
+
+@nexus_group.command(name="learn:converge")
+@click.option("--topic", required=True)
+@click.option("--max-rounds", default=3, type=int, show_default=True)
+@click.option("--pass-threshold", default=0.6, type=float, show_default=True)
+@click.option("--report-file", default=".nexus/reports/learn/converge_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def learn_converge(topic, max_rounds, pass_threshold, report_file, output_json):
+    """🔁 Learn Mode: run local KAL-style converge loop for a topic."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.converge(topic=topic, max_rounds=max_rounds, pass_threshold=pass_threshold)
+
+    _enforce_hallucination_gate(
+        final_response=(
+            f"Converge status for topic {topic}: converged={payload.get('converged')}, "
+            f"pass_rate={payload.get('self_question_pass_rate')}."
+        ),
+        evidence_bundle={
+            "code_artifacts": ["nexus/research/learn_mode.py"],
+            "test_artifacts": [
+                f"claims_matched={payload.get('claims_matched', 0)}",
+                f"self_question_pass_rate={payload.get('self_question_pass_rate', 0.0)}",
+            ],
+            "command_artifacts": [f"topic={topic}"],
+            "benchmark_metrics": {
+                "success_rate": payload.get("self_question_pass_rate", 0.0),
+                "success_threshold": pass_threshold,
+            },
+        },
+    )
+
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"✅ Learn converge complete: topic={topic}")
+        click.echo(
+            f"Converged={payload['converged']} | pass_rate={payload['self_question_pass_rate']} | coverage={payload['coverage']}"
+        )
+        click.echo(f"Report: {out_path}")
+
+
+@nexus_group.command(name="ask")
+@click.option("--topic", required=True)
+@click.option("--top-k", default=5, type=int, show_default=True)
+@click.option("--output-json", is_flag=True)
+def learn_ask(topic, top_k, output_json):
+    """❓ Ask using cited claims only. If no cited evidence, return UNKNOWN."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.ask(topic=topic, top_k=top_k)
+
+    _enforce_hallucination_gate(
+        final_response=str(payload.get("answer", "UNKNOWN")),
+        evidence_bundle={
+            "code_artifacts": ["nexus/research/learn_mode.py"],
+            "test_artifacts": [f"claims_used={payload.get('claims_used', 0)}"],
+            "command_artifacts": [f"topic={topic}"],
+        },
+    )
+
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    if payload["status"] == "UNKNOWN":
+        click.echo("UNKNOWN")
+        return
+    click.echo(payload["answer"])
+
 
 @nexus_group.command(name="contract-check")
 @click.option("--contract-file", type=click.Path(exists=True), required=True)
