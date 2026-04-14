@@ -10,9 +10,12 @@ from typing import Any
 from urllib import request
 from urllib.parse import quote_plus
 import html
+import time
 
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
+from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, append_skill_outcome_event
+from nexus.services.memory import MemoryService
 
 
 @dataclass
@@ -43,6 +46,7 @@ class LearnModeService:
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
+        self.closure_log = self.reports_dir / "learning_closure.jsonl"
 
     def _resolve_path(self, p: str | Path) -> Path:
         path = Path(p)
@@ -241,6 +245,129 @@ class LearnModeService:
                 f.write(json.dumps(c.to_dict(), ensure_ascii=False) + "\n")
                 existing.add(key)
 
+    def _persist_learning_closure(
+        self,
+        *,
+        action: str,
+        status: str,
+        reason: str,
+        topic_or_source: str,
+        evidence_paths: list[str],
+        retrieval_hints: list[str],
+        metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Unified learn closure:
+        1) MemPalace verify
+        2) FindingsMemory write (LanceDB sync via repository)
+        3) MemPalace sync + arweave tx
+        4) skill_outcome_events writeback
+        5) policy_memory route-phase weight sync
+        """
+        closure: dict[str, Any] = {
+            "action": action,
+            "status": status,
+            "reason": reason,
+            "mempalace_verified": False,
+            "memory_written": False,
+            "lancedb_synced": False,
+            "mempalace_sync_status": "SKIPPED",
+            "skill_outcome_written": False,
+            "policy_memory_synced": False,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        task_id = f"learn-{action}-{int(time.time())}"
+        try:
+            card = FindingsCard(
+                kind="episodes",
+                title=f"Learn {action}: {status}",
+                task_id=task_id,
+                tags=["learn_mode", action, status.lower()],
+                stage="analysis" if action == "converge" else "scout",
+                confidence="high" if status == "SUCCESS" else "medium",
+                evidence_paths=evidence_paths[:12],
+                retrieval_hints=list(dict.fromkeys([topic_or_source] + retrieval_hints))[:8],
+                body=(
+                    f"Action: {action}\n"
+                    f"Status: {status}\n"
+                    f"Reason: {reason}\n"
+                    f"Topic/Source: {topic_or_source}\n"
+                    f"Metrics: {json.dumps(metrics, ensure_ascii=False)}\n"
+                ),
+                extra={"closure_kind": "learn_mode", "action": action, "metrics": metrics},
+            )
+            palace = MemPalace(str(self.project_root))
+            clean = palace.verify([card.to_dict()])
+            if not clean:
+                closure["reason"] = f"{reason} | mempalace_rejected"
+                self._append_closure_log(closure)
+                return closure
+            closure["mempalace_verified"] = True
+
+            store = FindingsMemoryStore(self.project_root)
+            write_path = store.write(FindingsCard.from_dict(clean[0]))
+            closure["memory_written"] = True
+            closure["memory_path"] = write_path
+            closure["lancedb_synced"] = True
+
+            sync_info = palace.sync()
+            closure["mempalace_sync_status"] = str(sync_info.get("status", "UNKNOWN"))
+            closure["mempalace_sync"] = sync_info
+            closure["arweave_tx_id"] = palace.trigger_arweave_distillation(clean[0])
+
+            pass_rate = float(metrics.get("self_question_pass_rate", metrics.get("pass_rate", 0.0)) or 0.0)
+            claims_count = int(metrics.get("claims_count", 0) or 0)
+            outcome = build_outcome_event(
+                OutcomePayload(
+                    task_id=task_id,
+                    phase="LEARN",
+                    decision_id=f"{action}-{int(time.time())}",
+                    skill_id=f"learn:{action}",
+                    passed=status == "SUCCESS",
+                    repair_success=status == "SUCCESS",
+                    proof_present=claims_count > 0,
+                    regression_pass_rate=pass_rate,
+                    pattern_reuse=float(metrics.get("coverage", 0.0) or 0.0),
+                    next_run_hit=1.0 if status == "SUCCESS" else 0.0,
+                    metadata={"status": status, "source": "learn.mode", "reason": reason},
+                )
+            )
+            outcome_path = append_skill_outcome_event(self.project_root, outcome)
+            closure["skill_outcome_written"] = True
+            closure["skill_outcome_path"] = str(outcome_path)
+
+            memory = MemoryService(str(self.project_root))
+            # Keep route-weight updates conservative and bounded.
+            pr = max(0.0, min(1.0, pass_rate))
+            cv = max(0.0, min(1.0, float(metrics.get("coverage", 0.0) or 0.0)))
+            weights = {
+                "P": max(0.2, cv),
+                "X": max(0.2, pr),
+                "D": max(0.2, (pr + cv) / 2.0),
+                "R": max(0.2, 1.0 if status == "SUCCESS" else 0.3),
+                "A": max(0.2, float(metrics.get("citation_valid_ratio", 0.0) or cv)),
+                "C": max(0.2, 1.0 if status == "SUCCESS" else 0.3),
+            }
+            memory.sync_route_phase_weights(
+                weights=weights,
+                cycle_status=status,
+                fault_hash=topic_or_source[:120],
+            )
+            closure["policy_memory_synced"] = True
+            closure["route_phase_weights"] = weights
+
+        except Exception as exc:
+            closure["mempalace_sync_status"] = "ERROR"
+            closure["error"] = str(exc)
+
+        self._append_closure_log(closure)
+        return closure
+
+    def _append_closure_log(self, closure: dict[str, Any]) -> None:
+        self.closure_log.parent.mkdir(parents=True, exist_ok=True)
+        with self.closure_log.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(closure, ensure_ascii=False) + "\n")
+
     def load_claims(self) -> list[dict[str, Any]]:
         if not self.claims_path.exists():
             return []
@@ -303,6 +430,20 @@ class LearnModeService:
             "findings_card_path": card_path,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        report["learning_closure"] = self._persist_learning_closure(
+            action="ingest",
+            status=report["status"],
+            reason="ingest_completed",
+            topic_or_source=topic or source,
+            evidence_paths=[str(self.claims_path)] + snapshot_paths[:8] + ([card_path] if card_path else []),
+            retrieval_hints=[topic or source],
+            metrics={
+                "claims_count": report["claims_count"],
+                "coverage": 1.0 if report["claims_count"] > 0 else 0.0,
+                "pass_rate": 1.0 if report["claims_count"] > 0 else 0.0,
+                "citation_valid_ratio": 1.0 if report["claims_count"] > 0 else 0.0,
+            },
+        )
         return report
 
     def _extract_tokens(self, topic: str) -> set[str]:
@@ -471,18 +612,42 @@ class LearnModeService:
             "discovered_sources": discovered_sources,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        report["learning_closure"] = self._persist_learning_closure(
+            action="converge",
+            status="SUCCESS" if converged else "PARTIAL",
+            reason="converged" if converged else "insufficient_evidence",
+            topic_or_source=topic,
+            evidence_paths=[str(self.claims_path), str(self.reports_dir / "converge_report.json")],
+            retrieval_hints=sorted(self._extract_tokens(topic)),
+            metrics={
+                "claims_count": report["claims_total"],
+                "coverage": report["coverage"],
+                "self_question_pass_rate": report["self_question_pass_rate"],
+                "citation_valid_ratio": round(0.0 if report["claims_total"] == 0 else report["claims_matched"] / max(1, report["claims_total"]), 4),
+            },
+        )
         return report
 
     def ask(self, topic: str, top_k: int = 5, min_evidence: int = 1) -> dict[str, Any]:
         claims = self.load_claims()
         tokens = self._extract_tokens(topic)
         if not tokens:
+            closure = self._persist_learning_closure(
+                action="ask",
+                status="PARTIAL",
+                reason="empty_topic",
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=[],
+                metrics={"claims_count": 0, "coverage": 0.0, "pass_rate": 0.0, "citation_valid_ratio": 0.0},
+            )
             return {
                 "status": "UNKNOWN",
                 "answer": "UNKNOWN",
                 "citations": [],
                 "topic": topic,
                 "reason": "empty_topic",
+                "learning_closure": closure,
             }
 
         scored: list[tuple[int, dict[str, Any]]] = []
@@ -503,12 +668,27 @@ class LearnModeService:
         best = [c for _, c in scored[:top_k] if self._is_valid_citation(c)]
 
         if len(best) < max(1, min_evidence):
+            closure = self._persist_learning_closure(
+                action="ask",
+                status="PARTIAL",
+                reason="insufficient_cited_claims",
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=sorted(tokens),
+                metrics={
+                    "claims_count": len(best),
+                    "coverage": min(1.0, len(best) / max(1, top_k)),
+                    "pass_rate": 0.0,
+                    "citation_valid_ratio": 1.0 if best else 0.0,
+                },
+            )
             return {
                 "status": "UNKNOWN",
                 "answer": "UNKNOWN",
                 "citations": [],
                 "topic": topic,
                 "reason": "insufficient_cited_claims",
+                "learning_closure": closure,
             }
 
         lines = []
@@ -532,6 +712,20 @@ class LearnModeService:
             "citations": citations,
             "claims_used": len(best),
             "min_evidence_required": max(1, min_evidence),
+            "learning_closure": self._persist_learning_closure(
+                action="ask",
+                status="SUCCESS",
+                reason="answered_with_citations",
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=sorted(tokens),
+                metrics={
+                    "claims_count": len(best),
+                    "coverage": min(1.0, len(best) / max(1, top_k)),
+                    "pass_rate": 1.0,
+                    "citation_valid_ratio": 1.0,
+                },
+            ),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
