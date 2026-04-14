@@ -1,7 +1,8 @@
 import subprocess
+import time
 from pathlib import Path
 
-from scripts.nightshift import AutoResearchNightShift, RoundOutcome
+from scripts.nightshift import AutoResearchNightShift, RoundOutcome, _cleanup_stale_swarm_locks
 
 
 class FakeGateway:
@@ -102,6 +103,7 @@ def test_run_stops_after_convergence_patience(tmp_path):
         "target.py",
         max_rounds=6,
         convergence_patience=2,
+        keep_worktree=True,
     )
     shift.project_root = tmp_path
     shift.tracelog_path = tmp_path / "tracelog.jsonl"
@@ -169,7 +171,7 @@ def test_run_does_not_promote_when_tier2_fails(tmp_path):
     subprocess.run(["git", "add", "target.py"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True)
 
-    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1)
+    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1, keep_worktree=True)
     shift.project_root = tmp_path
     shift.tracelog_path = tmp_path / "tracelog.jsonl"
     shift.lesson_writeback_path = tmp_path / ".nexus/reports/lesson_writeback.json"
@@ -188,3 +190,67 @@ def test_run_does_not_promote_when_tier2_fails(tmp_path):
     assert result["reason"] == "tier2_gate_rejected"
     assert called["queued"] is False
     assert shift.lesson_writeback_path.exists()
+
+
+def test_cleanup_worktree_remove_called_when_not_keep(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir(parents=True, exist_ok=True)
+    work = tmp_path / "worktree"
+    work.mkdir(parents=True, exist_ok=True)
+    shift = AutoResearchNightShift("x.py", max_rounds=1, keep_worktree=False)
+    shift.project_root = root
+
+    calls = []
+
+    class _Res:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return _Res()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    shift._cleanup_worktree(work)
+    assert calls
+    assert calls[0][:4] == ["git", "worktree", "remove", "--force"]
+
+
+def test_cleanup_worktree_skip_when_keep(tmp_path, monkeypatch):
+    shift = AutoResearchNightShift("x.py", max_rounds=1, keep_worktree=True)
+    shift.project_root = tmp_path
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        raise AssertionError("should not run")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    shift._cleanup_worktree(tmp_path / "other")
+    assert calls == []
+
+
+def test_cleanup_stale_swarm_locks(tmp_path):
+    stale_dir = tmp_path / ".nexus-swarm-001"
+    fresh_dir = tmp_path / ".nexus-swarm-002"
+    stale_dir.mkdir(parents=True, exist_ok=True)
+    fresh_dir.mkdir(parents=True, exist_ok=True)
+    stale = stale_dir / ".swarm_lock"
+    fresh = fresh_dir / ".swarm_lock"
+    stale.write_text("x", encoding="utf-8")
+    fresh.write_text("x", encoding="utf-8")
+    old = time.time() - (4 * 60 * 60)
+    now = time.time()
+    stale.touch()
+    fresh.touch()
+    # set stale lock old enough for ttl=180 min; fresh stays recent
+    import os
+    os.utime(stale, (old, old))
+    os.utime(fresh, (now, now))
+
+    removed = _cleanup_stale_swarm_locks(tmp_path, ttl_minutes=180)
+
+    assert removed == 1
+    assert not stale.exists()
+    assert fresh.exists()

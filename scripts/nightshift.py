@@ -69,6 +69,7 @@ class AutoResearchNightShift:
         gateway: Any = None,
         model_name: Optional[str] = "gemini-3.1-pro-preview",
         fallback_model_name: Optional[str] = "gemini-3-flash-preview",
+        keep_worktree: Optional[bool] = None,
     ):
         self.task = task.strip()
         self.max_rounds = max_rounds
@@ -104,6 +105,8 @@ class AutoResearchNightShift:
         self.model_name = model_name
         self.fallback_model_name = fallback_model_name
         self.model_exhausted: Dict[str, str] = {}
+        env_keep = os.getenv("NIGHTSHIFT_KEEP_WORKTREE", "").strip().lower() in {"1", "true", "yes", "on"}
+        self.keep_worktree = env_keep if keep_worktree is None else bool(keep_worktree)
 
         # 🛡️ Wisdom Triad: Initialize unified prompt engine
         try:
@@ -662,7 +665,28 @@ class AutoResearchNightShift:
             }
 
         finally:
+            self._cleanup_worktree(workpath)
+
+    def _cleanup_worktree(self, workpath: Path) -> None:
+        resolved_workpath = Path(workpath).resolve()
+        resolved_root = self.project_root.resolve()
+        if self.keep_worktree:
             print(f"🧹 [Cleanup] Worktree at {workpath} retained for review.")
+            return
+        # Safety guard: never remove project root.
+        if resolved_workpath == resolved_root:
+            print(f"🧹 [Cleanup] Skip auto-remove for project root path: {workpath}")
+            return
+        res = subprocess.run(
+            ["git", "worktree", "remove", "--force", str(workpath)],
+            cwd=self.project_root,
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode == 0:
+            print(f"🧹 [Cleanup] Worktree removed: {workpath}")
+            return
+        print(f"⚠️ [Cleanup] Auto-remove failed, retained for review: {workpath}")
 
     def _warm_start_optimizer(self):
         """🛡️ Bayesian Warm Start: Load historical traces to eliminate cold-start bias."""
@@ -736,6 +760,19 @@ def _update_manifest_status(project_root: Path, task_name: str, commit_sha: str)
     else:
         print(f"⚠️ [Governance] Could not find matching task ID for '{identifier}' in manifest.")
 
+
+def _cleanup_stale_swarm_locks(project_root: Path, ttl_minutes: int) -> int:
+    threshold = time.time() - max(1, ttl_minutes) * 60
+    removed = 0
+    for lock in project_root.glob(".nexus-swarm-*/.swarm_lock"):
+        try:
+            if lock.stat().st_mtime < threshold:
+                lock.unlink(missing_ok=True)
+                removed += 1
+        except Exception as exc:
+            print(f"⚠️ [Janitor] Failed to remove lock {lock}: {exc}")
+    return removed
+
 def main():
     parser = argparse.ArgumentParser(description="Nexus Night Shift local convergence runner")
     parser.add_argument("--task", default="default-task")
@@ -751,10 +788,17 @@ def main():
     parser.add_argument("--convergence_patience", type=int, default=5)
     parser.add_argument("--model", default="gemini-3.1-pro-preview", help="Primary LLM model")
     parser.add_argument("--fallback-model", default="gemini-3-flash-preview", help="Fallback LLM model when quota/capacity issues occur")
+    parser.add_argument("--keep-worktree", action="store_true", help="Retain worktree after run (default: auto-clean)")
+    parser.add_argument("--cleanup-stale-locks", action="store_true", help="Remove stale .swarm_lock files before execution")
+    parser.add_argument("--lock-ttl-minutes", type=int, default=180, help="TTL for stale swarm lock cleanup")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
     pending_file = project_root / ".nexus/nightshift/pending.json"
+
+    if args.cleanup_stale_locks:
+        removed = _cleanup_stale_swarm_locks(project_root, args.lock_ttl_minutes)
+        print(f"🧹 [Janitor] Removed stale swarm locks: {removed}")
 
     if args.list_pending:
         if not pending_file.exists():
@@ -794,6 +838,7 @@ def main():
                     args.convergence_patience,
                     model_name=args.model,
                     fallback_model_name=args.fallback_model,
+                    keep_worktree=args.keep_worktree,
                 )
                 executor.submit(shift.run)
     else:
@@ -806,6 +851,7 @@ def main():
                 args.convergence_patience,
                 model_name=args.model,
                 fallback_model_name=args.fallback_model,
+                keep_worktree=args.keep_worktree,
             )
             shift.run()
 
