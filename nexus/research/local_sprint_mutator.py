@@ -5,47 +5,71 @@ import re
 
 def _deadlock_lock_order_patch(source: str) -> str:
     """
-    Best-effort deadlock fix for common transfer-style nested lock pattern.
+    R4: Hardened deadlock fix for nested transfer pattern.
+    Only applies if nested acc1/acc2 lock structure is detected.
     """
     if "def transfer(" not in source:
         return source
-
-    # R3: Robust pattern for deadlock fix
     if "first, second = (acc1, acc2)" in source:
         return source # Already patched
 
-    # Attempt regex replacement for bank_transfer deadlock
+    # Precise nested pattern: with acc1.lock -> with acc2.lock
     pattern = re.compile(
-        r"with (acc\d)\.lock:.*?\n\s+time\.sleep\(.*?\).*?\n\s+with (acc\d)\.lock:",
+        r"(?P<indent>\s+)with (?P<a1>acc1)\.lock:.*?\n(?P<inner_indent>\s+)with (?P<a2>acc2)\.lock:",
         re.DOTALL
     )
-    if pattern.search(source):
-        replacement = (
-            "first, second = (acc1, acc2) if id(acc1) < id(acc2) else (acc2, acc1)\n"
-            "    with first.lock:\n"
-            "        time.sleep(0.01)  # Simulate some IO or DB operation\n"
-            "        with second.lock:"
-        )
-        # We need a more careful replacement that doesn't break the rest of the block
-        # For simplicity in this local mutator, we target the specific bank_transfer demo
-        source = source.replace("with acc1.lock:", "first, second = (acc1, acc2) if id(acc1) < id(acc2) else (acc2, acc1)\n    with first.lock:")
-        source = source.replace("with acc2.lock:", "with second.lock:")
+    
+    match = pattern.search(source)
+    if not match:
         return source
-    return source
+
+    indent = match.group("indent")
+    # Replace the outer lock entry with order assignment
+    replacement = (
+        f"{indent}first, second = (acc1, acc2) if id(acc1) < id(acc2) else (acc2, acc1)\n"
+        f"{indent}with first.lock:\n"
+        f"{match.group('inner_indent')}with second.lock:"
+    )
+    
+    # We must be careful to only replace the matched entry point
+    # Using string replace here is safer if we know the unique context, 
+    # but regex sub with limited count is better.
+    new_source = pattern.sub(replacement, source, count=1)
+    
+    # AST Safety Valve
+    try:
+        compile(new_source, "<mutator_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
 
 def _feature_discount_patch(source: str) -> str:
     """Apply discount feature logic for demo."""
     if "def apply_discount(" not in source: return source
     if "pass" not in source: return source
-    return source.replace("pass", "if discount_code == 'SAVE20':\n        return amount * 0.8\n    return amount")
+    new_source = source.replace("pass", "if discount_code == 'SAVE20':\n        return amount * 0.8\n    return amount")
+    try:
+        compile(new_source, "<feature_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
 
 def _refactor_parser_patch(source: str) -> str:
     """Apply parser purity refactor for demo."""
+    new_source = source
     if "import random" in source:
-        source = source.replace("import random", "import hashlib")
+        new_source = new_source.replace("import random", "import hashlib")
     if "random.randint(0, 100)" in source:
-        source = source.replace("random.randint(0, 100)", "int(hashlib.md5(data.encode()).hexdigest(), 16) % 100")
-    return source
+        new_source = new_source.replace("random.randint(0, 100)", "int(hashlib.md5(data.encode()).hexdigest(), 16) % 100")
+    
+    if new_source == source:
+        return source
+        
+    try:
+        compile(new_source, "<refactor_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
 
 def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: int) -> str:
     """

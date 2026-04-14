@@ -568,6 +568,7 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
 @click.option("--root-cause-confidence", default=1.0, type=float)
 @click.option("--findings-query")
 @click.option("--llm-mode/--no-llm-mode", default=False, show_default=True)
+@click.option("--llm-baseline", is_flag=True, help="Enable LLM assistance for baseline generation.")
 @click.option("--timeout-sec", default=60, type=int, show_default=True)
 @click.option("--stage1-timeout-sec", default=20, type=int, show_default=True)
 @click.option("--max-time-ratio-guard", default=1.5, type=float, show_default=True)
@@ -626,6 +627,7 @@ def research_auto_flow(
         root_cause_confidence=root_cause_confidence,
         findings_query=findings_query,
         llm_mode=llm_mode,
+        llm_baseline=llm_baseline,
         timeout_sec=timeout_sec,
         stage1_timeout_sec=stage1_timeout_sec,
         max_time_ratio_guard=max_time_ratio_guard,
@@ -661,6 +663,7 @@ def _run_research_auto_flow_impl(
     root_cause_confidence: float,
     findings_query: str | None,
     llm_mode: bool,
+    llm_baseline: bool,
     timeout_sec: int,
     stage1_timeout_sec: int,
     max_time_ratio_guard: float,
@@ -718,18 +721,67 @@ def _run_research_auto_flow_impl(
     pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
     original_code = target_path.read_text(encoding="utf-8")
 
+    def _generate_baseline_patch(trial: int = 0) -> tuple[str, str]:
+        """R4: Enhanced baseline generation with LLM fast-fallback and conservative local paths."""
+        source_label = "local"
+        fallback_reason = None
+        
+        if llm_baseline and task_type in ["feature", "refactor"]:
+            try:
+                # Use a very short timeout for baseline assistance to avoid blocking
+                gen = LLMCandidateGenerator(REPO_ROOT, safe_mode=True)
+                # Note: gen.generate internal timeout depends on gateway, but we wrap it here if possible
+                # For now, we trust internal model_chain but monitor for rapid failure
+                patched, meta = gen.generate(source_code=original_code, task=task_desc, mutation_hint="baseline", seed=trial)
+                if patched and patched != original_code:
+                    return patched, "llm_assisted"
+                else:
+                    fallback_reason = "llm_generation_empty_fallback_local"
+            except Exception as e:
+                err_str = str(e).lower()
+                if "timeout" in err_str:
+                    fallback_reason = "llm_timeout_fallback_local"
+                elif any(p in err_str for p in ["quota", "429", "limit"]):
+                    fallback_reason = "llm_quota_fallback_local"
+                else:
+                    fallback_reason = f"llm_error_{err_str}_fallback_local"
+        
+        # Local Fallback Path
+        patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
+        
+        # If still no mutation and it's structural, try a generic structural hint as last resort
+        if patched == original_code and task_type in ["feature", "refactor"]:
+            # Last resort: force a pattern match if keywords exist
+            if "discount" in task_desc.lower():
+                from nexus.research.local_sprint_mutator import _feature_discount_patch
+                patched = _feature_discount_patch(original_code)
+                source_label = "local_conservative_feature"
+            elif "parser" in task_desc.lower() or "refactor" in task_desc.lower():
+                from nexus.research.local_sprint_mutator import _refactor_parser_patch
+                patched = _refactor_parser_patch(original_code)
+                source_label = "local_conservative_refactor"
+        
+        label = source_label
+        if fallback_reason:
+            label = f"{source_label}({fallback_reason})"
+            
+        return patched, label
+
     def _run_baseline_apply() -> dict:
         start = time.time()
         ok = False
         err = ""
         try:
-            patched = generate_local_candidate(original_code, task_desc, "lock ordering", 0)
-            target_path.write_text(patched, encoding="utf-8")
-            res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
-            ok = res.returncode == 0
-            if not ok:
-                err = "pytest_failed"
-                target_path.write_text(original_code, encoding="utf-8")
+            patched, source = _generate_baseline_patch()
+            if patched == original_code:
+                err = "no_mutation_generated"
+            else:
+                target_path.write_text(patched, encoding="utf-8")
+                res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
+                ok = res.returncode == 0
+                if not ok:
+                    err = "pytest_failed"
+                    target_path.write_text(original_code, encoding="utf-8")
         except subprocess.TimeoutExpired:
             err = "test_timeout"
             target_path.write_text(original_code, encoding="utf-8")
@@ -738,7 +790,7 @@ def _run_research_auto_flow_impl(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.time() - start, 4),
             "error": err,
-            "report": {},
+            "report": {"source": source},
         }
 
     def _run_baseline_probe() -> dict:
@@ -747,12 +799,15 @@ def _run_research_auto_flow_impl(
         ok = False
         err = ""
         try:
-            patched = generate_local_candidate(original_code, task_desc, "lock ordering", 0)
-            target_path.write_text(patched, encoding="utf-8")
-            res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
-            ok = res.returncode == 0
-            if not ok:
-                err = "pytest_failed"
+            patched, _ = _generate_baseline_patch()
+            if patched == original_code:
+                err = "no_mutation_generated"
+            else:
+                target_path.write_text(patched, encoding="utf-8")
+                res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
+                ok = res.returncode == 0
+                if not ok:
+                    err = "pytest_failed"
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
