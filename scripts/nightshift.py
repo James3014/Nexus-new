@@ -1,4 +1,5 @@
 import argparse
+import ast
 import json
 import os
 import signal
@@ -113,6 +114,15 @@ class AutoResearchNightShift:
 
         # [Approval Gate] Path setup
         self.pending_manifest_path = self.project_root / ".nexus/nightshift/pending.json"
+        self.lesson_writeback_path = self.project_root / ".nexus/reports/lesson_writeback.json"
+        self.tier1_timeout_sec = int(os.getenv("NIGHTSHIFT_TIER1_TIMEOUT_SEC", "120"))
+        self.tier2_timeout_sec = int(os.getenv("NIGHTSHIFT_TIER2_TIMEOUT_SEC", "900"))
+        self.tier1_smoke_pack = [
+            "tests/governance/test_self_evolve.py",
+            "tests/ops/test_ci_gate_lesson_block.py",
+            "tests/test_cli_commands.py",
+            "tests/test_xray_integration.py",
+        ]
         
         try:
             from nexus.research.bayesian_engine import (
@@ -343,9 +353,28 @@ class AutoResearchNightShift:
         if not candidate_code:
             return RoundOutcome(0.0, "", "EMPTY_PATCH", "Model returned no patch.")
 
+        # 2.1 🛡️ Semantic guard: reject AST-equivalent no-op changes.
+        if self._is_ast_no_change(current_code, candidate_code):
+            return RoundOutcome(
+                0.0,
+                "",
+                "REJECTED_AST_NO_CHANGE",
+                "AST unchanged after candidate patch; likely no-op/reformat-only change.",
+            )
+
         # 2. 🏗️ Physical Application
         target_path = workpath / self.resolved_target_file
         target_path.write_text(candidate_code, encoding="utf-8")
+
+        # 2.2 🥈 Tier 1 gate: static + targeted tests before any LLM scoring.
+        tier1_ok, tier1_summary = self._run_tier1_validation(workpath)
+        if not tier1_ok:
+            return RoundOutcome(
+                0.0,
+                candidate_code,
+                "TIER1_REJECTED",
+                tier1_summary,
+            )
 
         # 3. 🧪 Validation round (legacy-compatible) + Feynman fallback
         judge_resp, _ = self.gateway.ask_structured(
@@ -379,6 +408,99 @@ class AutoResearchNightShift:
             status="SCORED" if audit_score >= 0.8 else "AUDIT_REJECTED",
             summary=audit_summary
         )
+
+    def _is_ast_no_change(self, source_before: str, source_after: str) -> bool:
+        """Return True when Python AST is semantically unchanged."""
+        try:
+            before_tree = ast.parse(source_before or "")
+            after_tree = ast.parse(source_after or "")
+        except SyntaxError:
+            # Let Tier1 static gate classify syntax issues.
+            return False
+        before_dump = ast.dump(before_tree, annotate_fields=True, include_attributes=False)
+        after_dump = ast.dump(after_tree, annotate_fields=True, include_attributes=False)
+        return before_dump == after_dump
+
+    def _run_cmd(self, cmd: list[str], cwd: Path, timeout_sec: int) -> tuple[bool, str]:
+        try:
+            res = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"timeout: {' '.join(cmd)}"
+        except Exception as exc:
+            return False, f"exec_error: {' '.join(cmd)} :: {exc}"
+        combined = (res.stdout or "") + "\n" + (res.stderr or "")
+        if res.returncode != 0:
+            return False, f"rc={res.returncode}: {' '.join(cmd)}\n{combined.strip()}"
+        return True, combined.strip()
+
+    def _discover_targeted_tests(self) -> list[str]:
+        stem = Path(self.resolved_target_file).stem
+        tests_root = self.project_root / "tests"
+        if not tests_root.exists():
+            return []
+        matches = sorted(str(p.relative_to(self.project_root)) for p in tests_root.rglob(f"*{stem}*.py"))
+        if matches:
+            return matches[:8]
+        return [t for t in self.tier1_smoke_pack if (self.project_root / t).exists()]
+
+    def _run_tier1_validation(self, workpath: Path) -> tuple[bool, str]:
+        target = self.resolved_target_file
+        ok, msg = self._run_cmd(
+            ["uv", "run", "ruff", "check", target],
+            cwd=workpath,
+            timeout_sec=self.tier1_timeout_sec,
+        )
+        if not ok:
+            return False, f"tier1_ruff_failed: {msg}"
+
+        targeted = self._discover_targeted_tests()
+        if not targeted:
+            return False, "tier1_no_targeted_tests: no matching tests or smoke pack available."
+        ok, msg = self._run_cmd(
+            ["uv", "run", "pytest", "-q", "--maxfail=1", *targeted],
+            cwd=workpath,
+            timeout_sec=self.tier1_timeout_sec,
+        )
+        if not ok:
+            return False, f"tier1_pytest_failed: {msg}"
+        return True, "tier1_pass"
+
+    def _run_tier2_validation(self, workpath: Path) -> tuple[bool, str]:
+        ok, pytest_msg = self._run_cmd(
+            ["uv", "run", "pytest", "-q", "tests", "--ignore=tests/demo"],
+            cwd=workpath,
+            timeout_sec=self.tier2_timeout_sec,
+        )
+        if not ok:
+            return False, f"tier2_pytest_failed: {pytest_msg}"
+
+        ok, acceptance_msg = self._run_cmd(
+            ["uv", "run", "scripts/engine/nexus_cli.py", "nexus", "acceptance-check"],
+            cwd=workpath,
+            timeout_sec=self.tier2_timeout_sec,
+        )
+        if not ok:
+            return False, f"tier2_acceptance_failed: {acceptance_msg}"
+        return True, "tier2_pass"
+
+    def _write_failure_lesson(self, reason: str, details: str) -> None:
+        """Failure-to-Lesson writeback for blocked winners."""
+        payload = {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "task": self.task,
+            "target_file": self.resolved_target_file,
+            "reason": reason,
+            "details": details[:2000],
+            "decision": "winner_rejected",
+        }
+        self.lesson_writeback_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lesson_writeback_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _recover_patch_from_raw(self, raw_content: str) -> str:
         """Recover candidate code when the gateway cannot parse structured JSON."""
@@ -512,6 +634,23 @@ class AutoResearchNightShift:
 
             # --- [Approval Gate] Atomic Queue for Review ---
             if self.best_score > 0 and self.base_commit:
+                tier2_ok, tier2_summary = self._run_tier2_validation(workpath)
+                if not tier2_ok:
+                    print("🛑 [AutoResearch] Tier2 gate rejected winner. Skipping promotion.")
+                    self._log_trace(
+                        round_id=self.max_rounds,
+                        status="REJECTED_GLOBAL_REGRESSION",
+                        score=self.best_score,
+                        summary=tier2_summary,
+                    )
+                    self._write_failure_lesson("tier2_gate_rejection", tier2_summary)
+                    return {
+                        "status": "COMPLETED",
+                        "task": self.task,
+                        "target_file": self.resolved_target_file,
+                        "best_score": self.best_score,
+                        "reason": "tier2_gate_rejected",
+                    }
                 self._append_to_pending_manifest(self.task, self.resolved_target_file, self.base_commit, self.best_score, str(workpath))
 
             print(f"✅ [AutoResearch] Finished {self.task}. Best Score: {self.best_score:.2f}")

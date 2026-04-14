@@ -76,6 +76,7 @@ def test_run_round_generates_validated_scored_candidate(tmp_path):
         "status": "PASS",
         "warnings": [],
     }
+    shift._run_tier1_validation = lambda _workpath: (True, "tier1_pass")
 
     outcome = shift._run_round(1, tmp_path)
 
@@ -126,6 +127,7 @@ def test_run_stops_after_convergence_patience(tmp_path):
     records = []
     shift._run_round = fake_run_round
     shift._commit_candidate = lambda *args, **kwargs: (True, "ok")
+    shift._run_tier2_validation = lambda _workpath: (True, "tier2_pass")
     shift._log_trace = lambda *args, **kwargs: records.append(args[1])
 
     result = shift.run()
@@ -133,3 +135,56 @@ def test_run_stops_after_convergence_patience(tmp_path):
     assert result["status"] == "COMPLETED"
     assert call_counter["count"] == 3
     assert records == ["IMPROVED", "NO_CHANGE", "NO_CHANGE", "CONVERGED"]
+
+
+def test_run_round_rejects_ast_no_change(tmp_path):
+    target = tmp_path / "sample.py"
+    target.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+
+    gateway = FakeGateway(
+        [
+            (
+                {
+                    "status": "PASS",
+                    "summary": "whitespace tidy",
+                    "patch": "def add(a, b):\n    return a + b\n\n",
+                },
+                '{"output":"generation"}',
+            ),
+        ]
+    )
+
+    shift = AutoResearchNightShift("sample.py", max_rounds=1, gateway=gateway)
+    shift.resolved_target_file = "sample.py"
+    outcome = shift._run_round(1, tmp_path)
+
+    assert outcome.status == "REJECTED_AST_NO_CHANGE"
+    assert len(gateway.calls) == 1
+
+
+def test_run_does_not_promote_when_tier2_fails(tmp_path):
+    init_git_repo(tmp_path)
+    target = tmp_path / "target.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "target.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_path, check=True, capture_output=True)
+
+    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1)
+    shift.project_root = tmp_path
+    shift.tracelog_path = tmp_path / "tracelog.jsonl"
+    shift.lesson_writeback_path = tmp_path / ".nexus/reports/lesson_writeback.json"
+    shift.resolved_target_file = "target.py"
+    shift.worktree_mgr.lease = lambda task_id, branch_prefix: (task_id, branch_prefix, tmp_path)
+    shift._resolve_target_file = lambda: "target.py"
+    shift._run_round = lambda *_args, **_kwargs: RoundOutcome(9.0, "value = 2\n", "SCORED", "improved")
+    shift._run_tier2_validation = lambda _workpath: (False, "pytest exploded")
+
+    called = {"queued": False}
+    shift._append_to_pending_manifest = lambda *_args, **_kwargs: called.update({"queued": True})
+
+    result = shift.run()
+
+    assert result["status"] == "COMPLETED"
+    assert result["reason"] == "tier2_gate_rejected"
+    assert called["queued"] is False
+    assert shift.lesson_writeback_path.exists()
