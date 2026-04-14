@@ -650,28 +650,42 @@ class LearnModeService:
                 "learning_closure": closure,
             }
 
-        scored: list[tuple[int, dict[str, Any]]] = []
+        scored: list[tuple[int, dict[str, Any], set[str]]] = []
         for c in claims:
             if not self._is_valid_citation(c):
                 continue
             blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
             words = {self._normalize_token(w) for w in re.findall(r"[a-z0-9_-]+", blob)}
             score = 0
+            token_hits: set[str] = set()
             for t in tokens:
                 if t in words:
                     score += 2
+                    token_hits.add(t)
                 elif any(w.startswith(t) or t.startswith(w) for w in words if len(w) >= 4):
                     score += 1
+                    token_hits.add(t)
             if score > 0:
-                scored.append((score, c))
+                scored.append((score, c, token_hits))
         scored.sort(key=lambda x: x[0], reverse=True)
-        best = [c for _, c in scored[:top_k] if self._is_valid_citation(c)]
+        best_pairs = [(c, hits) for _, c, hits in scored[:top_k] if self._is_valid_citation(c)]
+        best = [c for c, _ in best_pairs]
+        covered_tokens: set[str] = set()
+        for _, hits in best_pairs:
+            covered_tokens.update(hits)
+        token_coverage = 0.0 if not tokens else len(covered_tokens) / len(tokens)
+        if len(tokens) >= 5:
+            min_token_coverage = 0.6
+        elif len(tokens) >= 3:
+            min_token_coverage = 0.5
+        else:
+            min_token_coverage = 0.5
 
-        if len(best) < max(1, min_evidence):
+        if len(best) < max(1, min_evidence) or token_coverage < min_token_coverage:
             closure = self._persist_learning_closure(
                 action="ask",
                 status="PARTIAL",
-                reason="insufficient_cited_claims",
+                reason="insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage",
                 topic_or_source=topic,
                 evidence_paths=[str(self.claims_path)],
                 retrieval_hints=sorted(tokens),
@@ -680,6 +694,7 @@ class LearnModeService:
                     "coverage": min(1.0, len(best) / max(1, top_k)),
                     "pass_rate": 0.0,
                     "citation_valid_ratio": 1.0 if best else 0.0,
+                    "token_coverage": round(token_coverage, 4),
                 },
             )
             return {
@@ -687,7 +702,8 @@ class LearnModeService:
                 "answer": "UNKNOWN",
                 "citations": [],
                 "topic": topic,
-                "reason": "insufficient_cited_claims",
+                "reason": "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage",
+                "token_coverage": round(token_coverage, 4),
                 "learning_closure": closure,
             }
 
@@ -712,6 +728,7 @@ class LearnModeService:
             "citations": citations,
             "claims_used": len(best),
             "min_evidence_required": max(1, min_evidence),
+            "token_coverage": round(token_coverage, 4),
             "learning_closure": self._persist_learning_closure(
                 action="ask",
                 status="SUCCESS",
