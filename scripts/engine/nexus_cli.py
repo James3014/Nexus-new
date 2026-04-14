@@ -1649,12 +1649,19 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
         baseline_ok_cases = 0
         infra_blocked_cases = 0
         measured_cases = 0
-        total_infra_blocked_runs = 0
+        
+        def _is_infra_run(run: dict[str, Any]) -> bool:
+            codes = [str(c).lower() for c in (run.get("error_codes") or [])]
+            reason = str(run.get("reason") or "").lower()
+            err = str(run.get("error") or "").lower()
+            text = " ".join(codes + [reason, err])
+            infra_keys = ("time_budget_exceeded", "quota", "429", "capacity", "broker_timeout", "swarm_timeout", "infra_blocked")
+            return any(k in text for k in infra_keys)
+
         for c in per_case:
             measured_cases += 1
             if c.get("status") == "infra_blocked":
                 infra_blocked_cases += 1
-                total_infra_blocked_runs += ab_trials # Assuming all trials in this case would have been blocked
                 continue
                 
             if not isinstance(c.get("baseline"), dict): continue
@@ -1665,15 +1672,16 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                 if not h_ok:
                     regressions += 1
             h_sum = c.get("hyper_sprint", {}).get("summary", {})
-            total_infra_blocked_runs += h_sum.get("infra_blocked_count", 0)
             if h_sum.get("success_rate", 0.0) == 0.0 and h_sum.get("infra_blocked_count", 0) > 0:
                 infra_blocked_cases += 1
         
         regression_rate = round(regressions / baseline_ok_cases, 4) if baseline_ok_cases else 0.0
         infra_blocked_rate = round(infra_blocked_cases / measured_cases, 4) if measured_cases else 0.0
         
-        algorithm_total_runs = total_h_runs - total_infra_blocked_runs
-        algorithm_success_rate = round(h_successes / algorithm_total_runs, 4) if algorithm_total_runs > 0 else 0.0
+        algorithm_runs = [r for r in all_h_runs if not _is_infra_run(r)]
+        algorithm_total_runs = len(algorithm_runs)
+        algorithm_successes = sum(1 for r in algorithm_runs if r.get("ok"))
+        algorithm_success_rate = round(algorithm_successes / algorithm_total_runs, 4) if algorithm_total_runs > 0 else 0.0
 
         summary["aggregates"] = {
             "success_rate": h_success_rate,

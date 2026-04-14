@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 from nexus.research.local_sprint_mutator import generate_local_candidate
