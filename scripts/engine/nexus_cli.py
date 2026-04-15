@@ -17,9 +17,9 @@ from nexus.app import research_flow_service
 
 from datetime import datetime, timezone
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+repo_root = Path(__file__).resolve().parents[2]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 
 class NexusCLI:
@@ -54,7 +54,7 @@ class NexusCLI:
                 )
                 return self._command_service.execute_feature(request)
 
-        config = EngineConfig(project_root=project_root or REPO_ROOT)
+        config = EngineConfig(project_root=project_root or repo_root)
         command_service = NexusCommandService(NexusEngine(config))
         self.service = _CompatService(command_service)
 
@@ -95,7 +95,7 @@ def legacy_spec_lock(spec_path):
 
 @nexus.command(name="nexus:governance-check")
 def legacy_governance_check():
-    res = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "ops" / "ci_gate.py"), "--dry-run"])
+    res = subprocess.run([sys.executable, str(repo_root / "scripts" / "ops" / "ci_gate.py"), "--dry-run"])
     if res.returncode == 0:
         click.echo("[Governance-Check] PASS")
         return
@@ -106,7 +106,7 @@ def legacy_governance_check():
 @nexus.command(name="nexus:acceptance-check")
 @click.option("--window", default=7, type=int)
 def legacy_acceptance_check(window):
-    gate = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "ops" / "ci_gate.py"), "--dry-run"])
+    gate = subprocess.run([sys.executable, str(repo_root / "scripts" / "ops" / "ci_gate.py"), "--dry-run"])
     if gate.returncode != 0:
         raise click.ClickException("Governance gate failed before acceptance-check")
     click.echo(f"Acceptance check window={window}")
@@ -119,11 +119,11 @@ def legacy_closeout(contract):
     if not path.exists():
         raise click.ClickException("Contract file missing")
     res = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "ops" / "closeout_guard.py"), "--contract", contract],
+        [sys.executable, str(repo_root / "scripts" / "ops" / "closeout_guard.py"), "--contract", contract],
         capture_output=True,
         text=True,
     )
-    reports_dir = REPO_ROOT / ".nexus" / "reports"
+    reports_dir = repo_root / ".nexus" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     status_payload = {
         "status": "PASS" if res.returncode == 0 else "FAIL",
@@ -151,7 +151,7 @@ def status(as_json):
         res = {"status": "OPERATIONAL", "version": "v23.7", "fleet_size": 50, "mcp": "READY"}
         click.echo(json.dumps(res, indent=2))
     else:
-        subprocess.run([sys.executable, str(REPO_ROOT / "scripts/ops/enterprise_audit_v22.py")], check=True)
+        subprocess.run([sys.executable, str(repo_root / "scripts/ops/enterprise_audit_v22.py")], check=True)
 
 def _render_hallucination_unverified(reason: str) -> None:
     click.echo("\n## 🧠 幻覺指數標註 (Hallucination Index)")
@@ -182,7 +182,7 @@ def _task_requests_output_file(task_text: str) -> bool:
 
 
 def _write_output_file(path: Path, payload: dict) -> Path:
-    out = path if path.is_absolute() else (REPO_ROOT / path).resolve()
+    out = path if path.is_absolute() else (repo_root / path).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return out
@@ -213,7 +213,7 @@ def _forward_to_nested_nexus(ctx: click.Context, subcommand: str) -> None:
     )
     cmd = [
         sys.executable,
-        str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+        str(repo_root / "scripts/engine/nexus_cli.py"),
         "nexus",
         subcommand,
         *ctx.args,
@@ -270,7 +270,7 @@ def _write_hallucination_evidence(path: str | None, final_response: str, evidenc
     if not path:
         return None
     out = Path(path)
-    out = out if out.is_absolute() else (REPO_ROOT / out).resolve()
+    out = out if out.is_absolute() else (repo_root / out).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "final_response": final_response,
@@ -286,7 +286,7 @@ def _write_hallucination_evidence(path: str | None, final_response: str, evidenc
 def acceptance_check(as_json, evidence_path):
     """✅ Run full system acceptance check with Hallucination Guard."""
     # 1. 執行實體驗收
-    cmd = [sys.executable, str(REPO_ROOT / "scripts/ops/nexus_acceptance_check.py")]
+    cmd = [sys.executable, str(repo_root / "scripts/ops/nexus_acceptance_check.py")]
     if as_json: cmd.append("--json")
     subprocess.run(cmd, check=True)
     
@@ -311,17 +311,17 @@ def run(task_id, complexity, output_file):
         )
 
     from nexus.core.context_hub import ContextHub
-    hub = ContextHub(REPO_ROOT)
+    hub = ContextHub(repo_root)
     
     # 1. 智慧感應 (Wisdom Sensing)
     decision = hub.make_pre_routing_decision(task_id, {"complexity_score": complexity})
     
     if decision.get("nas_autotune_needed"):
         click.echo(f"🧬 [Wisdom Layer] High complexity detected. Launching Bayesian Auto-Tuning...")
-        tuning_cmd = [sys.executable, str(REPO_ROOT / "scripts/nightshift.py"), "--task", task_id, "--max_rounds", "3"]
+        tuning_cmd = [sys.executable, str(repo_root / "scripts/nightshift.py"), "--task", task_id, "--max_rounds", "3"]
         # 🛡️ 物理強化：注入 PYTHONPATH 確保子進程能找到 nexus 庫
         env = os.environ.copy()
-        env["PYTHONPATH"] = f"{REPO_ROOT}:{env.get('PYTHONPATH', '')}"
+        env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
         subprocess.run(tuning_cmd, env=env, check=True)
         click.echo("✅ [Wisdom Layer] NAS Tuning Complete. Optimal weights locked.")
     
@@ -333,7 +333,7 @@ def run(task_id, complexity, output_file):
     import json
     from datetime import datetime
     
-    report_path = REPO_ROOT / ".nexus" / "reports" / f"hyper_{task_id.replace('/', '_')}.json"
+    report_path = repo_root / ".nexus" / "reports" / f"hyper_{task_id.replace('/', '_')}.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     
     # 模擬執行結果 (在此擴展點接入真實執行引擎)
@@ -379,9 +379,9 @@ def run(task_id, complexity, output_file):
 @click.option("--report-file", default=".nexus/reports/content/rewrite-report.json", show_default=True, type=click.Path(path_type=Path))
 def content_rewrite(input_file, output_file, task, llm_mode, report_file):
     """📝 Rewrite content with explicit file IO contract."""
-    source_path = input_file if input_file.is_absolute() else (REPO_ROOT / input_file).resolve()
-    out_path = output_file if output_file.is_absolute() else (REPO_ROOT / output_file).resolve()
-    report_path = report_file if report_file.is_absolute() else (REPO_ROOT / report_file).resolve()
+    source_path = input_file if input_file.is_absolute() else (repo_root / input_file).resolve()
+    out_path = output_file if output_file.is_absolute() else (repo_root / output_file).resolve()
+    report_path = report_file if report_file.is_absolute() else (repo_root / report_file).resolve()
 
     original = source_path.read_text(encoding="utf-8")
     rewritten = ""
@@ -392,7 +392,7 @@ def content_rewrite(input_file, output_file, task, llm_mode, report_file):
         try:
             from nexus.services.gateway import BattlesuitGateway
 
-            gateway = BattlesuitGateway(project_root=REPO_ROOT)
+            gateway = BattlesuitGateway(project_root=repo_root)
             prompt, raw = gateway.ask_structured(
                 prompt=(
                     "You are rewriting a document.\n"
@@ -458,7 +458,7 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
     """📚 Learn Mode: ingest source into claim+citation knowledge store."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.ingest(source=source, source_file=source_file, topic=topic)
 
     # Enforce local hallucination gate using generated evidence.
@@ -471,7 +471,7 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
     _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
     _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
 
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -494,7 +494,7 @@ def learn_register_source(topic, source, source_file, refresh_after_days, priori
     """🗂️ Register a learn source for scheduled refresh."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.register_source(
         topic=topic,
         source=source,
@@ -519,14 +519,14 @@ def learn_refresh(topic, due_only, pass_threshold, question_count, report_file, 
     """🔄 Refresh registered learn sources and re-run converge."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.refresh_sources(
         topic=topic,
         due_only=due_only,
         pass_threshold=pass_threshold,
         question_count=question_count,
     )
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -545,12 +545,12 @@ def learn_refresh_plan(topic, due_within_days, report_file, output_json):
     """🗓️ Build a scheduler-ready plan for learn source refresh."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.build_refresh_plan(
         topic=topic,
         due_within_days=due_within_days,
     )
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -590,7 +590,7 @@ def learn_converge(
     """🔁 Learn Mode: run local KAL-style converge loop for a topic."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.converge(
         topic=topic,
         max_rounds=max_rounds,
@@ -622,7 +622,7 @@ def learn_converge(
     _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
     _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
 
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -649,7 +649,7 @@ def learn_ask(topic, question, top_k, min_evidence, min_token_coverage, max_stal
     """❓ Ask using cited claims only. If no cited evidence, return UNKNOWN."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.ask(
         topic=topic,
         question=question,
@@ -690,13 +690,13 @@ def learn_report(topic, question_count, pass_threshold, report_file, output_json
     """📈 Build unified learn report for governance and CI consumption."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.build_report(
         topic=topic,
         question_count=question_count,
         pass_threshold=pass_threshold,
     )
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -722,9 +722,9 @@ def learn_phase_slo(window, report_file, output_json):
     """📏 Build phase-level learn SLO report for P/X/D/R/A/C writeback closure."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.build_phase_slo_report(window=window)
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -749,7 +749,7 @@ def learn_benchmark(manifest_file, source, source_file, topic, report_file, outp
     """📊 Benchmark learn ask quality and tune retrieval thresholds."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     manifest = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
     if source or source_file:
         service.ingest(source=source or topic, source_file=source_file, topic=topic)
@@ -850,7 +850,7 @@ def learn_benchmark(manifest_file, source, source_file, topic, report_file, outp
         "improvement": round(best.get("success_rate", 0.0) - (cfg_results[0].get("success_rate", 0.0) if cfg_results else 0.0), 4),
         "candidates": cfg_results,
     }
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -876,13 +876,13 @@ def learn_benchmark_curate(topic, max_questions, min_occurrences, manifest_file,
     """🧹 Curate learn benchmark candidates into a production-ready manifest."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.curate_benchmark_bank(
         topic=topic,
         max_questions=max_questions,
         min_occurrences=min_occurrences,
     )
-    out_path = (REPO_ROOT / manifest_file).resolve()
+    out_path = (repo_root / manifest_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_payload = {
         "topic": payload.get("topic", topic),
@@ -900,7 +900,7 @@ def learn_benchmark_curate(topic, max_questions, min_occurrences, manifest_file,
         except Exception:
             pass
     if not out_payload["questions"]:
-        template_path = REPO_ROOT / "docs" / "research" / "learn_benchmark_manifest_template.json"
+        template_path = repo_root / "docs" / "research" / "learn_benchmark_manifest_template.json"
         if template_path.exists():
             try:
                 template = json.loads(template_path.read_text(encoding="utf-8"))
@@ -954,9 +954,9 @@ def learn_gate(
     """🛡️ One-shot learn governance gate: report + evidence + acceptance + contract + ci(dry-run)."""
     from nexus.research.learn_mode import LearnModeService
 
-    service = LearnModeService(REPO_ROOT)
+    service = LearnModeService(repo_root)
     payload = service.build_report(topic=topic)
-    out_path = (REPO_ROOT / report_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -994,7 +994,7 @@ def learn_gate(
     subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+            str(repo_root / "scripts/engine/nexus_cli.py"),
             "nexus",
             "acceptance-check",
             "--evidence",
@@ -1005,7 +1005,7 @@ def learn_gate(
     subprocess.run(
         [
             sys.executable,
-            str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+            str(repo_root / "scripts/engine/nexus_cli.py"),
             "nexus",
             "acceptance-check",
             "--json",
@@ -1019,7 +1019,7 @@ def learn_gate(
         subprocess.run(
             [
                 sys.executable,
-                str(REPO_ROOT / "scripts/engine/nexus_cli.py"),
+                str(repo_root / "scripts/engine/nexus_cli.py"),
                 "nexus",
                 "contract-check",
                 "--contract-file",
@@ -1031,7 +1031,7 @@ def learn_gate(
     if not skip_ci:
         ci_cmd = [
             sys.executable,
-            str(REPO_ROOT / "scripts/ops/ci_gate.py"),
+            str(repo_root / "scripts/ops/ci_gate.py"),
             "--dry-run",
             "--wiki-drift-enforce-level",
             "p0",
@@ -1054,7 +1054,7 @@ def learn_gate(
 @click.option("--contract-file", type=click.Path(exists=True), required=True)
 def contract_check(contract_file):
     """📜 [Governance] Validate task contract against physical state."""
-    cmd = [sys.executable, str(REPO_ROOT / "scripts/ops/closeout_guard.py"), "--contract", contract_file]
+    cmd = [sys.executable, str(repo_root / "scripts/ops/closeout_guard.py"), "--contract", contract_file]
     subprocess.run(cmd, check=True)
 
 @nexus_group.command(name="distill")
@@ -1079,7 +1079,7 @@ def resume():
 @click.argument("task_name")
 def delegate(task_name):
     """📡 [Supervisor] Decompose and delegate task to fleet."""
-    subprocess.run([sys.executable, str(REPO_ROOT / "scripts/ops/supervisor_engine.py"), task_name], check=True)
+    subprocess.run([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=True)
 
 
 @nexus_group.command(name="research:route")
@@ -1092,7 +1092,7 @@ def delegate(task_name):
 @click.option("--explain-route", is_flag=True)
 def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json, explain_route):
     """🧠 Strategy Routing Layer: Decide whether to research and in what mode."""
-    out = research_flow_service.build_route(repo_root=REPO_ROOT, 
+    out = research_flow_service.build_route(repo_root=repo_root, 
         task_desc=task_desc,
         task_type=task_type,
         candidate_count=candidate_count,
@@ -1213,7 +1213,7 @@ def research_auto_flow(
     output_file,
 ):
     if explain_route:
-        out = research_flow_service.build_route(repo_root=REPO_ROOT, 
+        out = research_flow_service.build_route(repo_root=repo_root, 
             task_desc=task_desc,
             task_type=task_type,
             candidate_count=candidate_count,
@@ -1225,7 +1225,7 @@ def research_auto_flow(
         click.echo(json.dumps(out["explain_payload"], indent=2))
         return
 
-    payload, out_path = research_flow_service.run_auto_flow(repo_root=REPO_ROOT, 
+    payload, out_path = research_flow_service.run_auto_flow(repo_root=repo_root, 
         task_desc=task_desc,
         target_file=target_file,
         test_file=test_file,
@@ -1304,10 +1304,10 @@ def research_run(
     start_ts = datetime.now(timezone.utc).isoformat()
     run_id = run_id or f"research-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     scope_list = list(scope) if scope else ["nexus/research", "tests/research", "docs/research"]
-    scheduler = ExperimentScheduler(REPO_ROOT)
+    scheduler = ExperimentScheduler(repo_root)
     evaluator = UnifiedEvaluator(budget_limit=budget_limit, min_score_threshold=min_score_threshold)
-    selector = SelectorRollback(REPO_ROOT)
-    candidate_src_root = (REPO_ROOT / candidate_src_root).resolve()
+    selector = SelectorRollback(repo_root)
+    candidate_src_root = (repo_root / candidate_src_root).resolve()
     rollback_trace: list[str] = []
     elimination_matrix: list[dict] = []
     rejected_reasons: list[str] = []
@@ -1320,7 +1320,7 @@ def research_run(
 
     # 0) Governance Guards
     decision_log.append("governance: start")
-    _, _, free = shutil.disk_usage(REPO_ROOT)
+    _, _, free = shutil.disk_usage(repo_root)
     free_gb = free / (1024**3)
     if free_gb < disk_watermark_gb:
         status = "failed"
@@ -1354,7 +1354,7 @@ def research_run(
         from nexus.engine.policies.research_policy import ResearchPolicy
         from nexus.research.findings_memory import FindingsMemoryStore
         policy = ResearchPolicy()
-        store = FindingsMemoryStore(REPO_ROOT)
+        store = FindingsMemoryStore(repo_root)
         
         historical_hints = []
         hits = store.search(hypothesis)
@@ -1365,19 +1365,19 @@ def research_run(
         def _collect_workspace_files(paths: list[str]) -> list[str]:
             file_paths: list[str] = []
             for item in paths:
-                target = (REPO_ROOT / item).resolve()
+                target = (repo_root / item).resolve()
                 try:
-                    if not target.is_relative_to(REPO_ROOT):
+                    if not target.is_relative_to(repo_root):
                         continue
                 except Exception:
                     continue
                 if target.is_file():
-                    file_paths.append(str(target.relative_to(REPO_ROOT)))
+                    file_paths.append(str(target.relative_to(repo_root)))
                     continue
                 if target.is_dir():
                     for p in sorted(target.rglob("*")):
                         if p.is_file():
-                            file_paths.append(str(p.relative_to(REPO_ROOT)))
+                            file_paths.append(str(p.relative_to(repo_root)))
             return list(dict.fromkeys(file_paths))
 
         file_scope = _collect_workspace_files(scope_list)
@@ -1408,7 +1408,7 @@ def research_run(
                 if "real-run" in hypothesis.lower():
                     try:
                         from nexus.research.swarm_broker import SwarmBroker
-                        broker = SwarmBroker(REPO_ROOT)
+                        broker = SwarmBroker(repo_root)
                         swarm_dir = broker.acquire(timeout_sec=timeout_sec)
                         if not swarm_dir:
                             return {"seed": seed, "score": 0.0, "cost": estimated_cost_per_round, "error": "broker_timeout"}
@@ -1481,7 +1481,7 @@ def research_run(
             else:
                 decision_log.append(f"promote: start winner={winner}")
                 no_op_promotion = bool(file_scope) and all(
-                    (candidate_src_root / file_path).resolve() == (REPO_ROOT / file_path).resolve()
+                    (candidate_src_root / file_path).resolve() == (repo_root / file_path).resolve()
                     for file_path in file_scope
                     if (candidate_src_root / file_path).exists()
                 )
@@ -1503,15 +1503,15 @@ def research_run(
             status = "failed"
             decision_log.append("select: no_candidates_passed")
 
-    report_path = (REPO_ROOT / report_file).resolve()
+    report_path = (repo_root / report_file).resolve()
     
     # Retention logic
     def _apply_retention_policy() -> dict:
         summary = {"retain_last_n": retain_last_n, "cleaned": {"reports": 0, "experiments": 0, "backups": 0}}
         targets = [
-            ("reports", (REPO_ROOT / ".nexus" / "reports" / "research"), lambda p: p.is_file() and p.suffix == ".json"),
-            ("experiments", (REPO_ROOT / ".nexus" / "experiments"), lambda p: p.is_dir()),
-            ("backups", (REPO_ROOT / ".nexus" / "backups"), lambda p: p.is_dir()),
+            ("reports", (repo_root / ".nexus" / "reports" / "research"), lambda p: p.is_file() and p.suffix == ".json"),
+            ("experiments", (repo_root / ".nexus" / "experiments"), lambda p: p.is_dir()),
+            ("backups", (repo_root / ".nexus" / "backups"), lambda p: p.is_dir()),
         ]
         for key, root, predicate in targets:
             if not root.exists(): continue
@@ -1552,7 +1552,7 @@ def research_run(
         try:
             from nexus.services.mem_palace import MemPalace
             from nexus.research.findings_memory import FindingsCard
-            palace = MemPalace(str(REPO_ROOT))
+            palace = MemPalace(str(repo_root))
             
             seed_details = last_eval_report.get("seed_details", [])
             hint = seed_details[0].get("hint", "") if seed_details else ""
@@ -1787,9 +1787,9 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
             click.echo(f"▶️ [AB] case={cid} trials={max(1, ab_trials)} target={target_file}")
 
             if prepare_command:
-                subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+                subprocess.run(prepare_command, shell=True, cwd=repo_root, check=False)
 
-            target_path = (REPO_ROOT / target_file).resolve()
+            target_path = (repo_root / target_file).resolve()
             if not target_path.exists():
                 per_case.append({
                     "id": cid,
@@ -1819,7 +1819,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                     continue
 
                 if prepare_command:
-                    subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+                    subprocess.run(prepare_command, shell=True, cwd=repo_root, check=False)
 
                 original = target_path.read_text(encoding="utf-8")
                 t0 = time.time()
@@ -1829,7 +1829,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                 try:
                     # R3: Use LLM baseline if enabled and task is structural
                     if llm_baseline and task_type in ["feature", "refactor"]:
-                        gen = LLMCandidateGenerator(REPO_ROOT, safe_mode=True)
+                        gen = LLMCandidateGenerator(repo_root, safe_mode=True)
                         patched, meta = gen.generate(source_code=original, task=task_desc, mutation_hint=baseline_hint, seed=trial)
                     else:
                         patched = generate_local_candidate(original, task_desc, baseline_hint, trial)
@@ -1838,7 +1838,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                         err = "no_mutation_generated"
                     else:
                         target_path.write_text(patched, encoding="utf-8")
-                        res = subprocess.run(pytest_cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout_sec)
+                        res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
                         ok = res.returncode == 0
                         if not ok: err = "test_failed"
                 except subprocess.TimeoutExpired:
@@ -1869,7 +1869,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                     continue
 
                 if prepare_command:
-                    subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+                    subprocess.run(prepare_command, shell=True, cwd=repo_root, check=False)
 
                 t1 = time.time()
                 cfg = SprintConfig(
@@ -1889,7 +1889,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                 hyper_timeout_sec = max(20, int(stage1_timeout_sec + timeout_sec + (20 if ab_llm_mode else 10)))
                 try:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                        fut = pool.submit(run_hyper_sprint, repo_root=REPO_ROOT, config=cfg)
+                        fut = pool.submit(run_hyper_sprint, repo_root=repo_root, config=cfg)
                         result = fut.result(timeout=hyper_timeout_sec)
                 except concurrent.futures.TimeoutError:
                     result = None
@@ -1898,7 +1898,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                     target_path.write_text(result.patch, encoding="utf-8")
                 h_ok = bool(result) and result.status == "SUCCESS" and bool(result.patch)
                 if prepare_command:
-                    subprocess.run(prepare_command, shell=True, cwd=REPO_ROOT, check=False)
+                    subprocess.run(prepare_command, shell=True, cwd=repo_root, check=False)
                 
                 # Restore original after Hyper-Sprint to ensure next trial is clean
                 target_path.write_text(original, encoding="utf-8")
@@ -1917,7 +1917,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                             target_path.write_text(fb_patch, encoding="utf-8")
                             fb_res = subprocess.run(
                                 pytest_cmd,
-                                cwd=REPO_ROOT,
+                                cwd=repo_root,
                                 capture_output=True,
                                 text=True,
                                 timeout=timeout_sec,
@@ -2077,7 +2077,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
             "total_token_calls": h_calls,
         }
 
-        report_path = (REPO_ROOT / report_file).resolve()
+        report_path = (repo_root / report_file).resolve()
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         
@@ -2097,7 +2097,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                 f.write(f"{c['id']}\t{c['task_desc']}\t{b_s:.2%}\t{h_s:.2%}\t{h_s-b_s:+.2%}\t{h_p50:.2f}\t{h_c}\n")
 
         # Rolling-7 Summary
-        history_file = REPO_ROOT / ".nexus/reports/research/benchmark-history.json"
+        history_file = repo_root / ".nexus/reports/research/benchmark-history.json"
         history_file.parent.mkdir(parents=True, exist_ok=True)
         history = []
         if history_file.exists():
@@ -2127,7 +2127,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
     evaluator = UnifiedEvaluator(budget_limit=budget_limit)
     
     from nexus.research.findings_memory import FindingsMemoryStore
-    store = FindingsMemoryStore(REPO_ROOT)
+    store = FindingsMemoryStore(repo_root)
     
     research_chosen_count = 0
     success_count = 0
@@ -2188,7 +2188,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                     try:
                         import subprocess
                         from nexus.research.swarm_broker import SwarmBroker
-                        broker = SwarmBroker(REPO_ROOT)
+                        broker = SwarmBroker(repo_root)
                         swarm_dir = broker.acquire(timeout_sec=timeout_sec)
                         if not swarm_dir:
                             return {"seed": seed, "score": 0.0, "cost": 1.0, "error": "broker_timeout", "hint": mutation_hint}
@@ -2233,7 +2233,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                 try:
                     from nexus.services.mem_palace import MemPalace
                     from nexus.research.findings_memory import FindingsCard
-                    palace = MemPalace(str(REPO_ROOT))
+                    palace = MemPalace(str(repo_root))
                     
                     seed_details = eval_report.get("seed_details", [])
                     hint = seed_details[0].get("hint", "") if seed_details else ""
@@ -2269,7 +2269,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
         "time_budget_exceeded": time_budget_exceeded,
     }
     
-    report_path = (REPO_ROOT / report_file).resolve()
+    report_path = (repo_root / report_file).resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     click.echo(f"📊 Benchmark Complete: {success_count}/{len(cases)} cases passed. Report: {report_file}")
@@ -2318,8 +2318,8 @@ def research_sprint(task, target_file, test_file, candidate_count, max_rounds, t
     if safe_mode:
         click.echo("🛡️ [Hyper-Sprint] Safe mode ON: throttled model usage to reduce 429 risk.")
 
-    result = run_hyper_sprint(repo_root=REPO_ROOT, config=cfg)
-    report_path = write_sprint_report(repo_root=REPO_ROOT, result=result, report_file=report_file)
+    result = run_hyper_sprint(repo_root=repo_root, config=cfg)
+    report_path = write_sprint_report(repo_root=repo_root, result=result, report_file=report_file)
 
     if result.status != "SUCCESS":
         click.secho("❌ [Hyper-Sprint] Failed.", fg="red")
@@ -2341,7 +2341,7 @@ def research_sprint(task, target_file, test_file, candidate_count, max_rounds, t
         click.echo(f"Final Score: {result.final_score}")
         if click.confirm("Do you want to promote this patch to an independent branch?"):
             branch_name = promote_patch_to_branch(
-                repo_root=REPO_ROOT,
+                repo_root=repo_root,
                 target_file=target_file,
                 patch_code=result.patch,
                 score=result.final_score,
@@ -2363,9 +2363,9 @@ def research_meta_opt(manifest_file, presets_file, report_file, max_wall_time_se
     import time
 
     started_at = time.time()
-    manifest_path = (REPO_ROOT / manifest_file).resolve()
-    presets_path = (REPO_ROOT / presets_file).resolve()
-    out_path = (REPO_ROOT / report_file).resolve()
+    manifest_path = (repo_root / manifest_file).resolve()
+    presets_path = (repo_root / presets_file).resolve()
+    out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -2436,7 +2436,7 @@ def research_meta_opt(manifest_file, presets_file, report_file, max_wall_time_se
             cmd.append("--llm-baseline")
 
         click.echo(f"🧪 [Meta-Opt] ({idx}/{len(presets)}) preset={preset_name}")
-        proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, check=False)
 
         aggregates = {
             "algorithm_success_rate": 0.0,
@@ -2506,13 +2506,13 @@ def research_meta_opt(manifest_file, presets_file, report_file, max_wall_time_se
 # --- External Command Registration ---
 try:
     from scripts.engine.commands.ui_explorer import register as register_ui_explorer
-    register_ui_explorer(nexus_group, REPO_ROOT)
+    register_ui_explorer(nexus_group, repo_root)
     
     from scripts.engine.commands.swarm import register as register_swarm
-    register_swarm(nexus_group, REPO_ROOT)
+    register_swarm(nexus_group, repo_root)
     
     from scripts.engine.commands.stress_test import register as register_stress_test
-    register_stress_test(nexus_group, REPO_ROOT)
+    register_stress_test(nexus_group, repo_root)
 except ImportError as e:
     click.echo(f"⚠️  [Nexus:CLI] Could not load external command module: {e}")
 
@@ -2523,16 +2523,16 @@ except ImportError as e:
 def fed_init(tenants):
     """🌐 [v0.9] Federated Init"""
     from scripts.ops.federated_engine_v09 import FederatedEngineV09
-    FederatedEngineV09(REPO_ROOT).fed_init(num_tenants=tenants)
+    FederatedEngineV09(repo_root).fed_init(num_tenants=tenants)
     click.echo(f"📡 Fleet Initialized: {tenants} tenants.")
 
 @nexus.command(name="fed-run")
 def fed_run():
     """🚀 [v0.9] Fed-Run: Execute Federated NAS"""
     from scripts.ops.federated_engine_v09 import FederatedEngineV09
-    res = FederatedEngineV09(REPO_ROOT).fed_sync()
+    res = FederatedEngineV09(repo_root).fed_sync()
     click.echo(f"🧬 [v0.9 Federated NAS] Synchronized {res['aggregation_ratio']} tenants.")
-    lesson_script = REPO_ROOT / ("scripts/ops/crystal" + "lize_lessons.py")
+    lesson_script = repo_root / ("scripts/ops/crystal" + "lize_lessons.py")
     subprocess.run([sys.executable, str(lesson_script)], check=False)
 
 # --- v0.8 元進化 (RESTORED) ---
@@ -2542,7 +2542,7 @@ def fed_run():
 def meta_run(count, hybrid):
     """🧬 [v0.8] Meta-Evolve"""
     from scripts.ops.evolution_engine_v08 import EvolutionEngineV08
-    best = EvolutionEngineV08(REPO_ROOT).meta_evolve(count=count, hybrid_ratio=hybrid)
+    best = EvolutionEngineV08(repo_root).meta_evolve(count=count, hybrid_ratio=hybrid)
     click.echo(f"🧬 [NAS] Gen {best['gen']} Evolved. Fitness: {best['fitness']}")
 
 
@@ -2559,7 +2559,7 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
     if auto_flow:
         if not target_file or not test_file:
             raise click.ClickException("--auto-flow requires --target-file and --test-file")
-        payload, out_path = research_flow_service.run_auto_flow(repo_root=REPO_ROOT, 
+        payload, out_path = research_flow_service.run_auto_flow(repo_root=repo_root, 
             task_desc=task,
             target_file=target_file,
             test_file=test_file,
@@ -2629,7 +2629,7 @@ def learn_phase_policy_cmd(task_type, risk, output_json):
     from nexus.research.learn.phase_policy import derive_phase_actions
     import json
     
-    learn_svc = LearnModeService(REPO_ROOT)
+    learn_svc = LearnModeService(repo_root)
     slo_summary = learn_svc.read_phase_slo_summary()
     actions = derive_phase_actions(slo_summary, task_type, risk)
     
@@ -2655,5 +2655,37 @@ def learn_phase_policy_cmd(task_type, risk, output_json):
         click.echo(f"Reasoning: {out['policy']['reasoning']}")
 
 
+@nexus_group.command(name="learn:scheduler-status")
+@click.option("--output-json", is_flag=True)
+def learn_scheduler_status_cmd(output_json):
+    """📊 Show status of the production learn scheduler."""
+    import json
+    from pathlib import Path
+    
+    report_path = repo_root / ".nexus/reports/learn/scheduler_last_run.json"
+    alert_dir = repo_root / ".nexus/reports/alerts"
+    
+    if not report_path.exists():
+        click.echo("No scheduler run history found.")
+        return
+        
+    data = json.loads(report_path.read_text())
+    alerts = sorted(alert_dir.glob("*.json")) if alert_dir.exists() else []
+    
+    out = {
+        "last_run": data.get("timestamp"),
+        "last_exit_code": data.get("exit_code"),
+        "slo_readiness": data.get("slo_readiness"),
+        "alert_count": len(alerts),
+        "alert_paths": [str(a.name) for a in alerts[-3:]] # Last 3 alerts
+    }
+    
+    if output_json:
+        click.echo(json.dumps(out, indent=2))
+    else:
+        click.echo(f"Last Run: {out['last_run']}")
+        click.echo(f"Status: {'OK' if out['last_exit_code'] == 0 else 'DEGRADED' if out['last_exit_code'] == 2 else 'FAILED'}")
+        click.echo(f"Alerts Found: {out['alert_count']}")
 if __name__ == "__main__":
     nexus()
+
