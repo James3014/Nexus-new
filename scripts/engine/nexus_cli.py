@@ -830,6 +830,70 @@ def learn_benchmark(manifest_file, source, source_file, topic, report_file, outp
         click.echo(f"Report: {out_path}")
 
 
+@nexus_group.command(name="learn:benchmark-curate")
+@click.option("--topic", default="", help="Optional topic filter for candidate curation.")
+@click.option("--max-questions", default=40, type=int, show_default=True)
+@click.option("--min-occurrences", default=1, type=int, show_default=True)
+@click.option(
+    "--manifest-file",
+    default="docs/research/learn_benchmark_curated.json",
+    show_default=True,
+    type=click.Path(),
+)
+@click.option("--output-json", is_flag=True)
+def learn_benchmark_curate(topic, max_questions, min_occurrences, manifest_file, output_json):
+    """🧹 Curate learn benchmark candidates into a production-ready manifest."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.curate_benchmark_bank(
+        topic=topic,
+        max_questions=max_questions,
+        min_occurrences=min_occurrences,
+    )
+    out_path = (REPO_ROOT / manifest_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_payload = {
+        "topic": payload.get("topic", topic),
+        "generated_at": payload.get("generated_at", ""),
+        "questions": payload.get("questions", []),
+    }
+    if not out_payload["questions"] and out_path.exists():
+        try:
+            existing = json.loads(out_path.read_text(encoding="utf-8"))
+            existing_questions = existing.get("questions", []) if isinstance(existing, dict) else []
+            if existing_questions:
+                out_payload["questions"] = existing_questions
+                payload["fallback_used"] = True
+                payload["selected_count"] = len(existing_questions)
+        except Exception:
+            pass
+    if not out_payload["questions"]:
+        template_path = REPO_ROOT / "docs" / "research" / "learn_benchmark_manifest_template.json"
+        if template_path.exists():
+            try:
+                template = json.loads(template_path.read_text(encoding="utf-8"))
+                template_questions = template.get("questions", []) if isinstance(template, dict) else []
+                if template_questions:
+                    out_payload["questions"] = template_questions
+                    payload["fallback_used"] = True
+                    payload["fallback_template"] = str(template_path)
+                    payload["selected_count"] = len(template_questions)
+            except Exception:
+                pass
+    payload["questions"] = out_payload["questions"]
+    out_path.write_text(json.dumps(out_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload["manifest_file"] = str(out_path)
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(
+            f"✅ Learn benchmark curated: selected={payload.get('selected_count', 0)} "
+            f"from candidates={payload.get('candidate_count', 0)}"
+        )
+        click.echo(f"Manifest: {out_path}")
+
+
 @nexus_group.command(name="learn:gate")
 @click.option("--topic", default="nexus", show_default=True)
 @click.option("--pass-threshold", default=0.6, type=float, show_default=True)

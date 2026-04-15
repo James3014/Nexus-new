@@ -1,0 +1,45 @@
+{
+  "topic": "openharness",
+  "generated_at": "2026-04-15T05:32:17.832399+00:00",
+  "questions": [
+    {
+      "question": "What does this project do at a high level?",
+      "expected_status": "ANSWERED",
+      "expected_keywords": [
+        "project",
+        "system"
+      ],
+      "difficulty": "easy",
+      "category": "README"
+    },
+    {
+      "question": "How does this project connect its core pipeline across multiple files?",
+      "expected_status": "ANSWERED",
+      "expected_keywords": [
+        "pipeline",
+        "flow"
+      ],
+      "difficulty": "deep",
+      "category": "cross_file"
+    },
+    {
+      "question": "What database migration workflow is documented in this repository?",
+      "expected_status": "UNKNOWN",
+      "difficulty": "unknown",
+      "category": "out_of_scope"
+    },
+    {
+      "question": "Does this project both support and forbid audio review?",
+      "expected_status": "CONFLICT",
+      "difficulty": "conflict",
+      "category": "contradiction"
+    },
+    {
+      "question": "What stale deployment policy from old documentation still applies now?",
+      "expected_status": "UNKNOWN",
+      "difficulty": "stale",
+      "category": "staleness",
+      "expected_stale_claims": 1
+    }
+  ]
+}

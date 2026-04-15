@@ -501,3 +501,73 @@ def test_learn_refresh_plan_marks_due_sources(tmp_path, monkeypatch):
     assert payload["due_count"] == 1
     assert payload["not_due_count"] == 1
     assert payload["due"][0]["topic"] == "openharness"
+
+
+def test_learn_benchmark_curate_generates_manifest(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    candidates_path = tmp_path / ".nexus" / "knowledge" / "learn_benchmark_candidates.jsonl"
+    candidates_path.parent.mkdir(parents=True, exist_ok=True)
+    candidates_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "topic": "openharness",
+                        "question": "What benchmark dimensions does OpenHarness evaluate?",
+                        "actual_status": "ANSWERED",
+                        "reason": "answered_with_citations",
+                        "token_coverage": 0.8,
+                        "created_at": "2026-04-15T00:00:00+00:00",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "topic": "openharness",
+                        "question": "What benchmark dimensions does OpenHarness evaluate?",
+                        "actual_status": "ANSWERED",
+                        "reason": "answered_with_citations",
+                        "token_coverage": 0.82,
+                        "created_at": "2026-04-15T01:00:00+00:00",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "topic": "openharness",
+                        "question": "What PostgreSQL migration workflow is used?",
+                        "actual_status": "UNKNOWN",
+                        "reason": "insufficient_token_coverage",
+                        "token_coverage": 0.2,
+                        "created_at": "2026-04-15T01:10:00+00:00",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:benchmark-curate",
+            "--topic",
+            "openharness",
+            "--max-questions",
+            "10",
+            "--manifest-file",
+            "docs/research/learn_benchmark_curated.json",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "SUCCESS"
+    assert payload["selected_count"] >= 2
+
+    manifest = tmp_path / "docs" / "research" / "learn_benchmark_curated.json"
+    assert manifest.exists()
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert len(manifest_payload["questions"]) >= 2
