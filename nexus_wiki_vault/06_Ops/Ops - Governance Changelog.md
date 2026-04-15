@@ -155,3 +155,9 @@ version_scope: '[v17.1, v22, v23]'
 - **Governance**: Extended `learn:report` and CI smoke gate with stale/conflict signals, and added `learn:benchmark` to compare baseline vs tuned retrieval thresholds on fixed question manifests.
 - **Refresh Loop**: Added source registry and refresh flow (`learn:register-source`, `learn:refresh`) so freshness can trigger real re-ingest and re-converge instead of remaining a passive signal.
 - **Verification**: Passed learn CLI and CI smoke tests; real-repo smoke verified `ANSWERED` for in-scope questions and `UNKNOWN` for out-of-scope prompts on `HKUDS/OpenHarness`.
+
+## [2026-04-14] Enforcing Nexus Production Hardening
+- **Protocol**: Applied v2.1 Production-Hardened Nexus Enforced setup.
+- **Dependency**: Fixed `uv` dependency path error by appending `~/.cargo/bin` to `FALLBACKS` in `_nexus_preflight.sh`.
+- **Validation**: Executed preflight scripts and validated CLI command sets successfully.
+- **Hallucination Guard**: Generated `hallucination_evidence.json` matching validation matrices and achieved full validation.

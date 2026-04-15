@@ -1,7 +1,137 @@
 [
   {
+    "artifact": "acceptance_check.md",
+    "timestamp": "2026-04-15T09:32:53.346145",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "acceptance_check.json",
+    "timestamp": "2026-04-15T09:32:53.345977",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hallucination_evidence.json",
+    "timestamp": "2026-04-15T09:32:31.665797",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "test_inact_timeout.json",
+    "timestamp": "2026-04-15T06:25:08.010377",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_preflight_round.json",
+    "timestamp": "2026-04-15T05:51:26.475647",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_smoke.json",
+    "timestamp": "2026-04-15T05:48:22.394038",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "preflight_debug.json",
+    "timestamp": "2026-04-15T05:40:24.602434",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r13_test_report.json",
+    "timestamp": "2026-04-15T05:10:03.080463",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r13a_report.json",
+    "timestamp": "2026-04-15T05:02:16.573643",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r13_report.json",
+    "timestamp": "2026-04-15T04:59:44.002223",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r12a_report.json",
+    "timestamp": "2026-04-15T04:45:46.928873",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r12_report.json",
+    "timestamp": "2026-04-15T04:43:41.297261",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_quick_probe_report.json",
+    "timestamp": "2026-04-15T04:34:28.389780",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_preflight_only_check.json",
+    "timestamp": "2026-04-15T04:18:07.577531",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_preflight_postfix_escalated.json",
+    "timestamp": "2026-04-15T04:16:58.266350",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_preflight_postfix.json",
+    "timestamp": "2026-04-15T04:15:46.699903",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r10a_report.json",
+    "timestamp": "2026-04-15T04:14:12.399565",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r10_report.json",
+    "timestamp": "2026-04-15T04:13:46.496334",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r9_short_report.json",
+    "timestamp": "2026-04-15T01:50:05.260142",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_preflight_r9.json",
+    "timestamp": "2026-04-15T01:45:47.454388",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round_r9_report.json",
+    "timestamp": "2026-04-15T01:45:09.589398",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round7_mutator_targeted_report.json",
+    "timestamp": "2026-04-15T01:15:27.550229",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round7_codeonly_report.json",
+    "timestamp": "2026-04-15T01:01:43.090727",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "gemini_round7_short_report.json",
+    "timestamp": "2026-04-15T00:58:39.119329",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_\u5c07 _tmp_\u4e00\u4eba\u516c\u53f8_ground_truth.md \u7684\u524d 2000 \u5b57\u9032\u884c\u8a9e\u7fa9\u91cd\u69cb\uff0c\u4fee\u6b63\u932f\u5b57\u8207\u65b7\u53e5\uff0c\u6a19\u984c\u4f7f\u7528 H2\u3002\n\u8f38\u51fa\u5fc5\u9808\u76f4\u63a5\u5b58\u5165 _Users_jameschen_Downloads_obsidian_\u77e5\u8b58\u5eab_99_Inbox_REFINED_\u4e00\u4eba\u516c\u53f8_V2_AUDIT.md\uff0c\u4e0d\u8981\u89e3\u91cb\u4efb\u4f55\u4e8b\u60c5\u3002.json",
+    "timestamp": "2026-04-14T19:58:14.758389",
+    "category": "Audit Report"
+  },
+  {
+    "artifact": "hyper_\u8acb\u6839\u64da _tmp_\u4e00\u4eba\u516c\u53f8_ground_truth.md \u7684\u524d 1000 \u5b57\u9032\u884c\u8a9e\u7fa9\u91cd\u9444\uff1a\n1. \u4fee\u6b63 OCR \u932f\u5b57\u3002\n2. \u7e2b\u5408\u56e0\u5206\u9801\u800c\u65b7\u958b\u7684\u53e5\u5b50\u3002\n3. \u5efa\u7acb\u6a19\u6e96 Markdown H2 \u6a19\u984c\u3002\n4. \u56b4\u683c\u7981\u6b62\u7522\u51fa\u4efb\u4f55\u89e3\u91cb\u6587\u5b57\u3002\n\u8f38\u51fa\u5b58\u81f3 _tmp_\u4e00\u4eba\u516c\u53f8_v2_audit.md.json",
+    "timestamp": "2026-04-14T19:57:57.910860",
+    "category": "Audit Report"
+  },
+  {
     "artifact": "nightshift_nexus_core_outcome_schema.py.json",
-    "timestamp": "2026-04-14T17:45:41.616161",
+    "timestamp": "2026-04-14T17:48:35.583057",
     "category": "Operational Report"
   },
   {
@@ -12,21 +142,6 @@
   {
     "artifact": "hyper_\u8acb\u5c07 _Users_jameschen_Downloads_obsidian_\u77e5\u8b58\u5eab_99_Inbox_\u4e00\u4eba\u516c\u53f8_\u5168\u6587\u63d0\u53d6.md \u7684\u524d 500 \u884c\u91cd\u9444\u70ba\u9ad8\u54c1\u8cea\u96fb\u5b50\u66f8\u683c\u5f0f\u3002\n\u8981\u6c42\uff1a\n1. \u4fee\u6b63 OCR \u932f\u5b57\uff08\u5982 \u95a3\u4fc2->\u95dc\u4fc2, \u4fca\u8a18->\u5f8c\u8a18\uff09\u3002\n2. \u7e2b\u5408\u65b7\u53e5\uff0c\u79fb\u9664\u91cd\u8907\u6a19\u984c\u3002\n3. \u79fb\u9664\u9801\u78bc\u3001\u5716\u7247\u6a19\u8a18\u3001\u66f8\u540d\u3002\n4. \u8f38\u51fa\u7d14\u7cb9\u7684 Markdown \u5167\u5bb9\uff0c\u4e0d\u8981\u89e3\u91cb\u3002.json",
     "timestamp": "2026-04-14T17:21:19.567517",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-14T17:15:00.665454",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-14T17:15:00.665219",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "hallucination_evidence.json",
-    "timestamp": "2026-04-14T17:14:54.399466",
     "category": "Operational Report"
   },
   {

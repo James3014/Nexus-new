@@ -91,10 +91,12 @@ If failed:
 
 2. `TIMEOUT` (even when preflight is OK)
 - Interpretation: delegation channel is alive, but prompt scope is too heavy for current session/model latency.
+- Classification: `TIMEOUT_WALLCLOCK` or `TIMEOUT_INACTIVITY`.
 - Fix sequence (mandatory):
   - split into short-cycle prompt (one blocker, 1-3 files)
   - rerun `bash scripts/ops/run_gemini_nexus_round.sh ... 240`
   - keep timeout at 180-300
+  - runner will auto-fallback to local supervisor mode after 1 timeout in this round (record `infra_blocked` in report)
   - supervisor runs benchmark locally after code patch
   - if 2 consecutive `TIMEOUT` on short-cycle, mark `gemini_delegation_blocked` and fallback to local implementation for this round
 

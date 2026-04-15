@@ -25,6 +25,10 @@ class SprintOutcome(str, Enum):
     SEMANTIC_NO_CHANGE = "semantic_no_change"
     TEST_TIMEOUT = "test_timeout"
     GENERATION_FAIL = "generation_fail"
+    STAGE1_FAILED = "stage1_failed"
+    STAGE1_NO_PASSING_CANDIDATE = "stage1_no_passing_candidate"
+    HYPER_RUN_TIMEOUT = "hyper_run_timeout"
+    TIME_BUDGET_EXCEEDED = "time_budget_exceeded"
     UNKNOWN = "unknown"
 
 class SchemaError(ValueError):

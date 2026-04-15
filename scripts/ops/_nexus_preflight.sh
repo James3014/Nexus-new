@@ -12,7 +12,7 @@ check_binary() {
     if ! command -v "$1" &> /dev/null; then
         echo "⚠️ [Preflight] Binary '$1' not found in PATH. Attempting discovery..."
         # Heuristic discovery for common Mac paths
-        FALLBACKS=("/opt/homebrew/bin/$1" "/usr/local/bin/$1" "/Users/jameschen/.npm-global/bin/$1")
+        FALLBACKS=("/opt/homebrew/bin/$1" "/usr/local/bin/$1" "/Users/jameschen/.npm-global/bin/$1" "/Users/jameschen/.cargo/bin/$1")
         for fb in "${FALLBACKS[@]}"; do
             if [ -f "$fb" ]; then
                 echo "✅ [Preflight] Found '$1' at $fb. Aligning..."
