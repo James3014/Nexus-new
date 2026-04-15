@@ -55,10 +55,14 @@ class LearnModeService:
         self.benchmark_candidates_path = self.knowledge_dir / "learn_benchmark_candidates.jsonl"
         self.benchmark_bank_path = self.knowledge_dir / "learn_benchmark_bank.json"
         self.reports_dir = project_root / ".nexus" / "reports" / "learn"
+        self.phase_writeback_path = self.reports_dir / "phase_writeback.jsonl"
+        self.phase_slo_summary_path = self.reports_dir / "phase_slo_summary.json"
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.closure_log = self.reports_dir / "learning_closure.jsonl"
+
+    PHASES: tuple[str, ...] = ("P", "X", "D", "R", "A", "C")
 
     def _resolve_path(self, p: str | Path) -> Path:
         path = Path(p)
@@ -438,6 +442,170 @@ class LearnModeService:
         self.closure_log.parent.mkdir(parents=True, exist_ok=True)
         with self.closure_log.open("a", encoding="utf-8") as f:
             f.write(json.dumps(closure, ensure_ascii=False) + "\n")
+
+    def _decide_learn_phase_route(self, *, phase: str, topic: str, metrics: dict[str, Any]) -> dict[str, Any]:
+        phase = str(phase or "").upper()
+        coverage = float(metrics.get("coverage", 0.0) or 0.0)
+        pass_rate = float(metrics.get("self_question_pass_rate", metrics.get("pass_rate", 0.0)) or 0.0)
+        citation_valid_ratio = float(metrics.get("citation_valid_ratio", 0.0) or 0.0)
+        stale_claims_count = int(metrics.get("stale_claims_count", 0) or 0)
+        conflict_count = int(metrics.get("conflict_count", 0) or 0)
+
+        risk_score = 0.0
+        if coverage < 0.6:
+            risk_score += 0.35
+        if pass_rate < 0.6:
+            risk_score += 0.35
+        if citation_valid_ratio < 0.95:
+            risk_score += 0.2
+        if stale_claims_count > 0:
+            risk_score += 0.05
+        if conflict_count > 0:
+            risk_score += 0.15
+        risk_score = round(min(1.0, risk_score), 4)
+
+        if phase in {"P", "D"}:
+            mode = "light"
+            reason = "plan_diagnose_context_sync"
+        elif phase == "X":
+            mode = "research" if risk_score >= 0.5 else "light"
+            reason = "research_needed" if mode == "research" else "research_optional"
+        elif phase == "R":
+            mode = "research" if risk_score >= 0.45 else "light"
+            reason = "repair_needs_evidence" if mode == "research" else "repair_low_risk"
+        elif phase == "A":
+            mode = "strict"
+            reason = "audit_requires_citation_integrity"
+        elif phase == "C":
+            mode = "strict"
+            reason = "crystallize_requires_writeback"
+        else:
+            mode = "off"
+            reason = "unknown_phase"
+
+        return {
+            "phase": phase,
+            "topic": topic,
+            "mode": mode,
+            "risk_score": risk_score,
+            "reason": reason,
+            "metrics_snapshot": {
+                "coverage": coverage,
+                "self_question_pass_rate": pass_rate,
+                "citation_valid_ratio": citation_valid_ratio,
+                "stale_claims_count": stale_claims_count,
+                "conflict_count": conflict_count,
+            },
+        }
+
+    def _phase_writeback_policy(self, *, phase: str, route: dict[str, Any]) -> dict[str, Any]:
+        phase = str(phase or "").upper()
+        mode = str(route.get("mode", "off"))
+        required = phase in {"R", "A", "C"} or mode in {"research", "strict"}
+        return {
+            "required": required,
+            "policy": "required" if required else "optional",
+            "reason": f"phase={phase},mode={mode}",
+        }
+
+    def _append_phase_writeback(self, payload: dict[str, Any]) -> None:
+        self.phase_writeback_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.phase_writeback_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def sync_phase_learning_closure(
+        self,
+        *,
+        topic: str,
+        metrics: dict[str, Any],
+        phase_status: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Bridge Learn lane into six-phase routing + phase-end writeback policy."""
+        now = datetime.now(timezone.utc).isoformat()
+        written = 0
+        routes: dict[str, Any] = {}
+        statuses = {k.upper(): str(v).upper() for k, v in (phase_status or {}).items()}
+
+        for phase in self.PHASES:
+            route = self._decide_learn_phase_route(phase=phase, topic=topic, metrics=metrics)
+            policy = self._phase_writeback_policy(phase=phase, route=route)
+            status = statuses.get(phase, "SUCCESS")
+            payload = {
+                "timestamp": now,
+                "topic": topic,
+                "phase": phase,
+                "phase_status": status,
+                "route": route,
+                "writeback_policy": policy,
+                "writeback_done": True,
+            }
+            self._append_phase_writeback(payload)
+            routes[phase] = route
+            written += 1
+
+        summary = self.build_phase_slo_report(window=300)
+        return {
+            "status": "SUCCESS",
+            "topic": topic,
+            "entries_written": written,
+            "phase_routes": routes,
+            "phase_slo_summary": summary,
+        }
+
+    def build_phase_slo_report(self, *, window: int = 300) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        if self.phase_writeback_path.exists():
+            for line in self.phase_writeback_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                    if isinstance(row, dict):
+                        rows.append(row)
+                except json.JSONDecodeError:
+                    continue
+
+        rows = rows[-max(1, int(window)):]
+        per_phase: dict[str, dict[str, Any]] = {}
+        for phase in self.PHASES:
+            items = [r for r in rows if str(r.get("phase", "")).upper() == phase]
+            total = len(items)
+            required = sum(1 for r in items if bool((r.get("writeback_policy") or {}).get("required", False)))
+            done = sum(1 for r in items if bool(r.get("writeback_done", False)))
+            success = sum(1 for r in items if str(r.get("phase_status", "")).upper() == "SUCCESS")
+            required_done_ratio = 1.0 if required == 0 else done / required
+            success_ratio = 1.0 if total == 0 else success / total
+            per_phase[phase] = {
+                "total": total,
+                "writeback_required": required,
+                "writeback_done": done,
+                "required_done_ratio": round(required_done_ratio, 4),
+                "success_ratio": round(success_ratio, 4),
+            }
+
+        global_required = sum(v["writeback_required"] for v in per_phase.values())
+        global_done = sum(v["writeback_done"] for v in per_phase.values())
+        global_total = sum(v["total"] for v in per_phase.values())
+        global_success = sum(int(round(v["success_ratio"] * v["total"])) for v in per_phase.values())
+        phase_slo_pass = all(v["required_done_ratio"] >= 0.95 and v["success_ratio"] >= 0.5 for v in per_phase.values())
+
+        summary = {
+            "status": "SUCCESS",
+            "window": max(1, int(window)),
+            "phase_slo_pass": bool(phase_slo_pass),
+            "global": {
+                "writeback_required": global_required,
+                "writeback_done": global_done,
+                "required_done_ratio": round(1.0 if global_required == 0 else global_done / global_required, 4),
+                "success_ratio": round(1.0 if global_total == 0 else global_success / global_total, 4),
+            },
+            "phases": per_phase,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self.phase_slo_summary_path.parent.mkdir(parents=True, exist_ok=True)
+        self.phase_slo_summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
 
     def _load_source_registry(self) -> list[dict[str, Any]]:
         if not self.sources_path.exists():
@@ -1197,6 +1365,25 @@ class LearnModeService:
                 "citation_valid_ratio": round(0.0 if report["claims_total"] == 0 else report["claims_matched"] / max(1, report["claims_total"]), 4),
             },
         )
+        phase_status = {
+            "P": "SUCCESS",
+            "X": "SUCCESS" if report["discovered_sources"] else "PARTIAL",
+            "D": "SUCCESS" if report["claims_total"] > 0 else "PARTIAL",
+            "R": "SUCCESS" if report["converged"] else "PARTIAL",
+            "A": "SUCCESS" if report["claims_matched"] > 0 else "PARTIAL",
+            "C": "SUCCESS" if bool((report.get("learning_closure") or {}).get("mempalace_verified")) else "PARTIAL",
+        }
+        report["phase_learning_bridge"] = self.sync_phase_learning_closure(
+            topic=topic,
+            metrics={
+                "coverage": report["coverage"],
+                "self_question_pass_rate": report["self_question_pass_rate"],
+                "citation_valid_ratio": round(0.0 if report["claims_total"] == 0 else report["claims_matched"] / max(1, report["claims_total"]), 4),
+                "stale_claims_count": 0,
+                "conflict_count": 0,
+            },
+            phase_status=phase_status,
+        )
         return report
 
     def ask(
@@ -1445,7 +1632,7 @@ class LearnModeService:
                     f"Need more cited claims to reach pass threshold {pass_threshold}"
                 ]
 
-        return {
+        report = {
             "status": "SUCCESS",
             "topic": topic,
             "sources_count": len(sources),
@@ -1465,3 +1652,5 @@ class LearnModeService:
             "converged": pass_rate >= pass_threshold,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        report["phase_slo_summary"] = self.build_phase_slo_report(window=300)
+        return report

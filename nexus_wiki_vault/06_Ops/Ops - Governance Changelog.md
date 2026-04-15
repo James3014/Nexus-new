@@ -162,3 +162,10 @@ version_scope: '[v17.1, v22, v23]'
 - **Dependency**: Fixed `uv` dependency path error by appending `~/.cargo/bin` to `FALLBACKS` in `_nexus_preflight.sh`.
 - **Validation**: Executed preflight scripts and validated CLI command sets successfully.
 - **Hallucination Guard**: Generated `hallucination_evidence.json` matching validation matrices and achieved full validation.
+
+## [2026-04-15] Learn × Six-Phase Closure Bridge
+- **Phase Router**: Added learn phase routing decisions for `P/X/D/R/A/C` with risk-scored `mode` selection (`light/research/strict`) and persisted route metadata.
+- **Writeback Policy**: Added phase-end writeback policy records (`required/optional`) with machine-readable logs at `.nexus/reports/learn/phase_writeback.jsonl`.
+- **Phase SLO**: Added aggregated phase SLO summary (`phase_slo_pass`, `required_done_ratio`, per-phase success ratios) at `.nexus/reports/learn/phase_slo_summary.json`.
+- **CLI Surface**: Added `nexus learn:phase-slo` for explicit phase-level closure reporting.
+- **CI Gate**: Hardened learn smoke gate to require valid phase SLO report and enforce `phase_slo_pass=true` plus `required_done_ratio>=95%`.

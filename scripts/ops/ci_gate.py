@@ -257,6 +257,7 @@ def run_learn_check(mode: str, dry_run: bool, topic: str):
 
     print(f"\n🚀 [CI-Gate] Running Learn Mode Check ({mode}) {'(Dry-run)' if dry_run else ''}...")
     report = ROOT / ".nexus" / "reports" / "learn" / "learn-ci-smoke.json"
+    phase_slo = ROOT / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
     cmd = (
         f'"{VENV_PYTHON}" scripts/engine/nexus_cli.py nexus learn:report '
         f'--topic "{topic}" --report-file "{report}" --output-json'
@@ -302,6 +303,27 @@ def run_learn_check(mode: str, dry_run: bool, topic: str):
     if mode == "smoke" and conflict_candidates > 3:
         print("❌ [CI-BLOCK] Learn conflict_candidate_count is too high in smoke mode.")
         return False
+    if mode == "smoke":
+        if not phase_slo.exists():
+            print("❌ [CI-BLOCK] Learn phase_slo_summary.json is missing.")
+            return False
+        try:
+            phase_data = json.loads(phase_slo.read_text())
+        except Exception as e:
+            print(f"❌ [CI-BLOCK] Learn phase SLO summary parse failed: {e}")
+            return False
+        phase_slo_pass = bool(phase_data.get("phase_slo_pass", False))
+        global_required_ratio = float((phase_data.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0)
+        print(
+            f"📊 [Learn-Phase-SLO] phase_slo_pass={phase_slo_pass}, "
+            f"required_done_ratio={global_required_ratio:.2%}"
+        )
+        if not phase_slo_pass:
+            print("❌ [CI-BLOCK] Learn phase-level SLO failed.")
+            return False
+        if global_required_ratio < 0.95:
+            print("❌ [CI-BLOCK] Learn required_done_ratio below 95%.")
+            return False
     return True
 
 

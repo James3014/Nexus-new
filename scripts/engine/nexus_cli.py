@@ -707,6 +707,35 @@ def learn_report(topic, question_count, pass_threshold, report_file, output_json
     click.echo(f"Report: {out_path}")
 
 
+@nexus_group.command(name="learn:phase-slo")
+@click.option("--window", default=300, type=int, show_default=True)
+@click.option(
+    "--report-file",
+    default=".nexus/reports/learn/phase_slo_summary.json",
+    show_default=True,
+    type=click.Path(),
+)
+@click.option("--output-json", is_flag=True)
+def learn_phase_slo(window, report_file, output_json):
+    """📏 Build phase-level learn SLO report for P/X/D/R/A/C writeback closure."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.build_phase_slo_report(window=window)
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    click.echo("✅ Learn phase SLO summary generated")
+    click.echo(
+        f"phase_slo_pass={payload.get('phase_slo_pass')} "
+        f"required_done_ratio={payload.get('global', {}).get('required_done_ratio', 0.0)}"
+    )
+    click.echo(f"Report: {out_path}")
+
+
 @nexus_group.command(name="learn:benchmark")
 @click.option("--manifest-file", required=True, type=click.Path(exists=True))
 @click.option("--source", default="", help="Optional source to ingest before benchmark.")

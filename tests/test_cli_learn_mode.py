@@ -76,7 +76,11 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert "answered_questions" in converge_payload
     assert "swarm" in converge_payload
     assert "round_activity" in converge_payload
+    assert "phase_learning_bridge" in converge_payload
+    assert converge_payload["phase_learning_bridge"]["entries_written"] == 6
     assert (tmp_path / ".nexus" / "reports" / "learn" / "evidence_converge.json").exists()
+    assert (tmp_path / ".nexus" / "reports" / "learn" / "phase_writeback.jsonl").exists()
+    assert (tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").exists()
 
     learn_report = runner.invoke(
         nexus,
@@ -571,3 +575,41 @@ def test_learn_benchmark_curate_generates_manifest(tmp_path, monkeypatch):
     assert manifest.exists()
     manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert len(manifest_payload["questions"]) >= 2
+
+
+def test_learn_phase_slo_command_outputs_summary(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    phase_log = tmp_path / ".nexus" / "reports" / "learn" / "phase_writeback.jsonl"
+    phase_log.parent.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for phase in ["P", "X", "D", "R", "A", "C"]:
+        entries.append(
+            {
+                "timestamp": "2026-04-15T00:00:00+00:00",
+                "topic": "nexus",
+                "phase": phase,
+                "phase_status": "SUCCESS",
+                "route": {"mode": "light"},
+                "writeback_policy": {"required": True, "policy": "required"},
+                "writeback_done": True,
+            }
+        )
+    phase_log.write_text("\n".join(json.dumps(row) for row in entries) + "\n", encoding="utf-8")
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:phase-slo",
+            "--window",
+            "100",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "SUCCESS"
+    assert payload["phase_slo_pass"] is True
+    assert payload["global"]["required_done_ratio"] >= 0.95
