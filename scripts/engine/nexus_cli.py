@@ -1435,8 +1435,16 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
 
         per_case = []
         for case in cases:
-            if max_wall_time_sec > 0 and (time.time() - benchmark_start_time) > max_wall_time_sec:
-                time_budget_exceeded = True
+            if max_wall_time_sec > 0:
+                elapsed = time.time() - benchmark_start_time
+                remaining_wall = max_wall_time_sec - elapsed
+                if remaining_wall <= 0:
+                    time_budget_exceeded = True
+                else:
+                    # Estimate minimum budget for a case (at least one trial)
+                    min_case_budget = max(20, min(timeout_sec, 60) + 10) 
+                    if remaining_wall < min_case_budget:
+                        time_budget_exceeded = True
             
             cid = case.get("id", "unknown")
             if time_budget_exceeded:
@@ -1481,7 +1489,7 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                 })
                 continue
 
-            pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
+            pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", test_file]
             baseline_runs = []
             hyper_runs = []
 
@@ -1540,8 +1548,12 @@ def research_benchmark(manifest_file, report_file, budget_limit, timeout_sec, ma
                     "error": err,
                 })
 
-                if max_wall_time_sec > 0 and (time.time() - benchmark_start_time) > max_wall_time_sec:
-                    time_budget_exceeded = True
+                if max_wall_time_sec > 0 and not time_budget_exceeded:
+                    remaining_wall = max_wall_time_sec - (time.time() - benchmark_start_time)
+                    # Fast-fail for hyper run
+                    min_hyper_budget = max(10, min(timeout_sec, stage1_timeout_sec) + 10)
+                    if remaining_wall < min_hyper_budget:
+                        time_budget_exceeded = True
                 
                 if time_budget_exceeded:
                     hyper_runs.append({"trial": trial + 1, "ok": False, "elapsed_sec": 0.0, "reason": "time_budget_exceeded"})

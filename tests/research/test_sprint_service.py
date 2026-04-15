@@ -44,10 +44,10 @@ def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
     target.write_text("print('x')\n", encoding="utf-8")
 
     class FakeGenerator:
-        source = "local"
+        source = "untrusted_test"
 
         def generate(self, **_kwargs):
-            return "print('y')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+            return "print('y')\n", {"source": "untrusted_test", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):
@@ -77,10 +77,10 @@ def test_run_hyper_sprint_semantic_guard_for_feature(monkeypatch, tmp_path: Path
     target.write_text("print('x')\n", encoding="utf-8")
 
     class FakeGenerator:
-        source = "local"
+        source = "untrusted_test"
 
         def generate(self, **_kwargs):
-            return "print('y')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+            return "print('y')\n", {"source": "untrusted_test", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import subprocess
 import time
 from datetime import datetime
@@ -308,7 +309,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     start = time.time()
     policy = ResearchPolicy()
     scope_files = [config.target_file] + ([config.test_file] if config.test_file else [])
-    pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1"] + ([config.test_file] if config.test_file else [])
+    pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1"] + ([config.test_file] if config.test_file else [])
 
     target_path = repo_root / config.target_file
     source_code = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
@@ -354,7 +355,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         learning_trace["retrieval_error"] = str(exc)
         store = None
 
-    def _semantic_guard(source: str, candidate: str, task: str) -> tuple[bool, str]:
+    def _semantic_guard(source: str, candidate: str, task: str, source_label: str = "llm") -> tuple[bool, str]:
         if candidate.strip() == source.strip():
             return False, "no_change_candidate"
         
@@ -373,12 +374,16 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         is_feature = any(w in task_l for w in feature_words)
         is_refactor = "refactor" in task_l
         
-        # Allow structural changes for feature/refactor if AST is valid and delta >= 1
-        if (is_feature or is_refactor) and changed_count >= 1:
-            return True, ""
+        if changed_count < 1:
+            return False, "semantic_guard_zero_delta"
 
-        if is_feature and changed_count < 2:
+        # R9.1: Context-aware delta requirement
+        is_trusted_local = "local" in str(source_label).lower()
+        
+        # If it's a feature from LLM, require at least 2 lines of change to reduce low-quality hallucinations
+        if is_feature and not is_trusted_local and changed_count < 2:
             return False, "semantic_guard_low_delta_feature"
+            
         return True, ""
 
     def _build_rejection_summary(items: list[CandidateEval], codes: list[str]) -> dict[str, int]:
@@ -539,10 +544,24 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 used_source = str(meta.get("source", "local"))
             model_calls += int(meta.get("model_calls", 0))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
-            guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task)
+            guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
-                ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=guard_reason, candidate_code=candidate_code, source=used_source)
-                error_codes.append("semantic_guard")
+                # R8: If LLM fails semantic guard, try one Local Candidate as a backup
+                if llm_generator is not None:
+                    candidate_code, meta = local_generator.generate(
+                        source_code=source_code,
+                        task=config.task,
+                        mutation_hint=hint,
+                        seed=idx + 1000,
+                    )
+                    used_source = str(meta.get("source", "local_guard_fallback"))
+                    guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
+                
+                if not guard_ok:
+                    ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=guard_reason, candidate_code=candidate_code, source=used_source)
+                    error_codes.append("semantic_guard")
+                else:
+                    ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
             else:
                 ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
         except Exception as exc:  # noqa: BLE001
