@@ -341,3 +341,56 @@ def test_learn_benchmark_reports_best_config(tmp_path, monkeypatch):
     assert "baseline" in payload
     assert "best" in payload
     assert payload["best"]["success_rate"] >= payload["baseline"]["success_rate"]
+    assert "answer_precision" in payload["baseline"]
+    assert "unknown_accuracy" in payload["baseline"]
+    assert "avg_token_coverage" in payload["baseline"]
+
+
+def test_learn_register_source_and_refresh(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    source_file = tmp_path / "source.md"
+    source_file.write_text(
+        "OpenHarness evaluates agents and benchmark dimensions with cited evidence.",
+        encoding="utf-8",
+    )
+
+    reg = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:register-source",
+            "--topic",
+            "openharness",
+            "--source",
+            "repo:HKUDS/OpenHarness",
+            "--source-file",
+            str(source_file),
+            "--refresh-after-days",
+            "1",
+            "--priority",
+            "high",
+            "--output-json",
+        ],
+    )
+    assert reg.exit_code == 0, reg.output
+    reg_payload = json.loads(reg.output)
+    assert reg_payload["status"] == "SUCCESS"
+    assert (tmp_path / ".nexus" / "knowledge" / "learn_sources.jsonl").exists()
+
+    refresh = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:refresh",
+            "--topic",
+            "openharness",
+            "--all",
+            "--output-json",
+        ],
+    )
+    assert refresh.exit_code == 0, refresh.output
+    refresh_payload = json.loads(refresh.output)
+    assert refresh_payload["status"] == "SUCCESS"
+    assert refresh_payload["refreshed_count"] == 1

@@ -151,4 +151,5 @@ version_scope: '[v17.1, v22, v23]'
 - **Conflict Safety**: Added conflict detection in `learn:ask`; contradictory cited claims now return `CONFLICT` instead of forcing a brittle answer.
 - **Topic Routing**: Introduced topic-pack routing so repo-scoped questions prefer the most relevant claim bucket before answer assembly.
 - **Governance**: Extended `learn:report` and CI smoke gate with stale/conflict signals, and added `learn:benchmark` to compare baseline vs tuned retrieval thresholds on fixed question manifests.
+- **Refresh Loop**: Added source registry and refresh flow (`learn:register-source`, `learn:refresh`) so freshness can trigger real re-ingest and re-converge instead of remaining a passive signal.
 - **Verification**: Passed learn CLI and CI smoke tests; real-repo smoke verified `ANSWERED` for in-scope questions and `UNKNOWN` for out-of-scope prompts on `HKUDS/OpenHarness`.

@@ -481,6 +481,59 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
         click.echo(f"Evidence: {Path(evidence_file) if evidence_file else 'N/A'}")
 
 
+@nexus_group.command(name="learn:register-source")
+@click.option("--topic", required=True)
+@click.option("--source", required=True)
+@click.option("--source-file", required=False, type=click.Path(exists=True))
+@click.option("--refresh-after-days", default=14, type=int, show_default=True)
+@click.option("--priority", default="medium", show_default=True)
+@click.option("--output-json", is_flag=True)
+def learn_register_source(topic, source, source_file, refresh_after_days, priority, output_json):
+    """🗂️ Register a learn source for scheduled refresh."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.register_source(
+        topic=topic,
+        source=source,
+        source_file=source_file,
+        refresh_after_days=refresh_after_days,
+        priority=priority,
+    )
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"✅ Learn source registered: topic={topic} source={source}")
+
+
+@nexus_group.command(name="learn:refresh")
+@click.option("--topic", default="", help="Optional topic filter.")
+@click.option("--due-only/--all", default=True, show_default=True)
+@click.option("--pass-threshold", default=0.6, type=float, show_default=True)
+@click.option("--question-count", default=5, type=int, show_default=True)
+@click.option("--report-file", default=".nexus/reports/learn/learn_refresh.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def learn_refresh(topic, due_only, pass_threshold, question_count, report_file, output_json):
+    """🔄 Refresh registered learn sources and re-run converge."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.refresh_sources(
+        topic=topic,
+        due_only=due_only,
+        pass_threshold=pass_threshold,
+        question_count=question_count,
+    )
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"✅ Learn refresh complete: refreshed={payload['refreshed_count']} skipped={payload['skipped_count']}")
+        click.echo(f"Report: {out_path}")
+
+
 @nexus_group.command(name="learn:converge")
 @click.option("--topic", required=True)
 @click.option("--max-rounds", default=3, type=int, show_default=True)
@@ -671,6 +724,13 @@ def learn_benchmark(manifest_file, source, source_file, topic, report_file, outp
     for cfg in candidate_cfgs:
         runs = []
         total = 0.0
+        answered_hits = 0
+        answered_total = 0
+        unknown_hits = 0
+        unknown_total = 0
+        conflict_hits = 0
+        conflict_total = 0
+        stale_hits = 0
         for item in questions:
             result = service.ask(
                 topic=topic,
@@ -682,6 +742,18 @@ def learn_benchmark(manifest_file, source, source_file, topic, report_file, outp
             )
             score = _score_result(result, item)
             total += score
+            expected_status = str(item.get("expected_status", "ANSWERED")).upper()
+            if expected_status == "ANSWERED":
+                answered_total += 1
+                answered_hits += int(score)
+            elif expected_status == "UNKNOWN":
+                unknown_total += 1
+                unknown_hits += int(score)
+            elif expected_status == "CONFLICT":
+                conflict_total += 1
+                conflict_hits += int(score)
+            if int(item.get("expected_stale_claims", 0)) > 0 and result.get("status") == "UNKNOWN":
+                stale_hits += 1
             runs.append(
                 {
                     "question": item.get("question", ""),
@@ -689,12 +761,26 @@ def learn_benchmark(manifest_file, source, source_file, topic, report_file, outp
                     "actual_status": result.get("status"),
                     "score": score,
                     "token_coverage": result.get("token_coverage", 0.0),
+                    "claims_used": result.get("claims_used", 0),
+                    "topic_pack_selected": result.get("topic_pack_selected", ""),
                 }
             )
         cfg_results.append(
             {
                 "config": cfg,
                 "success_rate": round(total / max(1, len(questions)), 4),
+                "answer_precision": round(answered_hits / max(1, answered_total), 4),
+                "unknown_accuracy": round(unknown_hits / max(1, unknown_total), 4),
+                "conflict_accuracy": round(conflict_hits / max(1, conflict_total), 4),
+                "avg_token_coverage": round(
+                    sum(float(r.get("token_coverage", 0.0) or 0.0) for r in runs) / max(1, len(runs)),
+                    4,
+                ),
+                "avg_claims_used": round(
+                    sum(float(r.get("claims_used", 0) or 0) for r in runs) / max(1, len(runs)),
+                    4,
+                ),
+                "stale_claim_usage_rate": round(stale_hits / max(1, len(questions)), 4),
                 "results": runs,
             }
         )
