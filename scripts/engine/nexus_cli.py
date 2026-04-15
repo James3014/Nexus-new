@@ -2618,5 +2618,42 @@ def compat_research_auto_flow(ctx: click.Context):
     """Compatibility alias for `nexus research:auto-flow`."""
     _forward_to_nested_nexus(ctx, "research:auto-flow")
 
+
+@nexus_group.command(name="learn:phase-policy")
+@click.option("--task-type", default="bug")
+@click.option("--risk", default="standard")
+@click.option("--output-json", is_flag=True)
+def learn_phase_policy_cmd(task_type, risk, output_json):
+    """🧠 Show phase-policy decisions for a hypothetical task."""
+    from nexus.research.learn_mode import LearnModeService
+    from nexus.research.learn.phase_policy import derive_phase_actions
+    import json
+    
+    learn_svc = LearnModeService(REPO_ROOT)
+    slo_summary = learn_svc.read_phase_slo_summary()
+    actions = derive_phase_actions(slo_summary, task_type, risk)
+    
+    out = {
+        "task_type": task_type,
+        "risk": risk,
+        "slo_readiness": slo_summary.get("overall_pass_rate", 0.0),
+        "policy": {
+            "allow_research": actions.allow_research,
+            "force_baseline": actions.force_baseline,
+            "require_writeback": actions.require_writeback,
+            "audit_strictness": actions.audit_strictness.value,
+            "reasoning": actions.reasoning
+        }
+    }
+    
+    if output_json:
+        click.echo(json.dumps(out, indent=2))
+    else:
+        click.echo(f"SLO Readiness: {out['slo_readiness']:.1%}")
+        click.echo(f"Allow Research: {out['policy']['allow_research']}")
+        click.echo(f"Force Baseline: {out['policy']['force_baseline']}")
+        click.echo(f"Reasoning: {out['policy']['reasoning']}")
+
+
 if __name__ == "__main__":
     nexus()
