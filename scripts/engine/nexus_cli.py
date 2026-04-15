@@ -534,6 +534,30 @@ def learn_refresh(topic, due_only, pass_threshold, question_count, report_file, 
         click.echo(f"Report: {out_path}")
 
 
+@nexus_group.command(name="learn:refresh-plan")
+@click.option("--topic", default="", help="Optional topic filter.")
+@click.option("--due-within-days", default=0, type=int, show_default=True)
+@click.option("--report-file", default=".nexus/reports/learn/learn_refresh_plan.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def learn_refresh_plan(topic, due_within_days, report_file, output_json):
+    """🗓️ Build a scheduler-ready plan for learn source refresh."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    payload = service.build_refresh_plan(
+        topic=topic,
+        due_within_days=due_within_days,
+    )
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"✅ Learn refresh plan generated: due={payload['due_count']} total={payload['sources_total']}")
+        click.echo(f"Report: {out_path}")
+
+
 @nexus_group.command(name="learn:converge")
 @click.option("--topic", required=True)
 @click.option("--max-rounds", default=3, type=int, show_default=True)

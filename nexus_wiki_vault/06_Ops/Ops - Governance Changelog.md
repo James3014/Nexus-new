@@ -28,6 +28,7 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-15 | **Learn Mode Benchmark Candidate Writeback & Refresh Planning** | `nexus/research/learn_mode.py`, `scripts/engine/nexus_cli.py`, `tests/test_cli_learn_mode.py` | Low | Git revert | Codex |
 | 2026-04-13 | **Research 2.0 Gladiator & Memory Metabolism Integration** | `nexus/research/`, `nexus/engine/policies/`, `nexus_cli.py` | Mid | Git revert | Antigravity |
 | 2026-04-13 | **Automated Nexus Repair (AOS-P0-P1)** | `scripts/engine/`, `tests/engine/` | Mid | Git revert | Antigravity |
 | 2026-04-11 | **Tiered Test Strategy & Control-Plane Docs** | `tests/research/`, `docs/research/`, `nexus_cli.py` | Low | Git revert | Antigravity |

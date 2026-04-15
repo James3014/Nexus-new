@@ -394,3 +394,110 @@ def test_learn_register_source_and_refresh(tmp_path, monkeypatch):
     refresh_payload = json.loads(refresh.output)
     assert refresh_payload["status"] == "SUCCESS"
     assert refresh_payload["refreshed_count"] == 1
+
+
+def test_learn_ask_unknown_writes_benchmark_candidate(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    source_file = tmp_path / "source.md"
+    source_file.write_text(
+        "Repo Scout discovers repository structure and summarizes codebases with cited evidence.",
+        encoding="utf-8",
+    )
+
+    ingest = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:ingest",
+            "--source",
+            "repo:repo-scout",
+            "--source-file",
+            str(source_file),
+            "--topic",
+            "repo-scout",
+            "--output-json",
+        ],
+    )
+    assert ingest.exit_code == 0, ingest.output
+
+    ask = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "ask",
+            "--topic",
+            "repo-scout",
+            "--question",
+            "What Kubernetes CRD schema and migration workflow does this repo implement?",
+            "--output-json",
+        ],
+    )
+    assert ask.exit_code == 0, ask.output
+    ask_payload = json.loads(ask.output)
+    assert ask_payload["status"] == "UNKNOWN"
+
+    candidates_path = tmp_path / ".nexus" / "knowledge" / "learn_benchmark_candidates.jsonl"
+    assert candidates_path.exists()
+    rows = [json.loads(line) for line in candidates_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows
+    assert rows[-1]["topic"] == "repo-scout"
+    assert rows[-1]["actual_status"] == "UNKNOWN"
+
+
+def test_learn_refresh_plan_marks_due_sources(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    sources_path = tmp_path / ".nexus" / "knowledge" / "learn_sources.jsonl"
+    sources_path.parent.mkdir(parents=True, exist_ok=True)
+    sources_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "topic": "openharness",
+                        "source": "repo:HKUDS/OpenHarness",
+                        "source_file": "",
+                        "refresh_after_days": 1,
+                        "priority": "high",
+                        "last_ingested_at": "2026-04-10T00:00:00+00:00",
+                        "last_refreshed_at": "2026-04-10T00:00:00+00:00",
+                        "last_claim_count": 100,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "topic": "repo-scout",
+                        "source": "repo:BingJyun/repo-scout-skill",
+                        "source_file": "",
+                        "refresh_after_days": 14,
+                        "priority": "medium",
+                        "last_ingested_at": "2026-04-15T00:00:00+00:00",
+                        "last_refreshed_at": "2026-04-15T00:00:00+00:00",
+                        "last_claim_count": 50,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    plan = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:refresh-plan",
+            "--due-within-days",
+            "0",
+            "--output-json",
+        ],
+    )
+    assert plan.exit_code == 0, plan.output
+    payload = json.loads(plan.output)
+    assert payload["status"] == "SUCCESS"
+    assert payload["due_count"] == 1
+    assert payload["not_due_count"] == 1
+    assert payload["due"][0]["topic"] == "openharness"

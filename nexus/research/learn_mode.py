@@ -52,6 +52,7 @@ class LearnModeService:
         self.raw_dir = self.knowledge_dir / "raw_sources"
         self.claims_path = self.knowledge_dir / "learn_claims.jsonl"
         self.sources_path = self.knowledge_dir / "learn_sources.jsonl"
+        self.benchmark_candidates_path = self.knowledge_dir / "learn_benchmark_candidates.jsonl"
         self.reports_dir = project_root / ".nexus" / "reports" / "learn"
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
@@ -456,6 +457,31 @@ class LearnModeService:
         content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
         self.sources_path.write_text((content + "\n") if content else "", encoding="utf-8")
 
+    def _append_benchmark_candidate(
+        self,
+        *,
+        topic: str,
+        question: str,
+        actual_status: str,
+        reason: str,
+        token_coverage: float = 0.0,
+        topic_pack_selected: str = "",
+        conflicts: list[dict[str, Any]] | None = None,
+    ) -> None:
+        payload = {
+            "topic": topic,
+            "question": question,
+            "actual_status": actual_status,
+            "reason": reason,
+            "token_coverage": round(float(token_coverage or 0.0), 4),
+            "topic_pack_selected": topic_pack_selected,
+            "conflicts": conflicts or [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.benchmark_candidates_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.benchmark_candidates_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
     def _sync_registry_after_ingest(self, *, source: str, source_file: str | None, topic: str, claims_count: int) -> None:
         rows = self._load_source_registry()
         now = datetime.now(timezone.utc).isoformat()
@@ -588,6 +614,56 @@ class LearnModeService:
             "skipped": skipped[:20],
             "registry_path": str(self.sources_path),
             "timestamp": now,
+        }
+
+    def build_refresh_plan(
+        self,
+        *,
+        topic: str = "",
+        due_within_days: int = 0,
+    ) -> dict[str, Any]:
+        rows = self._load_source_registry()
+        if topic:
+            rows = [row for row in rows if str(row.get("topic", "")) == topic]
+
+        due_items: list[dict[str, Any]] = []
+        not_due_items: list[dict[str, Any]] = []
+        threshold = max(0, int(due_within_days))
+        for row in rows:
+            last = str(row.get("last_refreshed_at") or row.get("last_ingested_at") or "")
+            refresh_after_days = int(row.get("refresh_after_days", 14) or 14)
+            days_since = self._days_since(last) if last else float(refresh_after_days)
+            days_until_due = max(0.0, float(refresh_after_days) - float(days_since))
+            item = {
+                "topic": row.get("topic", ""),
+                "source": row.get("source", ""),
+                "source_file": row.get("source_file", ""),
+                "priority": row.get("priority", "medium"),
+                "refresh_after_days": refresh_after_days,
+                "last_ingested_at": row.get("last_ingested_at", ""),
+                "last_refreshed_at": row.get("last_refreshed_at", ""),
+                "last_claim_count": int(row.get("last_claim_count", 0) or 0),
+                "days_since_last_refresh": round(float(days_since), 3),
+                "days_until_due": round(float(days_until_due), 3),
+                "due": bool(days_until_due <= threshold),
+            }
+            if item["due"]:
+                due_items.append(item)
+            else:
+                not_due_items.append(item)
+
+        return {
+            "status": "SUCCESS",
+            "topic": topic,
+            "due_within_days": threshold,
+            "sources_total": len(rows),
+            "due_count": len(due_items),
+            "not_due_count": len(not_due_items),
+            "due": due_items,
+            "not_due": not_due_items,
+            "registry_path": str(self.sources_path),
+            "benchmark_candidates_path": str(self.benchmark_candidates_path),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def _enrich_claim(self, claim: dict[str, Any]) -> dict[str, Any]:
@@ -1092,6 +1168,15 @@ class LearnModeService:
 
         conflicts = self._find_conflicts(best)
         if conflicts:
+            self._append_benchmark_candidate(
+                topic=topic,
+                question=question,
+                actual_status="CONFLICT",
+                reason="conflicting_cited_claims",
+                token_coverage=token_coverage,
+                topic_pack_selected=selected_pack,
+                conflicts=conflicts,
+            )
             closure = self._persist_learning_closure(
                 action="ask",
                 status="PARTIAL",
@@ -1122,10 +1207,19 @@ class LearnModeService:
             }
 
         if len(best) < max(1, min_evidence) or token_coverage < float(min_token_coverage):
+            unknown_reason = "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage"
+            self._append_benchmark_candidate(
+                topic=topic,
+                question=question,
+                actual_status="UNKNOWN",
+                reason=unknown_reason,
+                token_coverage=token_coverage,
+                topic_pack_selected=selected_pack,
+            )
             closure = self._persist_learning_closure(
                 action="ask",
                 status="PARTIAL",
-                reason="insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage",
+                reason=unknown_reason,
                 topic_or_source=topic,
                 evidence_paths=[str(self.claims_path)],
                 retrieval_hints=sorted(tokens),
@@ -1144,7 +1238,7 @@ class LearnModeService:
                 "citations": [],
                 "topic": topic,
                 "question": question,
-                "reason": "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage",
+                "reason": unknown_reason,
                 "token_coverage": round(token_coverage, 4),
                 "topic_pack_selected": selected_pack,
                 "learning_closure": closure,
