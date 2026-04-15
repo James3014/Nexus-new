@@ -6,6 +6,9 @@ set -euo pipefail
 #   bash scripts/ops/start_gemini_nexus_enforced.sh <prompt-file> [report-file] [timeout-sec]
 #   bash scripts/ops/start_gemini_nexus_enforced.sh            # interactive gemini fallback
 
+BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh .nexus/reports/enforced_agent_briefing.md)"
+echo "📘 Enforced briefing generated: $BRIEFING_PATH"
+
 bash scripts/ops/_nexus_preflight.sh || exit 1
 
 if [[ $# -ge 1 ]]; then
@@ -17,4 +20,5 @@ if [[ $# -ge 1 ]]; then
 fi
 
 echo "🚀 Launching interactive Gemini shell (preflight already passed)..."
+echo "⚠️ Before execution, load briefing: $BRIEFING_PATH"
 exec /Users/jameschen/.npm-global/bin/gemini

@@ -40,7 +40,11 @@ echo "[nexus-enforced] report_file=$REPORT_FILE"
 
 cd "$NEXUS_ROOT"
 
-echo "[nexus-enforced] preflight: ci_gate dry-run"
+BRIEFING_PATH="$(bash scripts/ops/_nexus_enforced_briefing.sh .nexus/reports/enforced_agent_briefing.md)"
+echo "[nexus-enforced] briefing=$BRIEFING_PATH"
+
+echo "[nexus-enforced] preflight: environment + ci_gate dry-run"
+bash scripts/ops/_nexus_preflight.sh >/dev/null
 uv run scripts/ops/ci_gate.py --dry-run --wiki-drift-enforce-level p0 >/dev/null
 
 echo "[nexus-enforced] invoke antigravity (codex exec)"
@@ -49,4 +53,3 @@ if [[ "$APPROVAL_MODE" == "danger" ]]; then
 else
   cat "$PROMPT_FILE" | codex exec -C "$NEXUS_ROOT" -m "$MODEL" --full-auto - | tee "$REPORT_FILE"
 fi
-
