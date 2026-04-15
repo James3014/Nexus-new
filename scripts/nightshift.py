@@ -4,6 +4,8 @@ import json
 import os
 import signal
 import subprocess
+from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
+
 import time
 import shutil
 from concurrent.futures import ProcessPoolExecutor
@@ -503,7 +505,7 @@ class AutoResearchNightShift:
             timeout_sec=self.tier1_timeout_sec,
         )
         if not ok:
-            return False, f"tier1_pytest_failed: {msg}"
+            return False, f"test_failed: {msg}"
         return True, "tier1_pass"
 
     def _run_tier2_validation(self, workpath: Path) -> tuple[bool, str]:
@@ -513,7 +515,7 @@ class AutoResearchNightShift:
             timeout_sec=self.tier2_timeout_sec,
         )
         if not ok:
-            return False, f"tier2_pytest_failed: {pytest_msg}"
+            return False, f"test_failed (tier2): {pytest_msg}"
 
         ok, acceptance_msg = self._run_cmd(
             ["uv", "run", "scripts/engine/nexus_cli.py", "nexus", "acceptance-check"],
