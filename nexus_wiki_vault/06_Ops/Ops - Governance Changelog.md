@@ -145,3 +145,10 @@ version_scope: '[v17.1, v22, v23]'
   1. Generation success is insufficient without audit API compatibility checks (`DualTrackAudit` signature drift can invalidate rounds post-generation).
   2. Batch optimization requires strict artifact hygiene; traces and mock-path residue must be cleaned before merge review.
   3. Contract check requires a valid JSON contract payload; YAML task manifests are not drop-in substitutes.
+
+## [2026-04-15] Learn Mode Evidence Grading, Conflict Gate, and Benchmark Tuning
+- **Evidence Quality**: Enriched learn claims with `topic_pack`, `evidence_strength`, `freshness_days`, and `freshness_score` so retrieval can rank claims by source quality and recency instead of citation presence alone.
+- **Conflict Safety**: Added conflict detection in `learn:ask`; contradictory cited claims now return `CONFLICT` instead of forcing a brittle answer.
+- **Topic Routing**: Introduced topic-pack routing so repo-scoped questions prefer the most relevant claim bucket before answer assembly.
+- **Governance**: Extended `learn:report` and CI smoke gate with stale/conflict signals, and added `learn:benchmark` to compare baseline vs tuned retrieval thresholds on fixed question manifests.
+- **Verification**: Passed learn CLI and CI smoke tests; real-repo smoke verified `ANSWERED` for in-scope questions and `UNKNOWN` for out-of-scope prompts on `HKUDS/OpenHarness`.

@@ -279,9 +279,12 @@ def run_learn_check(mode: str, dry_run: bool, topic: str):
     converged = bool(data.get("converged", False))
     citation_valid_ratio = float(data.get("citation_valid_ratio", 0.0))
     pass_rate = float(data.get("self_question_pass_rate", 0.0))
+    stale_claims = int(data.get("stale_claims_count", 0))
+    conflict_candidates = int(data.get("conflict_candidate_count", 0))
     print(
         f"📊 [Learn] claims={claims}, coverage={coverage:.2%}, "
-        f"citation_valid_ratio={citation_valid_ratio:.2%}, pass_rate={pass_rate:.2%}, converged={converged}"
+        f"citation_valid_ratio={citation_valid_ratio:.2%}, pass_rate={pass_rate:.2%}, "
+        f"stale_claims={stale_claims}, conflict_candidates={conflict_candidates}, converged={converged}"
     )
 
     if claims <= 0:
@@ -295,6 +298,9 @@ def run_learn_check(mode: str, dry_run: bool, topic: str):
         return False
     if mode == "smoke" and pass_rate < 0.5:
         print("❌ [CI-BLOCK] Learn self_question_pass_rate is below 50% in smoke mode.")
+        return False
+    if mode == "smoke" and conflict_candidates > 3:
+        print("❌ [CI-BLOCK] Learn conflict_candidate_count is too high in smoke mode.")
         return False
     return True
 

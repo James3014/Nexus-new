@@ -26,6 +26,10 @@ class LearnClaim:
     citation_span: list[int]
     topic_tags: list[str]
     created_at: str
+    topic_pack: str = "general"
+    evidence_strength: str = "medium"
+    freshness_days: float = 0.0
+    freshness_score: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -34,6 +38,10 @@ class LearnClaim:
             "citation_span": self.citation_span,
             "topic_tags": self.topic_tags,
             "created_at": self.created_at,
+            "topic_pack": self.topic_pack,
+            "evidence_strength": self.evidence_strength,
+            "freshness_days": self.freshness_days,
+            "freshness_score": self.freshness_score,
         }
 
 
@@ -59,8 +67,63 @@ class LearnModeService:
         return sorted(set(words[:8]))
 
     @staticmethod
-    def _split_to_claims(text: str, source_url: str) -> list[LearnClaim]:
+    def _days_since(ts: str) -> float:
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return max(0.0, (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 86400.0)
+        except Exception:
+            return 365.0
+
+    @classmethod
+    def _freshness_score_for(cls, ts: str) -> tuple[float, float]:
+        days = cls._days_since(ts)
+        if days <= 7:
+            score = 1.0
+        elif days <= 30:
+            score = 0.85
+        elif days <= 90:
+            score = 0.6
+        else:
+            score = 0.35
+        return round(days, 3), score
+
+    @staticmethod
+    def _infer_topic_pack(source_url: str, claim: str, topic_hint: str = "") -> str:
+        src = source_url.lower()
+        hint = (topic_hint or "").strip().lower()
+        if hint:
+            return re.sub(r"[^a-z0-9_-]+", "-", hint)[:48].strip("-") or "general"
+        if "raw.githubusercontent.com" in src:
+            m = re.search(r"githubusercontent\.com/([^/]+/[^/]+)/", src)
+            if m:
+                return m.group(1).replace("/", "__")
+        if src.startswith("file://"):
+            name = Path(src.replace("file://", "")).stem.lower()
+            return re.sub(r"[^a-z0-9_-]+", "-", name)[:48].strip("-") or "local"
+        words = re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", claim.lower())
+        return (words[0] if words else "general")[:48]
+
+    @staticmethod
+    def _estimate_evidence_strength(source_url: str, claim: str) -> str:
+        src = source_url.lower()
+        text = claim.lower()
+        if any(k in src for k in ["/readme", "/docs/", "/skill.md", "claude.md"]):
+            return "high"
+        if src.endswith((".md", ".rst", ".txt")):
+            return "high"
+        if src.endswith((".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java")):
+            return "medium"
+        if any(k in text for k in ["must", "required", "supports", "uses", "provides"]):
+            return "medium"
+        return "low"
+
+    @classmethod
+    def _split_to_claims(cls, text: str, source_url: str, topic_hint: str = "") -> list[LearnClaim]:
         claims: list[LearnClaim] = []
+        created_at = datetime.now(timezone.utc).isoformat()
+        freshness_days, freshness_score = cls._freshness_score_for(created_at)
         for m in re.finditer(r"[^.!?\n][^.!?\n]{20,}[.!?]?", text):
             raw = m.group(0).strip()
             if len(raw) < 20:
@@ -70,8 +133,12 @@ class LearnModeService:
                     claim=raw,
                     source_url=source_url,
                     citation_span=[m.start(), m.end()],
-                    topic_tags=LearnModeService._extract_tags(raw),
-                    created_at=datetime.now(timezone.utc).isoformat(),
+                    topic_tags=cls._extract_tags(raw),
+                    created_at=created_at,
+                    topic_pack=cls._infer_topic_pack(source_url, raw, topic_hint=topic_hint),
+                    evidence_strength=cls._estimate_evidence_strength(source_url, raw),
+                    freshness_days=freshness_days,
+                    freshness_score=freshness_score,
                 )
             )
             if len(claims) >= 200:
@@ -369,6 +436,91 @@ class LearnModeService:
         with self.closure_log.open("a", encoding="utf-8") as f:
             f.write(json.dumps(closure, ensure_ascii=False) + "\n")
 
+    def _enrich_claim(self, claim: dict[str, Any]) -> dict[str, Any]:
+        out = dict(claim)
+        created_at = str(out.get("created_at") or datetime.now(timezone.utc).isoformat())
+        freshness_days, freshness_score = self._freshness_score_for(created_at)
+        out["created_at"] = created_at
+        out["topic_pack"] = out.get("topic_pack") or self._infer_topic_pack(
+            str(out.get("source_url", "")),
+            str(out.get("claim", "")),
+        )
+        out["evidence_strength"] = out.get("evidence_strength") or self._estimate_evidence_strength(
+            str(out.get("source_url", "")),
+            str(out.get("claim", "")),
+        )
+        out["freshness_days"] = float(out.get("freshness_days", freshness_days) or freshness_days)
+        out["freshness_score"] = float(out.get("freshness_score", freshness_score) or freshness_score)
+        return out
+
+    def _claim_strength_weight(self, claim: dict[str, Any]) -> float:
+        strength = str(claim.get("evidence_strength", "medium")).lower()
+        return {"high": 1.0, "medium": 0.75, "low": 0.45}.get(strength, 0.6)
+
+    def _claim_pack_score(self, claim: dict[str, Any], topic: str, question: str) -> float:
+        hay = " ".join(
+            [
+                str(claim.get("topic_pack", "")),
+                " ".join(claim.get("topic_tags", []) or []),
+                str(claim.get("source_url", "")),
+            ]
+        ).lower()
+        score = 0.0
+        for tok in self._extract_tokens(f"{topic} {question}"):
+            if tok in hay:
+                score += 1.0
+        return score
+
+    def _route_topic_pack(self, claims: list[dict[str, Any]], topic: str, question: str) -> tuple[str, list[dict[str, Any]]]:
+        if not claims:
+            return "general", []
+        pack_scores: dict[str, float] = {}
+        for claim in claims:
+            pack = str(claim.get("topic_pack", "general"))
+            pack_scores[pack] = pack_scores.get(pack, 0.0) + self._claim_pack_score(claim, topic, question)
+        selected_pack = max(pack_scores.items(), key=lambda item: item[1])[0] if pack_scores else "general"
+        routed = [c for c in claims if str(c.get("topic_pack", "general")) == selected_pack]
+        return selected_pack, (routed or claims)
+
+    def _claim_polarity(self, text: str) -> str:
+        lowered = text.lower()
+        negative_patterns = [" does not ", " do not ", " cannot ", " can't ", " never ", " no "]
+        return "negative" if any(p in f" {lowered} " for p in negative_patterns) else "positive"
+
+    def _find_conflicts(self, claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        conflicts: list[dict[str, Any]] = []
+        for i, left in enumerate(claims):
+            ltoks = self._extract_tokens(str(left.get("claim", "")))
+            if not ltoks:
+                continue
+            for right in claims[i + 1 :]:
+                rtoks = self._extract_tokens(str(right.get("claim", "")))
+                if not rtoks:
+                    continue
+                overlap = ltoks & rtoks
+                union = ltoks | rtoks
+                overlap_ratio = 0.0 if not union else len(overlap) / len(union)
+                if overlap_ratio < 0.55:
+                    continue
+                if self._claim_polarity(str(left.get("claim", ""))) == self._claim_polarity(str(right.get("claim", ""))):
+                    continue
+                conflicts.append(
+                    {
+                        "left": {
+                            "claim": left.get("claim", ""),
+                            "source_url": left.get("source_url", ""),
+                            "citation_span": left.get("citation_span", []),
+                        },
+                        "right": {
+                            "claim": right.get("claim", ""),
+                            "source_url": right.get("source_url", ""),
+                            "citation_span": right.get("citation_span", []),
+                        },
+                        "conflict_score": round(overlap_ratio, 4),
+                    }
+                )
+        return conflicts
+
     def load_claims(self) -> list[dict[str, Any]]:
         if not self.claims_path.exists():
             return []
@@ -378,7 +530,7 @@ class LearnModeService:
             if not line:
                 continue
             try:
-                out.append(json.loads(line))
+                out.append(self._enrich_claim(json.loads(line)))
             except json.JSONDecodeError:
                 continue
         return out
@@ -392,7 +544,7 @@ class LearnModeService:
             source_refs.append(source_ref)
             snap = self._save_source_snapshot(source_ref, text)
             snapshot_paths.append(str(snap))
-            claims.extend(self._split_to_claims(text, source_ref))
+            claims.extend(self._split_to_claims(text, source_ref, topic_hint=topic or source))
         self._append_claims(claims)
 
         # Learning closure hooks: MemPalace verify + Findings write
@@ -688,7 +840,15 @@ class LearnModeService:
         )
         return report
 
-    def ask(self, topic: str, question: str, top_k: int = 5, min_evidence: int = 1) -> dict[str, Any]:
+    def ask(
+        self,
+        topic: str,
+        question: str,
+        top_k: int = 5,
+        min_evidence: int = 1,
+        min_token_coverage: float | None = None,
+        max_staleness_days: int | None = 180,
+    ) -> dict[str, Any]:
         claims = self.load_claims()
         tokens = self._extract_tokens(question)
         if not tokens:
@@ -711,22 +871,31 @@ class LearnModeService:
                 "learning_closure": closure,
             }
 
-        scored: list[tuple[int, dict[str, Any], set[str]]] = []
-        for c in claims:
+        selected_pack, routed_claims = self._route_topic_pack(claims, topic, question)
+        filtered_claims = [
+            c for c in routed_claims if max_staleness_days is None or float(c.get("freshness_days", 0.0)) <= float(max_staleness_days)
+        ]
+        scored: list[tuple[float, dict[str, Any], set[str]]] = []
+        for c in filtered_claims:
             if not self._is_valid_citation(c):
                 continue
             blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
             words = {self._normalize_token(w) for w in re.findall(r"[a-z0-9_-]+", blob)}
-            score = 0
+            score = 0.0
             token_hits: set[str] = set()
             for t in tokens:
                 if t in words:
-                    score += 2
+                    score += 2.0
                     token_hits.add(t)
                 elif any(w.startswith(t) or t.startswith(w) for w in words if len(w) >= 4):
-                    score += 1
+                    score += 1.0
                     token_hits.add(t)
             if score > 0:
+                score = (
+                    score
+                    + self._claim_strength_weight(c)
+                    + float(c.get("freshness_score", 0.0))
+                )
                 scored.append((score, c, token_hits))
         scored.sort(key=lambda x: x[0], reverse=True)
 
@@ -753,14 +922,46 @@ class LearnModeService:
 
         best = [c for c, _ in best_pairs]
         token_coverage = 0.0 if not tokens else len(covered_tokens) / len(tokens)
-        if len(tokens) >= 5:
-            min_token_coverage = 0.6
-        elif len(tokens) >= 3:
-            min_token_coverage = 0.5
-        else:
-            min_token_coverage = 0.5
+        if min_token_coverage is None:
+            if len(tokens) >= 5:
+                min_token_coverage = 0.6
+            elif len(tokens) >= 3:
+                min_token_coverage = 0.5
+            else:
+                min_token_coverage = 0.5
 
-        if len(best) < max(1, min_evidence) or token_coverage < min_token_coverage:
+        conflicts = self._find_conflicts(best)
+        if conflicts:
+            closure = self._persist_learning_closure(
+                action="ask",
+                status="PARTIAL",
+                reason="conflicting_cited_claims",
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=sorted(tokens),
+                metrics={
+                    "claims_count": len(best),
+                    "coverage": min(1.0, len(best) / max(1, top_k)),
+                    "pass_rate": 0.0,
+                    "citation_valid_ratio": 1.0 if best else 0.0,
+                    "token_coverage": round(token_coverage, 4),
+                    "conflict_count": len(conflicts),
+                },
+            )
+            return {
+                "status": "CONFLICT",
+                "answer": "CONFLICT",
+                "citations": [],
+                "topic": topic,
+                "question": question,
+                "reason": "conflicting_cited_claims",
+                "token_coverage": round(token_coverage, 4),
+                "topic_pack_selected": selected_pack,
+                "conflicts": conflicts,
+                "learning_closure": closure,
+            }
+
+        if len(best) < max(1, min_evidence) or token_coverage < float(min_token_coverage):
             closure = self._persist_learning_closure(
                 action="ask",
                 status="PARTIAL",
@@ -774,6 +975,7 @@ class LearnModeService:
                     "pass_rate": 0.0,
                     "citation_valid_ratio": 1.0 if best else 0.0,
                     "token_coverage": round(token_coverage, 4),
+                    "topic_pack_selected": selected_pack,
                 },
             )
             return {
@@ -784,6 +986,7 @@ class LearnModeService:
                 "question": question,
                 "reason": "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage",
                 "token_coverage": round(token_coverage, 4),
+                "topic_pack_selected": selected_pack,
                 "learning_closure": closure,
             }
 
@@ -810,6 +1013,7 @@ class LearnModeService:
             "claims_used": len(best),
             "min_evidence_required": max(1, min_evidence),
             "token_coverage": round(token_coverage, 4),
+            "topic_pack_selected": selected_pack,
             "learning_closure": self._persist_learning_closure(
                 action="ask",
                 status="SUCCESS",
@@ -822,6 +1026,7 @@ class LearnModeService:
                     "coverage": min(1.0, len(best) / max(1, top_k)),
                     "pass_rate": 1.0,
                     "citation_valid_ratio": 1.0,
+                    "topic_pack_selected": selected_pack,
                 },
             ),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -836,12 +1041,22 @@ class LearnModeService:
         claims = self.load_claims()
         sources = {c.get("source_url", "") for c in claims if c.get("source_url")}
         valid_claims = [c for c in claims if self._is_valid_citation(c)]
-        matched = valid_claims
         unresolved_questions: list[str] = []
         answered_questions: list[dict[str, Any]] = []
         question_set: list[dict[str, Any]] = []
         coverage = 0.0 if not claims else len(valid_claims) / len(claims)
         pass_rate = 1.0 if claims else 0.0
+        topic_pack_counts: dict[str, int] = {}
+        high_strength_claims = 0
+        stale_claims_count = 0
+        for claim in valid_claims:
+            pack = str(claim.get("topic_pack", "general"))
+            topic_pack_counts[pack] = topic_pack_counts.get(pack, 0) + 1
+            if str(claim.get("evidence_strength", "")).lower() == "high":
+                high_strength_claims += 1
+            if float(claim.get("freshness_days", 0.0)) > 90:
+                stale_claims_count += 1
+        conflict_candidates = self._find_conflicts(valid_claims[:50])
         if topic:
             question_set = self._build_question_set(topic, question_count=question_count)
             answered_questions, unresolved_questions = self._answer_questions(question_set, valid_claims)
@@ -860,6 +1075,10 @@ class LearnModeService:
             "claims_count": len(claims),
             "claims_with_valid_citation": len(valid_claims),
             "citation_valid_ratio": round(0.0 if not claims else len(valid_claims) / len(claims), 4),
+            "high_strength_claims": high_strength_claims,
+            "stale_claims_count": stale_claims_count,
+            "conflict_candidate_count": len(conflict_candidates),
+            "topic_packs": topic_pack_counts,
             "top_sources": sorted(sources)[:5],
             "coverage": round(coverage, 4),
             "self_question_pass_rate": round(pass_rate, 4),

@@ -93,6 +93,9 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert report_payload["status"] == "SUCCESS"
     assert report_payload["claims_count"] >= 1
     assert report_payload["citation_valid_ratio"] > 0.0
+    assert "topic_packs" in report_payload
+    assert "high_strength_claims" in report_payload
+    assert "stale_claims_count" in report_payload
     assert "question_set" in report_payload
     assert "answered_questions" in report_payload
 
@@ -184,6 +187,53 @@ def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypat
     assert payload["reason"] == "insufficient_cited_claims"
 
 
+def test_learn_ask_returns_conflict_for_contradictory_claims(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
+    claims_path.parent.mkdir(parents=True, exist_ok=True)
+    claims = [
+        {
+            "claim": "Repo Scout supports audio review for repository analysis.",
+            "source_url": "file:///tmp/a.md",
+            "citation_span": [0, 55],
+            "topic_tags": ["repo", "scout", "audio", "review"],
+            "created_at": "2026-04-14T00:00:00+00:00",
+            "topic_pack": "repo_scout",
+            "evidence_strength": "high",
+        },
+        {
+            "claim": "Repo Scout does not support audio review for repository analysis.",
+            "source_url": "file:///tmp/b.md",
+            "citation_span": [0, 63],
+            "topic_tags": ["repo", "scout", "audio", "review"],
+            "created_at": "2026-04-14T00:00:00+00:00",
+            "topic_pack": "repo_scout",
+            "evidence_strength": "high",
+        },
+    ]
+    claims_path.write_text("\n".join(json.dumps(c) for c in claims) + "\n", encoding="utf-8")
+
+    ask = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "ask",
+            "--topic",
+            "repo scout",
+            "--question",
+            "Does repo scout support audio review?",
+            "--output-json",
+        ],
+    )
+    assert ask.exit_code == 0, ask.output
+    payload = json.loads(ask.output)
+    assert payload["status"] == "CONFLICT"
+    assert payload["reason"] == "conflicting_cited_claims"
+    assert payload["conflicts"]
+
+
 def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
@@ -234,3 +284,60 @@ def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
     assert any("acceptance-check" in " ".join(map(str, c)) for c in calls)
     assert any("contract-check" in " ".join(map(str, c)) for c in calls)
     assert any("ci_gate.py" in " ".join(map(str, c)) for c in calls)
+
+
+def test_learn_benchmark_reports_best_config(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+
+    source_file = tmp_path / "source.md"
+    source_file.write_text(
+        (
+            "Repo Scout analyzes repositories and supports audio review. "
+            "It can discover competitors and summarize repository structure. "
+            "There is no database migration workflow documented in this skill."
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question": "What does Repo Scout do?",
+                        "expected_status": "ANSWERED",
+                        "expected_keywords": ["analyzes repositories"],
+                    },
+                    {
+                        "question": "What database migration workflow is documented?",
+                        "expected_status": "UNKNOWN",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:benchmark",
+            "--manifest-file",
+            str(manifest),
+            "--source",
+            "repo:repo-scout",
+            "--source-file",
+            str(source_file),
+            "--topic",
+            "repo-scout",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "SUCCESS"
+    assert "baseline" in payload
+    assert "best" in payload
+    assert payload["best"]["success_rate"] >= payload["baseline"]["success_rate"]

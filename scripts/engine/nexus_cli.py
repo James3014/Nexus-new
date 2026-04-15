@@ -562,14 +562,23 @@ def learn_converge(
 @click.option("--question", required=True, help="Question to answer using cited claims within topic scope.")
 @click.option("--top-k", default=5, type=int, show_default=True)
 @click.option("--min-evidence", default=1, type=int, show_default=True)
+@click.option("--min-token-coverage", default=None, type=float)
+@click.option("--max-staleness-days", default=180, type=int, show_default=True)
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_ask.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_ask(topic, question, top_k, min_evidence, evidence_file, output_json):
+def learn_ask(topic, question, top_k, min_evidence, min_token_coverage, max_staleness_days, evidence_file, output_json):
     """❓ Ask using cited claims only. If no cited evidence, return UNKNOWN."""
     from nexus.research.learn_mode import LearnModeService
 
     service = LearnModeService(REPO_ROOT)
-    payload = service.ask(topic=topic, question=question, top_k=top_k, min_evidence=min_evidence)
+    payload = service.ask(
+        topic=topic,
+        question=question,
+        top_k=top_k,
+        min_evidence=min_evidence,
+        min_token_coverage=min_token_coverage,
+        max_staleness_days=max_staleness_days,
+    )
 
     final_response = str(payload.get("answer", "UNKNOWN"))
     evidence_bundle = {
@@ -585,6 +594,9 @@ def learn_ask(topic, question, top_k, min_evidence, evidence_file, output_json):
         return
     if payload["status"] == "UNKNOWN":
         click.echo("UNKNOWN")
+        return
+    if payload["status"] == "CONFLICT":
+        click.echo("CONFLICT")
         return
     click.echo(payload["answer"])
 
@@ -616,6 +628,96 @@ def learn_report(topic, question_count, pass_threshold, report_file, output_json
         f"sources={payload['sources_count']} claims={payload['claims_count']} coverage={payload['coverage']} converged={payload['converged']}"
     )
     click.echo(f"Report: {out_path}")
+
+
+@nexus_group.command(name="learn:benchmark")
+@click.option("--manifest-file", required=True, type=click.Path(exists=True))
+@click.option("--source", default="", help="Optional source to ingest before benchmark.")
+@click.option("--source-file", default=None, type=click.Path(exists=True))
+@click.option("--topic", required=True)
+@click.option("--report-file", default=".nexus/reports/learn/learn_benchmark.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def learn_benchmark(manifest_file, source, source_file, topic, report_file, output_json):
+    """📊 Benchmark learn ask quality and tune retrieval thresholds."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(REPO_ROOT)
+    manifest = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
+    if source or source_file:
+        service.ingest(source=source or topic, source_file=source_file, topic=topic)
+        service.converge(topic=topic, max_rounds=2, pass_threshold=0.6, question_count=5, auto_research=False)
+
+    questions = manifest.get("questions", [])
+    baseline_cfg = {"top_k": 5, "min_evidence": 1, "min_token_coverage": 0.5, "max_staleness_days": 180}
+    candidate_cfgs = [
+        baseline_cfg,
+        {"top_k": 5, "min_evidence": 2, "min_token_coverage": 0.5, "max_staleness_days": 180},
+        {"top_k": 6, "min_evidence": 2, "min_token_coverage": 0.4, "max_staleness_days": 180},
+        {"top_k": 4, "min_evidence": 2, "min_token_coverage": 0.6, "max_staleness_days": 90},
+    ]
+
+    def _score_result(result, expected):
+        expected_status = str(expected.get("expected_status", "ANSWERED")).upper()
+        ok = result.get("status") == expected_status
+        if ok and expected_status == "ANSWERED":
+            answer = str(result.get("answer", "")).lower()
+            for kw in expected.get("expected_keywords", []):
+                if str(kw).lower() not in answer:
+                    ok = False
+                    break
+        return 1.0 if ok else 0.0
+
+    cfg_results = []
+    for cfg in candidate_cfgs:
+        runs = []
+        total = 0.0
+        for item in questions:
+            result = service.ask(
+                topic=topic,
+                question=str(item.get("question", "")),
+                top_k=int(cfg["top_k"]),
+                min_evidence=int(cfg["min_evidence"]),
+                min_token_coverage=float(cfg["min_token_coverage"]),
+                max_staleness_days=int(cfg["max_staleness_days"]),
+            )
+            score = _score_result(result, item)
+            total += score
+            runs.append(
+                {
+                    "question": item.get("question", ""),
+                    "expected_status": item.get("expected_status", "ANSWERED"),
+                    "actual_status": result.get("status"),
+                    "score": score,
+                    "token_coverage": result.get("token_coverage", 0.0),
+                }
+            )
+        cfg_results.append(
+            {
+                "config": cfg,
+                "success_rate": round(total / max(1, len(questions)), 4),
+                "results": runs,
+            }
+        )
+
+    best = max(cfg_results, key=lambda item: item["success_rate"]) if cfg_results else {"config": baseline_cfg, "success_rate": 0.0}
+    payload = {
+        "status": "SUCCESS",
+        "topic": topic,
+        "question_count": len(questions),
+        "baseline": cfg_results[0] if cfg_results else {},
+        "best": best,
+        "improvement": round(best.get("success_rate", 0.0) - (cfg_results[0].get("success_rate", 0.0) if cfg_results else 0.0), 4),
+        "candidates": cfg_results,
+    }
+    out_path = (REPO_ROOT / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"✅ Learn benchmark complete: topic={topic}")
+        click.echo(f"Baseline={payload['baseline'].get('success_rate', 0.0):.2%} Best={payload['best'].get('success_rate', 0.0):.2%}")
+        click.echo(f"Report: {out_path}")
 
 
 @nexus_group.command(name="learn:gate")
