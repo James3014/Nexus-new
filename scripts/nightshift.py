@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
+from nexus.research.learn.policy_runtime import load_phase_policy
 
 import time
 import shutil
@@ -731,7 +732,21 @@ class AutoResearchNightShift:
         )
         return any(p in t for p in patterns)
 
+
+    def _check_policy_readiness(self) -> bool:
+        bypass = os.getenv("NIGHTSHIFT_BYPASS_LEARN_SLO") == "1"
+        policy = load_phase_policy(self.project_root, task_type="bug", risk_level="standard")
+        
+        if not policy.allow_research and not bypass:
+            print(f"❌ [NightShift] Blocked by Phase Policy: {policy.reasoning}")
+            return False
+        
+        if bypass:
+            print("⚠️ [NightShift] Policy bypass active (override=true)")
+        return True
+
     def run(self):
+        if not self._check_policy_readiness(): return {"status": "FAILED", "reason": "policy_blocked"}
         """🚀 [AutoResearch] Night Shift v24.0 Eternal: Bayesian Warm-Start Enabled."""
         print(f"🚀 [AutoResearch] Starting Night Shift for: {self.task}")
         start_time = time.time()

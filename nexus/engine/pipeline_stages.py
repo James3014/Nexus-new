@@ -8,6 +8,7 @@ from nexus.core.protocols import PipelineContextProtocol
 from nexus.learning.knowledge_index import KnowledgeIndex
 from nexus.core.events import NexusEvent
 from nexus.research.research_pack import build_research_pack
+from nexus.research.learn.policy_runtime import decide_research_engine, load_phase_policy
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,15 @@ class PipelineStagesMixin:
         with tracer.phase_span('P', task_id=ctx.task_id) as p_span:
             # --- P Stage: Plan (v24.0 Hardened - Learning Injected) ---
             ctx.state.current_phase = "P"
+            # R2: Derive Learn-aware Phase Policy
+            policy_actions = load_phase_policy(self.engine.project_root, task_type=ctx.task_type, risk_level='standard')
+            ctx.state.metadata['phase_policy'] = {
+                'allow_research': policy_actions.allow_research,
+                'force_baseline': policy_actions.force_baseline,
+                'require_writeback': policy_actions.require_writeback,
+                'audit_strictness': policy_actions.audit_strictness.value,
+                'reasoning': policy_actions.reasoning
+            }
             p_decision_id = self._register_phase_decision(ctx, "P", "planner")
             
             # 🧪 [Round 20] Bayesian Parameter Injection from current context
@@ -169,6 +179,17 @@ class PipelineStagesMixin:
             
             if not ctx.dry_run and (force_research or res_decision.should_research):
                 ctx.state.current_phase = "X"
+            # R2: Unified Engine Decision
+            task_type = ctx.task_type
+            risk_level = ctx.state.metadata.get('risk_level', 'standard')
+            engine = decide_research_engine(self.engine.project_root, task_type, risk_level)
+            
+            ctx.state.metadata['engine_decision_source'] = 'phase_policy'
+            ctx.state.metadata['chosen_research_engine'] = engine
+            
+            if engine == 'baseline':
+                logger.info('⚠️ [Research] Forced to Baseline by Phase Policy.')
+                return
                 x_decision_id = self._register_phase_decision(ctx, "X", "researcher")
                 self._gather_research_hints(ctx)
 

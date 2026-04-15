@@ -203,7 +203,7 @@ def test_run_blocked_when_learn_phase_slo_not_ready(tmp_path):
 
     result = shift.run()
     assert result["status"] == "FAILED"
-    assert result["reason"] == "phase_slo_summary_missing"
+    assert result["reason"] == "policy_blocked"
 
 
 def test_persist_learning_closure_runs_verify_write_sync(monkeypatch, tmp_path):
