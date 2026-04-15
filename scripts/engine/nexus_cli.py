@@ -1119,6 +1119,52 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
             click.secho("⚠️ [Advisor] Low confidence detected. Codex Audit recommended.", fg="yellow", bold=True)
 
 
+@nexus_group.command(name="research:report")
+@click.option("--input", "input_dir", default=".nexus/reports/research", type=click.Path(exists=True))
+@click.option("--rolling", type=int, default=7)
+@click.option("--output", default=".nexus/reports/research/unified_rolling.json", type=click.Path())
+def research_report_cmd(input_dir, rolling, output):
+    """📊 Aggregate multiple research reports into a unified rolling view."""
+    import json
+    from pathlib import Path
+    
+    p_in = Path(input_dir)
+    files = sorted(p_in.glob("*.json"))
+    if not files:
+        click.echo("No reports found.")
+        return
+        
+    recent = [f for f in files if "rolling" not in f.name][-rolling:]
+    click.echo(f"Aggregating {len(recent)} recent reports...")
+    
+    aggs = []
+    for f in recent:
+        try:
+            d = json.loads(f.read_text())
+            if "aggregates" in d: aggs.append(d["aggregates"])
+            elif "success_rate" in d: aggs.append(d)
+        except: continue
+        
+    if not aggs:
+        click.echo("Could not parse aggregate data.")
+        return
+        
+    avg_s = sum(a.get("success_rate", 0) for a in aggs) / len(aggs)
+    avg_r = sum(a.get("regression_rate", 0) for a in aggs) / len(aggs)
+    
+    summary = {
+        "rolling_window": rolling,
+        "sample_count": len(recent),
+        "avg_success_rate": avg_s,
+        "avg_regression_rate": avg_r,
+        "reports": [str(f.name) for f in recent]
+    }
+    
+    out_p = Path(output)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    out_p.write_text(json.dumps(summary, indent=2))
+    click.echo(f"Unified rolling report written to {output}")
+
 @nexus_group.command(name="research:auto-flow")
 @click.option("--task-desc", required=True)
 @click.option("--target-file", required=True)
