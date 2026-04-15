@@ -1,0 +1,13 @@
+{
+  "status": "ok",
+  "attempts": [
+    {
+      "phase": "task",
+      "attempt": 1,
+      "exit_code": 0,
+      "classification": "OK",
+      "elapsed_sec": 0.655
+    }
+  ],
+  "output": "OK"
+}

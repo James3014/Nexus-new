@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {
+      "id": "feature-rate-limiter-c1",
+      "task_desc": "Implement rolling window prune for rate limiter",
+      "target_file": "nexus/demo/feature_rate_limiter.py",
+      "test_file": "tests/demo/test_feature_rate_limiter.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case feature-rate-limiter"
+    }
+  ]
+}

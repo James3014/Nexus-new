@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "id": "deadlock-small-t15-c1",
+      "task_desc": "Fix deadlock in transfer (small, tight timeout)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 15,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-small-t20-c1",
+      "task_desc": "Fix deadlock in transfer (small baseline)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "deadlock-small-t20-c2",
+      "task_desc": "Fix deadlock in transfer (small, 2 candidates)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 20,
+      "baseline_hint": "lock ordering",
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    }
+  ]
+}

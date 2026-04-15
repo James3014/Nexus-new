@@ -1,0 +1,28 @@
+{
+  "status": "fail",
+  "reason": "WALL_CLOCK_TIMEOUT",
+  "attempts": [
+    {
+      "phase": "task",
+      "attempt": 1,
+      "exit_code": 124,
+      "classification": "WALL_CLOCK_TIMEOUT",
+      "elapsed_sec": 2.0093
+    },
+    {
+      "phase": "task",
+      "attempt": 2,
+      "exit_code": 124,
+      "classification": "WALL_CLOCK_TIMEOUT",
+      "elapsed_sec": 2.0069
+    },
+    {
+      "phase": "task",
+      "attempt": 3,
+      "exit_code": 124,
+      "classification": "WALL_CLOCK_TIMEOUT",
+      "elapsed_sec": 2.0154
+    }
+  ],
+  "hint": "If AUTH_LOOP, run interactive `gemini` once and approve browser auth."
+}

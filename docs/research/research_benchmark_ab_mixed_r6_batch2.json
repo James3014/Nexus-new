@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "id": "feature-discount-c2",
+      "task_desc": "Implement and harden VIP discount behavior",
+      "target_file": "nexus/demo/feature_discount_engine.py",
+      "test_file": "tests/demo/test_feature_discount_engine.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 30,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case feature-discount"
+    },
+    {
+      "id": "feature-rate-limiter-c1",
+      "task_desc": "Implement rolling window prune for rate limiter",
+      "target_file": "nexus/demo/feature_rate_limiter.py",
+      "test_file": "tests/demo/test_feature_rate_limiter.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case feature-rate-limiter"
+    },
+    {
+      "id": "refactor-normalize-config-c1",
+      "task_desc": "Refactor normalize_hosts while preserving behavior and adding dedup sort",
+      "target_file": "nexus/demo/refactor_normalize_config.py",
+      "test_file": "tests/demo/test_refactor_normalize_config.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case refactor-normalize-config"
+    },
+    {
+      "id": "refactor-parser-purity-c1",
+      "task_desc": "Refactor parser to avoid input mutation and trim values",
+      "target_file": "nexus/demo/refactor_parser_purity.py",
+      "test_file": "tests/demo/test_refactor_parser_purity.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case refactor-parser-purity"
+    },
+    {
+      "id": "refactor-parser-purity-c2",
+      "task_desc": "Refactor parser purity with additional robustness",
+      "target_file": "nexus/demo/refactor_parser_purity.py",
+      "test_file": "tests/demo/test_refactor_parser_purity.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 30,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case refactor-parser-purity"
+    }
+  ]
+}

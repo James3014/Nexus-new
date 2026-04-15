@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "id": "bugfix-deadlock-small-c1",
+      "task_desc": "Fix deadlock in transfer (small baseline)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "bugfix-deadlock-small-c2",
+      "task_desc": "Fix deadlock in transfer (small exploration)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_small.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_small.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 30,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-small"
+    },
+    {
+      "id": "bugfix-deadlock-stress-c1",
+      "task_desc": "Fix deadlock under stress (baseline)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 30,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    },
+    {
+      "id": "bugfix-deadlock-stress-c2",
+      "task_desc": "Fix deadlock under stress (exploration)",
+      "target_file": "nexus/demo/bank_transfer_bench_ab_stress.py",
+      "test_file": "tests/demo/test_concurrency_bench_ab_stress.py",
+      "candidate_count": 2,
+      "stage1_timeout_sec": 40,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case deadlock-stress"
+    },
+    {
+      "id": "feature-discount-c1",
+      "task_desc": "Implement VIP discount in pricing engine",
+      "target_file": "nexus/demo/feature_discount_engine.py",
+      "test_file": "tests/demo/test_feature_discount_engine.py",
+      "candidate_count": 1,
+      "stage1_timeout_sec": 20,
+      "prepare_command": "uv run python scripts/ops/research_ab_prepare_case.py --case feature-discount"
+    }
+  ]
+}
