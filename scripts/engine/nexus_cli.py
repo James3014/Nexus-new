@@ -1239,6 +1239,7 @@ def research_auto_flow(
     root_cause_confidence,
     findings_query,
     llm_mode,
+    llm_baseline,
     timeout_sec,
     stage1_timeout_sec,
     max_time_ratio_guard,
@@ -1329,6 +1330,7 @@ def _run_research_auto_flow_impl(
     import time
     from nexus.research.local_sprint_mutator import generate_local_candidate
     from nexus.research.sprint_service import SprintConfig, run_hyper_sprint
+    from nexus.research.learn_mode import LearnModeService
 
     route = _build_research_route(
         task_desc=task_desc,
@@ -1338,6 +1340,14 @@ def _run_research_auto_flow_impl(
         findings_query=findings_query,
     )
     chosen_flow = force_flow or route["recommended_flow"]
+    learn_service = LearnModeService(REPO_ROOT)
+    learn_phase_slo = learn_service.read_phase_slo_summary()
+    learn_gate_blocked = (
+        not bool(learn_phase_slo.get("phase_slo_pass", False))
+        or float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0) < 0.95
+    )
+    if force_flow is None and chosen_flow == "hyper_sprint" and learn_gate_blocked:
+        chosen_flow = "baseline"
     flow_key = f"{target_file}|{test_file}"
     history_path = (REPO_ROOT / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
 
@@ -1547,11 +1557,18 @@ def _run_research_auto_flow_impl(
             "hit": guard_hit,
             "early_baseline_shortcut": early_baseline_shortcut,
             "history_forced_baseline": history_forced_baseline,
+            "learn_forced_baseline": bool(learn_gate_blocked and force_flow is None),
             "recent_hyper_failures": recent_hyper_fails,
             "history_window": max(1, history_window),
             "baseline_fast_sec": baseline_fast_sec,
             "max_time_ratio_guard": max_time_ratio_guard,
             "baseline_probe": baseline_probe,
+        },
+        "learn_phase_slo": {
+            "phase_slo_pass": bool(learn_phase_slo.get("phase_slo_pass", False)),
+            "required_done_ratio": float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0),
+            "status": learn_phase_slo.get("status", "UNAVAILABLE"),
+            "reason": learn_phase_slo.get("reason", ""),
         },
         "result": result,
         "io": {

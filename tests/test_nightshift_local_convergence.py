@@ -87,7 +87,8 @@ def test_run_round_generates_validated_scored_candidate(tmp_path):
     assert len(gateway.calls) == 2
 
 
-def test_run_stops_after_convergence_patience(tmp_path):
+def test_run_stops_after_convergence_patience(tmp_path, monkeypatch):
+    monkeypatch.setenv("NIGHTSHIFT_BYPASS_LEARN_SLO", "1")
     init_git_repo(tmp_path)
     target = tmp_path / "target.py"
     target.write_text("value = 1\n", encoding="utf-8")
@@ -164,7 +165,8 @@ def test_run_round_rejects_ast_no_change(tmp_path):
     assert len(gateway.calls) == 1
 
 
-def test_run_does_not_promote_when_tier2_fails(tmp_path):
+def test_run_does_not_promote_when_tier2_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("NIGHTSHIFT_BYPASS_LEARN_SLO", "1")
     init_git_repo(tmp_path)
     target = tmp_path / "target.py"
     target.write_text("value = 1\n", encoding="utf-8")
@@ -192,6 +194,16 @@ def test_run_does_not_promote_when_tier2_fails(tmp_path):
     assert shift.lesson_writeback_path.exists()
     assert shift.last_learning_closure.get("status") == "REJECTED"
     assert shift.last_learning_closure.get("memory_written") is True
+
+
+def test_run_blocked_when_learn_phase_slo_not_ready(tmp_path):
+    shift = AutoResearchNightShift("target.py", max_rounds=1, convergence_patience=1, keep_worktree=True)
+    shift.project_root = tmp_path
+    shift.resolved_target_file = "target.py"
+
+    result = shift.run()
+    assert result["status"] == "FAILED"
+    assert result["reason"] == "phase_slo_summary_missing"
 
 
 def test_persist_learning_closure_runs_verify_write_sync(monkeypatch, tmp_path):
@@ -235,6 +247,7 @@ def test_persist_learning_closure_runs_verify_write_sync(monkeypatch, tmp_path):
     assert result.get("lancedb_synced") is True
     assert result.get("sync_status") == "SUCCESS"
     assert result.get("arweave_tx_id") == "ARW-nightshift"
+    assert result.get("learn_phase_bridge", {}).get("entries_written") == 6
 
 
 def test_cleanup_worktree_remove_called_when_not_keep(tmp_path, monkeypatch):

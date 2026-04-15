@@ -607,6 +607,44 @@ class LearnModeService:
         self.phase_slo_summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         return summary
 
+    def read_phase_slo_summary(self) -> dict[str, Any]:
+        if not self.phase_slo_summary_path.exists():
+            return {
+                "status": "UNAVAILABLE",
+                "phase_slo_pass": False,
+                "global": {
+                    "required_done_ratio": 0.0,
+                    "success_ratio": 0.0,
+                },
+                "phases": {},
+                "reason": "phase_slo_summary_missing",
+            }
+        try:
+            data = json.loads(self.phase_slo_summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {
+                "status": "UNAVAILABLE",
+                "phase_slo_pass": False,
+                "global": {
+                    "required_done_ratio": 0.0,
+                    "success_ratio": 0.0,
+                },
+                "phases": {},
+                "reason": "phase_slo_summary_parse_error",
+            }
+        if not isinstance(data, dict):
+            return {
+                "status": "UNAVAILABLE",
+                "phase_slo_pass": False,
+                "global": {
+                    "required_done_ratio": 0.0,
+                    "success_ratio": 0.0,
+                },
+                "phases": {},
+                "reason": "phase_slo_summary_invalid_type",
+            }
+        return data
+
     def _load_source_registry(self) -> list[dict[str, Any]]:
         if not self.sources_path.exists():
             return []

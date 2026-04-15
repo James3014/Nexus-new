@@ -169,3 +169,9 @@ version_scope: '[v17.1, v22, v23]'
 - **Phase SLO**: Added aggregated phase SLO summary (`phase_slo_pass`, `required_done_ratio`, per-phase success ratios) at `.nexus/reports/learn/phase_slo_summary.json`.
 - **CLI Surface**: Added `nexus learn:phase-slo` for explicit phase-level closure reporting.
 - **CI Gate**: Hardened learn smoke gate to require valid phase SLO report and enforce `phase_slo_pass=true` plus `required_done_ratio>=95%`.
+
+## [2026-04-15] Learn Integration with Research/Hyper/NightShift Runtime
+- **Research Route Hook**: `research:auto-flow` now reads Learn phase-SLO and can force `baseline` when Learn closure is not ready (`phase_slo_pass=false` or `required_done_ratio<95%`).
+- **Hyper Guardrail**: `run_hyper_sprint` now applies Learn phase-SLO preflight; when not ready it switches to local-first mode and records `learn_slo_block`.
+- **NightShift Guardrail**: NightShift now checks Learn phase-SLO before leasing worktree; blocked runs fail fast unless `NIGHTSHIFT_BYPASS_LEARN_SLO=1`.
+- **Closure Unification**: Hyper and NightShift learning writeback now also sync into Learn six-phase bridge logs, so all three lanes share the same phase-end closure evidence trail.

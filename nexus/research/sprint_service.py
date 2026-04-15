@@ -313,10 +313,32 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     target_path = repo_root / config.target_file
     source_code = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
-    llm_generator: Optional[LLMCandidateGenerator] = LLMCandidateGenerator(repo_root, config.safe_mode) if config.llm_mode else None
+    llm_mode_effective = bool(config.llm_mode)
+    learn_slo_guard = {
+        "phase_slo_pass": False,
+        "required_done_ratio": 0.0,
+        "active": False,
+        "reason": "",
+    }
+    try:
+        from nexus.research.learn_mode import LearnModeService
+
+        learn_slo = LearnModeService(repo_root).read_phase_slo_summary()
+        required_done_ratio = float((learn_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0)
+        phase_slo_pass = bool(learn_slo.get("phase_slo_pass", False))
+        learn_slo_guard["phase_slo_pass"] = phase_slo_pass
+        learn_slo_guard["required_done_ratio"] = required_done_ratio
+        if llm_mode_effective and (not phase_slo_pass or required_done_ratio < 0.95):
+            llm_mode_effective = False
+            learn_slo_guard["active"] = True
+            learn_slo_guard["reason"] = "learn_phase_slo_not_ready"
+    except Exception as exc:  # noqa: BLE001
+        learn_slo_guard["reason"] = f"learn_slo_read_error:{exc}"
+
+    llm_generator: Optional[LLMCandidateGenerator] = LLMCandidateGenerator(repo_root, config.safe_mode) if llm_mode_effective else None
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
-    if config.llm_mode:
+    if llm_mode_effective:
         executor = SprintExecutor(repo_root, scope_files=scope_files, pytest_cmd=pytest_cmd, timeout_sec=config.stage1_timeout_sec)
     else:
         executor = InPlaceSprintExecutor(
@@ -337,6 +359,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         "mempalace_verified": False,
         "memory_written": False,
         "arweave_tx_id": None,
+        "learn_slo_guard": learn_slo_guard,
     }
 
     # Learning loop (retrieve): pull recent hints before candidate generation.
@@ -501,6 +524,33 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             learning_trace["arweave_tx_id"] = tx_id
         except Exception as exc:  # noqa: BLE001
             learning_trace["memory_error"] = str(exc)
+        try:
+            from nexus.research.learn_mode import LearnModeService
+
+            learn_bridge = LearnModeService(repo_root).sync_phase_learning_closure(
+                topic=config.task,
+                metrics={
+                    "coverage": 1.0 if status == "SUCCESS" else 0.5,
+                    "self_question_pass_rate": 1.0 if status == "SUCCESS" else 0.4,
+                    "citation_valid_ratio": 1.0 if status == "SUCCESS" else 0.8,
+                    "stale_claims_count": 0,
+                    "conflict_count": int(summary.get("semantic_guard_low_delta_feature", 0)),
+                },
+                phase_status={
+                    "P": "SUCCESS",
+                    "X": "SUCCESS" if learning_trace.get("retrieval_hits", 0) > 0 else "PARTIAL",
+                    "D": "SUCCESS",
+                    "R": "SUCCESS" if status == "SUCCESS" else "FAILED",
+                    "A": "SUCCESS" if "semantic_guard" not in codes else "PARTIAL",
+                    "C": "SUCCESS" if learning_trace.get("mempalace_verified") else "PARTIAL",
+                },
+            )
+            learning_trace["learn_phase_bridge"] = {
+                "status": learn_bridge.get("status", "UNKNOWN"),
+                "entries_written": learn_bridge.get("entries_written", 0),
+            }
+        except Exception as exc:  # noqa: BLE001
+            learning_trace["learn_phase_bridge_error"] = str(exc)
 
     for idx in range(max(1, config.candidate_count)):
         hint = policy.get_mutation_hint(
@@ -630,7 +680,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_patch = best.candidate_code or source_code
     final_reason = "stage1_pass"
     # Stage 2 is optional enhancement only. Core success must not depend on external quota.
-    if config.llm_mode and "quota" not in error_codes:
+    if llm_mode_effective and "quota" not in error_codes:
         swarm_dir = SwarmBroker(repo_root).acquire(timeout_sec=config.timeout_sec)
         if swarm_dir:
             try:
@@ -656,8 +706,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     final_reason = "dayshift_no_improve"
             finally:
                 SwarmBroker(repo_root).release(swarm_dir)
-    elif config.llm_mode and "quota" in error_codes:
+    elif llm_mode_effective and "quota" in error_codes:
         final_reason = "dayshift_skipped_due_quota_fallback"
+    elif config.llm_mode and not llm_mode_effective:
+        error_codes.append("learn_slo_block")
+        final_reason = "dayshift_skipped_due_learn_slo_guard"
 
     final_codes = sorted(set(error_codes))
     rejection_summary = _build_rejection_summary(candidates, error_codes)

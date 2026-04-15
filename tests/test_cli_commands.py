@@ -674,6 +674,7 @@ def test_research_auto_flow_baseline(tmp_path, monkeypatch):
 def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    _write_ready_learn_slo(tmp_path)
 
     target = tmp_path / "demo.py"
     target.write_text("print('buggy')\n", encoding="utf-8")
@@ -739,6 +740,7 @@ def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
 def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    _write_ready_learn_slo(tmp_path)
 
     target = tmp_path / "demo.py"
     target.write_text("print('buggy')\n", encoding="utf-8")
@@ -757,11 +759,15 @@ def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
 
     called = {"hyper": 0}
 
+    def fake_generate_local_candidate(source, *_args, **_kwargs):
+        return source.replace("buggy", "fixed")
+
     def fake_run_hyper_sprint(*_args, **_kwargs):
         called["hyper"] += 1
         raise AssertionError("Hyper should not be called when baseline shortcut triggers")
 
     monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("nexus.research.local_sprint_mutator.generate_local_candidate", fake_generate_local_candidate)
     monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
 
     result = runner.invoke(
@@ -784,6 +790,55 @@ def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
     data = json.loads(result.output)
     assert data["chosen_flow"] == "baseline"
     assert data["guard"]["early_baseline_shortcut"] is True
+    assert called["hyper"] == 0
+
+
+def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+
+    target = tmp_path / "demo.py"
+    target.write_text("print('buggy')\n", encoding="utf-8")
+    test_file = tmp_path / "tests" / "test_demo.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    class _Res:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_subprocess_run(*_args, **_kwargs):
+        return _Res(returncode=0)
+
+    called = {"hyper": 0}
+
+    def fake_run_hyper_sprint(*_args, **_kwargs):
+        called["hyper"] += 1
+        raise AssertionError("Hyper should be skipped when Learn phase-SLO blocks")
+
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:auto-flow",
+            "--task-desc",
+            "fix flaky websocket timeout race",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["chosen_flow"] == "baseline"
+    assert data["guard"]["learn_forced_baseline"] is True
     assert called["hyper"] == 0
 
 
@@ -971,3 +1026,10 @@ def test_research_benchmark_ab_mode(tmp_path, monkeypatch):
     case = report["per_case"][0]
     assert case["baseline"]["summary"]["success_rate"] == 1.0
     assert case["hyper_sprint"]["summary"]["success_rate"] == 1.0
+def _write_ready_learn_slo(tmp_path):
+    phase_slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    phase_slo.parent.mkdir(parents=True, exist_ok=True)
+    phase_slo.write_text(
+        '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
+        encoding="utf-8",
+    )

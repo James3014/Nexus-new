@@ -181,6 +181,34 @@ class AutoResearchNightShift:
                 self.model_exhausted[model] = "preflight_quota_or_capacity_exhausted"
                 print(f"⚠️ [Preflight] Model unavailable by quota/capacity: {model}")
 
+    def _read_learn_phase_slo_guard(self) -> dict[str, Any]:
+        summary_path = self.project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+        if not summary_path.exists():
+            return {
+                "ready": False,
+                "phase_slo_pass": False,
+                "required_done_ratio": 0.0,
+                "reason": "phase_slo_summary_missing",
+            }
+        try:
+            data = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {
+                "ready": False,
+                "phase_slo_pass": False,
+                "required_done_ratio": 0.0,
+                "reason": "phase_slo_summary_parse_error",
+            }
+        phase_slo_pass = bool((data or {}).get("phase_slo_pass", False))
+        required_done_ratio = float(((data or {}).get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0)
+        ready = phase_slo_pass and required_done_ratio >= 0.95
+        return {
+            "ready": ready,
+            "phase_slo_pass": phase_slo_pass,
+            "required_done_ratio": required_done_ratio,
+            "reason": "" if ready else "learn_phase_slo_not_ready",
+        }
+
     def _resolve_target_file(self) -> str:
         """Resolve task string to an explicit editable file path."""
         task = (self.task or "").strip()
@@ -603,6 +631,33 @@ class AutoResearchNightShift:
             closure["mempalace_sync"] = sync_info
             tx_id = palace.trigger_arweave_distillation(clean[0])
             closure["arweave_tx_id"] = tx_id
+            try:
+                from nexus.research.learn_mode import LearnModeService
+
+                bridge = LearnModeService(self.project_root).sync_phase_learning_closure(
+                    topic=self.task,
+                    metrics={
+                        "coverage": 1.0 if status == "SUCCESS" else 0.5,
+                        "self_question_pass_rate": 1.0 if status == "SUCCESS" else 0.4,
+                        "citation_valid_ratio": 1.0 if closure.get("mempalace_verified") else 0.8,
+                        "stale_claims_count": 0,
+                        "conflict_count": 0,
+                    },
+                    phase_status={
+                        "P": "SUCCESS",
+                        "X": "SUCCESS",
+                        "D": "SUCCESS",
+                        "R": "SUCCESS" if status == "SUCCESS" else "FAILED",
+                        "A": "SUCCESS" if closure.get("mempalace_verified") else "PARTIAL",
+                        "C": "SUCCESS" if closure.get("memory_written") else "PARTIAL",
+                    },
+                )
+                closure["learn_phase_bridge"] = {
+                    "status": bridge.get("status", "UNKNOWN"),
+                    "entries_written": bridge.get("entries_written", 0),
+                }
+            except Exception as bridge_exc:
+                closure["learn_phase_bridge_error"] = str(bridge_exc)
             return closure
         except Exception as exc:
             closure["sync_status"] = "ERROR"
@@ -684,6 +739,20 @@ class AutoResearchNightShift:
 
         self.resolved_target_file = self._resolve_target_file()
         self._preflight_models()
+        bypass_learn_slo = os.getenv("NIGHTSHIFT_BYPASS_LEARN_SLO", "").strip().lower() in {"1", "true", "yes", "on"}
+        learn_guard = self._read_learn_phase_slo_guard()
+        if not learn_guard.get("ready", False) and not bypass_learn_slo:
+            reason = str(learn_guard.get("reason", "learn_phase_slo_not_ready"))
+            print(f"🛑 [AutoResearch] Blocked by Learn phase-SLO guard: {reason}")
+            self._persist_learning_closure(status="REJECTED", reason=reason, final_score=self.best_score)
+            return {
+                "status": "FAILED",
+                "task": self.task,
+                "target_file": self.resolved_target_file,
+                "best_score": self.best_score,
+                "reason": reason,
+                "learn_phase_slo": learn_guard,
+            }
 
         # 🏗️ Lease Workspace
         lease_task_id = f"{self.task}-{int(time.time())}"

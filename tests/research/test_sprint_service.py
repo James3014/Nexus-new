@@ -9,6 +9,15 @@ from nexus.research.sprint_service import (
 )
 
 
+def _write_ready_learn_slo(tmp_path: Path) -> None:
+    phase_slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    phase_slo.parent.mkdir(parents=True, exist_ok=True)
+    phase_slo.write_text(
+        '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
+        encoding="utf-8",
+    )
+
+
 def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
@@ -147,6 +156,7 @@ def test_run_hyper_sprint_learning_trace_persist_path(monkeypatch, tmp_path: Pat
     assert res.learning_trace.get("mempalace_verified") is True
     assert res.learning_trace.get("memory_written") is True
     assert res.learning_trace.get("arweave_tx_id") == "ARW-test"
+    assert res.learning_trace.get("learn_phase_bridge", {}).get("entries_written") == 6
 
 
 def test_write_sprint_report(tmp_path: Path):
@@ -161,6 +171,7 @@ def test_write_sprint_report(tmp_path: Path):
 
 
 def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
 
@@ -196,6 +207,33 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
     assert res.winner_source == "local"
     assert "quota" in res.error_codes
     assert "llm_fallback_local" in res.error_codes
+
+
+def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, **_kwargs):
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert "learn_slo_block" in res.error_codes
+    assert res.learning_trace.get("learn_slo_guard", {}).get("active") is True
 
 
 def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
