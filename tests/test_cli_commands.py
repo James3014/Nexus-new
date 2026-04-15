@@ -648,8 +648,8 @@ def test_research_auto_flow_baseline(tmp_path, monkeypatch):
     def fake_subprocess_run(*_args, **_kwargs):
         return _Res(returncode=0)
 
-    monkeypatch.setattr("nexus.research.local_sprint_mutator.generate_local_candidate", fake_generate_local_candidate)
-    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("nexus.app.research_flow_service.generate_local_candidate", fake_generate_local_candidate)
+    monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
 
     result = runner.invoke(
         nexus,
@@ -766,9 +766,9 @@ def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
         called["hyper"] += 1
         raise AssertionError("Hyper should not be called when baseline shortcut triggers")
 
-    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
-    monkeypatch.setattr("nexus.research.local_sprint_mutator.generate_local_candidate", fake_generate_local_candidate)
-    monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
+    monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("nexus.app.research_flow_service.generate_local_candidate", fake_generate_local_candidate)
+    monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
 
     result = runner.invoke(
         nexus,
@@ -818,8 +818,8 @@ def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
         called["hyper"] += 1
         raise AssertionError("Hyper should be skipped when Learn phase-SLO blocks")
 
-    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
-    monkeypatch.setattr("nexus.research.sprint_service.run_hyper_sprint", fake_run_hyper_sprint)
+    monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
 
     result = runner.invoke(
         nexus,
@@ -867,7 +867,7 @@ def test_run_bug_auto_flow_delegates(tmp_path, monkeypatch):
             tmp_path / ".nexus" / "reports" / "research" / "auto-flow-report.json",
         )
 
-    monkeypatch.setattr("scripts.engine.nexus_cli._run_research_auto_flow_impl", fake_auto_flow)
+    monkeypatch.setattr("nexus.app.research_flow_service.run_auto_flow", fake_auto_flow)
 
     result = runner.invoke(
         nexus,
@@ -895,7 +895,7 @@ def test_top_level_run_compat_forwards_to_nested_group(monkeypatch):
         called["cmd"] = cmd
         return MagicMock(returncode=0)
 
-    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
     result = runner.invoke(nexus, ["run", "fix deadlock", "--complexity", "0.3"])
     assert result.exit_code == 0
     assert "CLI-Compat" in result.output

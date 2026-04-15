@@ -129,74 +129,31 @@ class SprintExecutor:
         self.timeout_sec = timeout_sec
         self.broker = SwarmBroker(repo_root)
 
-    def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
-        start = time.time()
+def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+        evaluator = CandidateEvaluator(self.repo_root, self.pytest_cmd, self.timeout_sec)
+        target_rel = self.scope_files[0]
+        original = (self.repo_root / target_rel).read_text(encoding="utf-8") if (self.repo_root / target_rel).exists() else ""
+        
+        # Swarm handling (Executor-specific)
         swarm_dir = self.broker.acquire(timeout_sec=self.timeout_sec)
         if not swarm_dir:
             return CandidateEval(seed=seed, score=0.0, hint=hint, error="broker_timeout", source=source)
+            
         try:
-            target_rel = self.scope_files[0]
-            original = (self.repo_root / target_rel).read_text(encoding="utf-8") if (self.repo_root / target_rel).exists() else ""
-            if code == original:
-                return CandidateEval(
-                    seed=seed,
-                    score=0.2,
-                    hint=hint,
-                    error="no_change_candidate",
-                    candidate_code=code,
-                    source=source,
-                    elapsed_sec=round(time.time() - start, 4),
-                )
-            if Path(target_rel).suffix == ".py":
-                try:
-                    compile(code, target_rel, "exec")
-                except SyntaxError as exc:
-                    return CandidateEval(
-                        seed=seed,
-                        score=0.0,
-                        hint=hint,
-                        error=f"syntax_error:{exc.msg}",
-                        candidate_code=code,
-                        source=source,
-                        elapsed_sec=round(time.time() - start, 4),
-                    )
             self.broker.sync_scope(swarm_dir, scope_files=self.scope_files)
-            (swarm_dir / target_rel).write_text(code, encoding="utf-8")
-            res = subprocess.run(
-                self.pytest_cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_sec,
-                cwd=swarm_dir,
-            )
+            # Use evaluator but on swarm_dir
+            evaluator.repo_root = swarm_dir
+            res = evaluator.evaluate(seed=seed, hint=hint, code=code, source=source, target_file=target_rel, original_code=original)
+            
             return CandidateEval(
-                seed=seed,
-                score=1.0 if res.returncode == 0 else 0.4,
-                hint=hint,
+                seed=res.seed,
+                score=res.score,
+                hint=res.hint,
                 stdout=res.stdout,
-                candidate_code=code,
-                source=source,
-                elapsed_sec=round(time.time() - start, 4),
-            )
-        except subprocess.TimeoutExpired as exc:
-            return CandidateEval(
-                seed=seed,
-                score=0.0,
-                hint=hint,
-                error=str(exc),
-                candidate_code=code,
-                source=source,
-                elapsed_sec=round(time.time() - start, 4),
-            )
-        except Exception as exc:  # noqa: BLE001
-            return CandidateEval(
-                seed=seed,
-                score=0.0,
-                hint=hint,
-                error=str(exc),
-                candidate_code=code,
-                source=source,
-                elapsed_sec=round(time.time() - start, 4),
+                error=res.error,
+                candidate_code=res.candidate_code,
+                source=res.source,
+                elapsed_sec=res.elapsed_sec
             )
         finally:
             self.broker.release(swarm_dir)

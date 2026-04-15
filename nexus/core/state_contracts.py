@@ -6,6 +6,10 @@ from .state_legacy import NexusStateLegacyMixin
 from datetime import datetime
 from enum import Enum
 from nexus.core.pipeline_metadata import PipelineMetadata
+from .state_models import (
+    HealthMetrics, PhaseMetric, TokenAccounting, 
+    ObservabilityContext, AuditCounters, PhaseHealthSnapshot
+)
 
 class TddStatus(str, Enum):
     RED = "red"
@@ -27,13 +31,6 @@ class Plan(BaseModel):
     aesthetic_gate: List[str] = Field(default_factory=list) # [Polish, Normalize, Distill]
     expected_critique_score: int = 90
     traceid: str = Field(default_factory=lambda: str(uuid.uuid4()))
-
-class NexusState(BaseModel):
-    version: str = "v26.1"
-    aos_score: float = 131.5
-    active_shards: Dict[str, str] = {} # shard_id -> worktree_path
-    last_audit: Optional[Dict[str, Any]] = None
-    soul_alignment: bool = True
 
 # --- D 階段: Diagnosis ---
 
@@ -75,7 +72,6 @@ class NexusResearch(BaseModel):
     metadata: Dict[str, Any] = {}
 
 # --- A 階段: Audit ---
-
 
 class NexusRepair(BaseModel):
     task_id: str
@@ -144,63 +140,6 @@ class StepRecord(BaseModel):
 
 # --- H 階段: Health & Self-Check (CHK-001) ---
 
-class HealthMetrics(BaseModel):
-    test_pass_rate: float = 0.0 # 0.0 - 1.0
-    drift_index: float = 0.0    # 偏離指數 (越小越健康)
-    error_rate: float = 0.0     # 錯誤率
-    token_efficiency: float = 1.0 # 1.0 為標準
-    outcome_quality: float = 1.0 # 成果品質 (0.0 - 1.0)
-    last_check_at: Optional[datetime] = None
-    status: str = "UNKNOWN"     # HEALTHY, WARNING, CRITICAL
-
-class PhaseMetric(BaseModel):
-    health: float = 0.0
-    signals: Dict[str, Any] = Field(default_factory=dict)
-     # HEALTHY, WARNING, CRITICAL
-
-# --- R02 Decomposed Sub-objects ---
-
-class TokenAccounting(BaseModel):
-    """Token 使用量追蹤"""
-    total_usage: int = 0
-    raw_model: int = 0
-    fallback_est: int = 0
-    system_overhead: int = 0
-    capture_status: str = "unknown"
-    phase_tokens: Dict[str, int] = Field(default_factory=dict)
-
-class ObservabilityContext(BaseModel):
-    """追蹤與可觀測性"""
-    trace_id: str = ""
-    span_id: str = ""
-    auto_actions: List[Dict[str, Any]] = Field(default_factory=list)
-
-class AuditCounters(BaseModel):
-    """審計與重試計數器"""
-    audit_pass_count: int = 0
-    retry_count: int = 0
-    turn_count: int = 0
-    clarification_count: int = 0
-    correction_count: int = 0
-    unresolved_count: int = 0
-
-class PhaseHealthSnapshot(BaseModel):
-    """階段健康快照"""
-    health_score: float = 100.0
-    health_metrics: HealthMetrics = Field(default_factory=HealthMetrics)
-    pipeline_health: float = 100.0
-    learning_velocity: float = 0.0
-    phase_metrics: Dict[str, PhaseMetric] = Field(
-        default_factory=lambda: {
-            "P": PhaseMetric(),
-            "X": PhaseMetric(),
-            "D": PhaseMetric(),
-            "R": PhaseMetric(),
-            "A": PhaseMetric(),
-            "C": PhaseMetric()
-        }
-    )
-
 # --- T 階段: Trinity & Learning ---
 
 class TraumaRecord(BaseModel):
@@ -212,8 +151,14 @@ class NexusWeights(BaseModel):
     skill_weights: Dict[str, float] = Field(default_factory=lambda: {"generalist": 1.0})
     trauma_records: List[TraumaRecord] = Field(default_factory=list)
 
-
 class NexusState(BaseModel, NexusStateLegacyMixin):
+    # Legacy Root Fields (Consolidated)
+    version: str = "v26.1"
+    aos_score: float = 131.5
+    active_shards: Dict[str, str] = Field(default_factory=dict)
+    last_audit: Optional[Dict[str, Any]] = None
+    soul_alignment: bool = True
+
     schema_version: str = "2.0.0"
     task_id: str
     batch_id: Optional[str] = None

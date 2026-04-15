@@ -30,6 +30,7 @@ from nexus.core.hardened_validator import NexusHardenedValidator
 from nexus.learning.latent_predictor_v20 import get_latent_forecaster
 from nexus.engine.self_healing_selector import get_self_healing_selector
 
+from nexus.engine.bootstrap import build_engine_components
 from nexus.engine.config import EngineConfig
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.services.memory import MemoryService
@@ -63,91 +64,18 @@ class NexusEngine:
     def __init__(self, config: EngineConfig, **kwargs):
         self.config = config
         self.project_root = config.project_root
-        self.run_dir = config.run_dir or (self.project_root / ".nexus" / "runs" / "engine")
-        self.run_dir.mkdir(parents=True, exist_ok=True)
         self.silent = config.silent
         self.fast_mode = config.fast_mode
         self.audit_level = config.audit_level
         self.strategy = RepairStrategy()
         
-        # 🛡️ 治理對位 (DI Activation & Policy)
-        from nexus.engine.hub import NexusHub
+        # 🚀 Bootstrap Components
+        components = build_engine_components(config, kwargs)
         
-        self.state_io = StateIO(self.project_root, run_dir=self.run_dir)
-        self.workspace_mgr = WorkspaceManager(self.project_root)
-        
-        # Phase 2B: 治理政策外部化 (Environment-Aware YAML Loader)
-        env = os.getenv("NEXUS_ENV", "dev") # 預設為 dev
-        self.policy = PolicyLoader.load(str(self.project_root), env=env)
-        self.gate_eval = GateEvaluator(self.policy)
-        self.metrics_agg = MetricsAggregator()
+        # Bind components to self
+        for name, instance in components.items():
+            setattr(self, name, instance)
 
-        self.validator = NexusHardenedValidator()
-        self.latent_forecaster = get_latent_forecaster(str(self.project_root))
-        self.ash_selector = get_self_healing_selector(str(self.project_root), env=env)
-        self.memory = MemoryService(self.project_root)
-        self.hub = NexusHub(self.project_root)
-        from nexus.core.policy_manager import PolicyManager
-        from nexus.engine.metrics.token_accumulator import TokenAccumulator
-        from nexus.engine.health.evaluator import HealthEvaluator
-        from nexus.engine.policies.research_policy import ResearchPolicy
-        self.policy_manager = PolicyManager(str(self.project_root), run_dir=str(self.run_dir))
-        self.accumulator = TokenAccumulator()
-        self.health_evaluator = HealthEvaluator()
-        self.research_policy = ResearchPolicy()
-        
-        from nexus.services.mem_palace import MemPalace
-        self.mem_palace = MemPalace(str(self.project_root))
-        
-        registry_path = self.project_root / ".nexus" / "registry" / "shared_skills.db"
-        self.skill_registry = SkillRegistry(registry_path) if registry_path.exists() else None
-        
-        from nexus.research.wisdom.wisdom_vault import WisdomVault
-        self.wisdom_vault = WisdomVault(str(self.project_root))
-        
-        from nexus.core.context_hub import ContextHub
-        self.context_hub = kwargs.get("context_hub") or ContextHub(
-            str(self.project_root), 
-            memory_service=self.memory, 
-            run_dir=str(self.run_dir),
-            skill_registry=self.skill_registry,
-            mem_palace=self.mem_palace
-        )
-        self.context_hub.wisdom_vault = self.wisdom_vault
-        self.commander = kwargs.get("commander")
-        if self.commander is None:
-            from nexus.core.commander import Commander
-            self.commander = Commander(
-                run_dir=self.run_dir,
-                state_io=self.state_io,
-                router=kwargs.get("router"),
-                context_hub=self.context_hub,
-            )
-        if not hasattr(self.hub, "assemble_feature_pack"):
-            self.hub.assemble_feature_pack = self.context_hub.assemble_feature_pack
-        
-        from nexus.engine.battle_swarm import BattleSwarm
-        self.battle_swarm = BattleSwarm(str(self.project_root), run_dir=str(self.run_dir))
-        
-        from nexus.engine.reflex_loop import ReflexLoop
-        self.reflex_loop = ReflexLoop(str(self.project_root), memory_service=self.memory)
-        
-        # 核心組件對位
-        # 核心組件對位 (由 DI 容器注入)
-        self.reporter = kwargs.get("reporter", self.hub)
-        # 核心組件對位 (由 DI 容器注入實體物)
-        self.phases = kwargs.get("phases", {"P": "Planner", "D": "Diagnose", "R": "Repair", "X": "Research"})
-        
-        # 🛰️ 聯邦與進化底層
-        self.federation = FederationLayer(self.project_root)
-        self.vector_cache = VectorCache(self.project_root / ".nexus" / "vector_db")
-        self.sota_searcher = SOTASearcher(self.vector_cache)
-        self.neural_aggregator = NexusNeuralAggregator()
-        self.hardened_validator = NexusHardenedValidator()
-        self.swarm_planner = HierarchicalGraphPlanner(self.project_root)
-        
-        # 🪙 原子交易支持
-        self.transaction_mgr = TransactionManager(self.project_root)
         try:
             from nexus.engine.pipeline import NexusPipeline
             self.pipeline = NexusPipeline(self)
