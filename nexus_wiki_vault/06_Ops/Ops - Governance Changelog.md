@@ -175,3 +175,9 @@ version_scope: '[v17.1, v22, v23]'
 - **Hyper Guardrail**: `run_hyper_sprint` now applies Learn phase-SLO preflight; when not ready it switches to local-first mode and records `learn_slo_block`.
 - **NightShift Guardrail**: NightShift now checks Learn phase-SLO before leasing worktree; blocked runs fail fast unless `NIGHTSHIFT_BYPASS_LEARN_SLO=1`.
 - **Closure Unification**: Hyper and NightShift learning writeback now also sync into Learn six-phase bridge logs, so all three lanes share the same phase-end closure evidence trail.
+
+## [2026-04-15] Core NexusPipeline Learn-SLO Bridge
+- **Core Route Control**: Integrated Learn phase-SLO guard into `nexus/engine/pipeline_stages.py` at P/X stages (not only CLI lanes).
+- **P-Stage Override**: Precomputed `research_route` can now be force-overridden to `skip` when Learn SLO is active but not ready.
+- **X-Stage Runtime Gate**: X-stage now short-circuits research execution when Learn guard is not ready (except explicit benchmark force).
+- **D-Stage Context Carryover**: Diagnose pack now carries `learn_phase_slo` metadata for downstream repair/audit context.

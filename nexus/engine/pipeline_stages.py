@@ -2,6 +2,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import logging
 import time
 import dataclasses
+import json
+from pathlib import Path
 from nexus.core.protocols import PipelineContextProtocol
 from nexus.learning.knowledge_index import KnowledgeIndex
 from nexus.core.events import NexusEvent
@@ -35,6 +37,41 @@ class PipelineStagesMixin:
         ctx.state.metadata["phase_decisions"] = phase_decisions
         ctx.state.metadata["phase_skills"] = phase_skills
         return decision_id
+
+    def _load_learn_phase_slo_guard(self, ctx: PipelineContextProtocol) -> Dict[str, Any]:
+        project_root = Path(getattr(self.engine, "project_root", "."))
+        slo_path = project_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+        if not slo_path.exists():
+            return {
+                "active": False,
+                "ready": True,
+                "phase_slo_pass": True,
+                "required_done_ratio": 1.0,
+                "reason": "phase_slo_summary_missing",
+                "path": str(slo_path),
+            }
+        try:
+            data = json.loads(slo_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {
+                "active": True,
+                "ready": False,
+                "phase_slo_pass": False,
+                "required_done_ratio": 0.0,
+                "reason": "phase_slo_summary_parse_error",
+                "path": str(slo_path),
+            }
+        phase_slo_pass = bool((data or {}).get("phase_slo_pass", False))
+        required_done_ratio = float(((data or {}).get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0)
+        ready = phase_slo_pass and required_done_ratio >= 0.95
+        return {
+            "active": True,
+            "ready": ready,
+            "phase_slo_pass": phase_slo_pass,
+            "required_done_ratio": required_done_ratio,
+            "reason": "" if ready else "learn_phase_slo_not_ready",
+            "path": str(slo_path),
+        }
 
     def _stage_plan(self, ctx: PipelineContextProtocol, tracer: Any) -> None:
         with tracer.phase_span('P', task_id=ctx.task_id) as p_span:
@@ -70,6 +107,8 @@ class PipelineStagesMixin:
                 # Backward compatibility for older planner signatures.
                 ctx.prediction = ctx.planner.run(ctx.state, planner_input)
             ctx.accumulator.record(ctx.state, "P", ctx.prediction)
+            learn_guard = self._load_learn_phase_slo_guard(ctx)
+            ctx.state.metadata["learn_phase_slo"] = learn_guard
             
             # 🚀 Pre-compute research routing decision for phase 'X' should_run auto-trigger
             try:
@@ -78,9 +117,22 @@ class PipelineStagesMixin:
                 res_decision = ctx.research_policy.route(
                     decision, ctx.task_desc, task_type=ctx.task_type, prediction=ctx.prediction, context=ctx.state.metadata
                 )
-                ctx.state.metadata["research_route"] = dataclasses.asdict(res_decision) if dataclasses.is_dataclass(res_decision) else {}
+                route_payload = dataclasses.asdict(res_decision) if dataclasses.is_dataclass(res_decision) else {}
+                if learn_guard.get("active") and not learn_guard.get("ready"):
+                    route_payload.update(
+                        {
+                            "should_research": False,
+                            "mode": "skip",
+                            "reason": "learn_phase_slo_not_ready",
+                            "rounds": 0,
+                            "stable_wins": 0,
+                            "learn_guard_forced_skip": True,
+                        }
+                    )
+                    logger.info("🧠 P 階段：Learn phase-SLO 未達標，預先關閉 X 研究路由。")
+                ctx.state.metadata["research_route"] = route_payload
                 logger.info("📡 P 階段：預計算研究路由 (Should Research: %s, Reason: %s)", 
-                            res_decision.should_research, res_decision.reason)
+                            route_payload.get("should_research"), route_payload.get("reason"))
             except Exception as e:
                 logger.error("❌ P 階段：預計算研究路由失敗: %s", e)
 
@@ -94,6 +146,14 @@ class PipelineStagesMixin:
         with tracer.phase_span('X', task_id=ctx.task_id) as x_span:
             # --- X Stage: Research ---
             force_research = bool(ctx.state.metadata.get("benchmark_force_research"))
+            learn_guard = ctx.state.metadata.get("learn_phase_slo")
+            if not isinstance(learn_guard, dict):
+                learn_guard = self._load_learn_phase_slo_guard(ctx)
+                ctx.state.metadata["learn_phase_slo"] = learn_guard
+            if (not force_research) and learn_guard.get("active") and (not learn_guard.get("ready")):
+                ctx.state.metadata["research_skipped_by_learn_guard"] = True
+                logger.info("🛡️ X 階段：Learn phase-SLO 未達標，跳過研究階段。")
+                return
             
             # 🚀 Re-use pre-computed route if available (auto-trigger fix)
             precomputed = ctx.state.metadata.get("research_route")
@@ -182,6 +242,8 @@ class PipelineStagesMixin:
             if ctx.research_pack:
                 ctx.pack["research_context"] = ctx.research_pack
                 ctx.pack["research_pack"] = ctx.research_pack
+            if isinstance(ctx.state.metadata.get("learn_phase_slo"), dict):
+                ctx.pack["learn_phase_slo"] = ctx.state.metadata.get("learn_phase_slo")
 
             self._match_learned_skills(ctx)
             self._apply_cycle_prevention_logic(ctx)

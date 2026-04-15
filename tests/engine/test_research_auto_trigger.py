@@ -90,3 +90,54 @@ def test_x_stage_skips_when_route_says_false(mock_ki_cls, mock_ctx, mock_tracer)
     
     # 驗證並未執行研究器
     assert not mock_ctx.researcher.run.called
+
+
+@patch("nexus.engine.pipeline_stages.KnowledgeIndex")
+def test_p_stage_learn_slo_can_force_research_skip(mock_ki_cls, mock_ctx, mock_tracer, tmp_path):
+    """若 Learn phase-SLO 未達標，P 階段應覆寫 research_route 為 skip。"""
+    mock_ki = mock_ki_cls.return_value
+    mock_ki.search_similar.return_value = []
+    mock_ctx.prediction = {"candidate_count": 3, "root_cause_confidence": 0.2}
+    mock_ctx.planner.run.return_value = mock_ctx.prediction
+    res_decision = ResearchDecision(should_research=True, mode="external", reason="low_confidence", rounds=5, stable_wins=3)
+    mock_ctx.research_policy.route.return_value = res_decision
+
+    slo = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    slo.parent.mkdir(parents=True, exist_ok=True)
+    slo.write_text('{"phase_slo_pass": false, "global": {"required_done_ratio": 0.2}}', encoding="utf-8")
+
+    pipeline = MockPipeline()
+    pipeline.engine.project_root = tmp_path
+    pipeline._stage_plan(mock_ctx, mock_tracer)
+
+    route = mock_ctx.state.metadata["research_route"]
+    assert route["should_research"] is False
+    assert route["mode"] == "skip"
+    assert route["reason"] == "learn_phase_slo_not_ready"
+    assert route["learn_guard_forced_skip"] is True
+
+
+@patch("nexus.engine.pipeline_stages.KnowledgeIndex")
+def test_x_stage_skips_when_learn_guard_not_ready(mock_ki_cls, mock_ctx, mock_tracer):
+    """X 階段在 Learn guard 未就緒時，需跳過 researcher。"""
+    mock_ctx.state.metadata["research_route"] = {
+        "should_research": True,
+        "mode": "external",
+        "reason": "precomputed",
+        "rounds": 5,
+        "stable_wins": 3,
+    }
+    mock_ctx.state.metadata["learn_phase_slo"] = {
+        "active": True,
+        "ready": False,
+        "phase_slo_pass": False,
+        "required_done_ratio": 0.4,
+        "reason": "learn_phase_slo_not_ready",
+    }
+    mock_ctx.researcher = MagicMock()
+
+    pipeline = MockPipeline()
+    pipeline._stage_research(mock_ctx, mock_tracer)
+
+    assert mock_ctx.state.metadata["research_skipped_by_learn_guard"] is True
+    assert not mock_ctx.researcher.run.called
