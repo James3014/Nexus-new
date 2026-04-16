@@ -104,12 +104,29 @@ def legacy_governance_check():
 
 
 @nexus.command(name="nexus:acceptance-check")
-@click.option("--window", default=7, type=int)
-def legacy_acceptance_check(window):
-    gate = subprocess.run([sys.executable, str(repo_root / "scripts" / "ops" / "ci_gate.py"), "--dry-run"])
+@click.option("--window", default=50, type=int)
+@click.option("--evidence", type=click.Path(exists=True), help="Path to hallucination_evidence.json")
+@click.option("--json", "output_json", is_flag=True, help="Output in JSON format")
+def legacy_acceptance_check(window, evidence, output_json):
+    """[DEPRECATED] Use 'nexus acceptance-check' instead. Hardened release gate entry."""
+    click.secho("⚠️  [Legacy] 'nexus:acceptance-check' is deprecated. Forwarding to 'nexus acceptance-check'...", fg="yellow")
+    
+    # 1. Pre-check with CI gate
+    gate = subprocess.run([sys.executable, str(repo_root / "scripts" / "ops" / "ci_gate.py"), "--dry-run"], capture_output=True)
     if gate.returncode != 0:
+        click.echo(gate.stdout.decode())
         raise click.ClickException("Governance gate failed before acceptance-check")
-    click.echo(f"Acceptance check window={window}")
+    
+    # 2. Forward to real acceptance check
+    cmd = [sys.executable, str(repo_root / "scripts" / "ops" / "nexus_acceptance_check.py"), "--window", str(window)]
+    if evidence:
+        cmd.extend(["--evidence", str(evidence)])
+    if output_json:
+        cmd.append("--json")
+        
+    res = subprocess.run(cmd)
+    if res.returncode != 0:
+        sys.exit(res.returncode)
 
 
 @nexus.command(name="nexus:closeout")

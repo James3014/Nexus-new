@@ -1033,3 +1033,18 @@ def _write_ready_learn_slo(tmp_path):
         '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
         encoding="utf-8",
     )
+
+
+def test_legacy_acceptance_check_delegation(monkeypatch):
+    from scripts.engine.nexus_cli import nexus
+    runner = CliRunner()
+    
+    import subprocess
+    class MockRes:
+        def __init__(self, rc): self.returncode = rc; self.stdout = b"ok"; self.stderr = b""
+        
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: MockRes(0))
+    
+    result = runner.invoke(nexus, ["nexus:acceptance-check", "--window", "10"])
+    assert result.exit_code == 0
+    assert "[Legacy]" in result.output
