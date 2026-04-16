@@ -99,3 +99,5 @@ version_scope:
 - **Root Cause**: some tests depend on local runtime artifacts and monkeypatched `Path.exists` paths; isolation tree did not mirror those non-git assets.
 - **Decision**: harden `SessionMetabolism.load_checkpoint()` to tolerate missing files and run cross-environment verification (`root data + branch code`) before judging regression severity.
 - **Prevention**: classify failures into code regressions vs environment parity gaps; only block merge on code regressions, and record parity assumptions in the runbook.
+
+| 2026-04-16 | Red-Team-Hardening | T1-T5 Implementation | VALIDATED |
