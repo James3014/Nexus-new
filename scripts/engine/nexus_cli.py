@@ -325,7 +325,11 @@ def acceptance_check(as_json, evidence_path):
     help="Optional explicit output file path. Writes machine-readable JSON payload.",
 )
 def run(task_id, complexity, output_file):
-    # 🔮 [Oracle Protocol] Speculative Initiation
+    # 🔮 [Oracle Protocol] Speculative Pre-run
+    from nexus.core.speculative_classifier import SpeculativeClassifier
+    classifier = SpeculativeClassifier(repo_root)
+    intake_data = classifier.analyze_and_hydrate(task_id)
+
     dispatcher = OracleDispatcher(repo_root)
     advisor = OracleAdvisor(repo_root)
     shadow_tid = dispatcher.trigger_shadow_sync(task_id)
@@ -356,7 +360,15 @@ def run(task_id, complexity, output_file):
     
     # 🔮 [Oracle Protocol] Display Advice
     time.sleep(1.0) # 預留感應時間
-    advice = advisor.synthesize_advice(shadow_tid)
+    advice = advisor.synthesize_advice(shadow_tid, intake_data)
+    click.echo(advice)
+
+    
+    # 🔮 [Oracle Protocol] Future Advice Render
+    for _ in range(3):
+        advice = advisor.synthesize_advice(shadow_tid, intake_data)
+        if "正在觀測" not in advice: break
+        time.sleep(0.8)
     click.echo(advice)
 
     click.echo(f"🚀 Executing Task: {task_id} with locked NAS weights...")
@@ -2062,6 +2074,17 @@ def learn_benchmark_cmd(manifest_file, topic, source, source_file, output_json, 
     with open(output, 'w') as f:
         json.dump(summary, f, indent=2)
     click.echo(f"✅ Benchmark complete. Precision: {prec:.2%}, Unknown Correct: {un_corr:.2%}")
+
+
+@nexus_group.command(name="oracle:apply")
+@click.argument("shadow_tid")
+def oracle_apply(shadow_tid):
+    """🚀 [Oracle] Promote a successful shadow patch to main workspace."""
+    from nexus.oracle.promote import promote_shadow_patch
+    if promote_shadow_patch(repo_root, shadow_tid):
+        click.secho(f"✅ Successfully promoted future patch {shadow_tid} to the present.", fg="green")
+    else:
+        click.secho("❌ Promotion failed.", fg="red")
 
 if __name__ == "__main__":
     nexus()

@@ -1,17 +1,97 @@
 [
   {
+    "artifact": "hyper_oracle-physical-success-test.json",
+    "timestamp": "2026-04-16T17:41:14.241190",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_final-oracle-strength-test.json",
+    "timestamp": "2026-04-16T17:40:39.121697",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_fix-math-oracle-final.json",
+    "timestamp": "2026-04-16T17:40:08.022011",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_fix-math-oracle-v4.json",
+    "timestamp": "2026-04-16T17:38:02.650490",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_fix-math-oracle.json",
+    "timestamp": "2026-04-16T17:37:28.711552",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_fix add in oracle_test.py.json",
+    "timestamp": "2026-04-16T17:33:13.190130",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_oracle-final-verification.json",
+    "timestamp": "2026-04-16T17:31:59.248174",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_fix-memory-v2.json",
+    "timestamp": "2026-04-16T17:31:32.025018",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_fix-memory-deadlock.json",
+    "timestamp": "2026-04-16T17:30:55.071501",
+    "category": "Operational Report"
+  },
+  {
     "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-15T09:32:53.346145",
+    "timestamp": "2026-04-16T17:27:31.299955",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-15T09:32:53.345977",
+    "timestamp": "2026-04-16T17:27:31.299791",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_oracle-smoke-test.json",
+    "timestamp": "2026-04-16T17:26:41.763269",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_refactor-memory-scaling.json",
+    "timestamp": "2026-04-16T17:25:47.921482",
     "category": "Operational Report"
   },
   {
     "artifact": "hallucination_evidence.json",
-    "timestamp": "2026-04-15T09:32:31.665797",
+    "timestamp": "2026-04-16T16:32:00.092274",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "enterprise_audit.json",
+    "timestamp": "2026-04-16T16:28:24.071495",
+    "category": "Audit Report"
+  },
+  {
+    "artifact": "enforced_agent_briefing.md",
+    "timestamp": "2026-04-16T16:28:18.240273",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "lesson_writeback.json",
+    "timestamp": "2026-04-16T14:48:10.897601",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "closeout_status.json",
+    "timestamp": "2026-04-15T21:39:23.027832",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "nightshift_Fix deadlock in transfer.json",
+    "timestamp": "2026-04-15T14:26:29.661442",
     "category": "Operational Report"
   },
   {
@@ -185,11 +265,6 @@
     "category": "Operational Report"
   },
   {
-    "artifact": "enterprise_audit.json",
-    "timestamp": "2026-04-10T13:47:20.407035",
-    "category": "Audit Report"
-  },
-  {
     "artifact": "NEXUS_BENCHMARK_REPORT.md",
     "timestamp": "2026-04-10T03:15:01.100597",
     "category": "Operational Report"
@@ -257,11 +332,6 @@
   {
     "artifact": "wiki_drift_report.json",
     "timestamp": "2026-04-08T14:03:04.302531",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "closeout_status.json",
-    "timestamp": "2026-04-07T12:53:12.256926",
     "category": "Operational Report"
   },
   {
