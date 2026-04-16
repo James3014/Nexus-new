@@ -2,7 +2,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from scripts.nightshift import AutoResearchNightShift, RoundOutcome, _cleanup_stale_swarm_locks
+from nexus.app.nightshift_runner_service import AutoResearchNightShift, RoundOutcome, _cleanup_stale_swarm_locks
 
 
 class FakeGateway:
