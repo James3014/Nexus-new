@@ -29,6 +29,7 @@ def _run_verification_command(command: str, cwd: Path) -> VerificationRecord:
 
 
 def evaluate_completion(request: CompletionRequest) -> CompletionResult:
+    from scripts.ops.content_quality_gate import check_content_quality
     contract = contract_for_level(request.task_level)
     records = [
         _run_verification_command(command, request.cwd)
@@ -36,15 +37,24 @@ def evaluate_completion(request: CompletionRequest) -> CompletionResult:
     ]
     existing_artifacts = [path for path in request.artifact_paths if path.exists()]
     missing_artifacts = [path for path in request.artifact_paths if not path.exists()]
+    
+    # R1.1 Content Quality Hook
+    quality_failures = []
+    for art in existing_artifacts:
+        if art.suffix == ".md":
+            ok, reason = check_content_quality(art, min_words=50, min_paragraphs=2, blacklist=["高品質重鑄執行中"])
+            if not ok:
+                quality_failures.append(f"{art.name}: {reason}")
 
     passed_commands = sum(1 for record in records if record.passed)
     all_commands_passed = bool(records) and passed_commands == len(records)
     meets_command_floor = len(records) >= contract.min_verification_commands
     meets_artifact_floor = len(existing_artifacts) >= contract.required_artifacts
+    has_substance = len(quality_failures) == 0
 
     if not records or passed_commands == 0:
         status = CompletionStatus.IMPLEMENTED
-    elif not meets_command_floor or not all_commands_passed:
+    elif not meets_command_floor or not all_commands_passed or not has_substance:
         status = CompletionStatus.PARTIALLY_VERIFIED
     elif request.task_level == TaskLevel.DELIVERY and meets_artifact_floor:
         status = CompletionStatus.DELIVERY_READY
