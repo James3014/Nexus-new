@@ -49,24 +49,31 @@ class VectorCache:
         if not self.enabled or self.db is None:
             self._ensure_fallback_file()
             return
-        if self.table_name not in self.db.list_tables():
-            # 🛡️ 物理硬化：雙重對位 (Schema + Data) 封殺類型推斷錯誤
-            schema = pa.schema([
-                pa.field("id", pa.string()),
-                pa.field("vector", pa.list_(pa.float32(), 1024)),
-                pa.field("content", pa.string()),
-                pa.field("tier", pa.string()),
-                pa.field("metadata", pa.string())
-            ])
-            seed_data = [{
-                "id": "seed",
-                "vector": np.zeros(1024, dtype=np.float32),
-                "content": "seed_node",
-                "tier": "global",
-                "metadata": "{}"
-            }]
-            self.db.create_table(self.table_name, data=seed_data, schema=schema)
-            logger.info("vector_cache_table_hardened_with_dual_alignment [%s]", self.table_name)
+        try:
+            if self.table_name not in self.db.list_tables():
+                # 🛡️ 物理硬化：雙重對位 (Schema + Data) 封殺類型推斷錯誤
+                schema = pa.schema([
+                    pa.field("id", pa.string()),
+                    pa.field("vector", pa.list_(pa.float32(), 1024)),
+                    pa.field("content", pa.string()),
+                    pa.field("tier", pa.string()),
+                    pa.field("metadata", pa.string())
+                ])
+                seed_data = [{
+                    "id": "seed",
+                    "vector": np.zeros(1024, dtype=np.float32),
+                    "content": "seed_node",
+                    "tier": "global",
+                    "metadata": "{}"
+                }]
+                self.db.create_table(self.table_name, data=seed_data, schema=schema)
+                logger.info("vector_cache_table_hardened_with_dual_alignment [%s]", self.table_name)
+        except Exception as e:
+            if "already exists" in str(e):
+                logger.debug("vector_cache_table_already_exists_ignoring [%s]", self.table_name)
+            else:
+                raise
+
 
     def upsert(self, entries: List[Dict[str, Any]]):
         """批量物理注入向量數據。具備彈性容錯閘門。"""

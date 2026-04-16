@@ -1,5 +1,50 @@
 [
   {
+    "artifact": "acceptance_check.md",
+    "timestamp": "2026-04-17T00:59:30.082574",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "acceptance_check.json",
+    "timestamp": "2026-04-17T00:59:30.082312",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "run_Deploy scout units with war-armor for security refactor.json",
+    "timestamp": "2026-04-17T00:59:30.003760",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "run_Refactor auth and optimize performance for the landing page UI.json",
+    "timestamp": "2026-04-17T00:48:19.588308",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "run_Fix potential race condition in auth and refactor core storage.json",
+    "timestamp": "2026-04-17T00:04:33.043845",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "run_Fix race condition in auth and refactor core storage.json",
+    "timestamp": "2026-04-17T00:02:19.207741",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_Add a new tailwind component for the user dashboard.json",
+    "timestamp": "2026-04-16T20:04:37.088991",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hallucination_evidence.json",
+    "timestamp": "2026-04-16T19:37:20.309830",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "hyper_Fix auth error in the core pipeline.json",
+    "timestamp": "2026-04-16T19:34:42.195565",
+    "category": "Operational Report"
+  },
+  {
     "artifact": "hyper_oracle-physical-success-test.json",
     "timestamp": "2026-04-16T17:41:14.241190",
     "category": "Operational Report"
@@ -45,16 +90,6 @@
     "category": "Operational Report"
   },
   {
-    "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-16T17:27:31.299955",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-16T17:27:31.299791",
-    "category": "Operational Report"
-  },
-  {
     "artifact": "hyper_oracle-smoke-test.json",
     "timestamp": "2026-04-16T17:26:41.763269",
     "category": "Operational Report"
@@ -62,11 +97,6 @@
   {
     "artifact": "hyper_refactor-memory-scaling.json",
     "timestamp": "2026-04-16T17:25:47.921482",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "hallucination_evidence.json",
-    "timestamp": "2026-04-16T16:32:00.092274",
     "category": "Operational Report"
   },
   {

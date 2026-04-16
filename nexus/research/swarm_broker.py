@@ -35,6 +35,10 @@ class SwarmBroker:
                     # Attempt to create the lock file exclusively for cross-process safety
                     fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                     os.close(fd)
+                    
+                    # 🚀 [Shared Cache] 加速啟動：掛載重型依賴
+                    self._mount_shared_cache(swarm_dir)
+                    
                     logger.debug(f"🐝 [SwarmBroker] Acquired swarm sandbox: {swarm_dir.name}")
                     return swarm_dir
                 except FileExistsError:
@@ -44,7 +48,21 @@ class SwarmBroker:
         logger.error("❌ [SwarmBroker] Timeout waiting for an available Swarm directory.")
         return None
 
+    def _mount_shared_cache(self, swarm_dir: Path):
+        """
+        使用軟連結掛載 .venv 與 node_modules，避免磁碟 I/O 瓶頸。
+        """
+        for cache_dir in [".venv", "node_modules", ".ruff_cache"]:
+            src = self.workspace / cache_dir
+            dst = swarm_dir / cache_dir
+            if src.exists() and not dst.exists():
+                try:
+                    os.symlink(src, dst)
+                except Exception as e:
+                    logger.warning(f"⚠️ [SwarmBroker] Link failed for {cache_dir}: {e}")
+
     def sync_scope(self, swarm_dir: Path, scope_files: List[str], required_configs: List[str] = None):
+
         """
         將主工作區的 Scope 檔案與設定檔同步至 Swarm 目錄中。
         """

@@ -109,21 +109,49 @@ class ProjectPlanner:
 
     def _map_skills(self, task: str, dimensions: Dict[str, Any]) -> List[str]:
         """
-        根據意圖自動路由 Skills。
+        🚀 Nexus 封裝技能映射 (Encapsulated Skill Mapping)
+        僅掃描專案內部技能目錄，確保系統自治。
         """
-        mapping = {
-            "ui": "frontend-design",
-            "css": "frontend-design",
-            "fix": "as-debugging-and-error-recovery",
-            "test": "as-test-driven-development",
-            "doc": "as-documentation-and-adrs",
-            "security": "gstack-cso"
-        }
         found = []
-        for kw, skill in mapping.items():
-            if kw in task:
+        # 僅限 Nexus 專案內部路徑
+        internal_skills_roots = [
+            self.project_root / "skills",
+            self.project_root / "nexus" / "skills",
+            self.project_root / "nexus" / "research" / "skills"
+        ]
+        
+        all_available_skills = []
+        for root in internal_skills_roots:
+            if root.exists():
+                all_available_skills.extend([d.name for d in root.iterdir() if d.is_dir()])
+                # 同時檢查單個 json 設定檔（如 war-armor）
+                all_available_skills.extend([f.stem for f in root.glob("*.json")])
+
+        if not all_available_skills:
+            return []
+
+        # 1. Nexus 戰甲技能匹配 (Nexus Armor Priority)
+        for skill_id in all_available_skills:
+            if skill_id in task.lower() or any(p in task.lower() for p in skill_id.split("-")):
+                found.append(skill_id)
+        
+        # 2. 核心動作映射 (Core Action Mapping)
+        hard_mapping = {
+            "scout": "scout",
+            "idea": "idea",
+            "fix": "baseline",
+            "experiment": "experiment",
+            "graph": "graphify",
+            "analyze": "analysis",
+            "armor": "war-armor"
+        }
+        for kw, skill in hard_mapping.items():
+            if kw in task.lower() and any(skill in s for s in all_available_skills):
                 found.append(skill)
-        return list(set(found))
+                
+        return list(set(found))[:5]
+
+
 
 if __name__ == "__main__":
     # 測試腳本

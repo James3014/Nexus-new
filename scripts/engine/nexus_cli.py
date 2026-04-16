@@ -358,17 +358,20 @@ def run(task_id, complexity, output_file):
     elif strategy.flow_type == "hyper_sprint" or strategy.flow_type == "baseline":
         click.echo(f"🐝 [Swarm] Activating Hive Mind for {strategy.flow_type.upper()}...")
         from nexus.core.swarm import NexusSwarmOrchestrator
-        # 這裡需要一個 MockEngine 或真實 Engine 來驅動 Swarm
-        class MockEngine:
-            def __init__(self):
-                self.project_root = repo_root
+        from nexus.engine.coordinator import NexusEngine
+        from nexus.engine.config import EngineConfig
         
-        orchestrator = NexusSwarmOrchestrator(engine=MockEngine(), task=task_id, allocation=strategy.swarm_config)
+        # 🚀 [Real Engine] 掛載正式牌照：初始化真實引擎
+        config = EngineConfig(project_root=repo_root)
+        engine = NexusEngine(config)
+        
+        orchestrator = NexusSwarmOrchestrator(engine=engine, task=task_id, allocation=strategy.swarm_config)
         swarm_result = orchestrator.run()
         
         # 產出標準化報表
         from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
         from datetime import datetime
+
         outcome = NexusOutcomeV2(
             task_id=task_id,
             terminal_state="SUCCESS" if swarm_result["status"] != "FAIL" else "FAIL",

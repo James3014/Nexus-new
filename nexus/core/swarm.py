@@ -77,8 +77,32 @@ class NexusSwarmOrchestrator:
 
     def _scout(self) -> str:
         print("🔭 [Swarm:Scout] Performing deep intelligence scouting (LanceDB RAG)...")
-        # 這裡是 RAG 注入點
-        return "Scouted Context: Found previous similar fix in commit 4446d97."
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            p_root = getattr(self.engine, "project_root", Path("."))
+            if not isinstance(p_root, Path):
+                p_root = Path(p_root)
+            
+            svc = LearnModeService(p_root)
+            # 使用任務描述作為問題，topic 設為 general 或從任務中提取關鍵字
+            scout_result = svc.ask(topic="multi-agent-orchestration", question=self.task, top_k=8)
+            
+            citations = scout_result.get("citations", [])
+            if not citations:
+                return "Scouted Context: No specific historical lessons found in LanceDB."
+            
+            context_lines = ["Scouted Intelligence Bundle:"]
+            for i, c in enumerate(citations[:5]):
+                context_lines.append(f"[{i+1}] {c.get('claim')} (Source: {c.get('source_url')})")
+            
+            summary = "\n".join(context_lines)
+            print(f"✅ [Swarm:Scout] Retrieved {len(citations)} relevant claims from knowledge base.")
+            return summary
+            
+        except Exception as e:
+            logger.warning("Scouting failed due to service error: %s", e)
+            return "Scouted Context: Scouting service unavailable. Falling back to zero-context mode."
+
 
     def _consensus_plan(self, analysis: str) -> str:
         print("⚖️ [Swarm:Consensus] Running Architect-Reviewer debate...")
