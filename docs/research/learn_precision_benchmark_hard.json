@@ -1,0 +1,53 @@
+{
+  "topic": "repo-scout-skill",
+  "cases": [
+    {
+      "q": "How does repo-scout handle unexpected indentation in CLI extraction?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Describe the fail-closed behavior of the learn SLO guard.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What happens if REPO_ROOT is renamed to repo_root in tests?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Explain the role of LLMCandidateGenerator alias in P3-R1.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "List the modified files in the O1 facade refactor.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "How to verify the release-candidate evidence package?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Who is the Prime Minister of United Kingdom?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "How to prepare a perfect sushi rice?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "What is the distance between Earth and Moon?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "What is the best programming language for AI?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Explain the ending of the movie Inception.",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "How to play poker like a pro?",
+      "expected": "UNKNOWN"
+    }
+  ]
+}
