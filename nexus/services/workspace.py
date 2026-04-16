@@ -22,7 +22,7 @@ class WorkspacePermissionError(Exception):
     pass
 
 
-class WorkspaceManager:\n
+class WorkspaceManager:
     def _acquire_workspace_lock(self, workspace_path: Path, timeout_sec: int = 10) -> bool:
         lock_file = workspace_path / ".lock"
         start_time = time.time()

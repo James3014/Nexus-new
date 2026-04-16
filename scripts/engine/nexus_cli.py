@@ -325,95 +325,71 @@ def acceptance_check(as_json, evidence_path):
     help="Optional explicit output file path. Writes machine-readable JSON payload.",
 )
 def run(task_id, complexity, output_file):
-    # 🔮 [Oracle Protocol] Speculative Pre-run
+    """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
+    click.secho(f"🛡️ [NEXUS v24.8] Initiating Master Loop for: {task_id}", fg="cyan", bold=True)
+    
+    # [P] Plan Phase: Intent Extraction
     from nexus.core.speculative_classifier import SpeculativeClassifier
     classifier = SpeculativeClassifier(repo_root)
     intake_data = classifier.analyze_and_hydrate(task_id)
+    
+    # [D] Design Phase: Strategic Routing
+    from nexus.core.project_planner import ProjectPlanner
+    planner = ProjectPlanner(repo_root)
+    strategy = planner.build_campaign(intake_data)
+    
+    click.secho(f"🧠 [Strategy] Routed to {strategy.flow_type.upper()} (Risk: {strategy.risk_level})", fg="yellow")
+    click.echo(f"   Reason: {strategy.explanation}")
+    if strategy.required_skills:
+        click.echo(f"   Armed Skills: {', '.join(strategy.required_skills)}")
 
-    dispatcher = OracleDispatcher(repo_root)
-    advisor = OracleAdvisor(repo_root)
-    shadow_tid = dispatcher.trigger_shadow_sync(task_id)
-    click.secho(f"📡 [Shadow-Sync] Oracle shadows spawned (TID: {shadow_tid})...", fg="blue")
-
-    """🚀 [Wisdom Layer] Execute task with automatic NAS tuning."""
-    if _task_requests_output_file(task_id) and not output_file:
-        raise click.ClickException(
-            "Task appears to request file output. Please provide --output-file to avoid silent non-write behavior."
-        )
-
-    from nexus.core.context_hub import ContextHub
-    hub = ContextHub(repo_root)
-    
-    # 1. 智慧感應 (Wisdom Sensing)
-    decision = hub.make_pre_routing_decision(task_id, {"complexity_score": complexity})
-    
-    if decision.get("nas_autotune_needed"):
-        click.echo(f"🧬 [Wisdom Layer] High complexity detected. Launching Bayesian Auto-Tuning...")
-        tuning_cmd = [sys.executable, str(repo_root / "scripts/nightshift.py"), "--task", task_id, "--max_rounds", "3"]
-        # 🛡️ 物理強化：注入 PYTHONPATH 確保子進程能找到 nexus 庫
-        env = os.environ.copy()
-        env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
-        subprocess.run(tuning_cmd, env=env, check=True)
-        click.echo("✅ [Wisdom Layer] NAS Tuning Complete. Optimal weights locked.")
-    
-    # 2. 正式執行
-    
-    # 🔮 [Oracle Protocol] Display Advice
-    time.sleep(1.0) # 預留感應時間
-    advice = advisor.synthesize_advice(shadow_tid, intake_data)
-    click.echo(advice)
-
-    
-    # 🔮 [Oracle Protocol] Future Advice Render
-    for _ in range(3):
-        advice = advisor.synthesize_advice(shadow_tid, intake_data)
-        if "正在觀測" not in advice: break
-        time.sleep(0.8)
-    click.echo(advice)
-
-    click.echo(f"🚀 Executing Task: {task_id} with locked NAS weights...")
-    
-    # 物理硬化：產出標準化報表 (Phase 1)
-    from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
-    import json
-    from datetime import datetime
-    
-    report_path = repo_root / ".nexus" / "reports" / f"hyper_{task_id.replace('/', '_')}.json"
+    # [R] Research Phase: Tactical Execution
+    # 這裡根據策略動態分流
+    report_path = repo_root / ".nexus" / "reports" / f"run_{task_id.replace('/', '_')}.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # 模擬執行結果 (在此擴展點接入真實執行引擎)
-    outcome = NexusOutcomeV2(
-        task_id=task_id,
-        terminal_state="SUCCESS",
-        failure_category=SprintOutcome.SUCCESS.value,
-        exit_code=0,
-        timestamp=datetime.now().isoformat()
-    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
+
+    if strategy.flow_type == "nightshift":
+        click.echo(f"🧬 [Evolution] Launching NightShift deep-search engine...")
+        tuning_cmd = [sys.executable, str(repo_root / "scripts/nightshift.py"), "--task", task_id]
+        subprocess.run(tuning_cmd, env=env, check=True)
+    elif strategy.flow_type == "hyper_sprint" or strategy.flow_type == "baseline":
+        click.echo(f"🐝 [Swarm] Activating Hive Mind for {strategy.flow_type.upper()}...")
+        from nexus.core.swarm import NexusSwarmOrchestrator
+        # 這裡需要一個 MockEngine 或真實 Engine 來驅動 Swarm
+        class MockEngine:
+            def __init__(self):
+                self.project_root = repo_root
+        
+        orchestrator = NexusSwarmOrchestrator(engine=MockEngine(), task=task_id, allocation=strategy.swarm_config)
+        swarm_result = orchestrator.run()
+        
+        # 產出標準化報表
+        from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
+        from datetime import datetime
+        outcome = NexusOutcomeV2(
+            task_id=task_id,
+            terminal_state="SUCCESS" if swarm_result["status"] != "FAIL" else "FAIL",
+            failure_category=SprintOutcome.SUCCESS.value if swarm_result["status"] != "FAIL" else SprintOutcome.EXECUTION_ERROR.value,
+            exit_code=0 if swarm_result["status"] != "FAIL" else 1,
+            timestamp=datetime.now().isoformat()
+        )
+        with open(report_path, "w", encoding="utf-8") as f:
+            import json
+            json.dump(outcome.__dict__, f, indent=2, ensure_ascii=False)
+    else:
+        click.echo(f"⚡ [Skill] Executing specialized skill flow...")
+
     
-    with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(outcome.__dict__, f, indent=2, ensure_ascii=False)
+    # [A] Accept Phase: Automated Verification
+    click.secho("\n✅ [Verification] Running system-wide acceptance check...", fg="green")
+    acceptance_cmd = [sys.executable, str(repo_root / "scripts/ops/nexus_acceptance_check.py")]
+    subprocess.run(acceptance_cmd, env=env, check=True)
 
-    payload = {
-        "task_id": task_id,
-        "complexity": complexity,
-        "status": outcome.terminal_state,
-        "failure_category": outcome.failure_category,
-        "exit_code": outcome.exit_code,
-        "timestamp": outcome.timestamp,
-        "report_path": str(report_path),
-        "io": {
-            "output_written": False,
-            "output_path": None,
-        },
-    }
-    if output_file:
-        written = _write_output_file(output_file, payload)
-        payload["io"]["output_written"] = True
-        payload["io"]["output_path"] = str(written)
+    click.secho(f"🏁 [Master Loop] Campaign completed. Report: {report_path}", fg="cyan", bold=True)
 
-    click.echo(f"✅ [Hyper-Sprint] Task completed. Machine-readable report: {report_path}")
-    click.echo(f"Output Written: {payload['io']['output_written']}")
-    click.echo(f"Output Path: {payload['io']['output_path'] or 'N/A'}")
 
 
 @nexus_group.command(name="content:rewrite")
