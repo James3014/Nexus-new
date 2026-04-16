@@ -92,6 +92,7 @@ class AutoResearchNightShift:
             self.memory_store = None
         self.last_learning_closure: dict[str, Any] = {}
         self.best_score = 0.0
+        self.generation_latencies: List[float] = []
         self.no_improve_streak = 0
         self.base_commit: Optional[str] = None
         self.tracelog_path = self.project_root / f"tracelog_{self.task.replace('/', '_')}.jsonl"
@@ -223,6 +224,8 @@ class AutoResearchNightShift:
         return self.prompt_builder.build_task_prompt("R", self.task, "", "governance")
 
     def _run_round(self, round_id: int, workpath: Path) -> RoundOutcome:
+        from nexus.research.runtime.runtime_resilience import compute_adaptive_budget
+
         print(f"\n--- [Round {round_id}] Suggesting optimized variant... ---")
         params = self.optimizer.suggest()
         
@@ -293,7 +296,9 @@ class AutoResearchNightShift:
                     f"Lessons: {compact_lessons}\nWisdom: {compact_wisdom}"
                 )
 
-            print(f"📡 [Battlesuit] Calling Gemini CLI ({model})... Optimized context.")
+            # R2: Adaptive budget
+            effective_gen_timeout = compute_adaptive_budget(self.generation_latencies, default_sec=60)
+            print(f"📡 [Battlesuit] Calling Gemini CLI ({model})... Timeout: {effective_gen_timeout}s")
             start_gen = time.time()
             prompt, raw_content = self.gateway.ask_structured(
                 prompt=_build_generation_prompt(compact=False),
@@ -308,7 +313,7 @@ class AutoResearchNightShift:
                 model_name=model,
             )
             elapsed = time.time() - start_gen
-            print(f"✅ [Battlesuit] Generation complete in {elapsed:.1f}s.")
+            print(f"✅ [Battlesuit] Generation complete in {elapsed:.1f}s."); self.generation_latencies.append(elapsed)
 
             summary_text = str(prompt.get("summary", "") or "")
             raw_text = str(raw_content or "")

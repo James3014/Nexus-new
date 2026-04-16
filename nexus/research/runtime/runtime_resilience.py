@@ -37,3 +37,14 @@ def classify_infra_block(error_msg: str) -> Optional[str]:
     if any(k in err_l for k in ["broker", "swarm", "no directory available"]):
         return "infra_blocked:resource"
     return None
+
+
+def compute_adaptive_budget(recent_latencies: List[float], default_sec: int, hard_cap: int = 300) -> int:
+    """Calculate an adaptive budget based on recent latency history (moving average + safety)."""
+    if not recent_latencies:
+        return default_sec
+    
+    avg_latency = sum(recent_latencies) / len(recent_latencies)
+    # Target 1.5x average, but bounded
+    suggested = int(avg_latency * 1.5)
+    return max(min(suggested, hard_cap), default_sec)
