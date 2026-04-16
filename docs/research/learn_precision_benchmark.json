@@ -1,0 +1,53 @@
+{
+  "topic": "repo-scout-skill",
+  "cases": [
+    {
+      "q": "How does repo-scout use L5.7 Eternal?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What is the token limit for local mutator?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Describe the shard mapping logic in P0.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Who owns the Battlesuit Gateway?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What are the core mandates for security?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "List the P-X-D-R-A-C stages.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What is the capital of France?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "How to bake a chocolate cake?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Who won the 2022 World Cup?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "What is the best way to invest in stocks?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Explain quantum physics in detail.",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Who is the CEO of Twitter?",
+      "expected": "UNKNOWN"
+    }
+  ]
+}

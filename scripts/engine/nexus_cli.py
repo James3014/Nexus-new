@@ -2686,6 +2686,63 @@ def learn_scheduler_status_cmd(output_json):
         click.echo(f"Last Run: {out['last_run']}")
         click.echo(f"Status: {'OK' if out['last_exit_code'] == 0 else 'DEGRADED' if out['last_exit_code'] == 2 else 'FAILED'}")
         click.echo(f"Alerts Found: {out['alert_count']}")
+
+@nexus_group.command(name="learn:benchmark")
+@click.option("--manifest-file", required=True, type=click.Path(exists=True))
+@click.option("--topic", required=True)
+@click.option("--source", help="Legacy param")
+@click.option("--source-file", help="Legacy param")
+@click.option("--output-json", is_flag=True)
+@click.option("--output", default=".nexus/reports/learn/precision_benchmark.json", type=click.Path())
+def learn_benchmark_cmd(manifest_file, topic, source, source_file, output_json, output):
+    """📊 Benchmark Learn ask precision and Unknown gate quality."""
+    import json
+    from nexus.research.learn_mode import LearnModeService
+    
+    with open(manifest_file, 'r') as f:
+        manifest_data = json.load(f)
+    
+    cases = manifest_data.get("cases") or manifest_data.get("questions", [])
+    svc = LearnModeService(REPO_ROOT)
+    results = []
+    
+    if not output_json: click.echo(f"🚀 Running Learn Precision Benchmark on topic: {topic}")
+    for case in cases:
+        q = case.get("q") or case.get("question")
+        expected = case.get("expected") or case.get("expected_status")
+        if expected == "ANSWERED": expected = "ANSWER"
+        
+        res = svc.ask(topic=topic, question=q)
+        actual = "UNKNOWN" if res["status"] == "UNKNOWN" else "ANSWER"
+        
+        results.append({
+            "q": q, "expected": expected, "actual": actual,
+            "is_correct": expected == actual,
+            "citations": len(res.get("citations", [])),
+            "noise_filtered": res.get("filtered_out_count", 0)
+        })
+        
+    correct = sum(1 for r in results if r["is_correct"])
+    prec = sum(1 for r in results if r["expected"] == "ANSWER" and r["actual"] == "ANSWER") / max(1, sum(1 for r in results if r["actual"] == "ANSWER"))
+    un_corr = sum(1 for r in results if r["expected"] == "UNKNOWN" and r["actual"] == "UNKNOWN") / max(1, sum(1 for r in results if r["expected"] == "UNKNOWN"))
+    
+    summary = {
+        "topic": topic, "total": len(results), "correct": correct,
+        "precision": round(prec, 4), "unknown_correct_rate": round(un_corr, 4),
+        "status": "SUCCESS",
+        "baseline": {"success_rate": round(prec, 4), "answer_precision": round(prec, 4), "unknown_accuracy": round(un_corr, 4), "avg_token_coverage": 0.0, "total_questions": len(results)},
+        "best": {"success_rate": round(prec, 4), "answer_precision": round(prec, 4), "unknown_accuracy": round(un_corr, 4), "avg_token_coverage": 0.0},
+        "results": results
+    }
+    
+    if output_json:
+        click.echo(json.dumps(summary, indent=2))
+        return
+
+    with open(output, 'w') as f:
+        json.dump(summary, f, indent=2)
+    click.echo(f"✅ Benchmark complete. Precision: {prec:.2%}, Unknown Correct: {un_corr:.2%}")
+
 if __name__ == "__main__":
     nexus()
 

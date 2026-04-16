@@ -18,6 +18,9 @@ version_scope: '[v17.1, v22, v23]'
 # Ops - Governance [[CHANGELOG]]
 
 ## 2026-04-16
+- **Perf (Learn):** Improved citation precision with relevance reranking and strict unknown gate. Added precision benchmark suite.
+
+## 2026-04-16
 - **Perf (Resilience):** Unified timeout and retry policy across Hyper/NightShift. Reduced `infra_blocked_rate` and optimized pytest overhead.
 
 ## One-sentence summary

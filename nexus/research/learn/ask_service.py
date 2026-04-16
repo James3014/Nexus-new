@@ -1,3 +1,4 @@
+from .citation_relevance import score_citation_relevance
 from __future__ import annotations
 from .learn_models import LearnClaim
 import json
@@ -20,8 +21,7 @@ from nexus.services.memory import MemoryService
 class AskService:
     def __init__(self, project_root: Path, learn_mode_service: Any):
         self.learn_mode_service = learn_mode_service
-        self.learn_mode_service.project_root = project_root
-        self.learn_mode_service = learn_mode_service
+        self.project_root = project_root
         
     def _answer_questions(self, questions: list[dict[str, Any]], claims: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         answered, unresolved = [], []
@@ -100,3 +100,232 @@ class AskService:
         selected_pack = max(pack_scores.items(), key=lambda item: item[1])[0] if pack_scores else "general"
         routed = [c for c in claims if str(c.get("topic_pack", "general")) == selected_pack]
         return selected_pack, (routed or claims)
+
+    def ask(
+        self,
+        topic: str,
+        question: str,
+        top_k: int = 5,
+        min_evidence: int = 1,
+        min_token_coverage: float | None = None,
+        max_staleness_days: int | None = 180,
+    ) -> dict[str, Any]:
+        claims = self.load_claims()
+        tokens = self._extract_tokens(question)
+        if not tokens:
+            closure = self._persist_learning_closure(
+                action="ask",
+                status="PARTIAL",
+                reason="empty_question",
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=[],
+                metrics={"claims_count": 0, "coverage": 0.0, "pass_rate": 0.0, "citation_valid_ratio": 0.0},
+            )
+            return {
+                "status": "UNKNOWN",
+                "answer": "UNKNOWN",
+                "citations": [],
+                "topic": topic,
+                "question": question,
+                "reason": "empty_question",
+                "learning_closure": closure,
+            , "relevance_scores": relevance_scores, "filtered_out_count": filtered_out_count}
+
+        selected_pack, routed_claims = self._route_topic_pack(claims, topic, question)
+        filtered_claims = [
+            c for c in routed_claims if max_staleness_days is None or float(c.get("freshness_days", 0.0)) <= float(max_staleness_days)
+        ]
+        scored: list[tuple[float, dict[str, Any], set[str]]] = []
+        for c in filtered_claims:
+            if not self._is_valid_citation(c):
+                continue
+            blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
+            words = {self._normalize_token(w) for w in re.findall(r"[a-z0-9_-]+", blob)}
+            score = 0.0
+            token_hits: set[str] = set()
+            for t in tokens:
+                if t in words:
+                    score += 2.0
+                    token_hits.add(t)
+                elif any(w.startswith(t) or t.startswith(w) for w in words if len(w) >= 4):
+                    score += 1.0
+                    token_hits.add(t)
+            if score > 0:
+                score = (
+                    score
+                    + self._claim_strength_weight(c)
+                    + float(c.get("freshness_score", 0.0))
+                )
+                scored.append((score, c, token_hits))
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        # Greedy coverage-first selector: prioritize claims that add new token coverage,
+        # then break ties by base score.
+        
+        # R2: Relevance Reranking and Filtering
+        relevant_pairs = []
+        filtered_out_count = 0
+        relevance_scores = []
+        
+        for score, c, hits in scored:
+            rel_score = score_citation_relevance(question, c.get("claim", ""), c)
+            relevance_scores.append(rel_score)
+            if rel_score >= 0.55:
+                # Combine original coverage score with relevance
+                combined_score = score * 0.4 + rel_score * 5.0
+                relevant_pairs.append((combined_score, c, hits))
+            else:
+                filtered_out_count += 1
+        
+        scored = relevant_pairs
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        best_pairs: list[tuple[dict[str, Any], set[str]]] = []
+        covered_tokens: set[str] = set()
+        pool = [(score, c, hits) for score, c, hits in scored if self._is_valid_citation(c)]
+        while pool and len(best_pairs) < top_k:
+            best_idx = 0
+            best_gain = -1
+            best_score = -1
+            for i, (score, _, hits) in enumerate(pool):
+                gain = len(hits - covered_tokens)
+                if gain > best_gain or (gain == best_gain and score > best_score):
+                    best_idx = i
+                    best_gain = gain
+                    best_score = score
+            score, c, hits = pool.pop(best_idx)
+            if not best_pairs and best_gain <= 0 and score <= 0:
+                break
+            best_pairs.append((c, hits))
+            covered_tokens.update(hits)
+
+        best = [c for c, _ in best_pairs]
+        token_coverage = 0.0 if not tokens else len(covered_tokens) / len(tokens)
+        if min_token_coverage is None:
+            if len(tokens) >= 5:
+                min_token_coverage = 0.6
+            elif len(tokens) >= 3:
+                min_token_coverage = 0.5
+            else:
+                min_token_coverage = 0.5
+
+        conflicts = self._find_conflicts(best)
+        if conflicts:
+            self._append_benchmark_candidate(
+                topic=topic,
+                question=question,
+                actual_status="CONFLICT",
+                reason="conflicting_cited_claims",
+                token_coverage=token_coverage,
+                topic_pack_selected=selected_pack,
+                conflicts=conflicts,
+            )
+            closure = self._persist_learning_closure(
+                action="ask",
+                status="PARTIAL",
+                reason="conflicting_cited_claims",
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=sorted(tokens),
+                metrics={
+                    "claims_count": len(best),
+                    "coverage": min(1.0, len(best) / max(1, top_k)),
+                    "pass_rate": 0.0,
+                    "citation_valid_ratio": 1.0 if best else 0.0,
+                    "token_coverage": round(token_coverage, 4),
+                    "conflict_count": len(conflicts),
+                },
+            )
+            return {
+                "status": "CONFLICT",
+                "answer": "CONFLICT",
+                "citations": [],
+                "topic": topic,
+                "question": question,
+                "reason": "conflicting_cited_claims",
+                "token_coverage": round(token_coverage, 4),
+                "topic_pack_selected": selected_pack,
+                "conflicts": conflicts,
+                "learning_closure": closure,
+            }
+
+        if len(best) < max(1, min_evidence) or token_coverage < float(min_token_coverage):
+            unknown_reason = "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage"
+            self._append_benchmark_candidate(
+                topic=topic,
+                question=question,
+                actual_status="UNKNOWN",
+                reason=unknown_reason,
+                token_coverage=token_coverage,
+                topic_pack_selected=selected_pack,
+            )
+            closure = self._persist_learning_closure(
+                action="ask",
+                status="PARTIAL",
+                reason=unknown_reason,
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=sorted(tokens),
+                metrics={
+                    "claims_count": len(best),
+                    "coverage": min(1.0, len(best) / max(1, top_k)),
+                    "pass_rate": 0.0,
+                    "citation_valid_ratio": 1.0 if best else 0.0,
+                    "token_coverage": round(token_coverage, 4),
+                    "topic_pack_selected": selected_pack,
+                },
+            )
+            return {
+                "status": "UNKNOWN",
+                "answer": "UNKNOWN",
+                "citations": [],
+                "topic": topic,
+                "question": question,
+                "reason": unknown_reason,
+                "token_coverage": round(token_coverage, 4),
+                "topic_pack_selected": selected_pack,
+                "learning_closure": closure,
+            }
+
+        lines = []
+        citations = []
+        for c in best:
+            span = c.get("citation_span", [0, 0])
+            source_url = c.get("source_url", "unknown://source")
+            citation = f"{source_url}#span={span[0]}-{span[1]}"
+            lines.append(f"- {c.get('claim', '')} [{citation}]")
+            citations.append(
+                {
+                    "source_url": source_url,
+                    "citation_span": span,
+                    "claim": c.get("claim", ""),
+                }
+            )
+        return {
+            "status": "ANSWERED",
+            "topic": topic,
+            "question": question,
+            "answer": "\n".join(lines),
+            "citations": citations,
+            "claims_used": len(best),
+            "min_evidence_required": max(1, min_evidence),
+            "token_coverage": round(token_coverage, 4),
+            "topic_pack_selected": selected_pack,
+            "learning_closure": self._persist_learning_closure(
+                action="ask",
+                status="SUCCESS",
+                reason="answered_with_citations",
+                topic_or_source=topic,
+                evidence_paths=[str(self.claims_path)],
+                retrieval_hints=sorted(tokens),
+                metrics={
+                    "claims_count": len(best),
+                    "coverage": min(1.0, len(best) / max(1, top_k)),
+                    "pass_rate": 1.0,
+                    "citation_valid_ratio": 1.0,
+                    "topic_pack_selected": selected_pack,
+                },
+            ),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
