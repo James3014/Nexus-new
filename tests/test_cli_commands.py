@@ -74,7 +74,7 @@ import json
 def test_cli_closeout_pass(tmp_path, monkeypatch):
     runner = CliRunner()
     contract_file = tmp_path / "done_contract_test.json"
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     monkeypatch.setattr(
         "scripts.engine.nexus_cli.subprocess.run",
         lambda *args, **kwargs: MagicMock(returncode=0, stdout='{"ok": true}\n', stderr=""),
@@ -100,7 +100,7 @@ def test_cli_closeout_pass(tmp_path, monkeypatch):
 def test_cli_closeout_fail(tmp_path, monkeypatch):
     runner = CliRunner()
     contract_file = tmp_path / "fail_contract_test.json"
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     monkeypatch.setattr(
         "scripts.engine.nexus_cli.subprocess.run",
         lambda *args, **kwargs: MagicMock(returncode=1, stdout='{"ok": false, "checks": {"linter_ok": false}}\n', stderr=""),
@@ -134,7 +134,7 @@ def test_cli_closeout_missing_contract():
 
 def test_research_run_success(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     target = tmp_path / "docs" / "sample.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("ok", encoding="utf-8")
@@ -169,7 +169,7 @@ def test_research_run_success(tmp_path, monkeypatch):
 
 def test_research_run_rollback_on_failed_gate(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     target = tmp_path / "docs" / "sample.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("ok", encoding="utf-8")
@@ -205,7 +205,7 @@ def test_research_run_rollback_on_failed_gate(tmp_path, monkeypatch):
 
 def test_research_governance_success(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     target = tmp_path / "docs" / "sample.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("ok", encoding="utf-8")
@@ -235,7 +235,7 @@ def test_research_governance_success(tmp_path, monkeypatch):
 
 def test_research_governance_low_disk(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     # Monkeypatch shutil.disk_usage to return low free space
     import shutil
@@ -265,7 +265,7 @@ def test_research_governance_low_disk(tmp_path, monkeypatch):
 
 def test_research_governance_invalid_parallelism(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     result = runner.invoke(
         nexus,
@@ -289,7 +289,7 @@ def test_research_governance_invalid_parallelism(tmp_path, monkeypatch):
 
 def test_research_governance_invalid_timeout(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     result = runner.invoke(
         nexus,
@@ -313,7 +313,7 @@ def test_research_governance_invalid_timeout(tmp_path, monkeypatch):
 
 def test_research_governance_invalid_retries(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     result = runner.invoke(
         nexus,
@@ -337,7 +337,7 @@ def test_research_governance_invalid_retries(tmp_path, monkeypatch):
 
 def test_research_governance_invalid_retain_n(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     result = runner.invoke(
         nexus,
@@ -361,7 +361,7 @@ def test_research_governance_invalid_retain_n(tmp_path, monkeypatch):
 
 def test_research_retain_cleanup_executor(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     target = tmp_path / "docs" / "sample.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -407,7 +407,7 @@ def test_research_retain_cleanup_executor(tmp_path, monkeypatch):
 
 def test_research_schema(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     target = tmp_path / "docs" / "sample.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("ok", encoding="utf-8")
@@ -483,7 +483,7 @@ def test_research_schema(tmp_path, monkeypatch):
 
 def test_research_timeout(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     
     # We use a very short timeout to trigger it quickly
     result = runner.invoke(
@@ -512,7 +512,7 @@ def test_research_timeout(tmp_path, monkeypatch):
 
 def test_research_cleanup(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     report_dir = tmp_path / ".nexus" / "reports" / "research"
     report_dir.mkdir(parents=True, exist_ok=True)
     
@@ -544,7 +544,7 @@ def test_research_cleanup(tmp_path, monkeypatch):
 
 def test_research_route_findings_reinjection(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     
     # Create a finding
     finding_dir = tmp_path / ".nexus" / "memory" / "task" / "knowledge"
@@ -579,7 +579,7 @@ def test_research_route_findings_reinjection(tmp_path, monkeypatch):
 
 def test_research_route_recommended_flow_baseline(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     result = runner.invoke(
         nexus,
         [
@@ -603,7 +603,7 @@ def test_research_route_recommended_flow_baseline(tmp_path, monkeypatch):
 
 def test_research_route_recommended_flow_hyper_for_risky_task(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     result = runner.invoke(
         nexus,
         [
@@ -628,7 +628,7 @@ def test_research_route_recommended_flow_hyper_for_risky_task(tmp_path, monkeypa
 
 def test_research_auto_flow_baseline(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     target = tmp_path / "demo.py"
     target.write_text("print('buggy')\n", encoding="utf-8")
@@ -673,7 +673,7 @@ def test_research_auto_flow_baseline(tmp_path, monkeypatch):
 
 def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     _write_ready_learn_slo(tmp_path)
 
     target = tmp_path / "demo.py"
@@ -739,7 +739,7 @@ def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
 
 def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     _write_ready_learn_slo(tmp_path)
 
     target = tmp_path / "demo.py"
@@ -795,7 +795,7 @@ def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
 
 def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     target = tmp_path / "demo.py"
     target.write_text("print('buggy')\n", encoding="utf-8")
@@ -844,7 +844,7 @@ def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
 
 def test_run_bug_auto_flow_requires_scope_files(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     result = runner.invoke(nexus, ["run-bug", "fix deadlock", "--auto-flow"])
     assert result.exit_code != 0
     assert "--auto-flow requires --target-file and --test-file" in result.output
@@ -852,7 +852,7 @@ def test_run_bug_auto_flow_requires_scope_files(tmp_path, monkeypatch):
 
 def test_run_bug_auto_flow_delegates(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     called = {"count": 0}
     captured = {}
 
@@ -905,7 +905,7 @@ def test_top_level_run_compat_forwards_to_nested_group(monkeypatch):
 
 def test_research_run_multi_candidate(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     
     result = runner.invoke(nexus, ["nexus", "research:run", "--candidate-count", "3", "--dry-run", "--min-score-threshold", "0.1"])
     assert result.exit_code == 0
@@ -922,7 +922,7 @@ def test_research_run_multi_candidate(tmp_path, monkeypatch):
 
 def test_research_benchmark(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(json.dumps({
@@ -945,7 +945,7 @@ def test_research_benchmark(tmp_path, monkeypatch):
 
 def test_research_benchmark_ab_mode(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr("scripts.engine.nexus_cli.REPO_ROOT", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
 
     target = tmp_path / "demo.py"
     target.write_text("print('buggy')\n", encoding="utf-8")
