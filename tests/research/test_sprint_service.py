@@ -25,7 +25,7 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     class FakeGenerator:
         source = "local"
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
@@ -55,7 +55,7 @@ def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
     class FakeGenerator:
         source = "untrusted_test"
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             return "print('y')\n", {"source": "untrusted_test", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
@@ -88,7 +88,7 @@ def test_run_hyper_sprint_semantic_guard_for_feature(monkeypatch, tmp_path: Path
     class FakeGenerator:
         source = "untrusted_test"
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             return "print('y')\n", {"source": "untrusted_test", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
@@ -115,7 +115,7 @@ def test_run_hyper_sprint_learning_trace_persist_path(monkeypatch, tmp_path: Pat
     class FakeGenerator:
         source = "local"
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
@@ -181,13 +181,13 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             raise RuntimeError("HTTP 429 quota exhausted")
 
     class FakeLocalGenerator:
         source = "local"
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
@@ -216,7 +216,7 @@ def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
     class FakeLocalGenerator:
         source = "local"
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeExecutor:
@@ -245,7 +245,7 @@ def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
     class FakeLocalGenerator:
         source = "local"
 
-        def generate(self, **_kwargs):
+        def generate(self, *args, **kwargs):
             return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
 
     class FakeInPlaceExecutor:

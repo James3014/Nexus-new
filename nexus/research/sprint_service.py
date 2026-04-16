@@ -70,8 +70,13 @@ class SprintResult:
         return payload
 
 
-class LocalCandidateGenerator:
-    source = "local"
+class LLMCandidateGenerator:
+    source = "llm"
+
+    def __init__(self, project_root: Path, safe_mode: bool):
+        from nexus.services.gateway import BattlesuitGateway
+        self.gateway = BattlesuitGateway(project_root=project_root)
+        self.safe_mode = safe_mode
 
     def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
         prompt_text = (
@@ -111,6 +116,13 @@ class LocalCandidateGenerator:
                 raise
         raise RuntimeError(last_err or "all_models_failed")
 
+class LocalCandidateGenerator:
+    source = "local"
+
+    def generate(self, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
+        from .local_sprint_mutator import generate_local_candidate
+        code = generate_local_candidate(source_code, task, mutation_hint, seed)
+        return code, {"source": self.source, "model_calls": 0, "quota_backoffs": 0}
 
 class SprintExecutor:
     def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int):
@@ -350,7 +362,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             return False, "semantic_guard_zero_delta"
 
         # R9.1: Context-aware delta requirement
-        is_trusted_local = "local" in str(source_label).lower()
+        is_trusted_local = str(source_label).lower() == "local"
         
         # If it's a feature from LLM, require at least 2 lines of change to reduce low-quality hallucinations
         if is_feature and not is_trusted_local and changed_count < 2:
@@ -573,8 +585,21 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         candidates.append(ev)
         if config.safe_mode and ev.score >= 1.0:
             break
+
         if config.safe_mode:
             time.sleep(1.0)
+
+# R1.1: Emergency Fallback Valve - Ensure we match baseline if all else fails
+    has_success = any(c.score >= 1.0 for c in candidates)
+    tried_local = any(c.source == "local" for c in candidates)
+    if not has_success and not tried_local:
+        # Perform one last verified local run as "local" source
+        code, meta = local_generator.generate(source_code=source_code, task=config.task, mutation_hint="emergency_baseline_match", seed=0)
+        if code != source_code:
+            guard_ok, _ = _semantic_guard(source_code, code, config.task, meta.get("source", "local"))
+            if guard_ok:
+                ev = executor.evaluate_candidate(seed=999, hint="emergency_fallback", code=code, source=meta.get("source", "local"))
+                candidates.append(ev)
 
     if not candidates:
         return SprintResult(
@@ -691,4 +716,4 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         patch=final_patch,
     )
 
-LLMCandidateGenerator = LocalCandidateGenerator
+
