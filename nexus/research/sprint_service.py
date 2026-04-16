@@ -14,6 +14,7 @@ from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.swarm_broker import SwarmBroker
+from .runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
 
 
 @dataclass
@@ -73,20 +74,6 @@ class LocalCandidateGenerator:
     source = "local"
 
     def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
-        code = generate_local_candidate(source_code, task, mutation_hint, seed)
-        return code, {"source": self.source, "model_calls": 0, "quota_backoffs": 0}
-
-
-class LLMCandidateGenerator:
-    source = "llm"
-
-    def __init__(self, project_root: Path, safe_mode: bool):
-        from nexus.services.gateway import BattlesuitGateway
-
-        self.gateway = BattlesuitGateway(project_root=project_root)
-        self.safe_mode = safe_mode
-
-    def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
         prompt_text = (
             "You are executing Stage 1 of a Hyper-Sprint (Gladiator mode).\n"
             f"Task: {task}\n"
@@ -98,7 +85,7 @@ class LLMCandidateGenerator:
         quota_backoffs = 0
         model_calls = 0
         last_err = ""
-        for model in model_chain:
+        for idx, model in enumerate(model_chain):
             try:
                 model_calls += 1
                 out, raw = self.gateway.ask_structured(
@@ -113,9 +100,13 @@ class LLMCandidateGenerator:
             except Exception as exc:  # noqa: BLE001
                 err = str(exc).lower()
                 last_err = str(exc)
-                if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
+                infra_code = classify_infra_block(err)
+                if infra_code == "infra_blocked:quota":
                     quota_backoffs += 1
-                    time.sleep(1.5 if self.safe_mode else 0.5)
+                    delay = get_retry_delay(RetryParams(attempt=quota_backoffs, max_retries=3))
+                    time.sleep(delay)
+                    continue
+                if idx < len(model_chain) - 1:
                     continue
                 raise
         raise RuntimeError(last_err or "all_models_failed")
@@ -266,6 +257,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     start = time.time()
     policy = ResearchPolicy()
     scope_files = [config.target_file] + ([config.test_file] if config.test_file else [])
+    effective_timeout = compute_time_budget(config.timeout_sec)
     pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1"] + ([config.test_file] if config.test_file else [])
 
     target_path = repo_root / config.target_file
@@ -698,3 +690,5 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         promotable=final_score >= 0.9,
         patch=final_patch,
     )
+
+LLMCandidateGenerator = LocalCandidateGenerator

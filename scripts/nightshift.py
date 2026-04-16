@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import subprocess
+from nexus.research.runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
 from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
 from nexus.research.learn.policy_runtime import load_phase_policy
 
@@ -746,7 +747,7 @@ class AutoResearchNightShift:
         return True
 
     def run(self):
-        if not self._check_policy_readiness(): return {"status": "FAILED", "reason": "policy_blocked"}
+        if not self._check_policy_readiness(): return {"status": "FAILED", "infra_blocked": True, "reason": "policy_blocked"}
         """🚀 [AutoResearch] Night Shift v24.0 Eternal: Bayesian Warm-Start Enabled."""
         print(f"🚀 [AutoResearch] Starting Night Shift for: {self.task}")
         start_time = time.time()
@@ -763,7 +764,7 @@ class AutoResearchNightShift:
             print(f"🛑 [AutoResearch] Blocked by Learn phase-SLO guard: {reason}")
             self._persist_learning_closure(status="REJECTED", reason=reason, final_score=self.best_score)
             return {
-                "status": "FAILED",
+                "status": "FAILED", "infra_blocked": True,
                 "task": self.task,
                 "target_file": self.resolved_target_file,
                 "best_score": self.best_score,
@@ -777,7 +778,7 @@ class AutoResearchNightShift:
         task_id, branch_name, workpath = self.worktree_mgr.lease(lease_task_id, lease_branch)
         if not workpath:
             print("❌ [AutoResearch] Failed to lease workspace.")
-            return {"status": "FAILED", "reason": "workspace_lease_failed"}
+            return {"status": "FAILED", "infra_blocked": True, "reason": "workspace_lease_failed"}
 
         try:
             self.base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.project_root, text=True).strip()

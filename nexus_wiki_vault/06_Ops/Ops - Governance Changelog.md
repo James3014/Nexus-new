@@ -17,6 +17,9 @@ version_scope: '[v17.1, v22, v23]'
 
 # Ops - Governance [[CHANGELOG]]
 
+## 2026-04-16
+- **Perf (Resilience):** Unified timeout and retry policy across Hyper/NightShift. Reduced `infra_blocked_rate` and optimized pytest overhead.
+
 ## One-sentence summary
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
