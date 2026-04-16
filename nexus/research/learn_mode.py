@@ -17,6 +17,12 @@ from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
 from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, append_skill_outcome_event
 from nexus.services.memory import MemoryService
+from .learn.ingest_service import IngestService
+from .learn.claim_service import ClaimService
+from .learn.converge_service import ConvergeService
+from .learn.ask_service import AskService
+from .learn.phase_slo_service import PhaseSLOService
+
 
 
 @dataclass
@@ -61,6 +67,13 @@ class LearnModeService:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.closure_log = self.reports_dir / "learning_closure.jsonl"
+
+        self._ingest_svc = IngestService(self)
+        self._claim_svc = ClaimService(self)
+        self._converge_svc = ConvergeService(self)
+        self._ask_svc = AskService(self)
+        self._slo_svc = PhaseSLOService(self)
+
 
     PHASES: tuple[str, ...] = ("P", "X", "D", "R", "A", "C")
 
@@ -553,59 +566,7 @@ class LearnModeService:
         }
 
     def build_phase_slo_report(self, *, window: int = 300) -> dict[str, Any]:
-        rows: list[dict[str, Any]] = []
-        if self.phase_writeback_path.exists():
-            for line in self.phase_writeback_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                    if isinstance(row, dict):
-                        rows.append(row)
-                except json.JSONDecodeError:
-                    continue
-
-        rows = rows[-max(1, int(window)):]
-        per_phase: dict[str, dict[str, Any]] = {}
-        for phase in self.PHASES:
-            items = [r for r in rows if str(r.get("phase", "")).upper() == phase]
-            total = len(items)
-            required = sum(1 for r in items if bool((r.get("writeback_policy") or {}).get("required", False)))
-            done = sum(1 for r in items if bool(r.get("writeback_done", False)))
-            success = sum(1 for r in items if str(r.get("phase_status", "")).upper() == "SUCCESS")
-            required_done_ratio = 1.0 if required == 0 else done / required
-            success_ratio = 1.0 if total == 0 else success / total
-            per_phase[phase] = {
-                "total": total,
-                "writeback_required": required,
-                "writeback_done": done,
-                "required_done_ratio": round(required_done_ratio, 4),
-                "success_ratio": round(success_ratio, 4),
-            }
-
-        global_required = sum(v["writeback_required"] for v in per_phase.values())
-        global_done = sum(v["writeback_done"] for v in per_phase.values())
-        global_total = sum(v["total"] for v in per_phase.values())
-        global_success = sum(int(round(v["success_ratio"] * v["total"])) for v in per_phase.values())
-        phase_slo_pass = all(v["required_done_ratio"] >= 0.95 and v["success_ratio"] >= 0.5 for v in per_phase.values())
-
-        summary = {
-            "status": "SUCCESS",
-            "window": max(1, int(window)),
-            "phase_slo_pass": bool(phase_slo_pass),
-            "global": {
-                "writeback_required": global_required,
-                "writeback_done": global_done,
-                "required_done_ratio": round(1.0 if global_required == 0 else global_done / global_required, 4),
-                "success_ratio": round(1.0 if global_total == 0 else global_success / global_total, 4),
-            },
-            "phases": per_phase,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        self.phase_slo_summary_path.parent.mkdir(parents=True, exist_ok=True)
-        self.phase_slo_summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        return summary
+        return self._slo_svc.build_phase_slo_report(window=window)
 
     def read_phase_slo_summary(self) -> dict[str, Any]:
         if not self.phase_slo_summary_path.exists():
@@ -1095,74 +1056,7 @@ class LearnModeService:
         return out
 
     def ingest(self, source: str, source_file: str | None = None, topic: str = "") -> dict[str, Any]:
-        docs = self._load_source_documents(source, source_file=source_file)
-        snapshot_paths: list[str] = []
-        claims: list[LearnClaim] = []
-        source_refs: list[str] = []
-        for text, source_ref in docs:
-            source_refs.append(source_ref)
-            snap = self._save_source_snapshot(source_ref, text)
-            snapshot_paths.append(str(snap))
-            claims.extend(self._split_to_claims(text, source_ref, topic_hint=topic or source))
-        self._append_claims(claims)
-
-        # Learning closure hooks: MemPalace verify + Findings write
-        palace = MemPalace(str(self.project_root))
-        verified = palace.verify([c.to_dict() for c in claims])
-        verified_count = len(verified)
-
-        store = FindingsMemoryStore(self.project_root)
-        card = FindingsCard(
-            kind="knowledge",
-            title=f"Learn ingest: {source}",
-            scope="task",
-            tags=["learn_mode", "ingest"] + ([topic] if topic else []),
-            stage="scout",
-            confidence="medium",
-            evidence_paths=[str(self.claims_path)] + snapshot_paths[:8],
-            retrieval_hints=[topic or source],
-            body=f"Ingested {len(claims)} claims from {len(docs)} source docs.",
-            task_id=f"learn-{int(datetime.now(timezone.utc).timestamp())}",
-            extra={"verified_claims": verified_count, "source_refs": source_refs[:12]},
-        )
-        card_path = store.write(card)
-
-        report = {
-            "status": "SUCCESS",
-            "source": source,
-            "source_ref": source_refs[0] if source_refs else "",
-            "source_refs": source_refs[:20],
-            "claims_count": len(claims),
-            "verified_claims_count": verified_count,
-            "sources_count": len(set(source_refs)),
-            "documents_ingested": len(docs),
-            "claims_store": str(self.claims_path),
-            "source_snapshot_path": snapshot_paths[0] if snapshot_paths else "",
-            "source_snapshot_paths": snapshot_paths[:20],
-            "findings_card_path": card_path,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        report["learning_closure"] = self._persist_learning_closure(
-            action="ingest",
-            status=report["status"],
-            reason="ingest_completed",
-            topic_or_source=topic or source,
-            evidence_paths=[str(self.claims_path)] + snapshot_paths[:8] + ([card_path] if card_path else []),
-            retrieval_hints=[topic or source],
-            metrics={
-                "claims_count": report["claims_count"],
-                "coverage": 1.0 if report["claims_count"] > 0 else 0.0,
-                "pass_rate": 1.0 if report["claims_count"] > 0 else 0.0,
-                "citation_valid_ratio": 1.0 if report["claims_count"] > 0 else 0.0,
-            },
-        )
-        self._sync_registry_after_ingest(
-            source=source,
-            source_file=source_file,
-            topic=topic,
-            claims_count=report["claims_count"],
-        )
-        return report
+        return self._ingest_svc.ingest(source, source_file, topic)
 
     def _extract_tokens(self, topic: str) -> set[str]:
         raw = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .protocols import LearnContextProtocol
 from .learn_models import LearnClaim
 import json
 import re
@@ -18,15 +19,12 @@ from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, appen
 from nexus.services.memory import MemoryService
 
 class PhaseSLOService:
-    def __init__(self, project_root: Path, learn_mode_service: Any):
-        self.learn_mode_service = learn_mode_service
-        self.learn_mode_service.project_root = project_root
-        self.learn_mode_service = learn_mode_service
-        
+    def __init__(self, ctx: LearnContextProtocol):
+        self.ctx = ctx
     def build_phase_slo_report(self, window: int = 300) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
-        if self.learn_mode_service.phase_writeback_path.exists():
-            for line in self.learn_mode_service.phase_writeback_path.read_text(encoding="utf-8").splitlines():
+        if self.ctx.phase_writeback_path.exists():
+            for line in self.ctx.phase_writeback_path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -39,7 +37,7 @@ class PhaseSLOService:
 
         rows = rows[-max(1, int(window)):]
         per_phase: dict[str, dict[str, Any]] = {}
-        for phase in self.learn_mode_service.PHASES:
+        for phase in self.ctx.PHASES:
             items = [r for r in rows if str(r.get("phase", "")).upper() == phase]
             total = len(items)
             required = sum(1 for r in items if bool((r.get("writeback_policy") or {}).get("required", False)))
@@ -52,8 +50,7 @@ class PhaseSLOService:
                 "writeback_required": required,
                 "writeback_done": done,
                 "required_done_ratio": round(required_done_ratio, 4),
-                "success_ratio": round(success_ratio, 4),
-            }
+                "success_ratio": round(success_ratio, 4)}
 
         global_required = sum(v["writeback_required"] for v in per_phase.values())
         global_done = sum(v["writeback_done"] for v in per_phase.values())
@@ -69,24 +66,22 @@ class PhaseSLOService:
                 "writeback_required": global_required,
                 "writeback_done": global_done,
                 "required_done_ratio": round(1.0 if global_required == 0 else global_done / global_required, 4),
-                "success_ratio": round(1.0 if global_total == 0 else global_success / global_total, 4),
-            },
+                "success_ratio": round(1.0 if global_total == 0 else global_success / global_total, 4)},
             "phases": per_phase,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        self.learn_mode_service.phase_slo_summary_path.parent.mkdir(parents=True, exist_ok=True)
-        self.learn_mode_service.phase_slo_summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+            "timestamp": datetime.now(timezone.utc).isoformat()}
+        self.ctx.phase_slo_summary_path.parent.mkdir(parents=True, exist_ok=True)
+        self.ctx.phase_slo_summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         return summary
 
 
     def validate_writeback_closure(self, task_id: str) -> dict[str, Any]:
         """Verify if a specific task has committed learning closure writeback."""
-        if not self.learn_mode_service.history_path.exists():
+        if not self.ctx.history_path.exists():
             return {"ok": False, "code": "WB_MISSING"}
         
         try:
             import json
-            history = [json.loads(line) for line in self.learn_mode_service.history_path.read_text().splitlines() if line.strip()]
+            history = [json.loads(line) for line in self.ctx.history_path.read_text().splitlines() if line.strip()]
             task_entries = [h for h in history if h.get("task_id") == task_id]
             
             if not task_entries:
