@@ -132,26 +132,35 @@ class SprintExecutor:
         self.timeout_sec = timeout_sec
         self.broker = SwarmBroker(repo_root)
 
-def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
+    def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
         evaluator = CandidateEvaluator(self.repo_root, self.pytest_cmd, self.timeout_sec)
         target_rel = self.scope_files[0]
         original = (self.repo_root / target_rel).read_text(encoding="utf-8") if (self.repo_root / target_rel).exists() else ""
-        
-        # Swarm handling (Executor-specific)
+
+        # Swarm handling (Executor-specific) with timing instrumentation
+        start_create = time.time()
         swarm_dir = self.broker.acquire(timeout_sec=self.timeout_sec)
+        create_elapsed = time.time() - start_create
+
         if not swarm_dir:
             return CandidateEval(seed=seed, score=0.0, hint=hint, error="broker_timeout", source=source)
-            
+
         try:
+            start_sync = time.time()
             self.broker.sync_scope(swarm_dir, scope_files=self.scope_files)
+            sync_elapsed = time.time() - start_sync
+
             # Use evaluator but on swarm_dir
             evaluator.repo_root = swarm_dir
+            start_test = time.time()
             res = evaluator.evaluate(seed=seed, hint=hint, code=code, source=source, target_file=target_rel, original_code=original)
-            
+            test_elapsed = time.time() - start_test
+
+            # Record detailed timings in hint or extra (here we use CandidateEval which we'll ensure has enough fields)
             return CandidateEval(
                 seed=res.seed,
                 score=res.score,
-                hint=res.hint,
+                hint=f"{res.hint} | create:{create_elapsed:.2f}s sync:{sync_elapsed:.2f}s test:{test_elapsed:.2f}s",
                 stdout=res.stdout,
                 error=res.error,
                 candidate_code=res.candidate_code,
@@ -160,7 +169,6 @@ def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) ->
             )
         finally:
             self.broker.release(swarm_dir)
-
 
 class InPlaceSprintExecutor:
     """

@@ -46,12 +46,21 @@ def build_route(
     }
     decision = policy.route({}, task_desc, task_type=task_type, prediction=prediction)
 
+    # 🐝 [P2 Optimization] Doc-Fix Interception
+    task_lower = (task_desc or "").lower()
+    target_lower = (target_file or "").lower()
+    doc_patterns = ["readme", ".md", "doc:", "fix typo", "documentation", "typo:"]
+    is_doc_fix = any(p in task_lower for p in doc_patterns) or any(p in target_lower for p in doc_patterns if p.startswith("."))
+    
     task_upper = (task_desc or "").upper()
     hard_keywords = ["FLAKY", "RACE", "DEADLOCK", "TIMEOUT", "LATENCY", "WEBSOCKET", "SDK", "API"]
     has_hard_signal = any(kw in task_upper for kw in hard_keywords)
     
     # R2 Tuning: Feature/Refactor prefer baseline, Bugfix with risk prefers hyper
-    if task_type in ["feature", "refactor"]:
+    if is_doc_fix:
+        recommended_flow = "baseline"
+        recommended_reason = "Matched Doc-Fix Rule"
+    elif task_type in ["feature", "refactor"]:
         recommended_flow = "baseline"
         recommended_reason = f"structural_task_type_{task_type}_prefer_baseline"
     else:
@@ -73,7 +82,7 @@ def build_route(
     else:
         should_research = False
         mode = "skip"
-        reason = "clear_root_cause"
+        reason = recommended_reason if is_doc_fix else "clear_root_cause"
 
     risk_level = "HIGH" if (has_hard_signal or task_type == "feature") else "LOW"
     if adjusted_root_cause_confidence < 0.5:
@@ -400,3 +409,16 @@ def run_auto_flow(
     _write_history(history_data)
     return payload, out_path
 
+
+def _is_strictly_doc_fix(task: str, target_file: str) -> tuple[bool, str]:
+    is_doc_file = any(target_file.endswith(ext) for ext in [".md", ".txt", ".rst"])
+    has_code_intent = any(kw in task.lower() for kw in ["fix bug", "implement", "logic", "refactor"])
+    
+    score = 0
+    if is_doc_file: score += 50
+    if not has_code_intent: score += 30
+    
+    # Final Decision
+    is_doc = score >= 80
+    reason = f"Substance Score={score} (FileDoc={is_doc_file}, NoCodeIntent={not has_code_intent})"
+    return is_doc, reason

@@ -22,7 +22,24 @@ class WorkspacePermissionError(Exception):
     pass
 
 
-class WorkspaceManager:
+class WorkspaceManager:\n
+    def _acquire_workspace_lock(self, workspace_path: Path, timeout_sec: int = 10) -> bool:
+        lock_file = workspace_path / ".lock"
+        start_time = time.time()
+        while time.time() - start_time < timeout_sec:
+            try:
+                # Atomic creation of lock file
+                lock_file.touch(exist_ok=False)
+                return True
+            except FileExistsError:
+                time.sleep(0.5)
+        return False
+
+    def _release_workspace_lock(self, workspace_path: Path):
+        lock_file = workspace_path / ".lock"
+        if lock_file.exists():
+            lock_file.unlink()
+
     """
     🧬 Lvl 17 Workspace Isolation Protocol (Commander Mode)
     Ensures zero Git Index contention by using dynamic, UUID-based worktrees.
@@ -71,8 +88,30 @@ class WorkspaceManager:
         task_id = (task_id or "nexus-task")
         unique_id = task_id if explicit_task else f"{task_id[:16]}-{str(uuid.uuid4())[:4]}"
         branch_name = branch_name or f"isolated/task-{unique_id}"
-        work_path = self.workspace_base / unique_id
+        
+        # 🐝 [P1 Optimization] Swarm Reuse strategy
+        # 優先尋找並租用 .nexus-swarm-* 目錄，避免 git worktree add 的開銷
+        swarm_dirs = sorted([d for d in self.project_root.glob(".nexus-swarm-*") if d.is_dir()])
+        if swarm_dirs:
+            try:
+                from nexus.research.swarm_broker import SwarmBroker
+                broker = SwarmBroker(self.project_root)
+                swarm_path = broker.acquire(timeout_sec=5.0)
+                if swarm_path:
+                    print(f"🐝 [Swarm-Reuse] Leasing existing sandbox: {swarm_path.name}")
+                    # 切換到目標分支
+                    subprocess.run(["git", "checkout", "main"], cwd=swarm_path, capture_output=True)
+                    subprocess.run(["git", "checkout", "-b", branch_name], cwd=swarm_path, check=True, capture_output=True)
+                    
+                    # 標記此 workspace 為 swarm 類型以便 cleanup 處理
+                    (swarm_path / ".swarm_lease").write_text(branch_name, encoding="utf-8")
+                    
+                    self._sync_brain_to_path(swarm_path)
+                    return task_id, branch_name, swarm_path
+            except Exception as e:
+                logger.warning(f"⚠️ [Swarm-Reuse] Failed to acquire swarm, falling back: {e}")
 
+        work_path = self.workspace_base / unique_id
         print(f"🏗️ [Provisioning] Leasing workspace: {task_id} at {work_path}")
 
         # 建立隔離分支與 Worktree (Optimized Index Handling)
@@ -85,19 +124,7 @@ class WorkspaceManager:
                 timeout=45
             )
 
-            injector_bin = CONTEXT_INJECTOR_BIN or (
-                Path(KB_DIR) / "01_Persona/scripts/inject_context.py"
-            )
-            if injector_bin and os.path.exists(injector_bin):
-                print("🧠 [Injection] Syncing brain context to sandbox...")
-                res = subprocess.run(
-                    ["python3", injector_bin], capture_output=True, text=True
-                )
-                if res.returncode == 0:
-                    (work_path / "CONTEXT_SYNC.md").write_text(
-                        res.stdout, encoding="utf-8"
-                    )
-                    print("✅ [Injection] CONTEXT_SYNC.md generated in sandbox.")
+            self._sync_brain_to_path(work_path)
 
             # Auto-GC after successful lease to avoid interfering with call order expectations.
             self._auto_gc()
@@ -106,6 +133,22 @@ class WorkspaceManager:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             logger.error(f"❌ [FAILED] Lease failed or timed out: {e}")
             return None, None, None
+
+    def _sync_brain_to_path(self, work_path: Path):
+        """同步大腦上下文到指定路徑。"""
+        injector_bin = CONTEXT_INJECTOR_BIN or (
+            Path(KB_DIR) / "01_Persona/scripts/inject_context.py"
+        )
+        if injector_bin and os.path.exists(injector_bin):
+            print("🧠 [Injection] Syncing brain context to sandbox...")
+            res = subprocess.run(
+                ["python3", injector_bin], capture_output=True, text=True
+            )
+            if res.returncode == 0:
+                (work_path / "CONTEXT_SYNC.md").write_text(
+                    res.stdout, encoding="utf-8"
+                )
+                print("✅ [Injection] CONTEXT_SYNC.md generated in sandbox.")
 
     def _auto_gc(self):
         """🧹 Automatic Garbage Collection for stale sandboxes (>24h)."""
@@ -211,11 +254,24 @@ class WorkspaceManager:
 
     def cleanup(self, task_id, branch_name):
         """銷毀位面，回歸平靜。"""
+        # 1. 檢查是否為 Swarm 租約
+        for swarm_dir in self.project_root.glob(".nexus-swarm-*"):
+            lease_file = swarm_dir / ".swarm_lease"
+            if lease_file.exists():
+                if lease_file.read_text(encoding="utf-8").strip() == branch_name:
+                    from nexus.research.swarm_broker import SwarmBroker
+                    broker = SwarmBroker(self.project_root)
+                    lease_file.unlink()
+                    broker.release(swarm_dir)
+                    print(f"🧹 [Cleanup] Swarm sandbox {swarm_dir.name} released.")
+                    return
+
+        # 2. 原有的 Worktree 清理邏輯
         work_path = self.workspace_base / task_id
         if work_path.exists():
             subprocess.run(
                 ["git", "worktree", "remove", str(work_path), "--force"],
                 cwd=self.project_root,
             )
-            subprocess.run(["git", "branch", "-D", branch_name], cwd=self.project_root)
+            subprocess.run(["git", "branch", "-D", branch_name], cwd=self.project_root, capture_output=True)
             print(f"🧹 [Cleanup] Workspace {task_id} destroyed.")

@@ -72,24 +72,34 @@ class SwarmBroker:
     def release(self, swarm_dir: Path):
         """
         清空 Swarm 目錄內容（還原為初始狀態）並解除鎖定。
+        實施重用 (Reuse) 策略：保留 .git 並使用 git reset/clean。
         """
         if not swarm_dir or not swarm_dir.exists():
             return
             
         lock_file = swarm_dir / ".swarm_lock"
         try:
-            # Clean up all contents EXCEPT the lock file
-            for item in swarm_dir.iterdir():
-                if item.name == ".swarm_lock":
-                    continue
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
+            # 實施重用策略 (Reuse)
+            is_git = (swarm_dir / ".git").exists()
+            if is_git:
+                logger.debug(f"🐝 [SwarmBroker] Reusing git worktree in {swarm_dir.name}")
+                import subprocess
+                # 快速重設 git 狀態
+                subprocess.run(["git", "checkout", "."], cwd=swarm_dir, capture_output=True)
+                subprocess.run(["git", "clean", "-fd"], cwd=swarm_dir, capture_output=True)
+            else:
+                # Fallback: Clean up all contents EXCEPT the lock file
+                for item in swarm_dir.iterdir():
+                    if item.name == ".swarm_lock":
+                        continue
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
+                        item.unlink()
             
             # Finally remove the lock file to release it back to the pool
             if lock_file.exists():
                 lock_file.unlink()
-            logger.debug(f"🐝 [SwarmBroker] Released and cleaned swarm sandbox: {swarm_dir.name}")
+            logger.debug(f"🐝 [SwarmBroker] Released and reset swarm sandbox: {swarm_dir.name}")
         except Exception as e:
             logger.error(f"❌ [SwarmBroker] Error releasing swarm {swarm_dir.name}: {e}")

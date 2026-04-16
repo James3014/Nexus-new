@@ -67,7 +67,7 @@ class IngestService:
             docs.append((cleaned, raw_url))
         return docs
 
-    def _load_source_documents(self, source: str, source_file: str | None = None) -> list[tuple[str, str]]:
+    def _load_source_documents(self, source: str | list[str], source_file: str | None = None) -> list[tuple[str, str]]:
         if source_file:
             src_path = self.ctx._resolve_path(source_file)
             txt = self.ctx._clean_text(src_path.read_text(encoding="utf-8"))
@@ -92,7 +92,7 @@ class IngestService:
         )
         return [(seed, f"keyword://{source}")]
 
-    def ingest(self, source: str, source_file: str | None = None, topic: str = "") -> dict[str, Any]:
+    def ingest(self, source: str | list[str], source_file: str | None = None, topic: str = "") -> dict[str, Any]:
         docs = self.ctx._load_source_documents(source, source_file=source_file)
         snapshot_paths: list[str] = []
         claims: list[LearnClaim] = []
