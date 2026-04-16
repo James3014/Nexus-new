@@ -8,7 +8,7 @@ from scripts.engine.nexus_cli import nexus
 
 def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     source_file = tmp_path / "source.md"
     source_file.write_text(
@@ -131,7 +131,7 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
 
 def test_learn_ask_returns_unknown_without_cited_claims(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     ask = runner.invoke(
         nexus,
@@ -153,7 +153,7 @@ def test_learn_ask_returns_unknown_without_cited_claims(tmp_path, monkeypatch):
 
 def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
     claims_path.parent.mkdir(parents=True, exist_ok=True)
@@ -193,7 +193,7 @@ def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypat
 
 def test_learn_ask_returns_conflict_for_contradictory_claims(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
     claims_path.parent.mkdir(parents=True, exist_ok=True)
@@ -240,7 +240,7 @@ def test_learn_ask_returns_conflict_for_contradictory_claims(tmp_path, monkeypat
 
 def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
     claims_path.parent.mkdir(parents=True, exist_ok=True)
@@ -292,7 +292,7 @@ def test_learn_gate_runs_acceptance_contract_and_ci(tmp_path, monkeypatch):
 
 def test_learn_benchmark_reports_best_config(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     source_file = tmp_path / "source.md"
     source_file.write_text(
@@ -352,7 +352,7 @@ def test_learn_benchmark_reports_best_config(tmp_path, monkeypatch):
 
 def test_learn_register_source_and_refresh(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     source_file = tmp_path / "source.md"
     source_file.write_text(
@@ -402,7 +402,7 @@ def test_learn_register_source_and_refresh(tmp_path, monkeypatch):
 
 def test_learn_ask_unknown_writes_benchmark_candidate(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     source_file = tmp_path / "source.md"
     source_file.write_text(
@@ -452,7 +452,7 @@ def test_learn_ask_unknown_writes_benchmark_candidate(tmp_path, monkeypatch):
 
 def test_learn_refresh_plan_marks_due_sources(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     sources_path = tmp_path / ".nexus" / "knowledge" / "learn_sources.jsonl"
     sources_path.parent.mkdir(parents=True, exist_ok=True)
@@ -509,7 +509,7 @@ def test_learn_refresh_plan_marks_due_sources(tmp_path, monkeypatch):
 
 def test_learn_benchmark_curate_generates_manifest(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     candidates_path = tmp_path / ".nexus" / "knowledge" / "learn_benchmark_candidates.jsonl"
     candidates_path.parent.mkdir(parents=True, exist_ok=True)
@@ -579,7 +579,7 @@ def test_learn_benchmark_curate_generates_manifest(tmp_path, monkeypatch):
 
 def test_learn_phase_slo_command_outputs_summary(tmp_path, monkeypatch):
     runner = CliRunner()
-    monkeypatch.setattr(nexus_cli, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
 
     phase_log = tmp_path / ".nexus" / "reports" / "learn" / "phase_writeback.jsonl"
     phase_log.parent.mkdir(parents=True, exist_ok=True)

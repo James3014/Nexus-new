@@ -168,7 +168,7 @@ class AskService:
         for score, c, hits in scored:
             rel_score = score_citation_relevance(question, c.get("claim", ""), c)
             relevance_scores.append(rel_score)
-            if rel_score >= 0.55:
+            if rel_score >= 0.40:
                 # Combine original coverage score with relevance
                 combined_score = score * 0.4 + rel_score * 5.0
                 relevant_pairs.append((combined_score, c, hits))

@@ -18,7 +18,7 @@ def score_citation_relevance(query: str, claim: str, metadata: Dict[str, Any]) -
         
     # 1. Lexical overlap (Jaccard-like but query-weighted)
     overlap = len(query_words.intersection(claim_words))
-    lexical_score = overlap / len(query_words)
+    lexical_score = overlap / max(1, len(query_words)) * 1.5
     
     # 2. Source section prior
     source_url = metadata.get("source_url", "").lower()
