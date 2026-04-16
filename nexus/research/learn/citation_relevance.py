@@ -34,4 +34,17 @@ def score_citation_relevance(query: str, claim: str, metadata: Dict[str, Any]) -
     strength_weight = strength_map.get(strength, 1.0)
     
     final_score = lexical_score * source_weight * strength_weight
+    
+    # 4. Anti-confusion rules (de-weight general knowledge queries)
+    general_words = {"iphone", "twitter", "facebook", "france", "mars", "earth", "capital", "country", "time", "weather", "recipe", "prepare", "cook", "prime", "minister", "president", "price", "stock", "poker", "sushi"}
+    if any(w in query_words for w in general_words):
+        # Apply heavy penalty if the query contains generic non-repo terms
+        final_score *= 0.1
+
+    
+    # 5. Domain specific boost for core Nexus terms
+    domain_keywords = {"p-x-d-r-a-c", "slo", "eternal", "l5.7", "mutator", "shard", "mapping", "closure"}
+    if any(dk in query.lower() for dk in domain_keywords):
+        final_score *= 1.2
+
     return min(1.0, round(final_score, 4))

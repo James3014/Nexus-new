@@ -1,29 +1,101 @@
 {
   "topic": "repo-scout-skill",
   "cases": [
-    {"q": "How does repo-scout use L5.7 Eternal?", "expected": "ANSWER"},
-    {"q": "What is the token limit for local mutator?", "expected": "ANSWER"},
-    {"q": "Describe the shard mapping logic in P0.", "expected": "ANSWER"},
-    {"q": "Who owns the Battlesuit Gateway?", "expected": "ANSWER"},
-    {"q": "What are the core mandates for security?", "expected": "ANSWER"},
-    {"q": "List the P-X-D-R-A-C stages.", "expected": "ANSWER"},
-    {"q": "Explain the role of Mutator Safety Gate.", "expected": "ANSWER"},
-    {"q": "How to trigger Hyper-Sprint Gladiator mode?", "expected": "ANSWER"},
-    {"q": "What is the default timeout for Stage 1?", "expected": "ANSWER"},
-    {"q": "Describe the citation relevance scoring logic.", "expected": "ANSWER"},
-    {"q": "What is the purpose of Phase SLO recompute?", "expected": "ANSWER"},
-    {"q": "How does the Learn alert dispatcher work?", "expected": "ANSWER"},
-    {"q": "What is the capital of France?", "expected": "UNKNOWN"},
-    {"q": "How to bake a chocolate cake?", "expected": "UNKNOWN"},
-    {"q": "Who won the 2022 World Cup?", "expected": "UNKNOWN"},
-    {"q": "What is the best way to invest in stocks?", "expected": "UNKNOWN"},
-    {"q": "Explain quantum physics in detail.", "expected": "UNKNOWN"},
-    {"q": "Who is the CEO of Twitter?", "expected": "UNKNOWN"},
-    {"q": "What time is it in Tokyo right now?", "expected": "UNKNOWN"},
-    {"q": "How to fix a leaking faucet?", "expected": "UNKNOWN"},
-    {"q": "Which is the tallest mountain in the world?", "expected": "UNKNOWN"},
-    {"q": "Translate 'hello' to Spanish.", "expected": "UNKNOWN"},
-    {"q": "How many states are in the USA?", "expected": "UNKNOWN"},
-    {"q": "What is the latest iPhone model?", "expected": "UNKNOWN"}
+    {
+      "q": "How does repo-scout use L5.7 Eternal?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What is the token limit for local mutator?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Describe the shard mapping logic in P0.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Who owns the Battlesuit Gateway?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What are the core mandates for security?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "List the P-X-D-R-A-C stages.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Explain the role of Mutator Safety Gate.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "How to trigger Hyper-Sprint Gladiator mode?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What is the default timeout for Stage 1?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "Describe the citation relevance scoring logic.",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What is the purpose of Phase SLO recompute?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "How does the Learn alert dispatcher work?",
+      "expected": "ANSWER"
+    },
+    {
+      "q": "What is the capital of France?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "How to bake a chocolate cake?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Who won the 2022 World Cup?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "What is the best way to invest in stocks?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Explain quantum physics in detail.",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Who is the CEO of Twitter?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "What time is it in Tokyo right now?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "How to fix a leaking faucet?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Which is the tallest mountain in the world?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "Translate 'hello' to Spanish.",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "How many states are in the USA?",
+      "expected": "UNKNOWN"
+    },
+    {
+      "q": "What is the best recipe for baking bread?",
+      "expected": "UNKNOWN"
+    }
   ]
 }
