@@ -1,3 +1,7 @@
+import time
+
+from nexus.app.oracle_dispatcher import OracleDispatcher
+from nexus.app.oracle_advisor import OracleAdvisor
 
 def validate_claim_integrity(evidence_path: str):
     """🛡️ 硬性物理守門：驗證結論與證據的匹配度。"""
@@ -321,6 +325,12 @@ def acceptance_check(as_json, evidence_path):
     help="Optional explicit output file path. Writes machine-readable JSON payload.",
 )
 def run(task_id, complexity, output_file):
+    # 🔮 [Oracle Protocol] Speculative Initiation
+    dispatcher = OracleDispatcher(repo_root)
+    advisor = OracleAdvisor(repo_root)
+    shadow_tid = dispatcher.trigger_shadow_sync(task_id)
+    click.secho(f"📡 [Shadow-Sync] Oracle shadows spawned (TID: {shadow_tid})...", fg="blue")
+
     """🚀 [Wisdom Layer] Execute task with automatic NAS tuning."""
     if _task_requests_output_file(task_id) and not output_file:
         raise click.ClickException(
@@ -343,6 +353,12 @@ def run(task_id, complexity, output_file):
         click.echo("✅ [Wisdom Layer] NAS Tuning Complete. Optimal weights locked.")
     
     # 2. 正式執行
+    
+    # 🔮 [Oracle Protocol] Display Advice
+    time.sleep(1.0) # 預留感應時間
+    advice = advisor.synthesize_advice(shadow_tid)
+    click.echo(advice)
+
     click.echo(f"🚀 Executing Task: {task_id} with locked NAS weights...")
     
     # 物理硬化：產出標準化報表 (Phase 1)
