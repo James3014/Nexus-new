@@ -117,15 +117,25 @@ def _evaluate_phantom_false_positive(
 
     recent_rate, recent_blocked = calc_stats(recent)
     prev_rate, prev_blocked = calc_stats(previous)
-    passed = True
+    
+    # R2 Implementation: Enforce threshold and handle zero data
+    if not recent:
+        passed = False
+        status = "UNVERIFIED"
+    else:
+        passed = recent_rate <= fp_max
+        status = "PASS" if passed else "FAIL"
     
     return CriterionResult(
         name="phantom_false_positive_rate",
         passed=passed,
         detail={
+            "status": status,
             "recent_window_rows": len(recent),
             "recent_false_positive_rate": recent_rate,
             "threshold": fp_max,
+            "blocked_count": recent_blocked,
+            "trend": "STABLE" if recent_rate <= prev_rate else "DEGRADING"
         }
     )
 
