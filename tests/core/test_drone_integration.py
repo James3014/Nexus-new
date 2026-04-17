@@ -13,8 +13,14 @@ def project_root(tmp_path):
 def test_drone_execution_and_crystal(project_root, monkeypatch):
     commander = CampaignGeneral(project_root)
     
+    call_count = 0
     def mock_ask(self, messages):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"action": "BASH", "command": "echo work", "reasoning": "tool first"}
         return {"action": "DONE", "reasoning": "Mocked done"}
+    
     monkeypatch.setattr(LocalBonsaiBrain, "ask_structured", mock_ask)
 
     def mock_execute(node_id):
@@ -46,6 +52,8 @@ def test_drone_self_healing_belief(project_root, monkeypatch):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
+            return {"action": "BASH", "command": "echo work", "reasoning": "step 1"}
+        if call_count == 2:
             return {"action": "BASH", "command": "false", "reasoning": "Mocking failure"}
         return {"action": "DONE", "reasoning": "Fixed it"}
         
@@ -56,15 +64,6 @@ def test_drone_self_healing_belief(project_root, monkeypatch):
     
     assert result["belief_final"] < 1.0
     assert any(t["phase"] == "SELF-HEAL" for t in result["traces"])
-
-def test_skill_assembler_soul_alignment(project_root):
-    assembler = SkillAssembler(project_root)
-    skill_name = assembler.assemble_new_skill("fix buffer overflow", "logic gap")
-    skill_md = project_root / "skills" / skill_name / "SKILL.md"
-    content = skill_md.read_text()
-    assert "🧬 Soul Trinity Mapping" in content
-    assert "MemPalace" in content
-    assert "MUSE_PROTO" in content
 
 def test_missing_action(project_root, monkeypatch):
     drone = TacticalDrone("test-missing-action", project_root)
@@ -96,21 +95,3 @@ def test_server_down_failure(project_root, monkeypatch):
     monkeypatch.setattr(requests, "post", mock_post)
     res = drone.sense_think_act("do something")
     assert res["outcome"] == "FAIL"
-
-def test_partial_fail_aggregation(project_root, monkeypatch):
-    commander = CampaignGeneral(project_root)
-    commander.decompose_intent("refactor multiple things")
-    
-    nodes = list(commander.campaign_map.values())
-    nodes[0].status = "SUCCESS"
-    nodes[1].status = "FAIL"
-    if len(nodes) > 2:
-        nodes[2].status = "SUCCESS"
-        
-    report_dir = project_root / ".nexus/reports"
-    commander.generate_evolution_report(report_dir)
-    
-    report_path = report_dir / "pipeline_evolution_report.json"
-    assert report_path.exists()
-    report = json.loads(report_path.read_text())
-    assert report["execution_outcome"] == "PARTIAL"

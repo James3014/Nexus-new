@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🧬 Nexus Tactical Drone Engine (Hardenized - Correction v0.9.21)
+🧬 Nexus Tactical Drone Engine (Hardenized - Correction v0.9.22)
 修正契約斷裂、例外處理錯誤與假陽性成功判定邏輯。
 """
 import os
@@ -97,21 +97,86 @@ class TacticalDrone:
         self.status = "INIT"
         self.local_brain = LocalBonsaiBrain()
 
+    def normalize_action(self, raw: str) -> str:
+        if not raw:
+            return "UNKNOWN"
+        raw_upper = str(raw).strip().upper()
+        # [Task A] Expanded aliases for legal actions
+        if raw_upper in ["CREATE", "WRITE", "PATCH", "EDIT", "ADD", "UPDATE", "MODIFY", "SAVE"]:
+            return "EDIT"
+        if raw_upper in ["SHELL", "CMD", "EXEC", "BASH", "RUN", "SEARCH", "FIND", "READ", "LS", "CAT", "PWD", "COMMAND", "READ_FILE", "MKDIR", "RM", "MV", "CP", "GIT", "DELETE", "REMOVE"]:
+            return "BASH"
+        if raw_upper in ["FINISH", "COMPLETE", "DONE", "EXIT", "STOP", "SUCCESS", "END", "QUIT"]:
+            return "DONE"
+        return "UNKNOWN"
+
+    def repair_response_schema(self, resp: Dict[str, Any]) -> Dict[str, Any]:
+        """[Task B] Action Repair Layer"""
+        if not isinstance(resp, dict):
+            return resp
+        raw_action = str(resp.get("action", "")).upper()
+        
+        # 1. CREATE/WRITE with target/content -> EDIT
+        if raw_action in ["CREATE", "WRITE", "PATCH", "ADD", "SAVE"]:
+            target = resp.get("target") or resp.get("target_file")
+            content = resp.get("content")
+            if target and content is not None:
+                resp["action"] = "EDIT"
+                resp["target_file"] = target
+                
+        # 2. SHELL/CMD/EXEC with command -> BASH
+        elif raw_action in ["SHELL", "CMD", "EXEC", "RUN", "READ_FILE"]:
+            command = resp.get("command") or resp.get("cmd")
+            if command:
+                resp["action"] = "BASH"
+                resp["command"] = command
+                
+        # 3. DONE without reasoning -> DONE with "completed"
+        elif raw_action in ["FINISH", "COMPLETE", "DONE", "STOP"]:
+            resp["action"] = "DONE"
+            if "reasoning" not in resp:
+                resp["reasoning"] = "completed"
+                
+        return resp
+
     def sense_think_act(self, task_intent: str, tools: List[Any] = None) -> Dict[str, Any]:
-        """[A] 契約對齊：接受 task_intent 與可選 tools 參數。"""
-        logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Hardened-Logic)")
+        """[A] 契約對齊：實施 Sprint 強化邏輯。"""
+        logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Hardened-Logic v0.9.22)")
         start_time = time.time()
         
         sandbox_dir = self.project_root / ".nexus/tmp" / self.drone_id
         sandbox_dir.mkdir(parents=True, exist_ok=True)
         toolbox = DroneToolBox(sandbox_dir)
         
+        system_prompt = (
+            "You are a Nexus Drone. Follow MUSE_PROTO. Must return strict JSON.\n"
+            "Contract: action MUST be BASH, EDIT, or DONE.\n"
+            "Allowed actions only: BASH, EDIT, DONE. Do NOT output DONE unless you have used BASH or EDIT to satisfy the request.\n"
+            "- BASH requires 'command'.\n"
+            "- EDIT requires 'target_file' and 'content'.\n"
+            "- DONE requires 'reasoning'.\n"
+            "Examples:\n"
+            '{"action": "EDIT", "target_file": "main.py", "content": "print(1)", "reasoning": "Creating file"}\n'
+            '{"action": "BASH", "command": "ls -l", "reasoning": "Listing files"}\n'
+            '{"action": "DONE", "reasoning": "Task completed successfully"}'
+        )
+
         messages = [
-            {"role": "system", "content": "You are a Nexus Drone. Follow MUSE_PROTO. Must return explicit action: BASH | EDIT | DONE."},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": task_intent}
         ]
 
-        outcome = "FAIL" # [B] 預設為 FAIL，防範假陽性
+        outcome = "FAIL"
+        consecutive_invalid_count = 0
+        has_successful_tool_action = False
+        last_tool_action_successful = False
+        
+        metrics = {
+            "invalid_before_repair_count": 0,
+            "invalid_after_repair_count": 0,
+            "repair_applied_count": 0,
+            "action_histogram": {"BASH": 0, "EDIT": 0, "DONE": 0, "UNKNOWN": 0}
+        }
 
         for r in range(self.max_rounds):
             if time.time() - start_time > self.timeout_sec:
@@ -120,41 +185,109 @@ class TacticalDrone:
                 break
 
             self._log_trace("THINK", f"Round {r+1} reasoning...")
-            resp = self.local_brain.ask_structured(messages)
             
-            action = resp.get("action", "UNKNOWN") # 禁止預設 DONE
-            reasoning = resp.get("reasoning", "No reasoning")
-            self._log_trace("DECISION", f"{action}: {reasoning}")
+            loop_messages = list(messages)
+            last_msg = loop_messages[-1].copy()
+            last_msg["content"] = last_msg["content"] + "\nCurrent objective: produce ONE valid tool action now. You must BASH or EDIT to make progress before DONE."
+            loop_messages[-1] = last_msg
             
+            resp = self.local_brain.ask_structured(loop_messages)
+            
+            original_raw = str(resp.get("action", ""))
+            original_action = self.normalize_action(original_raw)
+            if original_action == "UNKNOWN":
+                metrics["invalid_before_repair_count"] += 1
+                
+            original_resp = dict(resp) if isinstance(resp, dict) else resp
+            resp = self.repair_response_schema(resp)
+            
+            if isinstance(resp, dict) and (resp != original_resp or str(resp.get("action", "")).upper() != str(original_raw).upper()):
+                metrics["repair_applied_count"] += 1
+                
+            raw_action = resp.get("action", "UNKNOWN") if isinstance(resp, dict) else "UNKNOWN"
+            action = self.normalize_action(raw_action)
+            reasoning = resp.get("reasoning", "No reasoning") if isinstance(resp, dict) else "No reasoning"
+            
+            if action not in metrics["action_histogram"]:
+                metrics["action_histogram"][action] = 0
+            metrics["action_histogram"][action] += 1
+            
+            self._log_trace("DECISION", f"{action}: {reasoning} (raw: {raw_action})")
+            
+            missing_fields = False
+            if action == "BASH" and not resp.get("command"):
+                missing_fields = True
+            elif action == "EDIT" and (not resp.get("target_file") or "content" not in resp):
+                missing_fields = True
+                
+            # [Task C] 3-Strike Policy
+            if action == "UNKNOWN" or missing_fields:
+                self.belief_score *= 0.5
+                metrics["invalid_after_repair_count"] += 1
+                consecutive_invalid_count += 1
+                
+                if consecutive_invalid_count == 1:
+                    self._log_trace("WARN", "Invalid action 1st attempt. Retrying with schema feedback.")
+                    messages.append({"role": "assistant", "content": json.dumps(resp) if isinstance(resp, dict) else str(resp)})
+                    messages.append({"role": "user", "content": "Invalid schema: require action=BASH|EDIT|DONE with required fields. Return JSON only. Allowed actions only: BASH, EDIT, DONE."})
+                    continue
+                elif consecutive_invalid_count == 2:
+                    self._log_trace("WARN", "Invalid action 2nd attempt. Fallback to safe BASH: pwd.")
+                    if not isinstance(resp, dict): resp = {}
+                    action = "BASH"
+                    resp["action"] = "BASH"
+                    resp["command"] = "pwd"
+                    missing_fields = False
+                    # Do not reset count yet, let it run pwd and see next round
+                else:
+                    self._log_trace("ERROR", "Invalid action 3rd attempt. Forcing FAIL as per protocol.")
+                    outcome = "FAIL"
+                    break
+            else:
+                # Valid action from model, reset strike count
+                consecutive_invalid_count = 0
+
             if action == "BASH":
-                res = toolbox.bash_exec(resp.get("command", "ls"))
+                res = toolbox.bash_exec(resp.get("command", ""))
                 self._log_trace("SENSE", f"BASH Result: {res}")
                 messages.append({"role": "assistant", "content": json.dumps(resp)})
                 messages.append({"role": "user", "content": f"BASH Result: {res}"})
                 if res["exit_code"] != 0: 
                     self._log_trace("SELF-HEAL", "Detected mismatch. Initiating recursive correction...")
                     self.belief_score *= 0.8
+                    last_tool_action_successful = False
+                else:
+                    has_successful_tool_action = True
+                    last_tool_action_successful = True
             elif action == "EDIT":
-                res = toolbox.file_edit(resp.get("target_file", "out.txt"), resp.get("content", ""))
+                res = toolbox.file_edit(resp.get("target_file", ""), resp.get("content", ""))
                 self._log_trace("SENSE", f"EDIT Result: {res}")
                 messages.append({"role": "assistant", "content": json.dumps(resp)})
                 messages.append({"role": "user", "content": f"EDIT Result: {res}"})
-                if res.get("status") == "FAIL": self.belief_score *= 0.5
+                if res.get("status") == "FAIL": 
+                    self._log_trace("SELF-HEAL", "Detected mismatch. Initiating recursive correction...")
+                    self.belief_score *= 0.5
+                    last_tool_action_successful = False
+                else:
+                    has_successful_tool_action = True
+                    last_tool_action_successful = True
             elif action == "DONE":
-                # 只有明確 DONE 且信念足夠才算成功
+                # [Task A] DONE Gate: Check for successful tool action first
+                if not (has_successful_tool_action and last_tool_action_successful):
+                    self._log_trace("WARN", "DONE rejected: perform a valid BASH/EDIT action with successful result first.")
+                    messages.append({"role": "assistant", "content": json.dumps(resp) if isinstance(resp, dict) else str(resp)})
+                    messages.append({"role": "user", "content": "DONE rejected: perform a valid BASH/EDIT action with successful result first."})
+                    outcome = "REPAIR_NEEDED"
+                    continue
+
                 if self.belief_score > 0.5:
                     outcome = "SUCCESS"
                 else:
                     outcome = "REPAIR_NEEDED"
                 break
-            else:
-                # [B] 未知 Action 直接判 FAIL 並終止
-                self._log_trace("ERROR", f"Invalid action: {action}")
-                outcome = "FAIL"
-                break
         
         self.status = outcome
-        return {"drone_id": self.drone_id, "outcome": outcome, "belief_final": self.belief_score, "traces": self.tracelog}
+        return {"drone_id": self.drone_id, "outcome": outcome, "belief_final": self.belief_score, "traces": self.tracelog, "metrics": metrics}
 
     def _log_trace(self, phase: str, message: str):
         self.tracelog.append({"timestamp": time.time(), "phase": phase, "message": message})
