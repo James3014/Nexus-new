@@ -33,8 +33,9 @@ class CampaignStrategy:
     explanation: str = ""
 
 class ProjectPlanner:
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, envelope: Optional[Any] = None):
         self.project_root = project_root
+        self.envelope = envelope # 來自 L4 的戰略封套
         self.memory_path = project_root / ".nexus" / "memory"
         self.beliefs_path = project_root / ".nexusknowledge" / "beliefs.jsonl"
         self.max_consensus_loops = 3
@@ -49,10 +50,16 @@ class ProjectPlanner:
         # 1. 呼叫 Campaign-Architect 生成初步提案
         proposal = self._architect_propose(task, dimensions)
         
-        # 2. 呼叫 Guard-Reviewer 進行衝突與倫理審查 (Consensus Loop)
+        # 2. 注入 L4 戰略封套約束
+        if self.envelope:
+            proposal.explanation += f" [Applied L4 Strategy: {self.envelope.macro_intent}]"
+            # 這裡可以進一步合併 read_only_files 等約束
+        
+        # 3. 呼叫 Guard-Reviewer 進行衝突與倫理審查 (Consensus Loop)
         final_strategy = self._consensus_check(proposal, intent_bundle)
         
         return final_strategy
+
 
     def _architect_propose(self, task: str, dimensions: Dict[str, Any]) -> CampaignStrategy:
         """
