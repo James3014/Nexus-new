@@ -56,6 +56,7 @@ def execute_tactical_node(node, repo_root):
     """L4 調用 L3 的神經接口"""
     from nexus.core.speculative_classifier import SpeculativeClassifier
     from nexus.core.project_planner import ProjectPlanner
+    from nexus.core.skill_assembler import SkillAssembler
     
     classifier = SpeculativeClassifier(repo_root)
     intake_data = classifier.analyze_and_hydrate(node.intent)
@@ -63,7 +64,18 @@ def execute_tactical_node(node, repo_root):
     planner = ProjectPlanner(repo_root, envelope=node.envelope)
     strategy = planner.build_campaign(intake_data)
     
+    # 🚀 [L3:Self-Assembly] 現場造槍邏輯
+    if strategy.assembly_required:
+        assembler = SkillAssembler(repo_root)
+        new_skill = assembler.assemble_new_skill(node.intent, strategy.gap_reason)
+        if new_skill:
+            click.secho(f"🔧 [L3:Self-Assembly] New armament forged: {new_skill}", fg="magenta")
+            if assembler.verify_skill_jit(new_skill):
+                strategy.required_skills.append(new_skill)
+                click.secho(f"✅ [L3:Self-Assembly] {new_skill} hot-mounted to current mission.", fg="green")
+
     return _run_engine_flow(node.node_id, node.intent, strategy, repo_root)
+
 
 def _run_engine_flow(run_id, task_id, strategy, repo_root):
     # 實體引擎執行邏輯...

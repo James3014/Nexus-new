@@ -31,6 +31,8 @@ class CampaignStrategy:
     risk_level: str = "LOW"
     beliefs_to_validate: List[str] = field(default_factory=list)
     explanation: str = ""
+    assembly_required: bool = False # 🚀 L3: 技能自我組裝旗標
+    gap_reason: str = ""
 
 class ProjectPlanner:
     def __init__(self, project_root: Path, envelope: Optional[Any] = None):
@@ -53,12 +55,18 @@ class ProjectPlanner:
         # 2. 注入 L4 戰略封套約束
         if self.envelope:
             proposal.explanation += f" [Applied L4 Strategy: {self.envelope.macro_intent}]"
-            # 這裡可以進一步合併 read_only_files 等約束
         
-        # 3. 呼叫 Guard-Reviewer 進行衝突與倫理審查 (Consensus Loop)
+        # 3. 技能偵查與缺口判定
+        if not proposal.required_skills and proposal.risk_level == "HIGH":
+            logger.info("⚠️ [Planner:Gap] No specialized skills found for HIGH risk task. Requesting Assembly.")
+            proposal.assembly_required = True
+            proposal.gap_reason = "missing_specialized_tactical_armament"
+        
+        # 4. 呼叫 Guard-Reviewer 進行衝突與倫理審查 (Consensus Gate)
         final_strategy = self._consensus_check(proposal, intent_bundle)
         
         return final_strategy
+
 
 
     def _architect_propose(self, task: str, dimensions: Dict[str, Any]) -> CampaignStrategy:
