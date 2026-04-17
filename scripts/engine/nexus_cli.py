@@ -238,6 +238,12 @@ def check_hallucination(evidence_path: str | None):
     with open(evidence_path, "r") as f:
         data = json.load(f)
 
+    # 🛡️ 治理硬化：檢查證據來源 (防止 Agent 自選證據)
+    source = data.get("_source", "agent")
+    if os.environ.get("NEXUS_STRICT_EVIDENCE_SOURCE") == "1" and source != "system":
+        click.echo("❌ [Gate:REJECTED] Evidence must be system-generated (not agent-authored).")
+        return False
+
     response = data.get("final_response", "")
     evidence = data.get("evidence_bundle", {})
 

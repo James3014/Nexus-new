@@ -163,10 +163,13 @@ def run_completion_gate_for_task(
     cwd: Path | str | None = None,
 ) -> tuple[bool, str]:
     gate_cfg = task.get("completion_gate")
+    # 🛡️ 治理硬化：NEXUS_STRICT_COMPLETION_GATE=1 時強制要求 completion gate
+    strict_gate = os.environ.get("NEXUS_STRICT_COMPLETION_GATE") == "1"
+    default_required = True if strict_gate else False
     gate_required = bool(
         task.get(
             "require_completion_gate",
-            manifest_defaults.get("require_completion_gate", False),
+            manifest_defaults.get("require_completion_gate", default_required),
         )
     )
     if not gate_cfg:

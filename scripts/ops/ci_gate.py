@@ -139,6 +139,69 @@ def run_integrity_check():
     print("✅ Physical Integrity Check PASSED (All Life-Signs detected).")
     return True
 
+def run_delivery_tracked_check(evidence_path: str | None = None, dry_run: bool = False) -> bool:
+    """🛡️ 檢查 evidence 中宣稱的 code_artifacts 是否全部被 git 追蹤"""
+    label = "(Dry-run)" if dry_run else ""
+    print(f"\n🚀 [CI-Gate] Running Delivery Tracked Check {label}...")
+    
+    if not evidence_path:
+        evidence_path = str(ROOT / ".nexus/reports/hallucination_evidence.json")
+    
+    p = Path(evidence_path)
+    if not p.exists():
+        print(f"⚠️ [Delivery-Track] Evidence file not found: {p}")
+        return True  # 沒 evidence 不阻擋（由其他 gate 處理）
+
+    import json
+    try:
+        data = json.loads(p.read_text())
+    except Exception as e:
+        print(f"❌ [Delivery-Track] Parse error: {e}")
+        return False
+        
+    code_artifacts = data.get("evidence_bundle", {}).get("code_artifacts", [])
+    
+    if not code_artifacts:
+        print("✅ [Delivery-Track] No code artifacts to check.")
+        return True
+    
+    # 取得 git tracked 清單
+    result = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True
+    )
+    tracked_files = set(result.stdout.strip().split("\n"))
+    
+    untracked = []
+    for artifact in code_artifacts:
+        try:
+            # 轉換為相對路徑
+            art_path = Path(artifact)
+            if art_path.is_absolute():
+                rel = str(art_path.relative_to(ROOT))
+            else:
+                rel = str(art_path)
+                
+            # 檢查是否為目錄（目錄本身不在 ls-files 中）
+            artifact_full_path = ROOT / rel
+            if artifact_full_path.is_dir():
+                # 目錄下至少要有一個 tracked file
+                has_tracked = any(
+                    t.startswith(rel) for t in tracked_files
+                )
+                if not has_tracked:
+                    untracked.append(rel)
+            elif rel not in tracked_files:
+                untracked.append(rel)
+        except Exception:
+            untracked.append(artifact)
+    
+    if untracked:
+        print(f"❌ [Delivery-Track] Untracked artifacts found: {untracked}")
+        return False
+    
+    print("✅ Delivery Tracked Check PASSED")
+    return True
+
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
     if not run_integrity_check():
@@ -154,6 +217,7 @@ def run_dry_run():
     
     checks["protocol_check"] = run_protocol_check(dry_run=True)
     checks["lesson_check"] = run_lesson_check(dry_run=True)
+    checks["delivery_tracked"] = run_delivery_tracked_check(dry_run=True)
     wiki_sync_status = run_wiki_sync_check(dry_run=True)
     checks["wiki_sync"] = (wiki_sync_status == "OK")
     
