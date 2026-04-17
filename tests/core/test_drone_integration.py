@@ -86,11 +86,14 @@ def test_unknown_action(project_root, monkeypatch):
     res = drone.sense_think_act("do something")
     assert res["outcome"] == "FAIL"
 
-def test_server_down_failure(project_root):
+def test_server_down_failure(project_root, monkeypatch):
+    import requests
     drone = TacticalDrone("test-server-down", project_root)
-    # Don't mock the brain, let it hit the default http://localhost:11435 which will likely fail
-    # or return FAIL anyway because of our try-except. We actually simulate a request exception
-    drone.local_brain.api_url = "http://invalid.local"
+    
+    def mock_post(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("Mocked Connection Error")
+        
+    monkeypatch.setattr(requests, "post", mock_post)
     res = drone.sense_think_act("do something")
     assert res["outcome"] == "FAIL"
 
