@@ -41,6 +41,7 @@ class OutcomePayload:
     regression_pass_rate: float = 0.0
     pattern_reuse: float = 0.0
     next_run_hit: float = 0.0
+    effort_level: str = "unknown"
     metadata: Dict[str, Any] | None = None
 
 
@@ -66,6 +67,7 @@ def build_outcome_event(payload: OutcomePayload) -> Dict[str, Any]:
         # Learning signals
         "pattern_reuse": _safe_float(payload.pattern_reuse),
         "next_run_hit": _safe_float(payload.next_run_hit),
+        "effort_level": str(payload.effort_level),
         # Optional enrichments
         "status": str(md.get("status", "")),
         "audit_status": str(md.get("audit_status", "")),

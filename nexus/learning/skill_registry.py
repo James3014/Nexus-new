@@ -59,6 +59,11 @@ class SkillRegistry:
                     languages       TEXT,
                     file_patterns   TEXT,
                     win_rate        REAL DEFAULT 0.0,
+                    origin_type     TEXT,
+                    external_path   TEXT,
+                    has_scripts     INTEGER DEFAULT 0,
+                    has_evals       INTEGER DEFAULT 0,
+                    trigger_keywords TEXT,
                     created_at      TEXT NOT NULL,
                     updated_at      TEXT NOT NULL
                 )
@@ -73,7 +78,12 @@ class SkillRegistry:
                 ("portability_markers", "TEXT"),
                 ("languages", "TEXT"),
                 ("file_patterns", "TEXT"),
-                ("win_rate", "REAL DEFAULT 0.0")
+                ("win_rate", "REAL DEFAULT 0.0"),
+                ("origin_type", "TEXT"),
+                ("external_path", "TEXT"),
+                ("has_scripts", "INTEGER DEFAULT 0"),
+                ("has_evals", "INTEGER DEFAULT 0"),
+                ("trigger_keywords", "TEXT"),
             ]:
                 try:
                     conn.execute(f"ALTER TABLE skills ADD COLUMN {col} {col_type}")
@@ -99,9 +109,10 @@ class SkillRegistry:
                         verification_exit_codes, embedding_model_version, repair_success,
                         retry_count, pattern_reuse_rate, orchestration_pattern, 
                         context_fingerprint, decision_boundary, iaov_steps,
-                        readiness_checklist, portability_markers, languages, file_patterns, win_rate, created_at, updated_at
+                        readiness_checklist, portability_markers, languages, file_patterns, win_rate,
+                        origin_type, external_path, has_scripts, has_evals, trigger_keywords, created_at, updated_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                 """, (
                     skill_id,
@@ -133,6 +144,11 @@ class SkillRegistry:
                     json.dumps(skill.languages),
                     json.dumps(skill.file_patterns),
                     float(skill.win_rate),
+                    skill.origin_type,
+                    skill.external_path,
+                    int(bool(skill.has_scripts)),
+                    int(bool(skill.has_evals)),
+                    json.dumps(skill.trigger_keywords),
                     skill.created_at,
                     now
                 ))

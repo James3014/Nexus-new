@@ -54,6 +54,12 @@ class SkillFrontmatter:
     # --- VDD：驗證驅動信號 ---
     verification_commands: List[str] = field(default_factory=list)
     verification_exit_codes: List[int] = field(default_factory=list)
+    # --- External skill linkage ---
+    origin_type: str = ""
+    external_path: str = ""
+    has_scripts: bool = False
+    has_evals: bool = False
+    trigger_keywords: List[str] = field(default_factory=list)
 
     
     def to_dict(self) -> Dict[str, Any]:
