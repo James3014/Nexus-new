@@ -2,6 +2,12 @@
 # 🌙 Nexus Night Shift Automation Runner (L1)
 # Usage: ./scripts/ops/night_cron.sh [task_limit]
 
+# 🛡️ Nexus v4.0 Hardening
+export NEXUS_MCP_HEALTHCHECK_ENABLED=1
+export NEXUS_MCP_HEALTHCHECK_TTL_SEC=120
+export NEXUS_SERENA_FAIL_OPEN=1
+
+
 LIMIT=${1:-10}
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 CSV_OUT="ci_benchmark_night_${TIMESTAMP}.csv"

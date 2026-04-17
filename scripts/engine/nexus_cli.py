@@ -25,6 +25,11 @@ repo_root = Path(__file__).resolve().parents[2]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
+# 🛡️ Nexus v4.0 Persistence: Hardened Health & Resilience
+os.environ.setdefault("NEXUS_MCP_HEALTHCHECK_ENABLED", "1")
+os.environ.setdefault("NEXUS_MCP_HEALTHCHECK_TTL_SEC", "120")
+os.environ.setdefault("NEXUS_SERENA_FAIL_OPEN", "1")
+
 
 class NexusCLI:
     """Compatibility shim for legacy callers that import NexusCLI from this module."""
