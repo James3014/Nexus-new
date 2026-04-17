@@ -105,6 +105,8 @@ def run_benchmark():
         "model_endpoint": "http://localhost:11435/completion",
         "total_tasks": total_tasks,
         "legal_actions_raw": legal_actions_tasks, # Task level
+        "invalid_actions_raw": invalid_actions_tasks,
+        "false_success_raw": false_success,
         "legal_action_step_count": legal_action_step_count,
         "total_action_step_count": total_action_step_count,
         "legal_action_rate": legal_action_rate, # Task level
