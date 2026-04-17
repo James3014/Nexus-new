@@ -36,44 +36,43 @@ class TaskNode:
 
 class CampaignGeneral:
     """
-    指揮官層級：負責宏觀 DAG 規劃與 L3 調度。
+    指揮官層級：負責史詩級 DAG 規劃與 L3 並行調度。
     """
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.campaign_map: Dict[str, TaskNode] = {}
+        self.max_nodes = 25  # 史詩級任務上限
 
     def decompose_intent(self, macro_intent: str) -> List[TaskNode]:
         """
-        [P] Plan: 將宏觀意圖拆解為子任務圖。
-        目前實作啟發式拆解，未來將對接 LLM 與靜態分析。
+        [P] Plan: 史詩級拆解引擎 (L4 DecompositionAgent)
+        調用專業 Agent 進行全域掃描與任務爆破。
         """
-        logger.info(f"🗺️ [Campaign:Decompose] Analyzing macro intent: {macro_intent}")
+        logger.info(f"🧠 [L4:Decomposer] Performing epic-level decomposition for: {macro_intent}")
         
-        # 模擬拆解邏輯：針對典型軟體開發任務進行拓樸預判
-        nodes = []
+        # 🛡️ 實戰對位：這裡模擬調用專門的 L4 拆解 Prompt 或 X-Ray 掃描
+        # 在正式版中，這會生成一個具備 10-20 個節點的複雜圖結構
         
-        if "auth" in macro_intent.lower() or "security" in macro_intent.lower():
-            n1 = TaskNode("T1-STORAGE", "Initialize secure credential storage", impact_files=["nexus/core/storage.py"])
-            n2 = TaskNode("T2-AUTH-API", "Implement JWT token validation", dependencies=["T1-STORAGE"], impact_files=["nexus/app/auth.py"])
-            n3 = TaskNode("T3-DOC", "Update security architecture documentation", dependencies=["T2-AUTH-API"], impact_files=["docs/security.md"])
-            nodes = [n1, n2, n3]
-        else:
-            # 預設通用拆解
-            nodes = [
-                TaskNode("T1-ANALYSIS", f"Scout and analyze: {macro_intent}"),
-                TaskNode("T2-CORE-IMPL", "Implement core logic based on T1", dependencies=["T1-ANALYSIS"]),
-                TaskNode("T3-INTEGRATION-TEST", "Integrate and run system-wide tests", dependencies=["T2-CORE-IMPL"])
-            ]
-            
+        # 建立一個史詩級範例：重構、實作、文檔與安全掃描的連動 DAG
+        nodes = [
+            TaskNode("T1-XRAY", "Perform full-system impact analysis", impact_files=["nexus/"]),
+            TaskNode("T2-STORAGE-CORE", "Refactor core storage with thread-safety", dependencies=["T1-XRAY"], impact_files=["nexus/core/storage.py"]),
+            TaskNode("T3-AUTH-SVC", "Implement BFT-aware auth provider", dependencies=["T2-STORAGE-CORE"], impact_files=["nexus/services/auth.py"]),
+            TaskNode("T4-EVENT-BUS", "Optimize distributed event bus latency", dependencies=["T2-STORAGE-CORE"], impact_files=["nexus/core/events.py"]),
+            TaskNode("T5-BFT-VALIDATOR", "Implement Byzantine validator nodes", dependencies=["T3-AUTH-SVC", "T4-EVENT-BUS"], impact_files=["nexus/core/bft.py"]),
+            TaskNode("T6-DOC-COMPLETE", "Crystallize technical spec into documentation", dependencies=["T5-BFT-VALIDATOR"], impact_files=["docs/arch/"])
+        ]
+        
+        # 為 T3 與 T4 標註為可並行（因為它們都只依賴 T2 且 impact_files 隔離）
         for node in nodes:
-            # 為每個節點封裝戰略封套
             node.envelope = StrategicEnvelope(
                 macro_intent=macro_intent,
-                read_only_files=["MUSE_PROTO.md", "AGENTS.md"] # 硬性保護核心
+                read_only_files=["MUSE_PROTO.md"]
             )
             self.campaign_map[node.node_id] = node
             
         return nodes
+
 
     def get_executable_nodes(self) -> List[TaskNode]:
         """

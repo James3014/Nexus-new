@@ -318,122 +318,38 @@ def acceptance_check(as_json, evidence_path):
 @nexus_group.command(name="run")
 @click.argument("task_id")
 @click.option("--complexity", type=float, default=0.0)
-@click.option(
-    "--output-file",
-    type=click.Path(path_type=Path, dir_okay=False),
-    default=None,
-    help="Optional explicit output file path. Writes machine-readable JSON payload.",
-)
-def run(task_id, complexity, output_file):
+def run(task_id, complexity):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
     click.secho(f"🛡️ [NEXUS v24.9.5] Initiating Master Loop for: {task_id}", fg="cyan", bold=True)
-
-    # 0. 判斷是否需要 L4 宏觀規劃
+    
     from nexus.core.campaign_general import CampaignGeneral
-    is_macro = any(kw in task_id.lower() for kw in ["system", "app", "complete", "refactor all", "build a"])
+    from nexus.core.cli_runner_async import campaign_master_loop
+    import asyncio
 
+    # 偵測史詩/宏觀任務
+    is_macro = any(kw in task_id.lower() for kw in ["system", "app", "complete", "refactor all", "build a", "史詩"])
+    
     if is_macro:
         click.secho("🗺️ [L4:Macro-Mode]史詩級任務偵測。啟動戰役大將 (Campaign-General)...", fg="magenta", bold=True)
+        repo_root = Path(__file__).resolve().parents[2]
         commander = CampaignGeneral(repo_root)
         task_nodes = commander.decompose_intent(task_id)
         click.echo(f"   [L4] 戰役地圖已生成：{len(task_nodes)} 個戰術節點。")
-
-        while True:
-            ready_nodes = commander.get_executable_nodes()
-            if not ready_nodes:
-                # 檢查是否還有 PENDING 任務（若有則說明依賴卡住或失敗）
-                remaining = [n for n in task_nodes if n.status == "PENDING"]
-                if remaining:
-                    click.secho("🛑 [L4:Campaign-Stalled] 戰役卡住，依賴關係未解除。", fg="red")
-                    break
-                else:
-                    click.secho("🏆 [L4:Campaign-Victory] 戰役圓滿完成，所有節點已結案。", fg="cyan", bold=True)
-                    break
-
-            # 環境屏障分組
-            groups = commander.check_environment_fence(ready_nodes)
-            for group in groups:
-                # 目前採序列化執行組內節點，未來可改為並行 Swarm
-                for node in group:
-                    click.secho(f"\n⚔️ [L4:Executing-Node] {node.node_id}: {node.intent}", fg="blue", bold=True)
-                    node.status = "EXECUTING"
-
-                    # 遞迴呼叫 L3 執行單元
-                    success = execute_tactical_node(node, repo_root)
-
-                    if success:
-                        node.status = "SUCCESS"
-                        click.secho(f"✅ [L4:Node-Victory] {node.node_id} PASSED.", fg="green")
-                    else:
-                        node.status = "FAIL"
-                        click.secho(f"❌ [L4:Node-Defeat] {node.node_id} FAILED.", fg="red")
-                        # 觸發 V24.9.5 的爆破機制 (Bursting) 暫留
-                        return 
+        
+        # 啟動異步調度循環
+        asyncio.run(campaign_master_loop(commander, task_nodes, repo_root))
         return
 
     # --- 以下為單一任務 (Non-Macro) 流路 ---
-    execute_tactical_flow(task_id, repo_root, complexity, output_file)
-
-def execute_tactical_node(node, repo_root):
-    """L4 調用 L3 的神經接口"""
-    from nexus.core.speculative_classifier import SpeculativeClassifier
-    from nexus.core.project_planner import ProjectPlanner
-
-    classifier = SpeculativeClassifier(repo_root)
-    intake_data = classifier.analyze_and_hydrate(node.intent)
-
-    # 傳入 L4 戰略封套
-    planner = ProjectPlanner(repo_root, envelope=node.envelope)
-    strategy = planner.build_campaign(intake_data)
-
-    return _run_engine_flow(node.node_id, node.intent, strategy, repo_root)
-
-def execute_tactical_flow(task_id, repo_root, complexity, output_file):
-    """原本的單兵戰術流"""
-    from nexus.core.speculative_classifier import SpeculativeClassifier
-    from nexus.core.project_planner import ProjectPlanner
-
-    classifier = SpeculativeClassifier(repo_root)
-    intake_data = classifier.analyze_and_hydrate(task_id)
-
-    planner = ProjectPlanner(repo_root)
-    strategy = planner.build_campaign(intake_data)
-
-    _run_engine_flow("RUN-SINGLE", task_id, strategy, repo_root)
-
-def _run_engine_flow(run_id, task_id, strategy, repo_root):
-    """整合後的執行引擎邏輯"""
-    click.secho(f"🧠 [Strategy] Routed to {strategy.flow_type.upper()} (Risk: {strategy.risk_level})", fg="yellow")
-
-    report_path = repo_root / ".nexus" / "reports" / f"run_{run_id}.json"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-
-    env = os.environ.copy()
-    env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
-
-    if strategy.flow_type == "nightshift":
-        click.echo(f"🧬 [Evolution] Launching NightShift engine...")
-        tuning_cmd = [sys.executable, str(repo_root / "scripts/nightshift.py"), "--task", task_id]
-        res = subprocess.run(tuning_cmd, env=env)
-        return res.returncode == 0
-    elif strategy.flow_type == "hyper_sprint" or strategy.flow_type == "baseline":
-        from nexus.core.swarm import NexusSwarmOrchestrator
-        from nexus.engine.coordinator import NexusEngine
-        from nexus.engine.config import EngineConfig
-
-        config = EngineConfig(project_root=repo_root)
-        engine = NexusEngine(config)
-
-        orchestrator = NexusSwarmOrchestrator(engine=engine, task=task_id, allocation=strategy.swarm_config)
-        swarm_result = orchestrator.run()
-
-        # 產出報告... (省略部分同前)
-        return swarm_result["status"] != "FAIL"
-
-    return True
-
-
-
+    from nexus.core.cli_runner_async import execute_tactical_node
+    class MockNode:
+        def __init__(self, tid, intent):
+            self.node_id = tid
+            self.intent = intent
+            self.envelope = None
+    
+    repo_root = Path(__file__).resolve().parents[2]
+    execute_tactical_node(MockNode("RUN-SINGLE", task_id), repo_root)
 
 @nexus_group.command(name="content:rewrite")
 @click.option("--input-file", required=True, type=click.Path(exists=True, path_type=Path), help="Source text/markdown file.")
