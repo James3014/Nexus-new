@@ -36,7 +36,7 @@ class LocalBonsaiBrain:
                 prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
             prompt += "<|im_start|>assistant\n"
 
-            # GBNF Grammar for STRICT JSON
+            # GBNF Grammar (簡化版以提高速度)
             grammar = r'''
                 root   ::= object
                 object ::= "{" space pair ( "," space pair )* "}" space
@@ -54,16 +54,33 @@ class LocalBonsaiBrain:
                     "prompt": prompt,
                     "stop": ["<|im_end|>"],
                     "temperature": 0.0,
-                    "n_predict": 256,
-                    "grammar": grammar # 強制執行語法約束
+                    "n_predict": 512, # 增加長度以防字串截斷
+                    "grammar": grammar
                 },
                 timeout=60
             )
             if res.status_code == 200:
                 text = res.json().get("content", "").strip()
-                return json.loads(text)
+                
+                # [Hardening] 容錯解析邏輯
+                try:
+                    return json.loads(text)
+                except:
+                    # 嘗試手動修復不完整的 JSON
+                    if not text.endswith("}"):
+                        text += '"}' if text.endswith('"') else '" }'
+                    if '"reasoning":' in text and not text.endswith('"}'):
+                        text += '"}'
+                    return json.loads(text)
+                    
             return {"error": f"Server status {res.status_code}"}
         except Exception as e:
+            # 最後的 Fallback: 若連修復都失敗，嘗試正則提取
+            import re
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                try: return json.loads(match.group())
+                except: pass
             return {"error": str(e)}
 
 class DroneToolBox:
@@ -87,16 +104,19 @@ class DroneToolBox:
             return {"error": str(e)}
 
 class TacticalDrone:
-    def __init__(self, drone_id: str, project_root: Path, belief_score: float = 1.0):
+    def __init__(self, drone_id: str, project_root: Path, belief_score: float = 1.0, max_rounds: int = 3, timeout_sec: int = 300):
         self.drone_id = drone_id
         self.project_root = project_root
         self.belief_score = belief_score
+        self.max_rounds = max_rounds
+        self.timeout_sec = timeout_sec
         self.tracelog = []
         self.status = "INIT"
         self.local_brain = LocalBonsaiBrain()
 
     def sense_think_act(self, task_intent: str) -> Dict[str, Any]:
         logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Custom-Core Integration)")
+        start_time = time.time()
         
         sandbox_dir = self.project_root / ".nexus/tmp" / self.drone_id
         sandbox_dir.mkdir(parents=True, exist_ok=True)
@@ -107,8 +127,13 @@ class TacticalDrone:
             {"role": "user", "content": task_intent}
         ]
 
-        for r in range(3):
-            self._log_trace("THINK", f"Round {r+1} reasoning...")
+        for r in range(self.max_rounds):
+            if time.time() - start_time > self.timeout_sec:
+                self._log_trace("ERROR", "Timeout exceeded")
+                self.status = "TIMEOUT"
+                break
+
+            self._log_trace("THINK", f"Round {r+1}/{self.max_rounds} reasoning...")
             resp = self.local_brain.ask_structured(messages)
             
             if "error" in resp:
