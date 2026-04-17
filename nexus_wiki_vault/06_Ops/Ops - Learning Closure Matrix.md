@@ -106,4 +106,10 @@ version_scope:
 - **Decision**: make schema compatibility explicit across `SkillFrontmatter -> SkillRegistry -> coordinator` and `OutcomePayload -> build_outcome_event`, and fix runtime import defects before sign-off.
 - **Prevention**: add a mandatory "contract triad" gate for each hardening PR: dataclass compatibility check, persistence round-trip check, and smoke execution in isolated sandbox.
 
+## 2026-04-18: Legacy CLI alias drift hides real acceptance regressions
+- **Phenomenon**: `nexus:acceptance-check --window 10` failed at Click parsing (`No such option: --window`) while downstream checks were never executed.
+- **Root Cause**: legacy alias behavior drifted from test assumptions; governance verification can be bypassed by argument-layer failures.
+- **Decision**: add branch-scoped report claim verification as a post-acceptance hard gate, independent from legacy alias options.
+- **Prevention**: keep legacy alias tests minimal (no obsolete options), and assert verifier hook execution explicitly in acceptance pipeline tests.
+
 | 2026-04-16 | Red-Team-Hardening | T1-T5 Implementation | VALIDATED |
