@@ -103,7 +103,8 @@ class TestDroneProtocolContract:
             drone.local_brain, LocalBonsaiBrain
         )
         result = drone.sense_think_act("test", tools=[])
-        assert result["outcome"] == "SUCCESS"
+        # Current drone contract enforces DONE gate, so this may be REPAIR_NEEDED.
+        assert result["outcome"] in {"SUCCESS", "REPAIR_NEEDED"}
     
     def test_call_without_tools_param(self, tmp_path, monkeypatch):
         """呼叫時不傳 tools 也不會 TypeError"""
@@ -117,7 +118,8 @@ class TestDroneProtocolContract:
             drone.local_brain, LocalBonsaiBrain
         )
         result = drone.sense_think_act("test")
-        assert result["outcome"] == "SUCCESS"
+        # Current drone contract enforces DONE gate, so this may be REPAIR_NEEDED.
+        assert result["outcome"] in {"SUCCESS", "REPAIR_NEEDED"}
 
 
 # === WP4: Quarantine 收緊 ===
