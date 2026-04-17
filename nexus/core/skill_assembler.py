@@ -39,7 +39,7 @@ class SkillAssembler:
             (skill_dir / "scripts").mkdir(exist_ok=True)
             (skill_dir / "references").mkdir(exist_ok=True)
             
-            # 3. 生成 SKILL.md 並包含 Metadata
+            # 3. 生成 SKILL.md 並包含 Metadata 與靈魂指令集
             safe_intent = task_intent.replace('"', "'")
             skill_content = f"""---
 name: {skill_name}
@@ -49,13 +49,21 @@ metadata:
   created_from_intent: "{safe_intent}"
   gap_reason: "{gap_reason}"
   created_at: "{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}"
+  soul_alignment:
+    belief: "High confidence in technical feasibility"
+    mempalace: "MUSE_PROTO v2.4 Enforced"
+    memory_context: "Inherited from Pilot preferred refactoring patterns"
 ---
 
 # {skill_name.upper()}
 
+## 🧬 Soul Trinity Mapping
+- **Belief**: {safe_intent} is achievable with current artifacts.
+- **MemPalace**: Do not modify protected core files without explicit X-ray analysis.
+- **Memory**: Prioritize readability and AST safety in generated scripts.
+
 ## Decision Boundary
 - Use this skill when the task involves: {task_intent}
-- Do not use for unrelated generic tasks.
 """
             (skill_dir / "SKILL.md").write_text(skill_content, encoding="utf-8")
             

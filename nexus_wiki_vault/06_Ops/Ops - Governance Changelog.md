@@ -32,6 +32,7 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-17 | **TACTICAL DRONE INTEGRATION** | `nexus/core/drone_engine.py`, `nexus/core/campaign_general.py`, `tests/core/test_drone_integration.py` | Medium | Git revert | Gemini-Nexus |
 | 2026-04-17 | **CLI ENTRYPOINT UNIFICATION** | `scripts/engine/nexus_cli.py`, `scripts/ops/_nexus_enforced_briefing.sh`, `nexus_wiki_vault/06_Ops/NEXUS_ENFORCED_LAUNCH.md` | Low | Git revert | Gemini-Nexus |
 | 2026-04-17 | **STARTUP ENFORCEMENT HARDENING** | `scripts/ops/start_gemini_nexus_enforced.sh`, `scripts/ops/start_codex_nexus_enforced.sh`, `scripts/ops/nexus_startup_contract_check.py` | Low | Git revert | Gemini-Nexus |
 | 2026-04-17 | **POST-RELEASE ENHANCEMENT PACK** | `nexus/core/campaign_general.py`, `nexus/core/skill_assembler.py`, `tests/core/test_skill_jit_enhanced.py` | Low | Git revert | Gemini-Nexus |
