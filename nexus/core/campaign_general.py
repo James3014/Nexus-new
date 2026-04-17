@@ -255,10 +255,33 @@ class CampaignGeneral:
         """[L7:Evolution-Closure] 強化版演化報表。"""
         output_dir.mkdir(parents=True, exist_ok=True)
         report_path = output_dir / "pipeline_evolution_report.json"
+        
+        nodes_summary = []
+        for node in self.campaign_map.values():
+            nodes_summary.append({
+                "node_id": node.node_id,
+                "intent": node.intent,
+                "status": node.status,
+                "criteria_passed": node.criteria_passed,
+                "dependencies": node.dependencies
+            })
+
+        # 真實聚合 execution_outcome
+        if not self.campaign_map:
+            execution_outcome = "SUCCESS"
+        else:
+            statuses = [n.status for n in self.campaign_map.values()]
+            if all(s == "SUCCESS" for s in statuses):
+                execution_outcome = "SUCCESS"
+            elif all(s in ["FAIL", "CRASH", "TIMEOUT", "REPAIR_NEEDED"] for s in statuses):
+                execution_outcome = "FAIL"
+            else:
+                execution_outcome = "PARTIAL"
+
         report_data = {
             "intent_summary": "Unified Command",
-            "dag_summary": [],
-            "execution_outcome": "SUCCESS",
+            "dag_summary": nodes_summary,
+            "execution_outcome": execution_outcome,
             "trace_ids": [],
             "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         }

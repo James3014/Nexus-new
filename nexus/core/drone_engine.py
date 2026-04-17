@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-🧬 Nexus Tactical Drone Engine (Hardenized via PrismML Fork)
-使用專屬編譯的 llama-server 對接 Bonsai-1.7B 1-bit 模型。
+🧬 Nexus Tactical Drone Engine (Hardenized - Correction v0.9.21)
+修正契約斷裂、例外處理錯誤與假陽性成功判定邏輯。
 """
 import os
 import json
@@ -12,13 +12,6 @@ import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-try:
-    from nexus.services.gateway import BattlesuitGateway
-    from nexus.research.swarm_broker import SwarmBroker
-except ImportError:
-    BattlesuitGateway = None
-    SwarmBroker = None
-
 logger = logging.getLogger("nexus.drone")
 
 class LocalBonsaiBrain:
@@ -27,8 +20,8 @@ class LocalBonsaiBrain:
         self.api_url = api_url
 
     def ask_structured(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        text = "" # 修正 UnboundLocalError: 預先定義變數
         try:
-            # 轉換為 ChatML 模板
             prompt = ""
             for m in messages:
                 role = m["role"]
@@ -36,7 +29,6 @@ class LocalBonsaiBrain:
                 prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
             prompt += "<|im_start|>assistant\n"
 
-            # GBNF Grammar (簡化版以提高速度)
             grammar = r'''
                 root   ::= object
                 object ::= "{" space pair ( "," space pair )* "}" space
@@ -54,34 +46,23 @@ class LocalBonsaiBrain:
                     "prompt": prompt,
                     "stop": ["<|im_end|>"],
                     "temperature": 0.0,
-                    "n_predict": 512, # 增加長度以防字串截斷
+                    "n_predict": 512,
                     "grammar": grammar
                 },
                 timeout=60
             )
             if res.status_code == 200:
                 text = res.json().get("content", "").strip()
-                
-                # [Hardening] 容錯解析邏輯
                 try:
                     return json.loads(text)
                 except:
-                    # 嘗試手動修復不完整的 JSON
-                    if not text.endswith("}"):
-                        text += '"}' if text.endswith('"') else '" }'
-                    if '"reasoning":' in text and not text.endswith('"}'):
-                        text += '"}'
+                    # [Hardening] 更安全的 JSON Repair
+                    if not text.startswith("{"): return {"action": "FAIL", "reasoning": "Malformed output"}
+                    if not text.endswith("}"): text += '"}' if text.endswith('"') else '" }'
                     return json.loads(text)
-                    
-            return {"error": f"Server status {res.status_code}"}
+            return {"action": "FAIL", "error": f"Server status {res.status_code}"}
         except Exception as e:
-            # 最後的 Fallback: 若連修復都失敗，嘗試正則提取
-            import re
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                try: return json.loads(match.group())
-                except: pass
-            return {"error": str(e)}
+            return {"action": "FAIL", "error": f"Inference crash: {str(e)}", "partial_text": text}
 
 class DroneToolBox:
     def __init__(self, sandbox_dir: Path):
@@ -97,11 +78,13 @@ class DroneToolBox:
     def file_edit(self, target: str, content: str) -> Dict[str, Any]:
         try:
             path = (self.sandbox_dir / target).resolve()
+            if not str(path).startswith(str(self.sandbox_dir.resolve())):
+                return {"status": "FAIL", "error": "Path traversal blocked"}
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             return {"status": "SUCCESS"}
         except Exception as e:
-            return {"error": str(e)}
+            return {"status": "FAIL", "error": str(e)}
 
 class TacticalDrone:
     def __init__(self, drone_id: str, project_root: Path, belief_score: float = 1.0, max_rounds: int = 3, timeout_sec: int = 300):
@@ -114,8 +97,9 @@ class TacticalDrone:
         self.status = "INIT"
         self.local_brain = LocalBonsaiBrain()
 
-    def sense_think_act(self, task_intent: str) -> Dict[str, Any]:
-        logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Custom-Core Integration)")
+    def sense_think_act(self, task_intent: str, tools: List[Any] = None) -> Dict[str, Any]:
+        """[A] 契約對齊：接受 task_intent 與可選 tools 參數。"""
+        logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Hardened-Logic)")
         start_time = time.time()
         
         sandbox_dir = self.project_root / ".nexus/tmp" / self.drone_id
@@ -123,25 +107,23 @@ class TacticalDrone:
         toolbox = DroneToolBox(sandbox_dir)
         
         messages = [
-            {"role": "system", "content": "You are a Nexus Drone. Use tools. Return JSON: {\"action\": \"BASH|EDIT|DONE\", \"command\": \"...\", \"reasoning\": \"...\"}"},
+            {"role": "system", "content": "You are a Nexus Drone. Follow MUSE_PROTO. Must return explicit action: BASH | EDIT | DONE."},
             {"role": "user", "content": task_intent}
         ]
 
+        outcome = "FAIL" # [B] 預設為 FAIL，防範假陽性
+
         for r in range(self.max_rounds):
             if time.time() - start_time > self.timeout_sec:
-                self._log_trace("ERROR", "Timeout exceeded")
-                self.status = "TIMEOUT"
+                self._log_trace("ERROR", "Timeout")
+                outcome = "TIMEOUT"
                 break
 
-            self._log_trace("THINK", f"Round {r+1}/{self.max_rounds} reasoning...")
+            self._log_trace("THINK", f"Round {r+1} reasoning...")
             resp = self.local_brain.ask_structured(messages)
             
-            if "error" in resp:
-                self._log_trace("ERROR", resp["error"])
-                break
-            
-            action = resp.get("action", "DONE")
-            reasoning = resp.get("reasoning", "Thinking...")
+            action = resp.get("action", "UNKNOWN") # 禁止預設 DONE
+            reasoning = resp.get("reasoning", "No reasoning")
             self._log_trace("DECISION", f"{action}: {reasoning}")
             
             if action == "BASH":
@@ -149,21 +131,34 @@ class TacticalDrone:
                 self._log_trace("SENSE", f"BASH Result: {res}")
                 messages.append({"role": "assistant", "content": json.dumps(resp)})
                 messages.append({"role": "user", "content": f"BASH Result: {res}"})
-                if res["exit_code"] != 0: self.belief_score *= 0.8
+                if res["exit_code"] != 0: 
+                    self._log_trace("SELF-HEAL", "Detected mismatch. Initiating recursive correction...")
+                    self.belief_score *= 0.8
             elif action == "EDIT":
-                res = toolbox.file_edit(resp.get("target_file", "output.txt"), resp.get("content", ""))
+                res = toolbox.file_edit(resp.get("target_file", "out.txt"), resp.get("content", ""))
                 self._log_trace("SENSE", f"EDIT Result: {res}")
                 messages.append({"role": "assistant", "content": json.dumps(resp)})
                 messages.append({"role": "user", "content": f"EDIT Result: {res}"})
+                if res.get("status") == "FAIL": self.belief_score *= 0.5
+            elif action == "DONE":
+                # 只有明確 DONE 且信念足夠才算成功
+                if self.belief_score > 0.5:
+                    outcome = "SUCCESS"
+                else:
+                    outcome = "REPAIR_NEEDED"
+                break
             else:
-                self.status = "SUCCESS"
+                # [B] 未知 Action 直接判 FAIL 並終止
+                self._log_trace("ERROR", f"Invalid action: {action}")
+                outcome = "FAIL"
                 break
         
-        return {"drone_id": self.drone_id, "outcome": self.status, "traces": self.tracelog}
+        self.status = outcome
+        return {"drone_id": self.drone_id, "outcome": outcome, "belief_final": self.belief_score, "traces": self.tracelog}
 
     def _log_trace(self, phase: str, message: str):
         self.tracelog.append({"timestamp": time.time(), "phase": phase, "message": message})
         logger.info(f"   [{phase}] {message}")
 
     def save_evolution_crystal(self, output_path: Path):
-        output_path.write_text(json.dumps({"drone_id": self.drone_id, "tracelog": self.tracelog}, indent=2))
+        output_path.write_text(json.dumps({"drone_id": self.drone_id, "status": self.status, "belief_score": self.belief_score, "tracelog": self.tracelog}, indent=2))

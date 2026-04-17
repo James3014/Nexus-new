@@ -3,29 +3,27 @@ import json
 from pathlib import Path
 from nexus.core.campaign_general import CampaignGeneral
 from nexus.core.skill_assembler import SkillAssembler
-from nexus.core.drone_engine import TacticalDrone
+from nexus.core.drone_engine import TacticalDrone, LocalBonsaiBrain
 
 @pytest.fixture
 def project_root(tmp_path):
-    # 建立必要的目錄與規約檔
     (tmp_path / "MUSE_PROTO.md").write_text("# Mock Protocol\n- Be good.")
     return tmp_path
 
 def test_drone_execution_and_crystal(project_root, monkeypatch):
-    # 1. 指揮官初始化
     commander = CampaignGeneral(project_root)
     
-    # 避免真實 LLM 呼叫，直接修改 execute_node_via_drone 行為
-    original_execute = commander.execute_node_via_drone
+    def mock_ask(self, messages):
+        return {"action": "DONE", "reasoning": "Mocked done"}
+    monkeypatch.setattr(LocalBonsaiBrain, "ask_structured", mock_ask)
+
     def mock_execute(node_id):
         node = commander.campaign_map[node_id]
         drone = TacticalDrone(f"drone-{node_id}", project_root, node.belief_confidence)
-        drone.gateway = None  # Force mock mode
+        drone.local_brain.ask_structured = mock_ask.__get__(drone.local_brain, LocalBonsaiBrain)
         res = drone.sense_think_act(node.intent, [])
         node.status = res["outcome"]
         node.belief_confidence = res["belief_final"]
-        
-        # 寫入 mock 結晶
         report_dir = project_root / ".nexus/reports/drones"
         report_dir.mkdir(parents=True, exist_ok=True)
         drone.save_evolution_crystal(report_dir / f"{node_id}_crystal.json")
@@ -33,36 +31,83 @@ def test_drone_execution_and_crystal(project_root, monkeypatch):
     monkeypatch.setattr(commander, "execute_node_via_drone", mock_execute)
 
     commander.decompose_intent("implement memory-service with high stability")
-    
-    # 動態獲取第一個可執行的節點
     executable = commander.get_executable_nodes()
     assert len(executable) > 0
     node = executable[0]
-    node_id = node.node_id
-    
-    # 2. 委派執行
-    result = commander.execute_node_via_drone(node_id)
+    result = commander.execute_node_via_drone(node.node_id)
     assert result["outcome"] == "SUCCESS"
     assert result["belief_final"] == 1.0
 
-def test_drone_self_healing_belief(project_root):
-    # 模擬一個包含 "fail" 的任務
+def test_drone_self_healing_belief(project_root, monkeypatch):
     drone = TacticalDrone("test-drone", project_root, belief_score=1.0)
-    drone.gateway = None # Force mock mode
+    
+    call_count = 0
+    def mock_ask(self_brain, messages):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"action": "BASH", "command": "false", "reasoning": "Mocking failure"}
+        return {"action": "DONE", "reasoning": "Fixed it"}
+        
+    monkeypatch.setattr(LocalBonsaiBrain, "ask_structured", mock_ask)
+    drone.local_brain.ask_structured = mock_ask.__get__(drone.local_brain, LocalBonsaiBrain)
+    
     result = drone.sense_think_act("this task will fail and need repair", tools=[])
     
-    # 驗證 Belief 分數下降 (觸發了模擬的修復路徑)
     assert result["belief_final"] < 1.0
     assert any(t["phase"] == "SELF-HEAL" for t in result["traces"])
 
 def test_skill_assembler_soul_alignment(project_root):
     assembler = SkillAssembler(project_root)
     skill_name = assembler.assemble_new_skill("fix buffer overflow", "logic gap")
-    
     skill_md = project_root / "skills" / skill_name / "SKILL.md"
     content = skill_md.read_text()
-    
-    # 驗證靈魂對齊標記
     assert "🧬 Soul Trinity Mapping" in content
     assert "MemPalace" in content
     assert "MUSE_PROTO" in content
+
+def test_missing_action(project_root, monkeypatch):
+    drone = TacticalDrone("test-missing-action", project_root)
+    def mock_ask(self, messages):
+        return {"reasoning": "I forgot to include an action"}
+    monkeypatch.setattr(LocalBonsaiBrain, "ask_structured", mock_ask)
+    drone.local_brain.ask_structured = mock_ask.__get__(drone.local_brain, LocalBonsaiBrain)
+    
+    res = drone.sense_think_act("do something")
+    assert res["outcome"] == "FAIL"
+
+def test_unknown_action(project_root, monkeypatch):
+    drone = TacticalDrone("test-unknown-action", project_root)
+    def mock_ask(self, messages):
+        return {"action": "JUMP", "reasoning": "I want to jump"}
+    monkeypatch.setattr(LocalBonsaiBrain, "ask_structured", mock_ask)
+    drone.local_brain.ask_structured = mock_ask.__get__(drone.local_brain, LocalBonsaiBrain)
+    
+    res = drone.sense_think_act("do something")
+    assert res["outcome"] == "FAIL"
+
+def test_server_down_failure(project_root):
+    drone = TacticalDrone("test-server-down", project_root)
+    # Don't mock the brain, let it hit the default http://localhost:11435 which will likely fail
+    # or return FAIL anyway because of our try-except. We actually simulate a request exception
+    drone.local_brain.api_url = "http://invalid.local"
+    res = drone.sense_think_act("do something")
+    assert res["outcome"] == "FAIL"
+
+def test_partial_fail_aggregation(project_root, monkeypatch):
+    commander = CampaignGeneral(project_root)
+    commander.decompose_intent("refactor multiple things")
+    
+    nodes = list(commander.campaign_map.values())
+    nodes[0].status = "SUCCESS"
+    nodes[1].status = "FAIL"
+    if len(nodes) > 2:
+        nodes[2].status = "SUCCESS"
+        
+    report_dir = project_root / ".nexus/reports"
+    commander.generate_evolution_report(report_dir)
+    
+    report_path = report_dir / "pipeline_evolution_report.json"
+    assert report_path.exists()
+    report = json.loads(report_path.read_text())
+    assert report["execution_outcome"] == "PARTIAL"
