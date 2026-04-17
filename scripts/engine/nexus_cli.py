@@ -109,6 +109,38 @@ def nexus_group():
     pass
 
 # --- 治理與狀態 ---
+@nexus_group.command(name="drone-hud")
+def drone_hud():
+    """🚁 [L5] Tactical Drone HUD - 實時監聽無人機執行狀態與干預。"""
+    import json
+    from pathlib import Path
+    click.secho("🚁 [Drone HUD] Scanning tactical drones in sector...", fg="cyan", bold=True)
+    drone_dir = repo_root / ".nexus/reports/drones"
+    if not drone_dir.exists():
+        click.echo("No drones currently reporting.")
+        return
+        
+    crystals = list(drone_dir.glob("*_crystal.json"))
+    click.echo(f"Active/Completed Drones: {len(crystals)}")
+    
+    for f in sorted(crystals, key=lambda x: x.stat().st_mtime, reverse=True)[:5]:
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            drone_id = data.get("drone_id", "unknown")
+            status = data.get("status", "unknown")
+            belief = data.get("belief_score", 0.0)
+            
+            color = "green" if status == "SUCCESS" else "red" if status in ["FAIL", "CRASH"] else "yellow"
+            click.secho(f"\n🐝 Drone: {drone_id} | Status: {status} | Belief: {belief:.2f}", fg=color, bold=True)
+            
+            traces = data.get("tracelog", [])[-3:] # Show last 3
+            for t in traces:
+                phase = t.get("phase", "")
+                msg = t.get("message", "")
+                click.echo(f"  [{phase}] {msg[:80]}...")
+        except:
+            pass
+
 @nexus_group.command(name="status")
 @click.option("--json", "as_json", is_flag=True)
 def status(as_json):

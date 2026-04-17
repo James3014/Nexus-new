@@ -98,6 +98,10 @@ class CampaignGeneral:
         node.status = result["outcome"]
         node.belief_confidence = result["belief_final"]
         
+        if result["outcome"] == "SPAWNED":
+            self.trigger_burst(node_id)
+            node.status = "BURSTING"
+            
         # 4. [C] 結晶：保存 Drone 的 Tracelog
         report_dir = self.project_root / ".nexus/reports/drones"
         report_dir.mkdir(parents=True, exist_ok=True)
