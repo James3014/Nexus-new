@@ -100,4 +100,10 @@ version_scope:
 - **Decision**: harden `SessionMetabolism.load_checkpoint()` to tolerate missing files and run cross-environment verification (`root data + branch code`) before judging regression severity.
 - **Prevention**: classify failures into code regressions vs environment parity gaps; only block merge on code regressions, and record parity assumptions in the runbook.
 
+## 2026-04-17: Contract drift can fake "hardening complete"
+- **Phenomenon**: Claimed hardening path still crashed in runtime because producer/consumer contracts drifted (`OutcomePayload` field mismatch, external skill fields not persisted, sandbox runtime import hole).
+- **Root Cause**: acceptance relied on narrative and partial spot checks, not end-to-end contract verification for schema + persistence + execution.
+- **Decision**: make schema compatibility explicit across `SkillFrontmatter -> SkillRegistry -> coordinator` and `OutcomePayload -> build_outcome_event`, and fix runtime import defects before sign-off.
+- **Prevention**: add a mandatory "contract triad" gate for each hardening PR: dataclass compatibility check, persistence round-trip check, and smoke execution in isolated sandbox.
+
 | 2026-04-16 | Red-Team-Hardening | T1-T5 Implementation | VALIDATED |
