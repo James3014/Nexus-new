@@ -34,15 +34,23 @@ def run_smoke_test() -> Dict[str, Any]:
         "regression_rate": 0.04,
         "cost_per_success": 0.85
     }
-    kill_switch_eval = lifecycle.evaluate_kill_switch(benchmark_results, baseline)
+    
+    kill_switch_triggered = False
+    reasons = []
+    from nexus.experiments.msa_routing.msa_lifecycle import KillSwitchTriggeredError
+    try:
+        lifecycle.evaluate_kill_switch(benchmark_results, baseline)
+    except KillSwitchTriggeredError as e:
+        kill_switch_triggered = True
+        reasons = [str(e)]
 
     output = {
         "precision": benchmark_results["precision"],
         "unknown_correct_rate": benchmark_results["unknown_correct_rate"],
         "regression_rate": benchmark_results["regression_rate"],
         "cost_per_success": benchmark_results["cost_per_success"],
-        "kill_switch_triggered": kill_switch_eval["triggered"],
-        "reasons": kill_switch_eval["reasons"],
+        "kill_switch_triggered": kill_switch_triggered,
+        "reasons": reasons,
         "route_status": route_result.status,
         "promoted": promoted
     }

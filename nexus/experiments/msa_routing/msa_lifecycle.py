@@ -56,5 +56,5 @@ class MSALifecycle:
             reasons.append(f"Cost efficiency not improved by 10% ({cost} vs {base_cost})")
             
         if reasons:
-            return {"triggered": True, "reasons": reasons}
+            raise KillSwitchTriggeredError(f"Kill Switch Triggered: {', '.join(reasons)}")
         return {"triggered": False, "reasons": []}

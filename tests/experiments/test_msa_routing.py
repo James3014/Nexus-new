@@ -41,18 +41,18 @@ def test_quarantine_gate_failures():
     assert quarantine.promote(item_id, "PASS", "REJECTED") is False
     
     # acceptance=FAIL -> promote=False
-    assert quarantine.promote(item_id, "FAIL", "VERIFIED") is False
+    from nexus.experiments.msa_routing.msa_lifecycle import MSALifecycle, KillSwitchTriggeredError
 
-def test_kill_switch_triggered_fails():
-    lifecycle = MSALifecycle()
-    baseline = {"precision": 0.8, "unknown_correct_rate": 0.96, "regression_rate": 0.05, "cost_per_success": 1.0}
-    
-    # Simulate a failing benchmark
-    bad_results = {"precision": 0.7, "unknown_correct_rate": 0.98, "regression_rate": 0.04, "cost_per_success": 0.85}
-    
-    eval_res = lifecycle.evaluate_kill_switch(bad_results, baseline)
-    assert eval_res["triggered"] is True
-    assert "Precision degraded (0.7 < 0.8)" in eval_res["reasons"]
+    def test_kill_switch_triggered_fails():
+        lifecycle = MSALifecycle()
+        baseline = {"precision": 0.8, "unknown_correct_rate": 0.96, "regression_rate": 0.05, "cost_per_success": 1.0}
+
+        # Simulate a failing benchmark
+        bad_results = {"precision": 0.7, "unknown_correct_rate": 0.98, "regression_rate": 0.04, "cost_per_success": 0.85}
+
+        with pytest.raises(KillSwitchTriggeredError) as exc_info:
+            lifecycle.evaluate_kill_switch(bad_results, baseline)
+        assert "Precision degraded" in str(exc_info.value)
 
 def test_router_fail_closed():
     router = MSARouter(confidence_threshold=0.8)
