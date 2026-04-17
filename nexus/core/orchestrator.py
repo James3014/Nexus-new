@@ -7,6 +7,8 @@ from datetime import datetime
 
 from nexus.core.config import OrchestratorConfig
 from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
+from nexus.core.belief_engine import BeliefEngine
+from nexus.core.mem_palace import MemoryPalace
 
 class NexusOrchestrator:
     """
@@ -54,6 +56,10 @@ class NexusOrchestrator:
         self.total_fallback_est = 0
         self.token_capture_statuses = []
         self.max_strikes = 3 if self.mode != "audit" else 1
+
+        # 🧠 Soul Pentad Pillars
+        self.belief_engine = BeliefEngine(self.project_root / ".nexus" / "belief_state.json")
+        self.palace = MemoryPalace()
 
     def set_execution_mode(self, mode: str, reason: str):
         """🛡️ 模式切換入口，並記錄原因。"""
@@ -127,6 +133,22 @@ class NexusOrchestrator:
                 diff=diff,
                 model_hint="flash" if strike % 2 != 0 else "sonnet",
             )
+            
+            # --- [D/R Phase Hardening] ---
+            # 🛡️ D 階段：規約審計 (Governance Audit)
+            if not self.palace.audit_action("D", data.get("summary", "")):
+                print("🛑 [Palace] Action blocked by governance rules. Escalating...")
+                self.set_execution_mode("audit", "governance_audit_failed")
+                return False
+
+            # 🧠 R 階段：信心判定 (Belief Check)
+            confidence = self.belief_engine.assess_confidence(self.task, data.get("summary", ""))
+            if confidence < 0.8:
+                print(f"🔍 [Belief] Low confidence ({confidence:.2f}). Triggering research escalation...")
+                self.set_execution_mode("pilot", "low_confidence_research")
+                # 此處模擬研究分支：注入更多 context 或重新獲取水晶
+                context_brief += "\n[EXTRA-RESEARCH] Deep scanning vector_rag for prior patterns..."
+
             self.total_tokens += data.get("tokens_used", 0)
             self.total_raw_model += data.get("token_raw_model", 0)
             self.total_fallback_est += data.get("token_fallback_est", 0)
