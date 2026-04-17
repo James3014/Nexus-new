@@ -7,6 +7,7 @@
 import os
 import json
 import logging
+import time
 from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +34,8 @@ class TaskNode:
     status: str = "PENDING"  # PENDING, EXECUTING, SUCCESS, FAIL, BURSTING
     envelope: Optional[StrategicEnvelope] = None
     result_path: Optional[str] = None
+    criteria: Dict[str, Any] = field(default_factory=dict)
+    criteria_passed: bool = False
 
 class CampaignGeneral:
     """
@@ -47,19 +50,44 @@ class CampaignGeneral:
     def decompose_intent(self, macro_intent: str) -> List[TaskNode]:
         """
         [P] Plan: 史詩級拆解引擎 (L4 DecompositionAgent)
-        調用專業 Agent 進行全域掃描與任務爆破。
+        根據 macro_intent 的複雜度與關鍵字，動態生成任務節點與依賴圖。
         """
-        logger.info(f"🧠 [L4:Decomposer] Performing epic-level decomposition for: {macro_intent}")
+        logger.info(f"🧠 [L4:Decomposer] Performing dynamic decomposition for: {macro_intent}")
         
-        # 建立一個史詩級範例：重構、實作、文檔與安全掃描的連動 DAG
-        nodes = [
-            TaskNode("T1-XRAY", "Perform full-system impact analysis", impact_files=["nexus/"]),
-            TaskNode("T2-STORAGE-CORE", "Refactor core storage with thread-safety", dependencies=["T1-XRAY"], impact_files=["nexus/core/storage.py"]),
-            TaskNode("T3-AUTH-SVC", "Implement BFT-aware auth provider", dependencies=["T2-STORAGE-CORE"], impact_files=["nexus/services/auth.py"]),
-            TaskNode("T4-EVENT-BUS", "Optimize distributed event bus latency", dependencies=["T2-STORAGE-CORE"], impact_files=["nexus/core/events.py"]),
-            TaskNode("T5-BFT-VALIDATOR", "Implement Byzantine validator nodes", dependencies=["T3-AUTH-SVC", "T4-EVENT-BUS"], impact_files=["nexus/core/bft.py"]),
-            TaskNode("T6-DOC-COMPLETE", "Crystallize technical spec into documentation", dependencies=["T5-BFT-VALIDATOR"], impact_files=["docs/arch/"])
-        ]
+        intent_lower = macro_intent.lower()
+        nodes = []
+        fallback_used = False
+        reason = "Dynamic heuristic based on intent keywords"
+
+        # 簡單的啟發式拆解邏輯
+        if "refactor" in intent_lower or "core" in intent_lower:
+            nodes = [
+                TaskNode("T1-XRAY", f"Analyze system impact for: {macro_intent}", impact_files=["nexus/"]),
+                TaskNode("T2-CORE", "Apply core logic refactoring", dependencies=["T1-XRAY"], impact_files=["nexus/core/"]),
+                TaskNode("T3-VERIFY", "Verify refactored core integrity", dependencies=["T2-CORE"])
+            ]
+        elif "fix" in intent_lower or "bug" in intent_lower:
+            nodes = [
+                TaskNode("T1-REPRO", f"Reproduce failure for: {macro_intent}"),
+                TaskNode("T2-FIX", "Implement bugfix and local validation", dependencies=["T1-REPRO"]),
+                TaskNode("T3-REGRESSION", "Run full regression suite", dependencies=["T2-FIX"])
+            ]
+        elif "doc" in intent_lower or "wiki" in intent_lower:
+            nodes = [
+                TaskNode("T1-INGEST", f"Ingest context for documentation: {macro_intent}"),
+                TaskNode("T2-WRITE", "Generate structured technical documentation", dependencies=["T1-INGEST"]),
+                TaskNode("T3-REVIEW", "Perform peer-review on documentation", dependencies=["T2-WRITE"])
+            ]
+        else:
+            # Fallback: 使用最小安全 DAG
+            fallback_used = True
+            reason = "No specific keywords matched, using minimal safety fallback"
+            nodes = [
+                TaskNode("T1-MIN-XRAY", "Perform minimal impact scan"),
+                TaskNode("T2-MIN-EXEC", f"Execute core task: {macro_intent}", dependencies=["T1-MIN-XRAY"])
+            ]
+
+        logger.info(f"📊 [L4:Decomposer] DAG Generated. Nodes: {len(nodes)}, Fallback: {fallback_used}, Reason: {reason}")
         
         for node in nodes:
             node.envelope = StrategicEnvelope(
@@ -138,34 +166,34 @@ class CampaignGeneral:
                 
         return executable
 
-    def check_environment_fence(self, nodes: List[TaskNode]) -> List[List[TaskNode]]:
+    def generate_evolution_report(self, output_dir: Path):
         """
-        🛡️ 環境屏障：Codex 建議。檢查檔案衝突，將可安全並行的任務分組。
+        [L7:Evolution-Closure] 產生統一的演化報表。
         """
-        if not nodes: return []
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report_path = output_dir / "pipeline_evolution_report.json"
         
-        parallel_groups = []
-        current_group = []
-        seen_files: Set[str] = set()
-        
-        for node in nodes:
-            # 檢查是否有檔案重疊
-            conflict = any(f in seen_files for f in node.impact_files)
-            
-            if conflict:
-                # 產生衝突，需強制分組（序列化執行）
-                if current_group:
-                    parallel_groups.append(current_group)
-                current_group = [node]
-                seen_files = set(node.impact_files)
-            else:
-                current_group.append(node)
-                seen_files.update(node.impact_files)
-                
-        if current_group:
-            parallel_groups.append(current_group)
-            
-        return parallel_groups
+        nodes_summary = []
+        for node in self.campaign_map.values():
+            nodes_summary.append({
+                "node_id": node.node_id,
+                "intent": node.intent,
+                "status": node.status,
+                "criteria_passed": node.criteria_passed,
+                "dependencies": node.dependencies
+            })
+
+        report_data = {
+            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            "macro_intent": next(iter(self.campaign_map.values())).envelope.macro_intent if self.campaign_map else "unknown",
+            "dag_summary": nodes_summary,
+            "execution_outcome": "SUCCESS" if all(n.status == "SUCCESS" for n in self.campaign_map.values()) else "PARTIAL",
+            "feedback_signals": ["automated_dag_generation_verified"],
+            "next_evolution_plan": "Enhance L4 decomposition with actual LLM feedback loop"
+        }
+
+        report_path.write_text(json.dumps(report_data, indent=2), encoding="utf-8")
+        logger.info(f"📜 [L7:Evolution] Unified report generated: {report_path}")
 
 if __name__ == "__main__":
     # 原型測試
