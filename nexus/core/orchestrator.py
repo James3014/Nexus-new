@@ -144,9 +144,20 @@ class NexusOrchestrator:
             # 🧠 R 階段：信心判定 (Belief Check)
             confidence = self.belief_engine.assess_confidence(self.task, data.get("summary", ""))
             if confidence < 0.8:
-                print(f"🔍 [Belief] Low confidence ({confidence:.2f}). Triggering research escalation...")
-                self.set_execution_mode("pilot", "low_confidence_research")
-                # 此處模擬研究分支：注入更多 context 或重新獲取水晶
+                print(f"🔍 [Belief] Low confidence ({confidence:.2f}). Triggering REAL auto-repair...")
+                self.set_execution_mode("pilot", "low_confidence_repair")
+                
+                # 🛡️ 實體自癒行動
+                outcome = {"task_id": self.task, "source": "pipeline.repair", "pass": False}
+                if self.patcher:
+                    outcome["pass"] = self.patcher.auto_fix(self.task, context_brief)
+                    if outcome["pass"]:
+                        print("✅ [Repair] Auto-fix succeeded.")
+                        # 持久化指標供 acceptance-check 讀取
+                        self._log_outcome(outcome)
+                        return True
+                
+                self._log_outcome(outcome)
                 context_brief += "\n[EXTRA-RESEARCH] Deep scanning vector_rag for prior patterns..."
 
             self.total_tokens += data.get("tokens_used", 0)
@@ -223,6 +234,14 @@ class NexusOrchestrator:
         LIMIT = 120000 
         ratio = self.total_tokens / LIMIT
         return ratio > 0.85
+
+    def _log_outcome(self, outcome: dict):
+        """將執行結果寫入 .nexus/metrics 以滿足治理 Gate。"""
+        log_file = self.project_root / ".nexus" / "metrics" / "skill_outcome_events.jsonl"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        outcome["timestamp"] = datetime.now().isoformat()
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(outcome) + "\n")
 
     def run_review(self, diff: str = "") -> dict:
         """Legacy review entrypoint kept for container contract tests."""
