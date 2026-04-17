@@ -11,6 +11,7 @@ import time
 import requests
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from nexus.core.drone_protocol import DroneProtocol
 
 logger = logging.getLogger("nexus.drone")
 
@@ -86,7 +87,7 @@ class DroneToolBox:
         except Exception as e:
             return {"status": "FAIL", "error": str(e)}
 
-class TacticalDrone:
+class TacticalDrone(DroneProtocol):
     def __init__(self, drone_id: str, project_root: Path, belief_score: float = 1.0, max_rounds: int = 3, timeout_sec: int = 300):
         self.drone_id = drone_id
         self.project_root = project_root

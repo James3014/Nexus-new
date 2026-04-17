@@ -12,6 +12,7 @@ from typing import Dict, List, Any, Optional, Set
 from dataclasses import dataclass, field
 from pathlib import Path
 from nexus.core.drone_engine import TacticalDrone
+from nexus.core.drone_protocol import DroneProtocol
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -90,6 +91,9 @@ class CampaignGeneral:
             project_root=self.project_root,
             belief_score=node.belief_confidence
         )
+
+        # 🛡️ 治理硬化：確保 Drone 符合介面協議
+        assert isinstance(drone, DroneProtocol), f"Drone {drone.drone_id} must implement DroneProtocol"
         
         # 2. 執行循環 (Sense-Think-Act)
         result = drone.sense_think_act(node.intent, tools=[])

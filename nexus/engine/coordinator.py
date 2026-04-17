@@ -506,6 +506,34 @@ class NexusEngine:
                         commands=verify_cmds
                     )
                 
+                # 🛡️ [Evidence:Auto] 系統自動採集證據 (防止 Agent 篡改)
+                evidence_path = self.project_root / ".nexus/reports/hallucination_evidence.json"
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                auto_evidence = {
+                    "_source": "system",
+                    "final_response": f"Task {task_id} pregate {'PASSED' if passed else 'FAILED'}",
+                    "evidence_bundle": {
+                        "code_artifacts": [str(self.run_dir)],
+                        "test_artifacts": [{
+                            "cmd": r.get("cmd", ""),
+                            "exit_code": r.get("exit_code", -1),
+                            "passed": r.get("passed", False),
+                            "stdout_tail": r.get("stdout_tail", ""),
+                            "stderr_tail": r.get("stderr_tail", ""),
+                        } for r in gate_results],
+                        "command_artifacts": [
+                            f"{r.get('cmd', '')} -> rc={r.get('exit_code', -1)}"
+                            for r in gate_results
+                        ],
+                        "aggregates": {
+                            "success_rate": sum(1 for r in gate_results if r.get("passed")) / max(len(gate_results), 1),
+                            "total_commands": len(gate_results),
+                        }
+                    }
+                }
+                evidence_path.write_text(json.dumps(auto_evidence, indent=2, ensure_ascii=False), encoding="utf-8")
+                logger.info("🛡️ [Evidence:Auto] Written to %s (agent-tamper-proof)", evidence_path)
+
                 # 💎 結晶化：委託 MetricsAggregator 聚合數據
                 payload = self.metrics_agg.aggregate_crystallize_payload(
                     task_id, skill_id, passed, gate_results, state.metadata
@@ -605,8 +633,9 @@ class NexusEngine:
         )
         logger.info(f"💎 [Aggregator:CRYSTAL] Lesson {lesson_id} persisted to LanceDB.")
         
-        return True
         # 寫入 event log
         log_path = self.project_root / ".nexus/metrics/skill_outcome_events.jsonl"
         with open(log_path, "a") as f:
             f.write(json.dumps(payload) + "\n")
+        
+        return True

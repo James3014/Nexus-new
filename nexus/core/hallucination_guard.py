@@ -259,8 +259,13 @@ class HallucinationGuard:
     def get_status(self) -> str:
         score = self.score
         thresholds = self.schema["thresholds"]
-        if score <= thresholds["VERIFIED"]: return "VERIFIED"
-        elif score <= thresholds["PARTIAL"]: return "PARTIAL"
+        if score <= thresholds["VERIFIED"]:
+            return "VERIFIED"
+        elif score <= thresholds["PARTIAL"]:
+            # 🛡️ 嚴格模式：PARTIAL 等同 REJECTED
+            if os.environ.get("NEXUS_STRICT_QUARANTINE") == "1":
+                return "REJECTED"
+            return "PARTIAL"
         return "REJECTED"
     
     def get_verdict(self, status: str) -> str:
