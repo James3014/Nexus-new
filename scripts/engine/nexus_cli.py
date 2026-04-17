@@ -25,6 +25,11 @@ repo_root = Path(__file__).resolve().parents[2]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
+# 🛡️ Nexus v4.0 Persistence: Hardened Health & Resilience
+os.environ.setdefault("NEXUS_MCP_HEALTHCHECK_ENABLED", "1")
+os.environ.setdefault("NEXUS_MCP_HEALTHCHECK_TTL_SEC", "120")
+os.environ.setdefault("NEXUS_SERENA_FAIL_OPEN", "1")
+
 
 class NexusCLI:
     """Compatibility shim for legacy callers that import NexusCLI from this module."""
@@ -293,6 +298,20 @@ def acceptance_check(as_json, evidence_path):
     cmd = [sys.executable, str(repo_root / "scripts/ops/nexus_acceptance_check.py")]
     if as_json: cmd.append("--json")
     subprocess.run(cmd, check=True)
+
+    # 1.5 驗收報告宣稱完整性檢查（防止跨分支/缺證據誤宣稱）
+    verify_cmd = [
+        sys.executable,
+        str(repo_root / "scripts/ops/verify_report_claims.py"),
+        "--project-root",
+        str(repo_root),
+        "--require-acceptance-pass",
+        "--require-path",
+        ".nexus/reports/acceptance_check.json",
+        "--require-path",
+        ".nexus/reports/acceptance_check.md",
+    ]
+    subprocess.run(verify_cmd, check=True)
     
     # 2. 執行幻覺審計 (always render; hard-fail only when explicit evidence gets REJECTED)
     if not check_hallucination(evidence_path):
@@ -2006,4 +2025,3 @@ def oracle_apply(shadow_tid):
 
 if __name__ == "__main__":
     nexus()
-

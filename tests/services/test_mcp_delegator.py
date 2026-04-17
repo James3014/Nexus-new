@@ -68,3 +68,40 @@ async def test_delegate_mcp_timeout(mock_server_env, monkeypatch):
     
     assert result["status"] == "FAIL"
     assert "TIMEOUT" in str(result["error"]).upper()
+
+
+@pytest.mark.asyncio
+async def test_serena_no_server_degrades_success(monkeypatch):
+    monkeypatch.delenv("MCP_DEFAULT_SERVER", raising=False)
+    monkeypatch.setenv("NEXUS_SERENA_FAIL_OPEN", "1")
+    delegator = MCPDelegator()
+    result = await delegator.delegate_mcp(
+        tool="serena_replace_content",
+        tenant_id="tenant_123",
+        args={"path": "x", "content": "y"},
+    )
+    assert result["status"] == "SUCCESS"
+    assert result["audit_status"] == "DEGRADED_SUCCESS"
+    assert result["fallback_used"] is True
+    assert "serena_no_server_configured" in result["fallback_reason"]
+
+
+@pytest.mark.asyncio
+async def test_serena_healthcheck_failed_degrades_success(mock_server_env, monkeypatch):
+    monkeypatch.setenv("NEXUS_SERENA_FAIL_OPEN", "1")
+    delegator = MCPDelegator()
+
+    async def _unhealthy(_command):
+        return False, "probe_exception:boom"
+
+    delegator._probe_command_health = _unhealthy  # type: ignore[method-assign]
+
+    result = await delegator.delegate_mcp(
+        tool="serena_execute_shell_command",
+        tenant_id="tenant_123",
+        args={"cmd": "echo hi"},
+    )
+    assert result["status"] == "SUCCESS"
+    assert result["audit_status"] == "DEGRADED_SUCCESS"
+    assert result["fallback_used"] is True
+    assert "serena_unhealthy" in result["fallback_reason"]

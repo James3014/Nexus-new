@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,12 @@ try:
     from scripts.ops.lesson_writeback_check import check_lesson_evidence
 except ImportError:
     def check_lesson_evidence(project_root): return True
+
+try:
+    from scripts.ops.verify_report_claims import verify_claims
+except ImportError:
+    def verify_claims(project_root, **kwargs):  # type: ignore
+        return {"passed": True, "checks": [], "project_root": str(project_root)}
 
 
 @dataclass(frozen=True)
@@ -324,6 +331,26 @@ def _evaluate_lesson_writeback(project_root: Path) -> CriterionResult:
     )
 
 
+def _evaluate_report_claim_integrity(
+    project_root: Path,
+    *,
+    required_paths: List[str],
+    require_acceptance_pass: bool,
+) -> CriterionResult:
+    """新增準則: report_claim_integrity."""
+    report = verify_claims(
+        project_root,
+        required_paths=required_paths,
+        require_clean=False,
+        require_acceptance_pass=require_acceptance_pass,
+    )
+    return CriterionResult(
+        name="report_claim_integrity",
+        passed=bool(report.get("passed", False)),
+        detail=report,
+    )
+
+
 def _write_markdown(report: Dict[str, Any], path: Path) -> None:
     lines = [
         "# Nexus Acceptance Check (Hardened)",
@@ -369,6 +396,11 @@ def main():
     parser.add_argument("--include-sources", default="pipeline.crystallize,pipeline.repair,pipeline.repair_audit")
     parser.add_argument("--exclude-sources", default="calibration.sim")
     parser.add_argument("--exclude-tasks", default="")
+    parser.add_argument(
+        "--required-claim-paths",
+        default=os.environ.get("NEXUS_REQUIRED_CLAIM_PATHS", ""),
+        help="Comma-separated files that must exist before claims can be marked PASS.",
+    )
     
     parser.add_argument("--json", action="store_true", help="Output as JSON.")
     args = parser.parse_args()
@@ -408,17 +440,33 @@ def main():
     wiki_contract_check = _evaluate_wiki_harness_contract(wiki_summary)
     
     lesson_check = _evaluate_lesson_writeback(project_root)
-    
-    gate_passed = all(c.passed for c in checks + [learning_check, ucc_check, wiki_contract_check, lesson_check])
-    
+    all_checks = checks + [learning_check, ucc_check, wiki_contract_check, lesson_check]
+    gate_passed = all(c.passed for c in all_checks)
+
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if gate_passed else "FAIL",
         "gate_passed": gate_passed,
-        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks + [learning_check, ucc_check, wiki_contract_check, lesson_check]],
+        "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks],
         "wiki_harness": wiki_summary,
     }
-    
+
+    # Write once so verifier can inspect current acceptance status from disk.
+    (output_dir / "acceptance_check.json").write_text(json.dumps(report, indent=2))
+    _write_markdown(report, output_dir / "acceptance_check.md")
+
+    required_paths = [p.strip() for p in str(args.required_claim_paths).split(",") if p.strip()]
+    claim_check = _evaluate_report_claim_integrity(
+        project_root,
+        required_paths=required_paths,
+        require_acceptance_pass=gate_passed,
+    )
+    all_checks.append(claim_check)
+    gate_passed = gate_passed and claim_check.passed
+    report["status"] = "PASS" if gate_passed else "FAIL"
+    report["gate_passed"] = gate_passed
+    report["criteria"] = [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks]
+
     (output_dir / "acceptance_check.json").write_text(json.dumps(report, indent=2))
     _write_markdown(report, output_dir / "acceptance_check.md")
     

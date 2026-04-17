@@ -100,4 +100,25 @@ version_scope:
 - **Decision**: harden `SessionMetabolism.load_checkpoint()` to tolerate missing files and run cross-environment verification (`root data + branch code`) before judging regression severity.
 - **Prevention**: classify failures into code regressions vs environment parity gaps; only block merge on code regressions, and record parity assumptions in the runbook.
 
+## 2026-04-17: Contract drift can fake "hardening complete"
+- **Phenomenon**: Claimed hardening path still crashed in runtime because producer/consumer contracts drifted (`OutcomePayload` field mismatch, external skill fields not persisted, sandbox runtime import hole).
+- **Root Cause**: acceptance relied on narrative and partial spot checks, not end-to-end contract verification for schema + persistence + execution.
+- **Decision**: make schema compatibility explicit across `SkillFrontmatter -> SkillRegistry -> coordinator` and `OutcomePayload -> build_outcome_event`, and fix runtime import defects before sign-off.
+- **Prevention**: add a mandatory "contract triad" gate for each hardening PR: dataclass compatibility check, persistence round-trip check, and smoke execution in isolated sandbox.
+
+## 2026-04-18: Legacy CLI alias drift hides real acceptance regressions
+- **Phenomenon**: `nexus:acceptance-check --window 10` failed at Click parsing (`No such option: --window`) while downstream checks were never executed.
+- **Root Cause**: legacy alias behavior drifted from test assumptions; governance verification can be bypassed by argument-layer failures.
+- **Decision**: add branch-scoped report claim verification as a post-acceptance hard gate, independent from legacy alias options.
+- **Prevention**: keep legacy alias tests minimal (no obsolete options), and assert verifier hook execution explicitly in acceptance pipeline tests.
+
 | 2026-04-16 | Red-Team-Hardening | T1-T5 Implementation | VALIDATED |
+| 2026-04-18 | V25-Soul-Pentad | Orchestrator Integration | INCOMPLETE |
+
+## 2026-04-18: v25 Governance Gate FAIL (Incomplete Hardening)
+- **Phenomenon**: Although Soul Pentad modules (Belief/Palace) are integrated, the acceptance-check results are:
+  - auto_repair_success_rate: 0% (Threshold: 80%)
+  - phantom_false_positive_rate: 100% (Threshold: 3%)
+- **Root Cause**: The Orchestrator now routes to new gates, but the underlying 'auto-repair' logic still uses legacy stubs without BeliefEngine feedback.
+- **Decision**: Reject v25 READY status.
+- **Next Step**: Implement actual 'Belief-to-Action' mapping in DroneEngine to boost repair success.

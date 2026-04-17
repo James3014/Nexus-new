@@ -182,6 +182,7 @@ class PipelineCrystalMixin:
                 regression_pass_rate=100.0,
                 pattern_reuse=float(ctx.state.metadata.get("pattern_reuse_rate", 0.0) or 0.0),
                 next_run_hit=float(ctx.state.metadata.get("next_run_hit_rate", 0.0) or 0.0),
+                effort_level=str(ctx.state.metadata.get("effort_level", "unknown")),
                 metadata={"status": "COMPLETED", "audit_status": "APPROVED", "source": "pipeline.crystallize"},
             )
             c_event = build_outcome_event(payload)
@@ -271,6 +272,7 @@ class PipelineCrystalMixin:
                 regression_pass_rate=0.0, 
                 pattern_reuse=float(ctx.state.metadata.get("pattern_reuse_rate", 0.0) or 0.0), 
                 next_run_hit=float(ctx.state.metadata.get("next_run_hit_rate", 0.0) or 0.0), 
+                effort_level=str(ctx.state.metadata.get("effort_level", "unknown")),
                 metadata={"status": "FAILED", "audit_status": "REJECTED", "source": "pipeline.crystallize"}
             )
             fail_event = build_outcome_event(payload)

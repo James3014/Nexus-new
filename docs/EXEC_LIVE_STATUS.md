@@ -1,9 +1,10 @@
 # EXEC LIVE STATUS
 
-Last Update: 2026-03-27 17:51:44
+Last Update: 2026-04-17 23:30:47
 
 | Task | Status | Retry | Last Update | Note |
 |---|---|---:|---|---|
+| preflight.read_index | done | 0 | 2026-04-17 23:30:47 | command_rc=0; completion_gate:completion_gate_skipped |
 
 Rule: pause only on destructive/credential/spec_conflict.
 
