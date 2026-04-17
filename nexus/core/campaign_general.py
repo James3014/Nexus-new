@@ -42,6 +42,7 @@ class CampaignGeneral:
         self.project_root = project_root
         self.campaign_map: Dict[str, TaskNode] = {}
         self.max_nodes = 25  # 史詩級任務上限
+        self.burst_count = 0
 
     def decompose_intent(self, macro_intent: str) -> List[TaskNode]:
         """
@@ -49,9 +50,6 @@ class CampaignGeneral:
         調用專業 Agent 進行全域掃描與任務爆破。
         """
         logger.info(f"🧠 [L4:Decomposer] Performing epic-level decomposition for: {macro_intent}")
-        
-        # 🛡️ 實戰對位：這裡模擬調用專門的 L4 拆解 Prompt 或 X-Ray 掃描
-        # 在正式版中，這會生成一個具備 10-20 個節點的複雜圖結構
         
         # 建立一個史詩級範例：重構、實作、文檔與安全掃描的連動 DAG
         nodes = [
@@ -63,7 +61,6 @@ class CampaignGeneral:
             TaskNode("T6-DOC-COMPLETE", "Crystallize technical spec into documentation", dependencies=["T5-BFT-VALIDATOR"], impact_files=["docs/arch/"])
         ]
         
-        # 為 T3 與 T4 標註為可並行（因為它們都只依賴 T2 且 impact_files 隔離）
         for node in nodes:
             node.envelope = StrategicEnvelope(
                 macro_intent=macro_intent,
@@ -72,6 +69,51 @@ class CampaignGeneral:
             self.campaign_map[node.node_id] = node
             
         return nodes
+
+    def trigger_burst(self, node_id: str):
+        """
+        🚀 [L4:Recursive-Bursting] 細胞分裂：將一個過於龐大的任務炸開為子圖。
+        """
+        if node_id not in self.campaign_map: return
+        
+        target = self.campaign_map[node_id]
+        logger.info(f"💥 [L4:Bursting] Node {node_id} too complex. Splitting into sub-campaign.")
+        
+        # 建立子任務圖 (模擬分裂過程)
+        self.burst_count += 1
+        sub_n1 = TaskNode(f"{node_id}.1", f"Analyze bottleneck of {target.intent}", impact_files=target.impact_files)
+        sub_n2 = TaskNode(f"{node_id}.2", f"Implement core fix for {node_id}", dependencies=[sub_n1.node_id], impact_files=target.impact_files)
+        sub_n3 = TaskNode(f"{node_id}.3", f"Regression test for {node_id}", dependencies=[sub_n2.node_id])
+        
+        # 更新全域圖：繼承原始依賴
+        sub_n1.dependencies = target.dependencies
+        
+        # 將下游任務的依賴重新指向子圖的末端
+        for n in self.campaign_map.values():
+            if node_id in n.dependencies:
+                n.dependencies.remove(node_id)
+                n.dependencies.append(sub_n3.node_id)
+        
+        # 移除原節點，注入新節點
+        del self.campaign_map[node_id]
+        for sub in [sub_n1, sub_n2, sub_n3]:
+            sub.envelope = target.envelope
+            self.campaign_map[sub.node_id] = sub
+        
+        logger.info(f"✅ [L4:Bursting] Node {node_id} replaced by {[sub_n1.node_id, sub_n2.node_id, sub_n3.node_id]}")
+
+    def is_milestone_reached(self) -> bool:
+        """
+        🚧 [L4:Milestone] 里程碑檢查點。
+        判斷當前已完成節點比例，必要時強制暫停等待審議。
+        """
+        completed = [n for n in self.campaign_map.values() if n.status == "SUCCESS"]
+        ratio = len(completed) / max(1, len(self.campaign_map))
+        if 0.4 < ratio < 0.6: # 50% 里程碑
+            logger.warning(f"🚧 [L4:Milestone] 50% mission reached ({len(completed)} nodes). Requiring architect review.")
+            return True
+        return False
+
 
 
     def get_executable_nodes(self) -> List[TaskNode]:

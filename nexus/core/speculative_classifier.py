@@ -21,7 +21,7 @@ class SpeculativeClassifier:
         }
 
     def analyze_and_hydrate(self, task: str) -> Dict[str, Any]:
-        """分析任務並從記憶中補全維度"""
+        """分析任務並從記憶中補全維度，整合 L1 Clarify-Manager"""
         task_l = task.lower()
         found_dims = {}
         missing_dims = []
@@ -38,12 +38,25 @@ class SpeculativeClassifier:
                 else:
                     missing_dims.append(dim)
 
+        # 🚀 [L1:Clarify-Manager] 信心度與補問閘門
+        confidence = 0.8 if not missing_dims else (0.4 if len(missing_dims) > 2 else 0.6)
+        clarify_required = confidence < 0.6
+        
+        clarify_suggestions = []
+        if clarify_required:
+            for dim in missing_dims:
+                clarify_suggestions.append(f"Could you specify the preferred {dim}?")
+
         return {
-            "intent_confidence": 0.8 if not missing_dims else 0.5,
-            "found_dimensions": found_dims,
+            "task": task,
+            "intent_confidence": confidence,
+            "dimensions": found_dims, # 統一命名為 dimensions 供 L3 使用
             "missing_dimensions": missing_dims,
+            "clarify_required": clarify_required,
+            "clarify_suggestions": clarify_suggestions,
             "is_ready_for_shadow": len(found_dims) >= 2
         }
+
 
     def _guess_from_history(self, dimension: str) -> str | None:
         """
