@@ -64,7 +64,7 @@ def test_regression_hardcoded_dag_protection(project_root):
     n2 = c.decompose_intent("refactor the whole system core")
     assert len(n1) != len(n2)
     assert len(n1) == 2 # Fallback
-    assert len(n2) == 3 # Refactor
+    assert len(n2) == 4 # Refactor (Updated from 3 to 4)
 
 def test_regression_skill_naming_stability(project_root):
     # 確保同意圖產生同技能名稱 (SHA256)

@@ -7,9 +7,10 @@
 
 ### 2.1 L4: 動態 DAG 拆解 (CampaignGeneral)
 - **變更**: 將原本固定的 6 節點拆解邏輯改為啟發式關鍵字驅動。
-- **支援關鍵字**: `refactor`, `fix`, `bug`, `doc`, `wiki`。
-- **Fallback**: 當無匹配關鍵字時，自動降級至最小安全 DAG (2 節點)。
-- **Metadata**: 包含 `fallback_used` 與 `dag_generation_reason`。
+- **支援關鍵字**: `refactor` (4 節點), `fix` (3 節點), `bug`, `doc`, `wiki`, `security`, `feature`, `system`。
+- **Fallback**: 當無匹配關鍵字時，根據意圖長度產生 2~4 個節點。短意圖 (< 15 字) 固定為 2 節點。
+- **穩定性**: 支持 `seed` 確定性輸出與基於 MD5 雜湊的變異。
+- **Metadata**: 包含 `fallback_used`, `dag_score` 與 `stability_tag`。
 
 ### 2.2 L3: 可攜式技能組裝 (SkillAssembler)
 - **變更**: 移除 `/Users/jameschen/` 等本機絕對路徑，改用 `project_root` 與環境變數。
