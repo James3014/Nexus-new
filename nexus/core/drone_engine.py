@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-🧬 Nexus Tactical Drone Engine (Integrated with LLM Reasoning & Physical Sandbox)
+🧬 Nexus Tactical Drone Engine (Integrated with Local Bonsai-1.7B & Physical Sandbox)
 這是 Nexus 戰甲的微型執行核心。
-負責將「靈魂五位一體」應用於微觀任務執行，並於隔離環境 (SwarmBroker) 中進行安全的物理操作。
+負責將「靈魂五位一體」應用於微觀任務執行，預設使用本機推理引擎。
 """
 import os
 import json
@@ -16,11 +16,40 @@ try:
     from nexus.services.gateway import BattlesuitGateway
     from nexus.research.swarm_broker import SwarmBroker
 except ImportError:
-    # Fallback placeholders for tests if not available
     BattlesuitGateway = None
     SwarmBroker = None
 
 logger = logging.getLogger("nexus.drone")
+
+class LocalDroneBrain:
+    """[P0] Local Reasoning Engine via Ollama (Bonsai-1.7B)."""
+    def __init__(self, model_name: str = "bonsai-drone"):
+        self.model_name = model_name
+        self.api_url = "http://localhost:11434/api/generate"
+
+    def ask(self, prompt: str, system_msg: str) -> Dict[str, Any]:
+        import requests
+        try:
+            full_prompt = f"System: {system_msg}\n\nUser: {prompt}\n\nAssistant:"
+            res = requests.post(
+                self.api_url,
+                json={
+                    "model": self.model_name,
+                    "prompt": full_prompt,
+                    "stream": False,
+                    "format": "json"
+                },
+                timeout=60
+            )
+            if res.status_code == 200:
+                raw_resp = res.json().get("response", "{}")
+                # 處理 Ollama 可能回傳的 Markdown Code Block
+                if "```json" in raw_resp:
+                    raw_resp = raw_resp.split("```json")[1].split("```")[0].strip()
+                return json.loads(raw_resp)
+            return {"error": f"Ollama status {res.status_code}"}
+        except Exception as e:
+            return {"error": str(e)}
 
 class DroneToolBox:
     """[P0] True Tool Integration: Executes commands within a given sandbox directory."""
@@ -62,6 +91,8 @@ class TacticalDrone:
         self.memory_l0 = self._load_muse_proto()
         self.tracelog = []
         self.status = "INIT"
+        # [P0] Local-First: Initialize Local Brain
+        self.local_brain = LocalDroneBrain()
         self.gateway = BattlesuitGateway(project_root=project_root) if BattlesuitGateway else None
 
     def _load_muse_proto(self) -> str:
@@ -73,7 +104,7 @@ class TacticalDrone:
         [R] 執行循環：感知 -> 推理 -> 動作
         """
         self.status = "EXECUTING"
-        logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle for: {task_intent[:50]}")
+        logger.info(f"🐝 [Drone:{self.drone_id}] Starting cycle (Local-First) for: {task_intent[:50]}")
         start_time = time.time()
         
         # [P0] Allocate physical sandbox
@@ -83,7 +114,6 @@ class TacticalDrone:
             sandbox_dir = broker.acquire(timeout_sec=10)
         
         if not sandbox_dir:
-            # Fallback to local tmp if broker unavailable
             sandbox_dir = self.project_root / ".nexus/tmp" / self.drone_id
             sandbox_dir.mkdir(parents=True, exist_ok=True)
             
@@ -97,45 +127,32 @@ class TacticalDrone:
             round_count += 1
             if time.time() - start_time > self.timeout_sec:
                 outcome = "TIMEOUT"
-                self._log_trace("ERROR", f"Budget Guard: Timeout after {self.timeout_sec}s")
+                self._log_trace("ERROR", "Budget Guard: Timeout")
                 break
                 
-            # [P0] True Reasoning via LLM
-            if self.gateway:
-                prompt_text = (
-                    f"You are a Tactical Drone in Nexus. Drone ID: {self.drone_id}.\n"
-                    f"MUSE_PROTO: {self.memory_l0[:500]}...\n"
-                    f"Task: {task_intent}\n"
-                    f"Round: {round_count}/{self.max_rounds}\n"
-                    "Determine next action. Return JSON with 'action' (BASH, EDIT, DONE), 'command' or 'content', and 'reasoning'."
-                )
-                try:
-                    resp, _ = self.gateway.ask_structured(
-                        prompt=prompt_text,
-                        payload=f"Current traces: {self.tracelog[-3:]}",
-                        phase="R",
-                        output_schema={
-                            "action": "BASH | EDIT | DONE | SPAWN",
-                            "command": "str (for BASH/SPAWN)",
-                            "content": "str (for EDIT)",
-                            "target_file": "str (for EDIT)",
-                            "reasoning": "str"
-                        }
-                    )
-                    thought = resp.get("reasoning", "No reasoning provided")
-                    action = resp.get("action", "DONE")
-                    self._log_trace("THINK", f"[LLM] {thought}")
-                except Exception as e:
-                    self._log_trace("ERROR", f"Gateway failed: {e}")
-                    action = "DONE"
-            else:
-                # Mock reasoning for tests
-                thought = f"Applying MUSE_PROTO to {task_intent}. Belief confidence: {self.belief_score}"
-                self._log_trace("THINK", thought)
-                action = "DONE"
-                if "fail" in task_intent.lower() and round_count == 1:
-                    action = "BASH"
-                    resp = {"command": "false"}  # Returns exit_code 1
+            # [P0] Reasoning: Try Local Brain first
+            resp = self.local_brain.ask(
+                prompt=f"Task: {task_intent}\nRound: {round_count}\nLast traces: {self.tracelog[-2:]}",
+                system_msg=f"You are a Nexus Drone. Follow MUSE_PROTO. Return JSON with 'action' (BASH|EDIT|DONE), 'command' or 'content', and 'reasoning'."
+            )
+            
+            if "error" in resp:
+                self._log_trace("WARN", f"Local Brain fail: {resp['error']}. Trying Cloud.")
+                if self.gateway:
+                    try:
+                        resp, _ = self.gateway.ask_structured(
+                            prompt=f"Drone {self.drone_id} task: {task_intent}",
+                            payload=f"Previous traces: {self.tracelog}",
+                            phase="R",
+                            output_schema={"action": "BASH|EDIT|DONE", "command": "str", "reasoning": "str"}
+                        )
+                    except: resp = {"action": "DONE", "reasoning": "Gateway error fallback"}
+                else:
+                    resp = {"action": "DONE", "reasoning": "No brain available"}
+
+            thought = resp.get("reasoning", "Thinking...")
+            action = resp.get("action", "DONE")
+            self._log_trace("THINK", f"[Reasoning] {thought}")
 
             # Act
             if action == "BASH":
@@ -144,23 +161,16 @@ class TacticalDrone:
                 tool_res = toolbox.bash_exec(cmd)
                 self._log_trace("SENSE", f"Result: {tool_res}")
                 if tool_res["exit_code"] != 0:
-                    self._log_trace("SELF-HEAL", "Detected mismatch. Initiating recursive correction...")
+                    self._log_trace("SELF-HEAL", "Command failed. Adjusting belief.")
                     self.belief_score *= 0.8
             elif action == "EDIT":
-                target = resp.get("target_file", "unknown.txt")
+                target = resp.get("target_file", "drone_edit.txt")
                 self._log_trace("ACT", f"Running EDIT: {target}")
                 tool_res = toolbox.file_edit(target, resp.get("content", ""))
                 self._log_trace("SENSE", f"Result: {tool_res}")
-            elif action == "SPAWN":
-                self._log_trace("ACT", "Triggering recursive SPAWN.")
-                outcome = "SPAWNED"
-                break
             elif action == "DONE":
                 self._log_trace("ACT", "Task marked as DONE.")
-                if self.belief_score > 0.5:
-                    outcome = "SUCCESS"
-                else:
-                    outcome = "REPAIR_NEEDED"
+                outcome = "SUCCESS" if self.belief_score > 0.5 else "REPAIR_NEEDED"
                 break
                 
         if broker and sandbox_dir and "nexus-swarm" in str(sandbox_dir):
@@ -194,7 +204,7 @@ class TacticalDrone:
         output_path.write_text(json.dumps(crystal, indent=2))
         logger.info(f"💎 [Drone:{self.drone_id}] Evolution crystal saved: {output_path}")
 
-        # [P1] Memory Writeback: Store SOP to LanceDB (mocked as JSON here for ingestion)
+        # [P1] Memory Writeback: Store SOP
         if self.status == "SUCCESS":
             sop_dir = self.project_root / ".nexus/reports/evolution/sops"
             sop_dir.mkdir(parents=True, exist_ok=True)
