@@ -3,6 +3,7 @@ msa_lifecycle.py
 Lifecycle & A/B Kill Switch
 """
 import time
+import os
 from .msa_indexer import get_file_hash
 from typing import Dict, Any, List
 
