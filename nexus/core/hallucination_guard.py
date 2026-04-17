@@ -188,7 +188,9 @@ class HallucinationGuard:
         threshold = 0.55  # Round-3 門檻
         for artifact in test_artifacts:
             if isinstance(artifact, dict) and "aggregates" in artifact:
-                success_rate = artifact["aggregates"].get("success_rate", 1.0)
+                # 🛡️ 治理硬化：嚴格模式下 success_rate 預設 0.0（未提供即視為失敗）
+                _sr_default = 0.0 if os.environ.get("NEXUS_STRICT_HALLUCINATION_DEFAULT") == "1" else 1.0
+                success_rate = artifact["aggregates"].get("success_rate", _sr_default)
                 if float(success_rate) < threshold:
                     return True
         return False
