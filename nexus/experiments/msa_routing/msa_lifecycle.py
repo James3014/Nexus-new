@@ -4,7 +4,7 @@ Lifecycle & A/B Kill Switch
 """
 import time
 import os
-from .msa_indexer import get_file_hash
+from nexus.experiments.msa_routing.msa_indexer import get_file_hash
 from typing import Dict, Any, List
 
 class KillSwitchTriggeredError(Exception):
