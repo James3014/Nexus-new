@@ -11,6 +11,13 @@ echo "📘 Enforced briefing generated: $BRIEFING_PATH"
 
 bash scripts/ops/_nexus_preflight.sh || exit 1
 
+# 🛡️ Nexus Startup Contract Check
+export NEXUS_RUNNER="Gemini"
+python3 scripts/ops/nexus_startup_contract_check.py || {
+  echo "❌ [ENFORCEMENT-BLOCK] Startup Contract FAILED. Agent cannot proceed."
+  exit 1
+}
+
 if [[ $# -ge 1 ]]; then
   PROMPT_FILE="$1"
   REPORT_FILE="${2:-.nexus/reports/gemini_round_report.json}"
@@ -19,6 +26,10 @@ if [[ $# -ge 1 ]]; then
   exec bash scripts/ops/run_gemini_nexus_round.sh "$PROMPT_FILE" "$REPORT_FILE" "$TIMEOUT_SEC"
 fi
 
-echo "🚀 Launching interactive Gemini shell (preflight already passed)..."
-echo "⚠️ Before execution, load briefing: $BRIEFING_PATH"
+echo "🚀 [ENFORCED-INTERACTIVE] Launching interactive Gemini shell..."
+echo "🛡️ Startup Contract ACK: $(cat .nexus/reports/startup_hardening/startup_contract_ack.json | grep ack_token)"
+echo "📘 Loading Briefing: $BRIEFING_PATH"
+# 強制輸出 Briefing 摘要
+head -n 20 "$BRIEFING_PATH"
+
 exec /Users/jameschen/.npm-global/bin/gemini

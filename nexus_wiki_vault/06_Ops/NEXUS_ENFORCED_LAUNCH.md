@@ -82,16 +82,20 @@ Before any [task](../Reference/task.md) execution, the agent must pass:
 bash ./scripts/ops/start_gemini_nexus_enforced.sh gemini-3-flash-preview yolo
 ```
 
-## Antigravity (enforced)
+## Codex (enforced)
 ```bash
-bash ./scripts/ops/start_antigravity_nexus_enforced.sh
+bash ./scripts/ops/start_codex_nexus_enforced.sh
 ```
 
-If antigravity is not on PATH:
+If codex is not on PATH:
 ```bash
-ANTIGRAVITY_BIN=/absolute/path/to/antigravity \
-bash ./scripts/ops/start_antigravity_nexus_enforced.sh
+CODEX_BIN=/absolute/path/to/codex \
+bash ./scripts/ops/start_codex_nexus_enforced.sh
 ```
+
+## Legacy Support
+The old `start_antigravity_nexus_enforced.sh` is now a proxy to `start_codex_nexus_enforced.sh`.
+It will issue a deprecation warning but remain functional for migration.
 
 ## Override behavior
 By default, gate failure blocks startup.
