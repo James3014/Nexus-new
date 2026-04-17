@@ -3,7 +3,8 @@ import json
 import logging
 import os
 import shlex
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,12 @@ class MCPDelegator:
     def __init__(self):
         # Resolve timeout from env or default to 30s
         self.timeout = float(os.getenv("MCP_DELEGATION_TIMEOUT", os.getenv("NEXUS_MCP_TIMEOUT", "30.0")))
+        self.healthcheck_enabled = os.getenv("NEXUS_MCP_HEALTHCHECK_ENABLED", "1") == "1"
+        self.healthcheck_ttl_sec = float(os.getenv("NEXUS_MCP_HEALTHCHECK_TTL_SEC", "120"))
+        self.healthcheck_timeout_sec = float(os.getenv("NEXUS_MCP_HEALTHCHECK_TIMEOUT_SEC", "2.0"))
+        # Serena can fail-open by default to avoid blocking core local workflows.
+        self.serena_fail_open = os.getenv("NEXUS_SERENA_FAIL_OPEN", "1") == "1"
+        self._health_cache: Dict[str, Tuple[float, bool, str]] = {}
 
     def _get_server_command(self, tool: str) -> Optional[list[str]]:
         """Resolve server/tool mapping from env/config with safe defaults."""
@@ -42,6 +49,77 @@ class MCPDelegator:
     def _is_mock_server(command: list[str]) -> bool:
         return any("mock_mcp_server.py" in str(part) for part in command)
 
+    @staticmethod
+    def _is_serena_route(tool: str, command: Optional[list[str]]) -> bool:
+        tool_lc = (tool or "").lower()
+        if "serena" in tool_lc:
+            return True
+        if not command:
+            return False
+        return any("serena" in str(part).lower() for part in command)
+
+    async def _probe_command_health(self, command: list[str]) -> Tuple[bool, str]:
+        """
+        Lightweight health probe:
+        - quick exit with rc 0 is healthy
+        - long-running process (timeout) is considered healthy (server likely waiting on stdio)
+        """
+        cache_key = " ".join(command)
+        now = time.time()
+        cached = self._health_cache.get(cache_key)
+        if cached and (now - cached[0]) < self.healthcheck_ttl_sec:
+            return cached[1], cached[2]
+
+        process = None
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                rc = await asyncio.wait_for(process.wait(), timeout=self.healthcheck_timeout_sec)
+                healthy = rc == 0
+                reason = "ok" if healthy else f"probe_exit_{rc}"
+            except asyncio.TimeoutError:
+                healthy = True
+                reason = "ok_running"
+            self._health_cache[cache_key] = (now, healthy, reason)
+            return healthy, reason
+        except Exception as exc:
+            reason = f"probe_exception:{exc}"
+            self._health_cache[cache_key] = (now, False, reason)
+            return False, reason
+        finally:
+            if process and process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=0.5)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+
+    @staticmethod
+    def _degraded_success(tool: str, tenant_id: str, args: Dict[str, Any], reason: str) -> Dict[str, Any]:
+        return {
+            "status": "SUCCESS",
+            "audit_status": "DEGRADED_SUCCESS",
+            "fallback_used": True,
+            "fallback_reason": reason,
+            "tool": tool,
+            "tenant_id": tenant_id,
+            "tokens_consumed": 0,
+            "data": {
+                "status": "degraded_success",
+                "resolver": "local_safe_fallback",
+                "tool": tool,
+                "args": args,
+            },
+        }
+
     async def delegate_mcp(self, tool: str, tenant_id: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """
         🚀 Direct stdio Delegation
@@ -51,6 +129,9 @@ class MCPDelegator:
         
         command = self._get_server_command(tool)
         if not command:
+            if self._is_serena_route(tool, command) and self.serena_fail_open:
+                logger.warning("serena_no_server_configured -> degraded_success")
+                return self._degraded_success(tool, tenant_id, args, reason="serena_no_server_configured")
             return {
                 "status": "FAIL",
                 "tool": tool,
@@ -58,6 +139,20 @@ class MCPDelegator:
                 "tokens_consumed": 0,
                 "error": f"No MCP server configured for tool: {tool}"
             }
+
+        if self.healthcheck_enabled and self._is_serena_route(tool, command):
+            healthy, reason = await self._probe_command_health(command)
+            if not healthy:
+                logger.warning("serena_healthcheck_failed [%s] for command=%s", reason, command)
+                if self.serena_fail_open:
+                    return self._degraded_success(tool, tenant_id, args, reason=f"serena_unhealthy:{reason}")
+                return {
+                    "status": "FAIL",
+                    "tool": tool,
+                    "tenant_id": tenant_id,
+                    "tokens_consumed": 0,
+                    "error": f"Serena MCP unhealthy: {reason}",
+                }
 
         process = None
         try:
@@ -162,9 +257,15 @@ class MCPDelegator:
                         "tokens_consumed": 145,
                         "data": {"status": "executed", "tool": f"mempalace_{tool}", "args": args},
                     }
+                if self._is_serena_route(tool, command) and self.serena_fail_open:
+                    logger.warning("serena_empty_response -> degraded_success")
+                    return self._degraded_success(tool, tenant_id, args, reason="serena_empty_response")
                 return {"status": "FAIL", "tool": tool, "tenant_id": tenant_id, "tokens_consumed": 0, "error": "Timeout or empty response"}
             
             if "error" in call_res:
+                 if self._is_serena_route(tool, command) and self.serena_fail_open:
+                    logger.warning("serena_call_error -> degraded_success")
+                    return self._degraded_success(tool, tenant_id, args, reason=f"serena_call_error:{call_res['error']}")
                  return {
                     "status": "FAIL", "tool": tool, "tenant_id": tenant_id, "tokens_consumed": 0,
                     "error": str(call_res["error"].get("message", call_res["error"]))
@@ -190,9 +291,14 @@ class MCPDelegator:
             }
 
         except asyncio.TimeoutError:
+            if self._is_serena_route(tool, command) and self.serena_fail_open:
+                logger.warning("serena_timeout -> degraded_success")
+                return self._degraded_success(tool, tenant_id, args, reason="serena_timeout")
             return {"status": "FAIL", "tool": tool, "tenant_id": tenant_id, "tokens_consumed": 0, "error": "TIMEOUT"}
         except Exception as e:
             logger.error(f"MCP Delegation error: {str(e)}")
+            if self._is_serena_route(tool, command) and self.serena_fail_open:
+                return self._degraded_success(tool, tenant_id, args, reason=f"serena_exception:{e}")
             return {"status": "FAIL", "tool": tool, "tenant_id": tenant_id, "tokens_consumed": 0, "error": str(e)}
         finally:
             if process:
