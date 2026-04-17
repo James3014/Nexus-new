@@ -27,13 +27,21 @@ cat > "$OUT_FILE" <<'EOF'
    - cross-module high-risk concurrency/timing/root-cause-unknown
 4. NightShift command:
    - `uv run python scripts/nightshift.py --task "<TASK_DESC>" --target_file "<TARGET_FILE>" --max_rounds 3 --budget_min 3 --convergence_patience 2 --model gemini-3.1-pro-preview --fallback-model gemini-3-flash-preview`
-5. Gates (must pass):
-   - `uv run scripts/engine/nexus_cli.py nexus acceptance-check`
+# Gates (must pass):
+   - `uv run scripts/engine/nexus_cli.py nexus acceptance-check --evidence .nexus/reports/hallucination_evidence.json`
    - `uv run scripts/engine/nexus_cli.py nexus contract-check --contract-file .nexus/config/task_contract.example.json`
+
+# CLI Unification (Redirect Table)
+| Legacy (Blocked) | New Entrypoint |
+|---|---|
+| `nexus:acceptance-check` | `nexus acceptance-check` |
+| `nexus:status` | `nexus status` |
+| `nexus:closeout` | `nexus contract-check` |
 
 # Notes
 - Prioritize quality metrics over speed: success_rate + regression_rate first.
 - Hyper can be slightly slower than baseline but must not be less stable.
+- **NEVER use `nexus:*` style commands. They are blocked.**
 EOF
 
 echo "$OUT_FILE"

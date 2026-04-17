@@ -68,95 +68,40 @@ def nexus():
     pass
 
 
+def _blocked_deprecated(old: str, new: str):
+    """🚫 DEPRECATED_BLOCKED: 停止執行並引導至新入口。"""
+    click.secho(f"❌ [DEPRECATED_BLOCKED] 此命令 '{old}' 已停用。", fg="red", bold=True)
+    click.echo(f"💡 請改用唯一新入口：\n   {new}")
+    sys.exit(2)
+
 @nexus.command(name="nexus:status")
-@click.option("--aos", is_flag=True)
-def legacy_status(aos):
-    if aos:
-        click.echo("[Nexus:AOS] Governance Verification")
-        click.echo("Federation Status: READY")
-        return
-    click.echo("Nexus status: OK")
+def legacy_status():
+    _blocked_deprecated("nexus:status", "uv run scripts/engine/nexus_cli.py nexus status")
 
 
 @nexus.command(name="nexus:hud")
-@click.option("--refresh", default=1, type=int)
-@click.option("--daemon", is_flag=True)
-def legacy_hud(refresh, daemon):
-    if daemon:
-        click.echo("[HUD] Background Daemon STARTING")
-        from nexus.services import cli_commands_service as ccs
-        ccs.subprocess.Popen(["echo", "hud-daemon"])
-    else:
-        click.echo(f"[HUD] refresh={refresh}")
+def legacy_hud():
+    _blocked_deprecated("nexus:hud", "uv run scripts/engine/nexus_cli.py nexus status")
 
 
 @nexus.command(name="nexus:spec-lock")
-@click.argument("spec_path")
-def legacy_spec_lock(spec_path):
-    click.echo(f"Auditing {spec_path} against MUSE_ENGINE_SPEC")
-    click.echo(f"{spec_path} PASSED Constitutional Audit")
+def legacy_spec_lock():
+    _blocked_deprecated("nexus:spec-lock", "MUSE_ENGINE_SPEC 審計已整合入 ci_gate。")
 
 
 @nexus.command(name="nexus:governance-check")
 def legacy_governance_check():
-    res = subprocess.run([sys.executable, str(repo_root / "scripts" / "ops" / "ci_gate.py"), "--dry-run"])
-    if res.returncode == 0:
-        click.echo("[Governance-Check] PASS")
-        return
-    click.echo("Governance gate failed")
-    raise click.ClickException("Governance gate failed")
+    _blocked_deprecated("nexus:governance-check", "uv run scripts/ops/ci_gate.py --dry-run")
 
 
 @nexus.command(name="nexus:acceptance-check")
-@click.option("--window", default=50, type=int)
-@click.option("--evidence", type=click.Path(exists=True), help="Path to hallucination_evidence.json")
-@click.option("--json", "output_json", is_flag=True, help="Output in JSON format")
-def legacy_acceptance_check(window, evidence, output_json):
-    """[DEPRECATED] Use 'nexus acceptance-check' instead. Hardened release gate entry."""
-    click.secho("⚠️  [Legacy] 'nexus:acceptance-check' is deprecated. Forwarding to 'nexus acceptance-check'...", fg="yellow")
-    
-    # 1. Pre-check with CI gate
-    gate = subprocess.run([sys.executable, str(repo_root / "scripts" / "ops" / "ci_gate.py"), "--dry-run"], capture_output=True)
-    if gate.returncode != 0:
-        click.echo(gate.stdout.decode())
-        raise click.ClickException("Governance gate failed before acceptance-check")
-    
-    # 2. Forward to real acceptance check
-    cmd = [sys.executable, str(repo_root / "scripts" / "ops" / "nexus_acceptance_check.py"), "--window", str(window)]
-    if evidence:
-        cmd.extend(["--evidence", str(evidence)])
-    if output_json:
-        cmd.append("--json")
-        
-    res = subprocess.run(cmd)
-    if res.returncode != 0:
-        sys.exit(res.returncode)
+def legacy_acceptance_check():
+    _blocked_deprecated("nexus:acceptance-check", "uv run scripts/engine/nexus_cli.py nexus acceptance-check --evidence <FILE>")
 
 
 @nexus.command(name="nexus:closeout")
-@click.option("--contract", required=True, type=click.Path())
-def legacy_closeout(contract):
-    path = Path(contract)
-    if not path.exists():
-        raise click.ClickException("Contract file missing")
-    res = subprocess.run(
-        [sys.executable, str(repo_root / "scripts" / "ops" / "closeout_guard.py"), "--contract", contract],
-        capture_output=True,
-        text=True,
-    )
-    reports_dir = repo_root / ".nexus" / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    status_payload = {
-        "status": "PASS" if res.returncode == 0 else "FAIL",
-        "exit_code": res.returncode,
-    }
-    (reports_dir / "closeout_status.json").write_text(json.dumps(status_payload, indent=2), encoding="utf-8")
-    if res.stdout:
-        click.echo(res.stdout.strip())
-    if res.returncode == 0:
-        click.echo("Hard-Gate successfully cleared")
-    else:
-        raise click.ClickException("closeout_failed")
+def legacy_closeout():
+    _blocked_deprecated("nexus:closeout", "uv run scripts/engine/nexus_cli.py nexus contract-check --contract-file <FILE>")
 
 @nexus.group(name="nexus")
 def nexus_group():

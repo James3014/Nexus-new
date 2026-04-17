@@ -58,16 +58,26 @@ Use enforced launch scripts to guarantee agents start under Nexus preflight.
 To run agents in Nexus Armor Mode with full protocol enforcement:
 
 ```bash
-uv run scripts/engine/nexus_cli.py nexus:status --global
+uv run scripts/engine/nexus_cli.py nexus status --json
 uv run scripts/ops/ci_gate.py --dry-run
 ```
+
+## CLI Entrypoint Unification (入口統一對照表)
+
+| 舊入口 (DEPRECATED_BLOCKED) | 唯一新入口 (MANDATORY) |
+|---|---|
+| `nexus:status` | `nexus status` |
+| `nexus:acceptance-check` | `nexus acceptance-check` |
+| `nexus:closeout` | `nexus contract-check` |
+| `nexus:hud` | `nexus status` |
+| `nexus:governance-check` | `scripts/ops/ci_gate.py --dry-run` |
 
 ## Mandatory Protocol Checks
 
 Before any [task](../Reference/task.md) execution, the agent must pass:
 1.  **Agent Protocol Check**: `uv run scripts/ops/agent_protocol_check.py`
 2.  **Wiki Governance Audit**: `uv run scripts/ops/wiki_linter.py --strict`
-3.  **Acceptance Check**: `uv run scripts/ops/nexus_acceptance_check.py --output-dir .nexus/reports`
+3.  **Acceptance Check**: `uv run scripts/engine/nexus_cli.py nexus acceptance-check --evidence <FILE>`
 
 ## [[why|Why]]
 - Prevent direct raw agent startup without Nexus gate checks.
