@@ -357,6 +357,25 @@ class NexusEngine:
         elif exec_plan.mode == "self_heal" and self.ash_selector:
             print(f"🧠 [Autonomic] Priority: SELF_HEAL triggered by memory match.")
             # ASH 邏輯將由下方的 gate_eval 觸發或直接介入
+        elif exec_plan.mode == "external_skill":
+            print(f"🧠 [Autonomic] Priority: EXTERNAL_SKILL triggered. Binding {exec_plan.skill_id}...")
+            try:
+                from nexus.core.unified_registry import UnifiedRegistry
+                from pathlib import Path
+                reg = UnifiedRegistry(self.project_root)
+                # Ensure external skills are discoverable in a fresh process.
+                reg.refresh()
+                skill_data = reg.registry.get_by_task_id(exec_plan.skill_id)
+                if skill_data and skill_data.get("external_path"):
+                    skill_md = Path(skill_data["external_path"]).read_text(
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    state.metadata["active_external_skill"] = skill_data["name"]
+                    state.metadata["task_description"] += f"\n\n[EXTERNAL SKILL INSTRUCTIONS: {skill_data['name']}]\n{skill_md}"
+                    print(f"✅ [SkillEmbody] Injected {len(skill_md)} bytes of tactical knowledge.")
+            except Exception as e:
+                print(f"⚠️ [SkillEmbody] Failed to inject external skill: {e}")
         # ----------------------------------------
 
         # 🛡️ 治理閘門：委託 GateEvaluator 進行 Phase D 判定
