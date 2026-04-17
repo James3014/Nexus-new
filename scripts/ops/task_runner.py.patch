@@ -1,0 +1,80 @@
+--- scripts/ops/task_runner.py
++++ scripts/ops/task_runner.py
+@@ -10,6 +10,8 @@
+ from nexus.health.scoring import HealthScorer
+ from nexus.core.state_contracts import NexusState
+ from nexus.core.context_compactor import ContextCompactor
++from nexus.core.task_graph import topo_sort
++from scripts.utils.pid_lock import acquire_lock, release_lock
+ 
+ # Configure logging
+ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(module)s - %(message)s")
+@@ -19,40 +21,6 @@
+         v2_compatible=True
+     )
+ 
+-def topo_sort(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+-    """Sort tasks based on their dependencies."""
+-    result = []
+-    visited: Set[str] = set()
+-    temp_visited: Set[str] = set()
+-    
+-    # Create lookup table
+-    task_map = {t["id"]: t for t in tasks}
+-
+-    def visit(task_id: str):
+-        if task_id in temp_visited:
+-            raise RecursionError(f"Circular dependency detected involving {task_id}")
+-        if task_id in visited:
+-            return
+-
+-        temp_visited.add(task_id)
+-
+-        task = task_map.get(task_id)
+-        if not task:
+-            logger.warning(f"Task {task_id} not found in task map, but was referenced.")
+-            temp_visited.remove(task_id)
+-            visited.add(task_id)
+-            return
+-
+-        for dep in task.get("depends_on", []):
+-            visit(dep)
+-
+-        temp_visited.remove(task_id)
+-        visited.add(task_id)
+-        result.append(task)
+-
+-    for t in tasks:
+-        if t["id"] not in visited:
+-            visit(t["id"])
+-
+-    return result
+-
+ class TaskRunner:
+     def __init__(self, manifest_path: str = "task_manifest.yaml", work_dir: str = ".nexus/work"):
+         self.manifest_path = manifest_path
+@@ -193,22 +161,6 @@
+             self.compactor.compact(nexus_state)
+             
+ 
+-def acquire_lock(lock_file: str) -> bool:
+-    if os.path.exists(lock_file):
+-        with open(lock_file, "r") as f:
+-            old_pid = f.read().strip()
+-        
+-        try:
+-            old_pid = int(old_pid)
+-            os.kill(old_pid, 0)
+-            logger.error(f"Process {old_pid} is already running.")
+-            return False
+-        except (ValueError, ProcessLookupError):
+-            logger.warning(f"Found stale lock file for PID {old_pid}. Overwriting.")
+-            
+-    with open(lock_file, "w") as f:
+-        f.write(str(os.getpid()))
+-    return True
+-
+-def release_lock(lock_file: str):
+-    if os.path.exists(lock_file):
+-        os.remove(lock_file)
+-        logger.debug(f"Removed lock file: {lock_file}")

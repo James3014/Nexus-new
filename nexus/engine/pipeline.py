@@ -198,6 +198,7 @@ class NexusPipeline(
         state.metadata.setdefault("phase_skills", {})
         state.metadata.setdefault("escalation_count", 0)
         dry_run_mode = bool(kwargs.get("dry_run"))
+        state.metadata["effort_level"] = str(kwargs.get("effort", context.get("effort_level", "unknown") if context else "unknown"))
         if context:
             state.metadata.update(context)
             
