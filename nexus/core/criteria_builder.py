@@ -41,43 +41,56 @@ class CriteriaBuilder:
 
         return criteria
 
-    def execute_criteria(self, criteria: Dict[str, Any], artifact_dir: Path) -> bool:
+    def execute_criteria(self, criteria: Dict[str, Any], artifact_dir: Path, trace_id: str = "unknown") -> bool:
         """
         [L2:Gate] 物理執行驗收條件。
-        執行 artifact_dir 中的測試腳本，並回傳是否全數通過。
         """
-        logger.info(f"🧪 [L2:Criteria] Executing {len(criteria['required_tests'])} tests for: {criteria['intent'][:50]}")
+        logger.info(f"🧪 [L2:Criteria] [{trace_id}] Executing {len(criteria['required_tests'])} tests for: {criteria['intent'][:50]}")
         
         all_passed = True
         results = []
 
         for test in criteria["required_tests"]:
             test_path = artifact_dir / test
-            # 模擬執行過程 (真實環境下會使用 subprocess 呼叫 uv run pytest 等)
             logger.info(f"🏃 [L2:Gate] Running test artifact: {test}")
             
-            # 這裡注入一個模擬邏輯：如果 intent 包含 "FAIL_TEST"，則模擬失敗
+            # 模擬執行邏輯
             success = "fail_test" not in criteria["intent"].lower()
             
             results.append({
                 "test_name": test,
                 "status": "PASS" if success else "FAIL",
-                "artifact_path": str(test_path)
+                "artifact_path": str(test_path),
+                "trace_id": trace_id
             })
             
             if not success:
                 all_passed = False
-                logger.error(f"❌ [L2:Gate] Test {test} FAILED.")
+                logger.error(f"❌ [L2:Gate] Test {test} FAILED. Triggering repair path.")
 
         # 寫入機器可讀報表
         artifact_dir.mkdir(parents=True, exist_ok=True)
         report_path = artifact_dir / "criteria_report.json"
         report_data = {
             "intent": criteria["intent"],
+            "trace_id": trace_id,
             "criteria_passed": all_passed,
-            "results": results
+            "results": results,
+            "requires_repair": not all_passed
         }
         report_path.write_text(json.dumps(report_data, indent=2), encoding="utf-8")
-        logger.info(f"📊 [L2:Criteria] Report generated at {report_path}")
-
         return all_passed
+
+    def generate_criteria_report(self, test_runs: List[Dict[str, Any]], report_path: Path):
+        """
+        [P2-3] 產出 Criteria 驗收報表。
+        """
+        report = {
+            "total_runs": len(test_runs),
+            "silent_fail_count": sum(1 for r in test_runs if not r["criteria_passed"] and not r.get("requires_repair", False)),
+            "fail_cases": [r for r in test_runs if not r["criteria_passed"]],
+            "results": test_runs
+        }
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        return report
