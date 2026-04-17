@@ -113,4 +113,12 @@ version_scope:
 - **Prevention**: keep legacy alias tests minimal (no obsolete options), and assert verifier hook execution explicitly in acceptance pipeline tests.
 
 | 2026-04-16 | Red-Team-Hardening | T1-T5 Implementation | VALIDATED |
-| 2026-04-18 | V25-Soul-Pentad | Orchestrator Integration | SUCCESS |
+| 2026-04-18 | V25-Soul-Pentad | Orchestrator Integration | INCOMPLETE |
+
+## 2026-04-18: v25 Governance Gate FAIL (Incomplete Hardening)
+- **Phenomenon**: Although Soul Pentad modules (Belief/Palace) are integrated, the acceptance-check results are:
+  - auto_repair_success_rate: 0% (Threshold: 80%)
+  - phantom_false_positive_rate: 100% (Threshold: 3%)
+- **Root Cause**: The Orchestrator now routes to new gates, but the underlying 'auto-repair' logic still uses legacy stubs without BeliefEngine feedback.
+- **Decision**: Reject v25 READY status.
+- **Next Step**: Implement actual 'Belief-to-Action' mapping in DroneEngine to boost repair success.
