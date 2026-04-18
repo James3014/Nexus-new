@@ -12,7 +12,8 @@ from typing import Any, Dict, List
 def _run_git(project_root: Path, args: List[str]) -> str:
     try:
         out = subprocess.check_output(["git", *args], cwd=str(project_root), stderr=subprocess.DEVNULL)
-        return out.decode("utf-8", errors="replace").strip()
+        # Keep leading spaces on porcelain status lines; only trim trailing newlines.
+        return out.decode("utf-8", errors="replace").rstrip("\n")
     except Exception:
         return ""
 
@@ -32,7 +33,14 @@ def _parse_porcelain_paths(raw_status: str) -> List[str]:
     for line in raw_status.splitlines():
         if not line.strip():
             continue
-        path = line[3:].strip() if len(line) > 3 else line.strip()
+        if len(line) >= 3 and line[2] == " ":
+            path = line[3:]
+        elif len(line) >= 2 and line[1] == " ":
+            # Fallback for non-standard one-column short status output.
+            path = line[2:]
+        else:
+            path = line
+        path = path.strip()
         if " -> " in path:
             path = path.split(" -> ", 1)[1].strip()
         paths.append(path)

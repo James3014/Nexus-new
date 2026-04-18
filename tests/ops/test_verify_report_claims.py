@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from scripts.ops.verify_report_claims import verify_claims
+from scripts.ops.verify_report_claims import _parse_porcelain_paths, verify_claims
 
 
 def _init_git_repo(path: Path) -> None:
@@ -88,3 +88,11 @@ def test_verify_claims_require_clean_can_ignore_generated_reports(tmp_path: Path
     assert report["passed"] is True
     working_tree = next(c for c in report["checks"] if c["name"] == "working_tree")
     assert working_tree["detail"]["effective_dirty_entries"] == 0
+
+
+def test_parse_porcelain_paths_preserves_dot_prefixed_paths() -> None:
+    raw = " M .nexus/reports/acceptance_check.json\nM  scripts/ops/nexus_delivery_gate.sh\n"
+    assert _parse_porcelain_paths(raw) == [
+        ".nexus/reports/acceptance_check.json",
+        "scripts/ops/nexus_delivery_gate.sh",
+    ]
