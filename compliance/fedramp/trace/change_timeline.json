@@ -1,17 +1,22 @@
 [
   {
     "artifact": "hallucination_evidence.json",
-    "timestamp": "2026-04-18T01:06:20.378328",
+    "timestamp": "2026-04-18T09:36:35.380660",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-18T00:05:17.209923",
+    "timestamp": "2026-04-18T09:36:34.606050",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-18T00:05:17.209491",
+    "timestamp": "2026-04-18T09:36:34.605842",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "writeback_todo.json",
+    "timestamp": "2026-04-18T08:55:01.208393",
     "category": "Operational Report"
   },
   {
@@ -302,11 +307,6 @@
   {
     "artifact": "hyper_\u57f7\u884c\u300a3000\u5143\u958b\u59cb\u7684\u81ea\u4e3b\u4eba\u751f\u300b\u5168\u66f8\u8a9e\u7fa9\u91cd\u69cb\u8207\u7d50\u69cb\u9084\u539f\u3002\n\u76ee\u6a19\uff1a\n1. 100% \u5b57\u5143\u5b88\u6046\u6bd4\u5c0d\u3002\n2. \u7e2b\u5408\u65b7\u53e5\u4e26\u5efa\u7acb H2 \u7ae0\u7bc0\u6a19\u984c\u3002\n3. \u79fb\u9664 OCR \u6b98\u7559\u566a\u97f3 (imageXXX, PASSIONs...)\u3002\n4. \u6700\u7d42\u7522\u51fa\u81f3 99_Inbox_3000\u5143\u958b\u59cb\u7684\u81ea\u4e3b\u4eba\u751f_\u5b8c\u6574\u4fee\u5fa9\u7248.md\u3002.json",
     "timestamp": "2026-04-14T17:13:16.281172",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "writeback_todo.json",
-    "timestamp": "2026-04-14T15:23:45.200803",
     "category": "Operational Report"
   },
   {

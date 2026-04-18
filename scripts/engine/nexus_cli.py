@@ -2185,33 +2185,37 @@ def submit_task_cmd(task_id):
 
     task = orch.state_store.load_task(task_id)
     evidence_path = orch.evidence_collector.generate_hallucination_evidence(
-        task, f"Task {task_id} completed successfully by {task.owner}."
+        task, f"Task {task_id} processed by {task.owner}."
     )
     
+    # Load the generated evidence to get derived claims
+    with open(evidence_path, "r") as f:
+        derived_bundle = json.load(f)
+    
+    # 💎 Governance Bridge: Log REAL outcome based on derived claims
+    from nexus.orchestrator.governance_bridge import append_governance_event
+    append_governance_event(str(repo_root), {
+        "task_id": task_id,
+        "pass": derived_bundle["claim_state"] == "VERIFIED",
+        "phantom_blocked": derived_bundle["claim_state"] != "VERIFIED",
+        "proof_present": derived_bundle["confidence_level"] == "HIGH"
+    })
+
     # 8) Delivery Format
     import subprocess
     sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
     
-    # 💎 Governance Bridge: Log positive event to reduce phantom_fp_rate
-    from nexus.orchestrator.governance_bridge import append_governance_event
-    append_governance_event(str(repo_root), {
-        "task_id": task_id,
-        "pass": True,
-        "phantom_blocked": False,
-        "proof_present": True
-    })
-
     delivery = {
         "commit_sha": sha,
-        "nas_fitness": 1.0,
+        "nas_fitness": 1.0 if derived_bundle["claim_state"] == "VERIFIED" else 0.5,
         "nexus_participation_ratio": 1.0,
         "swarm_pids": "none",
         "gate_summary": {
-            "acceptance_check": "PASS",
-            "hallucination_index": "VERIFIED",
+            "acceptance_check": "PASS" if passed else "FAIL",
+            "hallucination_index": derived_bundle["claim_state"],
             "contract_check": "PASS",
             "ci_gate": "PASS",
-            "proof_present": True
+            "proof_present": derived_bundle["confidence_level"] == "HIGH"
         }
     }
     
