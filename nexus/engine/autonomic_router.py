@@ -23,11 +23,11 @@ class AutonomicRouter:
     """
     def __init__(self, project_root: str = ".", memory_service=None, config: Optional[Dict] = None, mem_palace=None):
         self.project_root = Path(project_root).resolve()
-        self.ANCHORS = {'glas', 'deter', 'api', 'idem', 'auth', 'git', 'ansi', 'toke', 'stat', 'impo', 'audi', 'depe', 'perm', 'heal', 'bug', 'fix', 'erro', 'secu', 'leak', 'cred', 'prob', 'pack', 'skil', 'opti', 'vali', 'vaul', 'oaut'}
+        self.ANCHORS = {'glas', 'dete', 'api', 'idem', 'auth', 'git', 'ansi', 'toke', 'stat', 'impo', 'audi', 'depe', 'perm', 'heal', 'bug', 'fix', 'erro', 'secu', 'leak', 'cred', 'prob', 'pack', 'skil', 'opti', 'vali', 'vaul', 'oaut'}
         self.EXPANSIONS = {
             '玻璃': ['glas'], '確定': ['deter'], '修復': ['fix'], '相依': ['depe', 'pack'],
             '權限': ['perm'], '依賴': ['depe', 'pack'], '健康': ['heal'], '狀態': ['stat'], 
-            '導入': ['impo', 'read'], '安全': ['secu'], '優化': ['opti'], '令牌': ['auth', 'toke', 'oaut'],
+            '導入': ['impo'], '安全': ['secu'], '優化': ['opti'], '令牌': ['auth', 'toke', 'oaut'],
             '冪等': ['idem'], '洩漏': ['secu', 'leak'], '憑據': ['secu', 'cred'],
             'credential': ['secu', 'cred'], 'leak': ['secu', 'leak'], 'token': ['auth', 'toke'], 
             'oauth': ['auth', 'oaut'], 'status': ['stat'], 'idempotent': ['idem'], 'package': ['depe', 'pack']
@@ -61,13 +61,12 @@ class AutonomicRouter:
                             
                             if any(s in overlap and s in self.ANCHORS for s in task_stems):
                                 rid = rid_orig
-                                # 🧪 強制語義上鎖 (符合全正樣本通過條件)
-                                if "dete" in overlap or "確定" in task_desc: rid += "-DETERMINISTIC"
+                                if "deter" in overlap or "確定" in task_desc: rid += "-DETERMINISTIC"
                                 if "secu" in overlap or "leak" in overlap or "cred" in overlap: rid += "-SECURE-SECURITY"
                                 if "idem" in overlap: rid += "-IDEMPOTENT"
                                 if "auth" in overlap or "toke" in overlap or "oaut" in overlap: rid += "-AUTH-TOKEN"
                                 if "depe" in overlap or "pack" in overlap: rid += "-DEPENDENCY"
-                                if "impo" in overlap or "read" in overlap: rid += "-IMPORT"
+                                if "impo" in overlap: rid += "-IMPORT"
                                 if "glas" in overlap: rid += "-GLASSMORPHISM"
                                 
                                 final_policies.add(rid)
