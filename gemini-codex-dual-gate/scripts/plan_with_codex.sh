@@ -49,6 +49,7 @@ Reasoning: <brief explanation>"
 # Call Codex CLI in --uncommitted mode. Current CLI version rejects custom prompt in this mode.
 OUTPUT=$(codex review --uncommitted -c "model=\"$MODEL\"" 2>&1)
 EXIT_CODE=$?
+RECEIPT_FILE=$(write_command_receipt "plan" "codex" "$MODEL" "codex review --uncommitted -c model=$MODEL" "$EXIT_CODE" "$OUTPUT")
 
 {
   echo "### Review Context Prompt"
@@ -56,6 +57,9 @@ EXIT_CODE=$?
   echo
   echo "### Codex Raw Output"
   echo "$OUTPUT"
+  echo
+  echo "### Receipt"
+  echo "$RECEIPT_FILE"
 } > .ai/codex-plan-review.md
 
 if [ $EXIT_CODE -ne 0 ]; then
@@ -68,7 +72,7 @@ if [ $EXIT_CODE -ne 0 ]; then
       echo "### Gate Note"
       echo "Codex quota unavailable. Plan gate was skipped by policy."
     } >> .ai/codex-plan-review.md
-    echo "⚠️ Codex 額度不足（或達上限），已跳過 Plan Review Gate。"
+    echo "⚠️ Codex 額度不足（或達上限），已跳過 Plan Review Gate（帶證據留檔）。"
     exit 0
   fi
 

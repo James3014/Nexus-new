@@ -2,6 +2,39 @@
 
 MAX_REVIEWS=5
 
+write_command_receipt() {
+  local phase="$1"
+  local tool="$2"
+  local model="$3"
+  local cmd="$4"
+  local exit_code="$5"
+  local output="$6"
+
+  mkdir -p .ai/receipts
+  local ts
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  local output_sha
+  output_sha="$(printf "%s" "$output" | shasum -a 256 | awk '{print $1}')"
+  local receipt_file=".ai/receipts/${phase}-${tool}-$(date +%s).json"
+
+  PHASE="$phase" TOOL="$tool" MODEL="$model" CMD="$cmd" EXIT_CODE="$exit_code" OUTPUT_SHA="$output_sha" TS="$ts" RECEIPT_FILE="$receipt_file" python3 - <<'PY'
+import json
+import os
+receipt = {
+  "phase": os.environ["PHASE"],
+  "tool": os.environ["TOOL"],
+  "model": os.environ["MODEL"],
+  "command": os.environ["CMD"],
+  "exit_code": int(os.environ.get("EXIT_CODE", "0") or "0"),
+  "output_sha256": os.environ["OUTPUT_SHA"],
+  "timestamp_utc": os.environ["TS"]
+}
+with open(os.environ["RECEIPT_FILE"], "w", encoding="utf-8") as f:
+  json.dump(receipt, f, indent=2, ensure_ascii=False)
+PY
+  echo "$receipt_file"
+}
+
 ensure_real_codex_cli() {
   local codex_bin
   codex_bin="$(command -v codex 2>/dev/null || true)"
@@ -35,7 +68,7 @@ ensure_real_codex_cli() {
 is_codex_quota_error() {
   local output="$1"
 
-  if [ "${CODEX_FORCE_QUOTA_SKIP:-0}" = "1" ]; then
+  if [ "${CODEX_FORCE_QUOTA_ERROR:-0}" = "1" ]; then
     return 0
   fi
 
