@@ -1,0 +1,3 @@
+command = "implement-closed-loop"
+description = "Execute full implementation and dual-gate audit in a single loop"
+script = "scripts/implement_closed_loop.sh"
