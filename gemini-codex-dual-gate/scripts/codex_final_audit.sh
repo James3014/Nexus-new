@@ -85,14 +85,15 @@ if echo "$OUTPUT" | grep -q "\[CRITICAL\]"; then FINAL_VERDICT="BLOCKED"; fi
 
 # 4. Mandatory Lesson Writeback to Nexus
 LESSONS=$(echo "$OUTPUT" | sed -n '/REQUIRED_LESSONS:/,$p' | sed '1d')
-if [ ! -z "$LESSONS" ] && [ "$LESSONS" != "None" ]; then
+LESSONS_NORMALIZED=$(echo "$LESSONS" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed '/^$/d')
+if [ -n "$LESSONS_NORMALIZED" ] && ! echo "$LESSONS_NORMALIZED" | grep -qiE '^(none|n/a)$'; then
   TASK_ID=$(cat .ai/task.md | head -n1 | sed 's/# Task Description//' | xargs)
   [ -z "$TASK_ID" ] && TASK_ID="codex-dual-gate-$(date +%s)"
 
   echo "### Codex Lesson ($(date))" >> .ai/lessons.md
-  echo "$LESSONS" >> .ai/lessons.md
+  echo "$LESSONS_NORMALIZED" >> .ai/lessons.md
 
-  L_ID=$(persist_lesson_to_nexus "$TASK_ID" "$LESSONS" "audit" "codex-final-audit" "fix-audit-findings")
+  L_ID=$(persist_lesson_to_nexus "$TASK_ID" "$LESSONS_NORMALIZED" "audit" "codex-final-audit" "fix-audit-findings")
   if [ $? -eq 0 ]; then
     update_state "lessons_written_to_nexus" "true"
     append_history "lesson_event_ids" "\"$L_ID\""
