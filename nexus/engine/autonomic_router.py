@@ -18,37 +18,44 @@ class ExecutionPlan:
 
 class AutonomicRouter:
     """
-    🧠 Nexus Autonomic Router (v4.12 Final Production Ready)
-    核心技術：Stemming-aware Matching.
+    🧠 Nexus Autonomic Router (v4.16 Target-Fix Final)
+    核心技術：4碼詞幹壓縮 (4-char Stemming).
     """
-    # 領域錨點
-    ANCHORS = {'glass', 'determinis', 'api', 'idempotent', 'idempotency', 'auth', 'git', 'ansible', 'token', 'state', 'import', 'audit', 'depend', 'permiss', 'health', 'bug', 'fix', 'error', 'secur', 'leak', 'vault', 'skill', 'optimiz'}
-    
-    BILINGUAL_MAP = {
-        '玻璃': 'glass', '確定': 'determinis', '修復': 'fix', '自動': 'auto',
-        '權限': 'permiss', '依賴': 'depend', '健康': 'health', '狀態': 'state', 
-        '導入': 'import', '安全': 'secur', '優化': 'optimiz', '令牌': 'token', '冪等': 'idempotent'
-    }
-
-    STOP_WORDS = { 'applying', 'effects', 'in', 'of', 'to', 'with', 'by', 'the', 'is', 'are', 'for', 'on' }
-
     def __init__(self, project_root: str = ".", memory_service=None, config: Optional[Dict] = None, mem_palace=None):
         self.project_root = Path(project_root).resolve()
+        
+        # 🧪 使用 4 碼詞幹錨點
+        raw_anchors = {
+            'glassmorphism', 'deterministic', 'api', 'idempotent', 'idempotency', 
+            'auth', 'git', 'ansible', 'token', 'state', 'import', 'audit', 
+            'dependency', 'permission', 'health', 'bug', 'fix', 'error', 'secure',
+            'skill', 'optimize', 'validation', 'vault', 'circular', 'security', 'leak', 
+            'credential', 'probe', 'package'
+        }
+        raw_map = {
+            '玻璃': 'glass', '確定': 'deter', '修復': 'fix', '自動': 'auto',
+            '權限': 'permi', '依賴': 'depen', '健康': 'healt', '狀態': 'state', 
+            '導入': 'impor', '安全': 'secur', '優化': 'optim', '令牌': 'token', 
+            '冪等': 'idemp', '洩漏': 'leak', '憑據': 'crede'
+        }
+
+        self.ANCHORS = {self._stem(w) for w in raw_anchors}
+        self.BILINGUAL_MAP = {zh: self._stem(en) for zh, en in raw_map.items()}
+        self.STOP_WORDS = {self._stem(w) for w in ['applying', 'effects', 'in', 'of', 'to', 'with', 'by', 'the', 'is', 'are', 'for', 'on', 'execution', 'high', 'pattern', 'results']}
 
     def _stem(self, word: str) -> str:
-        """簡單詞幹化，取前 6 碼確保 security/secure, idempotent/idempotency 對位"""
-        return word.lower()[:6]
+        """採用 4 碼詞幹，極大化跨語系重合機率"""
+        return word.lower()[:4]
 
     def route(self, task_desc: str, state: NexusState, forecast: Dict[str, Any], pre_routing: Optional[Dict] = None) -> ExecutionPlan:
         desc_lower = task_desc.lower()
-        raw_words = set(re.findall(r"\w+", desc_lower))
         
-        # 詞幹化處理
-        task_stems = {self._stem(w) for w in raw_words}
+        task_stems = set()
+        for w in re.findall(r"\w+", desc_lower): task_stems.add(self._stem(w))
         for zh, en_stem in self.BILINGUAL_MAP.items():
             if zh in desc_lower: task_stems.add(en_stem)
             
-        matched_policies = []
+        matched_policies = set()
         if self.project_root:
             p_path = self.project_root / "nexus/knowledge/policy_memory.jsonl"
             if p_path.exists():
@@ -57,19 +64,17 @@ class AutonomicRouter:
                         if not line.strip(): continue
                         try:
                             p = json.loads(line)
-                            pool = set(re.findall(r"\w+", p.get("condition", ""))) | set(re.findall(r"\w+", p.get("rule_id", "")))
-                            pool_stems = {self._stem(w) for w in pool if w.lower() not in self.STOP_WORDS}
+                            pool = p.get("rule_id", "").lower() + " " + p.get("condition", "").lower()
+                            pool_stems = {self._stem(w) for w in re.findall(r"\w+", pool)}
                             
                             overlap = pool_stems & task_stems
                             if not overlap: continue
                             
-                            ratio = len(overlap) / len(pool_stems)
-                            has_anchor = any(s in overlap and s in self.ANCHORS for s in task_stems)
-                            
-                            if has_anchor or ratio >= 0.45:
-                                matched_policies.append(p.get("rule_id"))
+                            # 🛡️ 只要命中了 4 碼錨點詞幹，即導通
+                            if any(s in overlap and s in self.ANCHORS for s in task_stems):
+                                matched_policies.add(p.get("rule_id"))
                         except: continue
 
-        matched_policies = sorted(list(set(matched_policies)))
-        mode = "research_first" if any(k in desc_lower for k in ["research", "研究"]) else "swarm" if len(matched_policies) > 12 else "standard"
-        return ExecutionPlan(mode=mode, reason=f"Stem-Audit: {len(matched_policies)} matches.", confidence=1.0, matched_policies=matched_policies)
+        final_policies = sorted(list(matched_policies))
+        mode = "research_first" if "research" in desc_lower or "研究" in desc_lower else "swarm" if len(final_policies) > 15 else "standard"
+        return ExecutionPlan(mode=mode, reason=f"H-v4: {len(final_policies)} hits.", confidence=1.0, matched_policies=final_policies)
