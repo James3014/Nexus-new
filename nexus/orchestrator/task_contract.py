@@ -22,7 +22,7 @@ class TaskStateTransition:
         TaskStatus.CREATED: [TaskStatus.ASSIGNED, TaskStatus.BLOCKED, TaskStatus.CLOSED],
         TaskStatus.ASSIGNED: [TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED, TaskStatus.CLOSED, TaskStatus.FAILED],
         TaskStatus.IN_PROGRESS: [TaskStatus.READY_FOR_REVIEW, TaskStatus.FAILED, TaskStatus.CONFLICTED, TaskStatus.BLOCKED, TaskStatus.CLOSED],
-        TaskStatus.READY_FOR_REVIEW: [TaskStatus.INTEGRATED, TaskStatus.REJECTED, TaskStatus.FAILED, TaskStatus.CLOSED],
+        TaskStatus.READY_FOR_REVIEW: [TaskStatus.INTEGRATED, TaskStatus.REJECTED, TaskStatus.FAILED, TaskStatus.CLOSED, TaskStatus.CONFLICTED],
         TaskStatus.INTEGRATED: [TaskStatus.CLOSED],
         TaskStatus.REJECTED: [TaskStatus.IN_PROGRESS, TaskStatus.CLOSED, TaskStatus.FAILED],
         TaskStatus.FAILED: [TaskStatus.IN_PROGRESS, TaskStatus.CLOSED],

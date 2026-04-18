@@ -55,8 +55,19 @@ class EvidenceCollector:
         
         return task.is_done_ready()
 
-    def save_report(self, task: Task):
-        report_path = self.reports_dir / f"{task.task_id}_report.json"
-        with open(report_path, "w") as f:
-            f.write(task.model_dump_json(indent=2))
-        return report_path
+    def generate_hallucination_evidence(self, task: Task, final_response: str):
+        evidence_path = Path(".nexus/reports/hallucination_evidence.json")
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        bundle = {
+            "final_response": final_response,
+            "evidence_bundle": {
+                "code_artifacts": task.allowed_files,
+                "test_artifacts": [e.output_summary for e in task.evidence_list if "pytest" in e.command],
+                "command_artifacts": [f"{e.command} (exit: {e.exit_code})" for e in task.evidence_list]
+            }
+        }
+        
+        with open(evidence_path, "w") as f:
+            json.dump(bundle, f, indent=2)
+        return evidence_path
