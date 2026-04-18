@@ -1,0 +1,14 @@
+[
+  {"name": "deterministic_fix_en", "task": "Execution of high-frequency automated bug fixes for OFF-001 pattern", "expected_tags": ["DETERMINISTIC"], "negative": false},
+  {"name": "deterministic_fix_zh", "task": "優化自動化修復循環，確保執行序列具備 100% 確定性", "expected_tags": ["DETERMINISTIC"], "negative": false},
+  {"name": "glass_en", "task": "Applying glassmorphism effects in dashboard components", "expected_tags": ["GLASS"], "negative": false},
+  {"name": "glass_zh", "task": "為 Dashboard 核心組件實現玻璃擬態效果", "expected_tags": ["GLASS"], "negative": false},
+  {"name": "state_guard", "task": "Implement strict state transition guard to block invalid bypass", "expected_tags": ["STATE"], "negative": false},
+  {"name": "python_import", "task": "Fix NameError by adding missing os import in research phase module", "expected_tags": ["IMPORT"], "negative": false},
+  {"name": "deploy_perm", "task": "Fix permission denied during deploy script execution", "expected_tags": ["DEPLOY", "PERM"], "negative": false},
+  {"name": "audit_strike", "task": "When audit fails 3 times escalate to intervention protocol", "expected_tags": ["AUDIT"], "negative": false},
+  {"name": "api_health", "task": "Add a /health endpoint for API readiness checks", "expected_tags": ["API", "HEALTH"], "negative": false},
+  {"name": "skill_opt", "task": "Optimize skill and require validation status ok", "expected_tags": ["SKILL"], "negative": false},
+  {"name": "noise_marketing", "task": "Write a marketing landing page headline", "expected_tags": [], "negative": true},
+  {"name": "noise_recipe", "task": "Generate a pasta recipe", "expected_tags": [], "negative": true}
+]

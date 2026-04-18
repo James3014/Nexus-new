@@ -1,0 +1,22 @@
+[
+  {"name": "idempotency_en", "task": "Ensure the deployment script is idempotent", "expected_tags": ["IDEMPOTENT"], "negative": false},
+  {"name": "idempotency_zh", "task": "確保部署腳本符合冪等性規範", "expected_tags": ["IDEMPOTENCY"], "negative": false},
+  {"name": "security_leak_en", "task": "Check for credential leaks in repository", "expected_tags": ["SECURITY"], "negative": false},
+  {"name": "security_leak_zh", "task": "掃描存儲庫是否存在憑據洩漏", "expected_tags": ["SECURE"], "negative": false},
+  {"name": "ansible_vault_en", "task": "Encrypt secrets using ansible-vault", "expected_tags": ["ANSIBLE"], "negative": false},
+  {"name": "ansible_vault_zh", "task": "使用 ansible-vault 加密敏感資訊", "expected_tags": ["ANSIBLE"], "negative": false},
+  {"name": "auth_token_en", "task": "Implement OAuth2 token validation", "expected_tags": ["AUTH", "TOKEN"], "negative": false},
+  {"name": "auth_token_zh", "task": "實作 OAuth2 令牌校驗邏輯", "expected_tags": ["AUTH", "TOKEN"], "negative": false},
+  {"name": "git_atomic_en", "task": "Split the changes into atomic git commits", "expected_tags": ["GIT"], "negative": false},
+  {"name": "git_atomic_zh", "task": "將變更拆分為原子級 git 提交", "expected_tags": ["GIT"], "negative": false},
+  {"name": "python_import_refactor", "task": "Refactor all circular imports in the core module", "expected_tags": ["IMPORT"], "negative": false},
+  {"name": "api_endpoint_health", "task": "Implement a readiness probe for the api services", "expected_tags": ["API", "HEALTH"], "negative": false},
+  {"name": "state_machine_guard", "task": "Ensure state machine transitions don't bypass auth", "expected_tags": ["STATE", "AUTH"], "negative": false},
+  {"name": "package_dep_en", "task": "Update pinned dependencies in package.json", "expected_tags": ["DEPENDENCY"], "negative": false},
+  {"name": "package_dep_zh", "task": "更新 package.json 中的相依性版本", "expected_tags": ["DEPENDENCY"], "negative": false},
+  {"name": "noise_weather", "task": "What is the weather in Taipei?", "expected_tags": [], "negative": true},
+  {"name": "noise_math", "task": "Calculate the square root of 256", "expected_tags": [], "negative": true},
+  {"name": "noise_chat", "task": "Hello, how are you today?", "expected_tags": [], "negative": true},
+  {"name": "noise_format", "task": "Format this paragraph to be more readable", "expected_tags": [], "negative": true},
+  {"name": "noise_translate", "task": "Translate 'Hello' to Japanese", "expected_tags": [], "negative": true}
+]
