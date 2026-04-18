@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 source "$(dirname "$0")/lib/state.sh"
 source "$(dirname "$0")/lib/lesson_writeback.sh"
 

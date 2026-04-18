@@ -1,4 +1,6 @@
 #!/bin/bash
+set -euo pipefail
+
 source "$(dirname "$0")/lib/state.sh"
 source "$(dirname "$0")/lib/artifact.sh"
 source "$(dirname "$0")/lib/gate.sh"
@@ -8,6 +10,7 @@ MODEL="${CODEX_MODEL:-gpt-5.4}"
 if ! ensure_real_codex_cli; then
   mkdir -p .ai
   [ -f .ai/state.json ] || cp "$(dirname "$0")/../templates/.ai/state.json" .ai/state.json
+  seal_state
   set_status "BLOCKED"
   exit 1
 fi
@@ -15,95 +18,110 @@ fi
 mkdir -p .ai
 if [ ! -f .ai/state.json ]; then
   cp "$(dirname "$0")/../templates/.ai/state.json" .ai/state.json
+  seal_state
 fi
-
-if [ ! -f .ai/task.md ]; then
-  cp "$(dirname "$0")/../templates/.ai/task.md" .ai/task.md
-fi
-
-if [ ! -f .ai/constraints.md ]; then
-  cp "$(dirname "$0")/../templates/.ai/constraints.md" .ai/constraints.md
-fi
-
-if [ ! -f .ai/plan.md ]; then
-  cp "$(dirname "$0")/../templates/.ai/plan.md" .ai/plan.md
-fi
-
-if [ ! -f .ai/acceptance.md ]; then
-  cp "$(dirname "$0")/../templates/.ai/acceptance.md" .ai/acceptance.md
-fi
+[ -f .ai/task.md ] || cp "$(dirname "$0")/../templates/.ai/task.md" .ai/task.md
+[ -f .ai/constraints.md ] || cp "$(dirname "$0")/../templates/.ai/constraints.md" .ai/constraints.md
+[ -f .ai/plan.md ] || cp "$(dirname "$0")/../templates/.ai/plan.md" .ai/plan.md
+[ -f .ai/acceptance.md ] || cp "$(dirname "$0")/../templates/.ai/acceptance.md" .ai/acceptance.md
 
 echo "🚀 Requesting Codex Plan Review (Model: $MODEL)..."
 
-# Build prompt for plan review (kept as context artifact).
-PROMPT="Please review the following plan artifacts and provide a verdict.
-Task: $(cat .ai/task.md 2>/dev/null || echo 'N/A')
-Constraints: $(cat .ai/constraints.md 2>/dev/null || echo 'N/A')
-Plan: $(cat .ai/plan.md)
-Acceptance Criteria: $(cat .ai/acceptance.md 2>/dev/null || echo 'N/A')
+PROMPT="Review this plan strictly and reply exactly:
+VERDICT: APPROVED|REVISE|BLOCKED
+RATIONALE: <short>
 
-Output format:
-VERDICT: APPROVED | REVISE | BLOCKED
-Reasoning: <brief explanation>"
+TASK:
+$(cat .ai/task.md 2>/dev/null || echo 'N/A')
 
-# Call Codex CLI in --uncommitted mode. Current CLI version rejects custom prompt in this mode.
-OUTPUT=$(codex review --uncommitted -c "model=\"$MODEL\"" 2>&1)
-EXIT_CODE=$?
-RECEIPT_FILE=$(write_command_receipt "plan" "codex" "$MODEL" "codex review --uncommitted -c model=$MODEL" "$EXIT_CODE" "$OUTPUT")
+CONSTRAINTS:
+$(cat .ai/constraints.md 2>/dev/null || echo 'N/A')
+
+PLAN:
+$(cat .ai/plan.md)
+
+ACCEPTANCE:
+$(cat .ai/acceptance.md 2>/dev/null || echo 'N/A')"
+
+# Review uncommitted diff context.
+set +e
+DIFF_OUTPUT="$(codex review --uncommitted -c "model=\"$MODEL\"" 2>&1)"
+DIFF_EXIT=$?
+set -e
+DIFF_RECEIPT="$(write_command_receipt "plan-diff" "codex" "$MODEL" "codex review --uncommitted -c model=$MODEL" "$DIFF_EXIT" "$DIFF_OUTPUT")"
+
+# Review explicit artifact prompt.
+set +e
+PROMPT_OUTPUT="$(codex review -c "model=\"$MODEL\"" "$PROMPT" 2>&1)"
+PROMPT_EXIT=$?
+set -e
+PROMPT_RECEIPT="$(write_command_receipt "plan-prompt" "codex" "$MODEL" "codex review -c model=$MODEL <prompt>" "$PROMPT_EXIT" "$PROMPT_OUTPUT")"
 
 {
   echo "### Review Context Prompt"
   echo "$PROMPT"
   echo
-  echo "### Codex Raw Output"
-  echo "$OUTPUT"
+  echo "### Codex Diff Review Output"
+  echo "$DIFF_OUTPUT"
   echo
-  echo "### Receipt"
-  echo "$RECEIPT_FILE"
+  echo "### Codex Prompt Review Output"
+  echo "$PROMPT_OUTPUT"
+  echo
+  echo "### Receipts"
+  echo "$DIFF_RECEIPT"
+  echo "$PROMPT_RECEIPT"
 } > .ai/codex-plan-review.md
 
-if [ $EXIT_CODE -ne 0 ]; then
-  if is_codex_quota_error "$OUTPUT"; then
+if [ "$DIFF_EXIT" -ne 0 ] || [ "$PROMPT_EXIT" -ne 0 ]; then
+  if is_codex_quota_error "$DIFF_OUTPUT $PROMPT_OUTPUT"; then
+    PLAN_HASH="$(calculate_hash ".ai/plan.md")"
+    update_state "plan_hash" "\"$PLAN_HASH\""
     update_state "codex_quota_skipped" "true"
+    update_state "merge_blocked" "true"
     append_history "codex_review_history" "{\"timestamp\": \"$(date)\", \"verdict\": \"SKIPPED_NO_QUOTA\", \"type\": \"plan\", \"model\": \"$MODEL\"}"
-    set_status "PLAN_APPROVED"
+    set_status "PLAN_APPROVED_WITH_RISK"
     {
       echo
       echo "### Gate Note"
-      echo "Codex quota unavailable. Plan gate was skipped by policy."
+      echo "Codex quota unavailable. Plan gate accepted WITH RISK and merge remains blocked."
     } >> .ai/codex-plan-review.md
-    echo "⚠️ Codex 額度不足（或達上限），已跳過 Plan Review Gate（帶證據留檔）。"
+    echo "⚠️ Codex 額度不足（或達上限），Plan Review 以風險模式通過（PLAN_APPROVED_WITH_RISK）。"
     exit 0
   fi
 
-  echo "❌ Codex CLI failed with exit code $EXIT_CODE" >> .ai/codex-plan-review.md
+  echo "❌ Codex CLI failed. Diff exit=$DIFF_EXIT prompt exit=$PROMPT_EXIT" >> .ai/codex-plan-review.md
   set_status "BLOCKED"
   echo "❌ Codex CLI Error. Check .ai/codex-plan-review.md"
-  exit $EXIT_CODE
+  exit 1
 fi
 
-# Parse Verdict
-VERDICT=$(echo "$OUTPUT" | grep -oE "VERDICT: (APPROVED|REVISE|BLOCKED)" | head -n1 | cut -d' ' -f2)
+VERDICT="$(printf "%s\n%s\n" "$PROMPT_OUTPUT" "$DIFF_OUTPUT" | grep -oE "VERDICT: (APPROVED|REVISE|BLOCKED)" | head -n1 | awk '{print $2}')"
 if [ -z "$VERDICT" ]; then
-  if echo "$OUTPUT" | grep -qiE "no issues found|no actionable findings"; then
-    VERDICT="APPROVED"
-  else
-    VERDICT="REVISE"
-  fi
+  set_status "PLAN_REVISE"
+  {
+    echo
+    echo "### Gate Note"
+    echo "Missing structured VERDICT from Codex output."
+  } >> .ai/codex-plan-review.md
+  echo "❌ Plan Review missing structured VERDICT. Please revise and rerun."
+  exit 1
 fi
 
 echo -e "\n### Normalized Verdict\nVERDICT: $VERDICT" >> .ai/codex-plan-review.md
-
-# Update State
 increment_count "codex_review_count"
 append_history "codex_review_history" "{\"timestamp\": \"$(date)\", \"verdict\": \"$VERDICT\", \"type\": \"plan\", \"model\": \"$MODEL\"}"
 
-if [ "$VERDICT" == "APPROVED" ]; then
-  PLAN_HASH=$(calculate_hash ".ai/plan.md")
+if [ "$VERDICT" = "APPROVED" ]; then
+  PLAN_HASH="$(calculate_hash ".ai/plan.md")"
   update_state "plan_hash" "\"$PLAN_HASH\""
+  update_state "merge_blocked" "false"
   set_status "PLAN_APPROVED"
   echo "✅ Plan Approved by Codex ($MODEL)."
-else
+elif [ "$VERDICT" = "REVISE" ]; then
   set_status "PLAN_REVISE"
-  echo "❌ Plan Rejected by Codex ($MODEL): $VERDICT. Please revise .ai/plan.md"
+  echo "❌ Plan Rejected by Codex ($MODEL): REVISE. Please revise .ai/plan.md"
+else
+  set_status "PLAN_BLOCKED"
+  echo "❌ Plan Blocked by Codex ($MODEL)."
+  exit 1
 fi
