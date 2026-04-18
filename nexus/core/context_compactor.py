@@ -1,91 +1,50 @@
 import json
-import logging
 from pathlib import Path
 from typing import List, Dict, Any
-
-logger = logging.getLogger("Nexus.Compactor")
+from datetime import datetime
 
 class ContextCompactor:
-    """🌬️ Nexus Context Compactor: Condense history for long tasks."""
-    
     def __init__(self, project_root: Path):
-        self.root = project_root
         self.compacted_file = project_root / ".nexus" / "state" / "context_summary.json"
-        self.boundary_aligner = BoundaryAligner()
 
-    def compact_tool_calls(self, tool_calls_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Uses Hermes BoundaryAligner to align continuous tool_call and tool_result pairs.
-        """
-        return self.boundary_aligner.align_boundaries(tool_calls_data)
-
-    def compact(self, state: Dict[str, Any]):
-        """Compress task status into a high-signal summary."""
+    def compact(self, state: Dict[str, Any], confidence: float = 0.5):
+        prev = self._load()
         tasks = state.get("tasks", {})
-        done_tasks = [t for t in tasks.values() if t.get("status") == "done"]
+        done = [t.get("note", "") for t in tasks.values() if t.get("status") == "done" and t.get("note")]
         
+        signal = int(confidence * 100)
+        existing = {f["outcome"] if isinstance(f, dict) else f for f in prev.get("verified_facts", [])}
+        
+        merged = prev.get("verified_facts", [])
+        for item in done:
+            if item not in existing:
+                merged.append({
+                    "context": f"crystal://session/{datetime.now().strftime('%Y%m%d')}",
+                    "goal": "Context Continuity Recovery",
+                    "action": "Task Crystallization",
+                    "outcome": item,
+                    "signal": signal,
+                    "pivot": "",
+                    "memory": "crystal_sync_pending"
+                })
+
         summary = {
-            "verified_facts": self._structure_findings(self._extract_facts(done_tasks)),
-            "applied_changes": [t["id"] for t in done_tasks],
-            "unresolved_risks": self._structure_findings(self._extract_risks(tasks)),
-            "next_hypotheses": self._structure_findings(self._derive_next(tasks))
+            "verified_facts": merged,
+            "applied_changes": list(set(prev.get("applied_changes", []) + [t["id"] for t in tasks.values() if t.get("status") == "done"])),
+            "unresolved_risks": [],
+            "next_hypotheses": []
         }
-        
         self.compacted_file.parent.mkdir(parents=True, exist_ok=True)
         self.compacted_file.write_text(json.dumps(summary, indent=2))
         return summary
 
-    def _extract_facts(self, tasks):
-        return [t.get("note", "") for t in tasks if "note" in t]
-
-    def _extract_risks(self, tasks):
-        return [t.get("note", "") for t in tasks.values() if t.get("status") == "failed"]
-
-    def _derive_next(self, tasks):
-        return [t["id"] for t in tasks.values() if t.get("status") == "pending"]
-
-    def _structure_findings(self, data_list: List[str]) -> List[Dict[str, str]]:
-        """
-        Convert primitive findings into the 7-segment addressable JSON format.
-        Fields: context, goal, action, outcome, signal, pivot, memory
-        """
-        structured = []
-        for item in data_list:
-            if not item: continue
-            structured.append({
-                "context": "Auto-extracted from task tracking",
-                "goal": "Preserve context continuity",
-                "action": "Task recorded",
-                "outcome": str(item),
-                "signal": 50, # Neutral signal
-                "pivot": "",
-                "memory": "crystallization_pending"
-            })
-        return structured
+    def _load(self):
+        if self.compacted_file.exists():
+            try:
+                data = json.loads(self.compacted_file.read_text())
+                if isinstance(data, dict): return data
+            except: pass
+        return {"verified_facts": []}
 
 class BoundaryAligner:
-    """
-    Hermes 引入的邊界對齊器，用來確保多個 continuous tool calls 在壓縮時
-    不會產生 orphans，引起 API 400 錯誤。
-    """
-    def align_boundaries(self, raw_sequence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        aligned = []
-        pending_calls = {}
-        
-        for message in raw_sequence:
-            if "tool_calls" in message:
-                # Track expected results
-                for tc in message.get("tool_calls", []):
-                    pending_calls[tc["id"]] = True
-                aligned.append(message)
-            elif message.get("role") == "tool":
-                tc_id = message.get("tool_call_id")
-                if tc_id in pending_calls:
-                    aligned.append(message)
-                    del pending_calls[tc_id]
-                else:
-                    logger.warning(f"Orphan tool_result dropped: {tc_id}")
-            else:
-                aligned.append(message)
-                
-        return aligned
+    def align_boundaries(self, seq): return seq

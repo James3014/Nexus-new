@@ -177,24 +177,44 @@ class ContextHub:
         # 🧪 [TOON-2.0 Rendering]
         toon_summary = ToonRenderer.render(state, aggression=nas_aggression)
 
+        # 🧪 [v25.0 Context-Compactor Integration]
+        from nexus.core.context_compactor import ContextCompactor
+        compactor = ContextCompactor(self.project_root)
+        confidence = (bayesian_params or {}).get("confidence", 0.5)
+        structured_summary = compactor.compact(state.to_dict() if hasattr(state, "to_dict") else vars(state), confidence=confidence)
+
         # 🧪 [Entropy Prediction] (AOS-131.5)
         # Estimate tokens using a more accurate heuristic for code-heavy contexts
         def predict_tokens(txt_list):
             return sum(len(str(t)) for t in txt_list) // 3.8
-            
-        estimated_total = predict_tokens([l0, l1, history, toon_summary])
+
+        estimated_total = predict_tokens([l0, l1, history, toon_summary, json.dumps(structured_summary)])
         threshold = budget * (1.0 - (nas_aggression * 0.2))
-        
+
         if estimated_total > threshold:
             print(f"✂️ [ContextHub:TOON-2.0] Predicted {estimated_total:.0f} tokens exceed {threshold:.0f}. Compacting...")
             compact_history = prune_dialogue(history, aggression=nas_aggression)
-            context_parts = [l0, l1, "--- TOON-2.0 SUMMARY ---", toon_summary, "--- COMPACT HISTORY ---", compact_history]
+            context_parts = [
+                l0, l1,
+                "--- STRUCTURED CONTEXT (L5-Addressable) ---",
+                json.dumps(structured_summary, indent=2),
+                "--- TOON-2.0 SUMMARY ---",
+                toon_summary,
+                "--- COMPACT HISTORY ---",
+                compact_history
+            ]
         else:
-            context_parts = [l0, l1, "--- TOON-2.0 SUMMARY ---", toon_summary]
+            context_parts = [
+                l0, l1,
+                "--- STRUCTURED CONTEXT (L5-Addressable) ---",
+                json.dumps(structured_summary, indent=2),
+                "--- TOON-2.0 SUMMARY ---",
+                toon_summary
+            ]
             if history:
                 context_parts.append(str(history[-5:])) # Balanced history depth
 
-        print(f"🛠️ [ContextHub:v24.0] Balanced with Aggression: {nas_aggression:.2f} | Memory: {memory_limit}")
+        print(f"🛠️ [ContextHub:v25.0] Hybrid Context Assembled | Compactor: ACTIVE | Aggression: {nas_aggression:.2f}")
         return "\n".join(context_parts)
 
     def assemble_research_pack(self, query: str, results: List[Dict]) -> Dict[str, Any]:
