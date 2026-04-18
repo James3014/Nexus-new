@@ -2,8 +2,14 @@
 source "$(dirname "$0")/lib/state.sh"
 source "$(dirname "$0")/lib/artifact.sh"
 source "$(dirname "$0")/lib/lesson_writeback.sh"
+source "$(dirname "$0")/lib/gate.sh"
 
 MODEL="${CODEX_MODEL:-gpt-5.4}"
+
+if ! ensure_real_codex_cli; then
+  set_status "BLOCKED"
+  exit 1
+fi
 
 STATE=$(read_state | python3 -c "import json, sys; print(json.load(sys.stdin)['state'])")
 
@@ -59,6 +65,26 @@ EXIT_CODE=$?
   echo "### Codex Raw Output"
   echo "$OUTPUT"
 } > .ai/codex-scorecard.md
+
+if [ $EXIT_CODE -ne 0 ]; then
+  if is_codex_quota_error "$OUTPUT"; then
+    update_state "codex_quota_skipped" "true"
+    append_history "codex_review_history" "{\"timestamp\": \"$(date)\", \"verdict\": \"SKIPPED_NO_QUOTA\", \"type\": \"audit\", \"model\": \"$MODEL\"}"
+    set_status "DONE"
+    {
+      echo
+      echo "### Gate Note"
+      echo "Codex quota unavailable. Final audit gate was skipped by policy."
+    } >> .ai/codex-scorecard.md
+    echo "⚠️ Codex 額度不足（或達上限），已跳過 Final Audit Gate。"
+    exit 0
+  fi
+
+  echo "❌ Codex CLI failed with exit code $EXIT_CODE" >> .ai/codex-scorecard.md
+  set_status "BLOCKED"
+  echo "❌ Codex CLI Error. Check .ai/codex-scorecard.md"
+  exit $EXIT_CODE
+fi
 
 # 2. Parse Metrics
 OVERALL=$(echo "$OUTPUT" | grep -oE "overall: [0-9]+" | awk '{print $2}')

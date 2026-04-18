@@ -5,6 +5,13 @@ source "$(dirname "$0")/lib/gate.sh"
 
 MODEL="${CODEX_MODEL:-gpt-5.4}"
 
+if ! ensure_real_codex_cli; then
+  mkdir -p .ai
+  [ -f .ai/state.json ] || cp "$(dirname "$0")/../templates/.ai/state.json" .ai/state.json
+  set_status "BLOCKED"
+  exit 1
+fi
+
 mkdir -p .ai
 if [ ! -f .ai/state.json ]; then
   cp "$(dirname "$0")/../templates/.ai/state.json" .ai/state.json
@@ -52,6 +59,19 @@ EXIT_CODE=$?
 } > .ai/codex-plan-review.md
 
 if [ $EXIT_CODE -ne 0 ]; then
+  if is_codex_quota_error "$OUTPUT"; then
+    update_state "codex_quota_skipped" "true"
+    append_history "codex_review_history" "{\"timestamp\": \"$(date)\", \"verdict\": \"SKIPPED_NO_QUOTA\", \"type\": \"plan\", \"model\": \"$MODEL\"}"
+    set_status "PLAN_APPROVED"
+    {
+      echo
+      echo "### Gate Note"
+      echo "Codex quota unavailable. Plan gate was skipped by policy."
+    } >> .ai/codex-plan-review.md
+    echo "⚠️ Codex 額度不足（或達上限），已跳過 Plan Review Gate。"
+    exit 0
+  fi
+
   echo "❌ Codex CLI failed with exit code $EXIT_CODE" >> .ai/codex-plan-review.md
   set_status "BLOCKED"
   echo "❌ Codex CLI Error. Check .ai/codex-plan-review.md"
