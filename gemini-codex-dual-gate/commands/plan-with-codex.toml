@@ -1,0 +1,3 @@
+command = "plan-with-codex"
+description = "Plan the task and get Codex approval"
+script = "scripts/plan_with_codex.sh"

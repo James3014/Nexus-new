@@ -1,0 +1,3 @@
+command = "gemini-self-review"
+description = "Perform Gemini self-review on implementation"
+script = "scripts/gemini_self_review.sh"

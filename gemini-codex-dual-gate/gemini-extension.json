@@ -1,0 +1,8 @@
+{
+  "name": "gemini-codex-dual-gate",
+  "version": "0.1.0",
+  "description": "Dual-gate review flow: Codex Plan -> Gemini Self-Review -> Codex Final Audit",
+  "author": "Nexus Agent",
+  "commands_dir": "commands",
+  "scripts_dir": "scripts"
+}

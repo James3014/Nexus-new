@@ -1,0 +1,22 @@
+{
+  "state": "INIT",
+  "plan_hash": "",
+  "plan_drift": false,
+  "gemini_review_count": 0,
+  "codex_review_count": 0,
+  "gemini_review_history": [],
+  "codex_review_history": [],
+  "final_audit_round": 0,
+  "acceptance_pass_rate": 0.0,
+  "critical_count": 0,
+  "high_count": 0,
+  "medium_count": 0,
+  "low_count": 0,
+  "plan_conformance": "N/A",
+  "evidence_quality": "N/A",
+  "gemini_overall_score": 0,
+  "codex_overall_score": 0,
+  "lessons_written_to_nexus": false,
+  "lesson_event_ids": [],
+  "lessons_count": 0
+}
