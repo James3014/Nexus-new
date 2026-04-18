@@ -3,6 +3,17 @@ source "$(dirname "$0")/lib/state.sh"
 
 echo "⛓️ Initiating Closed-Loop Implementation..."
 
+# 0. Plan Gate
+STATE=$(python3 -c "import json; print(json.load(open('.ai/state.json'))['state'])" 2>/dev/null || echo "INIT")
+if [ "$STATE" != "PLAN_APPROVED" ]; then
+  echo "📐 Plan is not approved yet ($STATE). Running plan gate first..."
+  bash "$(dirname "$0")/plan_with_codex.sh"
+  if [ $? -ne 0 ]; then
+    echo "❌ Plan Gate Failed."
+    exit 1
+  fi
+fi
+
 # 1. Implementation
 bash "$(dirname "$0")/implement_from_plan.sh"
 if [ $? -ne 0 ]; then echo "❌ Implementation Step Failed."; exit 1; fi

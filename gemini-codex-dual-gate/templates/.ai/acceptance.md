@@ -1,2 +1,2 @@
 # Acceptance Criteria
-- [ ] Verified by tests
+- AC-1: PASS/FAIL - Verified by automated tests

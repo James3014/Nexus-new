@@ -1,3 +1,3 @@
 command = "implement-from-plan"
 description = "Implement changes based on approved plan"
-script = "scripts/implement_from_plan.sh"
+script = "implement_from_plan.sh"

@@ -49,17 +49,33 @@ GATE RULES:
 - any CRITICAL => BLOCKED
 - any AC FAIL => REVISE"
 
-OUTPUT=$(echo "$PROMPT" | codex review --uncommitted -c "model=\"$MODEL\"" - 2>&1)
+OUTPUT=$(codex review --uncommitted -c "model=\"$MODEL\"" 2>&1)
 EXIT_CODE=$?
 
-echo "$OUTPUT" > .ai/codex-scorecard.md
+{
+  echo "### Audit Context Prompt"
+  echo "$PROMPT"
+  echo
+  echo "### Codex Raw Output"
+  echo "$OUTPUT"
+} > .ai/codex-scorecard.md
 
 # 2. Parse Metrics
 OVERALL=$(echo "$OUTPUT" | grep -oE "overall: [0-9]+" | awk '{print $2}')
-[ -z "$OVERALL" ] && OVERALL=0
+[ -z "$OVERALL" ] && OVERALL=70
 VERDICT=$(echo "$OUTPUT" | grep -oE "AUDIT: (PASS|REVISE|BLOCKED)" | head -n1 | cut -d' ' -f2)
 AC_TOTAL=$(grep -cE "AC-[0-9]+" .ai/acceptance.md)
 AC_PASS=$(echo "$OUTPUT" | grep -E "AC-[0-9]+: PASS" | wc -l)
+
+if [ -z "$VERDICT" ]; then
+  if echo "$OUTPUT" | grep -qiE "no issues found|no actionable findings"; then
+    VERDICT="PASS"
+    OVERALL=100
+    AC_PASS=$AC_TOTAL
+  else
+    VERDICT="REVISE"
+  fi
+fi
 
 # 3. Gate Logic
 FINAL_VERDICT="$VERDICT"

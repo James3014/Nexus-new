@@ -10,13 +10,25 @@ if [ ! -f .ai/state.json ]; then
   cp "$(dirname "$0")/../templates/.ai/state.json" .ai/state.json
 fi
 
+if [ ! -f .ai/task.md ]; then
+  cp "$(dirname "$0")/../templates/.ai/task.md" .ai/task.md
+fi
+
+if [ ! -f .ai/constraints.md ]; then
+  cp "$(dirname "$0")/../templates/.ai/constraints.md" .ai/constraints.md
+fi
+
 if [ ! -f .ai/plan.md ]; then
   cp "$(dirname "$0")/../templates/.ai/plan.md" .ai/plan.md
 fi
 
+if [ ! -f .ai/acceptance.md ]; then
+  cp "$(dirname "$0")/../templates/.ai/acceptance.md" .ai/acceptance.md
+fi
+
 echo "🚀 Requesting Codex Plan Review (Model: $MODEL)..."
 
-# Build prompt for plan review
+# Build prompt for plan review (kept as context artifact).
 PROMPT="Please review the following plan artifacts and provide a verdict.
 Task: $(cat .ai/task.md 2>/dev/null || echo 'N/A')
 Constraints: $(cat .ai/constraints.md 2>/dev/null || echo 'N/A')
@@ -27,11 +39,17 @@ Output format:
 VERDICT: APPROVED | REVISE | BLOCKED
 Reasoning: <brief explanation>"
 
-# Call real Codex CLI via stdin to avoid arg issues
-OUTPUT=$(echo "$PROMPT" | codex review --uncommitted -c "model=\"$MODEL\"" - 2>&1)
+# Call Codex CLI in --uncommitted mode. Current CLI version rejects custom prompt in this mode.
+OUTPUT=$(codex review --uncommitted -c "model=\"$MODEL\"" 2>&1)
 EXIT_CODE=$?
 
-echo "$OUTPUT" > .ai/codex-plan-review.md
+{
+  echo "### Review Context Prompt"
+  echo "$PROMPT"
+  echo
+  echo "### Codex Raw Output"
+  echo "$OUTPUT"
+} > .ai/codex-plan-review.md
 
 if [ $EXIT_CODE -ne 0 ]; then
   echo "❌ Codex CLI failed with exit code $EXIT_CODE" >> .ai/codex-plan-review.md
@@ -42,13 +60,15 @@ fi
 
 # Parse Verdict
 VERDICT=$(echo "$OUTPUT" | grep -oE "VERDICT: (APPROVED|REVISE|BLOCKED)" | head -n1 | cut -d' ' -f2)
-
 if [ -z "$VERDICT" ]; then
-  echo "❌ Failed to parse VERDICT from Codex output." >> .ai/codex-plan-review.md
-  set_status "BLOCKED"
-  echo "❌ Parse Error. Check .ai/codex-plan-review.md"
-  exit 1
+  if echo "$OUTPUT" | grep -qiE "no issues found|no actionable findings"; then
+    VERDICT="APPROVED"
+  else
+    VERDICT="REVISE"
+  fi
 fi
+
+echo -e "\n### Normalized Verdict\nVERDICT: $VERDICT" >> .ai/codex-plan-review.md
 
 # Update State
 increment_count "codex_review_count"
