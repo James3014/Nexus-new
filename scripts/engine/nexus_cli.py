@@ -2023,5 +2023,90 @@ def oracle_apply(shadow_tid):
     else:
         click.secho("❌ Promotion failed.", fg="red")
 
+@nexus_group.group(name="multi-agent")
+def multi_agent_group():
+    """🤖 Multi-Agent Orchestration & Fleet Management"""
+    pass
+
+@multi_agent_group.command(name="init")
+def multi_agent_init():
+    """🛠️ Initialize multi-agent environment."""
+    from nexus.orchestrator.orchestrator import NexusOrchestrator
+    NexusOrchestrator()
+    click.secho("✅ Multi-agent environment initialized.", fg="green")
+
+@multi_agent_group.command(name="create-task")
+@click.option("--task-id", required=True)
+@click.option("--owner", required=True)
+@click.option("--allowed-files", required=True, help="Comma separated files")
+def create_task_cmd(task_id, owner, allowed_files):
+    """📝 Create a new multi-agent task."""
+    from nexus.orchestrator.orchestrator import NexusOrchestrator
+    orch = NexusOrchestrator()
+    files = [f.strip() for f in allowed_files.split(",")]
+    orch.create_task(
+        task_id=task_id,
+        owner=owner,
+        allowed_files=files,
+        done_criteria=["Gate pass"],
+        evidence_requirements=["pytest", "nexus acceptance-check"]
+    )
+    click.secho(f"✅ Task {task_id} created for {owner}.", fg="green")
+
+@multi_agent_group.command(name="start")
+@click.option("--task-id", required=True)
+def start_task_cmd(task_id):
+    """🚀 Start a task (locks files + creates worktree)."""
+    from nexus.orchestrator.orchestrator import NexusOrchestrator
+    orch = NexusOrchestrator()
+    task = orch.start_task(task_id)
+    click.secho(f"✅ Task {task_id} started.", fg="green")
+    click.echo(f"📍 Working directory: {task.working_dir}")
+    click.echo(f"🌿 Branch: {task.branch_name}")
+
+@multi_agent_group.command(name="status")
+@click.option("--task-id")
+@click.option("--json", "output_json", is_flag=True)
+def task_status_cmd(task_id, output_json):
+    """📊 Show task status."""
+    from nexus.orchestrator.orchestrator import NexusOrchestrator
+    orch = NexusOrchestrator()
+    if task_id:
+        task = orch.state_store.load_task(task_id)
+        if not task:
+            click.echo(f"Task {task_id} not found.")
+            return
+        if output_json:
+            click.echo(task.json(indent=2))
+        else:
+            click.echo(f"Task: {task.task_id} | Status: {task.current_status} | Owner: {task.owner}")
+    else:
+        tasks = orch.state_store.list_tasks()
+        for t in tasks.values():
+            click.echo(f"{t.task_id}: {t.current_status} ({t.owner})")
+
+@multi_agent_group.command(name="verify")
+@click.option("--task-id", required=True)
+def verify_task_cmd(task_id):
+    """✅ Run verification gates for a task."""
+    from nexus.orchestrator.orchestrator import NexusOrchestrator
+    orch = NexusOrchestrator()
+    click.echo(f"🔍 Verifying task {task_id}...")
+    passed = orch.verify_task(task_id)
+    if passed:
+        click.secho(f"✅ Task {task_id} passed all gates.", fg="green")
+    else:
+        click.secho(f"❌ Task {task_id} failed gates.", fg="red")
+
+@multi_agent_group.command(name="close")
+@click.option("--task-id", required=True)
+@click.option("--no-cleanup", is_flag=True)
+def close_task_cmd(task_id, no_cleanup):
+    """🏁 Close a task and release locks."""
+    from nexus.orchestrator.orchestrator import NexusOrchestrator
+    orch = NexusOrchestrator()
+    orch.close_task(task_id, cleanup=not no_cleanup)
+    click.secho(f"✅ Task {task_id} closed.", fg="green")
+
 if __name__ == "__main__":
     nexus()

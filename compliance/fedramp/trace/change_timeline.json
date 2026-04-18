@@ -1,12 +1,52 @@
 [
   {
+    "artifact": "hallucination_evidence.json",
+    "timestamp": "2026-04-18T01:06:20.378328",
+    "category": "Operational Report"
+  },
+  {
     "artifact": "acceptance_check.md",
-    "timestamp": "2026-04-17T07:06:40.628203",
+    "timestamp": "2026-04-18T00:05:17.209923",
     "category": "Operational Report"
   },
   {
     "artifact": "acceptance_check.json",
-    "timestamp": "2026-04-17T07:06:40.627831",
+    "timestamp": "2026-04-18T00:05:17.209491",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "enterprise_audit.json",
+    "timestamp": "2026-04-17T23:03:04.091191",
+    "category": "Audit Report"
+  },
+  {
+    "artifact": "lesson_writeback.json",
+    "timestamp": "2026-04-17T22:25:36.284796",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "credible_sampling_report.json",
+    "timestamp": "2026-04-17T20:39:20",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_summary.json",
+    "timestamp": "2026-04-17T20:39:20",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_duel.log",
+    "timestamp": "2026-04-17T20:39:20",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_abyss.log",
+    "timestamp": "2026-04-17T20:39:20",
+    "category": "Operational Report"
+  },
+  {
+    "artifact": "singularity_drift.log",
+    "timestamp": "2026-04-17T20:39:20",
     "category": "Operational Report"
   },
   {
@@ -42,11 +82,6 @@
   {
     "artifact": "hyper_Add a new tailwind component for the user dashboard.json",
     "timestamp": "2026-04-16T20:04:37.088991",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "hallucination_evidence.json",
-    "timestamp": "2026-04-16T19:37:20.309830",
     "category": "Operational Report"
   },
   {
@@ -110,18 +145,8 @@
     "category": "Operational Report"
   },
   {
-    "artifact": "enterprise_audit.json",
-    "timestamp": "2026-04-16T16:28:24.071495",
-    "category": "Audit Report"
-  },
-  {
     "artifact": "enforced_agent_briefing.md",
     "timestamp": "2026-04-16T16:28:18.240273",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "lesson_writeback.json",
-    "timestamp": "2026-04-16T14:48:10.897601",
     "category": "Operational Report"
   },
   {
@@ -300,11 +325,6 @@
     "category": "Operational Report"
   },
   {
-    "artifact": "credible_sampling_report.json",
-    "timestamp": "2026-04-11T05:16:32.936255",
-    "category": "Operational Report"
-  },
-  {
     "artifact": "NEXUS_BENCHMARK_REPORT.md",
     "timestamp": "2026-04-10T03:15:01.100597",
     "category": "Operational Report"
@@ -327,26 +347,6 @@
   {
     "artifact": "acceptance_summary.json",
     "timestamp": "2026-04-09T14:19:17.620883",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "singularity_summary.json",
-    "timestamp": "2026-04-09T11:50:02.700268",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "singularity_duel.log",
-    "timestamp": "2026-04-09T11:50:02.699919",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "singularity_drift.log",
-    "timestamp": "2026-04-09T11:50:02.698218",
-    "category": "Operational Report"
-  },
-  {
-    "artifact": "singularity_abyss.log",
-    "timestamp": "2026-04-09T11:50:02.697877",
     "category": "Operational Report"
   },
   {
