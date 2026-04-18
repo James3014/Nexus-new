@@ -2263,9 +2263,18 @@ def submit_task_cmd(task_id):
         "proof_present": derived_bundle["confidence_level"] == "HIGH"
     })
 
+    receipt_path = repo_root / ".nexus" / "reports" / "delivery_gate.json"
+    receipt_payload = {}
+    if receipt_path.exists():
+        try:
+            receipt_payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except Exception:
+            receipt_payload = {}
+
     # 8) Delivery Format
     import subprocess
     sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
+    delivery_gate_passed = bool(receipt_payload.get("delivery_gate_passed", False))
     
     delivery = {
         "commit_sha": sha,
@@ -2273,12 +2282,14 @@ def submit_task_cmd(task_id):
         "nexus_participation_ratio": 1.0,
         "swarm_pids": "none",
         "gate_summary": {
-            "acceptance_check": "PASS" if passed else "FAIL",
+            "delivery_gate": "PASS" if delivery_gate_passed else "FAIL",
+            "acceptance_check": "PASS" if delivery_gate_passed else "FAIL",
             "hallucination_index": derived_bundle["claim_state"],
-            "contract_check": "PASS",
-            "ci_gate": "PASS",
+            "contract_check": "UNRUN",
+            "ci_gate": "UNRUN",
             "proof_present": derived_bundle["confidence_level"] == "HIGH"
-        }
+        },
+        "receipt_path": str(receipt_path) if receipt_payload else None,
     }
     
     click.secho("✅ Task submitted successfully.", fg="green")
