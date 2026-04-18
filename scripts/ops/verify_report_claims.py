@@ -27,15 +27,29 @@ def _resolve_required_paths(project_root: Path, required_paths: List[str]) -> Li
     return resolved
 
 
+def _parse_porcelain_paths(raw_status: str) -> List[str]:
+    paths: List[str] = []
+    for line in raw_status.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip() if len(line) > 3 else line.strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        paths.append(path)
+    return paths
+
+
 def verify_claims(
     project_root: Path,
     *,
     required_paths: List[str] | None = None,
     require_clean: bool = False,
+    ignore_dirty_paths: List[str] | None = None,
     require_acceptance_pass: bool = False,
     acceptance_report_rel: str = ".nexus/reports/acceptance_check.json",
 ) -> Dict[str, Any]:
     required_paths = required_paths or []
+    ignore_dirty_paths = ignore_dirty_paths or []
     checks: List[Dict[str, Any]] = []
 
     branch = _run_git(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])
@@ -50,14 +64,25 @@ def verify_claims(
     )
 
     dirty = _run_git(project_root, ["status", "--porcelain"])
-    clean_ok = (not dirty.strip()) if require_clean else True
+    dirty_paths = _parse_porcelain_paths(dirty)
+    ignored_resolved = {str(p) for p in _resolve_required_paths(project_root, ignore_dirty_paths)}
+    effective_dirty = []
+    for rel_path in dirty_paths:
+        resolved = project_root / rel_path
+        if str(resolved.resolve()) in ignored_resolved:
+            continue
+        effective_dirty.append(rel_path)
+    clean_ok = (not effective_dirty) if require_clean else True
     checks.append(
         {
             "name": "working_tree",
             "passed": clean_ok,
             "detail": {
                 "require_clean": require_clean,
-                "dirty_entries": len([ln for ln in dirty.splitlines() if ln.strip()]),
+                "dirty_entries": len(dirty_paths),
+                "effective_dirty_entries": len(effective_dirty),
+                "ignored_dirty_paths": sorted(ignore_dirty_paths),
+                "effective_dirty_paths": effective_dirty,
             },
         }
     )
@@ -111,6 +136,12 @@ def main() -> int:
     parser.add_argument("--require-path", action="append", default=[], help="Required file path (repeatable).")
     parser.add_argument("--require-clean", action="store_true", help="Require clean working tree.")
     parser.add_argument(
+        "--ignore-dirty-path",
+        action="append",
+        default=[],
+        help="Dirty path to ignore for clean-tree checks (repeatable).",
+    )
+    parser.add_argument(
         "--require-acceptance-pass",
         action="store_true",
         help="Require .nexus/reports/acceptance_check.json to be PASS and gate_passed=true.",
@@ -123,6 +154,7 @@ def main() -> int:
         project_root,
         required_paths=list(args.require_path or []),
         require_clean=bool(args.require_clean),
+        ignore_dirty_paths=list(args.ignore_dirty_path or []),
         require_acceptance_pass=bool(args.require_acceptance_pass),
     )
 

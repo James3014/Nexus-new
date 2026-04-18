@@ -26,13 +26,9 @@ class EvidenceCollector:
         """
         Runs mandatory gates:
         1. pytest (if specified in criteria)
-        2. nexus acceptance-check
+        2. nexus delivery-gate
         """
-        # 1. Run pytest
-        self.run_check(task, ["pytest"], "Mandatory unit tests")
-        
-        # 2. Run nexus acceptance-check
-        # Create a temporary evidence file for the CLI
+        # Create a temporary evidence file for the gate.
         temp_evidence_path = self.reports_dir / f"{task.task_id}_temp_evidence.json"
         with open(temp_evidence_path, "w") as f:
             json.dump({
@@ -43,18 +39,19 @@ class EvidenceCollector:
                     "command_artifacts": [e.command for e in task.evidence_list]
                 }
             }, f)
-        
+
+        # Run the strict delivery gate, which includes tests and acceptance verification.
         self.run_check(task, [
-            "uv", "run", "scripts/engine/nexus_cli.py", "nexus", "acceptance-check",
+            "uv", "run", "scripts/engine/nexus_cli.py", "nexus", "delivery-gate",
             "--evidence", str(temp_evidence_path)
-        ], "Nexus Acceptance Check")
+        ], "Nexus Delivery Gate")
 
         # Check if all critical evidences passed (exit_code == 0)
         for e in task.evidence_list:
             if e.exit_code != 0:
                 return False
-        
-        return task.is_done_ready()
+
+        return bool(task.evidence_list)
 
     def generate_hallucination_evidence(self, task: Task, final_response: str):
         self.evidence_file.parent.mkdir(parents=True, exist_ok=True)

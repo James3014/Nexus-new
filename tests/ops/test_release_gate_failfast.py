@@ -12,5 +12,5 @@ def test_release_gate_fails_when_acceptance_fails(tmp_path, monkeypatch):
     # just rely on the exit code property.
     # For now, we verify that the script exists and contains the command.
     content = gate_script.read_text()
-    assert "nexus acceptance-check" in content
+    assert "nexus delivery-gate" in content
     assert "set -euo pipefail" in content # ensures fail-fast

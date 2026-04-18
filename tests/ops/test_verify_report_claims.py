@@ -66,3 +66,25 @@ def test_verify_claims_fail_when_acceptance_not_pass(tmp_path: Path) -> None:
     assert report["passed"] is False
     acceptance_check = next(c for c in report["checks"] if c["name"] == "acceptance_report")
     assert acceptance_check["passed"] is False
+
+
+def test_verify_claims_require_clean_can_ignore_generated_reports(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    _write_acceptance(tmp_path, status="PASS", gate_passed=True)
+    report_md = tmp_path / ".nexus" / "reports" / "acceptance_check.md"
+    report_md.write_text("generated\n", encoding="utf-8")
+
+    subprocess.run(["git", "add", ".nexus/reports/acceptance_check.json"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "acceptance"], cwd=tmp_path, check=True, capture_output=True)
+
+    report_md.write_text("regenerated\n", encoding="utf-8")
+
+    report = verify_claims(
+        tmp_path,
+        require_clean=True,
+        ignore_dirty_paths=[".nexus/reports/acceptance_check.md"],
+        require_acceptance_pass=True,
+    )
+    assert report["passed"] is True
+    working_tree = next(c for c in report["checks"] if c["name"] == "working_tree")
+    assert working_tree["detail"]["effective_dirty_entries"] == 0

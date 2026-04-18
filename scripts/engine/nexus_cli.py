@@ -317,6 +317,19 @@ def acceptance_check(as_json, evidence_path):
     if not check_hallucination(evidence_path):
         raise click.ClickException("Hallucination check failed.")
 
+
+@nexus_group.command(name="delivery-gate")
+@click.option("--evidence", "evidence_path", type=click.Path(exists=True), required=True)
+@click.option("--router-benchmark", is_flag=True, help="Run router benchmark as part of delivery verification.")
+def delivery_gate(evidence_path, router_benchmark):
+    """🚪 Run fail-closed delivery verification before completion claims."""
+    cmd = [str(repo_root / "scripts/ops/nexus_delivery_gate.sh"), "--evidence", str(evidence_path)]
+    if router_benchmark:
+        cmd.append("--router-benchmark")
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        raise click.ClickException("Delivery gate failed.")
+
 @nexus_group.command(name="run")
 @click.argument("task_id")
 @click.option("--complexity", type=float, default=0.0)

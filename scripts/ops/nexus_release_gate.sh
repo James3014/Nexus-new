@@ -10,7 +10,7 @@ scripts/ops/gate_ladder.sh
 
 
 echo "== Release Gate: acceptance check =="
-uv run scripts/engine/nexus_cli.py nexus acceptance-check --window 50
+uv run scripts/engine/nexus_cli.py nexus delivery-gate --evidence .nexus/reports/hallucination_evidence.json
 
 echo "== Release Gate: completion gate =="
 uv run python scripts/ops/nexus_completion_gate.py "$@"
