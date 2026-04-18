@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 STATE_FILE=".ai/state.json"
 STATE_SIG_FILE=".ai/state.sig"
 
@@ -12,28 +13,8 @@ if not state_file.exists():
     print("")
     raise SystemExit(0)
 
-tracked = [
-    ".ai/task.md",
-    ".ai/constraints.md",
-    ".ai/plan.md",
-    ".ai/acceptance.md",
-    ".ai/changed-files.md",
-    ".ai/implementation-report.md",
-    ".ai/test-results.md",
-    ".ai/codex-plan-review.md",
-    ".ai/codex-scorecard.md",
-    ".ai/gemini-scorecard.md",
-]
-
 h = hashlib.sha256()
 h.update(state_file.read_bytes())
-for p in tracked:
-    fp = Path(p)
-    h.update(p.encode("utf-8"))
-    if fp.exists():
-        h.update(fp.read_bytes())
-    else:
-        h.update(b"__MISSING__")
 print(h.hexdigest())
 PY
 }

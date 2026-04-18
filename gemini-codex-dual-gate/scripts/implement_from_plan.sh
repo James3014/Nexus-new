@@ -1,10 +1,11 @@
 #!/bin/bash
+set -euo pipefail
 source "$(dirname "$0")/lib/state.sh"
 source "$(dirname "$0")/lib/artifact.sh"
 
 STATE=$(read_state | python3 -c "import json, sys; print(json.load(sys.stdin)['state'])")
 
-if [ "$STATE" != "PLAN_APPROVED" ]; then
+if [ "$STATE" != "PLAN_APPROVED" ] && [ "$STATE" != "PLAN_APPROVED_WITH_RISK" ]; then
   echo "❌ Error: Plan is not approved. Current state: $STATE"
   exit 1
 fi
@@ -20,11 +21,28 @@ if [ "$OLD_HASH" != "$NEW_HASH" ]; then
   exit 1
 fi
 
-# 2. Implementation Simulation
-echo "🚀 Implementing from plan..."
+# 2. Artifact Completeness
+if ! check_artifacts; then
+  echo "❌ Missing required artifacts."
+  exit 1
+fi
+
+# 3. Real implementation evidence only
+if ! has_real_changes; then
+  set_status "BLOCKED"
+  echo "❌ No real code changes detected (staged/unstaged)."
+  exit 1
+fi
 generate_changed_files
-cp "$(dirname "$0")/../templates/.ai/implementation-report.md" .ai/implementation-report.md
-cp "$(dirname "$0")/../templates/.ai/test-results.md" .ai/test-results.md
+
+if [ ! -f .ai/implementation-report.md ]; then
+  set_status "BLOCKED"
+  echo "❌ Missing .ai/implementation-report.md."
+  exit 1
+fi
+
+# 4. Execute real tests and persist output
+run_test_commands_or_fail
 
 set_status "IMPLEMENTING"
-echo "✅ Implementation artifacts generated. Ready for /gemini-self-review."
+echo "✅ Implementation evidence and test outputs recorded. Ready for /gemini-self-review."

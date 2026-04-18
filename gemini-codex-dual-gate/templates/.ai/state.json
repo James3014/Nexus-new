@@ -2,6 +2,8 @@
   "state": "INIT",
   "plan_hash": "",
   "plan_drift": false,
+  "merge_blocked": false,
+  "codex_quota_skipped": false,
   "gemini_review_count": 0,
   "codex_review_count": 0,
   "gemini_review_history": [],
