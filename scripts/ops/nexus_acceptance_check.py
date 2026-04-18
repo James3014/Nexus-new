@@ -40,6 +40,7 @@ class CriterionResult:
 
 
 def _load_jsonl(path: Path) -> List[Dict[str, Any]]:
+    
     if not path.exists():
         return []
     rows: List[Dict[str, Any]] = []
