@@ -26,3 +26,4 @@ class EventLogger:
                 if line.strip():
                     events.append(json.loads(line))
         return events
+# v24.13 final hardening

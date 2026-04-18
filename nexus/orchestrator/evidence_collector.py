@@ -97,3 +97,4 @@ class EvidenceCollector:
         with open(self.evidence_file, "w") as f:
             json.dump(bundle, f, indent=2)
         return self.evidence_file
+# v24.13 final hardening

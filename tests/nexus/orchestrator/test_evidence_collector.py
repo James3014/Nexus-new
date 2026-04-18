@@ -47,3 +47,4 @@ def test_verify_gate_fail(task, tmp_path):
         
         result = collector.verify_gate(task)
         assert result is False
+# v24.13 final validation

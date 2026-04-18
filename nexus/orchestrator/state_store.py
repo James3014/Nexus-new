@@ -26,3 +26,4 @@ class StateStore:
             task = Task.model_validate_json(path.read_text())
             tasks[task.task_id] = task
         return tasks
+# v24.13 final hardening

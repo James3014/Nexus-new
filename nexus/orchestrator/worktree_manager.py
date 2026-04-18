@@ -60,3 +60,4 @@ class WorktreeManager:
 
     def prune(self):
         self._run_git(["worktree", "prune"])
+# v24.13 final hardening

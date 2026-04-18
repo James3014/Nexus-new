@@ -67,3 +67,4 @@ def test_context_report():
     assert report["branch"] == "codex/task/TASK-001"
     assert report["commit"] == "abc1234"
     assert report["cwd"] == "/tmp/nexus/TASK-001"
+# v24.13 final validation

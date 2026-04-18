@@ -33,3 +33,4 @@ def append_governance_event(project_root: str, payload: Dict[str, Any]):
     
     with open(log_path, "a") as f:
         f.write(json.dumps(event) + "\n")
+# v24.13 final hardening

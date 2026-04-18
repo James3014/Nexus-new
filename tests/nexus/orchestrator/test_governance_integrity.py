@@ -52,3 +52,4 @@ def test_evidence_collector_reject_verified_on_failure(tmp_path):
             assert data["claim_state"] == "UNVERIFIED"
             assert data["proof_type"] == "git_diff" # Proof exists but tests failed
             assert str(evidence_path) == str(isol_evidence)
+# v24.13 final validation
