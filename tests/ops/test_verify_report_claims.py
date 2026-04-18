@@ -96,3 +96,30 @@ def test_parse_porcelain_paths_preserves_dot_prefixed_paths() -> None:
         ".nexus/reports/acceptance_check.json",
         "scripts/ops/nexus_delivery_gate.sh",
     ]
+
+
+def test_verify_claims_loads_ignore_dirty_paths_from_config(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    _write_acceptance(tmp_path, status="PASS", gate_passed=True)
+    report_md = tmp_path / ".nexus" / "reports" / "acceptance_check.md"
+    report_md.write_text("generated\n", encoding="utf-8")
+    cfg = tmp_path / ".nexus" / "config" / "delivery_gate_allow_dirty.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"ignore_dirty_paths": [".nexus/reports/acceptance_check.md"]}), encoding="utf-8")
+
+    subprocess.run(
+        ["git", "add", ".nexus/reports/acceptance_check.json", ".nexus/config/delivery_gate_allow_dirty.json"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "commit", "-m", "acceptance"], cwd=tmp_path, check=True, capture_output=True)
+
+    report_md.write_text("regenerated\n", encoding="utf-8")
+    report = verify_claims(
+        tmp_path,
+        require_clean=True,
+        ignore_dirty_config=".nexus/config/delivery_gate_allow_dirty.json",
+        require_acceptance_pass=True,
+    )
+    assert report["passed"] is True

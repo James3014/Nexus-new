@@ -55,3 +55,15 @@ def test_delivery_gate_runs_shell_gate(monkeypatch):
     assert result.exit_code == 0
     joined = [" ".join(map(str, c)) for c in calls]
     assert any("scripts/ops/nexus_delivery_gate.sh" in c for c in joined)
+
+
+def test_delivery_receipt_renders_json(tmp_path, monkeypatch):
+    from scripts.engine.nexus_cli import nexus
+
+    receipt = tmp_path / "delivery_gate.json"
+    receipt.write_text('{"head":"abc123","branch":"feat/x","delivery_gate_passed":true}', encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(nexus, ["nexus", "delivery-receipt", "--receipt", str(receipt), "--json"])
+    assert result.exit_code == 0
+    assert '"head": "abc123"' in result.output

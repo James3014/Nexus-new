@@ -321,14 +321,30 @@ def acceptance_check(as_json, evidence_path):
 @nexus_group.command(name="delivery-gate")
 @click.option("--evidence", "evidence_path", type=click.Path(exists=True), required=True)
 @click.option("--router-benchmark", is_flag=True, help="Run router benchmark as part of delivery verification.")
-def delivery_gate(evidence_path, router_benchmark):
+@click.option("--receipt", "receipt_path", default=".nexus/reports/delivery_gate.json", show_default=True, type=click.Path())
+def delivery_gate(evidence_path, router_benchmark, receipt_path):
     """🚪 Run fail-closed delivery verification before completion claims."""
-    cmd = [str(repo_root / "scripts/ops/nexus_delivery_gate.sh"), "--evidence", str(evidence_path)]
+    cmd = [str(repo_root / "scripts/ops/nexus_delivery_gate.sh"), "--evidence", str(evidence_path), "--receipt", str(receipt_path)]
     if router_benchmark:
         cmd.append("--router-benchmark")
     result = subprocess.run(cmd)
     if result.returncode != 0:
         raise click.ClickException("Delivery gate failed.")
+
+
+@nexus_group.command(name="delivery-receipt")
+@click.option("--receipt", "receipt_path", default=".nexus/reports/delivery_gate.json", show_default=True, type=click.Path(exists=True))
+@click.option("--json", "as_json", is_flag=True)
+def delivery_receipt(receipt_path, as_json):
+    """🧾 Show the last machine-generated delivery receipt."""
+    payload = json.loads(Path(receipt_path).read_text(encoding="utf-8"))
+    if as_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    click.echo(f"[delivery-receipt] head={payload.get('head', 'unknown')}")
+    click.echo(f"[delivery-receipt] branch={payload.get('branch', 'unknown')}")
+    click.echo(f"[delivery-receipt] passed={str(bool(payload.get('delivery_gate_passed'))).lower()}")
+    click.echo(f"[delivery-receipt] receipt={receipt_path}")
 
 @nexus_group.command(name="run")
 @click.argument("task_id")

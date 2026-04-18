@@ -47,17 +47,39 @@ def _parse_porcelain_paths(raw_status: str) -> List[str]:
     return paths
 
 
+def _load_ignore_dirty_paths(project_root: Path, config_path: str | None) -> List[str]:
+    if not config_path:
+        return []
+    path = Path(config_path)
+    if not path.is_absolute():
+        path = (project_root / path).resolve()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if isinstance(data, list):
+        return [str(item) for item in data if str(item).strip()]
+    if isinstance(data, dict):
+        raw = data.get("ignore_dirty_paths", [])
+        if isinstance(raw, list):
+            return [str(item) for item in raw if str(item).strip()]
+    return []
+
+
 def verify_claims(
     project_root: Path,
     *,
     required_paths: List[str] | None = None,
     require_clean: bool = False,
     ignore_dirty_paths: List[str] | None = None,
+    ignore_dirty_config: str | None = None,
     require_acceptance_pass: bool = False,
     acceptance_report_rel: str = ".nexus/reports/acceptance_check.json",
 ) -> Dict[str, Any]:
     required_paths = required_paths or []
-    ignore_dirty_paths = ignore_dirty_paths or []
+    ignore_dirty_paths = (ignore_dirty_paths or []) + _load_ignore_dirty_paths(project_root, ignore_dirty_config)
     checks: List[Dict[str, Any]] = []
 
     branch = _run_git(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])
@@ -150,6 +172,11 @@ def main() -> int:
         help="Dirty path to ignore for clean-tree checks (repeatable).",
     )
     parser.add_argument(
+        "--ignore-dirty-config",
+        default=None,
+        help="JSON file containing ignore_dirty_paths for clean-tree checks.",
+    )
+    parser.add_argument(
         "--require-acceptance-pass",
         action="store_true",
         help="Require .nexus/reports/acceptance_check.json to be PASS and gate_passed=true.",
@@ -163,6 +190,7 @@ def main() -> int:
         required_paths=list(args.require_path or []),
         require_clean=bool(args.require_clean),
         ignore_dirty_paths=list(args.ignore_dirty_path or []),
+        ignore_dirty_config=args.ignore_dirty_config,
         require_acceptance_pass=bool(args.require_acceptance_pass),
     )
 
