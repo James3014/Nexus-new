@@ -43,4 +43,4 @@ def test_file_lock_persistence(tmp_path):
     # Reload from disk
     registry2 = FileLockRegistry(lock_file=str(lock_file))
     assert registry2.check_access("TASK-001", "src/main.py")
-# v24.13 final validation
+# integrity-seal: 1776512137

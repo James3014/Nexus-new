@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from scripts.ops.verify_report_claims import verify_claims
+from scripts.ops.verify_report_claims import _parse_porcelain_paths, verify_claims
 
 
 def _init_git_repo(path: Path) -> None:
@@ -66,3 +66,60 @@ def test_verify_claims_fail_when_acceptance_not_pass(tmp_path: Path) -> None:
     assert report["passed"] is False
     acceptance_check = next(c for c in report["checks"] if c["name"] == "acceptance_report")
     assert acceptance_check["passed"] is False
+
+
+def test_verify_claims_require_clean_can_ignore_generated_reports(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    _write_acceptance(tmp_path, status="PASS", gate_passed=True)
+    report_md = tmp_path / ".nexus" / "reports" / "acceptance_check.md"
+    report_md.write_text("generated\n", encoding="utf-8")
+
+    subprocess.run(["git", "add", ".nexus/reports/acceptance_check.json"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "acceptance"], cwd=tmp_path, check=True, capture_output=True)
+
+    report_md.write_text("regenerated\n", encoding="utf-8")
+
+    report = verify_claims(
+        tmp_path,
+        require_clean=True,
+        ignore_dirty_paths=[".nexus/reports/acceptance_check.md"],
+        require_acceptance_pass=True,
+    )
+    assert report["passed"] is True
+    working_tree = next(c for c in report["checks"] if c["name"] == "working_tree")
+    assert working_tree["detail"]["effective_dirty_entries"] == 0
+
+
+def test_parse_porcelain_paths_preserves_dot_prefixed_paths() -> None:
+    raw = " M .nexus/reports/acceptance_check.json\nM  scripts/ops/nexus_delivery_gate.sh\n"
+    assert _parse_porcelain_paths(raw) == [
+        ".nexus/reports/acceptance_check.json",
+        "scripts/ops/nexus_delivery_gate.sh",
+    ]
+
+
+def test_verify_claims_loads_ignore_dirty_paths_from_config(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    _write_acceptance(tmp_path, status="PASS", gate_passed=True)
+    report_md = tmp_path / ".nexus" / "reports" / "acceptance_check.md"
+    report_md.write_text("generated\n", encoding="utf-8")
+    cfg = tmp_path / ".nexus" / "config" / "delivery_gate_allow_dirty.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"ignore_dirty_paths": [".nexus/reports/acceptance_check.md"]}), encoding="utf-8")
+
+    subprocess.run(
+        ["git", "add", ".nexus/reports/acceptance_check.json", ".nexus/config/delivery_gate_allow_dirty.json"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "commit", "-m", "acceptance"], cwd=tmp_path, check=True, capture_output=True)
+
+    report_md.write_text("regenerated\n", encoding="utf-8")
+    report = verify_claims(
+        tmp_path,
+        require_clean=True,
+        ignore_dirty_config=".nexus/config/delivery_gate_allow_dirty.json",
+        require_acceptance_pass=True,
+    )
+    assert report["passed"] is True

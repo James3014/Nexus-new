@@ -90,4 +90,4 @@ class Task(BaseModel):
             "cwd": self.working_dir or os.getcwd(),
             "status": self.current_status
         }
-# v24.13 final hardening
+# integrity-seal: 1776512137

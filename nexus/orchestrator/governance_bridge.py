@@ -28,9 +28,9 @@ def append_governance_event(project_root: str, payload: Dict[str, Any]):
         "phantom_blocked": bool(payload["phantom_blocked"]),
         "regression_pass_rate": float(payload.get("regression_pass_rate", 0.0)),
         "proof_present": bool(payload["proof_present"]),
-        "source": payload.get("source", "multi_agent.orchestrator")
+        "source": "multi_agent.orchestrator"
     }
     
     with open(log_path, "a") as f:
         f.write(json.dumps(event) + "\n")
-# v24.13 final hardening
+# integrity-seal: 1776512137

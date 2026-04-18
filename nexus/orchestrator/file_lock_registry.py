@@ -64,4 +64,4 @@ class FileLockRegistry:
     def get_task_files(self, task_id: str) -> List[str]:
         """Returns all files currently locked by a task."""
         return [f for f, t in self.locks.items() if t == task_id]
-# v24.13 final hardening
+# integrity-seal: 1776512137

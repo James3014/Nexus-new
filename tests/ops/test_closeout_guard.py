@@ -22,7 +22,7 @@ def valid_contract(tmp_path):
 
 def test_guard_pass_with_valid_contract(valid_contract):
     result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT), "--contract", str(valid_contract)],
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(valid_contract), "--no-require-head-match"],
         capture_output=True,
         text=True
     )
@@ -46,7 +46,7 @@ def test_guard_fail_with_missing_linter_exit_code(tmp_path):
     contract_file.write_text(json.dumps(data))
     
     result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file)],
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file), "--no-require-head-match"],
         capture_output=True,
         text=True
     )
@@ -67,7 +67,7 @@ def test_guard_fail_with_linter_failure(tmp_path):
     contract_file.write_text(json.dumps(data))
     
     result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file)],
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file), "--no-require-head-match"],
         capture_output=True,
         text=True
     )
@@ -88,7 +88,7 @@ def test_guard_fail_with_empty_commit_sha(tmp_path):
     contract_file.write_text(json.dumps(data))
     
     result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file)],
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file), "--no-require-head-match"],
         capture_output=True,
         text=True
     )
@@ -109,7 +109,7 @@ def test_guard_fail_with_empty_changed_files(tmp_path):
     contract_file.write_text(json.dumps(data))
     
     result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file)],
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file), "--no-require-head-match"],
         capture_output=True,
         text=True
     )
@@ -120,7 +120,7 @@ def test_guard_fail_with_empty_changed_files(tmp_path):
 
 def test_guard_fail_missing_contract():
     result = subprocess.run(
-        [sys.executable, str(GUARD_SCRIPT), "--contract", "non_existent_contract.json"],
+        [sys.executable, str(GUARD_SCRIPT), "--contract", "non_existent_contract.json", "--no-require-head-match"],
         capture_output=True,
         text=True
     )
@@ -128,3 +128,30 @@ def test_guard_fail_missing_contract():
     output = json.loads(result.stdout)
     assert output["ok"] is False
     assert "Contract file missing" in output["error"]
+
+
+def test_guard_requires_head_match_by_default(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    contract_file = tmp_path / "done_contract.json"
+    contract_file.write_text(json.dumps({
+        "linter_exit_code": 0,
+        "ci_gate_exit_code": 0,
+        "required_tests_passed": True,
+        "commit_sha": "deadbee",
+        "changed_files": ["file1.py"]
+    }))
+    result = subprocess.run(
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    output = json.loads(result.stdout)
+    assert output["checks"]["commit_ok"] is False

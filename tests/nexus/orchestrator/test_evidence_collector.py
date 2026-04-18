@@ -28,23 +28,20 @@ def test_verify_gate_pass(task, tmp_path):
     collector = EvidenceCollector(reports_dir=str(tmp_path))
     
     with patch("subprocess.run") as mock_run:
-        # Both pytest and acceptance-check pass
+        # Delivery gate passes
         mock_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
         
         result = collector.verify_gate(task)
         assert result is True
-        assert len(task.evidence_list) >= 2
+        assert len(task.evidence_list) >= 1
+        assert "delivery-gate" in task.evidence_list[0].command
 
 def test_verify_gate_fail(task, tmp_path):
     collector = EvidenceCollector(reports_dir=str(tmp_path))
     
     with patch("subprocess.run") as mock_run:
-        # First check passes, second fails
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="Success", stderr=""),
-            MagicMock(returncode=1, stdout="Fail", stderr="Error")
-        ]
+        mock_run.return_value = MagicMock(returncode=1, stdout="Fail", stderr="Error")
         
         result = collector.verify_gate(task)
         assert result is False
-# v24.13 final validation
+# integrity-seal: 1776512137
