@@ -279,6 +279,31 @@ class NexusPipeline(
                 logger.error(f"Handoff bundle creation failed: {e}")
         elif terminal_state == "ESCALATED":
             logger.warning("📢 Pipeline 終止於 ESCALATED，Coordinator 應重新規劃")
+            
+        # === NEW: Final Safety Valve ===
+        # 即使所有 Phase 都報告 success，也要檢查是否有被繞過的 gate
+        pregate_unverified = bool(ctx.state.metadata.get("pregate_unverified"))
+        evidence_low_trust = bool(ctx.state.metadata.get("evidence_trust_rejection"))
+        plan_rejected = bool(ctx.state.metadata.get("plan_reject_reason"))
+        
+        if success and (pregate_unverified or evidence_low_trust or plan_rejected):
+            logger.warning("🛡️ [Safety Valve] Success overridden by unresolved governance signals.")
+            ctx.state.metadata["safety_valve_triggered"] = True
+            ctx.state.metadata["safety_valve_reasons"] = {
+                "pregate_unverified": pregate_unverified,
+                "evidence_low_trust": evidence_low_trust,
+                "plan_rejected": plan_rejected,
+            }
+            # 不直接改 success，但在 outcome 中標記需要人工確認
+            if ctx.outcome_v2:
+                ctx.outcome_v2.trust_level = "degraded"
+                ctx.outcome_v2.terminal_state = "HUMAN_REVIEW"
+            ctx.state.metadata["pipeline_terminal_state"] = "HUMAN_REVIEW"
+            ctx.state.metadata["human_review_reason"] = "safety_valve_triggered"
+            
+            # === NEW: Iron Gate Phase 2 布林值翻轉 ===
+            success = False
+            
         return success
 
     def _run_pipeline_inner(self, task_id: str, trace_id: str, span_id: str, task_desc: str, task_type: str = "bug", context: Optional[Dict] = None, tracer: Any = None, **kwargs) -> bool:
@@ -289,43 +314,67 @@ class NexusPipeline(
         success = True
         
         # 1. 執行線性階段 (P -> X -> D)
-        for plugin in self.registry.get_ordered_plugins():
-            if plugin.name in ("P", "X", "D"):
-                if not plugin.should_run(ctx):
-                    logger.info("⏩ Skipping phase: %s", plugin.name)
-                    continue
-                    
-                logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
-                
-                ctx.event_store.append(NexusEvent(
-                    event_id=f"evt_start_{plugin.name}_{int(time.time()*1000)}",
-                    task_id=ctx.task_id,
-                    phase=plugin.name,
-                    event_type="phase_start",
-                    payload={"name": plugin.name}
-                ))
-                
-                try:
-                    result = plugin.execute(self, ctx)
+        pxd_attempts = 0
+        MAX_PXD_RETRIES = 2
+        
+        while pxd_attempts < MAX_PXD_RETRIES and success:
+            pxd_attempts += 1
+            pxd_veto = False
+            
+            for plugin in self.registry.get_ordered_plugins():
+                if plugin.name in ("P", "X", "D"):
+                    if not plugin.should_run(ctx):
+                        logger.info("⏩ Skipping phase: %s", plugin.name)
+                        continue
+                        
+                    logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
                     
                     ctx.event_store.append(NexusEvent(
-                        event_id=f"evt_end_{plugin.name}_{int(time.time()*1000)}",
+                        event_id=f"evt_start_{plugin.name}_{int(time.time()*1000)}",
                         task_id=ctx.task_id,
                         phase=plugin.name,
-                        event_type="phase_end",
-                        payload={"status": result.status}
+                        event_type="phase_start",
+                        payload={"name": plugin.name}
                     ))
                     
-                    if result.status == "FAILED":
-                        logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
+                    try:
+                        result = plugin.execute(self, ctx)
+                        
+                        ctx.event_store.append(NexusEvent(
+                            event_id=f"evt_end_{plugin.name}_{int(time.time()*1000)}",
+                            task_id=ctx.task_id,
+                            phase=plugin.name,
+                            event_type="phase_end",
+                            payload={"status": result.status}
+                        ))
+                        
+                        if result.status == "FAILED":
+                            logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
+                            success = False
+                            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                            break
+                    except RuntimeError as veto_err:
+                        veto_str = str(veto_err)
+                        if "VETO" in veto_str and pxd_attempts < MAX_PXD_RETRIES:
+                            logger.warning("🔄 [Pipeline] D-Stage VETO → Feeding back to P-Stage for replan (Attempt %d/%d)", pxd_attempts, MAX_PXD_RETRIES)
+                            ctx.kwargs["veto_feedback"] = veto_str
+                            pxd_veto = True
+                            break  # Break inner for loop, retry outer while loop
+                        elif "VETO" in veto_str or "Plan Quality Gate" in veto_str:
+                            logger.error("🛑 [Pipeline] Governance VETO terminal: %s", veto_err)
+                            success = False
+                            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                            ctx.state.metadata["governance_veto_reason"] = veto_str
+                            break
+                        raise  # 非治理異常，繼續上拋
+                    except Exception as e:
+                        logger.exception(f"Unhandled failure in plugin {plugin.name}: {e}")
                         success = False
                         ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
                         break
-                except Exception as e:
-                    logger.exception(f"Unhandled failure in plugin {plugin.name}: {e}")
-                    success = False
-                    ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
-                    break
+            
+            if not pxd_veto:
+                break  # P-X-D 全部通過或 terminal failure，跳出
             
         # 2. 執行複雜循環階段 (R/A)
         if success:

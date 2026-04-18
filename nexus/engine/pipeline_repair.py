@@ -53,6 +53,33 @@ class PipelineRepairMixin:
         # CLI Pregate validation
         if r_out["status"] != "REJECTED":
             r_out["status"] = self._run_pregate_if_needed(ctx, r_out["status"], r_out["result"])
+            
+            # === NEW: T11 產生 Evidence Bundle 給 Verifier ===
+            try:
+                import json
+                evidence_path = self.engine.project_root / ".nexus" / "reports" / "hallucination_evidence.json"
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                code_artifacts = []
+                diff_cmd = subprocess.run(["git", "diff", "--name-only"], cwd=self.engine.project_root, capture_output=True, text=True)
+                if diff_cmd.returncode == 0 and diff_cmd.stdout:
+                    code_artifacts = [{"file_path": p, "modification_type": "modified"} for p in diff_cmd.stdout.strip().split("\n") if p]
+                
+                test_artifacts = []
+                for pregate_res in ctx.state.metadata.get("cli_pregate_results", []):
+                    test_artifacts.append({
+                        "command": pregate_res.get("cmd", ""),
+                        "exit_code": pregate_res.get("exit_code", -1),
+                        "stdout_tail": pregate_res.get("stdout_tail", "")
+                    })
+                
+                bundle = {
+                    "code_artifacts": code_artifacts,
+                    "test_artifacts": test_artifacts
+                }
+                evidence_path.write_text(json.dumps({"evidence_bundle": bundle}, indent=2))
+            except Exception as e:
+                logger.warning("evidence_bundle_generation_failed: %s", e)
 
         self.engine._add_step_to_history(
             ctx.state, "R",
@@ -180,7 +207,10 @@ class PipelineRepairMixin:
             if not verify_cmds:
                 ctx.state.metadata["pregate_skip"] = True
                 ctx.state.metadata["pregate_skip_reason"] = "no_verify_commands_detected"
-                logger.info("⚠️ CLI Pre-Gate SKIPPED: No verify commands detected")
+                # === CHANGED: 沒有驗證命令時不自動 PASS ===
+                logger.warning("⚠️ CLI Pre-Gate: No verify commands detected. Status downgraded to UNVERIFIED.")
+                ctx.state.metadata["pregate_unverified"] = True
+                # 不改變 current_status，但在 Audit 階段會被 Evidence Verifier 攔截
                 return current_status
 
             logger.info("🚦 CLI Pre-Gate Triggered: Running %d verify commands", len(verify_cmds))
@@ -225,15 +255,67 @@ class PipelineRepairMixin:
             # Update hallucination check counters safely
             self._update_meta_counter(ctx, "anti_hallucination_checks")
 
+            # === NEW: T16 用 git diff 物理結果取代 Agent 自報 ===
+            import subprocess as _sp
+            _diff_result = _sp.run(
+                ["git", "diff", "--stat", "HEAD"],
+                cwd=self.engine.project_root, capture_output=True, text=True
+            )
+            _physical_has_changes = bool(_diff_result.stdout.strip())
+            
+            # 物理上沒有變動，不論 Agent 說什麼都視為 False
+            physical_patch_generated = _physical_has_changes
+            physical_patch_applied = _physical_has_changes
+
             # Detect phantom success (status=APPROVED but no evidence)
             phantom_reason = detect_inconclusive_success(
                 status=review_status_raw,
-                patch_generated=result_object.get("patch_generated", False),
-                patch_apply_success=result_object.get("patch_apply_success", False),
+                patch_generated=physical_patch_generated,
+                patch_apply_success=physical_patch_applied,
                 no_change_reason=result_object.get("no_change_reason", ""),
                 proof_type=result_object.get("proof_type", ""),
                 proof_value=result_object.get("proof_value", ""),
+                git_diff_empty=not _physical_has_changes,
+                verify_commands_executed=bool(ctx.state.metadata.get("cli_pregate_results")),
             )
+            
+            # === NEW: T12 P↔R 跨階段 Diff 校驗 ===
+            if audit_success and phantom_reason is None:
+                try:
+                    plan_targets = ctx.state.metadata.get("plan_target_files", []) or ctx.pack.get("target_files", [])
+                    if plan_targets and isinstance(plan_targets, list):
+                        diff_cmd = subprocess.run(["git", "diff", "--name-only"], cwd=self.engine.project_root, capture_output=True, text=True)
+                        actual_modified = [p for p in diff_cmd.stdout.strip().split("\n") if p]
+                        
+                        # 提取檔名作比對，增加容錯率
+                        plan_basenames = {Path(p).name for p in plan_targets}
+                        actual_basenames = {Path(p).name for p in actual_modified}
+                        
+                        if actual_modified and plan_targets and not plan_basenames.intersection(actual_basenames):
+                            phantom_reason = "plan_repair_mismatch"
+                            logger.error("🛑 [Audit:MISMATCH] R-Stage modified files %s do not overlap with P-Stage plan %s.", actual_modified, plan_targets)
+                except Exception as eval_diff_e:
+                    logger.warning("plan_repair_diff_check_failed: %s", eval_diff_e)
+
+        # === NEW: Independent Evidence Verification ===
+        from nexus.delivery.evidence_verifier import EvidenceVerifier
+
+        try:
+            verifier = EvidenceVerifier(self.engine.project_root)
+            evidence_path = self.engine.project_root / ".nexus" / "reports" / "hallucination_evidence.json"
+            if evidence_path.exists():
+                import json
+                evidence_bundle = json.loads(evidence_path.read_text()).get("evidence_bundle", {})
+                verification = verifier.verify(evidence_bundle)
+                ctx.state.metadata["independent_evidence_verification"] = verification
+                
+                if verification["overall_trust"] == "LOW":
+                    audit_success = False
+                    status = "REJECTED"
+                    ctx.state.metadata["evidence_trust_rejection"] = True
+                    logger.error("🛑 [Audit:EVIDENCE] Independent verification trust=LOW. Rejecting.")
+        except Exception as ev_exc:
+            logger.warning("evidence_verifier_non_fatal: %s", ev_exc)
 
         if phantom_reason:
             audit_success = False
@@ -325,10 +407,12 @@ class PipelineRepairMixin:
                     return self._perform_escalation(ctx, mid_root, repair_attempts)
             except Exception as esc_exc:
                 logger.debug("escalation_analysis_failed: %s", esc_exc)
-        return False
+        return False, False
 
-    def _perform_escalation(self, ctx: PipelineContextProtocol, mid_root: str, repair_attempts: int) -> bool:
-        """Executes specific escalation actions (Plan jump or Human Review)."""
+    def _perform_escalation(self, ctx: PipelineContextProtocol, mid_root: str, repair_attempts: int):
+        """Executes specific escalation actions (Plan jump or Human Review).
+        Returns a tuple: (break_loop: bool, replan_succeeded: bool)
+        """
         self._update_meta_counter(ctx, "escalation_count")
         esc_count = ctx.state.metadata.get("escalation_count", 0)
 
@@ -337,13 +421,37 @@ class PipelineRepairMixin:
             ctx.state.metadata["human_review_required"] = True
             ctx.state.metadata["human_review_reason"] = f"max_escalation:{mid_root}"
             NexusEventBus.publish("human_review_required", {"task_id": ctx.state.task_id, "root_cause": mid_root, "escalation_count": esc_count})
-            return True
+            return True, False
 
-        logger.warning("📢 Escalation: R↔A loop failure (root_cause=%s). Jumping back to Planning (Phase P).", mid_root)
+        logger.warning("📢 Escalation → Actual Replan (root_cause=%s)", mid_root)
         ctx.state.metadata["escalation_triggered"] = True
         ctx.state.metadata["escalation_root_cause"] = mid_root
         NexusEventBus.publish("escalation_to_plan", {"task_id": ctx.state.task_id, "root_cause": mid_root, "attempt": repair_attempts})
-        return True
+        
+        # === NEW: T19 Actual Replan Execution ===
+        try:
+            logger.info("⚙️ Executing actual P-Stage for replan due to escalation...")
+            p_plugin = next((p for p in self.engine.registry.get_ordered_plugins() if p.name == "P"), None)
+            if not p_plugin:
+                raise RuntimeError("P-Stage plugin not found")
+                
+            replan_feedback = {
+                "root_cause": mid_root,
+                "rejection_history": ctx.state.metadata.get("rejection_history", []),
+                "repair_attempts": repair_attempts,
+            }
+            # Inject feedback so P-Stage loop will see it
+            ctx.kwargs["plan_feedback"] = replan_feedback
+            try:
+                p_plugin.execute(self.engine, ctx)
+            finally:
+                ctx.kwargs.pop("plan_feedback", None)
+            
+            logger.info("✅ Escalation Replan succeeded, about to reset R↔A loop.")
+            return False, True
+        except Exception as e:
+            logger.error("❌ Replan failed during escalation: %s", e)
+            return True, False
 
     def _repair_audit_loop(self, ctx: PipelineContextProtocol, tracer: Any) -> bool:
         """Main R↔A loop: Iteratively repair and audit until success or exhaustion."""
@@ -383,8 +491,22 @@ class PipelineRepairMixin:
 
             # Step 3: Handle Failure
             if a_out["status"] == "REJECTED" and repair_attempts < max_retries:
-                if self._handle_escalation(ctx, repair_attempts, r_out["status"], a_out["phantom_reason"]):
-                    # Escalation might trigger a replan jump, breaking the loop
+                esc_ret = self._handle_escalation(ctx, repair_attempts, r_out["status"], a_out["phantom_reason"])
+                
+                # Check for tuple signature
+                if isinstance(esc_ret, tuple):
+                    break_auto, replan_ok = esc_ret
+                else:
+                    break_auto = esc_ret
+                    replan_ok = False
+                
+                if replan_ok:
+                    logger.warning("🔄 Escalation triggered successful replan, resetting repair cycle.")
+                    repair_attempts = 0
+                    continue
+                    
+                if break_auto:
+                    # Escalation might have reached max_retries or failed replan
                     break
                 logger.warning("🔄 Audit Rejected. Retrying repair cycle...")
                 continue

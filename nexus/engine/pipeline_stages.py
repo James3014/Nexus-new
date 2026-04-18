@@ -105,18 +105,63 @@ class PipelineStagesMixin:
                 logger.debug("p_phase_learning_skip: %s", exc)
 
             decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
-            # 🚀 [v24.0] Pass Bayesian params to the Planner
-            planner_input = {"task": ctx.task_desc, **ctx.kwargs}
-            try:
-                ctx.prediction = ctx.planner.run(
-                    ctx.state,
-                    planner_input,
-                    bayesian_params=ctx.bayesian_params,
-                )
-            except TypeError:
-                # Backward compatibility for older planner signatures.
-                ctx.prediction = ctx.planner.run(ctx.state, planner_input)
-            ctx.accumulator.record(ctx.state, "P", ctx.prediction)
+            MAX_PLAN_RETRIES = 2
+            plan_attempts = 0
+            from nexus.core.plan_quality_gate import PlanQualityGate
+            plan_gate = PlanQualityGate()
+
+            while True:
+                plan_attempts += 1
+                # 🚀 [v24.0] Pass Bayesian params to the Planner
+                planner_input = {"task": ctx.task_desc, **ctx.kwargs}
+                if plan_attempts > 1:
+                    planner_input["plan_feedback"] = {
+                        "rejected": True,
+                        "missing_fields": plan_quality.missing_fields,
+                        "reason": plan_quality.reason,
+                        "attempt": plan_attempts,
+                    }
+                    logger.warning("🔄 [P-Stage] Plan retry %d/%d with feedback: %s", 
+                                   plan_attempts, MAX_PLAN_RETRIES + 1, plan_quality.missing_fields)
+                
+                try:
+                    ctx.prediction = ctx.planner.run(
+                        ctx.state,
+                        planner_input,
+                        bayesian_params=ctx.bayesian_params,
+                    )
+                except TypeError:
+                    # Backward compatibility for older planner signatures.
+                    ctx.prediction = ctx.planner.run(ctx.state, planner_input)
+                ctx.accumulator.record(ctx.state, "P", ctx.prediction)
+                
+                # === NEW: Plan Quality Gate ===
+                plan_quality = plan_gate.evaluate(ctx.prediction, ctx.state.metadata)
+                ctx.state.metadata["plan_quality_result"] = {
+                    "passed": plan_quality.passed,
+                    "score": plan_quality.score,
+                    "missing_fields": plan_quality.missing_fields,
+                    "warnings": plan_quality.warnings,
+                }
+                
+                if plan_quality.passed:
+                    break
+                    
+                if plan_attempts > MAX_PLAN_RETRIES:
+                    logger.error("🛑 [P-Stage:REJECT] Plan quality gate failed after %d attempts: %s", plan_attempts, plan_quality.reason)
+                    ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                    ctx.state.metadata["plan_reject_reason"] = plan_quality.reason
+                    raise RuntimeError(f"Plan Quality Gate REJECTED: {plan_quality.reason} (Attempts: {plan_attempts})")
+
+            logger.info("✅ [P-Stage] Plan quality gate passed (score=%.2f, warnings=%d, attempts=%d)", 
+                        plan_quality.score, len(plan_quality.warnings), plan_attempts)
+
+            # === NEW: T15 寫入 target_files 以供 P↔R Diff 校驗使用 ===
+            plan_target_files = ctx.prediction.get("target_files", [])
+            if plan_target_files:
+                ctx.state.metadata["plan_target_files"] = plan_target_files
+                logger.info("📋 [P-Stage] Registered %d target files for P↔R validation", len(plan_target_files))
+
             learn_guard = self._load_learn_phase_slo_guard(ctx)
             ctx.state.metadata["learn_phase_slo"] = learn_guard
             
@@ -189,7 +234,15 @@ class PipelineStagesMixin:
             
             if engine == 'baseline':
                 logger.info('⚠️ [Research] Forced to Baseline by Phase Policy.')
+                # Baseline 模式：僅登記決策，不執行完整研究
+                x_decision_id = self._register_phase_decision(ctx, "X", "baseline-skip")
+                ctx.state.metadata["research_skipped_reason"] = "baseline_policy"
+                self.engine._add_step_to_history(
+                    ctx.state, "X", metadata={"decision_id": x_decision_id, "skill_id": "baseline-skip", "engine": "baseline"}
+                )
                 return
+            else:
+                # Full 研究模式
                 x_decision_id = self._register_phase_decision(ctx, "X", "researcher")
                 self._gather_research_hints(ctx)
 
@@ -269,6 +322,15 @@ class PipelineStagesMixin:
             self._match_learned_skills(ctx)
             self._apply_cycle_prevention_logic(ctx)
             
+            # === NEW: D-Stage VETO Hard Link ===
+            if ctx.pack.get("fail") or ctx.pack.get("spec_veto"):
+                veto_reason = ctx.pack.get("veto_reason", "SpecGuard VETO: unspecified")
+                logger.error("🛑 [D-Stage:VETO] Diagnosis pack contains veto signal: %s", veto_reason)
+                ctx.state.metadata["d_stage_vetoed"] = True
+                ctx.state.metadata["d_stage_veto_reason"] = veto_reason
+                ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                raise RuntimeError(f"D-Stage VETO: {veto_reason}")
+
             self.engine._add_step_to_history(
                 ctx.state, "D", metadata={"pack_keys": list(ctx.pack.keys()), "decision_id": d_decision_id, "skill_id": "diagnose-pack"}
             )
