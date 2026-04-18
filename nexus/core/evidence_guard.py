@@ -28,18 +28,17 @@ class NexusEvidenceGuard:
         if evidence.get("task_id") != task_id:
              issues.append(f"Task ID Mismatch: {evidence.get('task_id')} != {task_id}")
 
-        # 語義檢查
-        if any(kw in claim_summary.lower() for kw in ["patch", "fix", "repair", "implement"]):
-            diff = ""
-            if self.git_hub:
-                _, diff = self.git_hub.get_changes("staged")
-            
-            if not diff or not diff.strip():
-                issues.append("Empty Change Set: No valid diff detected for logic claims.")
-            else:
-                keywords = [w.lower() for w in task_id.split() if len(w) > 3]
-                if not any(k in diff.lower() for k in keywords) and keywords:
-                    issues.append(f"Semantic Drift: Diff does not relate to task keywords {keywords}")
+        # Always enforce physical + semantic checks for PASS claims.
+        diff = ""
+        if self.git_hub:
+            _, diff = self.git_hub.get_changes("staged")
+
+        if not diff or not diff.strip():
+            issues.append("Empty Change Set: No valid diff detected for PASS claim.")
+        else:
+            keywords = [w.lower() for w in task_id.split() if len(w) > 3]
+            if keywords and not any(k in diff.lower() for k in keywords):
+                issues.append(f"Semantic Drift: Diff does not relate to task keywords {keywords}")
 
         if issues:
             return False, "\n".join(issues)
