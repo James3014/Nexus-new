@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from click.testing import CliRunner
 from pathlib import Path
 
@@ -67,3 +68,27 @@ def test_delivery_receipt_renders_json(tmp_path, monkeypatch):
     result = CliRunner().invoke(nexus, ["nexus", "delivery-receipt", "--receipt", str(receipt), "--json"])
     assert result.exit_code == 0
     assert '"head": "abc123"' in result.output
+
+
+def test_contract_snapshot_writes_current_head(tmp_path, monkeypatch):
+    from scripts.engine.nexus_cli import nexus
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
+
+    def _fake_check_output(cmd, cwd=None):
+        if cmd[:3] == ["git", "rev-parse", "--short"]:
+            return b"abc123\n"
+        if cmd[:4] == ["git", "show", "--name-only", "--format="]:
+            return b"nexus/orchestrator/orchestrator.py\ntests/nexus/orchestrator/test_task_contract.py\n"
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.check_output", _fake_check_output)
+    out = tmp_path / ".nexus" / "reports" / "closeout_contract.json"
+    result = CliRunner().invoke(nexus, ["nexus", "contract-snapshot", "--output", str(out)])
+    assert result.exit_code == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["commit_sha"] == "abc123"
+    assert payload["changed_files"] == [
+        "nexus/orchestrator/orchestrator.py",
+        "tests/nexus/orchestrator/test_task_contract.py",
+    ]

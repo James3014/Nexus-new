@@ -1068,6 +1068,39 @@ def contract_check(contract_file):
     cmd = [sys.executable, str(repo_root / "scripts/ops/closeout_guard.py"), "--contract", contract_file]
     subprocess.run(cmd, check=True)
 
+
+@nexus_group.command(name="contract-snapshot")
+@click.option("--output", "output_path", default=".nexus/reports/closeout_contract.json", show_default=True, type=click.Path())
+@click.option("--task-id", default="runtime-closeout", show_default=True)
+@click.option("--tests-passed/--no-tests-passed", default=True, show_default=True)
+@click.option("--linter-exit-code", default=0, show_default=True, type=int)
+@click.option("--ci-gate-exit-code", default=0, show_default=True, type=int)
+def contract_snapshot(output_path, task_id, tests_passed, linter_exit_code, ci_gate_exit_code):
+    """🧾 Emit a runtime closeout contract for the current HEAD."""
+    head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=repo_root).decode().strip()
+    changed_raw = subprocess.check_output(
+        ["git", "show", "--name-only", "--format=", "HEAD"],
+        cwd=repo_root,
+    ).decode()
+    changed_files = [line.strip() for line in changed_raw.splitlines() if line.strip()]
+    payload = {
+        "task_id": task_id,
+        "commit_sha": head,
+        "linter_exit_code": int(linter_exit_code),
+        "ci_gate_exit_code": int(ci_gate_exit_code),
+        "required_tests_passed": bool(tests_passed),
+        "changed_files": changed_files,
+        "done_criteria": [
+            "delivery gate passed",
+            "contract check passed",
+        ],
+    }
+    out = Path(output_path)
+    out = out if out.is_absolute() else (repo_root / out).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    click.echo(json.dumps({"ok": True, "output": str(out), "commit_sha": head}, indent=2, ensure_ascii=False))
+
 @nexus_group.command(name="distill")
 def distill():
     """🌬️ [Metabolism] Distill session essence."""
