@@ -2077,7 +2077,7 @@ def task_status_cmd(task_id, output_json):
             click.echo(f"Task {task_id} not found.")
             return
         if output_json:
-            click.echo(task.json(indent=2))
+            click.echo(task.model_dump_json(indent=2))
         else:
             click.echo(f"Task: {task.task_id} | Status: {task.current_status} | Owner: {task.owner}")
     else:
