@@ -2222,5 +2222,82 @@ def submit_task_cmd(task_id):
     click.secho("✅ Task submitted successfully.", fg="green")
     click.echo(json.dumps(delivery, indent=2))
 
+
+# --- v4.0: Skills & Registry Management ---
+@nexus_group.group(name="skills")
+def skills_group():
+    """🧠 Manage external skills and manual teach-ins."""
+    pass
+
+@skills_group.command(name="sync")
+def skills_sync():
+    """📥 Sync external skills from ~/.agents/skills/ into SQLite registry."""
+    from nexus.learning.external_skill_loader import ExternalSkillLoader
+    loader = ExternalSkillLoader(repo_root)
+    added, updated = loader.sync_all()
+    click.secho(f"✅ Sync Complete: {added} added, {updated} updated.", fg="green", bold=True)
+
+@skills_group.command(name="list")
+def skills_list():
+    """📋 List all registered skills (internal + external)."""
+    from nexus.core.unified_registry import UnifiedRegistry
+    reg = UnifiedRegistry(repo_root)
+    skills = reg.registry.list_all()
+    click.echo(f"{'ID':<20} | {'Name':<30} | {'Type':<10}")
+    click.echo("-" * 65)
+    for s in skills:
+        click.echo(f"{s['id']:<20} | {s['name']:<30} | {s.get('origin_type', 'internal'):<10}")
+
+@nexus_group.group(name="registry")
+def registry_group():
+    """🗄️ Unified Resource Registry (SSoT) status and maintenance."""
+    pass
+
+@registry_group.command(name="status")
+def registry_status():
+    """📊 Check health of assets, databases, and external skill paths."""
+    from nexus.core.unified_registry import UnifiedRegistry
+    reg = UnifiedRegistry(repo_root)
+    manifest = reg.get_status()
+    click.secho("📊 [Nexus Registry Status]", fg="cyan", bold=True)
+    click.echo(f"  SQLite Registry: {manifest.health.get('registry', 'UNKNOWN')}")
+    click.echo(f"  Skill Count    : {manifest.skills_count}")
+    click.echo(f"  Models (Armor) : {manifest.models_configured}")
+    click.echo(f"  Policies Count : {manifest.policies_count}")
+    click.echo(f"  Last Refresh   : {manifest.last_refresh}")
+
+@nexus_group.group(name="bench")
+def bench_group():
+    """📈 Autonomous performance benchmarking and ROI analysis."""
+    pass
+
+@bench_group.command(name="effort")
+def bench_effort():
+    """📊 Analyze success rates and ROI per effort level."""
+    from nexus.engine.benchmark_runner import BenchmarkRunner
+    runner = BenchmarkRunner(repo_root)
+    report = runner.generate_effort_roi_report()
+    click.secho("📈 [Nexus Effort ROI Report]", fg="magenta", bold=True)
+    for level, data in report.items():
+        click.echo(f"\n[{level.upper()}]")
+        click.echo(f"  Success Rate: {data['success_rate']:.2%}")
+        click.echo(f"  Avg Duration: {data['avg_duration_sec']:.1f}s")
+        click.echo(f"  Count       : {data['count']}")
+
+@nexus_group.group(name="sandbox")
+def sandbox_group():
+    """🏗️ Isolated environment execution and validation."""
+    pass
+
+@sandbox_group.command(name="run")
+@click.option("--task", required=True)
+def sandbox_run_cmd(task):
+    """🏗️ Run a task in a physical Git-worktree sandbox."""
+    from nexus.engine.sandbox_runner import SandboxRunner
+    runner = SandboxRunner(repo_root)
+    results = runner.run_task(task)
+    click.secho(f"🏗️ [Sandbox] Execution finished. Success: {results['success']}", fg="cyan")
+
 if __name__ == "__main__":
+
     nexus()
