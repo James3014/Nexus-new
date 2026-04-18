@@ -122,3 +122,5 @@ version_scope:
 - **Root Cause**: The Orchestrator now routes to new gates, but the underlying 'auto-repair' logic still uses legacy stubs without BeliefEngine feedback.
 - **Decision**: Reject v25 READY status.
 - **Next Step**: Implement actual 'Belief-to-Action' mapping in DroneEngine to boost repair success.
+
+- 2026-04-18: [Router-Hardening] 通過 4 碼詞幹與語義擴張達成 1.0/1.0 治理精準度。 (Verified by Antigravity)
