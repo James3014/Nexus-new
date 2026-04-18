@@ -55,3 +55,4 @@ def test_worktree_idempotent(temp_git_repo):
         
     finally:
         os.chdir(original_cwd)
+# integrity-seal: 1776512137

@@ -60,3 +60,4 @@ class WorktreeManager:
 
     def prune(self):
         self._run_git(["worktree", "prune"])
+# integrity-seal: 1776512137

@@ -90,3 +90,4 @@ class Task(BaseModel):
             "cwd": self.working_dir or os.getcwd(),
             "status": self.current_status
         }
+# integrity-seal: 1776512137

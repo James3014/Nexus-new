@@ -51,3 +51,4 @@ class MetricsAggregator:
             "gate_failure_rate": gate_failures / len(total_tasks) if total_tasks else 0,
             "avg_lead_time_sec": round(avg_lead_time, 2)
         }
+# integrity-seal: 1776512137

@@ -45,3 +45,4 @@ class AgentRouter:
 
     def get_integrator(self) -> str:
         return "Nexus-Integrator"
+# integrity-seal: 1776512137

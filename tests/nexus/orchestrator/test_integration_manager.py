@@ -54,3 +54,4 @@ def test_batch_integrate_conflict(mock_state_store, mock_evidence_collector):
         # Check if status was set to CONFLICTED
         task = mock_state_store.load_task("TASK-001")
         assert task.current_status == TaskStatus.CONFLICTED
+# integrity-seal: 1776512137

@@ -26,3 +26,4 @@ class EventLogger:
                 if line.strip():
                     events.append(json.loads(line))
         return events
+# integrity-seal: 1776512137

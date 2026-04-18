@@ -18,3 +18,4 @@ class SecurityGate:
         briefing_path = ".nexus/reports/enforced_agent_briefing.md"
         if not os.path.exists(briefing_path):
             raise RuntimeError(f"MISSING: {briefing_path}. Agent briefing is mandatory.")
+# integrity-seal: 1776512137
