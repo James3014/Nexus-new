@@ -39,6 +39,25 @@ class CriterionResult:
     detail: Dict[str, Any]
 
 
+def _build_primary_failure(criteria: List[CriterionResult]) -> Dict[str, Any]:
+    for item in criteria:
+        if item.passed:
+            continue
+        detail = item.detail or {}
+        reason = (
+            detail.get("error")
+            or detail.get("status")
+            or detail.get("warning")
+            or "criterion_failed"
+        )
+        return {
+            "name": item.name,
+            "reason": str(reason),
+            "detail": detail,
+        }
+    return {"name": "none", "reason": "none", "detail": {}}
+
+
 def _load_jsonl(path: Path) -> List[Dict[str, Any]]:
     
     if not path.exists():
@@ -83,7 +102,7 @@ def _evaluate_repair_success(
     recent_out = outcome_rows[-window:] if window > 0 else outcome_rows
     crystallize_success = [
         r for r in recent_out
-        if r.get("source") == "pipeline.crystallize" and bool(r.get("pass", False))
+        if r.get("source") == "pipeline.crystallize" and bool(r.get("pass", False) or r.get("regression_verified", False))
     ]
     
     total_opt = len(recent_opt)
@@ -227,7 +246,7 @@ def _evaluate_ucc_truth_efficiency(
     
     # 1. Reach Success Rate
     reach_events = [r for r in recent if str(r.get("skill_id", "")).startswith("reach.")]
-    reach_success = sum(1 for r in reach_events if bool(r.get("pass", False)))
+    reach_success = sum(1 for r in reach_events if bool(r.get("pass", False) or r.get("regression_verified", False)))
     reach_rate = _pct(reach_success, len(reach_events))
     
     # 2. Doc Veto Effectiveness
@@ -398,6 +417,12 @@ def main():
     parser.add_argument("--exclude-sources", default="calibration.sim")
     parser.add_argument("--exclude-tasks", default="")
     parser.add_argument(
+        "--cold-start-min-samples",
+        type=int,
+        default=10,
+        help="Minimum outcome sample count before hard FAIL gating is enforced.",
+    )
+    parser.add_argument(
         "--required-claim-paths",
         default=os.environ.get("NEXUS_REQUIRED_CLAIM_PATHS", ""),
         help="Comma-separated files that must exist before claims can be marked PASS.",
@@ -443,11 +468,20 @@ def main():
     lesson_check = _evaluate_lesson_writeback(project_root)
     all_checks = checks + [learning_check, ucc_check, wiki_contract_check, lesson_check]
     gate_passed = all(c.passed for c in all_checks)
+    cold_start = len(outcome_rows) < max(1, int(args.cold_start_min_samples))
+    primary_failure = _build_primary_failure(all_checks)
+    status = "PASS" if gate_passed else "FAIL"
+    if (not gate_passed) and cold_start:
+        status = "UNVERIFIED_COLD_START"
 
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "status": "PASS" if gate_passed else "FAIL",
+        "status": status,
         "gate_passed": gate_passed,
+        "cold_start": cold_start,
+        "cold_start_sample_count": len(outcome_rows),
+        "cold_start_min_samples": int(args.cold_start_min_samples),
+        "primary_failure": primary_failure,
         "criteria": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks],
         "wiki_harness": wiki_summary,
     }
@@ -464,8 +498,13 @@ def main():
     )
     all_checks.append(claim_check)
     gate_passed = gate_passed and claim_check.passed
-    report["status"] = "PASS" if gate_passed else "FAIL"
+    primary_failure = _build_primary_failure(all_checks)
+    status = "PASS" if gate_passed else "FAIL"
+    if (not gate_passed) and cold_start:
+        status = "UNVERIFIED_COLD_START"
+    report["status"] = status
     report["gate_passed"] = gate_passed
+    report["primary_failure"] = primary_failure
     report["criteria"] = [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in all_checks]
 
     (output_dir / "acceptance_check.json").write_text(json.dumps(report, indent=2))

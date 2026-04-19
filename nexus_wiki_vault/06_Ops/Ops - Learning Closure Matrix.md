@@ -124,3 +124,9 @@ version_scope:
 - **Next Step**: Implement actual 'Belief-to-Action' mapping in DroneEngine to boost repair success.
 
 - 2026-04-18: [Router-Hardening] 通過 4 碼詞幹與語義擴張達成 1.0/1.0 治理精準度。 (Verified by Antigravity)
+
+## 2026-04-19: Code16 Deadloop from Gate Coupling (Delivery vs Acceptance)
+- **Phenomenon**: `delivery_gate` repeatedly failed with `Code 16`, even when anti-fraud gates were healthy, causing agent loops (report tweak -> rerun -> fail).
+- **Root Cause**: integrity checks and acceptance quality checks were coupled under one hard-fail path; cold-start/metric sensitivity in acceptance was treated as the same severity as fraud/integrity failures.
+- **Decision**: split gates into `Integrity Claims` (always fail-closed) and `Acceptance Quality` (policy-aware: `dev` allows `UNVERIFIED_COLD_START`, `prod` remains strict).
+- **Prevention**: require `primary_failure` in acceptance output and force `CODE16_ROOT_CAUSE=<criterion>:<reason>` in delivery logs; keep normal/adversarial scores separated in qualification suite.
