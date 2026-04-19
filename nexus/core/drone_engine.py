@@ -167,6 +167,27 @@ class TacticalDrone(DroneProtocol):
             {"role": "user", "content": task_intent}
         ]
 
+        # [NEW: R-2] Inject Claims Knowledge to provide priors
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            svc = LearnModeService(self.project_root)
+            task_claims = svc.ask(
+                topic="drone-tactics", question=task_intent, top_k=3
+            )
+            if task_claims.get("citations"):
+                knowledge_block = "\n".join([
+                    f"[Knowledge] {c['claim']}" 
+                    for c in task_claims["citations"][:3]
+                ])
+                messages.insert(1, {
+                    "role": "system",
+                    "content": f"Historical Knowledge:\n{knowledge_block}"
+                })
+                self._log_trace("SENSE", f"Injected {len(task_claims['citations'])} historical claims.")
+        except Exception as e:
+            logger.debug(f"Drone knowledge injection skipped: {e}")
+
+
         outcome = "FAIL"
         consecutive_invalid_count = 0
         has_successful_tool_action = False
