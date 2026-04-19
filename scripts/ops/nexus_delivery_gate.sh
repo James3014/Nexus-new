@@ -10,6 +10,7 @@ RECEIPT_PATH=".nexus/reports/delivery_gate.json"
 RUN_ROUTER_BENCH=0
 FIX_SHA=""
 HEAD_SHA_ARG=""
+REPORT_PATH=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
     --router-benchmark)
       RUN_ROUTER_BENCH=1
       shift
+      ;;
+    --report)
+      REPORT_PATH="${2:?missing value for --report}"
+      shift 2
       ;;
     --receipt)
       RECEIPT_PATH="${2:?missing value for --receipt}"
@@ -61,18 +66,21 @@ echo "[delivery-gate] branch=$(git branch --show-current)"
 echo "[delivery-gate] head=$(git rev-parse --short HEAD)"
 
 echo "== Delivery Gate: tests =="
-uv run pytest -q tests/nexus/orchestrator
+/Users/jameschen/.cargo/bin/uv run pytest -q tests/nexus/orchestrator
 
 echo "== Delivery Gate: acceptance =="
-uv run scripts/engine/nexus_cli.py nexus acceptance-check --json --evidence "$EVIDENCE_PATH"
+/Users/jameschen/.cargo/bin/uv run scripts/engine/nexus_cli.py nexus acceptance-check --json --evidence "$EVIDENCE_PATH"
 
-echo "== Delivery Gate: report integrity =="
-uv run scripts/ops/verify_report_claims.py \
-  --project-root . \
-  --require-acceptance-pass \
-  --require-clean \
-  --ignore-dirty-config "$ALLOW_DIRTY_CONFIG" \
-  --json
+echo "== Delivery Gate: report integrity & lock =="
+VRC_ARGS=("--project-root" "." "--require-acceptance-pass" "--require-clean" "--ignore-dirty-config" "$ALLOW_DIRTY_CONFIG" "--json")
+if [[ -n "$REPORT_PATH" ]]; then
+  VRC_ARGS+=("--report-file" "$REPORT_PATH")
+fi
+
+if ! /Users/jameschen/.cargo/bin/uv run scripts/ops/verify_report_claims.py "${VRC_ARGS[@]}"; then
+  echo "[delivery-gate] \u274c ERROR: Report integrity check failed. See JSON output above." >&2
+  exit 1
+fi
 
 if [[ "$RUN_ROUTER_BENCH" == "1" && -f "scripts/ops/router_policy_benchmark.py" ]]; then
   echo "== Delivery Gate: router benchmark =="

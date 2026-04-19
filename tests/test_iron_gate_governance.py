@@ -175,3 +175,42 @@ def test_acceptance_ucc_cold_start():
     assert res.passed is False
     assert res.detail["status"] == "UNVERIFIED_COLD_START"
 
+
+
+# --- Report Integrity Lock v1 ---
+def test_verify_claims_integrity_fail_on_missing_report():
+    from scripts.ops.verify_report_claims import verify_claims
+    res = verify_claims(Path("."), report_file_rel="non_existent.json")
+    integrity_check = next(c for c in res["checks"] if c["name"] == "report_integrity_lock")
+    assert integrity_check["passed"] is False
+    assert integrity_check["detail"]["error"] == "report_file_not_found"
+
+@patch("scripts.ops.verify_report_claims._run_git")
+def test_verify_claims_integrity_fail_on_mismatch(mock_git):
+    from scripts.ops.verify_report_claims import verify_claims
+    import json
+    
+    # Mock git show and git diff to return something else
+    def side_effect(root, args):
+        if "show" in args: return "real_file.py"
+        if "diff" in args: return "real_file.py"
+        return ""
+    mock_git.side_effect = side_effect
+    
+    report_data = {
+        "head_sha": "abc",
+        "files_changed_in_this_commit": ["fake_file.py"],
+        "base_branch": "main",
+        "branch_delta_vs_base": ["fake_file.py"]
+    }
+    report_file = Path(".nexus/reports/test_mismatch.json")
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(json.dumps(report_data))
+    
+    try:
+        res = verify_claims(Path("."), report_file_rel=str(report_file))
+        integrity_check = next(c for c in res["checks"] if c["name"] == "report_integrity_lock")
+        assert integrity_check["passed"] is False
+        assert integrity_check["detail"]["commit_integrity"]["passed"] is False
+    finally:
+        report_file.unlink()
