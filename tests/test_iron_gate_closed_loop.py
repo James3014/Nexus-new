@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from nexus.core.plan_quality_gate import PlanQualityGate
 from nexus.engine.pipeline_repair import PipelineRepairMixin
@@ -133,3 +134,49 @@ def test_pipeline_d_stage_veto_retry():
     assert pxd_attempts == 2, f"Expected 2 attempts, got {pxd_attempts}"
     assert final_plan_strategy == "conservative", f"Should have switched to conservative, got {final_plan_strategy}"
     assert veto_feedback is not None, "Should have a veto feedback from first attempt"
+
+@patch("nexus.delivery.evidence_verifier.EvidenceVerifier.verify")
+def test_pipeline_verifier_fail_closed(mock_verify):
+    """T2: 驗證 Verifier 異常時觸發 FAIL-CLOSED"""
+    class DummyEngine(PipelineRepairMixin):
+        def __init__(self):
+            self.engine = MagicMock()
+            self.engine.project_root = Path(".")
+            self.engine._add_step_to_history = MagicMock()
+            self.engine.ReviewStatusNormalizer.normalize = MagicMock(return_value=("APPROVED", True))
+            self._register_phase_decision = MagicMock(return_value="a-123")
+            self._load_audit_hints = MagicMock()
+            self._update_meta_counter = MagicMock()
+            self._record_repair_outcome_event = MagicMock()
+            
+    engine = DummyEngine()
+    ctx = MagicMock()
+    ctx.state = MagicMock()
+    ctx.state.metadata = {}
+    
+    # Simulate verifier crash
+    mock_verify.side_effect = Exception("System Crash")
+    
+    # We need a minimal eval_ctx for _evaluate_audit_result if it uses it.
+    # Actually _evaluate_audit_result in recent edits uses result_object, review_status_raw etc.
+    
+    # Mocking external calls in _evaluate_audit_result
+    with patch("nexus.core.phantom_detect.detect_inconclusive_success", return_value=None):
+        with patch("json.loads", return_value={"evidence_bundle": {}}):
+            with patch("pathlib.Path.read_text", return_value="{}"):
+                with patch("pathlib.Path.exists", return_value=True):
+                    # Calling the method under test
+                    eval_ctx = MagicMock(
+                        repair_attempts=1,
+                        review_status_raw="APPROVED",
+                        result_object={},
+                        current_decision_id="d-123",
+                        current_skill_id="s-123",
+                        tracer=MagicMock()
+                    )
+                    out = engine._evaluate_audit_result(ctx, eval_ctx)
+                    
+                    assert out["audit_success"] is False
+                    assert out["status"] == "REJECTED"
+                    assert ctx.state.metadata["evidence_trust_rejection"] is True
+                    assert "System Crash" in ctx.state.metadata["evidence_verifier_error"]

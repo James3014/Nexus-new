@@ -315,7 +315,11 @@ class PipelineRepairMixin:
                     ctx.state.metadata["evidence_trust_rejection"] = True
                     logger.error("🛑 [Audit:EVIDENCE] Independent verification trust=LOW. Rejecting.")
         except Exception as ev_exc:
-            logger.warning("evidence_verifier_non_fatal: %s", ev_exc)
+            logger.error("🛑 [FAIL_CLOSED_EVIDENCE_VERIFIER] Verifier crashed, rejecting by default: %s", ev_exc)
+            audit_success = False
+            status = "REJECTED"
+            ctx.state.metadata["evidence_verifier_error"] = str(ev_exc)
+            ctx.state.metadata["evidence_trust_rejection"] = True
 
         if phantom_reason:
             audit_success = False

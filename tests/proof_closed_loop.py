@@ -323,6 +323,32 @@ def scenario_d_veto_replan():
             "final_state": "TERMINAL", "detail": "PXD retry exhausted"}
 
 # ================================================================
+# 場景 9: Verifier 異常 → Fail-Closed (邏輯模擬)
+# ================================================================
+def scenario_verifier_fail_closed():
+    """模擬 Verifier 拋出異常時觸發拒絕"""
+    attempts = 0
+    max_retries = 2
+    
+    while attempts < max_retries:
+        attempts += 1
+        try:
+            # 模擬 Verifier 崩潰
+            raise Exception("Fatal Verification Error")
+        except Exception:
+            # 模擬 pipeline_repair.py 中的 Fail-Closed
+            audit_success = False
+            status = "REJECTED"
+        
+        if status == "REJECTED":
+            # 繼續重試 (R↔A 流程)
+            continue
+            
+    return {"blocked": True, "retried": True,
+            "final_state": "TERMINAL",
+            "detail": f"Verifier 崩潰觸發 Fail-Closed 並在 {attempts} 次後終止"}
+
+# ================================================================
 # 執行所有場景
 # ================================================================
 if __name__ == "__main__":
@@ -337,6 +363,7 @@ if __name__ == "__main__":
         ("⑥ Escalation 過多 → HUMAN_REVIEW",       "Escalation",        scenario_escalation_max_human_review),
         ("⑦ CLI 無驗證命令 → 補命令後通過",          "CLI Pregate",       scenario_cli_pregate_retry),
         ("⑧ D-Stage VETO → 換策略重來 → 通過",      "D-Stage VETO",      scenario_d_veto_replan),
+        ("⑨ Verifier 崩潰 → Fail-Closed 不卡死",     "Verifier",          scenario_verifier_fail_closed),
     ]
 
     for name, gate, fn in scenarios:

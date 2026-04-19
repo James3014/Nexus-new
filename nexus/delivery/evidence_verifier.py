@@ -50,19 +50,34 @@ class EvidenceVerifier:
     def _verify_code_artifacts(self, artifacts: list) -> dict:
         missing = []
         untracked = []
+        invalid_items = []
+        normalized_paths = []
         tracked_files = self._get_tracked_files()
         
         for artifact in artifacts:
-            path = self.project_root / artifact
+            file_path = ""
+            if isinstance(artifact, str):
+                file_path = artifact
+            elif isinstance(artifact, dict):
+                file_path = artifact.get("file_path", "")
+            
+            if not file_path:
+                invalid_items.append(artifact)
+                continue
+            
+            normalized_paths.append(file_path)
+            path = self.project_root / file_path
             if not path.exists():
-                missing.append(artifact)
-            elif str(artifact) not in tracked_files:
-                untracked.append(artifact)
+                missing.append(file_path)
+            elif str(file_path) not in tracked_files:
+                untracked.append(file_path)
         
         return {
-            "all_exist": len(missing) == 0,
+            "all_exist": len(missing) == 0 and len(invalid_items) == 0,
             "missing": missing,
             "untracked": untracked,
+            "invalid_items": invalid_items,
+            "normalized_paths": normalized_paths,
             "total": len(artifacts),
         }
     

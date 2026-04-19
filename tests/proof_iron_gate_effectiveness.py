@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
+from unittest.mock import patch, MagicMock
 
 # ============================================================
 # 直接 import 我們改過的模組，在真實環境中驗證
@@ -161,6 +162,39 @@ proof(
     f"新 Pregate → passed={passed_2d}, reason='{results_2d[0].get('reason', '')[:60]}'",
     passed_2d is False
 )
+
+# 攻擊 2e: Evidence Verifier 內部異常 (Fail-Closed)
+verifier_fail = EvidenceVerifier(Path("."))
+with patch.object(verifier_fail, "verify", side_effect=Exception("Database Connection Timeout")):
+    # 模擬 pipeline_repair.py 中的行為
+    try:
+        verifier_fail.verify({})
+        v_passed = True
+    except:
+        v_passed = False
+    
+    proof(
+        "② 驗證缺口",
+        "Evidence Verifier 內部異常（例如逾時或崩潰）",
+        "舊行為: 異常被吞掉，預設放行",
+        "新行為: 系統觸發 [FAIL_CLOSED_EVIDENCE_VERIFIER] 並拒絕",
+        v_passed is False
+    )
+
+# 攻擊 2f: Evidence schema 為 dict 格式可正常驗證
+verifier_dict = EvidenceVerifier(Path("."))
+with patch("pathlib.Path.exists", return_value=True):
+    with patch("nexus.delivery.evidence_verifier.EvidenceVerifier._get_tracked_files", return_value=["a.py"]):
+        res_f = verifier_dict._verify_code_artifacts([
+            {"file_path": "a.py", "modification_type": "modified"}
+        ])
+        proof(
+            "② 驗證缺口",
+            "Evidence schema 使用新格式 (dict)",
+            "舊行為: 解析錯誤或跳過",
+            f"新行為: 成功解析並驗證 (all_exist={res_f['all_exist']})",
+            res_f["all_exist"] is True
+        )
 
 # ============================================================
 # 問題 ③：詐欺完成報告

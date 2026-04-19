@@ -114,6 +114,28 @@ def test_evidence_verifier_high_trust(mock_run):
         res = verifier.verify({"code_artifacts": ["a.py"], "test_artifacts": ["pytest"]})
         assert res["overall_trust"] == "HIGH"
 
+def test_evidence_verifier_dict_format():
+    """T1: 驗證 dict 格式解析"""
+    verifier = EvidenceVerifier(Path("."))
+    with patch("pathlib.Path.exists", return_value=True):
+        res = verifier._verify_code_artifacts([
+            {"file_path": "a.py", "modification_type": "modified"},
+            "b.py"
+        ])
+        assert "a.py" in res["normalized_paths"]
+        assert "b.py" in res["normalized_paths"]
+        assert len(res["invalid_items"]) == 0
+
+def test_evidence_verifier_invalid_items():
+    """T1: 驗證無效項處理"""
+    verifier = EvidenceVerifier(Path("."))
+    res = verifier._verify_code_artifacts([
+        {"modification_type": "modified"}, # missing file_path
+        "" # empty string
+    ])
+    assert len(res["invalid_items"]) == 2
+    assert res["all_exist"] is False
+
 # --- T14-D: cli_pregate.py logic check ---
 # Assuming run_cli_pregate exists and logic is straight forward
 # We focus on the fact that if commands are empty, in CLI pregate we might pass or fail based on rules.
