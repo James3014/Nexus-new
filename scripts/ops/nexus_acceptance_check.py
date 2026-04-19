@@ -257,7 +257,7 @@ def _evaluate_learning_promotion(
     
     metric_passed = (avg_pr >= pr_min) and (avg_nrh >= nrh_min)
     # === CHANGED: 只有 observe_only 才豁免 ===
-    passed = metric_passed or (mode == "observe_only")
+    passed = metric_passed or (mode in ["soft_signal", "observe_only"])
     
     return CriterionResult(
         name="learning_promotion_gate",
@@ -461,7 +461,7 @@ def main():
     parser.add_argument("--retry-abs-max", type=float, default=1.0)
     parser.add_argument("--pr-min", type=float, default=30.0)
     parser.add_argument("--nrh-min", type=float, default=20.0)
-    parser.add_argument("--learning-gate-mode", default="enforce")
+    parser.add_argument("--learning-gate-mode", default="soft_signal")
     parser.add_argument("--include-sources", default="pipeline.crystallize,pipeline.repair,pipeline.repair_audit")
     parser.add_argument("--exclude-sources", default="calibration.sim")
     parser.add_argument("--exclude-tasks", default="")

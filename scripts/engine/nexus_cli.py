@@ -297,7 +297,9 @@ def acceptance_check(as_json, evidence_path):
     # 1. 執行實體驗收
     cmd = [sys.executable, str(repo_root / "scripts/ops/nexus_acceptance_check.py")]
     if as_json: cmd.append("--json")
-    subprocess.run(cmd, check=True)
+    acceptance_result = subprocess.run(cmd)
+    if acceptance_result.returncode != 0:
+        raise click.exceptions.Exit(acceptance_result.returncode)
 
     # 1.5 驗收報告宣稱完整性檢查（防止跨分支/缺證據誤宣稱）
     verify_cmd = [
