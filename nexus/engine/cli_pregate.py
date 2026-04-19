@@ -34,7 +34,14 @@ def run_cli_pregate(
     執行驗證指令列表，回傳 (all_passed, results)
     """
     if not commands:
-        return True, [{"cmd": "_SKIPPED", "exit_code": -1, "passed": True, "pregate_skip": True}]
+        # === CHANGED: 空指令 → UNVERIFIED（非 pass） ===
+        return False, [{
+            "cmd": "_NO_VERIFY_COMMANDS",
+            "exit_code": -1,
+            "passed": False,
+            "pregate_skip": True,
+            "reason": "No verification commands detected. Cannot confirm repair success."
+        }]
     
     env = os.environ.copy()
     venv_bin = str(project_root / ".venv" / "bin")
@@ -58,9 +65,11 @@ def run_cli_pregate(
             )
             
             # ⚖️ 治理門檻調整 (Adaptive Gating):
-            # rc == 2 (Usage error/Path not found in Sandbox) 視為 Soft Fail (passed)。
+            # rc == 2 (Usage error/Path not found in Sandbox) 不再視為 Soft Fail (passed)。
             is_env_error = (proc.returncode == 2)
-            passed = (proc.returncode == 0) or is_env_error
+            passed = (proc.returncode == 0)
+            if is_env_error:
+                logger.warning("⚠️ CLI Pre-Gate SOFT FAIL (rc=2): %s — Counted as FAIL.", cmd)
             
             results.append({
                 "cmd": cmd,
@@ -71,11 +80,12 @@ def run_cli_pregate(
                 "stderr_tail": (proc.stderr or "")[-500:],
             })
             
-            if is_env_error:
-                logger.warning("⚠️ CLI Pre-Gate SOFT FAIL (rc=2, Ambient Noise): %s", cmd)
-            elif not passed:
+            if not passed:
                 all_passed = False
-                logger.warning("❌ CLI Pre-Gate FAIL: %s (rc=%d)", cmd, proc.returncode)
+                if is_env_error:
+                    logger.warning("⚠️ CLI Pre-Gate SOFT FAIL (rc=2, Ambient Noise): %s", cmd)
+                else:
+                    logger.warning("❌ CLI Pre-Gate FAIL: %s (rc=%d)", cmd, proc.returncode)
             else:
                 logger.info("✅ CLI Pre-Gate PASS: %s", cmd)
                 

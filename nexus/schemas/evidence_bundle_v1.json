@@ -1,44 +1,50 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Nexus Evidence Bundle",
+  "title": "Nexus Evidence Bundle V1",
+  "version": "1.1.0",
   "type": "object",
-  "required": [
-    "claim_state",
-    "confidence_level",
-    "code_artifacts",
-    "upstream_alignment_checklist",
-    "known_gaps"
-  ],
   "properties": {
-    "claim_state": {
-      "enum": ["IDEA", "HYPOTHESIS", "CANDIDATE_PATCH", "PARTIAL_VALIDATION", "VERIFIED", "STANDARDIZED", "REJECTED"]
-    },
-    "confidence_level": {
-      "enum": ["LOW", "MEDIUM", "HIGH"]
-    },
+    "version": { "type": "string", "enum": ["1.1.0"] },
     "code_artifacts": {
       "type": "array",
-      "items": { "type": "string" },
-      "description": "實體代碼路徑"
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "required": ["file_path"],
+            "properties": {
+              "file_path": { "type": "string", "minLength": 1 },
+              "modification_type": { "type": "string" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        ]
+      }
     },
-    "compile_commands": { "type": "array", "items": { "type": "string" } },
-    "runtime_commands": { "type": "array", "items": { "type": "string" } },
-    "sanitizer_logs": { "type": "string", "description": "ASAN/TSAN 物理日誌摘要" },
-    "upstream_alignment_checklist": {
-      "type": "object",
-      "additionalProperties": { "type": "boolean" }
-    },
-    "known_gaps": {
+    "test_artifacts": {
       "type": "array",
-      "items": { "type": "string" },
-      "description": "尚未驗證或已知失效的邊界"
-    }
+      "items": {
+        "type": "object",
+        "required": ["command", "exit_code"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "exit_code": { "type": "integer" },
+          "output_hash": { "type": "string" },
+          "duration_ms": { "type": "number" }
+        }
+      }
+    },
+    "env_context": {
+      "type": "object",
+      "properties": {
+        "python_version": { "type": "string" },
+        "os": { "type": "string" },
+        "project_root": { "type": "string" }
+      }
+    },
+    "verification_token": { "type": "string" },
+    "audit_receipt": { "type": "string" }
   },
-  "definitions": {
-    "confidence_rules": {
-      "HIGH": "Requires code + logs + repro + alignment_checklist",
-      "MEDIUM": "Requires code + partial tests",
-      "LOW": "Inference or summary only"
-    }
-  }
+  "required": ["version", "code_artifacts"]
 }

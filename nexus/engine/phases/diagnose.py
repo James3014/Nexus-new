@@ -59,9 +59,8 @@ class DiagnosticPhaseHandler(BasePhaseHandler):
         
         if guard_result.get("status") == "HARD_VETO":
             pack["spec_veto"] = guard_result
-            # 注入 Veto 標記供 Orchestrator 觀測內容及性能性能性能
             pack["fail"] = True
-            pack["veto_reason"] = "Doc conflict detected by SpecGuard"
-            logger.error("🛡️ [D-Stage:VETO] Diagnosis rejected due to official doc conflict.")
+            pack["veto_reason"] = guard_result.get("reason", "Doc conflict detected by SpecGuard")
+            logger.error("🛡️ [D-Stage:VETO] Diagnosis rejected: %s", pack["veto_reason"])
             
         return pack
