@@ -93,7 +93,7 @@ def test_evidence_verifier_low_trust(mock_run):
     # Mock git ls-files, git diff returns nothing
     mock_run.return_value = MagicMock(stdout="", returncode=0)
     verifier = EvidenceVerifier(Path("."))
-    res = verifier.verify({"code_artifacts": ["a.py"]})
+    res = verifier.verify({"version": "1.1.0", "code_artifacts": ["a.py"]})
     assert res["overall_trust"] == "LOW"
 
 @patch("subprocess.run")
@@ -110,8 +110,9 @@ def test_evidence_verifier_high_trust(mock_run):
     verifier = EvidenceVerifier(Path("."))
     
     # Mock exists
-    with patch("pathlib.Path.exists", return_value=True):
-        res = verifier.verify({"code_artifacts": ["a.py"], "test_artifacts": ["pytest"]})
+    with patch("pathlib.Path.exists", return_value=True), \
+         patch("nexus.delivery.anti_drift.AntiDrift.verify_drift", return_value=(True, {})):
+        res = verifier.verify({"version": "1.1.0", "code_artifacts": ["a.py"], "test_artifacts": [{"command": "pytest", "exit_code": 0}]})
         assert res["overall_trust"] == "HIGH"
 
 def test_evidence_verifier_dict_format():
@@ -264,3 +265,56 @@ def test_verify_claims_integrity_fail_on_missing_head():
         assert integrity_check["detail"]["error"] == "missing_report_head_sha"
     finally:
         report_file.unlink()
+
+# --- Stage 2: Physical Replay Chain ---
+from nexus.delivery.replay_runner import ReplayRunner
+
+@patch("subprocess.run")
+def test_replay_runner_success(mock_run):
+    mock_run.return_value = MagicMock(returncode=0, stdout="passed", stderr="")
+    runner = ReplayRunner(Path("."))
+    bundle = {
+        "version": "1.1.0",
+        "test_artifacts": [
+            {"command": "echo ok", "exit_code": 0}
+        ]
+    }
+    report = runner.run_replay(bundle)
+    assert report["passed"] is True
+    assert report["replay_count"] == 1
+    assert report["replay_results"][0]["match_rc"] is True
+
+@patch("subprocess.run")
+def test_replay_runner_mismatch_fail(mock_run):
+    mock_run.return_value = MagicMock(returncode=1, stdout="failed", stderr="")
+    runner = ReplayRunner(Path("."))
+    bundle = {
+        "version": "1.1.0",
+        "test_artifacts": [
+            {"command": "echo fail", "exit_code": 0}
+        ]
+    }
+    report = runner.run_replay(bundle)
+    assert report["passed"] is False
+    assert report["replay_results"][0]["match_rc"] is False
+
+def test_verifier_stage2_schema_mismatch():
+    from nexus.delivery.evidence_verifier import EvidenceVerifier
+    verifier = EvidenceVerifier(Path("."))
+    # Missing version
+    res = verifier.verify({"code_artifacts": []})
+    assert res["status"] == "REJECTED"
+    assert res["reason"] == "schema_mismatch"
+
+# --- Stage 3: Anti-Drift Check ---
+def test_verifier_stage3_drift_fail():
+    from nexus.delivery.evidence_verifier import EvidenceVerifier
+    import json
+    
+    verifier = EvidenceVerifier(Path("."))
+    # Manually break the manifest for testing or mock the check
+    with patch("nexus.delivery.anti_drift.AntiDrift.verify_drift") as mock_verify:
+        mock_verify.return_value = (False, {"some_file": "drifted"})
+        res = verifier.verify({"version": "1.1.0", "code_artifacts": []})
+        assert res["status"] == "REJECTED"
+        assert res["reason"] == "governance_drift_detected"

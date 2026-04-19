@@ -79,6 +79,19 @@ fi
 echo "== Delivery Gate: tests =="
 /Users/jameschen/.cargo/bin/uv run pytest -q tests/nexus/orchestrator
 
+
+echo "== Delivery Gate: regression check (vs baseline) =="
+if ! /Users/jameschen/.cargo/bin/uv run scripts/ops/diagnose_regression.py; then
+  RC=\$?
+  if [[ \$RC -eq 2 ]]; then
+    echo "[delivery-gate] ⚠️ REGRESSION DETECTED. Initiating repair cycle or human review..."
+    # 這裡可以接自癒邏輯，目前先 fail 給 human review
+    exit 2
+  else
+    exit \$RC
+  fi
+fi
+
 echo "== Delivery Gate: acceptance =="
 /Users/jameschen/.cargo/bin/uv run scripts/engine/nexus_cli.py nexus acceptance-check --json --evidence "$EVIDENCE_PATH"
 

@@ -5,20 +5,20 @@ Evidence Verifier: 系統級獨立驗證器。
 
 import subprocess
 from pathlib import Path
+from .replay_runner import ReplayRunner
+from .anti_drift import AntiDrift
 
 class EvidenceVerifier:
     """
     在 Audit (A) 階段被呼叫，獨立驗證 Agent 宣稱的 evidence。
     
-    驗證項目:
-    1. code_artifacts — 每個檔案是否存在 + 是否被 git 追蹤
-    2. test_artifacts — 每個測試命令是否真的被執行過（檢查 exit code log）
-    3. git_diff_check — 當前 worktree 的 git diff 是否與宣稱的 patch 一致
-    4. command_artifacts — 所列命令的 exit code 是否真的為 0
+    Stage 2: Physical Replay Chain.
     """
     
     def __init__(self, project_root: Path):
         self.project_root = Path(project_root)
+        self.replay_runner = ReplayRunner(self.project_root)
+        self.anti_drift = AntiDrift(self.project_root, self.project_root / "nexus/config/governance_manifest.json")
     
     def verify(self, evidence_bundle: dict) -> dict:
         reject_reasons = []
@@ -27,9 +27,31 @@ class EvidenceVerifier:
             if not self._validate_schema(evidence_bundle, reject_reasons):
                 return {
                     "overall_trust": "LOW",
+                    "status": "REJECTED",
+                    "reason": "schema_mismatch",
                     "reject_reasons": reject_reasons,
                     "code_artifacts_verified": {"all_exist": False},
                     "test_commands_verified": {"all_executed": False},
+                }
+
+            # Stage 3: Anti-Drift Check
+            drift_passed, drift_results = self.anti_drift.verify_drift()
+            if not drift_passed:
+                return {
+                    "overall_trust": "LOW",
+                    "status": "REJECTED",
+                    "reason": "governance_drift_detected",
+                    "drift_results": drift_results,
+                }
+
+            # Stage 2: Physical Replay
+            replay_report = self.replay_runner.run_replay(evidence_bundle)
+            if not replay_report["passed"]:
+                return {
+                    "overall_trust": "LOW",
+                    "status": "REJECTED",
+                    "reason": "replay_failed",
+                    "replay_report": replay_report,
                 }
 
             results = {
@@ -41,6 +63,7 @@ class EvidenceVerifier:
                 "test_commands_verified": self._verify_test_commands(
                     evidence_bundle.get("test_artifacts", [])
                 ),
+                "replay_chain": replay_report,
                 "overall_trust": "UNKNOWN",
                 "reject_reasons": reject_reasons,
             }
@@ -78,11 +101,16 @@ class EvidenceVerifier:
         if not bundle or not isinstance(bundle, dict):
             reasons.append("invalid_bundle_type")
             return False
+        if "version" not in bundle:
+            reasons.append("missing_schema_version")
+            # For backward compatibility during migration, we might warning or fail.
+            # Stage 2 requires version.
+            return False
+        if bundle["version"] != "1.1.0":
+            reasons.append(f"unsupported_schema_version: {bundle.get('version')}")
+            return False
         if "code_artifacts" not in bundle:
             reasons.append("missing_code_artifacts_key")
-            return False
-        if not isinstance(bundle["code_artifacts"], list):
-            reasons.append("code_artifacts_must_be_list")
             return False
         return True
     
