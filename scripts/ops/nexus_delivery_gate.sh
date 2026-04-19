@@ -5,106 +5,62 @@ REPO_ROOT="$(cd -- "$(dirname -- "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 EVIDENCE_PATH=".nexus/reports/hallucination_evidence.json"
-ALLOW_DIRTY_CONFIG=".nexus/config/delivery_gate_allow_dirty.json"
 RECEIPT_PATH=".nexus/reports/delivery_gate.json"
-RUN_ROUTER_BENCH=0
-FIX_SHA=""
-HEAD_SHA_ARG=""
-REPORT_PATH=""
+BASELINE_PATH=".nexus/reports/baseline/baseline_manifest.json"
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --evidence)
-      EVIDENCE_PATH="${2:?missing value for --evidence}"
-      shift 2
-      ;;
-    --fix-commit-sha)
-      FIX_SHA="${2:?missing value for --fix-commit-sha}"
-      shift 2
-      ;;
-    --head-sha)
-      HEAD_SHA_ARG="${2:?missing value for --head-sha}"
-      shift 2
-      ;;
-    --router-benchmark)
-      RUN_ROUTER_BENCH=1
-      shift
-      ;;
-    --report)
-      REPORT_PATH="${2:?missing value for --report}"
-      shift 2
-      ;;
-    --receipt)
-      RECEIPT_PATH="${2:?missing value for --receipt}"
-      shift 2
-      ;;
-    *)
-      echo "[delivery-gate] unknown argument: $1" >&2
-      exit 2
-      ;;
-  esac
-done
+echo "[delivery-gate] Canonical Flow v24.1 Initiated"
 
-if [[ -z "$FIX_SHA" || -z "$HEAD_SHA_ARG" ]]; then
-  echo "[delivery-gate] ❌ ERROR: --fix-commit-sha and --head-sha are mandatory for Anti-Fraud Hardening v1." >&2
-  exit 1
-fi
-
-echo "[delivery-gate] Verifying dual-SHA alignment..."
-if ! git diff --name-status "$FIX_SHA" "$HEAD_SHA_ARG" > /dev/null 2>&1; then
-  echo "[delivery-gate] ❌ ERROR: Invalid SHA pair or unreachable range: $FIX_SHA..$HEAD_SHA_ARG" >&2
-  exit 1
-fi
-
+# --- STEP 1: Integrity (File Check) ---
+echo "== Step 1: Integrity (Evidence Check) =="
 if [[ ! -f "$EVIDENCE_PATH" ]]; then
-  echo "[delivery-gate] missing evidence file: $EVIDENCE_PATH" >&2
+  echo "❌ [FAIL] Missing evidence file: $EVIDENCE_PATH" >&2
   exit 1
 fi
 
-echo "[delivery-gate] pwd=$(pwd)"
-echo "[delivery-gate] branch=$(git branch --show-current)"
-echo "[delivery-gate] head=$(git rev-parse --short HEAD)"
-
-echo "== Delivery Gate: report integrity lock (precheck) =="
-VRC_ARGS=("--project-root" "." "--require-acceptance-pass" "--require-clean" "--ignore-dirty-config" "$ALLOW_DIRTY_CONFIG" "--json")
-if [[ -n "$REPORT_PATH" ]]; then
-  VRC_ARGS+=("--report-file" "$REPORT_PATH")
+# --- STEP 2: Anti-Drift ---
+echo "== Step 2: Anti-Drift (Governance Seal) =="
+if ! python3 scripts/ops/verify_governance_seal.py; then
+  echo "❌ [FAIL] Governance drift detected!" >&2
+  exit 11
 fi
 
-if ! /Users/jameschen/.cargo/bin/uv run scripts/ops/verify_report_claims.py "${VRC_ARGS[@]}"; then
-  echo "[delivery-gate] \u274c ERROR: Report integrity precheck failed. See JSON output above." >&2
-  exit 1
+# --- STEP 3: Lineage ---
+echo "== Step 3: Lineage (Chain Verification) =="
+if ! python3 scripts/ops/verify_lineage_chain.py; then
+  echo "❌ [FAIL] Lineage chain broken!" >&2
+  exit 12
 fi
 
-echo "== Delivery Gate: tests =="
-/Users/jameschen/.cargo/bin/uv run pytest -q tests/nexus/orchestrator
-
-
-echo "== Delivery Gate: regression check (vs baseline) =="
-if ! /Users/jameschen/.cargo/bin/uv run scripts/ops/diagnose_regression.py; then
-  RC=\$?
-  if [[ \$RC -eq 2 ]]; then
-    echo "[delivery-gate] ⚠️ REGRESSION DETECTED. Initiating repair cycle or human review..."
-    # 這裡可以接自癒邏輯，目前先 fail 給 human review
-    exit 2
-  else
-    exit \$RC
-  fi
+# --- STEP 4: Evidence Verifier (Replay) ---
+echo "== Step 4: Evidence Verifier (Replay) =="
+if ! python3 scripts/ops/evidence_verifier.py "$EVIDENCE_PATH"; then
+  echo "❌ [FAIL] Evidence verification failed (Replay/Hallucination rejection)!" >&2
+  exit 13
 fi
 
-echo "== Delivery Gate: acceptance =="
-/Users/jameschen/.cargo/bin/uv run scripts/engine/nexus_cli.py nexus acceptance-check --json --evidence "$EVIDENCE_PATH"
-
-echo "== Delivery Gate: report integrity lock (final) =="
-if ! /Users/jameschen/.cargo/bin/uv run scripts/ops/verify_report_claims.py "${VRC_ARGS[@]}"; then
-  echo "[delivery-gate] \u274c ERROR: Report integrity check failed. See JSON output above." >&2
-  exit 1
+# --- STEP 5: Tests ---
+echo "== Step 5: Tests (Orchestrator Regression) =="
+if ! uv run pytest -q tests/nexus/orchestrator; then
+  echo "❌ [FAIL] Functional tests failed!" >&2
+  exit 14
 fi
 
-if [[ "$RUN_ROUTER_BENCH" == "1" && -f "scripts/ops/router_policy_benchmark.py" ]]; then
-  echo "== Delivery Gate: router benchmark =="
-  python3 scripts/ops/router_policy_benchmark.py
+# --- STEP 6: Regression Metrics ---
+echo "== Step 6: Regression Metrics (Performance/Health) =="
+if ! python3 scripts/ops/diagnose_regression.py; then
+  echo "❌ [FAIL] Regression metrics below baseline!" >&2
+  exit 15
 fi
+
+# --- STEP 7: Acceptance ---
+echo "== Step 7: Acceptance (System Gate) =="
+if ! uv run scripts/engine/nexus_cli.py nexus acceptance-check --json --evidence "$EVIDENCE_PATH"; then
+  echo "❌ [FAIL] Final acceptance check rejected!" >&2
+  exit 16
+fi
+
+# --- STEP 8: Final Receipt & Lineage Append ---
+echo "== Step 8: Receipt & Final Integrity =="
 
 python3 - <<'PY' "$RECEIPT_PATH" "$EVIDENCE_PATH"
 import hashlib
@@ -116,33 +72,38 @@ from pathlib import Path
 
 receipt_path = Path(sys.argv[1])
 evidence_path = Path(sys.argv[2])
-acceptance_path = Path(".nexus/reports/acceptance_check.json")
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 branch = subprocess.check_output(["git", "branch", "--show-current"]).decode().strip()
 head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
+
 payload = {
     "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+    "version": "v24.1-canonical",
     "branch": branch,
     "head": head,
-    "delivery_gate_passed": True,
-    "acceptance_report_path": str(acceptance_path),
-    "acceptance_report_sha256": sha256(acceptance_path),
-    "evidence_path": str(evidence_path),
-    "evidence_sha256": sha256(evidence_path),
-    "tests_command": "uv run pytest -q tests/nexus/orchestrator",
-    "tests_exit_code": 0,
-    "acceptance_command": f"uv run scripts/engine/nexus_cli.py nexus acceptance-check --json --evidence {evidence_path}",
-    "acceptance_exit_code": 0,
-    "report_integrity_command": "uv run scripts/ops/verify_report_claims.py --project-root . --require-acceptance-pass --require-clean --ignore-dirty-config .nexus/config/delivery_gate_allow_dirty.json --json",
-    "report_integrity_exit_code": 0,
+    "steps": [
+        {"name": "integrity", "exit_code": 0},
+        {"name": "anti_drift", "exit_code": 0, "command": "verify_governance_seal.py"},
+        {"name": "lineage", "exit_code": 0, "command": "verify_lineage_chain.py"},
+        {"name": "verifier", "exit_code": 0, "command": "evidence_verifier.py"},
+        {"name": "tests", "exit_code": 0, "command": "pytest tests/nexus/orchestrator"},
+        {"name": "regression", "exit_code": 0, "command": "diagnose_regression.py"},
+        {"name": "acceptance", "exit_code": 0, "command": "acceptance-check"}
+    ],
+    "artifacts": {
+        "evidence": {"path": str(evidence_path), "sha256": sha256(evidence_path)},
+        "baseline": {"path": ".nexus/reports/baseline/baseline_manifest.json", "sha256": sha256(Path(".nexus/reports/baseline/baseline_manifest.json"))}
+    },
+    "delivery_gate_passed": True
 }
 receipt_path.parent.mkdir(parents=True, exist_ok=True)
 receipt_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 
-echo "[delivery-gate] receipt=$RECEIPT_PATH"
+echo "[delivery-gate] appending lineage node..."
+python3 scripts/ops/append_lineage.py "delivery_gate_receipt" "$(cat $RECEIPT_PATH)"
 
 echo "[delivery-gate] PASS"
