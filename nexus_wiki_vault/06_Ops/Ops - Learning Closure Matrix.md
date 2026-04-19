@@ -130,3 +130,15 @@ version_scope:
 - **Root Cause**: integrity checks and acceptance quality checks were coupled under one hard-fail path; cold-start/metric sensitivity in acceptance was treated as the same severity as fraud/integrity failures.
 - **Decision**: split gates into `Integrity Claims` (always fail-closed) and `Acceptance Quality` (policy-aware: `dev` allows `UNVERIFIED_COLD_START`, `prod` remains strict).
 - **Prevention**: require `primary_failure` in acceptance output and force `CODE16_ROOT_CAUSE=<criterion>:<reason>` in delivery logs; keep normal/adversarial scores separated in qualification suite.
+
+## 2026-04-18: Deep Plan/Audit Gate Quota Exhaustion
+- **Phenomenon**: Deep auditing failed silently when token quotas were exhausted, defaulting to "PASS" in some cases.
+- **Root Cause**: Risk-aware paths did not have a "fail-closed" mechanism for infrastructure exhaustion during high-stakes audits.
+- **Decision**: Implemented mandatory quota check before deep audits and enforced "STALLED" state on exhaustion.
+- **Prevention**: Every deep audit gate must include a `quota_status` health check in the final receipt.
+
+## 2026-04-18: V25.7 Ultra-Hardened Baseline - Red-Team Approval Deadlock
+- **Phenomenon**: Red-team approval could not be finalized due to missing invocation evidence from external auditors.
+- **Root Cause**: Hard dependency on manual red-team signatures without an automated evidence pipeline.
+- **Decision**: Automated red-team invocation receipts and added them to the `hallucination_evidence.json` schema.
+- **Prevention**: High-security baselines must have automated evidence collection for every external approval step.

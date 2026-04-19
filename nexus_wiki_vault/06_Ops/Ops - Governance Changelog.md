@@ -32,6 +32,12 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-19 | **GOVERNANCE DEADLOOP DECOUPLING** | `scripts/ops/ci_gate.py` | High | Git revert | Antigravity |
+| 2026-04-19 | **NEXUS HARDENING STAGES A-G** | `nexus/governance/`, `nexus/core/lineage.py` | High | Git revert | Antigravity |
+| 2026-04-18 | **DEEP PLAN/AUDIT GATES** | `scripts/ops/task_runner.py`, `nexus/engine/coordinator.py` | High | Git revert | Antigravity |
+| 2026-04-18 | **RED-TEAM AUDIT HARDENING** | `compliance/audit/`, `scripts/ops/nexus_acceptance_check.py` | High | Git revert | Antigravity |
+| 2026-04-18 | **V25.7 ULTRA-HARDENED BASELINE** | `nexus/core/`, `.nexus/config/` | High | Git revert | Antigravity |
+| 2026-04-18 | **INTELLIGENCE INTERLOCK & COMPACTOR** | `nexus/core/context_compactor.py`, `nexus/core/bayesian_interlock.py` | High | Git revert | Antigravity |
 | 2026-04-17 | **NEXUS ENFORCED GOVERNANCE HARDENING** | `nexus/engine/coordinator.py`, `scripts/ops/ci_gate.py`, `nexus/core/drone_protocol.py`, `nexus/core/drone_engine.py`, `nexus/core/hallucination_guard.py` | High | Git revert | Antigravity |
 | 2026-04-17 | **LOCAL DRONE BRAIN (Bonsai)** | `nexus/core/drone_engine.py`, `Bonsai_Modelfile` | Low | Git revert | Gemini-Nexus |
 | 2026-04-17 | **TACTICAL DRONE INTEGRATION** | `nexus/core/drone_engine.py`, `nexus/core/campaign_general.py`, `tests/core/test_drone_integration.py` | Medium | Git revert | Gemini-Nexus |
