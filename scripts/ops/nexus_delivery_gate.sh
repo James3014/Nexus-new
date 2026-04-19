@@ -8,11 +8,21 @@ EVIDENCE_PATH=".nexus/reports/hallucination_evidence.json"
 ALLOW_DIRTY_CONFIG=".nexus/config/delivery_gate_allow_dirty.json"
 RECEIPT_PATH=".nexus/reports/delivery_gate.json"
 RUN_ROUTER_BENCH=0
+FIX_SHA=""
+HEAD_SHA_ARG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --evidence)
       EVIDENCE_PATH="${2:?missing value for --evidence}"
+      shift 2
+      ;;
+    --fix-commit-sha)
+      FIX_SHA="${2:?missing value for --fix-commit-sha}"
+      shift 2
+      ;;
+    --head-sha)
+      HEAD_SHA_ARG="${2:?missing value for --head-sha}"
       shift 2
       ;;
     --router-benchmark)
@@ -29,6 +39,17 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "$FIX_SHA" || -z "$HEAD_SHA_ARG" ]]; then
+  echo "[delivery-gate] ❌ ERROR: --fix-commit-sha and --head-sha are mandatory for Anti-Fraud Hardening v1." >&2
+  exit 1
+fi
+
+echo "[delivery-gate] Verifying dual-SHA alignment..."
+if ! git diff --name-status "$FIX_SHA" "$HEAD_SHA_ARG" > /dev/null 2>&1; then
+  echo "[delivery-gate] ❌ ERROR: Invalid SHA pair or unreachable range: $FIX_SHA..$HEAD_SHA_ARG" >&2
+  exit 1
+fi
 
 if [[ ! -f "$EVIDENCE_PATH" ]]; then
   echo "[delivery-gate] missing evidence file: $EVIDENCE_PATH" >&2

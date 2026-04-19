@@ -21,31 +21,70 @@ class EvidenceVerifier:
         self.project_root = Path(project_root)
     
     def verify(self, evidence_bundle: dict) -> dict:
-        results = {
-            "code_artifacts_verified": self._verify_code_artifacts(
-                evidence_bundle.get("code_artifacts", [])
-            ),
-            "git_diff_non_empty": self._check_git_diff_non_empty(),
-            "git_diff_stat": self._get_git_diff_stat(),
-            "test_commands_verified": self._verify_test_commands(
-                evidence_bundle.get("test_artifacts", [])
-            ),
-            "overall_trust": "UNKNOWN",
-        }
-        
-        # 計算 overall trust
-        code_ok = results["code_artifacts_verified"]["all_exist"]
-        diff_ok = results["git_diff_non_empty"]
-        test_ok = results["test_commands_verified"]["all_executed"]
-        
-        if code_ok and diff_ok and test_ok:
-            results["overall_trust"] = "HIGH"
-        elif code_ok and (diff_ok or test_ok):
-            results["overall_trust"] = "MEDIUM"
-        else:
-            results["overall_trust"] = "LOW"
-        
-        return results
+        reject_reasons = []
+        try:
+            # T1: Schema 契約化驗證
+            if not self._validate_schema(evidence_bundle, reject_reasons):
+                return {
+                    "overall_trust": "LOW",
+                    "reject_reasons": reject_reasons,
+                    "code_artifacts_verified": {"all_exist": False},
+                    "test_commands_verified": {"all_executed": False},
+                }
+
+            results = {
+                "code_artifacts_verified": self._verify_code_artifacts(
+                    evidence_bundle.get("code_artifacts", [])
+                ),
+                "git_diff_non_empty": self._check_git_diff_non_empty(),
+                "git_diff_stat": self._get_git_diff_stat(),
+                "test_commands_verified": self._verify_test_commands(
+                    evidence_bundle.get("test_artifacts", [])
+                ),
+                "overall_trust": "UNKNOWN",
+                "reject_reasons": reject_reasons,
+            }
+            
+            # 計算 overall trust
+            code_ok = results["code_artifacts_verified"]["all_exist"]
+            diff_ok = results["git_diff_non_empty"]
+            test_ok = results["test_commands_verified"]["all_executed"]
+            
+            if not code_ok:
+                reject_reasons.append("code_artifacts_missing_or_invalid")
+            if not diff_ok:
+                reject_reasons.append("empty_git_diff")
+            if not test_ok:
+                reject_reasons.append("test_execution_fraud_detected")
+
+            if code_ok and diff_ok and test_ok:
+                results["overall_trust"] = "HIGH"
+            elif code_ok and (diff_ok or test_ok):
+                results["overall_trust"] = "MEDIUM"
+            else:
+                results["overall_trust"] = "LOW"
+            
+            return results
+        except Exception as e:
+            # T2: 強制 Fail-Closed
+            return {
+                "overall_trust": "LOW",
+                "reject_reasons": [f"verifier_internal_error: {str(e)}"],
+                "code_artifacts_verified": {"all_exist": False},
+                "test_commands_verified": {"all_executed": False},
+            }
+
+    def _validate_schema(self, bundle: dict, reasons: list) -> bool:
+        if not bundle or not isinstance(bundle, dict):
+            reasons.append("invalid_bundle_type")
+            return False
+        if "code_artifacts" not in bundle:
+            reasons.append("missing_code_artifacts_key")
+            return False
+        if not isinstance(bundle["code_artifacts"], list):
+            reasons.append("code_artifacts_must_be_list")
+            return False
+        return True
     
     def _verify_code_artifacts(self, artifacts: list) -> dict:
         missing = []

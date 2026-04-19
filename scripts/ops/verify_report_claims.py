@@ -151,6 +151,29 @@ def verify_claims(
                 acceptance_detail["error"] = f"parse_error:{exc}"
     checks.append({"name": "acceptance_report", "passed": acceptance_ok, "detail": acceptance_detail})
 
+    # === NEW: T5 Anti-Fraud Hardening v1: Raw Proof Validation ===
+    proofs = {
+        "pytest_raw": ".nexus/reports/pytest_output.txt",
+        "effectiveness_proof": ".nexus/reports/effectiveness_proof.txt",
+        "closed_loop_proof": ".nexus/reports/closed_loop_proof.txt"
+    }
+    proof_results = []
+    for name, rel in proofs.items():
+        p_path = project_root / rel
+        has_proof = p_path.exists() and p_path.stat().st_size > 0
+        proof_results.append({
+            "name": name,
+            "passed": has_proof,
+            "path": str(p_path)
+        })
+    
+    proofs_ok = all(r["passed"] for r in proof_results)
+    checks.append({
+        "name": "raw_evidence_proofs",
+        "passed": proofs_ok,
+        "detail": {"proof_items": proof_results}
+    })
+
     passed = all(bool(c.get("passed", False)) for c in checks)
     return {
         "passed": passed,
