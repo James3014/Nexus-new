@@ -77,11 +77,14 @@ def verify_claims(
     ignore_dirty_config: str | None = None,
     require_acceptance_pass: bool = False,
     acceptance_report_rel: str = ".nexus/reports/acceptance_check.json",
+    require_baseline: bool = True,
+    baseline_manifest_rel: str = ".nexus/reports/baseline/baseline_manifest.json",
 ) -> Dict[str, Any]:
     required_paths = required_paths or []
     ignore_dirty_paths = (ignore_dirty_paths or []) + _load_ignore_dirty_paths(project_root, ignore_dirty_config)
     checks: List[Dict[str, Any]] = []
 
+    # 1. Git Context
     branch = _run_git(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])
     commit = _run_git(project_root, ["rev-parse", "--short", "HEAD"])
     git_ok = bool(branch and commit)
@@ -93,6 +96,27 @@ def verify_claims(
         }
     )
 
+    # 2. Baseline Manifest Check
+    baseline_path = (project_root / baseline_manifest_rel).resolve()
+    baseline_ok = True
+    baseline_detail = {"path": str(baseline_path), "exists": baseline_path.exists()}
+    if require_baseline:
+        if not baseline_path.exists():
+            baseline_ok = False
+        else:
+            try:
+                data = json.loads(baseline_path.read_text(encoding="utf-8"))
+                baseline_detail["version"] = data.get("version")
+                baseline_detail["generated_by_sha"] = data.get("generated_by_sha")
+                if not baseline_detail["version"] or not baseline_detail["generated_by_sha"]:
+                    baseline_ok = False
+                    baseline_detail["error"] = "missing_schema_fields"
+            except Exception as e:
+                baseline_ok = False
+                baseline_detail["error"] = f"parse_error:{e}"
+    checks.append({"name": "baseline_manifest", "passed": baseline_ok, "detail": baseline_detail})
+
+    # 3. Working Tree
     dirty = _run_git(project_root, ["status", "--porcelain"])
     dirty_paths = _parse_porcelain_paths(dirty)
     ignored_resolved = {str(p) for p in _resolve_required_paths(project_root, ignore_dirty_paths)}
@@ -181,6 +205,11 @@ def main() -> int:
         action="store_true",
         help="Require .nexus/reports/acceptance_check.json to be PASS and gate_passed=true.",
     )
+    parser.add_argument(
+        "--baseline-manifest",
+        default=".nexus/reports/baseline/baseline_manifest.json",
+        help="Path to baseline manifest (relative to project root).",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON output.")
     args = parser.parse_args()
 
@@ -192,6 +221,7 @@ def main() -> int:
         ignore_dirty_paths=list(args.ignore_dirty_path or []),
         ignore_dirty_config=args.ignore_dirty_config,
         require_acceptance_pass=bool(args.require_acceptance_pass),
+        baseline_manifest_rel=args.baseline_manifest,
     )
 
     if args.json:
