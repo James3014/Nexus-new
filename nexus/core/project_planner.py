@@ -73,9 +73,20 @@ class ProjectPlanner:
         """
         [Architect] 提出戰術分配。
         """
+        # [NEW: P-3] Flow Route Claims lookup
+        claims_override = None
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            svc = LearnModeService(self.project_root)
+            routing_hints = svc.ask(topic="project-routing", question=task, top_k=2)
+            if routing_hints.get("citations"):
+                claims_override = routing_hints["citations"][0]["claim"]
+        except Exception:
+            pass
+
         # 強化風險關鍵字與維度判斷
         high_risk_keywords = ["race condition", "deadlock", "auth", "security", "refactor", "migration"]
-        is_high_risk = any(kw in task for kw in high_risk_keywords)
+        is_high_risk = any(kw in task for kw in high_risk_keywords) or (claims_override and "high risk" in claims_override.lower())
         
         # 偵測維度模糊性 (eXtract 必要性)
         is_unknown = dimensions.get("logic_scope") == "[待定]" or not dimensions.get("affected_files")
