@@ -1730,6 +1730,11 @@ dependencies = [
     { name = "websockets" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.21.0" },
@@ -1766,6 +1771,9 @@ requires-dist = [
     { name = "web3", specifier = ">=6.0.0" },
     { name = "websockets", specifier = ">=11.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "numpy"

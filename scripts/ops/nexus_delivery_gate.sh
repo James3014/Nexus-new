@@ -43,7 +43,7 @@ fi
 
 # --- STEP 5: Tests ---
 echo "== Step 5: Tests (Orchestrator Regression) =="
-if ! uv run pytest -q tests/nexus/orchestrator; then
+if ! uv run python3 -m pytest -q tests/nexus/orchestrator; then
   echo "❌ [FAIL] Functional tests failed!" >&2
   exit 14
 fi
