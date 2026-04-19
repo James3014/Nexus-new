@@ -214,3 +214,53 @@ def test_verify_claims_integrity_fail_on_mismatch(mock_git):
         assert integrity_check["detail"]["commit_integrity"]["passed"] is False
     finally:
         report_file.unlink()
+
+@patch("scripts.ops.verify_report_claims._run_git")
+def test_verify_claims_integrity_fail_on_head_mismatch(mock_git):
+    from scripts.ops.verify_report_claims import verify_claims
+    import json
+    
+    def side_effect(root, args):
+        if "rev-parse" in args: return "actual_head"
+        if "show" in args: return "a.py"
+        if "diff" in args: return "a.py"
+        return ""
+    mock_git.side_effect = side_effect
+    
+    report_data = {
+        "head_sha": "wrong_head",
+        "files_changed_in_this_commit": ["a.py"],
+        "base_branch": "main",
+        "branch_delta_vs_base": ["a.py"]
+    }
+    report_file = Path(".nexus/reports/test_head_mismatch.json")
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(json.dumps(report_data))
+    
+    try:
+        res = verify_claims(Path("."), report_file_rel=str(report_file))
+        integrity_check = next(c for c in res["checks"] if c["name"] == "report_integrity_lock")
+        assert integrity_check["passed"] is False
+        assert integrity_check["detail"]["head_alignment"]["passed"] is False
+    finally:
+        report_file.unlink()
+
+def test_verify_claims_integrity_fail_on_missing_head():
+    from scripts.ops.verify_report_claims import verify_claims
+    import json
+    
+    report_data = {
+        "files_changed_in_this_commit": ["a.py"],
+        "base_branch": "main"
+    }
+    report_file = Path(".nexus/reports/test_missing_head.json")
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(json.dumps(report_data))
+    
+    try:
+        res = verify_claims(Path("."), report_file_rel=str(report_file))
+        integrity_check = next(c for c in res["checks"] if c["name"] == "report_integrity_lock")
+        assert integrity_check["passed"] is False
+        assert integrity_check["detail"]["error"] == "missing_report_head_sha"
+    finally:
+        report_file.unlink()

@@ -106,37 +106,49 @@ def verify_claims(
             try:
                 data = json.loads(p_report.read_text(encoding="utf-8"))
                 head_sha = data.get("head_sha", "")
-                
-                # R1: Local Commit Verification
-                claimed_files = set(data.get("files_changed_in_this_commit", []))
-                actual_files_raw = _run_git(project_root, ["show", "--name-only", "--pretty=format:", head_sha or "HEAD"])
-                actual_files = {f.strip() for f in actual_files_raw.splitlines() if f.strip()}
-                
-                commit_match = claimed_files == actual_files
-                integrity_detail["commit_integrity"] = {
-                    "passed": commit_match,
-                    "claimed_count": len(claimed_files),
-                    "actual_count": len(actual_files),
-                    "missing_in_report": sorted(list(actual_files - claimed_files)),
-                    "extra_in_report": sorted(list(claimed_files - actual_files))
-                }
-                
-                # R2: Branch Delta Verification
-                base_branch = data.get("base_branch", "main")
-                claimed_delta = set(data.get("branch_delta_vs_base", []))
-                actual_delta_raw = _run_git(project_root, ["diff", "--name-only", f"{base_branch}..{head_sha or 'HEAD'}"])
-                actual_delta = {f.strip() for f in actual_delta_raw.splitlines() if f.strip()}
-                
-                delta_match = claimed_delta == actual_delta
-                integrity_detail["delta_integrity"] = {
-                    "passed": delta_match,
-                    "base_branch": base_branch,
-                    "claimed_count": len(claimed_delta),
-                    "actual_count": len(actual_delta),
-                    "missing_in_report": sorted(list(actual_delta - claimed_delta)),
-                    "extra_in_report": sorted(list(claimed_delta - actual_delta))
-                }
-                integrity_ok = commit_match and delta_match
+                if not head_sha:
+                    integrity_ok = False
+                    integrity_detail["error"] = "missing_report_head_sha"
+                else:
+                    # R1: Head Alignment Verification
+                    actual_head = _run_git(project_root, ["rev-parse", "--short", "HEAD"])
+                    head_match = head_sha == actual_head
+                    integrity_detail["head_alignment"] = {
+                        "passed": head_match,
+                        "reported_head": head_sha,
+                        "actual_head": actual_head
+                    }
+                    
+                    # R1: Local Commit Verification
+                    claimed_files = set(data.get("files_changed_in_this_commit", []))
+                    actual_files_raw = _run_git(project_root, ["show", "--name-only", "--pretty=format:", head_sha])
+                    actual_files = {f.strip() for f in actual_files_raw.splitlines() if f.strip()}
+                    
+                    commit_match = claimed_files == actual_files
+                    integrity_detail["commit_integrity"] = {
+                        "passed": commit_match,
+                        "claimed_count": len(claimed_files),
+                        "actual_count": len(actual_files),
+                        "missing_in_report": sorted(list(actual_files - claimed_files)),
+                        "extra_in_report": sorted(list(claimed_files - actual_files))
+                    }
+                    
+                    # R2: Branch Delta Verification
+                    base_branch = data.get("base_branch", "main")
+                    claimed_delta = set(data.get("branch_delta_vs_base", []))
+                    actual_delta_raw = _run_git(project_root, ["diff", "--name-only", f"{base_branch}..{head_sha}"])
+                    actual_delta = {f.strip() for f in actual_delta_raw.splitlines() if f.strip()}
+                    
+                    delta_match = claimed_delta == actual_delta
+                    integrity_detail["delta_integrity"] = {
+                        "passed": delta_match,
+                        "base_branch": base_branch,
+                        "claimed_count": len(claimed_delta),
+                        "actual_count": len(actual_delta),
+                        "missing_in_report": sorted(list(actual_delta - claimed_delta)),
+                        "extra_in_report": sorted(list(claimed_delta - actual_delta))
+                    }
+                    integrity_ok = commit_match and delta_match and head_match
             except Exception as e:
                 integrity_ok = False
                 integrity_detail["error"] = f"integrity_check_failed: {str(e)}"

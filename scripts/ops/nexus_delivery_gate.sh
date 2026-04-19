@@ -65,18 +65,24 @@ echo "[delivery-gate] pwd=$(pwd)"
 echo "[delivery-gate] branch=$(git branch --show-current)"
 echo "[delivery-gate] head=$(git rev-parse --short HEAD)"
 
+echo "== Delivery Gate: report integrity lock (precheck) =="
+VRC_ARGS=("--project-root" "." "--require-acceptance-pass" "--require-clean" "--ignore-dirty-config" "$ALLOW_DIRTY_CONFIG" "--json")
+if [[ -n "$REPORT_PATH" ]]; then
+  VRC_ARGS+=("--report-file" "$REPORT_PATH")
+fi
+
+if ! /Users/jameschen/.cargo/bin/uv run scripts/ops/verify_report_claims.py "${VRC_ARGS[@]}"; then
+  echo "[delivery-gate] \u274c ERROR: Report integrity precheck failed. See JSON output above." >&2
+  exit 1
+fi
+
 echo "== Delivery Gate: tests =="
 /Users/jameschen/.cargo/bin/uv run pytest -q tests/nexus/orchestrator
 
 echo "== Delivery Gate: acceptance =="
 /Users/jameschen/.cargo/bin/uv run scripts/engine/nexus_cli.py nexus acceptance-check --json --evidence "$EVIDENCE_PATH"
 
-echo "== Delivery Gate: report integrity & lock =="
-VRC_ARGS=("--project-root" "." "--require-acceptance-pass" "--require-clean" "--ignore-dirty-config" "$ALLOW_DIRTY_CONFIG" "--json")
-if [[ -n "$REPORT_PATH" ]]; then
-  VRC_ARGS+=("--report-file" "$REPORT_PATH")
-fi
-
+echo "== Delivery Gate: report integrity lock (final) =="
 if ! /Users/jameschen/.cargo/bin/uv run scripts/ops/verify_report_claims.py "${VRC_ARGS[@]}"; then
   echo "[delivery-gate] \u274c ERROR: Report integrity check failed. See JSON output above." >&2
   exit 1
