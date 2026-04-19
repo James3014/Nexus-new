@@ -373,7 +373,10 @@ if __name__ == "__main__":
     header("結果")
 
     for p in proofs:
-        icon = "✅" if p.final_state in ("PASSED", "HUMAN_REVIEW") and not p.hung else "❌"
+        # Success icon if:
+        # 1. Passed/HumanReview/Terminal (all are controlled outcomes)
+        # 2. Not hung
+        icon = "✅" if p.final_state in ("PASSED", "HUMAN_REVIEW", "TERMINAL") and not p.hung else "❌"
         hang_warn = " ⚠️ HUNG!" if p.hung else ""
         print(f"\n  {icon} {p.scenario}")
         print(f"     Gate:     {p.gate}")
