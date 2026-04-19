@@ -142,6 +142,18 @@ class ContextHub:
         pack["recommended_skills"] = self._recommend_skills(summary, hotspots[:5])
         pack["wisdom_prior"] = self._inject_wisdom_prior(summary, hotspots[:5])
         
+        # [NEW: D-2] Inject Claims Diag Pack
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            from pathlib import Path
+            root = getattr(self, "project_root", getattr(state, "project_root", "."))
+            svc = LearnModeService(Path(root))
+            diag_hints = svc.ask(topic="health-diagnostics", question=summary, top_k=3)
+            if diag_hints.get("citations"):
+                pack["claims_diag_hints"] = [c["claim"] for c in diag_hints["citations"]]
+        except Exception:
+            pass
+
         # 🟢 [Fix-1] Injects specific Audit Failure Beliefs into ContextHub Output
         if hasattr(self, "belief_engine") and self.belief_engine:
             task_belief = self.belief_engine.get_confidence(f"AUDIT_FAILURE_1")

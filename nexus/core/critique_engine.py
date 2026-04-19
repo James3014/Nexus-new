@@ -15,6 +15,25 @@ class CritiqueEngine:
 
     def final_review(self, response_text: str, evidence_bundle: Dict) -> str:
         """最終審核 + 幻覺標註"""
+        # [NEW: A-1] Counter-Claim retrieval
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            from pathlib import Path
+            root = Path(evidence_bundle.get("project_root", ".")) if evidence_bundle else Path(".")
+            svc = LearnModeService(root)
+            repair_sum = evidence_bundle.get("repair_summary", response_text[:200]) if evidence_bundle else response_text[:200]
+            counter_claims = svc.ask(
+                topic="known-failures", 
+                question=f"problems with {repair_sum}",
+                top_k=3
+            )
+            if counter_claims.get("citations"):
+                if evidence_bundle is not None:
+                    evidence_bundle["counter_claims"] = [c["claim"] for c in counter_claims["citations"]]
+                logger.warning(f"Counter claims found: {[c['claim'] for c in counter_claims['citations']]}")
+        except Exception as e:
+            logger.debug(f"A-1 counter claim failed: {e}")
+
         # 1. 執行過度宣稱攔截
         self.detect_overclaim(response_text, evidence_bundle)
         

@@ -229,6 +229,19 @@ class HallucinationGuard:
         self.triggers = []
         self.trigger_details = []
 
+        # [NEW: A-2] Anti-Halluc Claims Penalty
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            from pathlib import Path
+            root = Path(self.evidence_bundle.get("project_root", "."))
+            svc = LearnModeService(root)
+            halluc_hints = svc.ask(topic="hallucination-patterns", question=response_text[:300], top_k=2)
+            if halluc_hints.get("citations"):
+                self.score += 2.0
+                self.triggers.append("Claims: historical_hallucination_pattern_matched (+2.0)")
+        except Exception:
+            pass
+
         metrics = self.schema.get("metrics", {})
         forced_rejected = False
         for rule_id, metric in metrics.items():

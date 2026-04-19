@@ -202,6 +202,20 @@ class NexusPipeline(
         if context:
             state.metadata.update(context)
             
+        # [NEW: P-1] Claims Pre-flight Guard
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            svc = LearnModeService(self.engine.project_root)
+            trap_check = svc.ask(topic="known-pitfalls", question=task_desc, top_k=3)
+            if trap_check.get("citations"):
+                state.metadata["claims_pre_flight"] = [
+                    f"⚠️ {c['claim']}" for c in trap_check["citations"][:3]
+                ]
+                logger.info(f"🛡️ [Pre-flight] Loaded {len(trap_check['citations'])} known pitfalls from Claims.")
+        except Exception as e:
+            logger.debug(f"Pre-flight claims check skipped: {e}")
+
+            
         self.engine.policy_manager.apply_policy_to_state(state, task_desc)
         # Ensure description persists after policy logic
         state.metadata["task_description"] = task_desc

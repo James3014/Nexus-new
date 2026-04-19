@@ -129,6 +129,16 @@ class CampaignGeneral:
         fallback_used = False
         reason = "Dynamic heuristic based on intent and learned weights"
         stability_tag = "STABLE" if seed is not None else "DYNAMIC"
+
+        # [NEW: P-2] Consult Claims for Decomposition Patterns
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            svc = LearnModeService(self.project_root)
+            decomposition_hints = svc.ask(topic="orchestration", question=macro_intent, top_k=2)
+            if decomposition_hints.get("citations"):
+                reason = "Guided by Claims: " + decomposition_hints["citations"][0]["claim"]
+        except Exception:
+            pass
         
         # 應用權重
         fallback_threshold = self.weights.get("fallback_threshold", 15.0)

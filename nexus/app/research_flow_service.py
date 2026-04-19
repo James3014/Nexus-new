@@ -196,13 +196,26 @@ def run_auto_flow(
         source_label = "local"
         fallback_reason = None
         
+        # [NEW: X-2] Prior-Art from Claims
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            svc = LearnModeService(repo_root)
+            prior_fixes = svc.ask(topic="bug-fixes", question=task_desc, top_k=5)
+            if prior_fixes.get("citations"):
+                prior_context = "\n".join([c["claim"] for c in prior_fixes["citations"][:3]])
+                task_desc_for_llm = f"{task_desc}\n\n[Prior Art]\n{prior_context}"
+            else:
+                task_desc_for_llm = task_desc
+        except Exception:
+            task_desc_for_llm = task_desc
+        
         if llm_baseline and task_type in ["feature", "refactor"]:
             try:
                 # Use a very short timeout for baseline assistance to avoid blocking
                 gen = LLMCandidateGenerator(repo_root, safe_mode=True)
                 # Note: gen.generate internal timeout depends on gateway, but we wrap it here if possible
                 # For now, we trust internal model_chain but monitor for rapid failure
-                patched, meta = gen.generate(source_code=original_code, task=task_desc, mutation_hint="baseline", seed=trial)
+                patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
                 if patched and patched != original_code:
                     return patched, "llm_assisted"
                 else:
@@ -217,7 +230,7 @@ def run_auto_flow(
                     fallback_reason = f"llm_error_{err_str}_fallback_local"
         
         # Local Fallback Path
-        patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
+        patched = generate_local_candidate(original_code, task_desc_for_llm, "baseline", trial)
         
         # If still no mutation and it's structural, try a generic structural hint as last resort
         if patched == original_code and task_type in ["feature", "refactor"]:
