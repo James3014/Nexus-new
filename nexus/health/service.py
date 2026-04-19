@@ -228,12 +228,30 @@ class SelfHealService:
         if not fault_hash:
             return
         lessons = self.memory_service.lookup_fault_lessons(fault_hash, limit=3)
-        if not lessons:
-            return
-        state.metadata["fault_lesson_hits"] = lessons
-        # Link memory retrieval into policy hit context for downstream learning.
-        for idx, lesson in enumerate(lessons):
-            state.policy_hit_ids.append(f"FAULT-{fault_hash[:8]}-{idx}")
+        if lessons:
+            state.metadata["fault_lesson_hits"] = lessons
+            # Link memory retrieval into policy hit context for downstream learning.
+            for idx, lesson in enumerate(lessons):
+                state.policy_hit_ids.append(f"FAULT-{fault_hash[:8]}-{idx}")
+
+        # [NEW: D-1] Inject Claims Fault Match
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            svc = LearnModeService(self.repo_root)
+            signatures = state.metadata.get("fault_signatures") or [{}]
+            first = signatures[0] if isinstance(signatures[0], dict) else {}
+            error_type = str(first.get("error_type", "unknown"))
+            claims_lessons = svc.ask(
+                topic="error-patterns", 
+                question=f"{fault_hash} {error_type}",
+                top_k=3
+            )
+            if claims_lessons.get("citations"):
+                state.metadata["claims_fault_hits"] = [
+                    c["claim"] for c in claims_lessons["citations"]
+                ]
+        except Exception:
+            pass
 
     def _record_fault_lesson(self, state: NexusState, result: SelfHealCycleResult) -> None:
         fault_hash = str(state.metadata.get("fault_hash", ""))

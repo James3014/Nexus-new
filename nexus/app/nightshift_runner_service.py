@@ -568,6 +568,23 @@ class AutoResearchNightShift:
             "lancedb_synced": False,
             "sync_status": "SKIPPED",
         }
+        
+        # [NEW: C-1] Check for conflicts with existing Claims before proceeding
+        try:
+            from nexus.research.learn_mode import LearnModeService
+            svc = LearnModeService(self.project_root)
+            lesson_text = f"NightShift {status} on {getattr(self, 'resolved_target_file', 'unknown')}: {reason}"
+            conflict_check = svc.ask(
+                topic="learning-conflicts", 
+                question=lesson_text,
+                top_k=3
+            )
+            if conflict_check.get("citations"):
+                closure["conflict_with_existing_claims"] = True
+                closure["conflicting_claims"] = [c["claim"] for c in conflict_check["citations"]]
+                print(f"⚠️ [NightShift] Learning closure blocked by conflicting claims: {closure['conflicting_claims']}")
+        except Exception:
+            pass
         self.last_learning_closure = closure
         if self.memory_store is None:
             closure["sync_status"] = "MEMORY_DISABLED"
