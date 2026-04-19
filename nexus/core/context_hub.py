@@ -36,10 +36,25 @@ class ContextHub:
         self.skill_registry = skill_registry
         self.mem_palace = mem_palace
         self.wisdom_vault = None  # Will be injected in coordinator or by DI
-
         from nexus.services.prompt_builder import PromptBuilder
 
         self.prompt_builder = PromptBuilder(project_root)
+        
+        # 🟢 [Fix-3] WisdomVault Auto-Injection
+        try:
+            from nexus.research.wisdom.wisdom_vault import WisdomVault
+            db_path = str(self.project_root / ".nexus" / "knowledge" / "lancedb")
+            self.wisdom_vault = WisdomVault(db_path=db_path)
+        except Exception as e:
+            print(f"⚠️ [ContextHub] WisdomVault auto-injection skipped: {e}")
+            self.wisdom_vault = None
+            
+        # 🟢 [Fix-1] BeliefEngine Auto-Injection 
+        try:
+            from nexus.core.belief_engine import BeliefEngine
+            self.belief_engine = BeliefEngine(self.project_root / ".nexus" / "belief_state.json")
+        except Exception as e:
+            self.belief_engine = None
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
         """讀取 AutoResearch 規則文件。"""
@@ -126,6 +141,13 @@ class ContextHub:
         }
         pack["recommended_skills"] = self._recommend_skills(summary, hotspots[:5])
         pack["wisdom_prior"] = self._inject_wisdom_prior(summary, hotspots[:5])
+        
+        # 🟢 [Fix-1] Injects specific Audit Failure Beliefs into ContextHub Output
+        if hasattr(self, "belief_engine") and self.belief_engine:
+            task_belief = self.belief_engine.get_confidence(f"AUDIT_FAILURE_1")
+            if task_belief < 0.5:
+                pack["belief_warning"] = "⚠️ 低落的系統信心！之前的修復被稽核員駁回，請改變策略。"
+                
         return pack
 
     def _get_l0_rules(self) -> str:
