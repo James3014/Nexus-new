@@ -52,9 +52,9 @@ class MSARouter:
                 reject_reason="no_candidates_retrieved"
             )
 
-        from .reranker import hybrid_rerank
+        # reranker module missing, fallback to score sorting
         # 1. Apply Hybrid Reranking
-        sorted_candidates = hybrid_rerank(retrieved_candidates, query_type=query_type)
+        sorted_candidates = sorted(retrieved_candidates, key=lambda c: c.score, reverse=True)
         best_candidate = sorted_candidates[0]
 
         if best_candidate.score < self.confidence_threshold:

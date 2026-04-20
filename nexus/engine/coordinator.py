@@ -101,6 +101,14 @@ class NexusEngine:
         except Exception:
             self.pipeline = None
 
+    def _detect_direct_mode(self, task_desc: str) -> bool:
+        import re
+        indicators = ["Bucket A", "Bucket B", "修法:", "根因:"]
+        file_pattern = r"(?:(?:nexus|tests)/[\w/]+\.py:\d+)|(?:pytest(?:.ini)?\b)|(?:test_[\w]+\.py(?:::[\w_]+)?)"
+        has_indicators = sum(1 for i in indicators if i in task_desc) > 0
+        has_file_refs = len(re.findall(file_pattern, task_desc)) > 0
+        return has_indicators or has_file_refs
+
     def _run_task_pipeline(
         self,
         *,
@@ -113,6 +121,11 @@ class NexusEngine:
         kwargs.pop("task_id", None)
         kwargs.pop("task", None)
         kwargs.pop("context", None)
+        
+        context = context or {}
+        if self._detect_direct_mode(task_desc):
+            logger.info("⚡ [Coordinator] Detected Direct Mode repair spec. Overriding autonomic routing.")
+            context["direct_mode"] = True
         has_runtime_phases = isinstance(self.phases, dict) and all(
             hasattr(p, "run") for p in self.phases.values() if p is not None
         )

@@ -356,7 +356,7 @@ def run(task_id, complexity):
     click.secho(f"🛡️ [NEXUS v24.9.5] Initiating Master Loop for: {task_id}", fg="cyan", bold=True)
     
     from nexus.core.campaign_general import CampaignGeneral
-    from nexus.core.cli_runner_async import campaign_master_loop
+    from nexus.engine.cli_runner_async import campaign_master_loop
     import asyncio
 
     # 偵測史詩/宏觀任務
@@ -374,7 +374,7 @@ def run(task_id, complexity):
         return
 
     # --- 以下為單一任務 (Non-Macro) 流路 ---
-    from nexus.core.cli_runner_async import execute_tactical_node
+    from nexus.engine.cli_runner_async import execute_tactical_node
     class MockNode:
         def __init__(self, tid, intent):
             self.node_id = tid

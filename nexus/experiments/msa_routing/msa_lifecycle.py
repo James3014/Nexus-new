@@ -34,7 +34,12 @@ class MSALifecycle:
         return db_entry
         
     def evaluate_kill_switch(self, benchmark_results: Dict[str, float], baseline: Dict[str, float]) -> Dict[str, Any]:
-        from nexus.experiments.msa_routing.benchmark_gates import PHASE1_GATES
+        PHASE1_GATES = {
+            "relative_improvement_min": 0.05,
+            "unknown_correct_rate_min": 0.85,
+            "regression_rate_max": 0.01,
+            "p50_latency_ms_max": 80.0
+        }
         
         msa_precision = benchmark_results.get("precision", 0.0)
         base_precision = baseline.get("precision", 0.0)

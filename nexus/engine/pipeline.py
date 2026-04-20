@@ -335,6 +335,11 @@ class NexusPipeline(
             pxd_attempts += 1
             pxd_veto = False
             
+            is_direct_mode = ctx.kwargs.get("context", {}).get("direct_mode", False) or ctx.state.metadata.get("direct_mode", False)
+            if is_direct_mode:
+                logger.info("⚡ [Pipeline] Direct Mode active: Bypassing P-X-D formulation phases.")
+                break
+                
             for plugin in self.registry.get_ordered_plugins():
                 if plugin.name in ("P", "X", "D"):
                     if not plugin.should_run(ctx):

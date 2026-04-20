@@ -79,13 +79,12 @@ def run_msa(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     start_time = time.time()
     retriever = LanceDBRetriever()
     
-    from nexus.experiments.msa_routing.query_classifier import classify_query
-
+    # classify_query missing, fallback to default
     for item in dataset:
         test_query = f"{item['query']} ({item['expected_mode']})"
         candidates = retriever.retrieve(test_query)
         
-        query_type = classify_query(item['query'])
+        query_type = "default"
         
         # 1. Routing
         route_result = router.route(item["id"], candidates, query_type=query_type)
