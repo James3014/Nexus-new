@@ -12,6 +12,7 @@ import pandas as pd
 
 import logging
 import urllib.request
+from nexus.core.config import NexusGlobalConfig
 
 logger = logging.getLogger("nexus.vector_rag")
 class VectorRAG:
@@ -41,8 +42,8 @@ class VectorRAG:
     def _get_embedding(self, text: str) -> List[float]:
         try:
             req = urllib.request.Request(
-                "http://localhost:11434/api/embeddings",
-                data=json.dumps({"model": "nomic-embed-text", "prompt": text}).encode("utf-8"),
+                f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
+                data=json.dumps({"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": text}).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
@@ -50,7 +51,7 @@ class VectorRAG:
                 result = json.loads(response.read())
                 return result.get("embedding", [])
         except Exception as e:
-            logger.error(f"Ollama embedding failed: {e}")
+            logger.error(f"🔮 [VectorRAG] Ollama embedding failed ({NexusGlobalConfig.OLLAMA_EMBED_MODEL}): {e}")
             return []
 
     def _ensure_fallback_file(self) -> None:

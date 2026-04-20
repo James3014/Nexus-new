@@ -5,7 +5,11 @@ Incremental & Type-Aware Indexing.
 import hashlib
 import os
 import subprocess
-from typing import List, Dict, Any
+import json
+import urllib.request
+from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
+from nexus.core.config import NexusGlobalConfig
 
 SCHEMA_METADATA = {
     "id": str,
@@ -46,64 +50,68 @@ def _read_file_content(full_path: str, max_chars: int = 4000) -> str:
     except Exception:
         return ""
 
+def _fetch_embedding_worker(fpath: str, content: str, repo_root: str) -> Dict[str, Any]:
+    """Worker for parallel embedding retrieval."""
+    full_path = os.path.join(repo_root, fpath)
+    file_hash = get_file_hash(full_path)
+    
+    file_type = "code"
+    if "reports" in fpath or "artifacts" in fpath:
+        file_type = "artifact"
+    elif "beliefs" in fpath:
+        file_type = "belief"
+    elif "rule" in fpath or "MUSE_PROTO" in fpath:
+        file_type = "rule"
+
+    vector = None
+    try:
+        req = urllib.request.Request(
+            f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
+            data=json.dumps({"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": content}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=2.0) as response:
+            result = json.loads(response.read())
+            if "embedding" in result:
+                vector = result["embedding"]
+    except Exception:
+        pass
+
+    if not vector:
+        # Fallback to hash-based pseudo vector
+        hash_int = int(file_hash[:8], 16) if file_hash else 0
+        vector = [(hash_int % (i + 1)) / 100.0 for i in range(128)]
+
+    return {
+        "id": fpath,
+        "vector": vector,
+        "content": content,
+        "type": file_type,
+        "version_id": "v1.0",
+        "source_hash": file_hash,
+        "ttl": 86400,
+        "confidence_decay": 1.0,
+        "claim_confidence": 0.8
+    }
+
 def incremental_index(repo_root: str, auto_upsert: bool = True) -> List[Dict[str, Any]]:
     changed_files = get_git_diff_files(repo_root)
     indexed_data = []
     
+    tasks = []
     for fpath in changed_files:
         full_path = os.path.join(repo_root, fpath)
-        file_hash = get_file_hash(full_path)
-        if not file_hash:
-            continue
-            
-        file_type = "code"
-        if "reports" in fpath or "artifacts" in fpath:
-            file_type = "artifact"
-        elif "beliefs" in fpath:
-            file_type = "belief"
-        elif "rule" in fpath or "MUSE_PROTO" in fpath:
-            file_type = "rule"
-
         content = _read_file_content(full_path)
         if not content:
             content = f"[empty or binary] {fpath}"
-            
-        # Phase 3 Wiring: Real Embeddings Integration (Local Default)
-        import urllib.request
-        import json
-        
-        vector = None
-        try:
-            # Try connecting to local unified embedding oracle (e.g., Ollama)
-            req = urllib.request.Request(
-                "http://localhost:11434/api/embeddings",
-                data=json.dumps({"model": "nomic-embed-text", "prompt": content}).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=1.0) as response:
-                result = json.loads(response.read())
-                if "embedding" in result:
-                    vector = result["embedding"]
-        except Exception as e:
-            pass # Embedding engine offline; degrade safely
+        tasks.append((fpath, content))
 
-        if not vector:
-            # Degraded Hash-based pseudo vector identical to previous mock, but isolated.
-            hash_int = int(file_hash[:8], 16)
-            vector = [(hash_int % (i + 1)) / 100.0 for i in range(128)]
-
-        indexed_data.append({
-            "id": fpath,
-            "vector": vector,
-            "content": content,
-            "type": file_type,
-            "version_id": "v1.0",
-            "source_hash": file_hash,
-            "ttl": 86400,
-            "confidence_decay": 1.0,
-            "claim_confidence": 0.8  # Default baseline confidence
-        })
+    # Parallelize embedding phase
+    if tasks:
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(_fetch_embedding_worker, fpath, content, repo_root) for fpath, content in tasks]
+            indexed_data = [f.result() for f in futures]
         
     if auto_upsert and indexed_data:
         upsert_to_lancedb(repo_root, indexed_data)
@@ -156,18 +164,15 @@ class LanceDBRetriever:
                 
             table = db.open_table("msa_knowledge")
             
-            import urllib.request
-            import json
-            import pandas as pd
             query_vector = None
             try:
                 req = urllib.request.Request(
-                    "http://localhost:11434/api/embeddings",
-                    data=json.dumps({"model": "nomic-embed-text", "prompt": query}).encode("utf-8"),
+                    f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
+                    data=json.dumps({"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": query}).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                     method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=1.0) as response:
+                with urllib.request.urlopen(req, timeout=1.5) as response:
                     query_vector = json.loads(response.read()).get("embedding")
             except:
                 pass

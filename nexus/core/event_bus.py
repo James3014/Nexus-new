@@ -14,7 +14,8 @@ class NexusEventBus:
     _event_log_path: Optional[Path] = None
     _signal_queue: List[Dict[str, Any]] = []
     _remote_broadcaster: Optional[Callable[[str, Dict[str, Any]], None]] = None
-    _sequence_lock = threading.Lock()
+    _sequence_lock = threading.RLock()
+    _subs_lock = threading.Lock()
     _global_seq = 0
 
     @classmethod
@@ -43,7 +44,8 @@ class NexusEventBus:
 
     @classmethod
     def subscribe(cls, event_type: str, handler: Callable[[Dict[str, Any]], None]) -> None:
-        cls._subscribers.setdefault(event_type, []).append(handler)
+        with cls._subs_lock:
+            cls._subscribers.setdefault(event_type, []).append(handler)
 
     @classmethod
     def publish(cls, event_type: str, payload: Dict[str, Any]) -> None:
@@ -67,7 +69,10 @@ class NexusEventBus:
                     f.write(json.dumps(record, default=str) + "\n")
         
         # 廣播（在鎖外執行以避免死鎖，但順序已由文件保證）
-        for handler in cls._subscribers.get(event_type, []):
+        with cls._subs_lock:
+            handlers = cls._subscribers.get(event_type, [])[:] # 複製清單以防在遍歷時被修改
+            
+        for handler in handlers:
             try: handler(local_payload)
             except Exception: pass
 

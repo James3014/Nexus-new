@@ -58,9 +58,11 @@ class SSEHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
 
+from nexus.core.config import NexusGlobalConfig
+
 def run_server(port=None):
     if port is None:
-        port = int(os.environ.get("NEXUS_SSE_PORT", "8080"))
+        port = NexusGlobalConfig.SSE_PORT
     with socketserver.ThreadingTCPServer(("", port), SSEHandler) as httpd:
         logger.info(f"📡 [SSE:Server] Claude-Together Signaling Active on port {port}")
         httpd.serve_forever()

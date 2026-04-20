@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from nexus.core.drone_engine import TacticalDrone
 from nexus.core.drone_protocol import DroneProtocol
+from nexus.core.config import NexusGlobalConfig
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -140,11 +141,10 @@ class CampaignGeneral:
         except Exception:
             pass
             
-        # 嘗試使用 LLM 進行韌性結構拆解 (取代僵硬的關鍵字匹配)
         import urllib.request
         try:
             req = urllib.request.Request(
-                "http://localhost:11434/api/generate",
+                f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/generate",
                 data=json.dumps({
                     "model": "llama3",
                     "prompt": f"Decompose this intention into exactly 3 to 5 discrete technical steps: '{macro_intent}'. Return ONLY a JSON array of strings representing the steps. No markdown.",

@@ -172,3 +172,9 @@ version_scope:
 - **Root Cause**: Hardcoded model dependencies and lack of parallel execution strategy in the audit pipeline.
 - **Decision**: Unified embeddings to `nomic-embed-text` and parallelized `ci_gate.py` using `ThreadPoolExecutor`.
 - **Prevention**: Enforce "Async-First" for I/O bound audit tasks and mandate model-alignment checks in the Cognition Layer.
+
+## 2026-04-20: Sequential Blocking in Intelligence Layers and Telemetry bypass (Stage 7)
+- **Phenomenon**: Large swarms experienced CPU starvation due to synchronous Ollama requests, and many core services bypassed logging via `print()`.
+- **Root Cause**: Reliance on simple `urllib` calls and lack of logging enforcement in research-heavy components.
+- **Decision**: Logged as Sev-1 debts. Initiated transition to `aiohttp` and mandatory logging for all telemetry-relevant paths.
+- **Prevention**: Pre-promotion "Static Analysis" to detect `print()` usage and synchronous network calls in core packages.

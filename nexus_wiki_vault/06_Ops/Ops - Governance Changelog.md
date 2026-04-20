@@ -32,6 +32,9 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-20 | **IO HARDENING & STATE PRUNING** | `state_repository.py`, `msa_indexer.py`, `event_bus.py` | High | Git revert | Antigravity |
+| 2026-04-20 | **CORE DEBT DISCOVERY (STAGE 7)** | `commander.py`, `context_hub.py`, `crystal.py` | Medium | Git revert | Gemini-Nexus |
+|---|---|---|---|---|---|
 | 2026-04-20 | **GOVERNANCE OPTIMIZATION & COGNITION HARDENING** | `vector_rag.py`, `ci_gate.py`, `nexus_swarm_sse.py` | High | Git revert | Antigravity |
 | 2026-04-20 | **QUALITY UNIFICATION & TEST RESTRUCTURING** | `pytest.ini`, `tests/` | Medium | Git revert | Antigravity |
 |---|---|---|---|---|---|
