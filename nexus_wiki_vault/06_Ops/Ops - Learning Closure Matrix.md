@@ -148,3 +148,9 @@ version_scope:
 - **Root Cause**: Spec-driven development velocity outpaced physical integration.
 - **Decision**: Physically wired 1-bit Core, GBNF constraints, and real LanceDB upserts.
 - **Prevention**: Monthly "Truth Realignment" audits to ensure Wiki maturity maps match physical `nexus/core` implementations.
+
+## 2026-04-20: Infrastructure Ghost Files and Shadow Mocking Risks
+- **Phenomenon**: Critical logic referenced non-existent infrastructure files (`dist_lock.py`), and `shadow_bus.py` used mock `time.sleep` instead of real execution.
+- **Root Cause**: `git clean -fd` accidentally removed untracked infrastructure prototypes, and legacy mock placeholders were left in "real" engine paths.
+- **Decision**: Restored and committed real infrastructure files. Enforced "Fail-Closed" in `shadow_bus.py`: if real sandbox is missing, task must FAIL.
+- **Prevention**: Mandatory `ls` verification of all imported internal modules in acceptance tests. Prohibit `time.sleep` in any non-test core logic.
