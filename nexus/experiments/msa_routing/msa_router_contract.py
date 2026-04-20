@@ -20,6 +20,7 @@ class MemoryCandidate(BaseModel):
     source_hash: str
     ttl: int = -1
     confidence_decay: float = 1.0
+    retrieval_source: Literal["lancedb", "fallback", "unknown"] = "unknown"
 
     @field_validator('score', 'confidence_decay')
     @classmethod

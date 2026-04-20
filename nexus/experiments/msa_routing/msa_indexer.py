@@ -38,6 +38,14 @@ def get_git_diff_files(repo_root: str, base_branch: str = "HEAD") -> List[str]:
     except subprocess.CalledProcessError:
         return []
 
+def _read_file_content(full_path: str, max_chars: int = 4000) -> str:
+    """Read actual file content for indexing, truncated to max_chars."""
+    try:
+        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read(max_chars)
+    except Exception:
+        return ""
+
 def incremental_index(repo_root: str) -> List[Dict[str, Any]]:
     changed_files = get_git_diff_files(repo_root)
     indexed_data = []
@@ -55,10 +63,14 @@ def incremental_index(repo_root: str) -> List[Dict[str, Any]]:
             file_type = "belief"
         elif "rule" in fpath or "MUSE_PROTO" in fpath:
             file_type = "rule"
+
+        content = _read_file_content(full_path)
+        if not content:
+            content = f"[empty or binary] {fpath}"
             
         indexed_data.append({
             "id": fpath,
-            "content": f"Mock Content of {fpath}",
+            "content": content,
             "type": file_type,
             "version_id": "v1.0",
             "source_hash": file_hash,
@@ -66,6 +78,25 @@ def incremental_index(repo_root: str) -> List[Dict[str, Any]]:
             "confidence_decay": 1.0
         })
     return indexed_data
+
+def upsert_to_lancedb(repo_root: str, records: List[Dict[str, Any]]) -> bool:
+    """Write indexed records into the msa_knowledge LanceDB table."""
+    if not records:
+        return False
+    db_path = os.path.join(repo_root, ".nexus/memory/memory_index.lancedb")
+    try:
+        import lancedb
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        db = lancedb.connect(db_path)
+        if "msa_knowledge" in db.table_names():
+            table = db.open_table("msa_knowledge")
+            table.add(records)
+        else:
+            db.create_table("msa_knowledge", records)
+        return True
+    except Exception as e:
+        print(f"⚠️ [MSA Indexer] LanceDB upsert failed: {e}")
+        return False
 
 class LanceDBRetriever:
     def __init__(self, repo_root: str = "."):
@@ -94,7 +125,8 @@ class LanceDBRetriever:
                     content=row.get("content", ""),
                     type=row.get("type", "belief"),
                     version_id=row.get("version_id", "v1.0"),
-                    source_hash=row.get("source_hash", "")
+                    source_hash=row.get("source_hash", ""),
+                    retrieval_source="lancedb"
                 )
                 if "_score" in row:
                     c.score = float(row["_score"])
@@ -115,7 +147,8 @@ class LanceDBRetriever:
             content=f"Content for {query}",
             type="belief",
             version_id="v1",
-            source_hash="hash_1"
+            source_hash="hash_1",
+            retrieval_source="fallback"
         )
         # Using a deterministic pseudo-random logic for stable fallback
         if "expected" in query.lower() and "answered" in query.lower():

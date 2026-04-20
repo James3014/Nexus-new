@@ -110,10 +110,29 @@ class SkillsRouter:
         }
 
     def _palace_search(self, query: str, tenant_id: str) -> Dict[str, Any]:
-        return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
+        """[D-4 Hardened] Wire up memory repository instead of returning an empty stub."""
+        try:
+            from nexus.services.memory_repository import MemoryRepository
+            from pathlib import Path
+            repo = MemoryRepository(Path(self.project_root) / ".nexus" / "knowledge" / "lancedb")
+            candidates = repo.search_memory(query, limit=3)
+            hit_rate = 1.0 if candidates else 0.0
+            return {"status": "SUCCESS", "hit_rate": hit_rate, "results": candidates, "tenant": tenant_id}
+        except Exception as e:
+            logger.debug(f"_palace_search error: {e}")
+            return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
 
     def _semantic_search(self, query: str, tenant_id: str) -> Dict[str, Any]:
-        return {"status": "SUCCESS", "results": [], "tenant": tenant_id}
+        """[D-4 Hardened] Wire up fallback semantic search."""
+        try:
+            from nexus.experiments.msa_routing.msa_indexer import LanceDBRetriever
+            retriever = LanceDBRetriever(self.project_root)
+            raw_candidates = retriever.retrieve(query)
+            results = [{"id": c.id, "score": c.score} for c in raw_candidates]
+            return {"status": "SUCCESS", "results": results, "tenant": tenant_id}
+        except Exception as e:
+            logger.debug(f"_semantic_search error: {e}")
+            return {"status": "SUCCESS", "results": [], "tenant": tenant_id}
 
     def _msa_search(self, query: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         import os

@@ -48,11 +48,18 @@ def run_baseline(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     precision = correct_answered / max(1, total_answered_expected)
     unknown_rate = correct_unknown / max(1, total_unknown_expected)
     
+    # Calculate simulated regression rate based on false positives (answered when it should be unknown)
+    false_positives = sum(1 for d in dataset if d["expected_mode"] == "UNKNOWN") - correct_unknown
+    regression_rate = false_positives / max(1, total_unknown_expected)
+    
+    # Calculate simple cost logic
+    cost_per_success = latency / max(1, correct_answered)
+    
     return {
         "precision": precision,
         "unknown_correct_rate": unknown_rate,
-        "regression_rate": 0.05, # mocked baseline regression
-        "cost_per_success": 1.0, # baseline cost
+        "regression_rate": regression_rate,
+        "cost_per_success": cost_per_success,
         "p50_latency_ms": latency
     }
 
@@ -95,11 +102,15 @@ def run_msa(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     precision = correct_answered / max(1, total_answered_expected)
     unknown_rate = correct_unknown / max(1, total_unknown_expected)
     
+    false_positives = sum(1 for d in dataset if d["expected_mode"] == "UNKNOWN") - correct_unknown
+    regression_rate = false_positives / max(1, total_unknown_expected)
+    cost_per_success = latency / max(1, correct_answered)
+    
     return {
         "precision": precision,
         "unknown_correct_rate": unknown_rate,
-        "regression_rate": 0.02, # MSA lowers regression
-        "cost_per_success": 0.85, # MSA reduces cost
+        "regression_rate": regression_rate,
+        "cost_per_success": cost_per_success,
         "p50_latency_ms": latency
     }
 
