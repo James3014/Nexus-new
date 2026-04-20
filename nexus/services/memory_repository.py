@@ -32,10 +32,47 @@ class MemoryRepository:
 
     def compress_to_aaak(self, text: str) -> str:
         """⚡ AAAK (Aggressive Agentic Knowledge) 30x Compression Dialect."""
-        # TODO: Implement full dialect logic. For now, using distillation summary mockup.
         if len(text) < 100: return text
+        
         digest = hashlib.md5(text.encode()).hexdigest()[:8]
-        return f"atom:{digest}:{text[:50]}...[distilled]"
+        
+        # 嘗試使用 Local LLM (如 Ollama) 進行原生提煉
+        import urllib.request
+        import json
+        try:
+            req = urllib.request.Request(
+                "http://localhost:11434/api/generate",
+                data=json.dumps({
+                    "model": "llama3",
+                    "prompt": f"Compress to extreme AAAK shorthand dialect (max 1/30 length, keep nouns/verbs/code/paths only). Source: {text[:2000]}",
+                    "stream": False
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=2.0) as response:
+                result = json.loads(response.read())
+                if "response" in result:
+                    return f"aaak:{digest}: {result['response'].strip()}"
+        except Exception:
+            pass
+
+        # AAAK Heuristic Dialect Fallback (Regex-driven structural compression)
+        import re
+        
+        # 1. 保留核心結構 (paths, classes, functions, ids)
+        core_elements = re.findall(r'(?:/[/\w.-]+|\b(?:class|def|struct)\s+\w+|\b[A-Z][a-z]+[A-Z]\w+|\b[a-z]+_[a-z_]+\b)', text)
+        
+        # 2. 保留重要關鍵字語境 (error, fail, pass, auth, etc)
+        keywords = re.findall(r'\b(?:error|fail|pass|auth|api|sql|db|key|sync|lock|thread)\b', text.lower())
+        
+        # 3. 過濾重複並組合
+        unique_elements = list(dict.fromkeys(core_elements + keywords))
+        
+        # 4. 構建極短方言
+        compressed = " ".join(unique_elements[:50]) # limit max 50 tokens
+        
+        return f"aaak:{digest}:{compressed} [dialect_fallback]"
 
     def _get_db(self):
         if self._db is None and lancedb:
@@ -46,6 +83,14 @@ class MemoryRepository:
                 logger.error(f"Failed to connect to LanceDB: {e}")
                 raise InfrastructureError(f"LanceDB connection failed: {e}")
         return self._db
+
+    def list_tables(self) -> List[str]:
+        """[TD-3 Hardened] Public method to list available memory tables."""
+        db = self._get_db()
+        if db is None:
+            return []
+        return db.list_tables() if hasattr(db, 'list_tables') else db.table_names()
+
 
     def semantic_dedup_ingest(self, table_name: str, new_record: Dict[str, Any], vector_col: str = "vector", tenant_id: str = "default"):
         """🚀 Nexus v23.5/v24.0/v24.5 Hardened Ingest: <0.1 discard / 0.1-0.3 merge / >0.3 new."""

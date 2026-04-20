@@ -13,9 +13,9 @@ def run_smoke_test() -> Dict[str, Any]:
     # 1. Router
     router = MSARouter(confidence_threshold=0.8)
     candidates = [
-        MemoryCandidate(id="test1", content="c1", type="code", score=0.9, version_id="v1", source_hash="h1"),
+        MemoryCandidate(id="test1", content="c1", type="code", version_id="v1", source_hash="h1", vector_similarity=0.9, claim_confidence=0.9, score=0.9),
     ]
-    route_result = router.route("query-123", candidates)
+    route_result = router.route("query-123", candidates, query_type="default")
 
     # 2. Quarantine
     quarantine = MSAQuarantine()

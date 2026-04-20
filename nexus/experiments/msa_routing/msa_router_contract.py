@@ -16,13 +16,15 @@ class MemoryCandidate(BaseModel):
     content: str
     type: Literal["code", "belief", "artifact", "rule"]
     score: float = 0.0
+    vector_similarity: float = 0.0
+    claim_confidence: float = 0.0
     version_id: str
     source_hash: str
     ttl: int = -1
     confidence_decay: float = 1.0
     retrieval_source: Literal["lancedb", "fallback", "unknown"] = "unknown"
 
-    @field_validator('score', 'confidence_decay')
+    @field_validator('score', 'vector_similarity', 'claim_confidence', 'confidence_decay')
     @classmethod
     def validate_range(cls, v):
         if not (0.0 <= v <= 1.0):
@@ -42,7 +44,7 @@ class MSARouter:
     def __init__(self, confidence_threshold: float = 0.75):
         self.confidence_threshold = confidence_threshold
 
-    def route(self, query_id: str, retrieved_candidates: List[MemoryCandidate]) -> RoutingResult:
+    def route(self, query_id: str, retrieved_candidates: List[MemoryCandidate], query_type: str = "default") -> RoutingResult:
         if not retrieved_candidates:
             return RoutingResult(
                 query_id=query_id,
@@ -50,10 +52,9 @@ class MSARouter:
                 reject_reason="no_candidates_retrieved"
             )
 
-        for c in retrieved_candidates:
-            c.score = c.score * c.confidence_decay
-
-        sorted_candidates = sorted(retrieved_candidates, key=lambda x: x.score, reverse=True)
+        from .reranker import hybrid_rerank
+        # 1. Apply Hybrid Reranking
+        sorted_candidates = hybrid_rerank(retrieved_candidates, query_type=query_type)
         best_candidate = sorted_candidates[0]
 
         if best_candidate.score < self.confidence_threshold:

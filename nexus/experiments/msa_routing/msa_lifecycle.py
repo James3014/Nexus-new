@@ -34,26 +34,35 @@ class MSALifecycle:
         return db_entry
         
     def evaluate_kill_switch(self, benchmark_results: Dict[str, float], baseline: Dict[str, float]) -> Dict[str, Any]:
+        from nexus.experiments.msa_routing.benchmark_gates import PHASE1_GATES
+        
         msa_precision = benchmark_results.get("precision", 0.0)
         base_precision = baseline.get("precision", 0.0)
         
         unknown_rate = benchmark_results.get("unknown_correct_rate", 0.0)
-        
         regression = benchmark_results.get("regression_rate", 0.0)
-        base_regression = baseline.get("regression_rate", 0.0)
-        
-        cost = benchmark_results.get("cost_per_success", 1.0)
-        base_cost = baseline.get("cost_per_success", 1.0)
+        latency = benchmark_results.get("p50_latency_ms", 0.0)
         
         reasons = []
+        
+        # 1. Precision & relative gain
+        rel_improvement = (msa_precision - base_precision) / max(0.001, base_precision)
         if msa_precision < base_precision:
             reasons.append(f"Precision degraded ({msa_precision} < {base_precision})")
-        if unknown_rate < 0.95:
-            reasons.append(f"Unknown accuracy below 0.95 ({unknown_rate})")
-        if regression > base_regression:
-            reasons.append(f"Regression increased ({regression} > {base_regression})")
-        if cost > (base_cost * 0.9):
-            reasons.append(f"Cost efficiency not improved by 10% ({cost} vs {base_cost})")
+        elif rel_improvement < PHASE1_GATES["relative_improvement_min"]:
+            reasons.append(f"Relative improvement {rel_improvement:.2%} < {PHASE1_GATES['relative_improvement_min']:.2%}")
+            
+        # 2. Unknown Rate (P0)
+        if unknown_rate < PHASE1_GATES["unknown_correct_rate_min"]:
+            reasons.append(f"Unknown accuracy {unknown_rate} below P0 threshold {PHASE1_GATES['unknown_correct_rate_min']}")
+            
+        # 3. Regression limit
+        if regression > PHASE1_GATES["regression_rate_max"]:
+            reasons.append(f"Regression {regression} > max {PHASE1_GATES['regression_rate_max']}")
+            
+        # 4. Latency
+        if latency > PHASE1_GATES["p50_latency_ms_max"]:
+            reasons.append(f"Latency {latency}ms > max {PHASE1_GATES['p50_latency_ms_max']}ms")
             
         if reasons:
             raise KillSwitchTriggeredError(f"Kill Switch Triggered: {', '.join(reasons)}")

@@ -633,7 +633,7 @@ class AutoResearchNightShift:
             write_path = self.memory_store.write(clean_card)
             closure["memory_written"] = True
             closure["memory_path"] = write_path
-            closure["lancedb_synced"] = True
+            closure["lancedb_synced"] = clean_card.extra.get("lancedb_synced", False)
             sync_info = palace.sync()
             closure["sync_status"] = str(sync_info.get("status", "UNKNOWN"))
             closure["mempalace_sync"] = sync_info

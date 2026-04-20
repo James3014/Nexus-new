@@ -114,11 +114,8 @@ class SkillsRouter:
         try:
             from nexus.services.memory_repository import MemoryRepository
             from pathlib import Path
-            repo = MemoryRepository(Path(self.project_root) / ".nexus" / "knowledge" / "lancedb")
-            db = repo._get_db()
-            if db is None:
-                return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
-            tables = db.list_tables() if hasattr(db, 'list_tables') else db.table_names()
+            repo = MemoryRepository(Path(self.project_root) / ".nexus" / "memory" / "memory_index.lancedb")
+            tables = repo.list_tables()
             if not tables:
                 return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
             df = repo.search_fts_across_tables(query, list(tables)[:5], limit=3)

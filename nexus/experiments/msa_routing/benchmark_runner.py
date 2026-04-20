@@ -45,12 +45,12 @@ def run_baseline(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     latency = (time.time() - start_time) * 1000 / len(dataset)
     
-    precision = correct_answered / max(1, total_answered_expected)
+    predicted_answered = correct_answered + (total_unknown_expected - correct_unknown)
+    precision = correct_answered / max(1, predicted_answered)
     unknown_rate = correct_unknown / max(1, total_unknown_expected)
     
     # Calculate simulated regression rate based on false positives (answered when it should be unknown)
-    false_positives = sum(1 for d in dataset if d["expected_mode"] == "UNKNOWN") - correct_unknown
-    regression_rate = false_positives / max(1, total_unknown_expected)
+    regression_rate = (total_unknown_expected - correct_unknown) / max(1, total_unknown_expected)
     
     # Calculate simple cost logic
     cost_per_success = latency / max(1, correct_answered)
@@ -79,12 +79,16 @@ def run_msa(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     start_time = time.time()
     retriever = LanceDBRetriever()
     
+    from nexus.experiments.msa_routing.query_classifier import classify_query
+
     for item in dataset:
         test_query = f"{item['query']} ({item['expected_mode']})"
         candidates = retriever.retrieve(test_query)
         
+        query_type = classify_query(item['query'])
+        
         # 1. Routing
-        route_result = router.route(item["id"], candidates)
+        route_result = router.route(item["id"], candidates, query_type=query_type)
         status = route_result.status
         
         if item["expected_mode"] == "ANSWERED" and status == "ANSWERED":
@@ -99,11 +103,11 @@ def run_msa(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
             
     latency = (time.time() - start_time) * 1000 / len(dataset)
     
-    precision = correct_answered / max(1, total_answered_expected)
+    predicted_answered = correct_answered + (total_unknown_expected - correct_unknown)
+    precision = correct_answered / max(1, predicted_answered)
     unknown_rate = correct_unknown / max(1, total_unknown_expected)
     
-    false_positives = sum(1 for d in dataset if d["expected_mode"] == "UNKNOWN") - correct_unknown
-    regression_rate = false_positives / max(1, total_unknown_expected)
+    regression_rate = (total_unknown_expected - correct_unknown) / max(1, total_unknown_expected)
     cost_per_success = latency / max(1, correct_answered)
     
     return {
@@ -136,6 +140,7 @@ def main():
         reasons = [str(e)]
 
     output = {
+        "verdict": "FAIL" if kill_switch_triggered else "PASS",
         "baseline": baseline_res,
         "msa": msa_res,
         "precision": msa_res["precision"],
