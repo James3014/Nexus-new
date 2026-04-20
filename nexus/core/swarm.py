@@ -45,7 +45,7 @@ class NexusSwarmOrchestrator:
 
     def run(self) -> Dict[str, Any]:
         """🚀 啟動全生命週期蜂群任務管線。"""
-        print(f"🐝 [Swarm] Deploying Strategic Swarm for Task: {self.task[:50]}...")
+$1logger.info($2)
         
         # 0. Scout Phase (Intelligence Gathering)
         context = ""
@@ -76,7 +76,7 @@ class NexusSwarmOrchestrator:
         }
 
     def _scout(self) -> str:
-        print("🔭 [Swarm:Scout] Performing deep intelligence scouting (LanceDB RAG)...")
+$1logger.info($2)
         try:
             from nexus.research.learn_mode import LearnModeService
             p_root = getattr(self.engine, "project_root", Path("."))
@@ -96,7 +96,7 @@ class NexusSwarmOrchestrator:
                 context_lines.append(f"[{i+1}] {c.get('claim')} (Source: {c.get('source_url')})")
             
             summary = "\n".join(context_lines)
-            print(f"✅ [Swarm:Scout] Retrieved {len(citations)} relevant claims from knowledge base.")
+$1logger.info($2)
             return summary
             
         except Exception as e:
@@ -105,19 +105,19 @@ class NexusSwarmOrchestrator:
 
 
     def _consensus_plan(self, analysis: str) -> str:
-        print("⚖️ [Swarm:Consensus] Running Architect-Reviewer debate...")
+$1logger.info($2)
         safe_analysis = analysis if analysis else "No analysis available"
         plan = f"CONSENSUS PLAN: Refactor with safety locks based on analysis: {safe_analysis[:50]}"
         return plan
 
     def _audit(self, status: str, result: Dict[str, Any]):
-        print("✍️ [Swarm:Audit] Crystallizing lessons and updating Memory...")
+$1logger.info($2)
         # 這裡執行 Lesson Writeback
         pass
 
     # --- 以下維持原有實作，但根據需要微調參數 ---
     def _analyze(self, context: str = "") -> str:
-        print(f"🔍 [Swarm:Analyzer] Analyzing repository... (Context size: {len(context)})")
+$1logger.info($2)
         import subprocess
         p_root = getattr(self.engine, "project_root", ".")
         try:
@@ -133,13 +133,13 @@ class NexusSwarmOrchestrator:
 
 
     def _plan(self, analysis: str) -> str:
-        print("🧠 [Swarm:Planner] Designing repair strategy...")
+$1logger.info($2)
         # 基於 Analysis 產出行動綱領內容。
         plan = f"STRATEGY: Break cyclic import in modeling/core.py and fix separability logic in separable.py.\nContext: {analysis[:100]}"
         return plan
 
     def _repair(self, plan: str) -> Dict[str, Any]:
-        print("🛠️ [Swarm:Coder] Implementing repair...")
+$1logger.info($2)
         # Use the review loop for the actual heavy lifting
         loop = GatewayReviewLoop(
             git=getattr(self.engine, "git", None),
@@ -162,7 +162,7 @@ class NexusSwarmOrchestrator:
         return res
 
     def _verify(self, repair_result: Dict[str, Any]) -> str:
-        print("🧪 [Swarm:Tester] Verifying fix...")
+$1logger.info($2)
         return repair_result.get("status", "FAIL")
 
 class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
@@ -248,7 +248,7 @@ class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
         """Attempt federated verify before falling back to local."""
         remote_node = self._select_executor("verify")
         if remote_node:
-            print(f"🌐 [Federation] Offloading verify to {remote_node.node_id} (Load: {remote_node.load:.2f})")
+$1logger.info($2)
             payload = {
                 "phase": "verify",
                 "repair_result": repair_result,
@@ -259,7 +259,7 @@ class FederatedSwarmOrchestrator(NexusSwarmOrchestrator):
             if res:
                 self.total_tokens += res.get("tokens_used", 0)
                 return res.get("status", "FAIL")
-            print("⚠️ [Federation] Remote verify failed. Falling back to local.")
+$1logger.info($2)
         return super()._verify(repair_result)
 
 class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
@@ -273,13 +273,13 @@ class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
         
     def broadcast_decision(self, decision_type: str, data: Dict):
         """🛡️ 廣播決策 (Shared Decisions)"""
-        print(f"📡 [{self.peer_id}] Broadcasting Decision: {decision_type}")
+$1logger.info($2)
         # 在 POC 中模擬發送至 SSE
         # requests.post("http://localhost:8080/broadcast", json={"peer": self.peer_id, "type": decision_type, "data": data})
 
     def listen_for_peers(self):
         """👂 監聽夥伴信號 (Clarification/Auto-reply)"""
-        print(f"👂 [{self.peer_id}] Listening for Peer signals...")
+$1logger.info($2)
 
     def check_manifest_lock(self, target: str) -> bool:
         """🛡️ [P2P] 原子性核驗 Manifest 鎖定狀態"""
@@ -292,7 +292,7 @@ class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
             # 檢查是否有其他 Peer 正在修復同一個目標內容分組。
             for d in decisions:
                 if d.get("target") == target and d.get("peer_id") != self.peer_id:
-                    print(f"🛑 [{self.peer_id}] CONFLICT_DETECTED: {target} is locked by {d.get('peer_id')}")
+$1logger.info($2)}")
                     return True
         return False
 
@@ -300,7 +300,7 @@ class PeerSwarmOrchestrator(NexusSwarmOrchestrator):
         """P2P 修復：具備衝突偵測與避讓能力"""
         target_file = "nexus/core/swarm.py" # 模擬目標內容分組內容分組。
         if self.check_manifest_lock(target_file):
-            print(f"🔄 [{self.peer_id}] Peer-Conflict: Redirecting to Memory_Refresh.")
+$1logger.info($2)
             return {"status": "CONFLICT_DETECTED", "history": self.history + ["conflict_wait"]}
             
         self.broadcast_decision("REPAIR_INTENT", {"target": target_file, "plan": plan})

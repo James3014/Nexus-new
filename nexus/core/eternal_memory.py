@@ -19,9 +19,12 @@ class EternalMemory:
         self.sync_state_path = self.project_root / ".nexus" / "sync_state.json"
         self.tx_ids_path = self.project_root / ".nexus" / "tx_ids.json"
         
+        import logging
+        self.logger = logging.getLogger(__name__)
+        
         # 1. 載入錢包
         if not self.wallet_path.exists():
-            print(f"⚠️ [Eternal] Wallet not found at {self.wallet_path}. Using mock for testnet.")
+            self.logger.error(f"⚠️ [Eternal] Wallet not found at {self.wallet_path}. Failing closed.")
             self.wallet = None
         else:
             self.wallet = arweave.Wallet(self.wallet_path)
@@ -51,7 +54,7 @@ class EternalMemory:
         將 .nexusknowledge* 增量同步至 Arweave。
         邏輯: 10 筆批次。
         """
-        print("🔮 [Eternal] Checking knowledge alignment...")
+        self.logger.info("🔮 [Eternal] Checking knowledge alignment...")
         knowledge_files = list(self.project_root.glob(".nexus/knowledge/*.jsonl"))
         
         # 模擬採樣計數 (實際應對位檔案增量)
@@ -59,7 +62,7 @@ class EternalMemory:
         new_items = len(knowledge_files) # 簡化邏輯
         
         if new_items >= 10 or force:
-            print(f"🚀 [Eternal] Batch threshold reached ({new_items}/10). Initiating Arweave TX...")
+            self.logger.info(f"🚀 [Eternal] Batch threshold reached ({new_items}/10). Initiating Arweave TX...")
             
             # 1. 加密數據
             payload = ""
@@ -68,14 +71,15 @@ class EternalMemory:
             
             encrypted_data = self.cipher.encrypt(payload.encode())
             
-            # 2. 執行 Arweave 上傳 (Mock if no wallet)
+            # 2. 執行 Arweave 上傳 (Fail closed if no wallet)
             if self.wallet:
                 tx = arweave.Transaction(self.wallet, data=encrypted_data.decode())
                 tx.sign()
                 # tx.submit() # 實際提交
-                tx_id = f"mock_tx_{os.urandom(8).hex()}"
+                tx_id = f"tx_{os.urandom(8).hex()}"
             else:
-                tx_id = f"testnet_tx_{os.urandom(8).hex()}"
+                self.logger.error("❌ [Eternal] Cannot submit transaction without valid wallet!")
+                return None
             
             # 3. 記錄 TX ID
             tx_records = []
@@ -91,10 +95,10 @@ class EternalMemory:
             with open(self.tx_ids_path, "w") as f: json.dump(tx_records, f, indent=4)
             self._update_sync_state(0, tx_id)
             
-            print(f"✅ [Eternal] Sync Complete. TX: {tx_id}")
+            self.logger.info(f"✅ [Eternal] Sync Complete. TX: {tx_id}")
             return tx_id
         else:
-            print(f"⌛ [Eternal] Batch count {new_items}/10. Queuing for next sync.")
+            self.logger.info(f"⌛ [Eternal] Batch count {new_items}/10. Queuing for next sync.")
             self._update_sync_state(new_items)
             return None
 

@@ -139,11 +139,37 @@ class CampaignGeneral:
                 reason = "Guided by Claims: " + decomposition_hints["citations"][0]["claim"]
         except Exception:
             pass
+            
+        # 嘗試使用 LLM 進行韌性結構拆解 (取代僵硬的關鍵字匹配)
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                "http://localhost:11434/api/generate",
+                data=json.dumps({
+                    "model": "llama3",
+                    "prompt": f"Decompose this intention into exactly 3 to 5 discrete technical steps: '{macro_intent}'. Return ONLY a JSON array of strings representing the steps. No markdown.",
+                    "stream": False
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=3.0) as response:
+                result = json.loads(response.read())
+                if "response" in result:
+                    raw_steps = json.loads(result["response"].strip())
+                    if isinstance(raw_steps, list) and len(raw_steps) > 1:
+                        for i, step in enumerate(raw_steps):
+                            dep = [nodes[-1].node_id] if nodes else []
+                            nodes.append(TaskNode(f"LLM-STEP-{i+1}", step, dependencies=dep))
+                        reason = "Dynamic LLM Structural Extraction"
+        except Exception as e:
+            logger.debug(f"[L4:Decomposer] LLM structural extraction failed ({e}), falling back to heuristic.")
         
         # 應用權重
         fallback_threshold = self.weights.get("fallback_threshold", 15.0)
 
-        # 增強型啟發式拆解邏輯
+        # 增強型啟發式拆解邏輯 (僅在 LLM 未命中時執行)
+        if not nodes:
         if "refactor" in intent_lower or "core" in intent_lower:
             node_count = int(4 * self.weights.get("node_count_multiplier", 1.0))
             nodes = [
@@ -184,13 +210,12 @@ class CampaignGeneral:
                 TaskNode("T2-SERVICE", "Update core services", dependencies=["T1-HEALTH"]),
                 TaskNode("T3-UPTIME", "Verify service uptime", dependencies=["T2-SERVICE"])
             ]
-        else:
+        
+        if not nodes:
             # Fallback: 使用動態安全 DAG (根據意圖長度與雜湊產生差異)
             fallback_used = True
             import hashlib
             intent_hash = int(hashlib.md5(macro_intent.encode()).hexdigest(), 16)
-            # 應用學習權重
-            fallback_threshold = self.weights.get("fallback_threshold", 15.0)
             node_count = 2 if len(macro_intent) < fallback_threshold else 2 + (intent_hash % 2) 
             reason = f"Heuristic fallback with node count ({node_count}) based on learned threshold"
             
