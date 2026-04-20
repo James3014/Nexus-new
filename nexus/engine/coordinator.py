@@ -171,13 +171,17 @@ class NexusEngine:
         self.reporter.voice_notify(f"Nexus 啟動：偵測到 Bug {final_task_id}", urgency="critical")
         self.reporter.log_trace("run_bug", final_task_id, "START", 0, 0.0)
         
+        pipeline_kwargs = dict(kwargs)
+        pipeline_kwargs.pop("task_id", None)
+        pipeline_kwargs.pop("context", None)
+        
         return self._run_task_pipeline(
             task_desc=desc,
             task_type="bug",
             task_id=final_task_id,
             context=state.metadata,
             state=state,
-            **kwargs,
+            **pipeline_kwargs,
         )
 
     def _maybe_mark_pipeline_phase(self, phase: str) -> None:

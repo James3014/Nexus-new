@@ -5,38 +5,19 @@ import os
 from unittest.mock import patch, MagicMock
 
 
-def test_cli_status_aos():
+@pytest.mark.parametrize("cmd", [
+    ["nexus:status"],
+    ["nexus:hud"],
+    ["nexus:spec-lock"],
+    ["nexus:governance-check"],
+    ["nexus:acceptance-check"],
+    ["nexus:closeout"]
+])
+def test_cli_deprecated_commands_blocked(cmd):
     runner = CliRunner()
-    result = runner.invoke(nexus, ["nexus:status", "--aos"])
-    assert result.exit_code == 0
-    assert "[Nexus:AOS] Governance Verification" in result.output
-    assert "Federation Status" in result.output
-
-
-def test_cli_hud_daemon():
-    runner = CliRunner()
-    with patch("nexus.services.cli_commands_service.subprocess.Popen") as mock_popen:
-        result = runner.invoke(nexus, ["nexus:hud", "--refresh", "1", "--daemon"])
-    assert result.exit_code == 0
-    assert "[HUD] Background Daemon STARTING" in result.output
-    assert mock_popen.called
-
-def test_cli_spec_lock():
-    runner = CliRunner()
-    # 建立一個測試規格檔案
-    test_spec = "TEST_SPEC.md"
-    with open(test_spec, "w") as f:
-        f.write("# Test Spec\n\n- Goal: Test Spec Lock")
-    
-    try:
-        # 測試 Spec Lock 指令
-        result = runner.invoke(nexus, ["nexus:spec-lock", test_spec])
-        assert result.exit_code == 0
-        assert f"Auditing {test_spec} against MUSE_ENGINE_SPEC" in result.output
-        assert f"{test_spec} PASSED Constitutional Audit" in result.output
-    finally:
-        if os.path.exists(test_spec):
-            os.remove(test_spec)
+    result = runner.invoke(nexus, cmd)
+    assert result.exit_code == 2
+    assert "DEPRECATED_BLOCKED" in result.output
 
 def test_cli_invalid_command():
     runner = CliRunner()
@@ -44,92 +25,7 @@ def test_cli_invalid_command():
     result = runner.invoke(nexus, ["nexus:invalid-cmd"])
     assert result.exit_code != 0
 
-
-def test_cli_governance_check_pass():
-    runner = CliRunner()
-    with patch("scripts.engine.nexus_cli.subprocess.run", return_value=MagicMock(returncode=0)):
-        result = runner.invoke(nexus, ["nexus:governance-check"])
-    assert result.exit_code == 0
-    assert "[Governance-Check] PASS" in result.output
-
-
-def test_cli_governance_check_fail():
-    runner = CliRunner()
-    with patch("scripts.engine.nexus_cli.subprocess.run", return_value=MagicMock(returncode=1)):
-        result = runner.invoke(nexus, ["nexus:governance-check"])
-    assert result.exit_code != 0
-    assert "Governance gate failed" in result.output
-
-
-def test_cli_acceptance_check_blocks_when_governance_fails():
-    runner = CliRunner()
-    with patch("scripts.engine.nexus_cli.subprocess.run", return_value=MagicMock(returncode=2)):
-        result = runner.invoke(nexus, ["nexus:acceptance-check", "--window", "10"])
-    assert result.exit_code != 0
-    assert "Governance gate failed before acceptance-check" in result.output
-
-
 import json
-
-def test_cli_closeout_pass(tmp_path, monkeypatch):
-    runner = CliRunner()
-    contract_file = tmp_path / "done_contract_test.json"
-    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
-    monkeypatch.setattr(
-        "scripts.engine.nexus_cli.subprocess.run",
-        lambda *args, **kwargs: MagicMock(returncode=0, stdout='{"ok": true}\n', stderr=""),
-    )
-    data = {
-        "linter_exit_code": 0,
-        "ci_gate_exit_code": 0,
-        "required_tests_passed": True,
-        "commit_sha": "abc123def456",
-        "changed_files": ["file1.py"]
-    }
-    contract_file.write_text(json.dumps(data))
-    
-    result = runner.invoke(nexus, ["nexus:closeout", "--contract", str(contract_file)])
-    assert result.exit_code == 0
-    assert "Hard-Gate successfully cleared" in result.output
-    status_path = tmp_path / ".nexus" / "reports" / "closeout_status.json"
-    assert status_path.exists()
-    status = json.loads(status_path.read_text())
-    assert status["status"] == "PASS"
-    assert status["exit_code"] == 0
-
-def test_cli_closeout_fail(tmp_path, monkeypatch):
-    runner = CliRunner()
-    contract_file = tmp_path / "fail_contract_test.json"
-    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
-    monkeypatch.setattr(
-        "scripts.engine.nexus_cli.subprocess.run",
-        lambda *args, **kwargs: MagicMock(returncode=1, stdout='{"ok": false, "checks": {"linter_ok": false}}\n', stderr=""),
-    )
-    data = {
-        "linter_exit_code": 1,
-        "ci_gate_exit_code": 0,
-        "required_tests_passed": True,
-        "commit_sha": "abc123def456",
-        "changed_files": ["file1.py"]
-    }
-    contract_file.write_text(json.dumps(data))
-    
-    result = runner.invoke(nexus, ["nexus:closeout", "--contract", str(contract_file)])
-    assert result.exit_code != 0
-    # Output should contain the JSON error
-    assert '"ok": false' in result.output
-    assert '"linter_ok": false' in result.output
-    status_path = tmp_path / ".nexus" / "reports" / "closeout_status.json"
-    assert status_path.exists()
-    status = json.loads(status_path.read_text())
-    assert status["status"] == "FAIL"
-    assert status["exit_code"] != 0
-
-def test_cli_closeout_missing_contract():
-    runner = CliRunner()
-    result = runner.invoke(nexus, ["nexus:closeout", "--contract", "non_existent.json"])
-    assert result.exit_code != 0
-    assert "Contract file missing" in result.output
 
 
 def test_research_run_success(tmp_path, monkeypatch):
@@ -1034,17 +930,3 @@ def _write_ready_learn_slo(tmp_path):
         encoding="utf-8",
     )
 
-
-def test_legacy_acceptance_check_delegation(monkeypatch):
-    from scripts.engine.nexus_cli import nexus
-    runner = CliRunner()
-    
-    import subprocess
-    class MockRes:
-        def __init__(self, rc): self.returncode = rc; self.stdout = b"ok"; self.stderr = b""
-        
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: MockRes(0))
-    
-    result = runner.invoke(nexus, ["nexus:acceptance-check", "--window", "10"])
-    assert result.exit_code == 0
-    assert "[Legacy]" in result.output

@@ -155,5 +155,3 @@ class VectorRAG:
 
         return prompt_block
 
-
-    rag = VectorRAG()
