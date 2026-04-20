@@ -1,36 +1,50 @@
-# 🛡️ Nexus Agent Brain Hub: v26 Hardened Edition
+# 🛡️ Nexus Agent Brain Hub: v27 Deep Governance Edition
 
 > [!IMPORTANT]
-> **本目錄是 Nexus v26 時代的架構精華。**
-> 所有的物理組件已完成接線（Wired），從「願景」進化為「實體」。這是 Agent 優化 Nexus 的終極 SSOT。
+> **本目錄是 Nexus v27 時代的治理與演化精華。**
+> 已從全量 Wiki 與代碼審計中聚合為 30 份「超級文件」。這套文件系統標誌著 Nexus 從「開發框架」進化為「具備物理誠信的治理作業系統 (G-OS)」。
 
 ---
 
-## 🧭 導航地圖 (Navigation Map)
+## 🧭 導航與權責地圖
 
-### 1. 核心規約與協議 (Protocols)
-- **[[01_MUSE_PROTO_ENFORCED_V2.4]]**: 全域 Agent 強制執行指令。
-- **[[02_SUPREME_MASTER_LOOP_PXDRAC]]**: P-X-D-R-A-C 六階段全生命週期（已進入 Production）。
-- **[[04_AGENT_CAPABILITY_AND_PERSONA_BOUNDARIES]]**: Agent 權責分工地圖。
+### 1. 核心規約與生存 (01-06)
+- [[01_MUSE_PROTO_ENFORCED_V2.4]]: 最高代理規約。
+- [[02_SUPREME_MASTER_LOOP_PXDRAC]]: 六階段治理閉環。
+- [[03_ACCESS_CONTROL_AND_SYSTEM_INTEGRITY]]: ACL 與權限矩陣。
+- [[04_DOMAIN_FIREWALL_AND_TACTICAL_BOUNDARIES]]: 領地防禦與推理約束。
+- [[05_COST_ACCOUNTING_AND_TOKEN_LEDGER]]: 預算控制與成本預判。
+- [[06_CI_RESILIENCE_AND_SELF_HEALING]]: 免疫系統與自動修復。
 
-### 2. 架構設計藍圖 (Architecture)
-- **[[06_CORE_ORCHESTRATOR_AND_COORDINATOR]]**: 核心大腦邏輯。
-- **[[07_TACTICAL_DRONE_ENGINE_AND_BONSAI]]**: 邊緣自治、1-bit Core 與 GBNF 約束。
-- **[[12_MSA_ROUTING_AND_LATENT_MEMORY]]**: 實體 LanceDB 檢索與記憶解耦。
+### 2. 智慧、執行與記憶 (07-14)
+- [[07_CORE_ORCHESTRATOR_AND_COORDINATOR]]: 中樞神經邏輯。
+- [[08_TACTICAL_DRONE_ENGINE_AND_BONSAI]]: 1-bit Core 與 GBNF 強制執行。
+- [[09_SKILL_FORGE_AND_JIT_ASSEMBLY]]: 技能自動化組裝引擎。
+- [[10_CAMPAIGN_GENERAL_AND_DAG_PLANNING]]: 史詩級任務調度。
+- [[11_FLEET_COMMAND_AND_SWARM_ADAPTERS]]: mTLS 安全與 Redis 同步。
+- [[12_MSA_ROUTING_AND_LATENT_MEMORY]]: 實體 LanceDB 與記憶解耦。
+- [[13_LANCEDB_AND_VECTOR_KNOWLEDGE_STORE]]: 語義去重與偽向量現況。
+- [[14_WISDOM_LAYER_AND_STRATEGY_TUNING]]: 複雜度感應與權重同步。
 
-### 3. 治理與演化 (Governance & Evolution)
-- **[[18_ARCHITECTURE_DECISION_RECORDS_ADR]]**: 歷史選型決策溯源。
-- **[[21_CI_RELEASE_GATE_AND_CLOSEOUT_HARD_GATE]]**: CI 同步與任務結算。
-- **[[29_NEXUS_EVOLUTION_AND_OPTIMIZATION_GUIDE]]**: **NEW!** 如何將系統從 78 分推向 90+ 分。
+### 3. 品質、誠信與驗證 (15-22)
+- [[15_STATE_LIFECYCLE_AND_METABOLISM]]: 物理斷點與會話蒸餾。
+- [[16_CRITIQUE_ENGINE_AND_ANTI_RATIONALIZATION]]: 行為誠信與美學硬門檻。
+- [[17_TASK_LINEAGE_AND_DAG_PROVENANCE]]: 任務譜系與因果溯源。
+- [[18_CONTEXT_SCORING_AND_TOON_COMPRESSION]]: 語義修剪與內容評分。
+- [[19_TELEMETRY_AND_HUD_OBSERVATION]]: 全景監控與 TraceID 傳播。
+- [[20_KNOWLEDGE_INGESTION_AND_CITATION_LINEAGE]]: 斷言引證與引證溯源。
+- [[21_INTEGRATED_TESTING_GAUNTLET]]: L1-L7 測試手套與回歸探針。
+- [[22_HALLUCINATION_GUARD_AND_ACCEPTANCE]]: 9 分強制阻斷與自動結晶。
+
+### 4. 結案、合規與演化 (23-30)
+- [[23_TRUTH_VALIDATOR_AND_PHYSICAL_VERDICT]]: 物理應用層驗收。
+- [[24_HANDOFF_BUNDLE_AND_ESCALATION]]: 人機移交與影子快照。
+- [[25_COMPLIANCE_AND_TRUTH_CLAIMS]]: 真值寄存器與紅隊審計。
+- [[26_CLI_SURFACE_AND_COMMAND_MAPS]]: 指令全集與實體綁定。
+- [[27_ARCHITECTURE_DECISION_RECORDS_ADR]]: 歷史選型決策索引。
+- [[28_LEARNING_CLOSURE_MATRIX_AND_LESSONS]]: 防再發矩陣。
+- [[29_GOVERNANCE_CHANGELOG_AND_HISTORY]]: 物理演化軌跡紀錄。
+- [[30_NEXUS_EVOLUTION_AND_90_PLUS_SPEC]]: 最終硬化路徑與晉升標準。
 
 ---
-
-## 🛠️ 如何使用本目錄優化 Nexus？
-
-1. **對位 (Align)**：開始任何任務前，讀取 `01_MUSE_PROTO`。
-2. **核對 (Check)**：確保你的代碼符合 `07_GBNF` 語法約束與 `12_MSA` 權重。
-3. **執行 (Execute)**：使用 `24_CLI_SURFACE` 中的指令進行實體操作。
-4. **結案 (Close)**：參考 `20_LEARNING_MATRIX` 回寫教訓。
-
----
-**[NEXUS v26 ACTIVE: PRODUCTION-READY | BRAIN HUB UPDATED]**
+**[NEXUS v27 ACTIVE: DEEP-GOVERNANCE-ALIGNED | HUB-REMASTERED]**
