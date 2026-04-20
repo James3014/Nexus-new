@@ -10,12 +10,10 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
 
 import pandas as pd
 
-try:
-    from sentence_transformers import SentenceTransformer  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
-    SentenceTransformer = None
+import logging
+import urllib.request
 
-
+logger = logging.getLogger("nexus.vector_rag")
 class VectorRAG:
     """
     🔮 Nexus VectorRAG (Phase 10.2)
@@ -31,15 +29,29 @@ class VectorRAG:
         self.fallback_file = self.db_path.parent / f"{self.table_name}.json"
         self.db = None
         self.model = None
-        self.enabled = lancedb is not None and SentenceTransformer is not None
+        self.enabled = lancedb is not None
 
         if self.enabled:
             self.db = lancedb.connect(str(self.db_path))
-            print("🔮 [VectorRAG] Loading Embedding Model: all-MiniLM-L6-v2...")
-            self.model = SentenceTransformer("all-MiniLM-L6-v2")
+            logger.info("🔮 [VectorRAG] Connecting to local LanceDB and using Ollama embeddings...")
         else:
             self._ensure_fallback_file()
-            print("⚠️ [VectorRAG] Running in JSON fallback mode; vector dependencies unavailable.")
+            logger.warning("⚠️ [VectorRAG] Running in JSON fallback mode; LanceDB unavailable.")
+
+    def _get_embedding(self, text: str) -> List[float]:
+        try:
+            req = urllib.request.Request(
+                "http://localhost:11434/api/embeddings",
+                data=json.dumps({"model": "nomic-embed-text", "prompt": text}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as response:
+                result = json.loads(response.read())
+                return result.get("embedding", [])
+        except Exception as e:
+            logger.error(f"Ollama embedding failed: {e}")
+            return []
 
     def _ensure_fallback_file(self) -> None:
         self.fallback_file.parent.mkdir(parents=True, exist_ok=True)
@@ -64,18 +76,22 @@ class VectorRAG:
         if not knowledge_data:
             return
 
-        print(f"🚀 [VectorRAG] Indexing {len(knowledge_data)} items...")
+        logger.info(f"🚀 [VectorRAG] Indexing {len(knowledge_data)} items...")
 
-        if not self.enabled or self.db is None or self.model is None:
+        if not self.enabled or self.db is None:
             rows = self._load_fallback_rows()
             rows.extend(knowledge_data)
             self._save_fallback_rows(rows)
-            print(f"✅ [VectorRAG] Fallback index updated. Total items: {len(rows)}")
+            logger.info(f"✅ [VectorRAG] Fallback index updated. Total items: {len(rows)}")
             return
 
         df = pd.DataFrame(knowledge_data)
         texts = df["task"].tolist()
-        embeddings = self.model.encode(texts)
+        # Use Ollama
+        embeddings = [self._get_embedding(t) for t in texts]
+        # fallback for empty
+        for i in range(len(embeddings)):
+            if not embeddings[i]: embeddings[i] = [0.0]*768
 
         df["vector"] = embeddings.tolist()
 
@@ -85,7 +101,7 @@ class VectorRAG:
         else:
             self.db.create_table(self.table_name, data=df)
 
-        print(f"✅ [VectorRAG] Index Updated. Total items: {len(self.db.open_table(self.table_name))}")
+        logger.info(f"✅ [VectorRAG] Index Updated. Total items: {len(self.db.open_table(self.table_name))}")
 
     def _fallback_score(self, row: Dict[str, Any], query: str) -> int:
         haystack = " ".join(
@@ -102,24 +118,25 @@ class VectorRAG:
         """
         執行語義搜索，返回 Top-K 匹配模式。
         """
-        if not self.enabled or self.db is None or self.model is None:
+        if not self.enabled or self.db is None:
             rows = self._load_fallback_rows()
             ranked = sorted(rows, key=lambda row: self._fallback_score(row, task_query), reverse=True)
             results = [row for row in ranked if self._fallback_score(row, task_query) > 0][:k]
             if not results:
                 results = ranked[:k]
-            print(f"🔍 [VectorRAG] Fallback query returned {len(results)} matches for: {task_query[:30]}...")
+            logger.info(f"🔍 [VectorRAG] Fallback query returned {len(results)} matches for: {task_query[:30]}...")
             return results
 
         if self.table_name not in self.db.list_tables():
             return []
 
         table = self.db.open_table(self.table_name)
-        query_vector = self.model.encode([task_query])[0]
+        query_vector = self._get_embedding(task_query)
+        if not query_vector: query_vector = [0.0]*768
 
         results = table.search(query_vector).limit(k).to_list()
 
-        print(f"🔍 [VectorRAG] Query returned {len(results)} matches for: {task_query[:30]}...")
+        logger.info(f"🔍 [VectorRAG] Query returned {len(results)} matches for: {task_query[:30]}...")
         return results
 
     def format_for_prompt(self, results: List[Dict[str, Any]]) -> str:
@@ -138,12 +155,4 @@ class VectorRAG:
         return prompt_block
 
 
-if __name__ == "__main__":
     rag = VectorRAG()
-    sample_data = [
-        {"task": "Fix Python timezone bug", "resolution": "Use pytz.timezone('UTC')"},
-        {"task": "Implement React Glassmorphism", "resolution": "backdrop-filter: blur(10px)"},
-    ]
-    rag.update_index(sample_data)
-    hits = rag.query("How to handle UTC times in Python?")
-    print(rag.format_for_prompt(hits))

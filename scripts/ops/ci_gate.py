@@ -5,6 +5,7 @@ import sys
 import json
 import argparse
 import subprocess
+import concurrent.futures
 from pathlib import Path
 
 # Add project root to sys.path before importing core modules
@@ -235,7 +236,8 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
         "drift": ROOT / ".nexus" / "reports" / "wiki_drift_report.json",
         "capability": ROOT / ".nexus" / "reports" / "wiki_capability_coverage_report.json",
         "eval": ROOT / ".nexus" / "reports" / "wiki_eval_report.json",
-        "writeback": ROOT / ".nexus" / "reports" / "wiki_writeback_report.json"
+        "writeback": ROOT / ".nexus" / "reports" / "wiki_writeback_report.json",
+        "coverage": ROOT / ".nexus" / "reports" / "coverage.json"
     }
 
     print(f"📊 [Wiki-Sync] Status: {wiki_sync_status}")
@@ -276,6 +278,15 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
             print(f"📊 [Wiki-Writeback] Status: {status}, Recent Count: {recent}")
         except Exception as e:
             print(f"⚠️ Error parsing writeback report: {e}")
+
+    # Coverage Summary
+    if reports["coverage"].exists():
+        try:
+            cov_data = json.loads(reports["coverage"].read_text())
+            total_pct = cov_data["totals"]["percent_covered"]
+            print(f"📊 [Test-Coverage] Total covered: {total_pct:.2f}%")
+        except Exception as e:
+            print(f"⚠️ Error parsing coverage report: {e}")
 
 def run_benchmark_check(mode: str, dry_run: bool):
     if mode == "off": return True
@@ -442,30 +453,28 @@ def main():
     )
     if not success and not args.dry_run: sys.exit(1)
 
-    # 2. Wiki Drift Audit (Agent I - v2.0)
-    run_step(
-        "Wiki Drift Audit",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_drift_audit.py',
-    )
+    # 2. Parallelize Wiki Audits for efficiency
+    wiki_audits = {
+        "Wiki Drift Audit": f'"{VENV_PYTHON}" scripts/ops/wiki_drift_audit.py',
+        "Wiki Capability Coverage Audit": f'"{VENV_PYTHON}" scripts/ops/wiki_capability_coverage_audit.py',
+        "Wiki Writeback Status Check": f'"{VENV_PYTHON}" scripts/ops/wiki_query_writeback.py',
+        "Wiki Eval Regression": f'"{VENV_PYTHON}" scripts/ops/wiki_eval_regression.py',
+    }
 
-    # 2b. Wiki Capability Coverage Audit (Phase 6 Weighted)
-    run_step(
-        "Wiki Capability Coverage Audit",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_capability_coverage_audit.py',
-    )
-
-    # 2c. Wiki Writeback Status (Phase 6)
-    run_step(
-        "Wiki Writeback Status Check",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_query_writeback.py',
-    )
-
-    # 2d. Wiki Eval Regression (Phase 6)
-    run_step(
-        "Wiki Eval Regression",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_eval_regression.py',
-    )
-    
+    print("\n🚀 [CI-Gate] Launching Parallel Wiki Audits...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(run_step, name, cmd): name for name, cmd in wiki_audits.items()}
+        for future in concurrent.futures.as_completed(futures):
+            name = futures[future]
+            try:
+                success, _ = future.result()
+                if not success and not args.dry_run:
+                    print(f"❌ [CI-BLOCK] Parallel Audit failed: {name}")
+                    sys.exit(1)
+            except Exception as e:
+                print(f"❌ [CI-BLOCK] Parallel Audit crashed: {name} - {e}")
+                if not args.dry_run: sys.exit(1)
+                
     # 2e. Research Benchmark (Phase 6)
     if not run_benchmark_check(args.benchmark_mode, args.dry_run) and not args.dry_run:
         sys.exit(1)
