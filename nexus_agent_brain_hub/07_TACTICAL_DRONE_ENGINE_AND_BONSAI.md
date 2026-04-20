@@ -1,21 +1,23 @@
 # 🚁 Tactical Drone Engine & Bonsai Brain
+**[PHYSICAL_STATUS: HARDENED_PROD | GBNF_ENFORCED]**
 
 ## 1. 邊緣自治架構
-`TacticalDrone` 是 Nexus 的實體執行單元，運作在隔離的沙盒環境中，確保「開發行為」不會污染「治理環境」。
+`TacticalDrone` 是 Nexus 的實體執行單元，運作在隔離沙盒中，由 **1-bit Core** 與 **GBNF** 語法強制守門。
 
-## 2. 1-bit Core 與 GBNF 語法
-- **1-bit Core**: Drone 的決策被簡化為極高精準度的原子化判定（YES/NO），減少幻覺。
-- **GBNF (Grammar)**: 強制 LLM 產出符合 JSON Schema 的結構化指令，防止解析錯誤。
+## 2. 實體化強制組件
+- **1-bit Core (`OneBitGate`)**: 位於 `nexus/core/onebit_core.py`。
+    - **動態門檻**: 0.5 ~ 0.95。隨任務複雜度（Tracing Log 長度）自動爬升難度。
+- **GBNF Grammar**: 鎖定 LLM 回覆格式，僅允許 `BASH`, `EDIT`, `DONE` 行為。
+- **3-Strike Policy**: 連效無效回覆扣 50% 分數，累計三次直接 `FAIL`。
 
 ## 3. Bonsai-1.7B 本地大腦
-- **定位**: 專為低功耗、高隱私、離線環境設計。
-- **實作**: 透過 `LocalBonsaiBrain` 封裝，支援 GBNF 結構化輸出。
-- **降級邏輯**: 當雲端 LLM 觸發配額限制或網路中斷時，Drone 自動切換至 Bonsai 模式。
+- **實作**: `LocalBonsaiBrain` 支援 GBNF 結構化輸出。
+- **接線**: 預設對接 `http://localhost:11434` (Ollama)。
 
 ## 4. 執行循環 (Sense-Think-Act)
-1. **Sense**: 讀取目標檔案與 `StrategicEnvelope`。
-2. **Think**: 在 GBNF 約束下生成解決方案。
-3. **Act**: 透過 `DroneToolBox` 執行 Bash 或 File Edit。
+1. **Sense**: 讀取目標檔案與戰略封套。
+2. **Think**: 在 GBNF 約束下生成決策。
+3. **Act**: 透過 `DroneToolBox` 執行實體修改。
 
 ---
-**[Source: nexus_wiki_vault/02_Modules/Module - Advanced Core Intelligence.md]**
+**[Source: New Dimension Audit Batch B - 2026-04-20]**

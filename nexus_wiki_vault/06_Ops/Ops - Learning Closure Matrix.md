@@ -178,3 +178,9 @@ version_scope:
 - **Root Cause**: Reliance on simple `urllib` calls and lack of logging enforcement in research-heavy components.
 - **Decision**: Logged as Sev-1 debts. Initiated transition to `aiohttp` and mandatory logging for all telemetry-relevant paths.
 - **Prevention**: Pre-promotion "Static Analysis" to detect `print()` usage and synchronous network calls in core packages.
+
+## 2026-04-20: Telemetry bypass and Synchronous I/O in Research Paths (Stage 8)
+- **Phenomenon**: Critical status reports from Swarm nodes were not captured by telemetry due to `print()` usage, and indexing latency was high due to `urllib` blocking.
+- **Root Cause**: Reliance on legacy CLI output patterns and synchronous network library defaults.
+- **Decision**: Migrated to `httpx` (Async) for indexer and enforced `logging` across all orchestrator paths. Established `ServiceRegistry` to facilitate component discovery.
+- **Prevention**: Pre-commit hooks must block `print()` in `nexus/core/` and enforce the use of the `ServiceRegistry` for cross-service communication.

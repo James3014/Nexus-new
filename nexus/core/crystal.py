@@ -20,14 +20,14 @@ class CrystalAnalyzer:
         self.penalty_step = 0.5    # 懲罰步進值
 
     def analyze(self):
-        print("💎 [Crystal] Initiating experience crystallization...")
+        logger.info("💎 [Crystal] Initiating experience crystallization...")
         if not self.tracelog_path.exists():
-            print("⚠️ [Crystal] No tracelog found. Skipping.")
+            logger.warning("⚠️ [Crystal] No tracelog found. Skipping.")
             return
 
         # 1. 讀取權重配置
         if not self.weights_path.exists():
-            print("❌ [Crystal] Weights config missing.")
+            logger.error("❌ [Crystal] Weights config missing.")
             return
         
         with open(self.weights_path, "r", encoding="utf-8") as f:
@@ -70,7 +70,7 @@ class CrystalAnalyzer:
                 new_val = max(-2.0, min(5.0, new_val))
                 
                 if new_val != old_val:
-                    print(f"📈 [Crystal] Updating {skill_key}: {old_val} -> {new_val} (Success: {data['success']}, Fail: {data['fail']})")
+                    logger.info(f"📈 [Crystal] Updating {skill_key}: {old_val} -> {new_val} (Success: {data['success']}, Fail: {data['fail']})")
                     adjustments[skill_key] = new_val
                     changes_detected = True
 
@@ -82,9 +82,9 @@ class CrystalAnalyzer:
             
             with open(self.weights_path, "w", encoding="utf-8") as f:
                 json.dump(weights_data, f, indent=4, ensure_ascii=False)
-            print("✅ [Crystal] Weights successfully crystallized.")
+            logger.info("✅ [Crystal] Weights successfully crystallized.")
         else:
-            print("ℹ️ [Crystal] No significant experience update needed.")
+            logger.info("ℹ️ [Crystal] No significant experience update needed.")
 
 if __name__ == "__main__":
     _DEFAULT_ROOT = os.getenv("NEXUS_PROJECT_ROOT", "/Users/jameschen/Downloads/Muse-Nexus")

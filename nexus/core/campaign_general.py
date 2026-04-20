@@ -141,27 +141,27 @@ class CampaignGeneral:
         except Exception:
             pass
             
-        import urllib.request
+        import httpx
         try:
-            req = urllib.request.Request(
-                f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/generate",
-                data=json.dumps({
-                    "model": "llama3",
-                    "prompt": f"Decompose this intention into exactly 3 to 5 discrete technical steps: '{macro_intent}'. Return ONLY a JSON array of strings representing the steps. No markdown.",
-                    "stream": False
-                }).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=3.0) as response:
-                result = json.loads(response.read())
-                if "response" in result:
-                    raw_steps = json.loads(result["response"].strip())
-                    if isinstance(raw_steps, list) and len(raw_steps) > 1:
-                        for i, step in enumerate(raw_steps):
-                            dep = [nodes[-1].node_id] if nodes else []
-                            nodes.append(TaskNode(f"LLM-STEP-{i+1}", step, dependencies=dep))
-                        reason = "Dynamic LLM Structural Extraction"
+            with httpx.Client() as client:
+                resp = client.post(
+                    f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/generate",
+                    json={
+                        "model": "llama3",
+                        "prompt": f"Decompose this intention into exactly 3 to 5 discrete technical steps: '{macro_intent}'. Return ONLY a JSON array of strings representing the steps. No markdown.",
+                        "stream": False
+                    },
+                    timeout=10.0
+                )
+                if resp.status_code == 200:
+                    result = resp.json()
+                    if "response" in result:
+                        raw_steps = json.loads(result["response"].strip())
+                        if isinstance(raw_steps, list) and len(raw_steps) > 1:
+                            for i, step in enumerate(raw_steps):
+                                dep = [nodes[-1].node_id] if nodes else []
+                                nodes.append(TaskNode(f"LLM-STEP-{i+1}", step, dependencies=dep))
+                            reason = "Dynamic LLM Structural Extraction"
         except Exception as e:
             logger.debug(f"[L4:Decomposer] LLM structural extraction failed ({e}), falling back to heuristic.")
         

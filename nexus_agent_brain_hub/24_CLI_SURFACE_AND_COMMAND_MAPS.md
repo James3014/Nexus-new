@@ -1,27 +1,22 @@
 # 🖥️ CLI Surface & Command Maps
+**[PHYSICAL_STATUS: FULLY_OPERATIONAL | SSOT_CONFIGURED]**
 
-## 1. 統一入口規範
-Nexus 所有的操作必須經由 `nexus_cli.py` 進行。嚴禁繞過 CLI 直接呼叫內部 Python 腳本，除非是為了開發除錯。
+## 1. 統一入口與配置歸一
+Nexus 的所有操作必須經由 `nexus_cli.py` 進行。全域配置由 `NexusGlobalConfig` 統一管控。
 
-## 2. 核心指令集 (Nexus Commands)
+## ⚙️ 實體指令圖譜 (Command Map)
 
-| 指令 | 作用 |
-|---|---|
-| `nexus run` | 啟動 Supreme Master Loop (P-X-D-R-A-C)。 |
-| `nexus resume` | 從物理快照點恢復任務。 |
-| `nexus status` | 顯示系統健康度與信任分數。 |
-| `nexus acceptance-check` | 執行任務驗收與幻覺審計。 |
-| `nexus learn:ingest` | 攝取外部知識並向量化至 LanceDB。 |
-| `nexus research:run` | 在沙盒中執行架構實驗。 |
+| 指令類別 | 指令示例 (nexus <cmd>) | 實體職能 |
+|---|---|---|
+| **核心循環** | `run`, `resume` | 啟動或恢復 P-X-D-R-A-C 大閉環。 |
+| **治理守門** | `acceptance-check` | 執行 9 分制 HI 審計與證據驗收。 |
+| **發布硬化** | `delivery-gate`, `closeout`| 產出交付憑證並封裝任務契約。 |
+| **集群監控** | `drone-hud`, `swarm` | 實時監控多 Agent 狀態與 mTLS 機群。 |
+| **研究實驗** | `research:run`, `bench` | 啟動沙盒實驗與 A/B 基準測試。 |
 
-## 3. 隱藏與外掛指令
-- **`drone-hud`**: 實時監控 Swarm 中所有 Drone 的信念分數與進度。
-- **`ui-validator`**: 自主化網頁 UI 結構驗證。
-- **`stress-test`**: 系統壓力測試與併發臨界點探測。
-
-## 4. 環境變數對位
-- **`NEXUS_ENFORCED_MODE=1`**: 強制進入治理模式。
-- **`NEXUS_TASK_ACCEPTANCE_MODE=task`**: 限定驗收範圍。
+## ⚙️ 核心配置 (NexusGlobalConfig)
+- **SSoT**: 所有環境變數（如 `NEXUS_OLLAMA_ENDPOINT`, `NEXUS_SSE_PORT`）均在此歸一。
+- **Exit Codes**: 對齊 `nexus/core/exit_codes.py` 四態終端語意（0:SUCCESS, 1:FAILED, 2:ESCALATED, 3:HUMAN_REVIEW）。
 
 ---
-**[Source: nexus_wiki_vault/00_Home/CLI Surface Quickstart.md]**
+**[Source: Truth Realignment Audit Stage 9 - 2026-04-20]**

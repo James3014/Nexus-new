@@ -32,6 +32,9 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-20 | **TELEMETRY PURIFICATION & ASYNC IO EVOLUTION** | `commander.py`, `context_hub.py`, `msa_indexer.py`, `campaign_general.py` | High | Git revert | Antigravity |
+| 2026-04-20 | **UNIFIED SERVICE REGISTRY** | `nexus/services/registry.py`, `services/__init__.py` | Medium | Git revert | Antigravity |
+|---|---|---|---|---|---|
 | 2026-04-20 | **IO HARDENING & STATE PRUNING** | `state_repository.py`, `msa_indexer.py`, `event_bus.py` | High | Git revert | Antigravity |
 | 2026-04-20 | **CORE DEBT DISCOVERY (STAGE 7)** | `commander.py`, `context_hub.py`, `crystal.py` | Medium | Git revert | Gemini-Nexus |
 |---|---|---|---|---|---|

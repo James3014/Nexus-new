@@ -6,9 +6,9 @@ import hashlib
 import os
 import subprocess
 import json
-import urllib.request
+import asyncio
+import httpx
 from typing import List, Dict, Any, Optional
-from concurrent.futures import ThreadPoolExecutor
 from nexus.core.config import NexusGlobalConfig
 
 SCHEMA_METADATA = {
@@ -50,8 +50,22 @@ def _read_file_content(full_path: str, max_chars: int = 4000) -> str:
     except Exception:
         return ""
 
-def _fetch_embedding_worker(fpath: str, content: str, repo_root: str) -> Dict[str, Any]:
-    """Worker for parallel embedding retrieval."""
+async def _fetch_embedding_async(client: httpx.AsyncClient, content: str) -> Optional[List[float]]:
+    """Fetch embedding asynchronously using httpx."""
+    try:
+        resp = await client.post(
+            f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
+            json={"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": content},
+            timeout=5.0
+        )
+        if resp.status_code == 200:
+            return resp.json().get("embedding")
+    except Exception:
+        pass
+    return None
+
+async def _index_file_worker_async(client: httpx.AsyncClient, fpath: str, content: str, repo_root: str) -> Dict[str, Any]:
+    """Async worker for file indexing."""
     full_path = os.path.join(repo_root, fpath)
     file_hash = get_file_hash(full_path)
     
@@ -63,20 +77,7 @@ def _fetch_embedding_worker(fpath: str, content: str, repo_root: str) -> Dict[st
     elif "rule" in fpath or "MUSE_PROTO" in fpath:
         file_type = "rule"
 
-    vector = None
-    try:
-        req = urllib.request.Request(
-            f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
-            data=json.dumps({"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": content}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=2.0) as response:
-            result = json.loads(response.read())
-            if "embedding" in result:
-                vector = result["embedding"]
-    except Exception:
-        pass
+    vector = await _fetch_embedding_async(client, content)
 
     if not vector:
         # Fallback to hash-based pseudo vector
@@ -95,28 +96,39 @@ def _fetch_embedding_worker(fpath: str, content: str, repo_root: str) -> Dict[st
         "claim_confidence": 0.8
     }
 
-def incremental_index(repo_root: str, auto_upsert: bool = True) -> List[Dict[str, Any]]:
+async def incremental_index_async(repo_root: str, auto_upsert: bool = True) -> List[Dict[str, Any]]:
     changed_files = get_git_diff_files(repo_root)
-    indexed_data = []
     
-    tasks = []
+    tasks_data = []
     for fpath in changed_files:
         full_path = os.path.join(repo_root, fpath)
         content = _read_file_content(full_path)
         if not content:
             content = f"[empty or binary] {fpath}"
-        tasks.append((fpath, content))
+        tasks_data.append((fpath, content))
 
-    # Parallelize embedding phase
-    if tasks:
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(_fetch_embedding_worker, fpath, content, repo_root) for fpath, content in tasks]
-            indexed_data = [f.result() for f in futures]
-        
+    if not tasks_data:
+        return []
+
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            _index_file_worker_async(client, fpath, content, repo_root) 
+            for fpath, content in tasks_data
+        ]
+        indexed_data = await asyncio.gather(*tasks)
+
     if auto_upsert and indexed_data:
         upsert_to_lancedb(repo_root, indexed_data)
         
     return indexed_data
+
+def incremental_index(repo_root: str, auto_upsert: bool = True) -> List[Dict[str, Any]]:
+    """Sync wrapper for incremental_index_async."""
+    try:
+        return asyncio.run(incremental_index_async(repo_root, auto_upsert))
+    except Exception as e:
+        # Fallback to empty if asyncio fails in non-main threads
+        return []
 
 def upsert_to_lancedb(repo_root: str, records: List[Dict[str, Any]]) -> bool:
     """Write indexed records into the msa_knowledge LanceDB table."""
@@ -166,14 +178,14 @@ class LanceDBRetriever:
             
             query_vector = None
             try:
-                req = urllib.request.Request(
-                    f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
-                    data=json.dumps({"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": query}).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=1.5) as response:
-                    query_vector = json.loads(response.read()).get("embedding")
+                with httpx.Client() as client:
+                    resp = client.post(
+                        f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/embeddings",
+                        json={"model": NexusGlobalConfig.OLLAMA_EMBED_MODEL, "prompt": query},
+                        timeout=5.0
+                    )
+                    if resp.status_code == 200:
+                        query_vector = resp.json().get("embedding")
             except:
                 pass
                 

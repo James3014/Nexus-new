@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
@@ -10,6 +11,8 @@ from nexus.core.brain_de_entropy import prune_dialogue
 
 
 from nexus.core.context_compression import ToonRenderer, ContextScorer
+
+logger = logging.getLogger("nexus.context_hub")
 
 class ContextHub:
     """
@@ -46,7 +49,7 @@ class ContextHub:
             db_path = str(self.project_root / ".nexus" / "knowledge" / "lancedb")
             self.wisdom_vault = WisdomVault(db_path=db_path)
         except Exception as e:
-            print(f"⚠️ [ContextHub] WisdomVault auto-injection skipped: {e}")
+            logger.warning(f"⚠️ [ContextHub] WisdomVault auto-injection skipped: {e}")
             self.wisdom_vault = None
             
         # 🟢 [Fix-1] BeliefEngine Auto-Injection 
@@ -122,7 +125,7 @@ class ContextHub:
             if self.nexus_fs:
                 return {"reminders": self.nexus_fs.search(f"memory_v9_{phase}"), "total_sources": -1}
         except Exception as e:
-            print(f"⚠️ [MemoryHook] Injection failed: {e}")
+            logger.error(f"⚠️ [MemoryHook] Injection failed: {e}")
         return {"reminders": [], "total_sources": 0}
 
     def assemble_diag_pack(
@@ -181,7 +184,7 @@ class ContextHub:
                 with open(handoff_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"⚠️ [ContextHub] Failed to load handoff: {e}")
+                logger.error(f"⚠️ [ContextHub] Failed to load handoff: {e}")
         return {}
 
     def _get_l1_index(self) -> str:
@@ -233,7 +236,7 @@ class ContextHub:
         threshold = budget * (1.0 - (nas_aggression * 0.2))
 
         if estimated_total > threshold:
-            print(f"✂️ [ContextHub:TOON-2.0] Predicted {estimated_total:.0f} tokens exceed {threshold:.0f}. Compacting...")
+            logger.info(f"✂️ [ContextHub:TOON-2.0] Predicted {estimated_total:.0f} tokens exceed {threshold:.0f}. Compacting...")
             compact_history = prune_dialogue(history, aggression=nas_aggression)
             context_parts = [
                 l0, l1,
@@ -255,7 +258,7 @@ class ContextHub:
             if history:
                 context_parts.append(str(history[-5:])) # Balanced history depth
 
-        print(f"🛠️ [ContextHub:v25.0] Hybrid Context Assembled | Compactor: ACTIVE | Aggression: {nas_aggression:.2f}")
+        logger.info(f"🛠️ [ContextHub:v25.0] Hybrid Context Assembled | Compactor: ACTIVE | Aggression: {nas_aggression:.2f}")
         return "\n".join(context_parts)
 
     def assemble_research_pack(self, query: str, results: List[Dict]) -> Dict[str, Any]:
@@ -383,4 +386,4 @@ class ContextHub:
         )
         
         path = store.write(card)
-        print(f"🧠 [DeepScientist:Memory] Structured Lesson recorded: {path}")
+        logger.info(f"🧠 [DeepScientist:Memory] Structured Lesson recorded: {path}")
