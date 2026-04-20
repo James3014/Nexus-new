@@ -142,3 +142,9 @@ version_scope:
 - **Root Cause**: Hard dependency on manual red-team signatures without an automated evidence pipeline.
 - **Decision**: Automated red-team invocation receipts and added them to the `hallucination_evidence.json` schema.
 - **Prevention**: High-security baselines must have automated evidence collection for every external approval step.
+
+## 2026-04-20: Architecture Realignment and Spec-to-Reality Hardening
+- **Phenomenon**: Significant gap between Wiki vision (1-bit core, real MSA) and codebase reality.
+- **Root Cause**: Spec-driven development velocity outpaced physical integration.
+- **Decision**: Physically wired 1-bit Core, GBNF constraints, and real LanceDB upserts.
+- **Prevention**: Monthly "Truth Realignment" audits to ensure Wiki maturity maps match physical `nexus/core` implementations.

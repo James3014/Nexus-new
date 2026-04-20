@@ -1,10 +1,21 @@
+---
+aliases: '[P-X-D-R-A-C, Master Loop Spec]'
+confidence: high
+last_compiled: '2026-04-20'
+owner: agent
+status: production
+tags: '[core, architecture, loop]'
+title: Supreme Master Loop Specification
+---
+
 # 🧬 Supreme Master Loop (P-X-D-R-A-C)
 
 ## 🛡️ 核心定義
-Supreme Master Loop 是一個概念上的全生命週期調度入口。
+Supreme Master Loop 已進入 **Production** 階段。它將開發與治理統合成一個具備自律性、強檢核性、且 L4/L3 邊界嚴格定義的「大閉環」。
+
 在架構實體上，它由兩層組成：
 1. **L4 Campaign Orchestrator (`campaign_master_loop`)**: 負責 DAG 並行排程、多節點分發與全域里程碑（Milestone）管控。
-2. **L3 Task Pipeline (`NexusPipeline` 及 Mixins)**: 負責執行單一節點（Node）的 **P-X-D-R-A-C 六階段** 閉環，將開發與治理統合成實體檢核。
+2. **L3 Task Pipeline (`NexusPipeline`)**: 負責執行單一節點（Node）的 **P-X-D-R-A-C 六階段** 閉環，將開發與治理統合成實體檢核。
 
 ## ⚙️ 六大階段 (The 6 Phases)
 
@@ -30,6 +41,12 @@ Supreme Master Loop 是一個概念上的全生命週期調度入口。
 ### Phase 6: Closeout (C) - 晉升結案
 - 簽署 `Task Contract Seal`。
 - 執行 `Atomic Promotion` 將影子補丁正式晉升至主線。
+
+## ⚙️ 技術實作 (Implementation)
+- **Commander**: `nexus/core/campaign_general.py` (L4 指揮官層)。
+- **Runner**: `nexus/core/cli_runner_async.py` (非同步執行主循環)。
+- **Hardening**: 已實作 `1-bit Core (OneBitGate)` 進行節點晉升判定。
+- **Interface**: `scripts/engine/nexus_cli.py nexus run`。
 
 ---
 **[Source: nexus_wiki_vault/01_System/Supreme_Master_Loop_Spec.md]**
