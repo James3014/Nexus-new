@@ -58,24 +58,13 @@ def _execute_shadow_worker(project_root_str: str, task_id: str, intent: str, mod
                     "error": proc.stderr,
                     "advice": "Sandbox execution failed."
                 }
-
-        # Sub-ideal Fallback Migration Path
-        time.sleep(1.2) 
-        
-        content = source_path.read_text()
-        patch_file = shadow_runs_dir / f"{task_id}.patch"
-        
-        if "a - b" in content:
-            patch_data = "--- oracle_test.py\n+++ oracle_test.py\n@@ -1,1 +1,1 @@\n-def add(a, b): return a - b\n+def add(a, b): return a + b"
-            patch_file.write_text(patch_data)
-            return {
-                "status": "SUCCESS",
-                "trajectory": f"Physical verified via {mode} (Fallback).",
-                "confidence": 0.99,
-                "patch_file": f".nexus/shadow_runs/{task_id}.patch",
-                "advice": "I found and verified the fix in future sandbox."
-            }
-        return {"status": "SUCCESS", "advice": "Current state is already optimal.", "confidence": 1.0}
+                
+        # If no sandbox script is present, we must fail closed to prevent hallucinated completion.
+        return {
+            "status": "FAILED",
+            "error": "Missing Sandbox Implementation",
+            "advice": "Phase 3 sandbox_runner.sh not found. System failing closed to avoid hallucinations."
+        }
     except Exception as e:
         return {"status": "FAILED", "error": str(e)}
 
