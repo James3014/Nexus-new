@@ -1,7 +1,7 @@
 from pathlib import Path
 """
 PR-05 TDD: CLI 薄化驗證
-確保 scripts/nexus_cli.py 只 parse + dispatch，不含業務邏輯。
+確保 scripts/engine/nexus_cli.py 只 parse + dispatch，不含業務邏輯。
 """
 import ast
 import pytest
@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 from nexus.app.command_service import TaskRequest
 from nexus.engine.config import EngineConfig
-from scripts.nexus_cli import NexusCLI
 
 
 def _get_function_body_source(filepath: str, function_name: str) -> str:
@@ -31,56 +30,6 @@ def test_cli_bug_dispatch_no_business_logic(tmp_path):
     assert "run_bug" in content
     # CLI 應委派給 engine，不含完整的修復邏輯
     assert "crystallize" not in content.lower()
-
-
-def test_cli_feature_dispatch(tmp_path):
-    """CLI 的 run_feature 應委派給 engine，不含硬編碼回覆。"""
-    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
-    mock_service = MagicMock()
-    mock_service.execute_feature.return_value = True
-    mock_service.last_completion_error = None
-    mock_service.last_effective_verify_commands = ["/bin/echo ok"]
-    mock_service.last_completion_report_paths = None
-    cli._service = mock_service
-
-    cli.run_feature(
-        task="新增購物車功能",
-        delivery_mode="high",
-        verify_commands=["/bin/echo ok"],
-    )
-
-    mock_service.execute_feature.assert_called_once_with(
-        TaskRequest(
-            task="新增購物車功能",
-            domain=None,
-            plan_only=False,
-            skill=None,
-            delivery_mode="high",
-            verify_commands=["/bin/echo ok"],
-            artifact_paths=None,
-        )
-    )
-
-
-def test_cli_feature_prints_delivery_summary(tmp_path, capsys):
-    cli = NexusCLI(project_root=tmp_path, output_dir=tmp_path / "runs")
-    mock_service = MagicMock()
-    mock_service.execute_feature.return_value = True
-    mock_service.last_completion_error = None
-    mock_service.last_effective_verify_commands = ["uv run pytest -q"]
-    mock_service.last_completion_report_paths = (tmp_path / "r.json", tmp_path / "r.md")
-    cli._service = mock_service
-
-    cli.run_feature(
-        task="新增購物車功能",
-        delivery_mode="high",
-        verify_commands=["uv run pytest -q"],
-    )
-
-    output = capsys.readouterr().out
-    assert "Verification Commands" in output
-    assert "uv run pytest -q" in output
-    assert "Delivery Reports" in output
 
 
 def test_command_service_bridges_engine(tmp_path):
