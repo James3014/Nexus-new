@@ -7,23 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-class DomainFirewall:
-    """🛡️ Nexus v25.5 Domain-based Tool Firewall with BaseSkill mitigation."""
-    def __init__(self, tactical_map_path: str = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "nexus/config/tactical_map.json")):
-        try:
-            with open(tactical_map_path, 'r') as f:
-                self.map = json.load(f)
-            self.base_skills = self.map.get("base_skills", [])
-            logger.info(f"✅ [Firewall] Loaded {self.map['total_skills']} skills / {len(self.base_skills)} BaseSkills.")
-        except Exception as e:
-            logger.error(f"❌ [Firewall] Failed to load map: {e}")
-            self.map = {"quadrants": {}}
-            self.base_skills = []
-
-    def authorize(self, skill_id: str, current_domain: str) -> bool:
-        if skill_id in self.base_skills: return True
-        quadrant = self.map["quadrants"].get(current_domain, {})
-        return skill_id in quadrant.get("skills", [])
+from nexus.core.domain_firewall import DomainFirewall
 
 class SkillsRouter:
 
@@ -129,8 +113,9 @@ class SkillsRouter:
     def _semantic_search(self, query: str, tenant_id: str) -> Dict[str, Any]:
         """[D-4 Hardened] Wire up fallback semantic search."""
         try:
-            from nexus.experiments.msa_routing.msa_indexer import LanceDBRetriever
-            retriever = LanceDBRetriever(self.project_root)
+            import importlib
+            msa_indexer = importlib.import_module("nexus.experiments.msa_routing.msa_indexer")
+            retriever = msa_indexer.LanceDBRetriever(self.project_root)
             raw_candidates = retriever.retrieve(query)
             results = [{"id": c.id, "score": c.score} for c in raw_candidates]
             return {"status": "SUCCESS", "results": results, "tenant": tenant_id}
@@ -144,11 +129,12 @@ class SkillsRouter:
             return []
             
         try:
-            from nexus.experiments.msa_routing.msa_router_contract import MSARouter
-            from nexus.experiments.msa_routing.msa_indexer import LanceDBRetriever
+            import importlib
+            msa_contract = importlib.import_module("nexus.experiments.msa_routing.msa_router_contract")
+            msa_indexer = importlib.import_module("nexus.experiments.msa_routing.msa_indexer")
             
-            router = MSARouter(confidence_threshold=0.75)
-            retriever = LanceDBRetriever(self.project_root)
+            router = msa_contract.MSARouter()  # Use default threshold!
+            retriever = msa_indexer.LanceDBRetriever(self.project_root)
             candidates = retriever.retrieve(query)
             
             result = router.route("msa_" + str(hash(query) % 1000000), candidates)

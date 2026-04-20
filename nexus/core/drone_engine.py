@@ -316,7 +316,11 @@ class TacticalDrone(DroneProtocol):
 
                 from nexus.core.onebit_core import OneBitGate
                 gate = OneBitGate()
-                decision = gate.evaluate(self.belief_score, "DONE action evaluated")
+                
+                # Dynamic complexity: Drone interactions increase threshold rigor
+                dynamic_complexity = 1.0 + (len(self.tracelog) * 0.02)
+                
+                decision = gate.evaluate(self.belief_score, "DONE action evaluated", task_complexity=dynamic_complexity)
                 self._log_trace("1-BIT-CORE", f"Verdict: {decision.verdict}, Reasoning: {decision.reasoning}")
                 if decision.verdict:
                     outcome = "SUCCESS"
