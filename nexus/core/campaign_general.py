@@ -170,46 +170,46 @@ class CampaignGeneral:
 
         # 增強型啟發式拆解邏輯 (僅在 LLM 未命中時執行)
         if not nodes:
-        if "refactor" in intent_lower or "core" in intent_lower:
-            node_count = int(4 * self.weights.get("node_count_multiplier", 1.0))
-            nodes = [
-                TaskNode("T1-XRAY", f"Analyze system impact for: {macro_intent}", impact_files=["nexus/"]),
-                TaskNode("T2-CORE", "Apply core logic refactoring", dependencies=["T1-XRAY"], impact_files=["nexus/core/"]),
-                TaskNode("T3-VERIFY", "Verify refactored core integrity", dependencies=["T2-CORE"])
-            ]
-            if node_count >= 4:
-                nodes.append(TaskNode("T4-DOC", "Update refactoring documentation", dependencies=["T3-VERIFY"]))
-        elif "fix" in intent_lower or "bug" in intent_lower:
-            nodes = [
-                TaskNode("T1-REPRO", f"Reproduce failure for: {macro_intent}"),
-                TaskNode("T2-FIX", "Implement bugfix and local validation", dependencies=["T1-REPRO"]),
-                TaskNode("T3-REGRESSION", "Run full regression suite", dependencies=["T2-FIX"])
-            ]
-        elif "security" in intent_lower or "auth" in intent_lower:
-            nodes = [
-                TaskNode("T1-SCAN", "Perform security vulnerability scanning"),
-                TaskNode("T2-HARDEN", "Apply security hardening patches", dependencies=["T1-SCAN"]),
-                TaskNode("T3-AUDIT", "Perform final security audit", dependencies=["T2-HARDEN"])
-            ]
-        elif "feature" in intent_lower or "implement" in intent_lower:
-            nodes = [
-                TaskNode("T1-SPEC", f"Draft technical specification for: {macro_intent}"),
-                TaskNode("T2-PROTOTYPE", "Build functional prototype", dependencies=["T1-SPEC"]),
-                TaskNode("T3-IMPLEMENT", "Full feature implementation", dependencies=["T2-PROTOTYPE"]),
-                TaskNode("T4-E2E", "Run end-to-end integration tests", dependencies=["T3-IMPLEMENT"])
-            ]
-        elif "doc" in intent_lower or "wiki" in intent_lower:
-            nodes = [
-                TaskNode("T1-INGEST", f"Ingest context for documentation: {macro_intent}"),
-                TaskNode("T2-WRITE", "Generate structured technical documentation", dependencies=["T1-INGEST"]),
-                TaskNode("T3-REVIEW", "Perform peer-review on documentation", dependencies=["T2-WRITE"])
-            ]
-        elif "system" in intent_lower:
-            nodes = [
-                TaskNode("T1-HEALTH", "Check system health metrics"),
-                TaskNode("T2-SERVICE", "Update core services", dependencies=["T1-HEALTH"]),
-                TaskNode("T3-UPTIME", "Verify service uptime", dependencies=["T2-SERVICE"])
-            ]
+            if "refactor" in intent_lower or "core" in intent_lower:
+                node_count = int(4 * self.weights.get("node_count_multiplier", 1.0))
+                nodes = [
+                    TaskNode("T1-XRAY", f"Analyze system impact for: {macro_intent}", impact_files=["nexus/"]),
+                    TaskNode("T2-CORE", "Apply core logic refactoring", dependencies=["T1-XRAY"], impact_files=["nexus/core/"]),
+                    TaskNode("T3-VERIFY", "Verify refactored core integrity", dependencies=["T2-CORE"])
+                ]
+                if node_count >= 4:
+                    nodes.append(TaskNode("T4-DOC", "Update refactoring documentation", dependencies=["T3-VERIFY"]))
+            elif "fix" in intent_lower or "bug" in intent_lower:
+                nodes = [
+                    TaskNode("T1-REPRO", f"Reproduce failure for: {macro_intent}"),
+                    TaskNode("T2-FIX", "Implement bugfix and local validation", dependencies=["T1-REPRO"]),
+                    TaskNode("T3-REGRESSION", "Run full regression suite", dependencies=["T2-FIX"])
+                ]
+            elif "security" in intent_lower or "auth" in intent_lower:
+                nodes = [
+                    TaskNode("T1-SCAN", "Perform security vulnerability scanning"),
+                    TaskNode("T2-HARDEN", "Apply security hardening patches", dependencies=["T1-SCAN"]),
+                    TaskNode("T3-AUDIT", "Perform final security audit", dependencies=["T2-HARDEN"])
+                ]
+            elif "feature" in intent_lower or "implement" in intent_lower:
+                nodes = [
+                    TaskNode("T1-SPEC", f"Draft technical specification for: {macro_intent}"),
+                    TaskNode("T2-PROTOTYPE", "Build functional prototype", dependencies=["T1-SPEC"]),
+                    TaskNode("T3-IMPLEMENT", "Full feature implementation", dependencies=["T2-PROTOTYPE"]),
+                    TaskNode("T4-E2E", "Run end-to-end integration tests", dependencies=["T3-IMPLEMENT"])
+                ]
+            elif "doc" in intent_lower or "wiki" in intent_lower:
+                nodes = [
+                    TaskNode("T1-INGEST", f"Ingest context for documentation: {macro_intent}"),
+                    TaskNode("T2-WRITE", "Generate structured technical documentation", dependencies=["T1-INGEST"]),
+                    TaskNode("T3-REVIEW", "Perform peer-review on documentation", dependencies=["T2-WRITE"])
+                ]
+            elif "system" in intent_lower:
+                nodes = [
+                    TaskNode("T1-HEALTH", "Check system health metrics"),
+                    TaskNode("T2-SERVICE", "Update core services", dependencies=["T1-HEALTH"]),
+                    TaskNode("T3-UPTIME", "Verify service uptime", dependencies=["T2-SERVICE"])
+                ]
         
         if not nodes:
             # Fallback: 使用動態安全 DAG (根據意圖長度與雜湊產生差異)
@@ -321,7 +321,7 @@ class CampaignGeneral:
             "intent_summary": "Unified Command",
             "dag_summary": nodes_summary,
             "execution_outcome": execution_outcome,
-            "trace_ids": [],
+            "trace_ids": [node.node_id for node in self.campaign_map.values()],
             "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         }
         report_path.write_text(json.dumps(report_data, indent=2))

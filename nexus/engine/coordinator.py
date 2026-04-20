@@ -64,6 +64,7 @@ class NexusEngine:
     def __init__(self, config: EngineConfig, **kwargs):
         self.config = config
         self.project_root = config.project_root
+        self.run_dir = config.run_dir
         self.silent = config.silent
         self.fast_mode = config.fast_mode
         self.audit_level = config.audit_level
@@ -75,6 +76,24 @@ class NexusEngine:
         # Bind components to self
         for name, instance in components.items():
             setattr(self, name, instance)
+
+        # Preserve coordinator-level DI contracts for tests and legacy callers.
+        self.reporter = kwargs.get("reporter", getattr(self, "reporter", None))
+        self.state_io = kwargs.get("state_io") or StateIO(self.project_root, run_dir=self.run_dir)
+        self.workspace_mgr = kwargs.get("workspace_mgr") or WorkspaceManager(self.project_root)
+        self.policy = kwargs.get("policy") or getattr(self, "policy", None) or PolicyLoader.load(str(self.project_root), env="dev")
+        self.gate_eval = kwargs.get("gate_eval") or GateEvaluator(self.policy)
+        self.metrics_agg = kwargs.get("metrics_agg") or MetricsAggregator()
+        self.validator = kwargs.get("validator") or NexusHardenedValidator()
+        self.latent_forecaster = kwargs.get("latent_forecaster") or get_latent_forecaster(str(self.project_root))
+        self.ash_selector = kwargs.get("ash_selector") or get_self_healing_selector(str(self.project_root), env="dev")
+        self.memory = kwargs.get("memory") or MemoryService(self.project_root)
+        self.federation = kwargs.get("federation") or FederationLayer(self.project_root)
+        self.vector_cache = kwargs.get("vector_cache") or VectorCache(self.project_root / ".nexus" / "vector_db")
+        self.sota_searcher = kwargs.get("sota_searcher") or SOTASearcher(self.vector_cache)
+        self.neural_aggregator = kwargs.get("neural_aggregator") or NexusNeuralAggregator()
+        self.swarm_planner = kwargs.get("swarm_planner") or HierarchicalGraphPlanner(self.project_root)
+        self.transaction_mgr = kwargs.get("transaction_mgr") or TransactionManager(self.project_root)
 
         try:
             from nexus.engine.pipeline import NexusPipeline
@@ -206,24 +225,7 @@ class NexusEngine:
         final_id = kwargs.get("task_id", f"heal-{int(time.time())}")
         return self._execute_task_workflow(final_id, f"nexus:self-heal:{mode}")
 
-    def run_research(self, **kwargs) -> bool:
-        """執行 SOTA 學術研究任務"""
-        # 研究類任務通常有獨立的工作空間，由 coordinator 統一觸發投影
-        self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
-        """執行基準測試 (v22-ARC 擴張)"""
-        if framework == "arc-agi":
-            from nexus.engine.arc_simulation import ARCVisualReasoner
-            reasoner = ARCVisualReasoner(swarm_mode=swarm_mode)
-            results = reasoner.run_tests(count=task_count)
-            # 物理寫入產出
-            output_dir = self.config.run_dir / "benchmarks"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = output_dir / f"arc_agi_{int(time.time())}.json"
-            report_path.write_text(json.dumps(results, indent=2))
-            return results
-            
-        # 預設 SWE-bench 流程...
-        return {"framework": framework, "status": "simulated", "score": 85.2}
+
 
     def run_benchmark(self, framework: str = "swe-bench", task_count: int = 15, swarm_mode: bool = False, **kwargs):
         """執行 Benchmark 基準測試 (支持蜂群並行模式)"""
@@ -334,7 +336,7 @@ class NexusEngine:
         state.metadata["forecast_tokens"] = est_tokens
         state.metadata["forecast_roi"] = roi_score
         
-        print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {est_tokens}, ROI: {roi_score:.2f}")
+        logger.info("[%s] [v20:JEPA] Forecast Tokens: %s, ROI: %.2f", state.task_id, est_tokens, roi_score)
         
         # --- 🧠 [Phase 11] Autonomic Routing ---
         from nexus.engine.autonomic_router import AutonomicRouter
@@ -350,15 +352,15 @@ class NexusEngine:
         
         if exec_plan.mode == "swarm":
             state.metadata["swarm_mode"] = True
-            print(f"🧠 [Autonomic] Auto-escalated to SWARM: {exec_plan.reason}")
+            logger.info("🧠 [Autonomic] Auto-escalated to SWARM: %s", exec_plan.reason)
         elif exec_plan.mode == "research_first":
             state.metadata["force_external"] = True
-            print(f"🧠 [Autonomic] Auto-routed to RESEARCH_FIRST: {exec_plan.reason}")
+            logger.info("🧠 [Autonomic] Auto-routed to RESEARCH_FIRST: %s", exec_plan.reason)
         elif exec_plan.mode == "self_heal" and self.ash_selector:
-            print(f"🧠 [Autonomic] Priority: SELF_HEAL triggered by memory match.")
+            logger.info("🧠 [Autonomic] Priority: SELF_HEAL triggered by memory match.")
             # ASH 邏輯將由下方的 gate_eval 觸發或直接介入
         elif exec_plan.mode == "external_skill":
-            print(f"🧠 [Autonomic] Priority: EXTERNAL_SKILL triggered. Binding {exec_plan.skill_id}...")
+            logger.info("🧠 [Autonomic] Priority: EXTERNAL_SKILL triggered. Binding %s...", exec_plan.skill_id)
             try:
                 from nexus.core.unified_registry import UnifiedRegistry
                 from pathlib import Path
@@ -373,15 +375,15 @@ class NexusEngine:
                     )
                     state.metadata["active_external_skill"] = skill_data["name"]
                     state.metadata["task_description"] += f"\n\n[EXTERNAL SKILL INSTRUCTIONS: {skill_data['name']}]\n{skill_md}"
-                    print(f"✅ [SkillEmbody] Injected {len(skill_md)} bytes of tactical knowledge.")
+                    logger.info("✅ [SkillEmbody] Injected %d bytes of tactical knowledge.", len(skill_md))
             except Exception as e:
-                print(f"⚠️ [SkillEmbody] Failed to inject external skill: {e}")
+                logger.warning("⚠️ [SkillEmbody] Failed to inject external skill: %s", e)
         # ----------------------------------------
 
         # 🛡️ 治理閘門：委託 GateEvaluator 進行 Phase D 判定
         proceed, reason = self.gate_eval.should_proceed("D", forecast, risk)
         if not proceed:
-            print(f"🚨 [Gate:Reject] {reason}! Triggering Adaptive Self-Healing...")
+            logger.error("🚨 [Gate:Reject] %s! Triggering Adaptive Self-Healing...", reason)
             repair_plan = self.ash_selector.trigger_ash(task_id, task_desc, str(risk))
             state.metadata["last_rejection_reason"] = reason
             state.metadata["ash_selected_strategy"] = repair_plan["selected_strategy"]
@@ -391,32 +393,32 @@ class NexusEngine:
         # --- 🧬 Phase X: SOTA Search & Academic Anchoring ---
         state.current_phase = "X"
         self._maybe_mark_pipeline_phase("X")
-        print(f"[{state.task_id}] [Phase X] Extracting SOTA patterns...")
+        logger.info("[%s] [Phase X] Extracting SOTA patterns...", state.task_id)
         sota_result = self.sota_searcher.search(state.metadata.get("task_description", ""), state.metadata.get("domain", "general"))
         state.metadata["sota_patterns"] = sota_result.get("data")
         
         # --- 🧬 Phase D: Neural Aggregator (Triage Compression) ---
         state.current_phase = "D"
-        print(f"[{state.task_id}] [Phase D] Aggregating neural context (Triage)...")
+        logger.info("[%s] [Phase D] Aggregating neural context (Triage)...", state.task_id)
         history = state.metadata.get("history_events", [])
         condensed_context = self.neural_aggregator.triage_summarize(history)
         state.metadata["diagnose_context"] = condensed_context
         
         # --- Phase D: 修復診斷與代碼生成 ---
         self._maybe_mark_pipeline_phase("D")
-        print(f"[{state.task_id}] [Phase D] Running diagnostic engine...")
+        logger.info("[%s] [Phase D] Running diagnostic engine...", state.task_id)
             
         logger.info("🔮 [Nexus:Predict] Scanning environment for task: %s", task_id)
         
         try:
             # --- 🧬 Phase A: Hardened Validator (AST Security Scan) ---
             state.current_phase = "A"
-            print(f"[{state.task_id}] [Phase A] Hardening audit (AST X-Ray Scan)...")
+            logger.info("[%s] [Phase A] Hardening audit (AST X-Ray Scan)...", state.task_id)
             # Assuming generated_code is available in state or context
             generated_code = state.metadata.get("generated_code", "")
             val_result = self.hardened_validator.validate_code(generated_code)
             if not val_result["passed"]:
-                 print(f"[{state.task_id}] [Phase A] REJECTED: Security Risk Found!")
+                 logger.error("[%s] [Phase A] REJECTED: Security Risk Found!", state.task_id)
                  state.metadata["lewm_sim_status"] = "REJECTED"
                  return False
             

@@ -7,9 +7,12 @@ import os
 import subprocess
 import json
 import asyncio
+import logging
 import httpx
 from typing import List, Dict, Any, Optional
 from nexus.core.config import NexusGlobalConfig
+
+logger = logging.getLogger("nexus.msa_indexer")
 
 SCHEMA_METADATA = {
     "id": str,
@@ -145,16 +148,16 @@ def upsert_to_lancedb(repo_root: str, records: List[Dict[str, Any]]) -> bool:
             try:
                 table.create_fts_index("content", replace=True)
             except Exception as e:
-                print(f"⚠️ Could not create FTS index: {e}")
+                logger.warning("⚠️ Could not create FTS index: %s", e)
         else:
             table = db.create_table("msa_knowledge", records)
             try:
                 table.create_fts_index("content")
             except Exception as e:
-                print(f"⚠️ Could not create FTS index: {e}")
+                logger.warning("⚠️ Could not create FTS index: %s", e)
         return True
     except Exception as e:
-        print(f"⚠️ [MSA Indexer] LanceDB upsert failed: {e}")
+        logger.warning("⚠️ [MSA Indexer] LanceDB upsert failed: %s", e)
         return False
 
 class LanceDBRetriever:
@@ -218,7 +221,7 @@ class LanceDBRetriever:
                 candidates.append(c)
             return candidates
         except Exception as e:
-            print(f"LanceDB real retrieval failed: {e}. Falling back.")
+            logger.warning("LanceDB real retrieval failed: %s. Falling back.", e)
             return self._degraded_fallback(query)
 
     def _degraded_fallback(self, query: str) -> List[Any]:
