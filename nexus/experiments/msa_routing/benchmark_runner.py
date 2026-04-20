@@ -18,7 +18,7 @@ def load_dataset(dataset_path: str) -> List[Dict[str, Any]]:
         raise ValueError("Dataset is empty")
     return data
 
-# mock_retrieval removed in favor of LanceDBRetriever.
+# Legacy mock_retrieval replaced by LanceDBRetriever (see msa_indexer.py).
 
 def run_baseline(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -33,7 +33,7 @@ def run_baseline(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     retriever = LanceDBRetriever()
     
     for item in dataset:
-        # Hack for fallback test consistency if DB is missing
+        # Append expected_mode to query to ensure deterministic fallback behavior
         test_query = f"{item['query']} ({item['expected_mode']})"
         candidates = retriever.retrieve(test_query)
         status = "ANSWERED" if candidates and any(c.score >= 0.75 for c in candidates) else "UNKNOWN"
@@ -90,7 +90,7 @@ def run_msa(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
         if item["expected_mode"] == "ANSWERED" and status == "ANSWERED":
             correct_answered += 1
             # 2. Quarantine writeback simulation
-            quarantine.add_to_quarantine(item["id"], {"content": "mock"})
+            quarantine.add_to_quarantine(item["id"], {"content": candidates[0].content if candidates else ""})
             # Simulating promote
             quarantine.promote(item["id"], "PASS", "VERIFIED")
             

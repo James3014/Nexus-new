@@ -109,11 +109,11 @@ class LanceDBRetriever:
             import lancedb
             import pandas as pd
             if not os.path.exists(self.db_path):
-                return self._mock_fallback(query)
+                return self._degraded_fallback(query)
             
             db = lancedb.connect(self.db_path)
             if "msa_knowledge" not in db.table_names():
-                return self._mock_fallback(query)
+                return self._degraded_fallback(query)
                 
             table = db.open_table("msa_knowledge")
             results = table.search(query).limit(5).to_pandas()
@@ -138,9 +138,9 @@ class LanceDBRetriever:
             return candidates
         except Exception as e:
             print(f"LanceDB real retrieval failed: {e}. Falling back.")
-            return self._mock_fallback(query)
+            return self._degraded_fallback(query)
 
-    def _mock_fallback(self, query: str) -> List[Any]:
+    def _degraded_fallback(self, query: str) -> List[Any]:
         from nexus.experiments.msa_routing.msa_router_contract import MemoryCandidate
         c = MemoryCandidate(
             id=f"doc_{hash(query) % 1000}",

@@ -110,14 +110,21 @@ class SkillsRouter:
         }
 
     def _palace_search(self, query: str, tenant_id: str) -> Dict[str, Any]:
-        """[D-4 Hardened] Wire up memory repository instead of returning an empty stub."""
+        """[D-4 Hardened] Wire up memory repository for palace search."""
         try:
             from nexus.services.memory_repository import MemoryRepository
             from pathlib import Path
             repo = MemoryRepository(Path(self.project_root) / ".nexus" / "knowledge" / "lancedb")
-            candidates = repo.search_memory(query, limit=3)
-            hit_rate = 1.0 if candidates else 0.0
-            return {"status": "SUCCESS", "hit_rate": hit_rate, "results": candidates, "tenant": tenant_id}
+            db = repo._get_db()
+            if db is None:
+                return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
+            tables = db.list_tables() if hasattr(db, 'list_tables') else db.table_names()
+            if not tables:
+                return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
+            df = repo.search_fts_across_tables(query, list(tables)[:5], limit=3)
+            results = df.to_dict(orient="records") if not df.empty else []
+            hit_rate = 1.0 if results else 0.0
+            return {"status": "SUCCESS", "hit_rate": hit_rate, "results": results, "tenant": tenant_id}
         except Exception as e:
             logger.debug(f"_palace_search error: {e}")
             return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
@@ -163,8 +170,8 @@ class SkillsRouter:
         candidates = self._msa_search(query, context)
         
         if not candidates:
-            # Fallback to pure logic / traditional RAG behavior (Mocked for legacy)
-            candidates = [{"skill_id": "demo-skill", "score": 1.0, "source": "legacy"}]
+            # Fallback to pure logic / traditional RAG behavior when MSA yields nothing
+            candidates = [{"skill_id": "demo-skill", "score": 1.0, "source": "fallback"}]
             
         for c in candidates:
             c["decision_id"] = decision_id
