@@ -154,3 +154,9 @@ version_scope:
 - **Root Cause**: `git clean -fd` accidentally removed untracked infrastructure prototypes, and legacy mock placeholders were left in "real" engine paths.
 - **Decision**: Restored and committed real infrastructure files. Enforced "Fail-Closed" in `shadow_bus.py`: if real sandbox is missing, task must FAIL.
 - **Prevention**: Mandatory `ls` verification of all imported internal modules in acceptance tests. Prohibit `time.sleep` in any non-test core logic.
+
+## 2026-04-20: Deep Architectural Debt Discovery (Stage 2 Audit)
+- **Phenomenon**: Found duplicated `DomainFirewall` implementation inside `router.py` and hardcoded `time.sleep` in core evolutionary components.
+- **Root Cause**: Rapid integration of siloed features without central refactoring and persistence of legacy mock snippets.
+- **Decision**: Logged as Sev-1 debts in the Evolution Spec. Mandated DRY refactoring for the Firewall and conversion of mocks to event-driven logic.
+- **Prevention**: Pre-promotion "Structural Linting" to detect class duplication and hardcoded delays in core paths.
