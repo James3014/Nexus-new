@@ -160,3 +160,9 @@ version_scope:
 - **Root Cause**: Rapid integration of siloed features without central refactoring and persistence of legacy mock snippets.
 - **Decision**: Logged as Sev-1 debts in the Evolution Spec. Mandated DRY refactoring for the Firewall and conversion of mocks to event-driven logic.
 - **Prevention**: Pre-promotion "Structural Linting" to detect class duplication and hardcoded delays in core paths.
+
+## 2026-04-20: Deep Purification and Intent Decomposition Hardening (Stage 4)
+- **Phenomenon**: Intent decomposition in `campaign_general.py` was fragile due to regex heuristics, and `context_hub.py` was becoming a monolithic bottleneck.
+- **Root Cause**: Reliance on legacy keyword matching and insufficient class separation during the rapid P-X-D-R-A-C rollout.
+- **Decision**: Integrated real LLM-based decomposition via Ollama and refactored `context_hub.py` into a specialized `KnowledgeInjector`.
+- **Prevention**: Enforce "Single Responsibility Principle" for core orchestrator modules and mandate semantic (LLM) processing for macro-intent handling.

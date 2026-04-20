@@ -1,39 +1,40 @@
 # 🚀 Nexus Evolution to 90+ Specification
-**[PHYSICAL_STATUS: DEBT_CLEARED_V1 | NEW_DEBTS_IDENTIFIED]**
+**[PHYSICAL_STATUS: DEEP_PURIFICATION_COMPLETE | LOGIC_UNIFIED]**
 
 ## 1. 債務清償進度 (Debt Clearance Status)
-Nexus 已完成第一波核心基礎設施債務清償。幽靈檔案已尋回，入口已歸一化。
+Nexus 已完成第三波深度淨化。日誌已對位，Mock 已殲滅，模組已拆解。
 
 | 債務項目 | 狀態 | 實體核驗 (Truth) |
 | :--- | :--- | :--- |
-| **MSA 實體向量** | ✅ **已接線** | `msa_indexer.py` 已對接實體 Embedding 接口。 |
-| **分散式鎖** | ✅ **已入庫** | `infrastructure/dist_lock.py` 已正式提交並具備實體邏輯。 |
-| **AAAK 30x 提煉** | ✅ **已實作** | 支援 LLM 與 Regex 雙通道提煉。 |
-| **Wiki 自動合成** | ✅ **已激活** | `wiki_sync_check.py` 具備主動語義合成能力。 |
+| **日誌標準化** | ✅ **已對位** | `swarm.py` 等模組已全數替換為結構化 `logging`。 |
+| **移除殘留 Mock** | ✅ **已殲滅** | `brain_snapshot.py` 使用實時時間；`eternal_memory.py` 移除假錢包。 |
+| **模組解耦 (Split)** | ✅ **已實作** | `context_hub.py` 已拆分出 `KnowledgeInjector` 類別。 |
+| **LLM 拆解賦能** | ✅ **已接線** | `campaign_general.py` 透過 Ollama 實作真正的語言理解拆解。 |
 
-## 2. 深度技術債 (Deep Architecture Debt)
-經 2026-04-20 深度審計，發現以下阻礙系統向 90+ 邁進的結構性債務：
+## 2. 深度技術債 (Stage 5 Discovery)
+經 2026-04-20 核心代碼深度掃描，挖掘出以下邁向 100 分終局的殘餘債務：
 
-### 🔴 Sev-1: Logic Duplication (邏輯重複)
-- **現象**: `SkillsRouter` 內部竟包含了一個完整的 `DomainFirewall` 類別，且與 `nexus/core/domain_firewall.py` 幾乎一致。
-- **風險**: 規則更新不一致將導致治理漏洞。必須立即執行「DRY (Don't Repeat Yourself)」重構。
+### 🔴 Sev-1: Cognition & Model Drift (認知與模型漂移)
+- **現象**: `vector_rag.py` 仍硬編碼舊版 `all-MiniLM-L6-v2` 模型且使用 `print()`。
+- **風險**: 導致檢索出的向量特徵與 MSA 採用的 `nomic-embed-text` 標準不一致，造成記憶碎片化。
 
-### 🔴 Sev-1: Hardcoded Mocks (殘留假動作)
-- **現象**: `self_evolve_engine.py` 與 `deferred_loader.py` 中仍殘留 `time.sleep(0.5)` 的模擬代碼。
-- **風險**: 導致系統產生無謂的延遲，且誤導 Agent 對執行速度的判斷。
+### 🔴 Sev-1: Port Hardcoding (通信埠硬編碼)
+- **現象**: `nexus_swarm_sse.py` 的信號中心寫死在 `8080` 埠。
+- **風險**: 在 Swarm 多節點環境下將導致埠位競爭，且缺乏集中式日誌監控。
 
-### 🟡 Sev-2: Cross-Layer Dependencies (跨層依賴)
-- **現象**: 核心組件 `router.py` 直接從 `nexus.experiments` 匯入 `LanceDBRetriever`。
-- **風險**: 違反了「實驗與核心隔離」原則。實驗成熟的功能應正式遷移至 `nexus/core/memory/`。
+### 🟡 Sev-2: CI Gate Orchestration (門禁調度膨脹)
+- **現象**: `ci_gate.py` 循序執行大量 Shell 腳本，錯誤處理在 dry-run 與實體執行間不對等。
+- **風險**: CI 執行效率低，且在無頭環境 (Headless) 下難以精準定位哪一道門檻失敗。
 
-### 🟡 Sev-2: Planning Fallback (計畫降級)
-- **現象**: `CampaignGeneral` 的計畫拆解目前強依賴簡單的關鍵字匹配，Fallback 邏輯僅是簡單的雜湊節點生成。
-- **風險**: 在處理極度複雜的意圖時，計畫精準度不足，導致 Drone 執行方向偏差。
+### 🟡 Sev-2: Test Fragmentation (測試目錄碎片化)
+- **現象**: 測試代碼散落在 `tests/core`, `tests/contracts` 與根目錄，缺乏統一命名空間。
+- **風險**: 難以衡量真實覆蓋率，且容易遺漏特定模組的集成測試。
 
 ## 3. 下一階段清剿目標
-1. **邏輯歸一化**: 刪除 `router.py` 內的重複防火牆類別，統一呼叫核心模組。
-2. **消滅 Sleep**: 將所有 `time.sleep` 替換為真實的非同步事件或條件等待。
-3. **實驗正式化**: 將 `msa_routing` 核心邏輯從 `experiments/` 提升至 `core/`。
+1. **模型歸一化**: 將 `VectorRAG` 對齊至全域 Embedding 標準，並全面 Logging 化。
+2. **動態配置化**: 將 SSE 與 RPC 埠位移至 `config.py`，支援環境變數注入。
+3. **門禁重構**: 將 `ci_gate.py` 的 Shell 調用重構為 Python 原生 Service 調用。
 
 ---
-**[NEXUS IDENTITY: 1e2904a8 + v27.3 DEBT-EXPANDED | TARGET: 90+ SCORE]**
+**[NEXUS IDENTITY: 1e2904a8 + v27.6 DEBT-TRACKED | TARGET: 98+ SCORE]**
+
