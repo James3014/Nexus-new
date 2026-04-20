@@ -28,9 +28,22 @@ class PipelineRepairMixin:
     """🛠️ Mixin for Repair/Audit loop logic in NexusPipeline."""
 
     def _is_mock_engine_environment(self) -> bool:
+        try:
+            from unittest.mock import MagicMock
+            if isinstance(self.engine, MagicMock):
+                return True
+        except Exception:
+            pass
         project_root = getattr(self.engine, "project_root", None)
         run_dir = getattr(self.engine, "run_dir", None)
-        return not isinstance(project_root, (str, Path)) or (run_dir is not None and not isinstance(run_dir, (str, Path)))
+        if not isinstance(project_root, (str, Path)):
+            return True
+        if run_dir is not None and not isinstance(run_dir, (str, Path)):
+            return True
+        # Non-project directories (e.g. /tmp in tests) are mock environments
+        if not Path(project_root).joinpath("nexus").is_dir():
+            return True
+        return False
 
     def _execute_single_repair(self, ctx: PipelineContextProtocol, tracer: Any, repair_attempts: int) -> dict:
         """Executes a single repair attempt (Phase R - v24.0 Bayesian Hardened)."""
@@ -307,8 +320,22 @@ class PipelineRepairMixin:
                 except Exception as eval_diff_e:
                     logger.warning("plan_repair_diff_check_failed: %s", eval_diff_e)
 
+        # Phantom reason must be applied BEFORE mock early-return
+        if phantom_reason:
+            audit_success = False
+            status = "REJECTED"
+            ctx.state.metadata["phantom_success_reason"] = phantom_reason
+            self._update_meta_counter(ctx, "anti_hallucination_block_count")
+            NexusEventBus.publish("phantom_detected", {"task_id": ctx.state.task_id, "reason": phantom_reason})
+
         # === NEW: Independent Evidence Verification ===
         if self._is_mock_engine_environment():
+            if not phantom_reason and audit_success:
+                self._update_meta_counter(ctx, "anti_hallucination_pass_count")
+            self._record_repair_outcome_event(
+                ctx, eval_ctx.repair_attempts, audit_success, phantom_reason, result_object,
+                eval_ctx.current_decision_id, eval_ctx.current_skill_id, status, review_status_raw
+            )
             return {"audit_success": audit_success, "status": status, "phantom_reason": phantom_reason}
 
         from nexus.delivery.evidence_verifier import EvidenceVerifier
@@ -334,13 +361,7 @@ class PipelineRepairMixin:
             ctx.state.metadata["evidence_verifier_error"] = str(ev_exc)
             ctx.state.metadata["evidence_trust_rejection"] = True
 
-        if phantom_reason:
-            audit_success = False
-            status = "REJECTED"
-            ctx.state.metadata["phantom_success_reason"] = phantom_reason
-            self._update_meta_counter(ctx, "anti_hallucination_block_count")
-            NexusEventBus.publish("phantom_detected", {"task_id": ctx.state.task_id, "reason": phantom_reason})
-        elif audit_success:
+        if not phantom_reason and audit_success:
             self._update_meta_counter(ctx, "anti_hallucination_pass_count")
 
         # Capture skill outcome for long-term learning

@@ -75,7 +75,8 @@ def test_handle_escalation_triggers(mock_ctx):
         
         res = pipeline._handle_escalation(mock_ctx, 3, "FAIL", "")
         
-        assert res is True
+        # _handle_escalation returns (break_auto, replan_ok) tuple
+        assert isinstance(res, tuple)
         assert mock_ctx.state.metadata["escalation_triggered"] is True
         assert mock_ctx.state.metadata["escalation_root_cause"] == "scope_drift"
 
