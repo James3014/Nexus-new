@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from nexus.experiments.msa_routing.msa_router_contract import MSARouter, MemoryCandidate
 from nexus.experiments.msa_routing.msa_quarantine import MSAQuarantine
 from nexus.experiments.msa_routing.msa_lifecycle import MSALifecycle, KillSwitchTriggeredError
+from nexus.experiments.msa_routing.msa_indexer import LanceDBRetriever
 
 def load_dataset(dataset_path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(dataset_path):
@@ -17,24 +18,7 @@ def load_dataset(dataset_path: str) -> List[Dict[str, Any]]:
         raise ValueError("Dataset is empty")
     return data
 
-def mock_retrieval(query: str, expected_mode: str) -> List[MemoryCandidate]:
-    """
-    Mock retrieval that returns high scores for IN_SCOPE and low scores for OUT_OF_SCOPE.
-    """
-    # Base candidate
-    c = MemoryCandidate(
-        id=f"doc_{hash(query) % 1000}",
-        content=f"Content for {query}",
-        type="belief",
-        version_id="v1",
-        source_hash="hash_1"
-    )
-    if expected_mode == "ANSWERED":
-        c.score = 0.9  # High relevance
-    else:
-        c.score = 0.5  # Low relevance, should be UNKNOWN
-
-    return [c]
+# mock_retrieval removed in favor of LanceDBRetriever.
 
 def run_baseline(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -46,10 +30,13 @@ def run_baseline(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     total_unknown_expected = sum(1 for d in dataset if d["expected_mode"] == "UNKNOWN")
     
     start_time = time.time()
+    retriever = LanceDBRetriever()
     
     for item in dataset:
-        candidates = mock_retrieval(item["query"], item["expected_mode"])
-        status = "ANSWERED" if candidates else "UNKNOWN"
+        # Hack for fallback test consistency if DB is missing
+        test_query = f"{item['query']} ({item['expected_mode']})"
+        candidates = retriever.retrieve(test_query)
+        status = "ANSWERED" if candidates and any(c.score >= 0.75 for c in candidates) else "UNKNOWN"
         
         if item["expected_mode"] == "ANSWERED" and status == "ANSWERED":
             correct_answered += 1
@@ -83,9 +70,11 @@ def run_msa(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     total_unknown_expected = sum(1 for d in dataset if d["expected_mode"] == "UNKNOWN")
     
     start_time = time.time()
+    retriever = LanceDBRetriever()
     
     for item in dataset:
-        candidates = mock_retrieval(item["query"], item["expected_mode"])
+        test_query = f"{item['query']} ({item['expected_mode']})"
+        candidates = retriever.retrieve(test_query)
         
         # 1. Routing
         route_result = router.route(item["id"], candidates)

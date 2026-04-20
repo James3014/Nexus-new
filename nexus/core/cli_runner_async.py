@@ -41,7 +41,14 @@ async def async_execute_tactical_node(node, repo_root, commander=None):
     return success
 
 async def campaign_master_loop(commander, task_nodes, repo_root):
-    """L4 史詩級並行調度主循環 (Hardened)"""
+    """
+    [L4 Campaign Orchestrator] 史詩級並行調度主循環 (Hardened)
+    
+    Architectural boundary:
+    - This function is strictly an **L4 Orchestrator** responsible for DAG scheduling, bursting, and parallel node execution (P/X level macroscopic planning).
+    - It does **NOT** run the P-X-D-R-A-C pipeline natively. 
+    - The actual single-task P-X-D-R-A-C lifecycle (Plan, eXplore, Diagnose, Repair, Audit, Crystallize) is handled inside the L3 Task Pipeline (`NexusPipeline` in `nexus/engine/pipeline.py`), which is invoked under the hood by `execute_tactical_node`.
+    """
     while True:
         # 🚧 [L4:Milestone] 里程碑檢查
         if commander.is_milestone_reached():

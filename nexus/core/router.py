@@ -115,11 +115,40 @@ class SkillsRouter:
     def _semantic_search(self, query: str, tenant_id: str) -> Dict[str, Any]:
         return {"status": "SUCCESS", "results": [], "tenant": tenant_id}
 
+    def _msa_search(self, query: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        import os
+        if os.environ.get("NEXUS_MSA_ENABLED", "0") != "1":
+            return []
+            
+        try:
+            from nexus.experiments.msa_routing.msa_router_contract import MSARouter
+            from nexus.experiments.msa_routing.msa_indexer import LanceDBRetriever
+            
+            router = MSARouter(confidence_threshold=0.75)
+            retriever = LanceDBRetriever(self.project_root)
+            candidates = retriever.retrieve(query)
+            
+            result = router.route("msa_" + str(hash(query) % 1000000), candidates)
+            if result.status == "ANSWERED" and result.selected:
+                return [{"skill_id": c.id, "score": c.score, "source": "msa"} for c in result.selected]
+        except Exception as e:
+            logger.warning(f"MSA routing failed or not found: {e}")
+        return []
+
     def route_candidates(self, phase: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Legacy router entrypoint expected by older tests."""
         phase_key = str(phase or "R").lower()
         decision_id = f"dec_{phase_key}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
-        candidate = {"skill_id": "demo-skill", "score": 1.0, "decision_id": decision_id}
+        
+        query = context.get("task_desc", context.get("task_id", ""))
+        candidates = self._msa_search(query, context)
+        
+        if not candidates:
+            # Fallback to pure logic / traditional RAG behavior (Mocked for legacy)
+            candidates = [{"skill_id": "demo-skill", "score": 1.0, "source": "legacy"}]
+            
+        for c in candidates:
+            c["decision_id"] = decision_id
 
         run_dir = __import__("pathlib").Path(self.run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -128,12 +157,12 @@ class SkillsRouter:
             "decision_id": decision_id,
             "phase": phase,
             "task_id": context.get("task_id", ""),
-            "candidate_count": 1,
+            "candidate_count": len(candidates),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        return [candidate]
+        return candidates
 
     def route(self, phase: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Legacy single-route API used by router artifact compatibility tests."""

@@ -20,6 +20,17 @@ class LocalBonsaiBrain:
     def __init__(self, api_url: str = "http://localhost:11435"):
         self.api_url = api_url
 
+    def health_check(self) -> bool:
+        """[Task 8] Pre-flight health check for the local Bonsai brain API."""
+        try:
+            res = requests.get(f"{self.api_url}/health", timeout=5)
+            # fallback for standard llama.cpp server: maybe root
+            if res.status_code == 404:
+                res = requests.get(f"{self.api_url}/", timeout=5)
+            return res.status_code == 200
+        except Exception:
+            return False
+
     def ask_structured(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         text = "" # 修正 UnboundLocalError: 預先定義變數
         try:
@@ -31,12 +42,13 @@ class LocalBonsaiBrain:
             prompt += "<|im_start|>assistant\n"
 
             grammar = r'''
-                root   ::= object
-                object ::= "{" space pair ( "," space pair )* "}" space
+                root   ::= "{" space "\"action\"" space ":" space action_val ( "," space pair )* "}" space
+                action_val ::= "\"BASH\"" | "\"EDIT\"" | "\"DONE\""
                 pair   ::= string ":" space value
                 string ::= "\"" [^"]* "\""
                 value  ::= string | number | object | array | "true" | "false" | "null"
                 number ::= [0-9]+
+                object ::= "{" space ( pair ( "," space pair )* )? "}" space
                 array  ::= "[" space ( value ( "," space value )* )? "]" space
                 space  ::= [ \t\n\r]*
             '''
@@ -302,7 +314,11 @@ class TacticalDrone(DroneProtocol):
                     outcome = "REPAIR_NEEDED"
                     continue
 
-                if self.belief_score > 0.5:
+                from nexus.core.onebit_core import OneBitGate
+                gate = OneBitGate()
+                decision = gate.evaluate(self.belief_score, "DONE action evaluated")
+                self._log_trace("1-BIT-CORE", f"Verdict: {decision.verdict}, Reasoning: {decision.reasoning}")
+                if decision.verdict:
                     outcome = "SUCCESS"
                 else:
                     outcome = "REPAIR_NEEDED"
