@@ -166,3 +166,9 @@ version_scope:
 - **Root Cause**: Reliance on legacy keyword matching and insufficient class separation during the rapid P-X-D-R-A-C rollout.
 - **Decision**: Integrated real LLM-based decomposition via Ollama and refactored `context_hub.py` into a specialized `KnowledgeInjector`.
 - **Prevention**: Enforce "Single Responsibility Principle" for core orchestrator modules and mandate semantic (LLM) processing for macro-intent handling.
+
+## 2026-04-20: Cognitive Drift and Governance Performance Bottlenecks (Stage 5)
+- **Phenomenon**: Vector retrieval used obsolete models (`MiniLM`), and CI gates were executing sequentially, leading to high latency.
+- **Root Cause**: Hardcoded model dependencies and lack of parallel execution strategy in the audit pipeline.
+- **Decision**: Unified embeddings to `nomic-embed-text` and parallelized `ci_gate.py` using `ThreadPoolExecutor`.
+- **Prevention**: Enforce "Async-First" for I/O bound audit tasks and mandate model-alignment checks in the Cognition Layer.

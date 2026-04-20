@@ -32,6 +32,9 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-20 | **GOVERNANCE OPTIMIZATION & COGNITION HARDENING** | `vector_rag.py`, `ci_gate.py`, `nexus_swarm_sse.py` | High | Git revert | Antigravity |
+| 2026-04-20 | **QUALITY UNIFICATION & TEST RESTRUCTURING** | `pytest.ini`, `tests/` | Medium | Git revert | Antigravity |
+|---|---|---|---|---|---|
 | 2026-04-20 | **DEEP PURIFICATION (STAGE 4)** | `context_hub.py`, `swarm.py`, `campaign_general.py` | High | Git revert | Gemini-Nexus |
 | 2026-04-20 | **STRUCTURAL DEBT PURGE** | `router.py`, `self_evolve_engine.py`, `onebit_core.py` | High | Git revert | Antigravity |
 | 2026-04-20 | **DEEP DEBT AUDIT & REALIGNMENT** | Brain Hub, `router.py`, `self_evolve_engine.py` | High | Git revert | Gemini-Nexus |
