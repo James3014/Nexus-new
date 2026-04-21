@@ -194,53 +194,21 @@ class PipelineStagesMixin:
             )
 
     def _stage_research(self, ctx: PipelineContextProtocol, tracer: Any) -> None:
-        import json
         from nexus.engine.policies.research_policy import ResearchDecision
         with tracer.phase_span('X', task_id=ctx.task_id) as x_span:
             # --- X Stage: Research ---
             force_research = bool(ctx.state.metadata.get("benchmark_force_research"))
-            learn_guard = ctx.state.metadata.get("learn_phase_slo")
-            if not isinstance(learn_guard, dict):
-                # Stage-level unit tests may call X directly without running P first.
-                # In that case we must not read filesystem SLO and accidentally skip X.
-                learn_guard = {"active": False, "ready": True}
-                ctx.state.metadata["learn_phase_slo"] = learn_guard
-            if (not force_research) and learn_guard.get("active") and (not learn_guard.get("ready")):
+            learn_guard = self._resolve_stage_research_guard(ctx)
+            if self._should_skip_research_by_learn_guard(learn_guard, force_research):
                 ctx.state.metadata["research_skipped_by_learn_guard"] = True
                 logger.info("🛡️ X 階段：Learn phase-SLO 未達標，跳過研究階段。")
                 return
-            
-            # 🚀 Re-use pre-computed route if available (auto-trigger fix)
-            precomputed = ctx.state.metadata.get("research_route")
-            if precomputed and isinstance(precomputed, dict):
-                res_decision = ResearchDecision(**precomputed)
-                logger.debug("🔬 X 階段：重用預計算路由 (Reason: %s)", res_decision.reason)
-            else:
-                decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
-                res_decision = ctx.research_policy.route(
-                    decision, ctx.task_desc, task_type=ctx.task_type, prediction=ctx.prediction, context=ctx.state.metadata
-                )
-                ctx.state.metadata["research_route"] = dataclasses.asdict(res_decision) if dataclasses.is_dataclass(res_decision) else {}
-            
+
+            res_decision = self._resolve_research_decision(ctx, ResearchDecision)
             if not ctx.dry_run and (force_research or res_decision.should_research):
                 ctx.state.current_phase = "X"
-            # R2: Unified Engine Decision
-            task_type = ctx.task_type
-            risk_level = ctx.state.metadata.get('risk_level', 'standard')
-            policy_engine = decide_research_engine(self.engine.project_root, task_type, risk_level)
-            should_research_flag = getattr(res_decision, "should_research", False)
-            should_research_explicit = should_research_flag is True
 
-            if force_research:
-                engine = "full"
-            elif should_research_explicit:
-                # Explicit research decision must win over conservative baseline defaults.
-                engine = "full"
-            elif policy_engine == "baseline":
-                engine = "baseline"
-            else:
-                engine = policy_engine
-            
+            engine = self._choose_research_engine(ctx, res_decision, force_research)
             ctx.state.metadata['engine_decision_source'] = 'phase_policy'
             ctx.state.metadata['chosen_research_engine'] = engine
             
@@ -268,6 +236,49 @@ class PipelineStagesMixin:
                     ctx.research_pack = self._run_standard_phase(ctx, res_decision)
                 
                 self._persist_research_pack(ctx, x_decision_id)
+
+    def _resolve_stage_research_guard(self, ctx: PipelineContextProtocol) -> Dict[str, Any]:
+        learn_guard = ctx.state.metadata.get("learn_phase_slo")
+        if isinstance(learn_guard, dict):
+            return learn_guard
+        # Stage-level unit tests may call X directly without running P first.
+        # In that case we must not read filesystem SLO and accidentally skip X.
+        learn_guard = {"active": False, "ready": True}
+        ctx.state.metadata["learn_phase_slo"] = learn_guard
+        return learn_guard
+
+    def _should_skip_research_by_learn_guard(self, learn_guard: Dict[str, Any], force_research: bool) -> bool:
+        return (not force_research) and learn_guard.get("active") and (not learn_guard.get("ready"))
+
+    def _resolve_research_decision(self, ctx: PipelineContextProtocol, decision_cls: Any) -> Any:
+        precomputed = ctx.state.metadata.get("research_route")
+        if precomputed and isinstance(precomputed, dict):
+            res_decision = decision_cls(**precomputed)
+            logger.debug("🔬 X 階段：重用預計算路由 (Reason: %s)", res_decision.reason)
+            return res_decision
+
+        decision = ctx.hub.make_pre_routing_decision(ctx.task_id, {"type": ctx.task_type, **(ctx.state.metadata or {})})
+        res_decision = ctx.research_policy.route(
+            decision, ctx.task_desc, task_type=ctx.task_type, prediction=ctx.prediction, context=ctx.state.metadata
+        )
+        ctx.state.metadata["research_route"] = dataclasses.asdict(res_decision) if dataclasses.is_dataclass(res_decision) else {}
+        return res_decision
+
+    def _choose_research_engine(self, ctx: PipelineContextProtocol, res_decision: Any, force_research: bool) -> str:
+        task_type = ctx.task_type
+        risk_level = ctx.state.metadata.get('risk_level', 'standard')
+        policy_engine = decide_research_engine(self.engine.project_root, task_type, risk_level)
+        should_research_flag = getattr(res_decision, "should_research", False)
+        should_research_explicit = should_research_flag is True
+
+        if force_research:
+            return "full"
+        if should_research_explicit:
+            # Explicit research decision must win over conservative baseline defaults.
+            return "full"
+        if policy_engine == "baseline":
+            return "baseline"
+        return policy_engine
 
     def _gather_research_hints(self, ctx: PipelineContextProtocol):
         try:
