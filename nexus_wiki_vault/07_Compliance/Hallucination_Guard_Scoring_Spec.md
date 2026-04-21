@@ -3,7 +3,7 @@ aliases: '[HI Scoring, Hallucination Weights, Audit Rules]'
 confidence: high
 last_compiled: '2026-04-20'
 owner: agent
-source_of_truth: nexus/core/hallucination_guard.py
+source_of_truth: nexus/governance/hallucination_guard.py
 status: hardened
 tags: '[compliance, hallucination, audit, weights]'
 title: Compliance - Hallucination Guard Scoring Spec

@@ -1,22 +1,22 @@
-# 📖 System Overview & Glossary
-**[PHYSICAL_STATUS: TERMINOLOGY_SSOT | LAYER_1_FOUNDATION]**
+# 📖 System Overview & Glossary (v32.6)
+**[PHYSICAL_STATUS: REFACTOR_ALIGNED | LAYER_1_FOUNDATION]**
 
-## 1. 定義 (Definition)
-Nexus 是一個治理型 Agent 作業系統，旨在透過物理規約將 LLM 的不確定性轉換為生產穩定性。
+## 1. 系統架構變革 (2026-04-21)
+Nexus 已完成核心重構，實現了 **Engine (執行)**、**Governance (治理)** 與 **Events (事件)** 的深度解耦。
 
 ## 2. 術語表 (Glossary)
 - **AAAK**: 30x 語義提煉方言。
 - **1-bit Core**: 原子化決策判決核心。
-- **HI**: 幻覺指數。
-- **Drift**: 真值偏離度。
+- **Events Backbone**: 由 `nexus/events/` 驅動，取代舊版單體 `event_bus.py`。
+- **Capability Gate**: 物理層級的階段性工具隔離機制。
 
-## 3. 🛑 核心錯誤碼 (Errors Enum)
-| Code | Label | Semantics |
-|---|---|---|
-| **0** | SUCCESS | 任務完成，證據鏈完整。 |
-| **1** | FAILED | 修復失敗，無須升級。 |
-| **2** | ESCALATED | 需要重新規劃。 |
-| **3** | HUMAN_REVIEW | 嚴重治理違規，人工介入。 |
+## 3. 🛑 核心錯誤碼 (SSOT)
+| Code | Label | Semantics | Source (Code) |
+|---|---|---|---|
+| **0** | SUCCESS | 任務完成，證據完整。 | `exit_codes.py` |
+| **1** | FAILED | 修復失敗，無須升級。 | `exit_codes.py` |
+| **2** | ESCALATED | 需重啟 CampaignGeneral。| `exit_codes.py` |
+| **3** | HUMAN_REVIEW | 治理違規，人工介入。 | `exit_codes.py` |
 
 ---
-**[Source: nexus/core/exit_codes.py]**
+**[Source: nexus/core/exit_codes.py | REFACTOR_READY]**
