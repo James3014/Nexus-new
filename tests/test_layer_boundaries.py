@@ -21,3 +21,16 @@ def test_engine_layer_rules():
         content = py_file.read_text()
         assert "from nexus.app" not in content
         assert "import nexus.app" not in content
+
+
+def test_core_event_modules_are_compatibility_facades():
+    """🧱 core 事件入口僅保留 façade，實作必須在 nexus/events。"""
+    core_event_bus = Path("nexus/core/event_bus.py").read_text(encoding="utf-8")
+    core_events = Path("nexus/core/events.py").read_text(encoding="utf-8")
+
+    assert "from nexus.events.transport import NexusEventBus" in core_event_bus
+    assert "class NexusEventBus" not in core_event_bus
+
+    assert "from nexus.events.contracts import NexusEvent" in core_events
+    assert "from nexus.events.store import EventStore" in core_events
+    assert "@dataclass" not in core_events

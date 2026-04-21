@@ -2,9 +2,11 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import logging
-import json
 import time
 import uuid
+
+from nexus.events.log_store import JsonlEventLogStore
+from nexus.events.signal_ingress import SignalIngress
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,8 @@ class NexusEventBus:
     _sequence_lock = threading.RLock()
     _subs_lock = threading.Lock()
     _global_seq = 0
+    _log_store = JsonlEventLogStore()
+    _signal_ingress = SignalIngress()
 
     @classmethod
     def set_remote_broadcaster(cls, broadcaster: Callable[[str, Dict[str, Any]], None]) -> None:
@@ -27,22 +31,10 @@ class NexusEventBus:
     @classmethod
     def configure(cls, project_root: Path) -> None:
         """初始化持久化路徑"""
-        log_dir = project_root / ".nexus" / "events"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        cls._event_log_path = log_dir / "event_log.jsonl"
-
-        # 載入外部信號佇列
+        log_dir, event_log_path = cls._log_store.configure(project_root)
+        cls._event_log_path = event_log_path
         signal_file = log_dir / "signal_inbox.jsonl"
-        if signal_file.exists():
-            try:
-                cls._signal_queue = [
-                    json.loads(line)
-                    for line in signal_file.read_text(encoding="utf-8").strip().split("\n")
-                    if line.strip()
-                ]
-                signal_file.write_text("", encoding="utf-8")  # 消費後清空
-            except Exception as e:
-                logger.debug("signal_inbox load failed: %s", e)
+        cls._signal_queue = cls._signal_ingress.load_from_inbox(signal_file)
 
     @classmethod
     def subscribe(cls, event_type: str, handler: Callable[[Dict[str, Any]], None]) -> None:
@@ -67,8 +59,9 @@ class NexusEventBus:
             }
 
             if cls._event_log_path:
-                with open(cls._event_log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, default=str) + "\n")
+                if cls._log_store.event_log_path != cls._event_log_path:
+                    cls._log_store.event_log_path = cls._event_log_path
+                cls._log_store.append_record(record)
 
         # 廣播（在鎖外執行以避免死鎖，但順序已由文件保證）
         with cls._subs_lock:
@@ -90,35 +83,22 @@ class NexusEventBus:
     @classmethod
     def inject_signal(cls, signal_type: str, payload: Dict[str, Any]) -> None:
         """外部注入信號（由 bot/人工/Pilot Friend 呼叫）"""
-        cls._signal_queue.append({
-            "signal_type": signal_type,
-            "payload": payload,
-            "injected_at": time.time(),
-        })
+        cls._signal_queue = cls._signal_ingress.inject(cls._signal_queue, signal_type, payload)
         cls.publish("external_signal_injected", {"signal_type": signal_type})
 
     @classmethod
     def drain_signals(cls, signal_type: str = "") -> List[Dict[str, Any]]:
         """消費信號佇列（Pipeline 在每個 phase 開頭輪詢）"""
-        if not signal_type:
-            drained = cls._signal_queue[:]
-            cls._signal_queue.clear()
-            return drained
-
-        matched = [s for s in cls._signal_queue if s["signal_type"] == signal_type]
-        cls._signal_queue = [s for s in cls._signal_queue if s["signal_type"] != signal_type]
-        return matched
+        drained, remaining = cls._signal_ingress.drain(cls._signal_queue, signal_type)
+        cls._signal_queue = remaining
+        return drained
 
     @classmethod
     def get_recent_events(cls, event_type: str = "", limit: int = 50) -> List[Dict[str, Any]]:
         """讀取最近的持久化事件（供 dashboard / 觀測）"""
-        if not cls._event_log_path or not cls._event_log_path.exists():
-            return []
         try:
-            lines = cls._event_log_path.read_text(encoding="utf-8").strip().split("\n")
-            events = [json.loads(l) for l in lines[-limit:] if l.strip()]
-            if event_type:
-                events = [e for e in events if e.get("event_type") == event_type]
-            return events
+            if cls._event_log_path and cls._log_store.event_log_path != cls._event_log_path:
+                cls._log_store.event_log_path = cls._event_log_path
+            return cls._log_store.read_recent(event_type=event_type, limit=limit)
         except Exception:
             return []
