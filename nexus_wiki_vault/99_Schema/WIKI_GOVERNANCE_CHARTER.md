@@ -1,0 +1,35 @@
+---
+aliases: '[Wiki Constitution, Structure Freeze, Maintenance Rules]'
+confidence: extreme
+last_compiled: '2026-04-21'
+owner: human
+status: sealed
+tags: '[governance, constitution, wiki, structure]'
+title: 🛡️ Nexus Wiki Governance Charter (結構憲法)
+---
+
+# 🛡️ Nexus Wiki Governance Charter (結構憲法)
+**[VERSION: v1.0 | STATUS: STRUCTURE_FROZEN]**
+
+## 1. 結構永恆性 (Structure Invariance)
+Nexus Wiki 的「六層架構」現已正式凍結。為了維持公司級知識中樞的清晰度，除非獲得 Antigravity 與人類架構師的雙重授權，否則：
+- **禁止新增平行主目錄** (Top-level directories)。
+- 所有新功能必須映射至既有的 `Understand / Operate / Trace` 三大主線。
+
+## 2. 增頁與掛載規則 (Page Provisioning)
+- **歸屬強制**: 每一份新建立的頁面必須明確屬於 Layer 0-6 中的某一層。
+- **雙向鏈路**: 新頁面必須在 `00_Home` 或 `Wiki Index and Coverage Map` 中具備回鏈。
+- **分類一致**: 嚴禁建立內容重疊的「碎片化」頁面，優先採購「內容增壓」模式更新現有文件。
+
+## 3. 真值聲明規約 (SSOT Mandate)
+任何宣稱為「唯一真值來源 (SSOT)」的頁面（如 `Exit_Code_Registry`），必須在 Frontmatter 標註：
+1. `source_of_truth`: 物理代碼路徑。
+2. `last_audit`: 最後人工抽查時間。
+3. `confidence`: 目前的代碼對位置信度。
+
+## 4. 角色分流保護
+- `README_Product`, `README_Agent`, `README_Investor`, `README_Contributor` 是 Wiki 的四大法定入口。
+- 禁止隨意新增第五種角色入口，以維持導航純淨度。
+
+---
+**[BY ORDER OF NEXUS HIGH COMMAND | SEALED ON 2026-04-21]**

@@ -1,18 +1,22 @@
-# 🚀 README: 5 分鐘懂 Nexus (Product Guide)
-**[ROLE: HUMAN_GUEST | AUDIENCE: EVERYONE]**
+# 🚀 Nexus: 具備自我治理能力的 Agent 作業系統
+**[產品定位：企業級 AI 代理安全與合規入口]**
 
-## 1. Nexus 是什麼？
-Nexus 是一個**「具備物理誠信的 Agent 治理作業系統」**。它將 LLM 封裝在具備門禁、審計與隔離能力的環境中，將 AI 的不確定性轉換為可預測的生產力。
+## 1. 核心價值：將 AI 的不確定性轉換為生產力
+Nexus 是專為自主代理 (Autonomous Agents) 打造的治理環境。我們解決了 AI 代理在生產環境中常見的「幻覺、失控、不可控修改」等核心信任問題。
 
-## 2. 核心價值 (Value Props)
-- **零幻覺執行**: 透過 1-bit Core 與 HI 審計，物理阻斷未經驗證的變更。
-- **超大規模記憶**: MSA 技術讓 Agent 具備 100M+ Token 的全量代碼感知。
-- **商業級合規**: 內建 SOC2 審計證據鏈與全流程譜系追蹤 (Provenance)。
+## 2. 三大技術護城河 (The Technology Moat)
+- **原子化判決技術 (One-Bit Verdict)**: 
+    - *商業解讀*: 確保任何代碼變更在物理驗收通過前，絕不進入生產環境。
+    - *技術底層*: 基於 1-bit Core 信心門檻判定。
+- **大容量記憶路由引擎 (Enterprise Memory Engine)**: 
+    - *商業解讀*: 讓 AI 具備破億字元的全項目感知能力，精確定位問題，不產生記憶偏差。
+    - *技術底層*: 實體 MSA (Memory Sparse Attention) 與 LanceDB 向量對位。
+- **自主運作評分系統 (AOS Score)**: 
+    - *商業解讀*: 為每一次任務提供 0-100 的透明化審計指標，確保代碼美學與邏輯誠信。
 
-## 3. 快速導覽
-- [[00_Product/User Stories|使用者案例]]
-- [[00_Product/Pricing|定價與 SaaS 方案]]
-- [[Reference/QUICKSTART|快速啟動]]
+## 3. 為什麼企業需要 Nexus？
+- **滿足合規**: 內建 SOC2 級別的證據鏈與譜系追蹤 (Lineage)。
+- **降低風險**: 物理阻斷非授權操作，故障自動修復率提升 80%。
 
 ---
-**[NEXUS VISION: THE HARD-SHELL FOR SOFT INTELLIGENCE]**
+**[NEXUS PRODUCT: THE HARD-SHELL FOR SOFT INTELLIGENCE]**

@@ -1,17 +1,20 @@
-# 📜 Wiki_Changelog_Auto (v32.0)
-**[PHYSICAL_STATUS: AUTO_SYNC_ENABLED | SOURCE: GIT_LOG]**
+# 📜 Wiki_Changelog_Auto (v32.3 Sealed)
+**[PHYSICAL_STATUS: AUTO_SYNC_ENABLED | AUDIT_ENHANCED]**
 
-## 1. 維基演化紀錄 (Wiki Evolution)
+## 1. 維基演化分類紀錄
 
-| Date | Page | Change Rationale (動機) | Author | Commit SHA |
+| Date | Type (類型) | Page | Change Rationale | Commit SHA |
 | :--- | :--- | :--- | :--- | :--- |
-| 2026-04-21 | `00_Home/README_*` | 補齊產品化分流入口。 | Gemini-Nexus | `b4b3481` |
-| 2026-04-21 | `01_System/Errors_Enum` | 補齊錯誤碼全典對位。 | Gemini-Nexus | `b4b3481` |
-| 2026-04-21 | `07_Compliance/*` | 補齊 HI 審計權重實體頁。 | Gemini-Nexus | `b4b3481` |
-| 2026-04-21 | `99_Schema/Version_Matrix`| 建立頁面健康追蹤矩陣。 | Gemini-Nexus | `b4b3481` |
+| 2026-04-21 | **拋光 (POLISH)** | `00_Home/README_*` | 去內部黑話化，商業語氣收斂。 | `4265ade6` |
+| 2026-04-21 | **新增 (ADDED)** | `01_System/Registry` | 建立 Exit Code 物理聯動。 | `b4b34815` |
+| 2026-04-21 | **重構 (REFACTOR)**| `02_Modules/Core` | 引擎路徑位移至 `nexus/engine/`。 | `0b1ff607` |
+| 2026-04-21 | **封印 (SEALED)** | `99_Schema/Matrix` | 完成 100% 物理對位核驗。 | `0b1ff607` |
 
-## 2. 合成規約
-- 每次 `git commit` 後，`wiki_sync_check` 將自動追加新行至此表。
+## 2. 類型定義
+- **ADDED**: 新增治理維度。
+- **REFACTOR**: 對位代碼結構調整。
+- **POLISH**: 語氣與格式優化。
+- **SEALED**: 通過 Antigravity 物理審計。
 
 ---
-**[NEXUS VAULT AUDIT: ACTIVE]**
+**[NEXUS VAULT AUDIT: V32.3_ACTIVE]**

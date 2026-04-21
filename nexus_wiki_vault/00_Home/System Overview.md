@@ -19,27 +19,22 @@ Nexus 是一個以物理誠信為核心、為 AI Agent 打造的自動化治理�
 ---
 
 ## 🧭 角色導航入口 (Persona Portals)
-為了讓不同身分的使用者快速進入狀態，請選擇您的入口：
-
-### 👤 人類與合作夥伴 (Humans & Partners)
-- **[[README_Product|產品導覽]]**: 5 分鐘懂 Nexus 核心價值。
-- **[[README_Investor|投資人簡報]]**: 商業模式、市場機會與技術護城河。
-
-### 🤖 AI 代理與開發者 (Agents & Developers)
-- **[[README_Agent|Agent 執碼規約]]**: 進入工作區的強制紀律與 CLI 指令。
-- **[[README_Contributor|貢獻者手冊]]**: 如何參與 Nexus 核心開發。
+請選擇您的角色以獲取專屬導航：
+- **[[README_Product|產品導覽]]** | **[[README_Investor|投資人簡報]]**
+- **[[README_Agent|Agent 執碼規約]]** | **[[README_Contributor|貢獻者指南]]**
 
 ---
 
-## 🏗️ 六層硬化架構 (The 6-Layer Roadmap)
-本 Wiki 採用嚴格的分層導航，確保 Agent 具備全知全能的真值認知：
-
-1. **Layer 0: 產品與願景 (Product)**: [[00_Home/README_Product|Guide]] | [[00_Product/User Stories|Stories]]
-2. **Layer 1: 基礎與術語 (Foundation)**: [[01_System/Nexus Glossary|Glossary]] | [[01_System/Code_Ownership_Matrix|Ownership]]
-3. **Layer 2: 治理規約 (Governance)**: [[01_System/MUSE_PROTO|MUSE_PROTO]] | [[07_Compliance/Hallucination_Guard_Scoring_Spec|HI Scoring]]
-4. **Layer 3: 架構與核心 (Architecture)**: [[02_Modules/Module - Core Orchestrator|Orchestrator]] | [[02_Modules/Router_Decision_Flow|Router]]
-5. **Layer 4: 操作與修復 (Operational)**: [[05_Protocols/CLI_Full_Params|CLI Params]] | [[06_Ops/Ops - CI Failure Playbook|Recovery]]
-6. **Layer 5-6: 商業與生態 (Commercial)**: [[05_Commercial/Go-to-Market|GTM]] | [[06_Ecosystem/SDK Quickstart|SDK]]
+## 🏗️ 治理與維護規則
+- **[[99_Schema/WIKI_GOVERNANCE_CHARTER|Wiki 結構憲法]]**: 架構凍結與增頁規約。 (NEW)
+- **[[99_Schema/Wiki_Changelog_Auto|維基演化日誌]]**: 最近變更追蹤。
 
 ---
-**[NEXUS IDENTITY: e148a212 + v32.0 FINAL-PRODUCT-Remaster]**
+
+## 🧭 三大任務主線 (The Three Mainlines)
+1. **認識 Nexus (Understand)**: [[00_Product/User Stories|User Stories]] | [[05_Commercial/Go-to-Market|Business Plan]]
+2. **操作 Nexus (Operate)**: [[01_System/MUSE_PROTO|MUSE_PROTO]] | [[05_Protocols/CLI_Full_Params|CLI Reference]]
+3. **追溯 Nexus (Trace)**: [[99_Schema/Page_Version_Matrix|Page Maturity Matrix]] | [[08_Diffs/Code_to_Wiki_Alignment_Matrix|Alignment Matrix]]
+
+---
+**[NEXUS IDENTITY: e148a212 + v32.5 STRUCTURE-FROZEN]**

@@ -1,48 +1,46 @@
-# 🗺️ Nexus Wiki Index & Coverage Map (v30.2)
-**[PHYSICAL_STATUS: PRODUCTIZED_OS_INDEX | VERSION_V30.2]**
+# 🗺️ Nexus Wiki Index & Coverage Map (v30.3 Final)
+**[PHYSICAL_STATUS: STRUCTURE_FROZEN | VERSION_V30.3]**
 
 ## 🛡️ 總導覽：Nexus 產品與治理全景入口
-Nexus Wiki 現已升級為「六層架構」，同時服務內部治理與外部商業生態。
+本 Wiki 的資訊架構現已正式凍結。未來僅允許「增頁」與「內容更新」，嚴禁新增平行主目錄。
 
 ---
 
-## 🧭 六層知識矩陣 (The Six-Layer Matrix)
+## 🧭 三大任務主線 (Core Mainlines)
 
-### Layer 0: 產品導覽 (Product)
-- **快速入門**: [[00_Home/README_Product|Product Home]]
+### 🧩 認識 Nexus (Understand)
+面向產品與生態。
+- **產品首頁**: [[00_Home/README_Product|README_Product]]
 - **使用者案例**: [[00_Product/User Stories|User Stories]]
+- **商業戰略**: [[05_Commercial/Go-to-Market|Go-to-Market]]
 - **投資人簡報**: [[00_Product/Investor Deck|Investor Deck]]
 
-### Layer 1: 基礎層 (Foundation)
-- [[01_System/System Relationship and Dependency Graph|Relationship Graph]]
-- [[01_System/Nexus Glossary|Glossary & Terms]]
-- [[01_System/Code_Ownership_Matrix|Code Ownership]] (NEW)
-- [[01_System/Exit_Code_Registry|Exit Code Registry]] (NEW)
-- [[01_System/Errors_Enum|Errors Enum]] (NEW)
-- [[01_System/Swarm_MultiNode|Swarm Multi-Node]] (NEW)
+### ⚙️ 操作 Nexus (Operate)
+面向執行與開發。
+- **最高規約**: [[01_System/MUSE_PROTO|MUSE_PROTO v2.4]]
+- **CLI 手冊**: [[05_Protocols/CLI_Full_Params|CLI Full Parameters]]
+- **故障修復**: [[06_Ops/Ops - CI Failure Playbook|Failure Playbook]]
+- **審計計分**: [[07_Compliance/Hallucination_Guard_Scoring_Spec|HI Scoring Spec]]
 
-### Layer 2: 治理層 (Governance)
-- [[01_System/MUSE_PROTO|MUSE_PROTO v2.4]]
-- [[07_Compliance/Hallucination_Guard_Scoring_Spec|HI Scoring Spec]] (NEW)
-- [[06_Ops/Ops - Closeout Hard Gate|Closeout Hard Gate]]
-- [[06_Ops/Ops - Document Lifecycle SOP|Document SOP]]
-
-### Layer 3: 架構層 (Architecture)
-- [[02_Modules/Module - Core Orchestrator|Core Orchestrator]]
-- [[02_Modules/Router_Decision_Flow|Router Decision Flow]] (NEW)
-- [[02_Modules/Module - Advanced Core Intelligence|Drone & 1-bit Core]]
-- [[15_STATE_LIFECYCLE_AND_METABOLISM_PRUNING|Metabolism & Pruning]]
-
-### Layer 4: 操作層 (Operational)
-- [[06_Ops/Evidence_Bundle_Format|Evidence Bundle Format]] (NEW)
-- [[06_Ops/Retry_Escalation_and_Handoff_Policy|Retry & Handoff Policy]] (NEW)
-- [[06_Ops/Monitoring_CostHooks|Monitoring & Billing]]
-- [[08_Diffs/Code_to_Wiki_Alignment_Matrix|Alignment Matrix]] (NEW)
-
-### Layer 5-6: 商業與生態 (Commercial/Eco)
-- [[05_Commercial/Go-to-Market|GTM & Partnership]]
-- [[06_Ecosystem/API_Reference|API Reference]]
-- [[06_Ecosystem/SDK Quickstart|SDK Quickstart]]
+### 📜 追溯 Nexus (Trace)
+面向審計與歷史。
+- **演化日誌**: [[99_Schema/Wiki_Changelog_Auto|Automatic Changelog]]
+- **健康矩陣**: [[99_Schema/Page_Version_Matrix|Page Maturity Matrix]]
+- **文碼對位**: [[08_Diffs/Code_to_Wiki_Alignment_Matrix|Alignment Matrix]]
 
 ---
-**[NEXUS v30.2 IDENTITY: DEEP-CODE-ALIGNED | SSOT]**
+
+## 📊 物理目錄對位表 (Physical Directory Sync)
+
+| Layer | Directory | Content | Status |
+| :--- | :--- | :--- | :--- |
+| **L0** | `00_Product/` | 商業與使用者案例。 | ✅ **SYNCED** |
+| **L1** | `01_System/` | 核心術語與系統全景。 | ✅ **SYNCED** |
+| **L2** | `05_Protocols/`| 執行規約與 CLI 標準。 | ✅ **SYNCED** |
+| **L3** | `02_Modules/` | 硬化後的組件規格。 | ✅ **SYNCED** |
+| **L4** | `06_Ops/` | 維運、發布與恢復 SOP。| ✅ **SYNCED** |
+| **L5** | `05_Commercial/`| 市場路徑與合規。 | ✅ **SYNCED** |
+| **L6** | `06_Ecosystem/` | SDK 與 API 參考。 | ✅ **SYNCED** |
+
+---
+**[NEXUS v30.3 IDENTITY: STRUCTURE-FROZEN | SSOT]**

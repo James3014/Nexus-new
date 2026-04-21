@@ -1,21 +1,20 @@
-# 🖥️ CLI Full Parameter Reference (v1.0)
-**[PHYSICAL_STATUS: SSOT_WIRED | LAYER_4_OPERATIONAL]**
+# 🖥️ CLI Full Parameter & Help Map (v32.3)
+**[PHYSICAL_STATUS: SSOT_WIRED | TERMINAL_SYNC]**
 
-## 1. `nexus_cli.py` 全參數表格
+## 1. 終端命令對照區 (--help Mapping)
+本節內容直接映射自 `uv run scripts/engine/nexus_cli.py --help`。
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--mode` | string | `dual` | 運行模式：`hyper` (速度), `night` (回歸), `dual` (MSA+Palace)。 |
-| `--risk` | float | `0.5` | 1-bit Core 判決敏感度。高風險任務建議 `0.9`。 |
-| `--nodes` | int | `5` | Swarm 並行 Drone 數量上限。 |
-| `--force` | bool | `False` | 強制繞過非 P0 級別的 Gate (需管理員權限)。 |
-| `--trace-id` | string | UUID | 指定全鏈路追蹤 ID。 |
+| CLI Display | Full Parameter | Function |
+| :--- | :--- | :--- |
+| `run` | `nexus run` | 啟動 P-X-D-R-A-C 大循環。 |
+| `status` | `nexus status --fleet` | 觀測全局或機群健康度。 |
+| `drone-hud`| `nexus drone-hud --listen` | 建立即時 SSE 監控串流。 |
+| `gate` | `nexus delivery-gate` | 物理 Endpoint 最終核驗。 |
 
-## 2. 子命令對位
-- **`run`**: 執行完整的 P-X-D-R-A-C 邏輯。
-- **`acceptance-check`**: 調用 `HallucinationGuard` 計算 HI 分數。
-- **`contract-check`**: 校驗 Git SHA 與任務契約。
-- **`drone-hud`**: 開放實時監控串流。
+## 2. 高級參數規約
+- **`--risk <0.1~0.95>`**: 調整 1-bit Core 靈敏度。
+- **`--mode <hyper|night>`**: 切換敏捷與回歸模式。
+- **`--trace-id <UUID>`**: 鎖定當前譜系紀錄標籤。
 
 ---
-**[Source: uv run scripts/engine/nexus_cli.py --help]**
+**[Source: scripts/engine/nexus_cli.py | CLI-VERIFIED]**

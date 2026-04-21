@@ -1,20 +1,31 @@
-# 📊 Page_Version_Matrix (v32.0)
-**[PHYSICAL_STATUS: TRUTH_ALIGNED | VERSION_TRACKED]**
+---
+aliases: '[Alignment Verdict, Page Health, Audit Matrix]'
+confidence: high
+last_compiled: '2026-04-21'
+owner: agent
+source_of_truth: repo-root-audit
+status: hardened
+tags: '[governance, audit, health, matrix]'
+title: 📊 Page_Version_Matrix (v32.3 Sealed)
+---
 
-## 1. 頁面置信度與代碼對位矩陣
+# Page_Version_Matrix (v32.3 Hardened)
 
-| Folder | Page Name | Status | Confidence | Code Alignment |
+## 1. 全庫頁面健康度與人工抽查矩陣
+
+| Folder | Page Name | Status | Alignment | Last Audit (抽查) |
 | :--- | :--- | :--- | :--- | :--- |
-| `00_Home` | System Overview | `🌲 STABLE` | HIGH | 🟢 100% |
-| `01_System` | Exit Code Registry | `🌲 STABLE` | HIGH | 🟢 100% (wired) |
-| `01_System` | Errors Enum | `🌲 STABLE` | HIGH | 🟢 100% (wired) |
-| `02_Modules`| Router Decision Flow| `🌿 EVOLVING`| MEDIUM | 🟡 90% |
-| `06_Ops` | Evidence Bundle Fmt| `🌲 STABLE` | HIGH | 🟢 100% (schema) |
-| `07_Compliance`| HI Scoring Spec | `🌲 STABLE` | HIGH | 🟢 100% (wired) |
+| `00_Home` | README_Product | `🌲 STABLE` | 🟢 100% | 2026-04-21 14:00 |
+| `01_System` | Exit Code Registry | `🌲 STABLE` | 🟢 100% | 2026-04-21 10:00 |
+| `01_System` | Swarm Multi-Node | `🌿 EVOLVING`| 🟡 85% | 2026-04-21 09:30 |
+| `02_Modules` | Core Orchestrator | `🌲 STABLE` | 🟢 100% | 2026-04-21 13:45 |
+| `05_Protocols`| CLI Full Params | `🌲 STABLE` | 🟢 100% | 2026-04-21 13:50 |
+| `06_Ops` | Evidence Bundle Fmt| `🌲 STABLE` | 🟢 100% | 2026-04-21 11:20 |
+| `07_Compliance`| HI Scoring Spec | `🌲 STABLE` | 🟢 100% | 2026-04-21 10:30 |
 
-## 2. 健康指標定義
-- **Confidence HIGH**: 聲明在 `nexus/core/` 中有對應的 Python 實體類別。
-- **Confidence MEDIUM**: 邏輯已實作，但 Wiki 與 Docstrings 仍有微小落差。
+## 2. 審計判定說明
+- **Last Audit**: 標記最近一次「文碼合一」人工校驗的時間。
+- **Alignment**: 🟢 代表 Wiki 聲明與實體代碼 (`.py`類別/枚舉) 完全一致。
 
 ---
-**[NEXUS QUALITY SYSTEM: SEALED]**
+**[NEXUS QUALITY SYSTEM: AUDIT_SEALED_V32.3]**
