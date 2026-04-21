@@ -165,6 +165,32 @@ def run_delivery_tracked_check(evidence_path: str | None = None, dry_run: bool =
     if not code_artifacts:
         print("✅ [Delivery-Track] No code artifacts to check.")
         return True
+
+    def _extract_artifact_path(artifact):
+        if isinstance(artifact, str):
+            val = artifact.strip()
+            return val if val else None
+        if isinstance(artifact, dict):
+            for key in ("file_path", "path", "artifact_path"):
+                value = artifact.get(key)
+                if isinstance(value, str):
+                    value = value.strip()
+                    if value:
+                        return value
+        return None
+
+    normalized_artifacts = []
+    invalid_artifacts = []
+    for artifact in code_artifacts:
+        path = _extract_artifact_path(artifact)
+        if path:
+            normalized_artifacts.append(path)
+        else:
+            invalid_artifacts.append(artifact)
+
+    if invalid_artifacts:
+        print(f"❌ [Delivery-Track] Invalid code artifacts entries: {invalid_artifacts}")
+        return False
     
     # 取得 git tracked 清單
     result = subprocess.run(
@@ -173,7 +199,7 @@ def run_delivery_tracked_check(evidence_path: str | None = None, dry_run: bool =
     tracked_files = set(result.stdout.strip().split("\n"))
     
     untracked = []
-    for artifact in code_artifacts:
+    for artifact in normalized_artifacts:
         try:
             # 轉換為相對路徑
             art_path = Path(artifact)

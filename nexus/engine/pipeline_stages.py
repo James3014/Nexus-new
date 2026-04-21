@@ -7,6 +7,7 @@ from pathlib import Path
 from nexus.core.protocols import PipelineContextProtocol
 from nexus.learning.knowledge_index import KnowledgeIndex
 from nexus.events.contracts import NexusEvent
+from nexus.engine.direct_mode import analyze_task_spec
 from nexus.research.research_pack import build_research_pack
 from nexus.research.learn.policy_runtime import decide_research_engine, load_phase_policy
 
@@ -73,6 +74,38 @@ class PipelineStagesMixin:
             "reason": "" if ready else "learn_phase_slo_not_ready",
             "path": str(slo_path),
         }
+
+    def _stage_spec_bind(self, ctx: PipelineContextProtocol) -> Dict[str, Any]:
+        spec = analyze_task_spec(ctx.task_desc)
+        target_files = list(spec.target_files)
+        verify_commands = list(spec.verify_commands)
+        if spec.enabled:
+            ctx.state.metadata["direct_mode"] = True
+            ctx.state.metadata["direct_mode_reason"] = spec.reason
+            if target_files:
+                existing = [str(p) for p in (ctx.state.metadata.get("target_files") or [])]
+                ctx.state.metadata["target_files"] = list(dict.fromkeys(existing + target_files))
+            if verify_commands and not ctx.state.metadata.get("verify_commands"):
+                ctx.state.metadata["verify_commands"] = verify_commands
+
+        binding = {
+            "enabled": bool(spec.enabled),
+            "reason": spec.reason,
+            "target_files_count": len(target_files),
+            "verify_commands_count": len(verify_commands),
+        }
+        ctx.state.metadata["spec_binding"] = binding
+        if ctx.event_store:
+            ctx.event_store.append(
+                NexusEvent(
+                    event_id=f"evt_spec_bind_{int(time.time()*1000)}",
+                    task_id=ctx.task_id,
+                    phase="S",
+                    event_type="spec_bind",
+                    payload=binding,
+                )
+            )
+        return binding
 
     def _stage_plan(self, ctx: PipelineContextProtocol, tracer: Any) -> None:
         with tracer.phase_span('P', task_id=ctx.task_id) as p_span:

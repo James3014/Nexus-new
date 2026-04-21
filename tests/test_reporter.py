@@ -45,5 +45,11 @@ class TestReporter(unittest.TestCase):
             self.assertEqual(entry["flashjudge_score"], 0.8)
             self.assertIn("timestamp", entry)
 
+    def test_non_pathlike_run_dir_is_rejected(self):
+        mock_run_dir = MagicMock()
+        reporter = Reporter(project_root=str(self.project_root), run_dir=mock_run_dir)
+        self.assertIsNone(reporter.run_dir)
+        self.assertEqual(reporter.tracelog_path, self.project_root / "tracelog.jsonl")
+
 if __name__ == "__main__":
     unittest.main()

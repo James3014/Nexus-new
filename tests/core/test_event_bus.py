@@ -63,3 +63,12 @@ def test_event_bus_configure_load(tmp_path):
     assert NexusEventBus._signal_queue[0]["signal_type"] == "boot"
     # 載入後應清空
     assert inbox.read_text() == ""
+
+
+def test_event_bus_legacy_signal_queue_assignment_still_works(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus._signal_queue = []  # legacy direct reset
+    NexusEventBus.inject_signal("STOP", {"reason": "legacy"})
+    drained = NexusEventBus.drain_signals("STOP")
+    assert len(drained) == 1
+    assert drained[0]["payload"]["reason"] == "legacy"

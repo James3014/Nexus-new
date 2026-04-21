@@ -6,7 +6,7 @@ import time
 import uuid
 
 from nexus.events.log_store import JsonlEventLogStore
-from nexus.events.signal_ingress import SignalIngress
+from nexus.events.signal_queue_service import SignalQueueService
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class NexusEventBus:
     _subs_lock = threading.Lock()
     _global_seq = 0
     _log_store = JsonlEventLogStore()
-    _signal_ingress = SignalIngress()
+    _signal_queue_svc = SignalQueueService()
 
     @classmethod
     def set_remote_broadcaster(cls, broadcaster: Callable[[str, Dict[str, Any]], None]) -> None:
@@ -34,7 +34,13 @@ class NexusEventBus:
         log_dir, event_log_path = cls._log_store.configure(project_root)
         cls._event_log_path = event_log_path
         signal_file = log_dir / "signal_inbox.jsonl"
-        cls._signal_queue = cls._signal_ingress.load_from_inbox(signal_file)
+        cls._signal_queue = cls._signal_queue_svc.load_from_inbox(signal_file)
+
+    @classmethod
+    def _sync_signal_queue_from_legacy(cls) -> None:
+        """Keep legacy direct writes to _signal_queue compatible with service state."""
+        if cls._signal_queue is not cls._signal_queue_svc.queue:
+            cls._signal_queue = cls._signal_queue_svc.reset(cls._signal_queue)
 
     @classmethod
     def subscribe(cls, event_type: str, handler: Callable[[Dict[str, Any]], None]) -> None:
@@ -83,14 +89,16 @@ class NexusEventBus:
     @classmethod
     def inject_signal(cls, signal_type: str, payload: Dict[str, Any]) -> None:
         """外部注入信號（由 bot/人工/Pilot Friend 呼叫）"""
-        cls._signal_queue = cls._signal_ingress.inject(cls._signal_queue, signal_type, payload)
+        cls._sync_signal_queue_from_legacy()
+        cls._signal_queue = cls._signal_queue_svc.inject(signal_type, payload)
         cls.publish("external_signal_injected", {"signal_type": signal_type})
 
     @classmethod
     def drain_signals(cls, signal_type: str = "") -> List[Dict[str, Any]]:
         """消費信號佇列（Pipeline 在每個 phase 開頭輪詢）"""
-        drained, remaining = cls._signal_ingress.drain(cls._signal_queue, signal_type)
-        cls._signal_queue = remaining
+        cls._sync_signal_queue_from_legacy()
+        drained = cls._signal_queue_svc.drain(signal_type)
+        cls._signal_queue = cls._signal_queue_svc.queue
         return drained
 
     @classmethod

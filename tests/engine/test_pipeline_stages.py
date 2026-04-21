@@ -87,3 +87,21 @@ def test_stage_diagnose(mock_ctx, mock_tracer):
     assert mock_ctx.state.current_phase == "D"
     assert mock_ctx.pack["research_pack"] == mock_ctx.research_pack
     assert pipeline.engine._add_step_to_history.called
+
+
+def test_stage_spec_bind_enables_direct_mode_and_binds_scope(mock_ctx):
+    mock_ctx.task_desc = """
+    根因: mock drift
+    修法:
+    - nexus/engine/pipeline_stages.py:77
+    1 uv run pytest tests/engine/test_pipeline_stages.py::test_stage_plan -q
+    """
+    pipeline = MockPipeline()
+    result = pipeline._stage_spec_bind(mock_ctx)
+
+    assert result["enabled"] is True
+    assert mock_ctx.state.metadata["direct_mode"] is True
+    assert "nexus/engine/pipeline_stages.py" in mock_ctx.state.metadata["target_files"]
+    assert mock_ctx.state.metadata["verify_commands"] == [
+        "uv run pytest tests/engine/test_pipeline_stages.py::test_stage_plan -q"
+    ]

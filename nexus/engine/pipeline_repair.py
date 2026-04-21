@@ -75,28 +75,7 @@ class PipelineRepairMixin:
             
             # === NEW: T11 產生 Evidence Bundle 給 Verifier ===
             try:
-                import json
-                evidence_path = self.engine.project_root / ".nexus" / "reports" / "hallucination_evidence.json"
-                evidence_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                code_artifacts = []
-                diff_cmd = subprocess.run(["git", "diff", "--name-only"], cwd=self.engine.project_root, capture_output=True, text=True)
-                if diff_cmd.returncode == 0 and diff_cmd.stdout:
-                    code_artifacts = [{"file_path": p, "modification_type": "modified"} for p in diff_cmd.stdout.strip().split("\n") if p]
-                
-                test_artifacts = []
-                for pregate_res in ctx.state.metadata.get("cli_pregate_results", []):
-                    test_artifacts.append({
-                        "command": pregate_res.get("cmd", ""),
-                        "exit_code": pregate_res.get("exit_code", -1),
-                        "stdout_tail": pregate_res.get("stdout_tail", "")
-                    })
-                
-                bundle = {
-                    "code_artifacts": code_artifacts,
-                    "test_artifacts": test_artifacts
-                }
-                evidence_path.write_text(json.dumps({"evidence_bundle": bundle}, indent=2))
+                self._write_hallucination_evidence_bundle(ctx)
             except Exception as e:
                 logger.warning("evidence_bundle_generation_failed: %s", e)
 
@@ -173,6 +152,59 @@ class PipelineRepairMixin:
             "current_decision_id": current_decision_id,
             "current_skill_id": current_skill_id
         }
+
+    def _collect_code_artifacts_from_git_diff(self) -> List[str]:
+        project_root = Path(getattr(self.engine, "project_root", Path.cwd()))
+        diff_cmd = subprocess.run(
+            ["git", "diff", "--name-only"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+        )
+        if diff_cmd.returncode != 0 or not diff_cmd.stdout:
+            return []
+        return [line.strip() for line in diff_cmd.stdout.splitlines() if line.strip()]
+
+    @staticmethod
+    def _build_test_artifacts_from_pregate_results(pregate_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for pregate_res in pregate_results:
+            out.append(
+                {
+                    "command": pregate_res.get("cmd", ""),
+                    "exit_code": pregate_res.get("exit_code", -1),
+                    "stdout_tail": pregate_res.get("stdout_tail", ""),
+                }
+            )
+        return out
+
+    @staticmethod
+    def _build_command_artifacts_from_pregate_results(pregate_results: List[Dict[str, Any]]) -> List[str]:
+        return [
+            f"{pregate_res.get('cmd', '')} -> rc={pregate_res.get('exit_code', -1)}"
+            for pregate_res in pregate_results
+        ]
+
+    def _build_hallucination_evidence_bundle(self, ctx: PipelineContextProtocol) -> Dict[str, Any]:
+        pregate_results = ctx.state.metadata.get("cli_pregate_results", [])
+        if not isinstance(pregate_results, list):
+            pregate_results = []
+
+        return {
+            "code_artifacts": self._collect_code_artifacts_from_git_diff(),
+            "test_artifacts": self._build_test_artifacts_from_pregate_results(pregate_results),
+            "command_artifacts": self._build_command_artifacts_from_pregate_results(pregate_results),
+        }
+
+    def _write_hallucination_evidence_bundle(self, ctx: PipelineContextProtocol) -> Path:
+        import json
+
+        project_root = Path(getattr(self.engine, "project_root", Path.cwd()))
+        evidence_path = project_root / ".nexus" / "reports" / "hallucination_evidence.json"
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"evidence_bundle": self._build_hallucination_evidence_bundle(ctx)}
+        evidence_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return evidence_path
 
     def _map_repair_metadata(self, ctx: PipelineContextProtocol, result_object: dict) -> None:
         """Maps result object fields to state metadata for persistence."""

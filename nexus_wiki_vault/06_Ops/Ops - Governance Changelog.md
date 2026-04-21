@@ -68,6 +68,7 @@ version_scope: '[v17.1, v22, v23]'
 | 2026-04-15 | **Learn Mode Benchmark Candidate Writeback & Refresh Planning** | `nexus/research/learn_mode.py`, `scripts/engine/nexus_cli.py`, `tests/test_cli_learn_mode.py` | Low | Git revert | Codex |
 | 2026-04-21 | **Report Claims Domain Decoupling (Fail-Closed)** | `nexus/delivery/report_claims.py`, `scripts/ops/verify_report_claims.py` | Medium | Git revert | Codex |
 | 2026-04-21 | **TDD Refactor: Delivery Evidence Parsing + Evidence Writer Modularization + RunDir Hygiene** | `scripts/ops/ci_gate.py`, `nexus/engine/pipeline_repair.py`, `nexus/services/reporter.py`, `tests/ops/test_ci_gate_delivery_tracked.py`, `tests/engine/test_pipeline_repair.py`, `tests/test_reporter.py` | Medium | Git revert | Codex |
+| 2026-04-21 | **Engine Decomposition Wave: Routing/Repair/Event Queue Service Split** | `nexus/engine/coordinator.py`, `nexus/engine/*_service.py`, `nexus/events/signal_queue_service.py`, `nexus/research/learn/*_service.py`, `tests/engine/`, `tests/core/test_signal_queue_service.py` | Medium | Git revert | Codex |
 
 ### 🤖 Auto-Synthesized Governance Log
 - **Target Modules**: scripts/ops/ci_gate.py

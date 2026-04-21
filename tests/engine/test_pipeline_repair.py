@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
+import json
 from nexus.engine.pipeline_repair import PipelineRepairMixin, AuditEvalContext
 from nexus.core.state_contracts import NexusState
 
@@ -92,3 +93,49 @@ def test_repair_audit_loop_success(mock_ctx, mock_tracer):
     
     assert success is True
     assert pipeline._execute_single_repair.call_count == 1
+
+
+def test_build_hallucination_evidence_bundle_collects_paths_and_commands(tmp_path, mock_ctx):
+    pipeline = MockPipeline()
+    pipeline.engine.project_root = tmp_path
+    mock_ctx.state.metadata["cli_pregate_results"] = [
+        {"cmd": "uv run pytest -q tests/a.py", "exit_code": 0, "stdout_tail": "ok"},
+        {"cmd": "uv run pytest -q tests/b.py", "exit_code": 1, "stdout_tail": "fail"},
+    ]
+
+    class MockRun:
+        returncode = 0
+        stdout = "nexus/engine/pipeline_repair.py\nnexus/core/state_contracts.py\n"
+
+    with patch("nexus.engine.pipeline_repair.subprocess.run", return_value=MockRun()):
+        bundle = pipeline._build_hallucination_evidence_bundle(mock_ctx)
+
+    assert bundle["code_artifacts"] == [
+        "nexus/engine/pipeline_repair.py",
+        "nexus/core/state_contracts.py",
+    ]
+    assert len(bundle["test_artifacts"]) == 2
+    assert bundle["command_artifacts"] == [
+        "uv run pytest -q tests/a.py -> rc=0",
+        "uv run pytest -q tests/b.py -> rc=1",
+    ]
+
+
+def test_write_hallucination_evidence_bundle_persists_expected_shape(tmp_path, mock_ctx):
+    pipeline = MockPipeline()
+    pipeline.engine.project_root = tmp_path
+    mock_ctx.state.metadata["cli_pregate_results"] = [
+        {"cmd": "uv run pytest -q tests/a.py", "exit_code": 0, "stdout_tail": "ok"},
+    ]
+
+    class MockRun:
+        returncode = 0
+        stdout = "nexus/engine/pipeline_repair.py\n"
+
+    with patch("nexus.engine.pipeline_repair.subprocess.run", return_value=MockRun()):
+        evidence_path = pipeline._write_hallucination_evidence_bundle(mock_ctx)
+
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert "evidence_bundle" in payload
+    assert payload["evidence_bundle"]["code_artifacts"] == ["nexus/engine/pipeline_repair.py"]
+    assert payload["evidence_bundle"]["command_artifacts"] == ["uv run pytest -q tests/a.py -> rc=0"]

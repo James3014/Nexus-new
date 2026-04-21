@@ -7,6 +7,12 @@ class LearnContextProtocol(Protocol):
     project_root: Path
     knowledge_dir: Path
     claims_path: Path
+    sources_path: Path
+    benchmark_candidates_path: Path
+    benchmark_bank_path: Path
+    reports_dir: Path
+    phase_writeback_path: Path
+    phase_slo_summary_path: Path
     registry_path: Path
     bench_path: Path
     history_path: Path

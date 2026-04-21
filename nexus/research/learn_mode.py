@@ -22,6 +22,11 @@ from .learn.claim_service import ClaimService
 from .learn.converge_service import ConvergeService
 from .learn.ask_service import AskService
 from .learn.phase_slo_service import PhaseSLOService
+from .learn.report_service import ReportService
+from .learn.phase_bridge_service import PhaseBridgeService
+from .learn.benchmark_service import BenchmarkService
+from .learn.source_registry_service import SourceRegistryService
+from .learn.phase_slo_summary_service import PhaseSLOSummaryService
 
 
 
@@ -73,6 +78,11 @@ class LearnModeService:
         self._converge_svc = ConvergeService(self)
         self._ask_svc = AskService(self)
         self._slo_svc = PhaseSLOService(self)
+        self._report_svc = ReportService(self)
+        self._phase_bridge_svc = PhaseBridgeService(self)
+        self._benchmark_svc = BenchmarkService(self)
+        self._source_registry_svc = SourceRegistryService(self)
+        self._phase_slo_summary_svc = PhaseSLOSummaryService(self)
 
 
     PHASES: tuple[str, ...] = ("P", "X", "D", "R", "A", "C")
@@ -457,74 +467,17 @@ class LearnModeService:
             f.write(json.dumps(closure, ensure_ascii=False) + "\n")
 
     def _decide_learn_phase_route(self, *, phase: str, topic: str, metrics: dict[str, Any]) -> dict[str, Any]:
-        phase = str(phase or "").upper()
-        coverage = float(metrics.get("coverage", 0.0) or 0.0)
-        pass_rate = float(metrics.get("self_question_pass_rate", metrics.get("pass_rate", 0.0)) or 0.0)
-        citation_valid_ratio = float(metrics.get("citation_valid_ratio", 0.0) or 0.0)
-        stale_claims_count = int(metrics.get("stale_claims_count", 0) or 0)
-        conflict_count = int(metrics.get("conflict_count", 0) or 0)
-
-        risk_score = 0.0
-        if coverage < 0.6:
-            risk_score += 0.35
-        if pass_rate < 0.6:
-            risk_score += 0.35
-        if citation_valid_ratio < 0.95:
-            risk_score += 0.2
-        if stale_claims_count > 0:
-            risk_score += 0.05
-        if conflict_count > 0:
-            risk_score += 0.15
-        risk_score = round(min(1.0, risk_score), 4)
-
-        if phase in {"P", "D"}:
-            mode = "light"
-            reason = "plan_diagnose_context_sync"
-        elif phase == "X":
-            mode = "research" if risk_score >= 0.5 else "light"
-            reason = "research_needed" if mode == "research" else "research_optional"
-        elif phase == "R":
-            mode = "research" if risk_score >= 0.45 else "light"
-            reason = "repair_needs_evidence" if mode == "research" else "repair_low_risk"
-        elif phase == "A":
-            mode = "strict"
-            reason = "audit_requires_citation_integrity"
-        elif phase == "C":
-            mode = "strict"
-            reason = "crystallize_requires_writeback"
-        else:
-            mode = "off"
-            reason = "unknown_phase"
-
-        return {
-            "phase": phase,
-            "topic": topic,
-            "mode": mode,
-            "risk_score": risk_score,
-            "reason": reason,
-            "metrics_snapshot": {
-                "coverage": coverage,
-                "self_question_pass_rate": pass_rate,
-                "citation_valid_ratio": citation_valid_ratio,
-                "stale_claims_count": stale_claims_count,
-                "conflict_count": conflict_count,
-            },
-        }
+        return self._phase_bridge_svc._decide_learn_phase_route(
+            phase=phase,
+            topic=topic,
+            metrics=metrics,
+        )
 
     def _phase_writeback_policy(self, *, phase: str, route: dict[str, Any]) -> dict[str, Any]:
-        phase = str(phase or "").upper()
-        mode = str(route.get("mode", "off"))
-        required = phase in {"R", "A", "C"} or mode in {"research", "strict"}
-        return {
-            "required": required,
-            "policy": "required" if required else "optional",
-            "reason": f"phase={phase},mode={mode}",
-        }
+        return self._phase_bridge_svc._phase_writeback_policy(phase=phase, route=route)
 
     def _append_phase_writeback(self, payload: dict[str, Any]) -> None:
-        self.phase_writeback_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.phase_writeback_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        self._phase_bridge_svc._append_phase_writeback(payload)
 
     def sync_phase_learning_closure(
         self,
@@ -533,97 +486,23 @@ class LearnModeService:
         metrics: dict[str, Any],
         phase_status: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Bridge Learn lane into six-phase routing + phase-end writeback policy."""
-        now = datetime.now(timezone.utc).isoformat()
-        written = 0
-        routes: dict[str, Any] = {}
-        statuses = {k.upper(): str(v).upper() for k, v in (phase_status or {}).items()}
-
-        for phase in self.PHASES:
-            route = self._decide_learn_phase_route(phase=phase, topic=topic, metrics=metrics)
-            policy = self._phase_writeback_policy(phase=phase, route=route)
-            status = statuses.get(phase, "SUCCESS")
-            payload = {
-                "timestamp": now,
-                "topic": topic,
-                "phase": phase,
-                "phase_status": status,
-                "route": route,
-                "writeback_policy": policy,
-                "writeback_done": True,
-            }
-            self._append_phase_writeback(payload)
-            routes[phase] = route
-            written += 1
-
-        summary = self.build_phase_slo_report(window=300)
-        return {
-            "status": "SUCCESS",
-            "topic": topic,
-            "entries_written": written,
-            "phase_routes": routes,
-            "phase_slo_summary": summary,
-        }
+        return self._phase_bridge_svc.sync_phase_learning_closure(
+            topic=topic,
+            metrics=metrics,
+            phase_status=phase_status,
+        )
 
     def build_phase_slo_report(self, *, window: int = 300) -> dict[str, Any]:
         return self._slo_svc.build_phase_slo_report(window=window)
 
     def read_phase_slo_summary(self) -> dict[str, Any]:
-        if not self.phase_slo_summary_path.exists():
-            return {
-                "status": "UNAVAILABLE",
-                "phase_slo_pass": False,
-                "global": {
-                    "required_done_ratio": 0.0,
-                    "success_ratio": 0.0,
-                },
-                "phases": {},
-                "reason": "phase_slo_summary_missing",
-            }
-        try:
-            data = json.loads(self.phase_slo_summary_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {
-                "status": "UNAVAILABLE",
-                "phase_slo_pass": False,
-                "global": {
-                    "required_done_ratio": 0.0,
-                    "success_ratio": 0.0,
-                },
-                "phases": {},
-                "reason": "phase_slo_summary_parse_error",
-            }
-        if not isinstance(data, dict):
-            return {
-                "status": "UNAVAILABLE",
-                "phase_slo_pass": False,
-                "global": {
-                    "required_done_ratio": 0.0,
-                    "success_ratio": 0.0,
-                },
-                "phases": {},
-                "reason": "phase_slo_summary_invalid_type",
-            }
-        return data
+        return self._phase_slo_summary_svc.read_phase_slo_summary()
 
     def _load_source_registry(self) -> list[dict[str, Any]]:
-        if not self.sources_path.exists():
-            return []
-        rows: list[dict[str, Any]] = []
-        for line in self.sources_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        return rows
+        return self._source_registry_svc.load_source_registry()
 
     def _write_source_registry(self, rows: list[dict[str, Any]]) -> None:
-        self.sources_path.parent.mkdir(parents=True, exist_ok=True)
-        content = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
-        self.sources_path.write_text((content + "\n") if content else "", encoding="utf-8")
+        self._source_registry_svc.write_source_registry(rows)
 
     def _append_benchmark_candidate(
         self,
@@ -636,39 +515,22 @@ class LearnModeService:
         topic_pack_selected: str = "",
         conflicts: list[dict[str, Any]] | None = None,
     ) -> None:
-        payload = {
-            "topic": topic,
-            "question": question,
-            "actual_status": actual_status,
-            "reason": reason,
-            "token_coverage": round(float(token_coverage or 0.0), 4),
-            "topic_pack_selected": topic_pack_selected,
-            "conflicts": conflicts or [],
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        self.benchmark_candidates_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.benchmark_candidates_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        self._benchmark_svc.append_benchmark_candidate(
+            topic=topic,
+            question=question,
+            actual_status=actual_status,
+            reason=reason,
+            token_coverage=token_coverage,
+            topic_pack_selected=topic_pack_selected,
+            conflicts=conflicts,
+        )
 
     def _load_benchmark_candidates(self) -> list[dict[str, Any]]:
-        if not self.benchmark_candidates_path.exists():
-            return []
-        rows: list[dict[str, Any]] = []
-        for line in self.benchmark_candidates_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-                if isinstance(row, dict):
-                    rows.append(row)
-            except json.JSONDecodeError:
-                continue
-        return rows
+        return self._benchmark_svc.load_benchmark_candidates()
 
     @staticmethod
     def _normalize_question(question: str) -> str:
-        return re.sub(r"\s+", " ", question.strip().lower())
+        return BenchmarkService.normalize_question(question)
 
     def curate_benchmark_bank(
         self,
@@ -677,117 +539,19 @@ class LearnModeService:
         max_questions: int = 40,
         min_occurrences: int = 1,
     ) -> dict[str, Any]:
-        candidates = self._load_benchmark_candidates()
-        if topic:
-            candidates = [c for c in candidates if str(c.get("topic", "")) == topic]
-
-        buckets: dict[str, dict[str, Any]] = {}
-        for row in candidates:
-            question = str(row.get("question", "")).strip()
-            if not question:
-                continue
-            key = self._normalize_question(question)
-            status = str(row.get("actual_status", "UNKNOWN")).upper()
-            token_coverage = float(row.get("token_coverage", 0.0) or 0.0)
-            entry = buckets.setdefault(
-                key,
-                {
-                    "question": question,
-                    "topics": {},
-                    "status_counts": {},
-                    "reasons": {},
-                    "count": 0,
-                    "token_coverage_sum": 0.0,
-                    "latest_at": "",
-                    "topic_pack_selected": str(row.get("topic_pack_selected", "")),
-                },
-            )
-            t = str(row.get("topic", ""))
-            entry["topics"][t] = entry["topics"].get(t, 0) + 1
-            entry["status_counts"][status] = entry["status_counts"].get(status, 0) + 1
-            reason = str(row.get("reason", ""))
-            if reason:
-                entry["reasons"][reason] = entry["reasons"].get(reason, 0) + 1
-            entry["count"] += 1
-            entry["token_coverage_sum"] += token_coverage
-            created_at = str(row.get("created_at", ""))
-            if created_at and created_at > entry["latest_at"]:
-                entry["latest_at"] = created_at
-            if not entry["question"] or len(question) < len(entry["question"]):
-                entry["question"] = question
-
-        scored: list[dict[str, Any]] = []
-        for entry in buckets.values():
-            if int(entry["count"]) < max(1, int(min_occurrences)):
-                continue
-            status_counts = entry["status_counts"]
-            expected_status = max(status_counts.items(), key=lambda kv: kv[1])[0] if status_counts else "UNKNOWN"
-            avg_cov = entry["token_coverage_sum"] / max(1, int(entry["count"]))
-            diversity_bonus = 1.0 if len(status_counts) > 1 else 0.0
-            hard_case_bonus = 0.8 if expected_status in {"UNKNOWN", "CONFLICT"} else 0.2
-            coverage_band_bonus = 0.6 if 0.2 <= avg_cov <= 0.85 else 0.1
-            score = float(entry["count"]) * 1.5 + diversity_bonus + hard_case_bonus + coverage_band_bonus
-            scored.append(
-                {
-                    "question": entry["question"],
-                    "expected_status": expected_status,
-                    "score": round(score, 4),
-                    "count": int(entry["count"]),
-                    "avg_token_coverage": round(avg_cov, 4),
-                    "status_counts": status_counts,
-                    "reasons": entry["reasons"],
-                    "topics": entry["topics"],
-                    "latest_at": entry["latest_at"],
-                    "topic_pack_selected": entry.get("topic_pack_selected", ""),
-                }
-            )
-
-        scored.sort(key=lambda item: (item["score"], item["count"]), reverse=True)
-        selected = scored[: max(1, int(max_questions))]
-        manifest_questions = []
-        for item in selected:
-            manifest_questions.append(
-                {
-                    "question": item["question"],
-                    "expected_status": item["expected_status"],
-                    "expected_keywords": [],
-                    "difficulty": "unknown" if item["expected_status"] == "UNKNOWN" else ("conflict" if item["expected_status"] == "CONFLICT" else "deep"),
-                    "category": "auto_curated",
-                    "evidence_score": item["score"],
-                }
-            )
-
-        bank_payload = {
-            "status": "SUCCESS",
-            "topic": topic,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "candidate_count": len(candidates),
-            "bucket_count": len(buckets),
-            "selected_count": len(selected),
-            "questions": manifest_questions,
-            "ranked_pool": selected,
-            "source_file": str(self.benchmark_candidates_path),
-        }
-        self.benchmark_bank_path.parent.mkdir(parents=True, exist_ok=True)
-        self.benchmark_bank_path.write_text(json.dumps(bank_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        return bank_payload
+        return self._benchmark_svc.curate_benchmark_bank(
+            topic=topic,
+            max_questions=max_questions,
+            min_occurrences=min_occurrences,
+        )
 
     def _sync_registry_after_ingest(self, *, source: str, source_file: str | None, topic: str, claims_count: int) -> None:
-        rows = self._load_source_registry()
-        now = datetime.now(timezone.utc).isoformat()
-        changed = False
-        for row in rows:
-            if (
-                str(row.get("topic", "")) == str(topic or row.get("topic", ""))
-                and str(row.get("source", "")) == str(source)
-                and str(row.get("source_file", "")) == str(source_file or "")
-            ):
-                row["last_ingested_at"] = now
-                row["last_claim_count"] = int(claims_count)
-                row["updated_at"] = now
-                changed = True
-        if changed:
-            self._write_source_registry(rows)
+        self._source_registry_svc.sync_registry_after_ingest(
+            source=source,
+            source_file=source_file,
+            topic=topic,
+            claims_count=claims_count,
+        )
 
     def register_source(
         self,
@@ -798,50 +562,16 @@ class LearnModeService:
         priority: str = "medium",
         source_file: str | None = None,
     ) -> dict[str, Any]:
-        rows = self._load_source_registry()
-        key = f"{topic}|{source}|{source_file or ''}"
-        now = datetime.now(timezone.utc).isoformat()
-        refresh_after_days = max(1, int(refresh_after_days))
-        priority = str(priority or "medium").lower()
-        updated = False
-        for row in rows:
-            row_key = f"{row.get('topic','')}|{row.get('source','')}|{row.get('source_file','')}"
-            if row_key == key:
-                row.update(
-                    {
-                        "topic": topic,
-                        "source": source,
-                        "source_file": source_file or "",
-                        "refresh_after_days": refresh_after_days,
-                        "priority": priority,
-                        "updated_at": now,
-                    }
-                )
-                updated = True
-                break
-        if not updated:
-            rows.append(
-                {
-                    "topic": topic,
-                    "source": source,
-                    "source_file": source_file or "",
-                    "refresh_after_days": refresh_after_days,
-                    "priority": priority,
-                    "last_ingested_at": "",
-                    "last_refreshed_at": "",
-                    "last_claim_count": 0,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            )
-        self._write_source_registry(rows)
-        return {"status": "SUCCESS", "topic": topic, "source": source, "priority": priority, "refresh_after_days": refresh_after_days}
+        return self._source_registry_svc.register_source(
+            topic=topic,
+            source=source,
+            refresh_after_days=refresh_after_days,
+            priority=priority,
+            source_file=source_file,
+        )
 
     def _source_due(self, row: dict[str, Any]) -> bool:
-        last = str(row.get("last_refreshed_at") or row.get("last_ingested_at") or "")
-        if not last:
-            return True
-        return self._days_since(last) >= float(row.get("refresh_after_days", 14) or 14)
+        return self._source_registry_svc.source_due(row)
 
     def refresh_sources(
         self,
@@ -851,60 +581,12 @@ class LearnModeService:
         pass_threshold: float = 0.6,
         question_count: int = 5,
     ) -> dict[str, Any]:
-        rows = self._load_source_registry()
-        selected = [r for r in rows if (not topic or str(r.get("topic", "")) == topic)]
-        if due_only:
-            selected = [r for r in selected if self._source_due(r)]
-        refreshed: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
-        now = datetime.now(timezone.utc).isoformat()
-        for row in rows:
-            if row not in selected:
-                skipped.append(
-                    {
-                        "topic": row.get("topic", ""),
-                        "source": row.get("source", ""),
-                        "reason": "not_selected" if topic and str(row.get("topic", "")) != topic else ("not_due" if due_only else "not_requested"),
-                    }
-                )
-                continue
-            ingest_report = self.ingest(
-                source=str(row.get("source", "")),
-                source_file=(str(row.get("source_file", "")) or None),
-                topic=str(row.get("topic", "")),
-            )
-            converge_report = self.converge(
-                topic=str(row.get("topic", "")),
-                max_rounds=2,
-                pass_threshold=pass_threshold,
-                question_count=question_count,
-                auto_research=False,
-            )
-            row["last_ingested_at"] = now
-            row["last_refreshed_at"] = now
-            row["last_claim_count"] = int(ingest_report.get("claims_count", 0))
-            row["updated_at"] = now
-            refreshed.append(
-                {
-                    "topic": row.get("topic", ""),
-                    "source": row.get("source", ""),
-                    "claims_count": ingest_report.get("claims_count", 0),
-                    "converged": converge_report.get("converged", False),
-                    "self_question_pass_rate": converge_report.get("self_question_pass_rate", 0.0),
-                }
-            )
-        self._write_source_registry(rows)
-        return {
-            "status": "SUCCESS",
-            "due_only": due_only,
-            "topic": topic,
-            "refreshed_count": len(refreshed),
-            "skipped_count": len(skipped),
-            "refreshed": refreshed,
-            "skipped": skipped[:20],
-            "registry_path": str(self.sources_path),
-            "timestamp": now,
-        }
+        return self._source_registry_svc.refresh_sources(
+            topic=topic,
+            due_only=due_only,
+            pass_threshold=pass_threshold,
+            question_count=question_count,
+        )
 
     def build_refresh_plan(
         self,
@@ -912,49 +594,10 @@ class LearnModeService:
         topic: str = "",
         due_within_days: int = 0,
     ) -> dict[str, Any]:
-        rows = self._load_source_registry()
-        if topic:
-            rows = [row for row in rows if str(row.get("topic", "")) == topic]
-
-        due_items: list[dict[str, Any]] = []
-        not_due_items: list[dict[str, Any]] = []
-        threshold = max(0, int(due_within_days))
-        for row in rows:
-            last = str(row.get("last_refreshed_at") or row.get("last_ingested_at") or "")
-            refresh_after_days = int(row.get("refresh_after_days", 14) or 14)
-            days_since = self._days_since(last) if last else float(refresh_after_days)
-            days_until_due = max(0.0, float(refresh_after_days) - float(days_since))
-            item = {
-                "topic": row.get("topic", ""),
-                "source": row.get("source", ""),
-                "source_file": row.get("source_file", ""),
-                "priority": row.get("priority", "medium"),
-                "refresh_after_days": refresh_after_days,
-                "last_ingested_at": row.get("last_ingested_at", ""),
-                "last_refreshed_at": row.get("last_refreshed_at", ""),
-                "last_claim_count": int(row.get("last_claim_count", 0) or 0),
-                "days_since_last_refresh": round(float(days_since), 3),
-                "days_until_due": round(float(days_until_due), 3),
-                "due": bool(days_until_due <= threshold),
-            }
-            if item["due"]:
-                due_items.append(item)
-            else:
-                not_due_items.append(item)
-
-        return {
-            "status": "SUCCESS",
-            "topic": topic,
-            "due_within_days": threshold,
-            "sources_total": len(rows),
-            "due_count": len(due_items),
-            "not_due_count": len(not_due_items),
-            "due": due_items,
-            "not_due": not_due_items,
-            "registry_path": str(self.sources_path),
-            "benchmark_candidates_path": str(self.benchmark_candidates_path),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+        return self._source_registry_svc.build_refresh_plan(
+            topic=topic,
+            due_within_days=due_within_days,
+        )
 
     def _enrich_claim(self, claim: dict[str, Any]) -> dict[str, Any]:
         out = dict(claim)
@@ -1543,55 +1186,8 @@ class LearnModeService:
         question_count: int = 5,
         pass_threshold: float = 0.6,
     ) -> dict[str, Any]:
-        claims = self.load_claims()
-        sources = {c.get("source_url", "") for c in claims if c.get("source_url")}
-        valid_claims = [c for c in claims if self._is_valid_citation(c)]
-        unresolved_questions: list[str] = []
-        answered_questions: list[dict[str, Any]] = []
-        question_set: list[dict[str, Any]] = []
-        coverage = 0.0 if not claims else len(valid_claims) / len(claims)
-        pass_rate = 1.0 if claims else 0.0
-        topic_pack_counts: dict[str, int] = {}
-        high_strength_claims = 0
-        stale_claims_count = 0
-        for claim in valid_claims:
-            pack = str(claim.get("topic_pack", "general"))
-            topic_pack_counts[pack] = topic_pack_counts.get(pack, 0) + 1
-            if str(claim.get("evidence_strength", "")).lower() == "high":
-                high_strength_claims += 1
-            if float(claim.get("freshness_days", 0.0)) > 90:
-                stale_claims_count += 1
-        conflict_candidates = self._find_conflicts(valid_claims[:50])
-        if topic:
-            question_set = self._build_question_set(topic, question_count=question_count)
-            answered_questions, unresolved_questions = self._answer_questions(question_set, valid_claims)
-            pass_rate = (
-                0.0 if not question_set else len(answered_questions) / len(question_set)
-            )
-            if pass_rate < pass_threshold and not unresolved_questions:
-                unresolved_questions = [
-                    f"Need more cited claims to reach pass threshold {pass_threshold}"
-                ]
-
-        report = {
-            "status": "SUCCESS",
-            "topic": topic,
-            "sources_count": len(sources),
-            "claims_count": len(claims),
-            "claims_with_valid_citation": len(valid_claims),
-            "citation_valid_ratio": round(0.0 if not claims else len(valid_claims) / len(claims), 4),
-            "high_strength_claims": high_strength_claims,
-            "stale_claims_count": stale_claims_count,
-            "conflict_candidate_count": len(conflict_candidates),
-            "topic_packs": topic_pack_counts,
-            "top_sources": sorted(sources)[:5],
-            "coverage": round(coverage, 4),
-            "self_question_pass_rate": round(pass_rate, 4),
-            "question_set": question_set,
-            "answered_questions": answered_questions,
-            "unresolved_questions": unresolved_questions,
-            "converged": pass_rate >= pass_threshold,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        report["phase_slo_summary"] = self.build_phase_slo_report(window=300)
-        return report
+        return self._report_svc.build_report(
+            topic=topic,
+            question_count=question_count,
+            pass_threshold=pass_threshold,
+        )

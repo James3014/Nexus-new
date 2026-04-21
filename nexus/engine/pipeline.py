@@ -327,6 +327,14 @@ class NexusPipeline(
         ctx.tracer = tracer
         
         success = True
+        spec_binding = self._stage_spec_bind(ctx)
+        logger.info(
+            "🧭 [S-Stage] Spec binding enabled=%s reason=%s targets=%d verify_cmds=%d",
+            spec_binding.get("enabled"),
+            spec_binding.get("reason"),
+            spec_binding.get("target_files_count", 0),
+            spec_binding.get("verify_commands_count", 0),
+        )
         
         # 1. 執行線性階段 (P -> X -> D)
         pxd_attempts = 0
@@ -336,7 +344,7 @@ class NexusPipeline(
             pxd_attempts += 1
             pxd_veto = False
             
-            is_direct_mode = ctx.kwargs.get("context", {}).get("direct_mode", False) or ctx.state.metadata.get("direct_mode", False)
+            is_direct_mode = bool(ctx.state.metadata.get("direct_mode", False))
             if is_direct_mode:
                 logger.info("⚡ [Pipeline] Direct Mode active: Bypassing P-X-D formulation phases.")
                 break
