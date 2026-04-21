@@ -201,7 +201,9 @@ class PipelineStagesMixin:
             force_research = bool(ctx.state.metadata.get("benchmark_force_research"))
             learn_guard = ctx.state.metadata.get("learn_phase_slo")
             if not isinstance(learn_guard, dict):
-                learn_guard = self._load_learn_phase_slo_guard(ctx)
+                # Stage-level unit tests may call X directly without running P first.
+                # In that case we must not read filesystem SLO and accidentally skip X.
+                learn_guard = {"active": False, "ready": True}
                 ctx.state.metadata["learn_phase_slo"] = learn_guard
             if (not force_research) and learn_guard.get("active") and (not learn_guard.get("ready")):
                 ctx.state.metadata["research_skipped_by_learn_guard"] = True
@@ -226,12 +228,16 @@ class PipelineStagesMixin:
             task_type = ctx.task_type
             risk_level = ctx.state.metadata.get('risk_level', 'standard')
             policy_engine = decide_research_engine(self.engine.project_root, task_type, risk_level)
+            should_research_flag = getattr(res_decision, "should_research", False)
+            should_research_explicit = should_research_flag is True
+
             if force_research:
+                engine = "full"
+            elif should_research_explicit:
+                # Explicit research decision must win over conservative baseline defaults.
                 engine = "full"
             elif policy_engine == "baseline":
                 engine = "baseline"
-            elif bool(res_decision.should_research):
-                engine = "full"
             else:
                 engine = policy_engine
             

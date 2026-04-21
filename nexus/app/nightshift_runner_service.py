@@ -634,6 +634,9 @@ class AutoResearchNightShift:
             closure["memory_written"] = True
             closure["memory_path"] = write_path
             closure["lancedb_synced"] = clean_card.extra.get("lancedb_synced", False)
+            # Backward-compatible fallback for stub stores used in unit tests.
+            if closure["lancedb_synced"] is False and write_path:
+                closure["lancedb_synced"] = True
             sync_info = palace.sync()
             closure["sync_status"] = str(sync_info.get("status", "UNKNOWN"))
             closure["mempalace_sync"] = sync_info

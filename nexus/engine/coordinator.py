@@ -469,6 +469,9 @@ class NexusEngine:
                 logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
 
             verify_cmds = _auto_detect_verify_commands(self.project_root)
+            skip_pregate_for_isolated_workspace = (
+                not verify_cmds and not (self.project_root / ".git").exists()
+            )
             
             # 進入修復循環 (模擬)
             state.current_phase = "R"
@@ -497,7 +500,11 @@ class NexusEngine:
                 # ----------------------------------------
                 
                 # ⚔️ Layer 4: BattleSwarm Trigger (Real-time Swarm on first failure)
-                if attempt == 2 and hasattr(self, "battle_swarm"):
+                if (
+                    attempt == 2
+                    and hasattr(self, "battle_swarm")
+                    and (self.project_root / ".git").exists()
+                ):
                     self.battle_swarm.default_workers = self.reflex_loop.config.get("battle_workers", 4) if hasattr(self, "reflex_loop") else 4
                     logger.info(f"⚔️ [BattleSwarm] Triggering Layer 4 Parallel Repair with {self.battle_swarm.default_workers} workers...")
                     
@@ -538,6 +545,15 @@ class NexusEngine:
                         passed, gate_results = run_cli_pregate(project_root=self.run_dir, commands=verify_cmds)
                         
                     self.battle_swarm.cleanup(battle_result)
+                elif skip_pregate_for_isolated_workspace:
+                    passed = True
+                    gate_results = [{
+                        "cmd": "_NO_VERIFY_COMMANDS",
+                        "exit_code": 0,
+                        "passed": True,
+                        "pregate_skip": True,
+                        "reason": "isolated_workspace_without_git",
+                    }]
                 else:
                     passed, gate_results = run_cli_pregate(
                         project_root=self.run_dir,

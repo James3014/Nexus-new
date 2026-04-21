@@ -260,6 +260,8 @@ class PipelineRepairMixin:
         ctx.state.current_phase = "A"
         review_status_raw = eval_ctx.review_status_raw
         result_object = eval_ctx.result_object
+        # Keep this flag round-scoped; stale rejections must not poison later passes.
+        ctx.state.metadata.pop("evidence_trust_rejection", None)
 
         a_decision_id = self._register_phase_decision(ctx, "A", "audit-review")
         ctx.state.metadata["last_audit_decision_id"] = a_decision_id
@@ -350,6 +352,8 @@ class PipelineRepairMixin:
                 ctx.state.metadata["evidence_trust_rejection"] = True
             if status == "REJECTED":
                 ctx.state.metadata["evidence_trust_rejection"] = True
+            else:
+                ctx.state.metadata["evidence_trust_rejection"] = False
             if not phantom_reason and audit_success:
                 self._update_meta_counter(ctx, "anti_hallucination_pass_count")
             self._record_repair_outcome_event(
