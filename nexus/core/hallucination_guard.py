@@ -174,25 +174,25 @@ class HallucinationGuard:
         """
         R3: 當回覆含完成宣稱且 evidence 顯示 success_rate < threshold，直接 REJECTED。
         """
+        success, threshold = self._extract_benchmark_metrics()
+        if success is not None and threshold is not None:
+            return self._check_completion_claim_with_unmet_benchmark_threshold()
+
         text = self.response_text.lower()
         completion_keywords = ["completed", "done", "完成", "成功", "passed"]
         has_completion_claim = any(kw in text for kw in completion_keywords)
         if not has_completion_claim:
             return False
 
-        # 解析 Evidence 中的 success_rate
         test_artifacts = self.evidence_bundle.get("test_artifacts", [])
         if not isinstance(test_artifacts, list):
             return False
 
-        threshold = 0.55  # Round-3 門檻
+        threshold = 0.55
         for artifact in test_artifacts:
             if isinstance(artifact, dict) and "aggregates" in artifact:
-                # 🛡️ 治理硬化：嚴格模式下 success_rate 預設 0.0（未提供即視為失敗）
                 _sr_default = 0.0 if os.environ.get("NEXUS_STRICT_HALLUCINATION_DEFAULT") == "1" else 1.0
                 success_rate = artifact["aggregates"].get("success_rate", _sr_default)
-                
-                # 🧪 V25 補丁：若含實體自癒標記或合法 V25 地址結構，則放寬判定
                 if artifact["aggregates"].get("repair_mode") == "V25-ALIGNED" or self._is_v25_address(self.response_text):
                     success_rate = max(float(success_rate), 0.9)
 
@@ -250,23 +250,26 @@ class HallucinationGuard:
             weight = float(metric.get("weight", 0))
             keywords = metric.get("keywords", [])
             word_boundary = bool(metric.get("word_boundary", True))
-            matched = False
+            hits: List[str] = []
+            check_name = metric.get("check")
 
             if isinstance(keywords, list) and keywords:
                 hits = self._match_keywords(response_text, keywords, word_boundary=word_boundary)
-                if hits:
-                    matched = True
-                    self._apply_trigger(rule_id, weight, f"keywords={','.join(hits)}")
 
-            check_name = metric.get("check")
+            # Rules with an explicit check must be governed by that check result,
+            # not by keyword hits alone. This prevents "completed" from leaving a
+            # stale trigger behind when benchmark evidence already satisfies the threshold.
             if isinstance(check_name, str) and check_name:
                 check_fn = getattr(self, f"_check_{check_name}", None)
                 if callable(check_fn) and check_fn():
-                    # Avoid double score when both keywords and check trigger in same rule.
-                    if not matched:
-                        self._apply_trigger(rule_id, weight, f"check={check_name}")
+                    trigger_detail = f"keywords={','.join(hits)}" if hits else f"check={check_name}"
+                    self._apply_trigger(rule_id, weight, trigger_detail)
                     if bool(metric.get("force_rejected", False)):
                         forced_rejected = True
+                continue
+
+            if hits:
+                self._apply_trigger(rule_id, weight, f"keywords={','.join(hits)}")
 
         # Cap score at 10
         if self.score > 10:

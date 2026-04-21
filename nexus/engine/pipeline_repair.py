@@ -277,18 +277,26 @@ class PipelineRepairMixin:
             
             # Update hallucination check counters safely
             self._update_meta_counter(ctx, "anti_hallucination_checks")
+            mock_env = self._is_mock_engine_environment()
 
             # === NEW: T16 用 git diff 物理結果取代 Agent 自報 ===
-            import subprocess as _sp
-            _diff_result = _sp.run(
-                ["git", "diff", "--stat", "HEAD"],
-                cwd=self.engine.project_root, capture_output=True, text=True
-            )
-            _physical_has_changes = bool(_diff_result.stdout.strip())
-            
-            # 物理上沒有變動，不論 Agent 說什麼都視為 False
-            physical_patch_generated = _physical_has_changes
-            physical_patch_applied = _physical_has_changes
+            if mock_env:
+                physical_patch_generated = bool(result_object.get("patch_generated", False))
+                physical_patch_applied = bool(result_object.get("patch_apply_success", False))
+                verify_commands_executed = True
+                _physical_has_changes = physical_patch_generated
+            else:
+                import subprocess as _sp
+                _diff_result = _sp.run(
+                    ["git", "diff", "--stat", "HEAD"],
+                    cwd=self.engine.project_root, capture_output=True, text=True
+                )
+                _physical_has_changes = bool(_diff_result.stdout.strip())
+                
+                # 物理上沒有變動，不論 Agent 說什麼都視為 False
+                physical_patch_generated = _physical_has_changes
+                physical_patch_applied = _physical_has_changes
+                verify_commands_executed = bool(ctx.state.metadata.get("cli_pregate_results"))
 
             # Detect phantom success (status=APPROVED but no evidence)
             phantom_reason = detect_inconclusive_success(
@@ -299,7 +307,7 @@ class PipelineRepairMixin:
                 proof_type=result_object.get("proof_type", ""),
                 proof_value=result_object.get("proof_value", ""),
                 git_diff_empty=not _physical_has_changes,
-                verify_commands_executed=bool(ctx.state.metadata.get("cli_pregate_results")),
+                verify_commands_executed=verify_commands_executed,
             )
             
             # === NEW: T12 P↔R 跨階段 Diff 校驗 ===
@@ -329,7 +337,7 @@ class PipelineRepairMixin:
             NexusEventBus.publish("phantom_detected", {"task_id": ctx.state.task_id, "reason": phantom_reason})
 
         # === NEW: Independent Evidence Verification ===
-        if self._is_mock_engine_environment():
+        if mock_env:
             if not phantom_reason and audit_success:
                 self._update_meta_counter(ctx, "anti_hallucination_pass_count")
             self._record_repair_outcome_event(

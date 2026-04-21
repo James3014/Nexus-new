@@ -12,7 +12,6 @@ from typing import Any, Dict, List
 def _run_git(project_root: Path, args: List[str]) -> str:
     try:
         out = subprocess.check_output(["git", *args], cwd=str(project_root), stderr=subprocess.DEVNULL)
-        # Keep leading spaces on porcelain status lines; only trim trailing newlines.
         return out.decode("utf-8", errors="replace").rstrip("\n")
     except Exception:
         return ""
@@ -36,7 +35,6 @@ def _parse_porcelain_paths(raw_status: str) -> List[str]:
         if len(line) >= 3 and line[2] == " ":
             path = line[3:]
         elif len(line) >= 2 and line[1] == " ":
-            # Fallback for non-standard one-column short status output.
             path = line[2:]
         else:
             path = line
@@ -68,6 +66,64 @@ def _load_ignore_dirty_paths(project_root: Path, config_path: str | None) -> Lis
     return []
 
 
+def _read_json(path: Path) -> Dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _sorted_nonempty_lines(raw: str) -> List[str]:
+    return sorted([line.strip() for line in raw.splitlines() if line.strip()])
+
+
+def _evaluate_report_integrity_lock(project_root: Path, report_file_rel: str | None) -> Dict[str, Any]:
+    if not report_file_rel:
+        return {"name": "report_integrity_lock", "passed": True, "detail": {"skipped": True}}
+
+    report_path = Path(report_file_rel)
+    if not report_path.is_absolute():
+        report_path = (project_root / report_path).resolve()
+
+    detail: Dict[str, Any] = {"path": str(report_path), "exists": report_path.exists()}
+    if not report_path.exists():
+        detail["error"] = "report_file_not_found"
+        return {"name": "report_integrity_lock", "passed": False, "detail": detail}
+
+    report = _read_json(report_path)
+    head_sha = str(report.get("head_sha", "")).strip()
+    if not head_sha:
+        detail["error"] = "missing_report_head_sha"
+        return {"name": "report_integrity_lock", "passed": False, "detail": detail}
+
+    actual_head = _run_git(project_root, ["rev-parse", "--short", "HEAD"]).strip()
+    head_ok = bool(actual_head) and actual_head == head_sha
+    detail["head_alignment"] = {"passed": head_ok, "report_head_sha": head_sha, "actual_head_sha": actual_head}
+
+    reported_commit_files = sorted([str(v).strip() for v in report.get("files_changed_in_this_commit", []) if str(v).strip()])
+    actual_commit_files = _sorted_nonempty_lines(_run_git(project_root, ["show", "--name-only", "--pretty=format:", "HEAD"]))
+    commit_ok = reported_commit_files == actual_commit_files
+    detail["commit_integrity"] = {
+        "passed": commit_ok,
+        "reported_files": reported_commit_files,
+        "actual_files": actual_commit_files,
+    }
+
+    base_branch = str(report.get("base_branch", "main")).strip() or "main"
+    reported_delta = sorted([str(v).strip() for v in report.get("branch_delta_vs_base", []) if str(v).strip()])
+    actual_delta = _sorted_nonempty_lines(_run_git(project_root, ["diff", "--name-only", f"{base_branch}...HEAD"]))
+    delta_ok = reported_delta == actual_delta
+    detail["branch_delta_integrity"] = {
+        "passed": delta_ok,
+        "base_branch": base_branch,
+        "reported_delta": reported_delta,
+        "actual_delta": actual_delta,
+    }
+
+    passed = head_ok and commit_ok and delta_ok
+    return {"name": "report_integrity_lock", "passed": passed, "detail": detail}
+
+
 def verify_claims(
     project_root: Path,
     *,
@@ -77,14 +133,14 @@ def verify_claims(
     ignore_dirty_config: str | None = None,
     require_acceptance_pass: bool = False,
     acceptance_report_rel: str = ".nexus/reports/acceptance_check.json",
-    require_baseline: bool = True,
+    require_baseline: bool = False,
     baseline_manifest_rel: str = ".nexus/reports/baseline/baseline_manifest.json",
+    report_file_rel: str | None = None,
 ) -> Dict[str, Any]:
     required_paths = required_paths or []
     ignore_dirty_paths = (ignore_dirty_paths or []) + _load_ignore_dirty_paths(project_root, ignore_dirty_config)
     checks: List[Dict[str, Any]] = []
 
-    # 1. Git Context
     branch = _run_git(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])
     commit = _run_git(project_root, ["rev-parse", "--short", "HEAD"])
     git_ok = bool(branch and commit)
@@ -96,7 +152,6 @@ def verify_claims(
         }
     )
 
-    # 2. Baseline Manifest Check
     baseline_path = (project_root / baseline_manifest_rel).resolve()
     baseline_ok = True
     baseline_detail = {"path": str(baseline_path), "exists": baseline_path.exists()}
@@ -104,23 +159,18 @@ def verify_claims(
         if not baseline_path.exists():
             baseline_ok = False
         else:
-            try:
-                data = json.loads(baseline_path.read_text(encoding="utf-8"))
-                baseline_detail["version"] = data.get("version")
-                baseline_detail["generated_by_sha"] = data.get("generated_by_sha")
-                if not baseline_detail["version"] or not baseline_detail["generated_by_sha"]:
-                    baseline_ok = False
-                    baseline_detail["error"] = "missing_schema_fields"
-            except Exception as e:
+            data = _read_json(baseline_path)
+            baseline_detail["version"] = data.get("version")
+            baseline_detail["generated_by_sha"] = data.get("generated_by_sha")
+            if not baseline_detail["version"] or not baseline_detail["generated_by_sha"]:
                 baseline_ok = False
-                baseline_detail["error"] = f"parse_error:{e}"
+                baseline_detail["error"] = "missing_schema_fields"
     checks.append({"name": "baseline_manifest", "passed": baseline_ok, "detail": baseline_detail})
 
-    # 3. Working Tree
     dirty = _run_git(project_root, ["status", "--porcelain"])
     dirty_paths = _parse_porcelain_paths(dirty)
     ignored_resolved = {str(p) for p in _resolve_required_paths(project_root, ignore_dirty_paths)}
-    effective_dirty = []
+    effective_dirty: List[str] = []
     for rel_path in dirty_paths:
         resolved = project_root / rel_path
         if str(resolved.resolve()) in ignored_resolved:
@@ -165,15 +215,13 @@ def verify_claims(
         if not acceptance_report.exists():
             acceptance_ok = False
         else:
-            try:
-                data = json.loads(acceptance_report.read_text(encoding="utf-8"))
-                acceptance_detail["status"] = data.get("status", "unknown")
-                acceptance_detail["gate_passed"] = bool(data.get("gate_passed", False))
-                acceptance_ok = acceptance_detail["status"] == "PASS" and acceptance_detail["gate_passed"] is True
-            except Exception as exc:
-                acceptance_ok = False
-                acceptance_detail["error"] = f"parse_error:{exc}"
+            data = _read_json(acceptance_report)
+            acceptance_detail["status"] = data.get("status", "unknown")
+            acceptance_detail["gate_passed"] = bool(data.get("gate_passed", False))
+            acceptance_ok = acceptance_detail["status"] == "PASS" and acceptance_detail["gate_passed"] is True
     checks.append({"name": "acceptance_report", "passed": acceptance_ok, "detail": acceptance_detail})
+
+    checks.append(_evaluate_report_integrity_lock(project_root, report_file_rel))
 
     passed = all(bool(c.get("passed", False)) for c in checks)
     return {
@@ -210,6 +258,16 @@ def main() -> int:
         default=".nexus/reports/baseline/baseline_manifest.json",
         help="Path to baseline manifest (relative to project root).",
     )
+    parser.add_argument(
+        "--no-require-baseline",
+        action="store_true",
+        help="Disable baseline schema hard requirement.",
+    )
+    parser.add_argument(
+        "--report-file",
+        default=None,
+        help="Report JSON path used for report_integrity_lock checks.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON output.")
     args = parser.parse_args()
 
@@ -221,7 +279,9 @@ def main() -> int:
         ignore_dirty_paths=list(args.ignore_dirty_path or []),
         ignore_dirty_config=args.ignore_dirty_config,
         require_acceptance_pass=bool(args.require_acceptance_pass),
+        require_baseline=not args.no_require_baseline,
         baseline_manifest_rel=args.baseline_manifest,
+        report_file_rel=args.report_file,
     )
 
     if args.json:

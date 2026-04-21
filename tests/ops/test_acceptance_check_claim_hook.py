@@ -99,7 +99,10 @@ def test_multi_agent_submit_uses_delivery_receipt(tmp_path, monkeypatch):
 
     receipt = tmp_path / ".nexus" / "reports" / "delivery_gate.json"
     receipt.parent.mkdir(parents=True, exist_ok=True)
-    receipt.write_text(json.dumps({"delivery_gate_passed": True}), encoding="utf-8")
+    receipt.write_text(json.dumps({
+        "delivery_gate_passed": True,
+        "acceptance_result": {"gate_passed": True},
+    }), encoding="utf-8")
 
     class _Task:
         task_id = "T1"
@@ -125,5 +128,39 @@ def test_multi_agent_submit_uses_delivery_receipt(tmp_path, monkeypatch):
     result = CliRunner().invoke(nexus, ["nexus", "multi-agent", "submit", "--task-id", "T1"])
     assert result.exit_code == 0
     assert '"delivery_gate": "PASS"' in result.output
+    assert '"acceptance_check": "PASS"' in result.output
     assert '"contract_check": "UNRUN"' in result.output
     assert '"ci_gate": "UNRUN"' in result.output
+
+
+def test_multi_agent_submit_fails_closed_without_acceptance_receipt(tmp_path, monkeypatch):
+    from scripts.engine.nexus_cli import nexus
+
+    receipt = tmp_path / ".nexus" / "reports" / "delivery_gate.json"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text(json.dumps({"delivery_gate_passed": True}), encoding="utf-8")
+
+    class _Task:
+        task_id = "T1"
+        owner = "codex"
+
+    class _Collector:
+        def generate_hallucination_evidence(self, task, final_response):
+            ev = tmp_path / ".nexus" / "reports" / "hallucination_evidence.json"
+            ev.write_text(json.dumps({"claim_state": "VERIFIED", "confidence_level": "HIGH"}), encoding="utf-8")
+            return ev
+
+    class _Orch:
+        evidence_collector = _Collector()
+        state_store = type("S", (), {"load_task": staticmethod(lambda _task_id: _Task())})()
+        def verify_task(self, task_id):
+            return True
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.check_output", lambda *args, **kwargs: b"abc123\n")
+    monkeypatch.setattr("nexus.orchestrator.orchestrator.NexusOrchestrator", lambda: _Orch())
+    monkeypatch.setattr("nexus.orchestrator.governance_bridge.append_governance_event", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(nexus, ["nexus", "multi-agent", "submit", "--task-id", "T1"])
+    assert result.exit_code != 0
+    assert "Submission blocked" in result.output

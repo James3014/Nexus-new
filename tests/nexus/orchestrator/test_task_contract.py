@@ -1,5 +1,12 @@
 import pytest
-from nexus.orchestrator.task_contract import Task, TaskStatus, Evidence, TaskStateTransition
+from nexus.orchestrator.task_contract import (
+    Evidence,
+    EvidenceKind,
+    EvidenceRequirement,
+    Task,
+    TaskStatus,
+    TaskStateTransition,
+)
 
 def test_task_schema_validation():
     task = Task(
@@ -50,6 +57,37 @@ def test_claim_guard_complete():
     )
     task.add_evidence(Evidence(command="pytest", exit_code=0, output_summary="All tests passed"))
     assert task.is_done_ready() is True
+
+
+def test_evidence_kind_is_inferred_from_command():
+    evidence = Evidence(command="pytest -q tests/nexus/orchestrator", exit_code=0, output_summary="ok")
+    assert evidence.kind == EvidenceKind.PYTEST
+
+
+def test_task_normalizes_evidence_requirements():
+    task = Task(
+        task_id="TASK-001",
+        owner="Agent-1",
+        allowed_files=["file1.py"],
+        done_criteria=["tests pass"],
+        evidence_requirements=["pytest output", "nexus acceptance-check"],
+    )
+    assert task.normalized_evidence_requirements == [
+        EvidenceRequirement.PYTEST,
+        EvidenceRequirement.ACCEPTANCE_CHECK,
+    ]
+
+
+def test_missing_evidence_requirements_uses_semantic_match():
+    task = Task(
+        task_id="TASK-001",
+        owner="Agent-1",
+        allowed_files=["file1.py"],
+        done_criteria=["tests pass"],
+        evidence_requirements=["pytest", "nexus acceptance-check"],
+    )
+    task.add_evidence(Evidence(command="pytest -q tests/nexus/orchestrator", exit_code=0, output_summary="ok"))
+    assert task.missing_evidence_requirements() == [EvidenceRequirement.ACCEPTANCE_CHECK]
 
 def test_context_report():
     task = Task(

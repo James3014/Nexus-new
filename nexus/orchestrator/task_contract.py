@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
 import os
 
 class TaskStatus(str, Enum):
@@ -37,11 +37,68 @@ class TaskStateTransition:
         if target not in cls.ALLOWED_TRANSITIONS.get(current, []):
             raise ValueError(f"Illegal state transition from {current} to {target}")
 
+
+class EvidenceKind(str, Enum):
+    PYTEST = "pytest"
+    ACCEPTANCE_CHECK = "acceptance-check"
+    DELIVERY_GATE = "delivery-gate"
+    OTHER = "other"
+
+
+class EvidenceRequirement(str, Enum):
+    PYTEST = "pytest"
+    ACCEPTANCE_CHECK = "acceptance-check"
+    DELIVERY_GATE = "delivery-gate"
+
+
+def normalize_requirement(
+    requirement: str | EvidenceRequirement,
+) -> str | EvidenceRequirement:
+    if isinstance(requirement, EvidenceRequirement):
+        return requirement
+    text = str(requirement).strip().lower()
+    if "pytest" in text:
+        return EvidenceRequirement.PYTEST
+    if "acceptance-check" in text:
+        return EvidenceRequirement.ACCEPTANCE_CHECK
+    if "delivery-gate" in text:
+        return EvidenceRequirement.DELIVERY_GATE
+    return text
+
+
+def infer_evidence_kind(command: str) -> EvidenceKind:
+    text = (command or "").strip().lower()
+    if "delivery-gate" in text:
+        return EvidenceKind.DELIVERY_GATE
+    if "acceptance-check" in text:
+        return EvidenceKind.ACCEPTANCE_CHECK
+    if "pytest" in text:
+        return EvidenceKind.PYTEST
+    return EvidenceKind.OTHER
+
 class Evidence(BaseModel):
     command: str
     exit_code: int
     output_summary: str
     artifact_path: Optional[str] = None
+    kind: EvidenceKind = EvidenceKind.OTHER
+
+    @model_validator(mode="after")
+    def _infer_kind(self):
+        if self.kind == EvidenceKind.OTHER:
+            self.kind = infer_evidence_kind(self.command)
+        return self
+
+    def satisfies(self, requirement: str | EvidenceRequirement) -> bool:
+        normalized = normalize_requirement(requirement)
+        if isinstance(normalized, EvidenceRequirement):
+            if normalized == EvidenceRequirement.PYTEST:
+                return self.kind == EvidenceKind.PYTEST
+            if normalized == EvidenceRequirement.ACCEPTANCE_CHECK:
+                return self.kind in {EvidenceKind.ACCEPTANCE_CHECK, EvidenceKind.DELIVERY_GATE}
+            if normalized == EvidenceRequirement.DELIVERY_GATE:
+                return self.kind == EvidenceKind.DELIVERY_GATE
+        return str(normalized) in self.command.lower()
 
 class Task(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
@@ -52,7 +109,7 @@ class Task(BaseModel):
     base_branch: str = "main"
     current_status: TaskStatus = TaskStatus.CREATED
     done_criteria: List[str]
-    evidence_requirements: List[str]
+    evidence_requirements: List[str | EvidenceRequirement]
     evidence_list: List[Evidence] = []
     branch_name: Optional[str] = None
     last_commit: Optional[str] = None
@@ -75,12 +132,21 @@ class Task(BaseModel):
     def add_evidence(self, evidence: Evidence):
         self.evidence_list.append(evidence)
 
+    @property
+    def normalized_evidence_requirements(self) -> List[str | EvidenceRequirement]:
+        return [normalize_requirement(req) for req in self.evidence_requirements]
+
+    def missing_evidence_requirements(self) -> List[str | EvidenceRequirement]:
+        missing: List[str | EvidenceRequirement] = []
+        for requirement in self.normalized_evidence_requirements:
+            if not any(evidence.satisfies(requirement) for evidence in self.evidence_list):
+                missing.append(requirement)
+        return missing
+
     def is_done_ready(self) -> bool:
-        # Claim guard: check if all evidence requirements have at least one matching evidence (simple heuristic)
-        # In practice, this would be more sophisticated.
         if not self.evidence_list:
             return False
-        return len(self.evidence_list) >= len(self.evidence_requirements)
+        return not self.missing_evidence_requirements()
 
     def get_context_report(self) -> Dict[str, Any]:
         return {

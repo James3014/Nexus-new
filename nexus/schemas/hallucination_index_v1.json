@@ -20,7 +20,7 @@
       "check": "status_claim_without_evidence",
       "word_boundary": false
     },
-    "low_success_rate_claim": {
+    "completion_claim_with_unmet_benchmark_threshold": {
       "weight": 10,
       "keywords": ["completed", "done", "完成", "成功", "passed"],
       "check": "claim_completion_with_low_success",

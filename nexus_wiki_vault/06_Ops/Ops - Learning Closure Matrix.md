@@ -184,3 +184,21 @@ version_scope:
 - **Root Cause**: Reliance on legacy CLI output patterns and synchronous network library defaults.
 - **Decision**: Migrated to `httpx` (Async) for indexer and enforced `logging` across all orchestrator paths. Established `ServiceRegistry` to facilitate component discovery.
 - **Prevention**: Pre-commit hooks must block `print()` in `nexus/core/` and enforce the use of the `ServiceRegistry` for cross-service communication.
+
+## 2026-04-21: Multi-Agent Completion Receipts Must Bind To Real Test Evidence
+- **Phenomenon**: Multi-agent submit flows could emit completion-style JSON even when no real targeted pytest evidence was attached, and `acceptance_check` could appear implied from a delivery receipt.
+- **Root Cause**: `EvidenceCollector` accepted placeholder test artifacts and `submit` summarized receipt data too loosely, allowing narrative completion to outrun empirical verification.
+- **Decision**: Made the orchestrator fail closed when pre-gate required evidence is missing, removed placeholder pytest artifacts, and required explicit acceptance receipt state before emitting a successful submission summary.
+- **Prevention**: Any multi-agent completion path must prove required evidence by command match, and receipt-derived summaries may only report gates that are explicitly present in the machine receipt.
+
+## 2026-04-21: Completion Semantics Drift When Shell, CLI, and Collector Co-Own The Same Truth
+- **Phenomenon**: Completion truth was split across CLI inline logic, collector heuristics, and shell heredoc receipt generation, so the same workflow could regress repeatedly even after local bug fixes.
+- **Root Cause**: Delivery semantics were not owned by a single domain module; shell orchestration and Python business logic both serialized receipt/gate meaning independently.
+- **Decision**: Extracted `delivery.submission`, `delivery.receipt`, and `orchestrator.evidence_policy` so receipt building, submission assessment, and evidence semantics have explicit owners and reusable tests.
+- **Prevention**: Shell scripts may orchestrate execution, but receipt schema construction and pass/fail interpretation must live in Python domain modules with direct unit coverage.
+
+## 2026-04-21: Thin Wrapper Refactor Broke Ops Test Contracts
+- **Phenomenon**: `learn_refresh_*` and `wiki_sync_check` passed superficial smoke behavior but failed contract tests due to missing helper APIs (`load_json`, `_to_plist_xml`) and altered gate status semantics.
+- **Root Cause**: Wrapper simplification removed monkeypatch seams and strict return-code contracts that ops tests and governance flows depend on.
+- **Decision**: Restored explicit helper APIs and fail-closed status behavior (`wiki_sync_check` returns `2` for protected code drift without wiki updates) while keeping runtime flow unchanged.
+- **Prevention**: Any wrapper refactor in `scripts/ops/` must run contract tests (`test_learn_refresh_*`, `test_verify_report_claims`, `test_wiki_sync_check`) before acceptance.

@@ -126,61 +126,16 @@ fi
 
 # --- STEP 9: Final Receipt & Lineage Append ---
 echo "== Step 9: Receipt & Final Integrity =="
-
-python3 - <<'PY' "$RECEIPT_PATH" "$EVIDENCE_PATH" "$ACCEPTANCE_REPORT_PATH" "$ACCEPTANCE_POLICY" "$ACC_RC" "$ACC_STATUS" "$ACC_GATE" "$ACC_PRIMARY"
-import hashlib
-import json
-import subprocess
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-receipt_path = Path(sys.argv[1])
-evidence_path = Path(sys.argv[2])
-acceptance_report = Path(sys.argv[3])
-acceptance_policy = sys.argv[4]
-acceptance_exit_code = int(sys.argv[5])
-acceptance_status = sys.argv[6]
-acceptance_gate = sys.argv[7].lower() == "true"
-acceptance_primary = sys.argv[8]
-
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-branch = subprocess.check_output(["git", "branch", "--show-current"]).decode().strip()
-head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
-
-payload = {
-    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-    "version": "v24.1-canonical",
-    "branch": branch,
-    "head": head,
-    "steps": [
-        {"name": "integrity", "exit_code": 0},
-        {"name": "anti_drift", "exit_code": 0, "command": "verify_governance_seal.py"},
-        {"name": "lineage", "exit_code": 0, "command": "verify_lineage_chain.py"},
-        {"name": "verifier", "exit_code": 0, "command": "evidence_verifier.py"},
-        {"name": "tests", "exit_code": 0, "command": "pytest tests/nexus/orchestrator"},
-        {"name": "regression", "exit_code": 0, "command": "diagnose_regression.py"},
-        {"name": "report_integrity", "exit_code": 0, "command": "verify_report_claims.py"},
-        {"name": "acceptance", "exit_code": acceptance_exit_code, "command": "acceptance-check"}
-    ],
-    "artifacts": {
-        "evidence": {"path": str(evidence_path), "sha256": sha256(evidence_path)},
-        "baseline": {"path": ".nexus/reports/baseline/baseline_manifest.json", "sha256": sha256(Path(".nexus/reports/baseline/baseline_manifest.json"))},
-        "acceptance": {"path": str(acceptance_report), "sha256": sha256(acceptance_report)} if acceptance_report.exists() else {"path": str(acceptance_report), "sha256": None}
-    },
-    "acceptance_policy": acceptance_policy,
-    "acceptance_result": {
-        "status": acceptance_status,
-        "gate_passed": acceptance_gate,
-        "primary_cause": acceptance_primary,
-    },
-    "delivery_gate_passed": True
-}
-receipt_path.parent.mkdir(parents=True, exist_ok=True)
-receipt_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-PY
+python3 scripts/ops/write_delivery_receipt.py \
+  --receipt-path "$RECEIPT_PATH" \
+  --evidence-path "$EVIDENCE_PATH" \
+  --baseline-path "$BASELINE_PATH" \
+  --acceptance-report "$ACCEPTANCE_REPORT_PATH" \
+  --acceptance-policy "$ACCEPTANCE_POLICY" \
+  --acceptance-exit-code "$ACC_RC" \
+  --acceptance-status "$ACC_STATUS" \
+  --acceptance-gate "$ACC_GATE" \
+  --acceptance-primary "$ACC_PRIMARY"
 
 echo "[delivery-gate] appending lineage node..."
 python3 scripts/ops/append_lineage.py "delivery_gate_receipt" "$(cat $RECEIPT_PATH)"

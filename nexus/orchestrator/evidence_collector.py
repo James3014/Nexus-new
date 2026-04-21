@@ -2,7 +2,10 @@ import subprocess
 import json
 from pathlib import Path
 from typing import List, Dict, Any
-from nexus.orchestrator.task_contract import Evidence, Task, TaskStatus
+from nexus.orchestrator.task_contract import Evidence, EvidenceRequirement, Task, TaskStatus
+from nexus.orchestrator.evidence_policy import build_temp_evidence_payload
+from nexus.orchestrator.evidence_policy import derive_claim_bundle
+from nexus.orchestrator.evidence_policy import missing_pre_gate_requirements
 
 class EvidenceCollector:
     def __init__(self, reports_dir: str = ".nexus/multi_agent/reports", 
@@ -28,17 +31,25 @@ class EvidenceCollector:
         1. pytest (if specified in criteria)
         2. nexus delivery-gate
         """
+        missing_pre_gate = missing_pre_gate_requirements(task)
+        if missing_pre_gate:
+            task.add_evidence(Evidence(
+                command="evidence-precheck",
+                exit_code=2,
+                output_summary=(
+                    "Missing required evidence before delivery gate: "
+                    + ", ".join(
+                        req.value if isinstance(req, EvidenceRequirement) else str(req)
+                        for req in missing_pre_gate
+                    )
+                ),
+            ))
+            return False
+
         # Create a temporary evidence file for the gate.
         temp_evidence_path = self.reports_dir / f"{task.task_id}_temp_evidence.json"
         with open(temp_evidence_path, "w") as f:
-            json.dump({
-                "final_response": "Automated verification",
-                "evidence_bundle": {
-                    "code_artifacts": task.allowed_files,
-                    "test_artifacts": ["pytest results in evidence_list"],
-                    "command_artifacts": [e.command for e in task.evidence_list]
-                }
-            }, f)
+            json.dump(build_temp_evidence_payload(task), f)
 
         # Run the strict delivery gate, which includes tests and acceptance verification.
         self.run_check(task, [
@@ -51,7 +62,7 @@ class EvidenceCollector:
             if e.exit_code != 0:
                 return False
 
-        return bool(task.evidence_list)
+        return bool(task.evidence_list) and not task.missing_evidence_requirements()
 
     def generate_hallucination_evidence(self, task: Task, final_response: str):
         self.evidence_file.parent.mkdir(parents=True, exist_ok=True)
@@ -62,34 +73,7 @@ class EvidenceCollector:
             diff = subprocess.check_output(["git", "diff", task.base_branch], cwd=task.working_dir).decode()
         except Exception:
             pass
-        
-        has_proof = bool(diff and diff.strip())
-        all_passed = all(e.exit_code == 0 for e in task.evidence_list)
-        evidence_count = len(task.evidence_list)
-        
-        # 2. Dynamic Confidence & State Derivation
-        if all_passed and has_proof and evidence_count >= len(task.evidence_requirements):
-            confidence = "HIGH"
-            claim_state = "VERIFIED"
-        elif all_passed and evidence_count > 0:
-            confidence = "MEDIUM"
-            claim_state = "PARTIAL"
-        else:
-            confidence = "LOW"
-            claim_state = "UNVERIFIED"
-
-        bundle = {
-            "final_response": final_response,
-            "claim_state": claim_state,
-            "confidence_level": confidence,
-            "proof_type": "git_diff" if has_proof else "none",
-            "proof_value": diff if has_proof else "no_physical_changes_detected",
-            "evidence_bundle": {
-                "code_artifacts": task.allowed_files,
-                "test_artifacts": [e.output_summary for e in task.evidence_list if "pytest" in e.command],
-                "command_artifacts": [f"{e.command} (exit: {e.exit_code})" for e in task.evidence_list]
-            }
-        }
+        bundle = derive_claim_bundle(task, final_response, diff)
         
         with open(self.evidence_file, "w") as f:
             json.dump(bundle, f, indent=2)
