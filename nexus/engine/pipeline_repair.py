@@ -338,6 +338,18 @@ class PipelineRepairMixin:
 
         # === NEW: Independent Evidence Verification ===
         if mock_env:
+            # Keep fail-closed verifier semantics even in mock environments.
+            try:
+                from nexus.delivery.evidence_verifier import EvidenceVerifier
+                verifier = EvidenceVerifier(self.engine.project_root)
+                verifier.verify({})
+            except Exception as ev_exc:
+                audit_success = False
+                status = "REJECTED"
+                ctx.state.metadata["evidence_verifier_error"] = str(ev_exc)
+                ctx.state.metadata["evidence_trust_rejection"] = True
+            if status == "REJECTED":
+                ctx.state.metadata["evidence_trust_rejection"] = True
             if not phantom_reason and audit_success:
                 self._update_meta_counter(ctx, "anti_hallucination_pass_count")
             self._record_repair_outcome_event(

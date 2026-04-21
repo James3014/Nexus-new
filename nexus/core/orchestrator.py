@@ -107,3 +107,8 @@ class NexusOrchestrator:
         from nexus.core.evidence_guard import NexusEvidenceGuard
         guard = NexusEvidenceGuard(self.project_root, git_hub=self.infra.git if self.infra else None)
         return guard.audit_claim(summary, self.task)
+
+    def run_review(self) -> dict:
+        """Compatibility contract: return structured review result instead of bool."""
+        ok = self._do_loop()
+        return {"status": "PASS" if ok else "FAIL", "passed": bool(ok)}

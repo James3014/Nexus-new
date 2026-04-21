@@ -225,7 +225,15 @@ class PipelineStagesMixin:
             # R2: Unified Engine Decision
             task_type = ctx.task_type
             risk_level = ctx.state.metadata.get('risk_level', 'standard')
-            engine = "full" if (force_research or bool(res_decision.should_research)) else decide_research_engine(self.engine.project_root, task_type, risk_level)
+            policy_engine = decide_research_engine(self.engine.project_root, task_type, risk_level)
+            if force_research:
+                engine = "full"
+            elif policy_engine == "baseline":
+                engine = "baseline"
+            elif bool(res_decision.should_research):
+                engine = "full"
+            else:
+                engine = policy_engine
             
             ctx.state.metadata['engine_decision_source'] = 'phase_policy'
             ctx.state.metadata['chosen_research_engine'] = engine
@@ -235,9 +243,13 @@ class PipelineStagesMixin:
                 # Baseline 模式：僅登記決策，不執行完整研究
                 x_decision_id = self._register_phase_decision(ctx, "X", "baseline-skip")
                 ctx.state.metadata["research_skipped_reason"] = "baseline_policy"
-                self.engine._add_step_to_history(
-                    ctx.state, "X", metadata={"decision_id": x_decision_id, "skill_id": "baseline-skip", "engine": "baseline"}
-                )
+                add_step = getattr(self.engine, "_add_step_to_history", None)
+                if callable(add_step):
+                    add_step(
+                        ctx.state,
+                        "X",
+                        metadata={"decision_id": x_decision_id, "skill_id": "baseline-skip", "engine": "baseline"},
+                    )
                 return
             else:
                 # Full 研究模式
@@ -285,15 +297,23 @@ class PipelineStagesMixin:
     def _persist_research_pack(self, ctx: PipelineContextProtocol, decision_id: str):
         import json
         try:
-            research_path = self.engine.run_dir / "research_pack.json"
+            run_dir = getattr(self.engine, "run_dir", None)
+            if run_dir is None:
+                run_dir = Path(getattr(self.engine, "project_root", ".")) / ".nexus" / "reports"
+            research_path = Path(run_dir) / "research_pack.json"
+            research_path.parent.mkdir(parents=True, exist_ok=True)
             research_path.write_text(json.dumps(ctx.research_pack, ensure_ascii=False, indent=2), encoding="utf-8")
             ctx.state.metadata["research_pack_path"] = str(research_path)
         except Exception as exc:
             logger.warning("research_pack_write_failed: %s", exc)
-        ctx.accumulator.record(ctx.state, "X", ctx.research_pack, overhead=50)
-        self.engine._add_step_to_history(
-            ctx.state, "X", metadata={**ctx.research_pack, "decision_id": decision_id, "skill_id": "researcher"}
-        )
+        accumulator = getattr(ctx, "accumulator", None)
+        if accumulator is not None and hasattr(accumulator, "record"):
+            accumulator.record(ctx.state, "X", ctx.research_pack, overhead=50)
+        add_step = getattr(self.engine, "_add_step_to_history", None)
+        if callable(add_step):
+            add_step(
+                ctx.state, "X", metadata={**ctx.research_pack, "decision_id": decision_id, "skill_id": "researcher"}
+            )
 
     def _stage_diagnose(self, ctx: PipelineContextProtocol, tracer: Any) -> None:
         with tracer.phase_span('D', task_id=ctx.task_id) as d_span:

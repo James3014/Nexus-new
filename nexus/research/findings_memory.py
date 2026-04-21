@@ -26,6 +26,7 @@ class FindingsCard:
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     recall_accuracy: float = 0.0
     task_id: str = ""
+    tenant_id: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -33,7 +34,14 @@ class FindingsCard:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "FindingsCard":
-        return cls(**data)
+        allowed = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in data.items() if k in allowed}
+        extra_unknown = {k: v for k, v in data.items() if k not in allowed}
+        if extra_unknown:
+            filtered_extra = dict(filtered.get("extra") or {})
+            filtered_extra.update(extra_unknown)
+            filtered["extra"] = filtered_extra
+        return cls(**filtered)
 
     @classmethod
     def from_lesson_event(cls, event: Any) -> "FindingsCard":
