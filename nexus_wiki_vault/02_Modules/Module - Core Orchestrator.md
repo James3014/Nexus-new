@@ -1,59 +1,32 @@
 ---
-aliases: '[Orchestrator Node, Nexus CLI Engine]'
+aliases: '[Orchestrator Node, Nexus CLI Engine, Engine Master]'
 confidence: high
-last_compiled: '2026-04-06'
+last_compiled: '2026-04-21'
 owner: agent
-raw_sources: ''
-related_pages: ''
-source_of_truth: scripts/engine/nexus_cli.py
-status: active
-tags: '[module, core, orchestrator, controller]'
+raw_sources: 'nexus/engine/cli_runner_async.py, nexus/core/dual_loop_orchestrator.py'
+related_pages: '[[Supreme_Master_Loop_Spec]]'
+source_of_truth: nexus/engine/cli_runner_async.py
+status: hardened
+tags: '[module, core, orchestrator, controller, engine]'
 title: Module - Core Orchestrator
 type: module
-version_scope: '[v17.1, v22, v23]'
+version_scope: '[v24.1, v26]'
 ---
 
-
-
-# Module - Core Orchestrator
-
-> [!NOTE]
-> **Canonical Page**: 本頁為 Nexus Orchestrator 的高階權威定義。技術細節與微觀實作請參閱 [Module - Core Orchestrator Deep Dive](Module - Core Orchestrator Deep Dive.md)。
+# Module - Core Orchestrator (v26 Hardened)
 
 ## One-sentence summary
-本模組為 Nexus Swarm 的「神經中樞」，負責接收任務指令、調度 Phase Runners 並維護全域狀態機。 [Source: scripts/engine/nexus_cli.py]
+本模組為 Nexus 的「動力引擎」，負責協調 L4 指揮層任務拆解與 L3 執行層的 P-X-D-R-A-C 閉環，並產出 v24.1 標竿級交付憑證。
 
 ## Role / responsibility
-- **命令解析**: 處理 `nexus:*` 全系列子命令與參數校驗。 [Source: scripts/engine/nexus_cli.py]
-- **調度序列**: 驅動 P-X-D-R-A-C 流程的物理執行。 [Source: nexus_wiki_vault/03_Flows/Flow - PXDRAC Runtime.md]]]
-- **異步門禁**: 在 TTY 模式下執行 `Pilot CLI` 的交互監聽與風險阻斷。 [Source: nexus/core/orchestrator.py]
-
-## Upstream
-- **User Interface (CLI)**: 原始命令輸入流。
-- **Wisdom Layer (v23)**: 提供決策權重與 Bias 修正。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]]]
-
-## Downstream
-- **Phase Runners**: 調用具體的業務執行實體。 [Source: nexus/core/orchestrator.py]
-- **[Module - State Contracts](Module - State Contracts.md)**: 確保交接工件符合 JSON Schema。
+- **引擎位移 (Engine Move)**: 核心主循環 `campaign_master_loop` 已遷移至 `nexus/engine/cli_runner_async.py` 進行邏輯解耦。
+- **交付憑證 (Delivery Receipt)**: 任務完成後由 `nexus/delivery/receipt.py` 產出物理收據，包含 SHA256 驗證與八大誠信步驟。
+- **並發誠信**: 使用 `threading.RLock` 確保事件廣播與狀態更新的原子性，物理阻斷死鎖。 [Source: nexus/core/event_bus.py]
 
 ## Related modules / files
-- `nexus/core/orchestrator.py`: 核心業務管理類。 [Source: nexus/core/orchestrator.py]
-- `nexus/core/state_machine.py`: 狀態轉移權威邏輯。 [Source: nexus/core/state_machine.py]
-
-## Source notes
-- Hardened v17.1 Spec: 定義原始 Orchestrator 的核心責任清單。
-- v22 Engine Spec: 加入了對 `manifest.json` 與 `handoff_bundle` 的原生支援。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
-
-## Open questions / conflicts
-- [ ] **Concurrency**: 多任務併發時鎖定 `.nexus/` 的資源競爭處理。
-- [ ] **External [[api|API]]**: 是否需要開放 FastAPI 入口以支援 [Nexus Desk](Module - Nexus Desk Interface.md) 介面調用。
+- `nexus/engine/cli_runner_async.py`: 非同步執行主循環 (L4/L3 橋接)。
+- `nexus/delivery/receipt.py`: 產出 v24.1-canonical 交付收據。
+- `nexus/core/event_bus.py`: 具備可重入鎖 (RLock) 的系統脈搏。
 
 ---
-[System Overview](../00_Home/System Overview.md)
-
-
----
-[System Overview](../00_Home/System Overview.md)
-
----
-[[System Overview]]
+Back to [[System Overview]]
