@@ -104,7 +104,7 @@ class NexusOrchestrator:
             except Exception as exc:
                 return False, f"Belief audit error: {exc}"
 
-        from nexus.core.evidence_guard import NexusEvidenceGuard
+        from nexus.governance.evidence_guard import NexusEvidenceGuard
         guard = NexusEvidenceGuard(self.project_root, git_hub=self.infra.git if self.infra else None)
         return guard.audit_claim(summary, self.task)
 

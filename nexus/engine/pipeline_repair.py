@@ -5,7 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from nexus.learning.knowledge_index import KnowledgeIndex
-from nexus.core.event_bus import NexusEventBus
+from nexus.events.transport import NexusEventBus
 from nexus.core.protocols import PipelineContextProtocol
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
 from nexus.delivery.phantom_guard import detect_inconclusive_success

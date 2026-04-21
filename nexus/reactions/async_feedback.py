@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import logging
 import json
 import time
-from nexus.core.event_bus import NexusEventBus
+from nexus.events.transport import NexusEventBus
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,7 @@
 import re
 import logging
 from typing import Dict
-from nexus.core.hallucination_guard import HallucinationGuard
+from nexus.governance.hallucination_guard import HallucinationGuard
 
 logger = logging.getLogger(__name__)
 

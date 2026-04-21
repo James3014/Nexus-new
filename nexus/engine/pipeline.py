@@ -20,8 +20,9 @@ from nexus.learning.knowledge_index import KnowledgeIndex
 from nexus.learning.skill_registry import SkillRegistry
 from nexus.learning.skill_exchange import SkillExchange
 from nexus.learning.skill_store import SkillStore
-from nexus.core.event_bus import NexusEventBus
-from nexus.core.events import EventStore, NexusEvent
+from nexus.events.transport import NexusEventBus
+from nexus.events.store import EventStore
+from nexus.events.contracts import NexusEvent
 from nexus.telemetry.otel_config import init_otel
 from nexus.telemetry.tracer import NexusTracer
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands

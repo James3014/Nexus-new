@@ -107,7 +107,7 @@ class SecureRegistrySync:
                 resp = {"status": "ok", "payload": res}
                 
             elif action == "event":
-                from nexus.core.event_bus import NexusEventBus
+                from nexus.events.transport import NexusEventBus
                 event_type = req.get("event_type", "unknown")
                 payload = req.get("payload", {})
                 

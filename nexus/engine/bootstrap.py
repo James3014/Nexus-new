@@ -8,7 +8,7 @@ from nexus.services.workspace import WorkspaceManager
 from nexus.core.policy_loader import PolicyLoader
 from nexus.core.gate_evaluator import GateEvaluator
 from nexus.core.metrics_aggregator import MetricsAggregator
-from nexus.core.hardened_validator import NexusHardenedValidator
+from nexus.governance.hardened_validator import NexusHardenedValidator
 from nexus.learning.lewm_predictor import LeWMPredictor
 from nexus.services.memory import MemoryService
 from nexus.engine.hub import NexusHub

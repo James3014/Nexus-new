@@ -57,7 +57,7 @@ class HarnessDirector:
 class CapabilityHook(BaseHook):
     """🛡️ 權限鉤器 (Hard-Fail)"""
     def pre_execute(self, tool_name: str, args: Dict[str, Any], context: Dict[str, Any]) -> HookResult:
-        from nexus.core.capability_gate import CapabilityGate
+        from nexus.governance.capability_gate import CapabilityGate
         gate = CapabilityGate()
         phase = context.get("phase", "P")
         allowed_tools = gate.get_tools(phase)

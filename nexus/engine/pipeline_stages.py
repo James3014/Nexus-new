@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from nexus.core.protocols import PipelineContextProtocol
 from nexus.learning.knowledge_index import KnowledgeIndex
-from nexus.core.events import NexusEvent
+from nexus.events.contracts import NexusEvent
 from nexus.research.research_pack import build_research_pack
 from nexus.research.learn.policy_runtime import decide_research_engine, load_phase_policy
 

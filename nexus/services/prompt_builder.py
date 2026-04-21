@@ -4,7 +4,7 @@ import json
 import yaml
 import hashlib
 import logging
-from nexus.core.capability_gate import CapabilityGate
+from nexus.governance.capability_gate import CapabilityGate
 from nexus.services.mem_palace import MemPalace
 
 logger = logging.getLogger(__name__)

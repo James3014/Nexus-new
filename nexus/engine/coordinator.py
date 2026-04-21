@@ -26,7 +26,7 @@ from nexus.learning.sota_searcher import SOTASearcher
 from nexus.learning.vector_cache import VectorCache
 from nexus.core.neural_aggregator import NexusNeuralAggregator
 from nexus.engine.federation import FederationLayer
-from nexus.core.hardened_validator import NexusHardenedValidator
+from nexus.governance.hardened_validator import NexusHardenedValidator
 from nexus.learning.latent_predictor_v20 import get_latent_forecaster
 from nexus.engine.self_healing_selector import get_self_healing_selector
 
