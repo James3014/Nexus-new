@@ -4,9 +4,13 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
+
+from nexus.delivery.report_claims import ReportClaimsOptions
+from nexus.delivery.report_claims import load_ignore_dirty_paths as _load_ignore_dirty_paths_core
+from nexus.delivery.report_claims import parse_porcelain_paths as _parse_porcelain_paths_core
+from nexus.delivery.report_claims import verify_claims_core
 
 
 def _run_git(project_root: Path, args: List[str]) -> str:
@@ -16,112 +20,12 @@ def _run_git(project_root: Path, args: List[str]) -> str:
     except Exception:
         return ""
 
-
-def _resolve_required_paths(project_root: Path, required_paths: List[str]) -> List[Path]:
-    resolved: List[Path] = []
-    for raw in required_paths:
-        p = Path(raw)
-        if not p.is_absolute():
-            p = (project_root / p).resolve()
-        resolved.append(p)
-    return resolved
-
-
 def _parse_porcelain_paths(raw_status: str) -> List[str]:
-    paths: List[str] = []
-    for line in raw_status.splitlines():
-        if not line.strip():
-            continue
-        if len(line) >= 3 and line[2] == " ":
-            path = line[3:]
-        elif len(line) >= 2 and line[1] == " ":
-            path = line[2:]
-        else:
-            path = line
-        path = path.strip()
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1].strip()
-        paths.append(path)
-    return paths
+    return _parse_porcelain_paths_core(raw_status)
 
 
 def _load_ignore_dirty_paths(project_root: Path, config_path: str | None) -> List[str]:
-    if not config_path:
-        return []
-    path = Path(config_path)
-    if not path.is_absolute():
-        path = (project_root / path).resolve()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    if isinstance(data, list):
-        return [str(item) for item in data if str(item).strip()]
-    if isinstance(data, dict):
-        raw = data.get("ignore_dirty_paths", [])
-        if isinstance(raw, list):
-            return [str(item) for item in raw if str(item).strip()]
-    return []
-
-
-def _read_json(path: Path) -> Dict[str, Any]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _sorted_nonempty_lines(raw: str) -> List[str]:
-    return sorted([line.strip() for line in raw.splitlines() if line.strip()])
-
-
-def _evaluate_report_integrity_lock(project_root: Path, report_file_rel: str | None) -> Dict[str, Any]:
-    if not report_file_rel:
-        return {"name": "report_integrity_lock", "passed": True, "detail": {"skipped": True}}
-
-    report_path = Path(report_file_rel)
-    if not report_path.is_absolute():
-        report_path = (project_root / report_path).resolve()
-
-    detail: Dict[str, Any] = {"path": str(report_path), "exists": report_path.exists()}
-    if not report_path.exists():
-        detail["error"] = "report_file_not_found"
-        return {"name": "report_integrity_lock", "passed": False, "detail": detail}
-
-    report = _read_json(report_path)
-    head_sha = str(report.get("head_sha", "")).strip()
-    if not head_sha:
-        detail["error"] = "missing_report_head_sha"
-        return {"name": "report_integrity_lock", "passed": False, "detail": detail}
-
-    actual_head = _run_git(project_root, ["rev-parse", "--short", "HEAD"]).strip()
-    head_ok = bool(actual_head) and actual_head == head_sha
-    detail["head_alignment"] = {"passed": head_ok, "report_head_sha": head_sha, "actual_head_sha": actual_head}
-
-    reported_commit_files = sorted([str(v).strip() for v in report.get("files_changed_in_this_commit", []) if str(v).strip()])
-    actual_commit_files = _sorted_nonempty_lines(_run_git(project_root, ["show", "--name-only", "--pretty=format:", "HEAD"]))
-    commit_ok = reported_commit_files == actual_commit_files
-    detail["commit_integrity"] = {
-        "passed": commit_ok,
-        "reported_files": reported_commit_files,
-        "actual_files": actual_commit_files,
-    }
-
-    base_branch = str(report.get("base_branch", "main")).strip() or "main"
-    reported_delta = sorted([str(v).strip() for v in report.get("branch_delta_vs_base", []) if str(v).strip()])
-    actual_delta = _sorted_nonempty_lines(_run_git(project_root, ["diff", "--name-only", f"{base_branch}...HEAD"]))
-    delta_ok = reported_delta == actual_delta
-    detail["branch_delta_integrity"] = {
-        "passed": delta_ok,
-        "base_branch": base_branch,
-        "reported_delta": reported_delta,
-        "actual_delta": actual_delta,
-    }
-
-    passed = head_ok and commit_ok and delta_ok
-    return {"name": "report_integrity_lock", "passed": passed, "detail": detail}
+    return _load_ignore_dirty_paths_core(project_root, config_path)
 
 
 def verify_claims(
@@ -137,99 +41,17 @@ def verify_claims(
     baseline_manifest_rel: str = ".nexus/reports/baseline/baseline_manifest.json",
     report_file_rel: str | None = None,
 ) -> Dict[str, Any]:
-    required_paths = required_paths or []
-    ignore_dirty_paths = (ignore_dirty_paths or []) + _load_ignore_dirty_paths(project_root, ignore_dirty_config)
-    checks: List[Dict[str, Any]] = []
-
-    branch = _run_git(project_root, ["rev-parse", "--abbrev-ref", "HEAD"])
-    commit = _run_git(project_root, ["rev-parse", "--short", "HEAD"])
-    git_ok = bool(branch and commit)
-    checks.append(
-        {
-            "name": "git_context",
-            "passed": git_ok,
-            "detail": {"branch": branch or "unknown", "commit": commit or "unknown"},
-        }
+    options = ReportClaimsOptions(
+        required_paths=list(required_paths or []),
+        require_clean=bool(require_clean),
+        ignore_dirty_paths=list(ignore_dirty_paths or []) + _load_ignore_dirty_paths(project_root, ignore_dirty_config),
+        require_acceptance_pass=bool(require_acceptance_pass),
+        acceptance_report_rel=acceptance_report_rel,
+        require_baseline=bool(require_baseline),
+        baseline_manifest_rel=baseline_manifest_rel,
+        report_file_rel=report_file_rel,
     )
-
-    baseline_path = (project_root / baseline_manifest_rel).resolve()
-    baseline_ok = True
-    baseline_detail = {"path": str(baseline_path), "exists": baseline_path.exists()}
-    if require_baseline:
-        if not baseline_path.exists():
-            baseline_ok = False
-        else:
-            data = _read_json(baseline_path)
-            baseline_detail["version"] = data.get("version")
-            baseline_detail["generated_by_sha"] = data.get("generated_by_sha")
-            if not baseline_detail["version"] or not baseline_detail["generated_by_sha"]:
-                baseline_ok = False
-                baseline_detail["error"] = "missing_schema_fields"
-    checks.append({"name": "baseline_manifest", "passed": baseline_ok, "detail": baseline_detail})
-
-    dirty = _run_git(project_root, ["status", "--porcelain"])
-    dirty_paths = _parse_porcelain_paths(dirty)
-    ignored_resolved = {str(p) for p in _resolve_required_paths(project_root, ignore_dirty_paths)}
-    effective_dirty: List[str] = []
-    for rel_path in dirty_paths:
-        resolved = project_root / rel_path
-        if str(resolved.resolve()) in ignored_resolved:
-            continue
-        effective_dirty.append(rel_path)
-    clean_ok = (not effective_dirty) if require_clean else True
-    checks.append(
-        {
-            "name": "working_tree",
-            "passed": clean_ok,
-            "detail": {
-                "require_clean": require_clean,
-                "dirty_entries": len(dirty_paths),
-                "effective_dirty_entries": len(effective_dirty),
-                "ignored_dirty_paths": sorted(ignore_dirty_paths),
-                "effective_dirty_paths": effective_dirty,
-            },
-        }
-    )
-
-    resolved_paths = _resolve_required_paths(project_root, required_paths)
-    missing = [str(p) for p in resolved_paths if not p.exists()]
-    paths_ok = not missing
-    checks.append(
-        {
-            "name": "required_paths",
-            "passed": paths_ok,
-            "detail": {"required_count": len(resolved_paths), "missing": missing},
-        }
-    )
-
-    acceptance_report = (project_root / acceptance_report_rel).resolve()
-    acceptance_ok = True
-    acceptance_detail: Dict[str, Any] = {
-        "path": str(acceptance_report),
-        "exists": acceptance_report.exists(),
-        "status": "unknown",
-        "gate_passed": None,
-        "require_acceptance_pass": require_acceptance_pass,
-    }
-    if require_acceptance_pass:
-        if not acceptance_report.exists():
-            acceptance_ok = False
-        else:
-            data = _read_json(acceptance_report)
-            acceptance_detail["status"] = data.get("status", "unknown")
-            acceptance_detail["gate_passed"] = bool(data.get("gate_passed", False))
-            acceptance_ok = acceptance_detail["status"] == "PASS" and acceptance_detail["gate_passed"] is True
-    checks.append({"name": "acceptance_report", "passed": acceptance_ok, "detail": acceptance_detail})
-
-    checks.append(_evaluate_report_integrity_lock(project_root, report_file_rel))
-
-    passed = all(bool(c.get("passed", False)) for c in checks)
-    return {
-        "passed": passed,
-        "project_root": str(project_root),
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "checks": checks,
-    }
+    return verify_claims_core(project_root, options, _run_git)
 
 
 def main() -> int:
