@@ -21,6 +21,12 @@ version_scope: '[v17.1, v22, v23]'
 ## 2026-04-16
 - **Perf (Resilience):** Unified timeout and retry policy across Hyper/NightShift. Reduced `infra_blocked_rate` and optimized pytest overhead.
 
+## 2026-04-23
+- **Trust + Routing Hardening:** Unified semantic completion contract for `learn:*` work commands and added fixed guard audit for `research:auto-flow` hard-task routing (`tests/engine/test_research_auto_flow_guard_audit.py`) to prevent false baseline demotion regressions.
+
+## 2026-04-23
+- **Capability Wave 6~12 (Minimal Operational Baseline):** Added phase KPI dashboard command (`learn:phase-kpi`), auto prior-fix retrieval weighting in route decision, belief-driven hyper budget tuning, nightshift recommendation signalization, drone crystal semantic contract fields, and autotune script (`scripts/bench/capability_autotune.py`) with backup-on-apply.
+
 ## One-sentence summary
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 

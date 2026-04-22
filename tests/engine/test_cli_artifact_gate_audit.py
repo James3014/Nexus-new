@@ -34,6 +34,7 @@ MUTATING_COMMANDS_REQUIRING_ARTIFACTS = {
     "learn:converge": ("report_file", "evidence_file", "_write_hallucination_evidence"),
     "learn:report": ("report_file", "write_text("),
     "learn:phase-slo": ("report_file", "write_text("),
+    "learn:phase-kpi": ("report_file", "write_text("),
     "learn:benchmark-legacy": ("report_file", "write_text("),
     "learn:benchmark-curate": ("manifest_file", "write_text("),
     "learn:gate": ("report_file", "evidence_file", "acceptance-check", "contract-check"),

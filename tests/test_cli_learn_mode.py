@@ -664,3 +664,51 @@ def test_learn_phase_slo_command_outputs_summary(tmp_path, monkeypatch):
     assert payload["status"] == "SUCCESS"
     assert payload["phase_slo_pass"] is True
     assert payload["global"]["required_done_ratio"] >= 0.95
+
+
+def test_learn_phase_kpi_command_outputs_summary(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+
+    phase_log = tmp_path / ".nexus" / "reports" / "learn" / "phase_writeback.jsonl"
+    phase_log.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "timestamp": "2026-04-15T00:00:00+00:00",
+            "topic": "nexus",
+            "phase": "P",
+            "phase_status": "SUCCESS",
+            "route": {"mode": "light"},
+            "writeback_policy": {"required": True, "policy": "required"},
+            "writeback_done": True,
+        },
+        {
+            "timestamp": "2026-04-15T00:01:00+00:00",
+            "topic": "nexus",
+            "phase": "R",
+            "phase_status": "PARTIAL",
+            "route": {"mode": "research"},
+            "writeback_policy": {"required": True, "policy": "required"},
+            "writeback_done": False,
+        },
+    ]
+    phase_log.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:phase-kpi",
+            "--window",
+            "100",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "SUCCESS"
+    assert payload["total_records"] == 2
+    assert "P" in payload["phases"]
+    assert "R" in payload["phases"]
+    assert payload["mode_breakdown"]["light"] == 1
+    assert payload["mode_breakdown"]["research"] == 1

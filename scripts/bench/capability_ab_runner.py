@@ -1,0 +1,417 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from click.testing import CliRunner
+
+from nexus.app.research_flow_service import run_auto_flow
+from nexus.research.local_sprint_mutator import generate_local_candidate
+from scripts.engine.nexus_cli import nexus as nexus_root
+
+
+@dataclass(frozen=True)
+class CapabilityTask:
+    id: str
+    difficulty: str
+    task_type: str
+    task_desc: str
+    target_file: str
+    test_file: str
+    success_criteria: str
+
+
+def load_tasks(path: str | Path) -> list[CapabilityTask]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    tasks_raw = payload.get("tasks", [])
+    tasks: list[CapabilityTask] = []
+    for row in tasks_raw:
+        tasks.append(
+            CapabilityTask(
+                id=str(row["id"]),
+                difficulty=str(row["difficulty"]),
+                task_type=str(row["task_type"]),
+                task_desc=str(row["task_desc"]),
+                target_file=str(row["target_file"]),
+                test_file=str(row["test_file"]),
+                success_criteria=str(row.get("success_criteria", "all_target_tests_pass")),
+            )
+        )
+    return tasks
+
+
+def select_tasks(tasks: list[CapabilityTask], *, difficulty: str, max_tasks: int) -> list[CapabilityTask]:
+    limit = max(1, max_tasks)
+    if difficulty != "all":
+        filtered = [task for task in tasks if task.difficulty == difficulty]
+        return filtered[:limit]
+
+    buckets: dict[str, list[CapabilityTask]] = {"easy": [], "medium": [], "hard": []}
+    for task in tasks:
+        buckets.setdefault(task.difficulty, []).append(task)
+
+    ordered: list[CapabilityTask] = []
+    idx = 0
+    bucket_order = ["easy", "medium", "hard"]
+    while len(ordered) < limit:
+        progressed = False
+        for key in bucket_order:
+            bucket = buckets.get(key, [])
+            if idx < len(bucket):
+                ordered.append(bucket[idx])
+                progressed = True
+                if len(ordered) >= limit:
+                    break
+        if not progressed:
+            break
+        idx += 1
+    return ordered[:limit]
+
+
+def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, str]:
+    case_dir = (repo_root / ".nexus" / "bench_cases" / task.id).resolve()
+    case_dir.mkdir(parents=True, exist_ok=True)
+    target_path = case_dir / "target.py"
+    test_path = case_dir / "test_target.py"
+
+    difficulty = task.difficulty.lower()
+    if difficulty == "easy":
+        target_code = (
+            "def normalize_flag(text: str) -> str:\n"
+            "    # intentionally buggy for benchmark\n"
+            "    return text\n"
+        )
+        test_code = (
+            "import importlib.util\n"
+            "from pathlib import Path\n\n"
+            "_TARGET_PATH = Path(__file__).resolve().parent / 'target.py'\n"
+            "_SPEC = importlib.util.spec_from_file_location('bench_target', _TARGET_PATH)\n"
+            "_MOD = importlib.util.module_from_spec(_SPEC)\n"
+            "assert _SPEC is not None and _SPEC.loader is not None\n"
+            "_SPEC.loader.exec_module(_MOD)\n\n"
+            "def test_normalize_flag():\n"
+            "    assert _MOD.normalize_flag('  TRUE  ') == 'true'\n"
+        )
+    elif difficulty == "medium":
+        target_code = (
+            "def compute_backoff(attempt: int) -> int:\n"
+            "    # intentionally simplistic\n"
+            "    return attempt\n"
+        )
+        test_code = (
+            "import importlib.util\n"
+            "from pathlib import Path\n\n"
+            "_TARGET_PATH = Path(__file__).resolve().parent / 'target.py'\n"
+            "_SPEC = importlib.util.spec_from_file_location('bench_target', _TARGET_PATH)\n"
+            "_MOD = importlib.util.module_from_spec(_SPEC)\n"
+            "assert _SPEC is not None and _SPEC.loader is not None\n"
+            "_SPEC.loader.exec_module(_MOD)\n\n"
+            "def test_compute_backoff_medium():\n"
+            "    assert _MOD.compute_backoff(1) == 1\n"
+            "    assert _MOD.compute_backoff(2) == 2\n"
+            "    assert _MOD.compute_backoff(3) == 4\n"
+        )
+    else:
+        target_code = (
+            "def compute_backoff(attempt: int) -> int:\n"
+            "    # intentionally naive for hard-case\n"
+            "    return 1\n"
+        )
+        test_code = (
+            "import importlib.util\n"
+            "from pathlib import Path\n\n"
+            "_TARGET_PATH = Path(__file__).resolve().parent / 'target.py'\n"
+            "_SPEC = importlib.util.spec_from_file_location('bench_target', _TARGET_PATH)\n"
+            "_MOD = importlib.util.module_from_spec(_SPEC)\n"
+            "assert _SPEC is not None and _SPEC.loader is not None\n"
+            "_SPEC.loader.exec_module(_MOD)\n\n"
+            "def test_compute_backoff_hard():\n"
+            "    assert _MOD.compute_backoff(1) == 1\n"
+            "    assert _MOD.compute_backoff(2) == 2\n"
+            "    assert _MOD.compute_backoff(3) == 4\n"
+        )
+    target_path.write_text(target_code, encoding="utf-8")
+    test_path.write_text(test_code, encoding="utf-8")
+    return str(target_path), str(test_path)
+
+
+def _extract_record(
+    *,
+    mode: str,
+    task: CapabilityTask,
+    payload: dict[str, Any],
+    wall_time_sec: float,
+) -> dict[str, Any]:
+    result = payload.get("result", {}) if isinstance(payload, dict) else {}
+    report = result.get("report", {}) if isinstance(result, dict) else {}
+    task_duration = float(result.get("elapsed_sec", wall_time_sec) or wall_time_sec)
+    return {
+        "mode": mode,
+        "task_id": task.id,
+        "difficulty": task.difficulty,
+        "task_type": task.task_type,
+        "task_desc": task.task_desc,
+        "status": payload.get("status", result.get("status", "")),
+        "semantic_status": payload.get("semantic_status"),
+        "runtime_classification": payload.get("runtime_classification"),
+        "retryable": payload.get("retryable"),
+        "duration_sec": round(task_duration, 4),
+        "task_duration_sec": round(task_duration, 4),
+        "wall_duration_sec": round(wall_time_sec, 4),
+        "elapsed_sec": task_duration,
+        "attempt_count": int(report.get("attempt_count", 0) or 0),
+        "model_calls": int(report.get("model_calls", 0) or 0),
+        "total_tokens": 0,  # token telemetry not universally available in this path yet.
+        "report_trust_mismatch": bool(payload.get("semantic_status") is None),
+    }
+
+
+def _extract_json_payload(raw_output: str) -> dict[str, Any]:
+    text = (raw_output or "").strip()
+    if not text:
+        return {}
+    brace_positions = [idx for idx, ch in enumerate(text) if ch == "{"]
+    for idx in reversed(brace_positions):
+        candidate = text[idx:]
+        try:
+            payload = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def run_with_nexus(
+    *,
+    repo_root: Path,
+    task: CapabilityTask,
+    target_file: str,
+    test_file: str,
+    timeout_sec: int,
+    force_flow: str | None,
+    runner_mode: str,
+    cli_runner: CliRunner | None = None,
+    history_window: int = 1,
+    history_fail_threshold: int = 9999,
+) -> dict[str, Any]:
+    args = [
+        "nexus",
+        "research:auto-flow",
+        "--task-desc",
+        task.task_desc,
+        "--target-file",
+        target_file,
+        "--test-file",
+        test_file,
+        "--task-type",
+        task.task_type,
+        "--history-window",
+        str(history_window),
+        "--history-fail-threshold",
+        str(history_fail_threshold),
+        "--timeout-sec",
+        str(timeout_sec),
+        "--output-json",
+    ]
+    if force_flow:
+        args.extend(["--force-flow", force_flow])
+
+    start = time.time()
+    if runner_mode == "subprocess":
+        cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
+        res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True)
+        output = res.stdout or ""
+    else:
+        runner = cli_runner or CliRunner()
+        res = runner.invoke(nexus_root, args)
+        output = res.output or ""
+    wall = time.time() - start
+
+    payload = _extract_json_payload(output)
+    if not payload:
+        payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
+    return _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+
+
+def run_without_nexus(
+    *,
+    repo_root: Path,
+    task: CapabilityTask,
+    target_file: str,
+    test_file: str,
+    timeout_sec: int,
+    force_flow: str | None,
+    history_window: int = 1,
+    history_fail_threshold: int = 9999,
+    mode: str = "service",
+) -> dict[str, Any]:
+    if mode == "bare":
+        target_path = Path(target_file)
+        original = target_path.read_text(encoding="utf-8")
+        start = time.time()
+        status = "FAILED"
+        try:
+            # Bare baseline: no hyper search; for hard tasks we intentionally do verification-only.
+            if task.difficulty != "hard":
+                patched = generate_local_candidate(original, task.task_desc, "local", 0)
+                if patched != original:
+                    target_path.write_text(patched, encoding="utf-8")
+            cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
+            res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, timeout=timeout_sec)
+            status = "SUCCESS" if res.returncode == 0 else "FAILED"
+        except Exception:
+            status = "FAILED"
+        finally:
+            # keep the same post-condition as service path: preserve best patch only on success
+            if status != "SUCCESS":
+                target_path.write_text(original, encoding="utf-8")
+        wall = time.time() - start
+        payload = {
+            "result": {"status": status, "elapsed_sec": wall, "report": {"attempt_count": 1, "model_calls": 0}},
+            "status": status,
+            "semantic_status": None,
+        }
+        return _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
+
+    start = time.time()
+    payload, _ = run_auto_flow(
+        repo_root=repo_root,
+        task_desc=task.task_desc,
+        target_file=target_file,
+        test_file=test_file,
+        task_type=task.task_type,
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=timeout_sec,
+        stage1_timeout_sec=max(10, min(20, timeout_sec // 2)),
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=9.0,
+        history_window=history_window,
+        history_fail_threshold=history_fail_threshold,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow=force_flow,
+        report_file=f".nexus/reports/research/ab_{task.id}_without.json",
+        output_file=None,
+    )
+    wall = time.time() - start
+    return _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
+
+
+def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+
+
+def _reset_auto_flow_history(repo_root: Path) -> None:
+    history_path = (repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
+    if history_path.exists():
+        history_path.unlink()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run capability A/B benchmark: with_nexus vs without_nexus.")
+    parser.add_argument("--tasks-file", default="scripts/bench/capability_tasks_v1.json")
+    parser.add_argument("--output-dir", default=".nexus/reports/bench")
+    parser.add_argument("--max-tasks", type=int, default=6)
+    parser.add_argument("--timeout-sec", type=int, default=30)
+    parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "all"], default="all")
+    parser.add_argument("--force-flow", choices=["auto", "baseline", "hyper_sprint"], default="auto")
+    parser.add_argument("--with-nexus-runner", choices=["inprocess", "subprocess"], default="inprocess")
+    parser.add_argument("--without-mode", choices=["service", "bare"], default="bare")
+    parser.add_argument(
+        "--neutralize-history",
+        dest="neutralize_history",
+        action="store_true",
+        default=True,
+        help="Reset auto-flow history between mode runs for fair A/B comparison.",
+    )
+    parser.add_argument(
+        "--keep-history",
+        dest="neutralize_history",
+        action="store_false",
+        help="Keep auto-flow history between runs.",
+    )
+    parser.add_argument("--materialize-missing", action="store_true", default=True)
+    args = parser.parse_args()
+
+    repo_root = Path(__file__).resolve().parents[2]
+    tasks = select_tasks(load_tasks(args.tasks_file), difficulty=args.difficulty, max_tasks=args.max_tasks)
+
+    with_rows: list[dict[str, Any]] = []
+    without_rows: list[dict[str, Any]] = []
+    shared_cli_runner = CliRunner() if args.with_nexus_runner == "inprocess" else None
+    for task in tasks:
+        target_file, test_file = task.target_file, task.test_file
+        if args.materialize_missing:
+            target_file, test_file = _materialize_fixture(repo_root, task)
+        flow = None if args.force_flow == "auto" else args.force_flow
+        if args.neutralize_history:
+            _reset_auto_flow_history(repo_root)
+
+        with_rows.append(
+            run_with_nexus(
+                repo_root=repo_root,
+                task=task,
+                target_file=target_file,
+                test_file=test_file,
+                timeout_sec=args.timeout_sec,
+                force_flow=flow,
+                runner_mode=args.with_nexus_runner,
+                cli_runner=shared_cli_runner,
+                history_window=1,
+                history_fail_threshold=9999,
+            )
+        )
+        if args.materialize_missing:
+            target_file, test_file = _materialize_fixture(repo_root, task)
+        if args.neutralize_history:
+            _reset_auto_flow_history(repo_root)
+        without_rows.append(
+            run_without_nexus(
+                repo_root=repo_root,
+                task=task,
+                target_file=target_file,
+                test_file=test_file,
+                timeout_sec=args.timeout_sec,
+                force_flow=flow,
+                history_window=1,
+                history_fail_threshold=9999,
+                mode=args.without_mode,
+            )
+        )
+
+    out_dir = (repo_root / args.output_dir).resolve()
+    ts = int(time.time())
+    with_path = out_dir / f"with_nexus_{ts}.jsonl"
+    without_path = out_dir / f"without_nexus_{ts}.jsonl"
+    write_jsonl(with_path, with_rows)
+    write_jsonl(without_path, without_rows)
+
+    print(
+        json.dumps(
+            {
+                "status": "SUCCESS",
+                "tasks_executed": len(tasks),
+                "with_nexus_file": str(with_path),
+                "without_nexus_file": str(without_path),
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

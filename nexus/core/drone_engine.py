@@ -336,4 +336,15 @@ class TacticalDrone(DroneProtocol):
         logger.info(f"   [{phase}] {message}")
 
     def save_evolution_crystal(self, output_path: Path):
-        output_path.write_text(json.dumps({"drone_id": self.drone_id, "status": self.status, "belief_score": self.belief_score, "tracelog": self.tracelog}, indent=2))
+        semantic_status = "VERIFIED" if str(self.status).upper() == "SUCCESS" else "UNVERIFIED"
+        payload = {
+            "drone_id": self.drone_id,
+            "status": self.status,
+            "semantic_status": semantic_status,
+            "runtime_classification": "verified_pass" if semantic_status == "VERIFIED" else "runtime_execution_failed",
+            "belief_score": self.belief_score,
+            "tracelog": self.tracelog,
+            "artifact_path": str(output_path),
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2))

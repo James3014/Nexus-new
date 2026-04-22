@@ -16,6 +16,8 @@ WORK_COMMANDS = (
     "learn:refresh-plan",
     "learn:converge",
     "learn:report",
+    "learn:phase-slo",
+    "learn:phase-kpi",
     "learn:benchmark-legacy",
     "learn:benchmark-curate",
     "learn:gate",

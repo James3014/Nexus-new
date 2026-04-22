@@ -16,6 +16,7 @@ def test_learn_mode_service_facade_integrity(tmp_path: Path):
     assert hasattr(svc, "_benchmark_svc")
     assert hasattr(svc, "_source_registry_svc")
     assert hasattr(svc, "_phase_slo_summary_svc")
+    assert hasattr(svc, "_phase_kpi_svc")
     
     # Check if public methods exist (Stability Check)
     methods = [
@@ -24,6 +25,7 @@ def test_learn_mode_service_facade_integrity(tmp_path: Path):
         "converge",
         "ask",
         "build_phase_slo_report",
+        "build_phase_kpi_report",
         "build_report",
         "curate_benchmark_bank",
         "register_source",
@@ -150,3 +152,18 @@ def test_phase_slo_summary_delegation_to_subservice(tmp_path, monkeypatch):
     out = svc.read_phase_slo_summary()
     assert called["read"] is True
     assert out["phase_slo_pass"] is True
+
+
+def test_phase_kpi_report_delegation_to_subservice(tmp_path, monkeypatch):
+    svc = LearnModeService(tmp_path)
+    called = {"kpi": False}
+
+    def fake_build_phase_kpi_report(window=300):
+        called["kpi"] = True
+        return {"status": "SUCCESS", "window": window, "total_records": 0}
+
+    monkeypatch.setattr(svc._phase_kpi_svc, "build_phase_kpi_report", fake_build_phase_kpi_report)
+    out = svc.build_phase_kpi_report(window=64)
+    assert called["kpi"] is True
+    assert out["status"] == "SUCCESS"
+    assert out["window"] == 64

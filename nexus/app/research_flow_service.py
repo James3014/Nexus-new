@@ -15,6 +15,54 @@ from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator
 
 
+def _derive_findings_query(task_desc: str, target_file: str | None = None) -> str:
+    text = " ".join((task_desc or "").split())
+    if target_file:
+        text = f"{text} {target_file}".strip()
+    return text[:200]
+
+
+def read_belief_confidence_fast(repo_root: Path) -> float:
+    path = (repo_root / ".nexus" / "belief_state.json").resolve()
+    if not path.exists():
+        return 1.0
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        raw = payload.get("confidence", payload.get("belief_confidence", 1.0))
+        value = float(raw)
+        return min(1.0, max(0.0, value))
+    except Exception:
+        return 1.0
+
+
+def read_capability_tuning_fast(repo_root: Path) -> dict[str, Any]:
+    path = (repo_root / ".nexus" / "config" / "capability_tuning.json").resolve()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def read_phase_slo_summary_fast(repo_root: Path) -> dict[str, Any]:
+    path = (repo_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").resolve()
+    if not path.exists():
+        return {"phase_slo_pass": False, "global": {"required_done_ratio": 0.0}, "status": "UNAVAILABLE", "reason": "phase_slo_summary_missing"}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("invalid_phase_slo_payload")
+        payload.setdefault("phase_slo_pass", False)
+        payload.setdefault("global", {"required_done_ratio": 0.0})
+        payload.setdefault("status", "SUCCESS")
+        payload.setdefault("reason", "")
+        return payload
+    except Exception:
+        return {"phase_slo_pass": False, "global": {"required_done_ratio": 0.0}, "status": "UNAVAILABLE", "reason": "phase_slo_summary_invalid"}
+
+
 def build_route(
     *,
     repo_root: Path,
@@ -29,9 +77,10 @@ def build_route(
     findings_hits = 0
     historical_hints = []
     adjusted_root_cause_confidence = root_cause_confidence
-    if findings_query:
+    effective_findings_query = findings_query or _derive_findings_query(task_desc, target_file=target_file)
+    if effective_findings_query:
         store = FindingsMemoryStore(repo_root)
-        hits = store.search(findings_query)
+        hits = store.search(effective_findings_query)
         findings_hits = len(hits)
         for h in hits:
             historical_hints.extend(h.retrieval_hints)
@@ -104,12 +153,97 @@ def build_route(
         "rounds": decision.rounds if should_research else 0,
         "stable_wins": decision.stable_wins if should_research else 0,
         "findings_hits": findings_hits,
+        "prior_fix_hits": findings_hits,
         "historical_hints": list(dict.fromkeys(historical_hints))[:3],  # Unique, max 3
         "adjusted_root_cause_confidence": adjusted_root_cause_confidence,
         "require_codex_audit": adjusted_root_cause_confidence < 0.6,
         "recommended_flow": recommended_flow,
         "recommended_reason": recommended_reason,
         "explain_payload": explain,
+    }
+
+
+def build_hyper_execution_profile(
+    *,
+    task_desc: str,
+    task_type: str,
+    candidate_count: int,
+    root_cause_confidence: float,
+    route_recommended_flow: str,
+    belief_confidence: float = 1.0,
+    prior_fix_hits: int = 0,
+    tuning: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    text = (task_desc or "").lower()
+    hard_keywords = ["flaky", "race", "deadlock", "timeout", "latency", "websocket", "sdk", "api"]
+    has_hard_keyword = any(keyword in text for keyword in hard_keywords)
+    low_confidence = float(root_cause_confidence) < 0.75
+    risk_bug = task_type == "bug" and route_recommended_flow == "hyper_sprint"
+    is_hard_task = bool(has_hard_keyword or low_confidence or risk_bug)
+
+    effective_candidate_count = max(1, int(candidate_count))
+    effective_max_rounds = 1
+    effective_stage1_max_parallel = 1
+    tuning_reasons: list[str] = []
+
+    if risk_bug:
+        effective_candidate_count = max(effective_candidate_count, 3)
+        effective_max_rounds = max(effective_max_rounds, 2)
+        effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
+        tuning_reasons.append("risk_bug_promote_hyper_budget")
+
+    if has_hard_keyword:
+        effective_candidate_count = max(effective_candidate_count, 4)
+        effective_max_rounds = max(effective_max_rounds, 3)
+        effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
+        tuning_reasons.append("hard_keyword_detected")
+
+    if low_confidence:
+        effective_candidate_count = max(effective_candidate_count, 4)
+        effective_max_rounds = max(effective_max_rounds, 3)
+        tuning_reasons.append("low_root_cause_confidence")
+
+    if float(belief_confidence) < 0.6:
+        effective_candidate_count = max(effective_candidate_count, 4)
+        effective_max_rounds = max(effective_max_rounds, 3)
+        effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
+        tuning_reasons.append("low_belief_confidence")
+
+    if int(prior_fix_hits or 0) >= 2 and is_hard_task:
+        effective_candidate_count = max(effective_candidate_count, 5)
+        effective_max_rounds = max(effective_max_rounds, 3)
+        tuning_reasons.append("prior_fix_hits_boost")
+
+    knobs = (tuning or {}).get("knobs", {}) if isinstance(tuning, dict) else {}
+    candidate_boost = int(knobs.get("candidate_boost", 0) or 0)
+    max_rounds_boost = int(knobs.get("max_rounds_boost", 0) or 0)
+    stage1_parallel_boost = int(knobs.get("stage1_parallel_boost", 0) or 0)
+    if candidate_boost != 0:
+        effective_candidate_count = max(1, effective_candidate_count + candidate_boost)
+        tuning_reasons.append(f"tuning_candidate_boost:{candidate_boost}")
+    if max_rounds_boost != 0:
+        effective_max_rounds = max(1, effective_max_rounds + max_rounds_boost)
+        tuning_reasons.append(f"tuning_max_rounds_boost:{max_rounds_boost}")
+    if stage1_parallel_boost != 0:
+        effective_stage1_max_parallel = max(1, effective_stage1_max_parallel + stage1_parallel_boost)
+        tuning_reasons.append(f"tuning_stage1_parallel_boost:{stage1_parallel_boost}")
+
+    # Keep runtime bounded for CLI calls.
+    effective_candidate_count = min(effective_candidate_count, 6)
+    effective_max_rounds = min(effective_max_rounds, 4)
+    effective_stage1_max_parallel = min(effective_stage1_max_parallel, 3)
+
+    return {
+        "is_hard_task": is_hard_task,
+        "has_hard_keyword": has_hard_keyword,
+        "low_confidence": low_confidence,
+        "risk_bug": risk_bug,
+        "belief_confidence": float(belief_confidence),
+        "prior_fix_hits": int(prior_fix_hits or 0),
+        "effective_candidate_count": effective_candidate_count,
+        "effective_max_rounds": effective_max_rounds,
+        "effective_stage1_max_parallel": effective_stage1_max_parallel,
+        "tuning_reasons": tuning_reasons,
     }
 
 
@@ -140,8 +274,6 @@ def run_auto_flow(
     output_file: Path | None,
 ):
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
-    from nexus.research.sprint_service import SprintConfig, run_hyper_sprint
-    from nexus.research.learn_mode import LearnModeService
 
     route = build_route(
         repo_root=repo_root,
@@ -150,15 +282,35 @@ def run_auto_flow(
         candidate_count=candidate_count,
         root_cause_confidence=root_cause_confidence,
         findings_query=findings_query,
+        target_file=target_file,
     )
+    tuning_payload = read_capability_tuning_fast(repo_root)
+    tuning_knobs = (tuning_payload.get("knobs", {}) if isinstance(tuning_payload, dict) else {}) or {}
+    execution_profile = build_hyper_execution_profile(
+        task_desc=task_desc,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        root_cause_confidence=root_cause_confidence,
+        route_recommended_flow=str(route.get("recommended_flow", "")),
+        belief_confidence=read_belief_confidence_fast(repo_root),
+        prior_fix_hits=int(route.get("prior_fix_hits", 0) or 0),
+        tuning=tuning_payload,
+    )
+    tuned_baseline_fast_sec = baseline_fast_sec
+    try:
+        tuned_fast = float(tuning_knobs.get("baseline_fast_sec", baseline_fast_sec))
+        if tuned_fast >= 0:
+            tuned_baseline_fast_sec = tuned_fast
+    except Exception:
+        tuned_baseline_fast_sec = baseline_fast_sec
+    skip_baseline_probe_for_hard = bool(tuning_knobs.get("skip_baseline_probe_for_hard", False))
     chosen_flow = force_flow or route["recommended_flow"]
-    learn_service = LearnModeService(repo_root)
-    learn_phase_slo = learn_service.read_phase_slo_summary()
+    learn_phase_slo = read_phase_slo_summary_fast(repo_root)
     learn_gate_blocked = (
         not bool(learn_phase_slo.get("phase_slo_pass", False))
         or float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0) < 0.95
     )
-    if force_flow is None and chosen_flow == "hyper_sprint" and learn_gate_blocked:
+    if force_flow is None and chosen_flow == "hyper_sprint" and learn_gate_blocked and not execution_profile["is_hard_task"]:
         chosen_flow = "baseline"
     flow_key = f"{target_file}|{test_file}"
     history_path = (repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
@@ -179,6 +331,14 @@ def run_auto_flow(
     recent = list(history_data.get(flow_key, []))
     recent_window = recent[-max(1, history_window):]
     recent_hyper_fails = sum(1 for item in recent_window if item.get("flow") == "hyper_sprint" and item.get("status") == "FAILED")
+    stage1_fail_signals = sum(
+        1
+        for item in recent_window
+        if item.get("flow") == "hyper_sprint"
+        and item.get("status") == "FAILED"
+        and "stage1_no_passing_candidate" in str(item.get("reason", ""))
+    )
+    nightshift_recommended = bool(recent_hyper_fails >= 2 or stage1_fail_signals >= 1)
     history_forced_baseline = False
     if force_flow is None and chosen_flow == "hyper_sprint" and recent_hyper_fails >= max(1, history_fail_threshold):
         chosen_flow = "baseline"
@@ -312,11 +472,11 @@ def run_auto_flow(
             task=task_desc,
             target_file=target_file,
             test_file=test_file,
-            candidate_count=max(1, candidate_count),
-            max_rounds=1,
+            candidate_count=execution_profile["effective_candidate_count"],
+            max_rounds=execution_profile["effective_max_rounds"],
             timeout_sec=timeout_sec,
             safe_mode=True,
-            stage1_max_parallel=1,
+            stage1_max_parallel=execution_profile["effective_stage1_max_parallel"],
             stage1_timeout_sec=effective_stage1_timeout,
             llm_mode=llm_mode,
         )
@@ -345,48 +505,63 @@ def run_auto_flow(
 
     baseline_probe = None
     early_baseline_shortcut = False
+    baseline_probe_skipped = False
     if chosen_flow == "baseline":
         result = _run_baseline_apply()
     else:
-        # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
-        baseline_probe = _run_baseline_probe()
         if (
             force_flow is None
-            and baseline_probe["status"] == "SUCCESS"
-            and baseline_probe["elapsed_sec"] <= baseline_fast_sec
+            and execution_profile["is_hard_task"]
+            and skip_baseline_probe_for_hard
         ):
-            early_baseline_shortcut = True
-            target_path.write_text(original_code, encoding="utf-8")
-            result = _run_baseline_apply()
-            chosen_flow = "baseline"
-        else:
+            baseline_probe_skipped = True
             result = _run_hyper_apply()
+        else:
+        # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
+            baseline_probe = _run_baseline_probe()
             if (
-                baseline_probe["status"] == "SUCCESS"
-                and result["status"] == "SUCCESS"
-                and baseline_probe["elapsed_sec"] > 0
-                and result["elapsed_sec"] > max_time_ratio_guard * baseline_probe["elapsed_sec"]
+                force_flow is None
+                and baseline_probe["status"] == "SUCCESS"
+                and tuned_baseline_fast_sec > 0
+                and baseline_probe["elapsed_sec"] <= tuned_baseline_fast_sec
             ):
-                guard_hit = True
+                early_baseline_shortcut = True
                 target_path.write_text(original_code, encoding="utf-8")
                 result = _run_baseline_apply()
                 chosen_flow = "baseline"
+            else:
+                result = _run_hyper_apply()
+                min_probe_sec_for_ratio_guard = 0.05
+                if (
+                    baseline_probe["status"] == "SUCCESS"
+                    and result["status"] == "SUCCESS"
+                    and baseline_probe["elapsed_sec"] >= min_probe_sec_for_ratio_guard
+                    and result["elapsed_sec"] > max_time_ratio_guard * baseline_probe["elapsed_sec"]
+                ):
+                    guard_hit = True
+                    target_path.write_text(original_code, encoding="utf-8")
+                    result = _run_baseline_apply()
+                    chosen_flow = "baseline"
 
     payload = {
         "schema_version": "1.0",
         "task_desc": task_desc,
         "task_type": task_type,
         "route": route,
+        "execution_profile": execution_profile,
         "chosen_flow": chosen_flow,
         "guard": {
             "hit": guard_hit,
             "early_baseline_shortcut": early_baseline_shortcut,
             "history_forced_baseline": history_forced_baseline,
-            "learn_forced_baseline": bool(learn_gate_blocked and force_flow is None),
+            "learn_forced_baseline": bool(learn_gate_blocked and force_flow is None and not execution_profile["is_hard_task"]),
             "recent_hyper_failures": recent_hyper_fails,
+            "nightshift_recommended": nightshift_recommended,
+            "stage1_fail_signals": stage1_fail_signals,
             "history_window": max(1, history_window),
-            "baseline_fast_sec": baseline_fast_sec,
+            "baseline_fast_sec": tuned_baseline_fast_sec,
             "max_time_ratio_guard": max_time_ratio_guard,
+            "baseline_probe_skipped": baseline_probe_skipped,
             "baseline_probe": baseline_probe,
         },
         "learn_phase_slo": {

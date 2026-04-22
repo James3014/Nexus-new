@@ -32,7 +32,12 @@ def test_core_command_paths_emit_semantic_contract_fields():
         "research:run": ("build_completion_envelope(", "semantic_status", "ensure_verified_completion("),
         "delegate": ("build_completion_envelope(", "write_completion_envelope(", "ensure_verified_completion("),
         "learn:ingest": ("semantic_status", "report_file"),
+        "learn:register-source": ("_finalize_semantic_payload(", "ensure_verified_completion("),
+        "learn:refresh": ("_finalize_semantic_payload(", "ensure_verified_completion("),
+        "learn:refresh-plan": ("_finalize_semantic_payload(", "ensure_verified_completion("),
         "learn:report": ("semantic_status", "report_file"),
+        "learn:phase-slo": ("_finalize_semantic_payload(", "ensure_verified_completion("),
+        "learn:phase-kpi": ("_finalize_semantic_payload(", "ensure_verified_completion("),
         "learn:converge": ("evidence_file", "_write_hallucination_evidence(", "_enforce_hallucination_gate("),
     }
     for command_name, tokens in required.items():

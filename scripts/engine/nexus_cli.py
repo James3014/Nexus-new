@@ -245,6 +245,25 @@ def _merge_completion_payload(base_payload: dict, completion_payload: dict) -> d
     return merged
 
 
+def _finalize_semantic_payload(
+    payload: dict,
+    *,
+    command_name: str,
+    task_name: str,
+    runtime_ok: bool,
+    execution_path: str,
+) -> dict:
+    completion_payload = build_completion_envelope(
+        command_name=command_name,
+        task_name=task_name,
+        runtime_ok=runtime_ok,
+        execution_path=execution_path,
+    )
+    merged = _merge_completion_payload(payload, completion_payload)
+    merged["semantic_status"] = merged.get("semantic_status", "UNVERIFIED")
+    return merged
+
+
 def _persist_completion_handoff(payload: dict, *, context: str, report_file: str | Path | None = None) -> Path:
     handoff_path = write_completion_handoff(
         project_root=REPO_ROOT,
@@ -670,11 +689,19 @@ def learn_register_source(topic, source, source_file, refresh_after_days, priori
     out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = _finalize_semantic_payload(
+        payload,
+        command_name="learn:register-source",
+        task_name=f"register source topic={topic}",
+        runtime_ok=(str(payload.get("status", "")).upper() == "SUCCESS"),
+        execution_path="cli->learn_mode_service",
+    )
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         click.echo(f"✅ Learn source registered: topic={topic} source={source}")
         click.echo(f"Report: {out_path}")
+    ensure_verified_completion(payload, context="learn:register-source")
 
 
 @nexus_group.command(name="learn:refresh")
@@ -698,11 +725,19 @@ def learn_refresh(topic, due_only, pass_threshold, question_count, report_file, 
     out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = _finalize_semantic_payload(
+        payload,
+        command_name="learn:refresh",
+        task_name=f"refresh sources topic={topic or 'all'}",
+        runtime_ok=(str(payload.get("status", "")).upper() == "SUCCESS"),
+        execution_path="cli->learn_mode_service",
+    )
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         click.echo(f"✅ Learn refresh complete: refreshed={payload['refreshed_count']} skipped={payload['skipped_count']}")
         click.echo(f"Report: {out_path}")
+    ensure_verified_completion(payload, context="learn:refresh")
 
 
 @nexus_group.command(name="learn:refresh-plan")
@@ -722,11 +757,19 @@ def learn_refresh_plan(topic, due_within_days, report_file, output_json):
     out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = _finalize_semantic_payload(
+        payload,
+        command_name="learn:refresh-plan",
+        task_name=f"build refresh plan topic={topic or 'all'}",
+        runtime_ok=(str(payload.get("status", "")).upper() == "SUCCESS"),
+        execution_path="cli->learn_mode_service",
+    )
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         click.echo(f"✅ Learn refresh plan generated: due={payload['due_count']} total={payload['sources_total']}")
         click.echo(f"Report: {out_path}")
+    ensure_verified_completion(payload, context="learn:refresh-plan")
 
 
 @nexus_group.command(name="learn:converge")
@@ -925,15 +968,61 @@ def learn_phase_slo(window, report_file, output_json):
     out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = _finalize_semantic_payload(
+        payload,
+        command_name="learn:phase-slo",
+        task_name=f"build learn phase slo window={window}",
+        runtime_ok=True,
+        execution_path="cli->learn_mode_service",
+    )
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
-        return
-    click.echo("✅ Learn phase SLO summary generated")
-    click.echo(
-        f"phase_slo_pass={payload.get('phase_slo_pass')} "
-        f"required_done_ratio={payload.get('global', {}).get('required_done_ratio', 0.0)}"
+    else:
+        click.echo("✅ Learn phase SLO summary generated")
+        click.echo(
+            f"phase_slo_pass={payload.get('phase_slo_pass')} "
+            f"required_done_ratio={payload.get('global', {}).get('required_done_ratio', 0.0)}"
+        )
+        click.echo(f"Report: {out_path}")
+    ensure_verified_completion(payload, context="learn:phase-slo")
+
+
+@nexus_group.command(name="learn:phase-kpi")
+@click.option("--window", default=300, type=int, show_default=True)
+@click.option(
+    "--report-file",
+    default=".nexus/reports/learn/phase_kpi_report.json",
+    show_default=True,
+    type=click.Path(),
+)
+@click.option("--output-json", is_flag=True)
+def learn_phase_kpi(window, report_file, output_json):
+    """📊 Build phase KPI dashboard payload for P/X/D/R/A/C."""
+    from nexus.research.learn_mode import LearnModeService
+
+    service = LearnModeService(repo_root)
+    payload = service.build_phase_kpi_report(window=window)
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    payload = _finalize_semantic_payload(
+        payload,
+        command_name="learn:phase-kpi",
+        task_name=f"build learn phase kpi window={window}",
+        runtime_ok=True,
+        execution_path="cli->learn_mode_service",
     )
-    click.echo(f"Report: {out_path}")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo("✅ Learn phase KPI report generated")
+        click.echo(
+            f"total_records={payload.get('total_records', 0)} "
+            f"success_ratio={payload.get('global', {}).get('success_ratio', 0.0)} "
+            f"required_done_ratio={payload.get('global', {}).get('required_done_ratio', 0.0)}"
+        )
+        click.echo(f"Report: {out_path}")
+    ensure_verified_completion(payload, context="learn:phase-kpi")
 
 
 @nexus_group.command(name="learn:benchmark-legacy")

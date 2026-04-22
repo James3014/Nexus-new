@@ -27,6 +27,7 @@ from .learn.phase_bridge_service import PhaseBridgeService
 from .learn.benchmark_service import BenchmarkService
 from .learn.source_registry_service import SourceRegistryService
 from .learn.phase_slo_summary_service import PhaseSLOSummaryService
+from .learn.phase_kpi_service import PhaseKPIService
 
 
 
@@ -83,6 +84,7 @@ class LearnModeService:
         self._benchmark_svc = BenchmarkService(self)
         self._source_registry_svc = SourceRegistryService(self)
         self._phase_slo_summary_svc = PhaseSLOSummaryService(self)
+        self._phase_kpi_svc = PhaseKPIService(self)
 
 
     PHASES: tuple[str, ...] = ("P", "X", "D", "R", "A", "C")
@@ -504,6 +506,9 @@ class LearnModeService:
 
     def read_phase_slo_summary(self) -> dict[str, Any]:
         return self._phase_slo_summary_svc.read_phase_slo_summary()
+
+    def build_phase_kpi_report(self, *, window: int = 300) -> dict[str, Any]:
+        return self._phase_kpi_svc.build_phase_kpi_report(window=window)
 
     def _load_source_registry(self) -> list[dict[str, Any]]:
         return self._source_registry_svc.load_source_registry()
