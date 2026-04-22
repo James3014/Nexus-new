@@ -156,6 +156,8 @@ def _extract_record(
     guard = payload.get("guard", {}) if isinstance(payload, dict) else {}
     strategy = payload.get("strategy", {}) if isinstance(payload, dict) else {}
     learn_phase_slo = payload.get("learn_phase_slo", {}) if isinstance(payload, dict) else {}
+    consensus = route.get("consensus", {}) if isinstance(route, dict) else {}
+    consensus_votes = consensus.get("votes", {}) if isinstance(consensus, dict) else {}
     task_duration = float(result.get("elapsed_sec", wall_time_sec) or wall_time_sec)
     model_calls = int(report.get("model_calls", 0) or 0)
     total_tokens = int(report.get("total_tokens", 0) or 0)
@@ -189,6 +191,9 @@ def _extract_record(
         "route_recommended_flow": route.get("recommended_flow"),
         "route_reason": route.get("recommended_reason"),
         "route_risk_score": int(route_features.get("risk_score", 0) or 0),
+        "route_consensus_winner": consensus.get("winner"),
+        "route_consensus_hyper_votes": int(consensus_votes.get("hyper_sprint", 0) or 0),
+        "route_consensus_baseline_votes": int(consensus_votes.get("baseline", 0) or 0),
         "route_findings_hits": int(route.get("findings_hits", 0) or 0),
         "prior_fix_hits": int(route.get("prior_fix_hits", 0) or 0),
         "belief_confidence": float((payload.get("execution_profile", {}) or {}).get("belief_confidence", 1.0) or 1.0),

@@ -21,6 +21,7 @@ def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
     assert out["health"]["verdict"] in {"PASS", "WARN"}
     assert "pillars" in out
     assert "self_heal" in out
+    assert "route_consensus" in out
     assert 0.0 <= out["pillars"]["overall"] <= 1.0
     assert Path(out["report_file"]).exists()
 
@@ -38,6 +39,7 @@ def test_run_ops_loop_rounds_outputs_median_kpi(tmp_path: Path):
     assert out["rounds"] == 2
     assert "kpi_median_3round" in out
     assert out["trend_gate"]["verdict"] in {"PASS", "WARN"}
+    assert "median_consensus" in out["trend_gate"]
     assert Path(out["report_file"]).exists()
 
 

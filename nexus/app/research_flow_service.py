@@ -7,12 +7,52 @@ import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
+from dataclasses import dataclass
 import click
 
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator
+
+
+@dataclass(frozen=True)
+class ParsedTuningKnobs:
+    candidate_boost: int = 0
+    max_rounds_boost: int = 0
+    stage1_parallel_boost: int = 0
+    baseline_fast_sec: float = 0.0
+    skip_baseline_probe_for_hard: bool = False
+
+
+def _parse_tuning_knobs(payload: dict[str, Any] | None) -> ParsedTuningKnobs:
+    raw = (payload or {}).get("knobs", {}) if isinstance(payload, dict) else {}
+    if not isinstance(raw, dict):
+        return ParsedTuningKnobs()
+    try:
+        candidate_boost = int(raw.get("candidate_boost", 0) or 0)
+    except Exception:
+        candidate_boost = 0
+    try:
+        max_rounds_boost = int(raw.get("max_rounds_boost", 0) or 0)
+    except Exception:
+        max_rounds_boost = 0
+    try:
+        stage1_parallel_boost = int(raw.get("stage1_parallel_boost", 0) or 0)
+    except Exception:
+        stage1_parallel_boost = 0
+    try:
+        baseline_fast_sec = float(raw.get("baseline_fast_sec", 0.0) or 0.0)
+    except Exception:
+        baseline_fast_sec = 0.0
+    skip_baseline_probe_for_hard = bool(raw.get("skip_baseline_probe_for_hard", False))
+    return ParsedTuningKnobs(
+        candidate_boost=max(-2, min(2, candidate_boost)),
+        max_rounds_boost=max(-2, min(2, max_rounds_boost)),
+        stage1_parallel_boost=max(-2, min(2, stage1_parallel_boost)),
+        baseline_fast_sec=max(0.0, baseline_fast_sec),
+        skip_baseline_probe_for_hard=skip_baseline_probe_for_hard,
+    )
 
 
 def _derive_findings_query(task_desc: str, target_file: str | None = None) -> str:
@@ -132,6 +172,27 @@ def build_route(
         recommended_flow = "hyper_sprint" if is_risky_bug else "baseline"
         recommended_reason = "complex_bug_prefer_hyper" if is_risky_bug else "simple_bug_prefer_baseline"
 
+    consensus_votes = {
+        "baseline": 0,
+        "hyper_sprint": 0,
+    }
+    vote_reasons: list[str] = []
+    if is_doc_fix:
+        consensus_votes["baseline"] += 2
+        vote_reasons.append("doc_fix_prefers_baseline")
+    if has_hard_signal:
+        consensus_votes["hyper_sprint"] += 1
+        vote_reasons.append("hard_signal_prefers_hyper")
+    if adjusted_root_cause_confidence < 0.75:
+        consensus_votes["hyper_sprint"] += 1
+        vote_reasons.append("low_confidence_prefers_hyper")
+    if findings_hits > 0:
+        consensus_votes["hyper_sprint"] += 1
+        vote_reasons.append("history_hits_prefers_hyper")
+    if task_type in {"feature", "refactor"}:
+        consensus_votes["baseline"] += 1
+        vote_reasons.append("structural_task_prefers_baseline")
+
     if recommended_flow == "hyper_sprint":
         should_research = True
         mode = decision.mode if decision.mode != "skip" else "external"
@@ -188,6 +249,11 @@ def build_route(
         "recommended_reason": recommended_reason,
         "explain_payload": explain,
         "route_features": route_features,
+        "consensus": {
+            "votes": consensus_votes,
+            "reasons": vote_reasons,
+            "winner": recommended_flow,
+        },
     }
 
 
@@ -256,10 +322,10 @@ def build_hyper_execution_profile(
         prefer_direct_hyper = True
         tuning_reasons.append("cross_module_refactor_direct_hyper")
 
-    knobs = (tuning or {}).get("knobs", {}) if isinstance(tuning, dict) else {}
-    candidate_boost = int(knobs.get("candidate_boost", 0) or 0)
-    max_rounds_boost = int(knobs.get("max_rounds_boost", 0) or 0)
-    stage1_parallel_boost = int(knobs.get("stage1_parallel_boost", 0) or 0)
+    knobs = _parse_tuning_knobs(tuning)
+    candidate_boost = knobs.candidate_boost
+    max_rounds_boost = knobs.max_rounds_boost
+    stage1_parallel_boost = knobs.stage1_parallel_boost
     if candidate_boost != 0:
         effective_candidate_count = max(1, effective_candidate_count + candidate_boost)
         tuning_reasons.append(f"tuning_candidate_boost:{candidate_boost}")
@@ -329,7 +395,7 @@ def run_auto_flow(
         target_file=target_file,
     )
     tuning_payload = read_capability_tuning_fast(repo_root)
-    tuning_knobs = (tuning_payload.get("knobs", {}) if isinstance(tuning_payload, dict) else {}) or {}
+    parsed_knobs = _parse_tuning_knobs(tuning_payload)
     execution_profile = build_hyper_execution_profile(
         task_desc=task_desc,
         task_type=task_type,
@@ -341,13 +407,8 @@ def run_auto_flow(
         tuning=tuning_payload,
     )
     tuned_baseline_fast_sec = baseline_fast_sec
-    try:
-        tuned_fast = float(tuning_knobs.get("baseline_fast_sec", baseline_fast_sec))
-        if tuned_fast >= 0:
-            tuned_baseline_fast_sec = tuned_fast
-    except Exception:
-        tuned_baseline_fast_sec = baseline_fast_sec
-    skip_baseline_probe_for_hard = bool(tuning_knobs.get("skip_baseline_probe_for_hard", False))
+    tuned_baseline_fast_sec = max(0.0, float(parsed_knobs.baseline_fast_sec or baseline_fast_sec))
+    skip_baseline_probe_for_hard = bool(parsed_knobs.skip_baseline_probe_for_hard)
     chosen_flow = force_flow or route["recommended_flow"]
     learn_phase_slo = read_phase_slo_summary_fast(repo_root)
     learn_gate_blocked = (

@@ -368,14 +368,29 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
                 if isinstance(trend_gate, dict) and trend_gate:
                     t_verdict = str(trend_gate.get("verdict", "UNKNOWN"))
                     mk = trend_gate.get("median_kpi", {}) if isinstance(trend_gate.get("median_kpi"), dict) else {}
+                    mc = trend_gate.get("median_consensus", {}) if isinstance(trend_gate.get("median_consensus"), dict) else {}
                     print(
                         "📊 [Capability-TrendGate] Verdict: "
                         f"{t_verdict}, Solve: {float(mk.get('with_solve_rate', 0.0) or 0.0):.2f}, "
                         f"Semantic: {float(mk.get('with_semantic_verified_rate', 0.0) or 0.0):.2f}, "
                         f"WallOverhead: {float(mk.get('wall_overhead_sec', 0.0) or 0.0):.2f}s"
                     )
+                    if mc:
+                        print(
+                            "📊 [Capability-TrendGate] Consensus: "
+                            f"Winner->Recommended {float(mc.get('winner_match_recommended_rate', 0.0) or 0.0):.2f}, "
+                            f"Winner->ChosenFlow {float(mc.get('winner_match_chosen_flow_rate', 0.0) or 0.0):.2f}"
+                        )
                     if t_verdict != "PASS":
                         print("⚠️ [Capability-TrendGate] 3-round median KPI gate is not PASS.")
+                route_consensus = payload.get("route_consensus", {}) if isinstance(payload, dict) else {}
+                if isinstance(route_consensus, dict) and route_consensus:
+                    print(
+                        "📊 [Route-Consensus] Winner->Recommended: "
+                        f"{float(route_consensus.get('winner_match_recommended_rate', 0.0) or 0.0):.2f}, "
+                        "Winner->ChosenFlow: "
+                        f"{float(route_consensus.get('winner_match_chosen_flow_rate', 0.0) or 0.0):.2f}"
+                    )
         except Exception as e:
             print(f"⚠️ Error parsing capability health report: {e}")
 

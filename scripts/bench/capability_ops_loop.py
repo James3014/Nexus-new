@@ -123,6 +123,40 @@ def _compute_self_heal_metrics(with_rows: list[dict[str, Any]]) -> dict[str, Any
     }
 
 
+def _compute_route_consensus_metrics(with_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = max(1, len(with_rows))
+    winner_defined = [
+        r for r in with_rows if str(r.get("route_consensus_winner", "")).strip() in {"baseline", "hyper_sprint"}
+    ]
+    winner_match = [
+        r
+        for r in winner_defined
+        if str(r.get("route_consensus_winner", "")) == str(r.get("route_recommended_flow", ""))
+    ]
+    flow_alignment = [
+        r
+        for r in winner_defined
+        if str(r.get("route_consensus_winner", "")) == str(r.get("chosen_flow", ""))
+    ]
+    hyper_wins = [
+        r
+        for r in winner_defined
+        if int(r.get("route_consensus_hyper_votes", 0) or 0) > int(r.get("route_consensus_baseline_votes", 0) or 0)
+    ]
+    baseline_wins = [
+        r
+        for r in winner_defined
+        if int(r.get("route_consensus_baseline_votes", 0) or 0) >= int(r.get("route_consensus_hyper_votes", 0) or 0)
+    ]
+    return {
+        "winner_defined_rate": round(len(winner_defined) / total, 4),
+        "winner_match_recommended_rate": round((len(winner_match) / len(winner_defined)) if winner_defined else 0.0, 4),
+        "winner_match_chosen_flow_rate": round((len(flow_alignment) / len(winner_defined)) if winner_defined else 0.0, 4),
+        "hyper_consensus_rate": round((len(hyper_wins) / len(winner_defined)) if winner_defined else 0.0, 4),
+        "baseline_consensus_rate": round((len(baseline_wins) / len(winner_defined)) if winner_defined else 0.0, 4),
+    }
+
+
 def _compute_health_score(eval_payload: dict[str, Any]) -> dict[str, Any]:
     with_summary = (eval_payload.get("a") or {}).get("summary", {}
     ) if isinstance(eval_payload, dict) else {}
@@ -242,6 +276,7 @@ def run_ops_loop(
     with_rows = _load_jsonl_rows(with_file)
     pillar_metrics = _compute_pillar_scores(with_rows)
     self_heal_metrics = _compute_self_heal_metrics(with_rows)
+    route_consensus_metrics = _compute_route_consensus_metrics(with_rows)
 
     llm_probe_payload: dict[str, Any] | None = None
     if run_llm_probe:
@@ -400,6 +435,7 @@ def run_ops_loop(
         "health": health,
         "pillars": pillar_metrics,
         "self_heal": self_heal_metrics,
+        "route_consensus": route_consensus_metrics,
         "llm_probe": llm_probe_payload,
         "autotune": autotune_payload or None,
     }
@@ -445,22 +481,38 @@ def run_ops_loop_rounds(
     median_kpi["wall_overhead_sec"] = round(
         max(0.0, median_kpi["with_avg_wall_duration_sec"] - median_kpi["without_avg_wall_duration_sec"]), 4
     )
+    consensus_recommended_values = [
+        float((r.get("route_consensus", {}) or {}).get("winner_match_recommended_rate", 0.0) or 0.0)
+        for r in reports
+    ]
+    consensus_chosen_values = [
+        float((r.get("route_consensus", {}) or {}).get("winner_match_chosen_flow_rate", 0.0) or 0.0)
+        for r in reports
+    ]
+    consensus_median = {
+        "winner_match_recommended_rate": round(_median(consensus_recommended_values), 4),
+        "winner_match_chosen_flow_rate": round(_median(consensus_chosen_values), 4),
+    }
+    kpi_pass = (
+        median_kpi["with_solve_rate"] >= 0.95
+        and median_kpi["with_semantic_verified_rate"] >= 0.95
+        and median_kpi["wall_overhead_sec"] <= 1.5
+    )
+    consensus_pass = (
+        consensus_median["winner_match_recommended_rate"] >= 0.9
+        and consensus_median["winner_match_chosen_flow_rate"] >= 0.85
+    )
     trend_gate = {
-        "verdict": (
-            "PASS"
-            if (
-                median_kpi["with_solve_rate"] >= 0.95
-                and median_kpi["with_semantic_verified_rate"] >= 0.95
-                and median_kpi["wall_overhead_sec"] <= 1.5
-            )
-            else "WARN"
-        ),
+        "verdict": ("PASS" if (kpi_pass and consensus_pass) else "WARN"),
         "rules": {
             "min_solve_rate": 0.95,
             "min_semantic_rate": 0.95,
             "max_wall_overhead_sec": 1.5,
+            "min_consensus_recommended_rate": 0.9,
+            "min_consensus_chosen_flow_rate": 0.85,
         },
         "median_kpi": median_kpi,
+        "median_consensus": consensus_median,
     }
     final = dict(reports[-1])
     final["rounds"] = len(reports)

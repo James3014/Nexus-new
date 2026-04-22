@@ -19,8 +19,10 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert "recommended_flow" in out
     assert "explain_payload" in out
     assert "route_features" in out
+    assert "consensus" in out
     assert out["explain_payload"]["risk"] == "CRITICAL"
     assert out["route_features"]["risk_score"] >= 50
+    assert out["consensus"]["winner"] in {"baseline", "hyper_sprint"}
 
 
 def test_build_hyper_execution_profile_boosts_hard_bug():

@@ -72,6 +72,7 @@ def test_extract_record_maps_semantic_fields():
             "recommended_reason": "complex_bug_prefer_hyper",
             "findings_hits": 2,
             "prior_fix_hits": 2,
+            "consensus": {"winner": "hyper_sprint", "votes": {"hyper_sprint": 3, "baseline": 1}},
             "route_features": {"risk_score": 87},
         },
         "guard": {"hit": False, "nightshift_recommended": True, "stage1_fail_signals": 1},
@@ -97,9 +98,12 @@ def test_extract_record_maps_semantic_fields():
     assert out["token_capture_status"] == "measured"
     assert out["report_trust_mismatch"] is False
     assert out["route_risk_score"] == 87
+    assert out["route_consensus_winner"] == "hyper_sprint"
+    assert out["route_consensus_hyper_votes"] == 3
     assert out["guard_nightshift_recommended"] is True
     assert out["strategy_path"] == "probe_then_hyper"
     assert out["learn_phase_slo_pass"] is True
+    assert out["semantic_completed"] is False
 
 
 def test_extract_json_payload_from_prefixed_output():
