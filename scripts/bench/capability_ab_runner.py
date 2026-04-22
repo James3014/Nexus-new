@@ -151,6 +151,9 @@ def _extract_record(
     result = payload.get("result", {}) if isinstance(payload, dict) else {}
     report = result.get("report", {}) if isinstance(result, dict) else {}
     task_duration = float(result.get("elapsed_sec", wall_time_sec) or wall_time_sec)
+    model_calls = int(report.get("model_calls", 0) or 0)
+    total_tokens = int(report.get("total_tokens", 0) or 0)
+    token_capture_status = str(report.get("token_capture_status", "unknown") or "unknown")
     return {
         "mode": mode,
         "task_id": task.id,
@@ -166,8 +169,9 @@ def _extract_record(
         "wall_duration_sec": round(wall_time_sec, 4),
         "elapsed_sec": task_duration,
         "attempt_count": int(report.get("attempt_count", 0) or 0),
-        "model_calls": int(report.get("model_calls", 0) or 0),
-        "total_tokens": 0,  # token telemetry not universally available in this path yet.
+        "model_calls": model_calls,
+        "total_tokens": total_tokens,
+        "token_capture_status": token_capture_status,
         "report_trust_mismatch": bool(payload.get("semantic_status") is None),
     }
 
@@ -274,7 +278,16 @@ def run_without_nexus(
                 target_path.write_text(original, encoding="utf-8")
         wall = time.time() - start
         payload = {
-            "result": {"status": status, "elapsed_sec": wall, "report": {"attempt_count": 1, "model_calls": 0}},
+            "result": {
+                "status": status,
+                "elapsed_sec": wall,
+                "report": {
+                    "attempt_count": 1,
+                    "model_calls": 0,
+                    "total_tokens": 0,
+                    "token_capture_status": "not_applicable_local_only",
+                },
+            },
             "status": status,
             "semantic_status": None,
         }

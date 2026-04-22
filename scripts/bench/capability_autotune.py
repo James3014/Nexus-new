@@ -48,8 +48,13 @@ def compute_tuning(eval_payload: dict[str, Any]) -> dict[str, Any]:
             reasons.append("solve_rate_below_target_expand_search")
         if wall_overhead > 0.8:
             knobs["stage1_parallel_boost"] = -1
-            knobs["skip_baseline_probe_for_hard"] = True
             reasons.append("wall_overhead_high_reduce_parallel")
+            if with_solve >= 0.95:
+                knobs["skip_baseline_probe_for_hard"] = True
+                reasons.append("strong_quality_enable_hard_probe_skip")
+            else:
+                knobs["skip_baseline_probe_for_hard"] = False
+                reasons.append("protect_solve_rate_keep_hard_probe")
         elif with_solve >= 0.95 and wall_overhead < 0.5:
             knobs["stage1_parallel_boost"] = 1
             reasons.append("strong_quality_low_overhead_allow_parallel_boost")

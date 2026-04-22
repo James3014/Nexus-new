@@ -75,7 +75,7 @@ def test_hard_task_not_demoted_by_learn_guard_when_phase_slo_missing(tmp_path, m
         history_fail_threshold=2,
         dynamic_timeout_multiplier=1.0,
         min_dynamic_stage1_timeout=20,
-        force_flow=None,
+        force_flow="hyper_sprint",
         report_file=".nexus/reports/research/auto-flow-report.json",
         output_file=None,
     )
@@ -326,3 +326,53 @@ def test_skip_baseline_probe_for_hard_task_when_tuning_enabled(tmp_path, monkeyp
     assert payload["chosen_flow"] == "hyper_sprint"
     assert calls["hyper"] == 1
     assert calls["generate_local"] == 0
+
+
+def test_early_baseline_shortcut_reuses_probe_result_without_second_generation(tmp_path, monkeypatch):
+    _write_task_files(tmp_path)
+    calls = {"generate_local": 0}
+
+    class _Res:
+        def __init__(self, returncode: int = 0):
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = ""
+
+    def fake_subprocess_run(*_args, **_kwargs):
+        return _Res(returncode=0)
+
+    def fake_generate_local(source, *_args, **_kwargs):
+        calls["generate_local"] += 1
+        return source.replace("buggy", "fixed")
+
+    monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
+    monkeypatch.setattr("nexus.app.research_flow_service.generate_local_candidate", fake_generate_local)
+
+    payload, _ = rfs.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="fix flaky websocket timeout race",
+        target_file="demo.py",
+        test_file="tests/test_demo.py",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.2,
+        baseline_fast_sec=99.0,
+        history_window=3,
+        history_fail_threshold=2,
+        dynamic_timeout_multiplier=1.0,
+        min_dynamic_stage1_timeout=20,
+        force_flow=None,
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+    )
+
+    assert payload["chosen_flow"] == "baseline"
+    assert payload["guard"]["early_baseline_shortcut"] is True
+    assert payload["result"]["report"]["reused_from_probe"] is True
+    assert calls["generate_local"] == 1

@@ -95,6 +95,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "avg_total_tokens": 0.0,
             "avg_model_calls": 0.0,
             "avg_attempt_count": 0.0,
+            "token_observable_rate": 0.0,
             "trust_mismatch_rate": 0.0,
         }
 
@@ -121,6 +122,12 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_tokens = sum(_as_float(row.get("total_tokens"), 0.0) for row in rows)
     total_model_calls = sum(_as_int(row.get("model_calls"), 0) for row in rows)
     total_attempts = sum(_as_int(row.get("attempt_count"), 0) for row in rows)
+    token_observable = sum(
+        1
+        for row in rows
+        if str(row.get("token_capture_status", "")).strip().lower()
+        not in {"", "unknown", "missing", "none", "null"}
+    )
     trust_mismatch = sum(1 for row in rows if _is_trust_mismatch(row))
 
     return {
@@ -132,6 +139,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_total_tokens": round(total_tokens / total, 2),
         "avg_model_calls": round(total_model_calls / total, 2),
         "avg_attempt_count": round(total_attempts / total, 2),
+        "token_observable_rate": round(token_observable / total, 4),
         "trust_mismatch_rate": round(trust_mismatch / total, 4),
     }
 
@@ -151,6 +159,9 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         "avg_total_tokens_delta": round(summary_b["avg_total_tokens"] - summary_a["avg_total_tokens"], 2),
         "avg_model_calls_delta": round(summary_b["avg_model_calls"] - summary_a["avg_model_calls"], 2),
         "avg_attempt_count_delta": round(summary_b["avg_attempt_count"] - summary_a["avg_attempt_count"], 2),
+        "token_observable_rate_delta": round(
+            summary_b["token_observable_rate"] - summary_a["token_observable_rate"], 4
+        ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
     }
     return {

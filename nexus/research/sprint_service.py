@@ -56,6 +56,8 @@ class SprintResult:
     model_calls: int
     quota_backoffs: int
     test_timeouts: int
+    total_tokens: int = 0
+    token_capture_status: str = "not_applicable_local_only"
     error_codes: list[str] = field(default_factory=list)
     rejection_summary: dict[str, int] = field(default_factory=dict)
     learning_trace: dict[str, Any] = field(default_factory=dict)
@@ -101,7 +103,21 @@ class LLMCandidateGenerator:
                     model_name=model,
                 )
                 code = out.get("patch") or raw
-                return code, {"source": self.source, "model_calls": model_calls, "quota_backoffs": quota_backoffs}
+                tokens_used = 0
+                token_capture_status = "unknown"
+                if isinstance(out, dict):
+                    try:
+                        tokens_used = int(out.get("tokens_used", 0) or 0)
+                    except (TypeError, ValueError):
+                        tokens_used = 0
+                    token_capture_status = str(out.get("token_capture_status", "unknown") or "unknown")
+                return code, {
+                    "source": self.source,
+                    "model_calls": model_calls,
+                    "quota_backoffs": quota_backoffs,
+                    "tokens_used": tokens_used,
+                    "token_capture_status": token_capture_status,
+                }
             except Exception as exc:  # noqa: BLE001
                 err = str(exc).lower()
                 last_err = str(exc)
@@ -122,7 +138,13 @@ class LocalCandidateGenerator:
     def generate(self, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
         from .local_sprint_mutator import generate_local_candidate
         code = generate_local_candidate(source_code, task, mutation_hint, seed)
-        return code, {"source": self.source, "model_calls": 0, "quota_backoffs": 0}
+        return code, {
+            "source": self.source,
+            "model_calls": 0,
+            "quota_backoffs": 0,
+            "tokens_used": 0,
+            "token_capture_status": "not_applicable_local_only",
+        }
 
 class SprintExecutor:
     def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int):
@@ -319,6 +341,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     candidates: list[CandidateEval] = []
     model_calls = 0
+    total_tokens = 0
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
@@ -562,6 +585,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 )
                 used_source = str(meta.get("source", "local"))
             model_calls += int(meta.get("model_calls", 0))
+            total_tokens += int(meta.get("tokens_used", 0) or 0)
             quota_backoffs += int(meta.get("quota_backoffs", 0))
             guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
@@ -621,6 +645,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             model_calls=model_calls,
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
+            total_tokens=total_tokens,
+            token_capture_status=(
+                "measured"
+                if total_tokens > 0
+                else ("missing" if model_calls > 0 else "not_applicable_local_only")
+            ),
             error_codes=sorted(set(error_codes)),
             rejection_summary={},
             learning_trace=learning_trace,
@@ -650,6 +680,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             model_calls=model_calls,
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
+            total_tokens=total_tokens,
+            token_capture_status=(
+                "measured"
+                if total_tokens > 0
+                else ("missing" if model_calls > 0 else "not_applicable_local_only")
+            ),
             error_codes=final_codes,
             rejection_summary=rejection_summary,
             learning_trace=learning_trace,
@@ -715,6 +751,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         model_calls=model_calls,
         quota_backoffs=quota_backoffs,
         test_timeouts=test_timeouts,
+        total_tokens=total_tokens,
+        token_capture_status=(
+            "measured"
+            if total_tokens > 0
+            else ("missing" if model_calls > 0 else "not_applicable_local_only")
+        ),
         error_codes=final_codes,
         rejection_summary=rejection_summary,
         learning_trace=learning_trace,
@@ -723,5 +765,3 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         promotable=final_score >= 0.9,
         patch=final_patch,
     )
-
-

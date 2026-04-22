@@ -13,7 +13,8 @@ def test_compute_tuning_expands_budget_when_solve_rate_low():
     out = compute_tuning(payload)
     assert out["knobs"]["candidate_boost"] == 1
     assert out["knobs"]["max_rounds_boost"] == 1
-    assert out["knobs"]["skip_baseline_probe_for_hard"] is True
+    assert out["knobs"]["skip_baseline_probe_for_hard"] is False
+    assert "protect_solve_rate_keep_hard_probe" in out["reasons"]
 
 
 def test_compute_tuning_keeps_conservative_when_trust_mismatch_detected():
@@ -25,6 +26,16 @@ def test_compute_tuning_keeps_conservative_when_trust_mismatch_detected():
     assert "trust_mismatch_detected_keep_conservative" in out["reasons"]
     assert out["knobs"]["baseline_fast_sec"] == 0.0
     assert out["knobs"]["skip_baseline_probe_for_hard"] is False
+
+
+def test_compute_tuning_enables_hard_probe_skip_only_with_strong_quality():
+    payload = {
+        "a": {"summary": {"solve_rate": 0.98, "trust_mismatch_rate": 0.0, "avg_wall_duration_sec": 1.4}},
+        "b": {"summary": {"avg_wall_duration_sec": 0.4}},
+    }
+    out = compute_tuning(payload)
+    assert out["knobs"]["skip_baseline_probe_for_hard"] is True
+    assert "strong_quality_enable_hard_probe_skip" in out["reasons"]
 
 
 def test_cli_apply_writes_tuning_and_backup(tmp_path: Path):

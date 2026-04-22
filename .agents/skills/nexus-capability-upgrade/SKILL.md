@@ -282,6 +282,13 @@ uv run python scripts/bench/capability_ops_loop.py --profile weekly --apply-auto
 - `[x] Wave-10 / drone evolution crystal 對齊 semantic contract`
 - `[x] Wave-11 / nightshift recommendation signal（history/stage1 fail）`
 - `[x] Wave-12 / capability autotune script（含 apply + backup）`
+- `[x] Wave-13 / token-model observability 全鏈路打通（sprint_service -> auto_flow -> ab_runner -> ab_eval）`
+  evidence: `tests/research/test_sprint_service.py`, `tests/benchmark/test_capability_ab_runner.py`, `tests/test_ab_eval_schema.py`
+- `[x] Wave-14 / baseline probe reuse（early shortcut 不重跑 apply）`
+  evidence: `tests/engine/test_research_auto_flow_guard_audit.py::test_early_baseline_shortcut_reuses_probe_result_without_second_generation`
+- `[x] Wave-15 / hard first-pass 命中提升（prior-fix 加速 + mutator 高風險關鍵字擴充 + prior-art 汙染隔離）`
+  evidence: `tests/app/test_research_flow_service.py::test_build_hyper_execution_profile_accelerates_first_pass_for_strong_prior_hits`, `tests/app/test_research_flow_service.py::test_baseline_local_mutation_ignores_prior_art_keyword_pollution`, `tests/research/test_local_mutator_safety.py::test_compute_backoff_websocket_high_risk_uses_conservative_patch`
+  benchmark: `ops_loop_iter_1776882767.json` 與 `ops_loop_iter_1776882809.json`，with-nexus `solve_rate=1.0`、hard-003/004 由 FAILED -> VERIFIED。
 
 ## 固定驗證矩陣（必跑）
 1. 可信回報與語義合約矩陣：

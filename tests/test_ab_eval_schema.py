@@ -19,6 +19,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "task_duration_sec": 10.0,
                         "wall_duration_sec": 12.0,
                         "total_tokens": 200,
+                        "token_capture_status": "measured",
                         "attempt_count": 1,
                     }
                 ),
@@ -29,6 +30,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "task_duration_sec": 20.0,
                         "wall_duration_sec": 22.0,
                         "total_tokens": 400,
+                        "token_capture_status": "measured",
                         "attempt_count": 2,
                     }
                 ),
@@ -47,6 +49,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "task_duration_sec": 12.0,
                         "wall_duration_sec": 14.0,
                         "total_tokens": 300,
+                        "token_capture_status": "measured",
                         "attempt_count": 2,
                     }
                 ),
@@ -57,6 +60,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "task_duration_sec": 22.0,
                         "wall_duration_sec": 24.0,
                         "total_tokens": 500,
+                        "token_capture_status": "measured",
                         "attempt_count": 3,
                     }
                 ),
@@ -76,6 +80,8 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["solve_rate_delta"] == 0.5
     assert report["delta"]["semantic_verified_rate_delta"] == 0.5
     assert report["delta"]["avg_wall_duration_sec_delta"] == 2.0
+    assert report["a"]["summary"]["token_observable_rate"] == 1.0
+    assert report["b"]["summary"]["token_observable_rate"] == 1.0
 
 
 def test_ab_eval_counts_trust_mismatch_rate(tmp_path):

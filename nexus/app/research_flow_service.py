@@ -213,6 +213,10 @@ def build_hyper_execution_profile(
         effective_candidate_count = max(effective_candidate_count, 5)
         effective_max_rounds = max(effective_max_rounds, 3)
         tuning_reasons.append("prior_fix_hits_boost")
+    if int(prior_fix_hits or 0) >= 3 and is_hard_task:
+        effective_candidate_count = max(effective_candidate_count, 6)
+        effective_stage1_max_parallel = max(effective_stage1_max_parallel, 3)
+        tuning_reasons.append("prior_fix_hits_first_pass_accelerate")
 
     knobs = (tuning or {}).get("knobs", {}) if isinstance(tuning, dict) else {}
     candidate_boost = int(knobs.get("candidate_boost", 0) or 0)
@@ -389,8 +393,9 @@ def run_auto_flow(
                 else:
                     fallback_reason = f"llm_error_{err_str}_fallback_local"
         
-        # Local Fallback Path
-        patched = generate_local_candidate(original_code, task_desc_for_llm, "baseline", trial)
+        # Local fallback intentionally uses raw task_desc to avoid prior-art keyword pollution
+        # (e.g., stale "flaky/race" hints forcing conservative patch on unrelated tasks).
+        patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
         
         # If still no mutation and it's structural, try a generic structural hint as last resort
         if patched == original_code and task_type in ["feature", "refactor"]:
@@ -433,7 +438,13 @@ def run_auto_flow(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.time() - start, 4),
             "error": err,
-            "report": {"source": source},
+            "report": {
+                "source": source,
+                "attempt_count": 1,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_capture_status": "not_applicable_local_only",
+            },
         }
 
     def _run_baseline_probe() -> dict:
@@ -441,8 +452,10 @@ def run_auto_flow(
         start = time.time()
         ok = False
         err = ""
+        source = "local"
+        patched = original_code
         try:
-            patched, _ = _generate_baseline_patch()
+            patched, source = _generate_baseline_patch()
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
@@ -460,6 +473,14 @@ def run_auto_flow(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.time() - start, 4),
             "error": err,
+            "report": {
+                "source": source,
+                "attempt_count": 1,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_capture_status": "not_applicable_local_only",
+            },
+            "_patch": patched if ok else None,
         }
 
     def _run_hyper_apply() -> dict:
@@ -499,6 +520,9 @@ def run_auto_flow(
                 "error_codes": res.error_codes,
                 "rejection_summary": res.rejection_summary,
                 "attempt_count": res.attempt_count,
+                "model_calls": res.model_calls,
+                "total_tokens": res.total_tokens,
+                "token_capture_status": res.token_capture_status,
                 "effective_stage1_timeout_sec": effective_stage1_timeout,
             },
         }
@@ -526,8 +550,22 @@ def run_auto_flow(
                 and baseline_probe["elapsed_sec"] <= tuned_baseline_fast_sec
             ):
                 early_baseline_shortcut = True
-                target_path.write_text(original_code, encoding="utf-8")
-                result = _run_baseline_apply()
+                probe_patch = baseline_probe.get("_patch")
+                if isinstance(probe_patch, str) and probe_patch and probe_patch != original_code:
+                    target_path.write_text(probe_patch, encoding="utf-8")
+                    result = {
+                        "flow": "baseline",
+                        "status": "SUCCESS",
+                        "elapsed_sec": baseline_probe["elapsed_sec"],
+                        "error": "",
+                        "report": {
+                            **(baseline_probe.get("report", {}) if isinstance(baseline_probe.get("report"), dict) else {}),
+                            "reused_from_probe": True,
+                        },
+                    }
+                else:
+                    target_path.write_text(original_code, encoding="utf-8")
+                    result = _run_baseline_apply()
                 chosen_flow = "baseline"
             else:
                 result = _run_hyper_apply()
@@ -542,6 +580,10 @@ def run_auto_flow(
                     target_path.write_text(original_code, encoding="utf-8")
                     result = _run_baseline_apply()
                     chosen_flow = "baseline"
+
+    baseline_probe_for_report = None
+    if isinstance(baseline_probe, dict):
+        baseline_probe_for_report = {k: v for k, v in baseline_probe.items() if k != "_patch"}
 
     payload = {
         "schema_version": "1.0",
@@ -562,7 +604,7 @@ def run_auto_flow(
             "baseline_fast_sec": tuned_baseline_fast_sec,
             "max_time_ratio_guard": max_time_ratio_guard,
             "baseline_probe_skipped": baseline_probe_skipped,
-            "baseline_probe": baseline_probe,
+            "baseline_probe": baseline_probe_for_report,
         },
         "learn_phase_slo": {
             "phase_slo_pass": bool(learn_phase_slo.get("phase_slo_pass", False)),

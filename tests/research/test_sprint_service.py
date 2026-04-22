@@ -43,6 +43,8 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     assert res.status == "SUCCESS"
     assert res.winner_source == "local"
     assert res.model_calls == 0
+    assert res.total_tokens == 0
+    assert res.token_capture_status == "not_applicable_local_only"
     assert res.promotable is True
     assert res.attempt_count == 1
     assert "retrieval_hits" in res.learning_trace
@@ -207,6 +209,45 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
     assert res.winner_source == "local"
     assert "quota" in res.error_codes
     assert "llm_fallback_local" in res.error_codes
+    assert res.total_tokens == 0
+
+
+def test_llm_mode_propagates_token_observability(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "quota_backoffs": 0,
+                "tokens_used": 222,
+                "token_capture_status": "measured",
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.total_tokens == 222
+    assert res.token_capture_status == "measured"
 
 
 def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):

@@ -66,12 +66,23 @@ def test_extract_record_maps_semantic_fields():
         "status": "FAILED",
         "semantic_status": "UNVERIFIED",
         "runtime_classification": "runtime_defect",
-        "result": {"elapsed_sec": 2.3, "report": {"attempt_count": 4, "model_calls": 1}},
+        "result": {
+            "elapsed_sec": 2.3,
+            "report": {
+                "attempt_count": 4,
+                "model_calls": 1,
+                "total_tokens": 321,
+                "token_capture_status": "measured",
+            },
+        },
     }
     out = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=2.5)
     assert out["task_id"] == "hard-001"
     assert out["semantic_status"] == "UNVERIFIED"
     assert out["attempt_count"] == 4
+    assert out["model_calls"] == 1
+    assert out["total_tokens"] == 321
+    assert out["token_capture_status"] == "measured"
     assert out["report_trust_mismatch"] is False
 
 
@@ -123,6 +134,9 @@ def test_run_without_nexus_bare_mode_returns_record(tmp_path: Path):
     assert out["mode"] == "without_nexus"
     assert out["semantic_status"] is None
     assert out["attempt_count"] == 1
+    assert out["model_calls"] == 0
+    assert out["total_tokens"] == 0
+    assert out["token_capture_status"] == "not_applicable_local_only"
 
 
 def test_run_without_nexus_bare_mode_hard_task_runs_verify_only(tmp_path: Path):
