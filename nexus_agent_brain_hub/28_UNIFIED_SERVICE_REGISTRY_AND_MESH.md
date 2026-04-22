@@ -1,24 +1,24 @@
-# 🧱 Unified Service Registry & Mesh
-**[PHYSICAL_STATUS: REGISTRY_ACTIVE | MIGRATION_PENDING]**
+# 🧱 Unified Service Registry & Mesh (v32.7)
+**[PHYSICAL_STATUS: MESH_ENFORCED | SERVICE_ISOLATION]**
 
-## 1. 統一服務註冊中心
-`ServiceRegistry` 是 Nexus 內部組件的唯一註冊與發現入口，解決重複實例化問題。
+## 1. 服務網格與組件治理
+Nexus 已將核心「單體引擎」拆解為基於 **Service Mesh (服務網格)** 的細粒度架構。這實現了開發與治理功能的物理級解耦。
 
-## ⚙️ 實體化註冊規約
-- **單例模式 (Singleton)**: 全系統僅存一份 `nexus_service_registry`。
-- **註冊機制**:
-    - **強型別**: 必須提供 Service 的 `Type` 與 `Instance`。
-    - **狀態**: 追蹤 `INIT`, `ACTIVE`, `STOPPED` 生命週期。
-- **發現機制**:
-    - 透過 `registry.get_service("name")` 安全獲取實例。
-    - **物理位置**: `nexus/services/registry.py`。
+## ⚙️ 實體組件登記冊 (Engine Registry)
+所有的關鍵邏輯現已收斂至專屬服務：
 
-## 2. 服務治理路徑
-- **SSoT**: 所有核心 Service（如 `MemoryRepository`, `SkillsRouter`）應強制註冊。
-- **解耦**: 透過 Registry 獲取依賴，取代模組內部的動態 `import`。
+| Domain | Key Service | Role |
+| :--- | :--- | :--- |
+| **Execution** | `RepairLoopService` | 管理補丁生成與驗證的原子循環。 |
+| **Governance**| `ForecastGateService` | 在 Phase P 預判任務合規性。 |
+| **Recall** | `AutonomicRoutingService`| 執行 MSA 與環境感知的技能路由。 |
+| **Telemetry** | `SignalQueueService` | 處理跨進程的非同步事件通訊。 |
+| **Learning** | `BenchmarkService` | 提供 A/B 數據閉環的性能對標。 |
 
-## 🚧 待完成優化
-- **全量接管**: 目前僅有核心組件完成註冊，剩餘 80+ 檔案需逐步併入 Mesh。
+## 2. 物理實體 (Today's Decoupled Alignment)
+- **Bootstrap Factory**: `nexus/engine/bootstrap.py`。
+- **Mesh Registry**: `nexus/services/registry.py`。
+- **Service Root**: `nexus/engine/`, `nexus/research/learn/`。
 
 ---
-**[Source: Truth Realignment Audit Stage 8 - 2026-04-20]**
+**[Source: April 21 Service Extraction | REFACTOR_SYNCED]**

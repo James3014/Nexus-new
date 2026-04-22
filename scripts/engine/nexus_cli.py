@@ -19,6 +19,7 @@ repo_root = REPO_ROOT
 from nexus.app.oracle_dispatcher import OracleDispatcher
 from nexus.app.oracle_advisor import OracleAdvisor
 from nexus.app import research_flow_service
+from nexus.engine.canonical_task_seam import build_legacy_cli_service, execute_single_task_via_service
 
 def validate_claim_integrity(evidence_path: str):
     """🛡️ 硬性物理守門：驗證結論與證據的匹配度。"""
@@ -42,37 +43,7 @@ class NexusCLI:
     """Compatibility shim for legacy callers that import NexusCLI from this module."""
 
     def __init__(self, silent: bool = True, project_root: Path | None = None):
-        from nexus.engine.config import EngineConfig
-        from nexus.engine.coordinator import NexusEngine
-        from nexus.app.command_service import NexusCommandService, TaskRequest
-
-        class _CompatService:
-            def __init__(self, command_service: NexusCommandService):
-                self._command_service = command_service
-
-            def execute_bug(self, task: str, delivery_mode: str = "standard", bug_id: str | None = None, **kwargs):
-                request = TaskRequest(
-                    task=task,
-                    task_id=bug_id,
-                    delivery_mode=delivery_mode,
-                    verify_commands=kwargs.get("verify_commands"),
-                    artifact_paths=kwargs.get("artifact_paths"),
-                )
-                return self._command_service.execute_bug(request)
-
-            def execute_feature(self, task: str, domain: str | None = None, delivery_mode: str = "standard", **kwargs):
-                request = TaskRequest(
-                    task=task,
-                    domain=domain,
-                    delivery_mode=delivery_mode,
-                    verify_commands=kwargs.get("verify_commands"),
-                    artifact_paths=kwargs.get("artifact_paths"),
-                )
-                return self._command_service.execute_feature(request)
-
-        config = EngineConfig(project_root=project_root or repo_root)
-        command_service = NexusCommandService(NexusEngine(config))
-        self.service = _CompatService(command_service)
+        self.service = build_legacy_cli_service(project_root or repo_root)
 
 @click.group()
 def nexus():
@@ -170,6 +141,61 @@ def _render_hallucination_unverified(reason: str) -> None:
     click.echo("**狀態**: 🟡 需審核\n")
 
 
+def _identity_vault_status(root: Path) -> tuple[bool, list[str]]:
+    candidate_paths = (
+        root / "nexus_wiki_vault" / "01_System" / "Identity_Vault.md",
+        REPO_ROOT / "nexus_wiki_vault" / "01_System" / "Identity_Vault.md",
+    )
+    identity_path = next((path for path in candidate_paths if path.exists()), None)
+    if identity_path is None:
+        return False, ["missing_identity_vault"]
+    text = identity_path.read_text(encoding="utf-8")
+    failures: list[str] = []
+    for identity in ("learn_mode_agent", "codex_supervisor", "gemini_router"):
+        if identity not in text:
+            failures.append(f"missing_identity:{identity}")
+    if text.count("Init/Active/Archive") < 3:
+        failures.append("identity_lifecycle_incomplete")
+    return not failures, failures
+
+
+def _write_dual_gate_markdown(base_root: Path, path: Path, task: str, data: dict, evidence: str, debt: str) -> Path:
+    from nexus.research.learn.dual_gate_protocol import DualGateProtocol
+
+    out = path if path.is_absolute() else (base_root / path).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(DualGateProtocol.render(task=task, data=data, evidence=evidence, debt=debt), encoding="utf-8")
+    return out
+
+
+def _evaluate_learn_semantic_contract(
+    *,
+    root: Path,
+    payload: dict,
+    command_name: str,
+    markdown_report_written: bool,
+) -> dict:
+    failures: list[str] = []
+    if command_name == "learn:ingest":
+        channel_counts = payload.get("channel_counts")
+        if not isinstance(channel_counts, dict):
+            failures.append("missing_dual_channel_fields")
+        else:
+            for key in ("tactical_data", "governance_principles"):
+                if key not in channel_counts:
+                    failures.append(f"missing_channel_count:{key}")
+    identity_ok, identity_failures = _identity_vault_status(root)
+    if not identity_ok:
+        failures.extend(identity_failures)
+    if not markdown_report_written:
+        failures.append("dual_gate_markdown_not_written")
+    semantic_status = "VERIFIED" if not failures else "UNVERIFIED"
+    return {
+        "semantic_status": semantic_status,
+        "semantic_failures": failures,
+    }
+
+
 def _task_requests_output_file(task_text: str) -> bool:
     text = (task_text or "").lower()
     intent_words = (
@@ -197,36 +223,6 @@ def _write_output_file(path: Path, payload: dict) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return out
-
-
-def _infer_run_task_kind(task_text: str) -> str:
-    text = str(task_text or "").strip().lower()
-    feature_keywords = (
-        "build",
-        "create",
-        "add",
-        "implement",
-        "feature",
-        "新增",
-        "建立",
-        "實作",
-        "開發",
-    )
-    if any(keyword in text for keyword in feature_keywords):
-        return "feature"
-    return "bug"
-
-
-def _execute_single_run_task(task_text: str, project_root: Path) -> bool:
-    from nexus.app.command_service import NexusCommandService, TaskRequest
-    from nexus.engine.config import EngineConfig
-    from nexus.engine.coordinator import NexusEngine
-
-    service = NexusCommandService(NexusEngine(EngineConfig(project_root=project_root)))
-    request = TaskRequest(task=task_text, delivery_mode="standard")
-    if _infer_run_task_kind(task_text) == "feature":
-        return bool(service.execute_feature(request))
-    return bool(service.execute_bug(request))
 
 
 def _render_run_classification(status: str) -> None:
@@ -447,7 +443,7 @@ def run(task_id, complexity, output_file):
         # 啟動異步調度循環
         asyncio.run(campaign_master_loop(commander, task_nodes, REPO_ROOT))
     else:
-        if not _execute_single_run_task(task_id, REPO_ROOT):
+        if not execute_single_task_via_service(task_id, REPO_ROOT):
             status = "FAIL"
 
     if output_file:
@@ -549,9 +545,10 @@ def content_rewrite(input_file, output_file, task, llm_mode, report_file):
 @click.option("--source-file", required=False, type=click.Path(exists=True), help="Optional local source file override.")
 @click.option("--topic", default="", help="Optional topic tag.")
 @click.option("--report-file", default=".nexus/reports/learn/learn_report.json", show_default=True, type=click.Path())
+@click.option("--markdown-report-file", default=".nexus/reports/learn/learn_ingest.md", show_default=True, type=click.Path())
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_ingest.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_ingest(source, source_file, topic, report_file, evidence_file, output_json):
+def learn_ingest(source, source_file, topic, report_file, markdown_report_file, evidence_file, output_json):
     """📚 Learn Mode: ingest source into claim+citation knowledge store."""
     from nexus.research.learn_mode import LearnModeService
 
@@ -568,6 +565,22 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
     _write_hallucination_evidence(evidence_file, final_response, evidence_bundle)
     _enforce_hallucination_gate(final_response=final_response, evidence_bundle=evidence_bundle)
 
+    markdown_path = _write_dual_gate_markdown(
+        repo_root,
+        Path(markdown_report_file),
+        task=f"learn:ingest source={source}",
+        data=payload,
+        evidence=f"claims_count={payload.get('claims_count', 0)} source_ref={payload.get('source_ref', '')}",
+        debt="None" if payload.get("claims_count", 0) > 0 else "No claims ingested",
+    )
+    semantic_contract = _evaluate_learn_semantic_contract(
+        root=repo_root,
+        payload=payload,
+        command_name="learn:ingest",
+        markdown_report_written=markdown_path.exists(),
+    )
+    payload.update(semantic_contract)
+
     out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -577,7 +590,12 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
         click.echo(f"✅ Learn ingest complete: {source}")
         click.echo(f"Claims: {payload['claims_count']}, Verified: {payload['verified_claims_count']}")
         click.echo(f"Report: {out_path}")
+        click.echo(f"Markdown: {markdown_path}")
         click.echo(f"Evidence: {Path(evidence_file) if evidence_file else 'N/A'}")
+    if payload["semantic_status"] != "VERIFIED":
+        raise click.ClickException(
+            "Learn ingest semantic contract failed: " + ", ".join(payload["semantic_failures"])
+        )
 
 
 @nexus_group.command(name="learn:register-source")
@@ -586,8 +604,9 @@ def learn_ingest(source, source_file, topic, report_file, evidence_file, output_
 @click.option("--source-file", required=False, type=click.Path(exists=True))
 @click.option("--refresh-after-days", default=14, type=int, show_default=True)
 @click.option("--priority", default="medium", show_default=True)
+@click.option("--report-file", default=".nexus/reports/learn/learn_register_source.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_register_source(topic, source, source_file, refresh_after_days, priority, output_json):
+def learn_register_source(topic, source, source_file, refresh_after_days, priority, report_file, output_json):
     """🗂️ Register a learn source for scheduled refresh."""
     from nexus.research.learn_mode import LearnModeService
 
@@ -599,10 +618,14 @@ def learn_register_source(topic, source, source_file, refresh_after_days, priori
         refresh_after_days=refresh_after_days,
         priority=priority,
     )
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         click.echo(f"✅ Learn source registered: topic={topic} source={source}")
+        click.echo(f"Report: {out_path}")
 
 
 @nexus_group.command(name="learn:refresh")
@@ -782,8 +805,9 @@ def learn_ask(topic, question, top_k, min_evidence, min_token_coverage, max_stal
 @click.option("--question-count", default=5, type=int, show_default=True)
 @click.option("--pass-threshold", default=0.6, type=float, show_default=True)
 @click.option("--report-file", default=".nexus/reports/learn/learn_report.json", show_default=True, type=click.Path())
+@click.option("--markdown-report-file", default=".nexus/reports/learn/learn_report.md", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_report(topic, question_count, pass_threshold, report_file, output_json):
+def learn_report(topic, question_count, pass_threshold, report_file, markdown_report_file, output_json):
     """📈 Build unified learn report for governance and CI consumption."""
     from nexus.research.learn_mode import LearnModeService
 
@@ -793,17 +817,45 @@ def learn_report(topic, question_count, pass_threshold, report_file, output_json
         question_count=question_count,
         pass_threshold=pass_threshold,
     )
+    markdown_path = _write_dual_gate_markdown(
+        repo_root,
+        Path(markdown_report_file),
+        task=f"learn:report topic={topic or 'all'}",
+        data=payload,
+        evidence=(
+            f"claims_count={payload.get('claims_count', 0)} "
+            f"converged={payload.get('converged')} "
+            f"citation_valid_ratio={payload.get('citation_valid_ratio', 0.0)}"
+        ),
+        debt="; ".join(payload.get("unresolved_questions", [])) or "None",
+    )
+    semantic_contract = _evaluate_learn_semantic_contract(
+        root=repo_root,
+        payload=payload,
+        command_name="learn:report",
+        markdown_report_written=markdown_path.exists(),
+    )
+    payload.update(semantic_contract)
     out_path = (repo_root / report_file).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        if payload["semantic_status"] != "VERIFIED":
+            raise click.ClickException(
+                "Learn report semantic contract failed: " + ", ".join(payload["semantic_failures"])
+            )
         return
     click.echo("✅ Learn report generated")
     click.echo(
         f"sources={payload['sources_count']} claims={payload['claims_count']} coverage={payload['coverage']} converged={payload['converged']}"
     )
     click.echo(f"Report: {out_path}")
+    click.echo(f"Markdown: {markdown_path}")
+    if payload["semantic_status"] != "VERIFIED":
+        raise click.ClickException(
+            "Learn report semantic contract failed: " + ", ".join(payload["semantic_failures"])
+        )
 
 
 @nexus_group.command(name="learn:phase-slo")
@@ -1188,11 +1240,21 @@ def contract_snapshot(output_path, task_id, tests_passed, linter_exit_code, ci_g
     click.echo(json.dumps({"ok": True, "output": str(out), "commit_sha": head}, indent=2, ensure_ascii=False))
 
 @nexus_group.command(name="distill")
-def distill():
+@click.option("--report-file", default=".nexus/reports/metabolism/distill_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def distill(report_file, output_json):
     """🌬️ [Metabolism] Distill session essence."""
     from nexus.services.metabolism_engine import metabolism
     tx = metabolism.distill({"goal": "v23.7 Recovery", "done": ["Wiki Sync"], "todo": ["Command Recovery"]})
-    click.echo(f"💎 Session distilled. Arweave TX: {tx}")
+    payload = {"status": "SUCCESS", "tx": tx}
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"💎 Session distilled. Arweave TX: {tx}")
+        click.echo(f"Report: {out_path}")
 
 # --- v23.7 艦隊指揮 ---
 @nexus_group.command(name="resume")
@@ -1207,9 +1269,20 @@ def resume():
 
 @nexus_group.command(name="delegate")
 @click.argument("task_name")
-def delegate(task_name):
+@click.option("--report-file", default=".nexus/reports/delegate/delegate_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def delegate(task_name, report_file, output_json):
     """📡 [Supervisor] Decompose and delegate task to fleet."""
     subprocess.run([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=True)
+    payload = {"status": "SUCCESS", "task_name": task_name}
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"✅ Delegated task: {task_name}")
+        click.echo(f"Report: {out_path}")
 
 
 @nexus_group.command(name="research:route")
@@ -1937,18 +2010,38 @@ except ImportError as e:
 
 @nexus.command(name="fed-init")
 @click.option("--tenants", default=10)
-def fed_init(tenants):
+@click.option("--report-file", default=".nexus/reports/federation/fed_init_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def fed_init(tenants, report_file, output_json):
     """🌐 [v0.9] Federated Init"""
     from scripts.ops.federated_engine_v09 import FederatedEngineV09
     FederatedEngineV09(repo_root).fed_init(num_tenants=tenants)
-    click.echo(f"📡 Fleet Initialized: {tenants} tenants.")
+    payload = {"status": "SUCCESS", "tenants": tenants}
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"📡 Fleet Initialized: {tenants} tenants.")
+        click.echo(f"Report: {out_path}")
 
 @nexus.command(name="fed-run")
-def fed_run():
+@click.option("--report-file", default=".nexus/reports/federation/fed_run_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def fed_run(report_file, output_json):
     """🚀 [v0.9] Fed-Run: Execute Federated NAS"""
     from scripts.ops.federated_engine_v09 import FederatedEngineV09
     res = FederatedEngineV09(repo_root).fed_sync()
-    click.echo(f"🧬 [v0.9 Federated NAS] Synchronized {res['aggregation_ratio']} tenants.")
+    payload = {"status": "SUCCESS", "result": res}
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"🧬 [v0.9 Federated NAS] Synchronized {res['aggregation_ratio']} tenants.")
+        click.echo(f"Report: {out_path}")
     lesson_script = repo_root / ("scripts/ops/crystal" + "lize_lessons.py")
     subprocess.run([sys.executable, str(lesson_script)], check=False)
 
@@ -1956,11 +2049,21 @@ def fed_run():
 @nexus.command(name="meta-run")
 @click.option("--count", default=128)
 @click.option("--hybrid", default=0.6)
-def meta_run(count, hybrid):
+@click.option("--report-file", default=".nexus/reports/meta/meta_run_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def meta_run(count, hybrid, report_file, output_json):
     """🧬 [v0.8] Meta-Evolve"""
     from scripts.ops.evolution_engine_v08 import EvolutionEngineV08
     best = EvolutionEngineV08(repo_root).meta_evolve(count=count, hybrid_ratio=hybrid)
-    click.echo(f"🧬 [NAS] Gen {best['gen']} Evolved. Fitness: {best['fitness']}")
+    payload = {"status": "SUCCESS", "best": best}
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"🧬 [NAS] Gen {best['gen']} Evolved. Fitness: {best['fitness']}")
+        click.echo(f"Report: {out_path}")
 
 
 @nexus.command(name="run-bug")
@@ -2163,13 +2266,24 @@ def learn_benchmark_cmd(manifest_file, topic, source, source_file, output_json, 
 
 @nexus_group.command(name="oracle:apply")
 @click.argument("shadow_tid")
-def oracle_apply(shadow_tid):
+@click.option("--report-file", default=".nexus/reports/oracle/oracle_apply_report.json", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def oracle_apply(shadow_tid, report_file, output_json):
     """🚀 [Oracle] Promote a successful shadow patch to main workspace."""
     from nexus.oracle.promote import promote_shadow_patch
-    if promote_shadow_patch(repo_root, shadow_tid):
+    ok = promote_shadow_patch(repo_root, shadow_tid)
+    payload = {"status": "SUCCESS" if ok else "FAILED", "shadow_tid": shadow_tid}
+    out_path = (repo_root / report_file).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    elif ok:
         click.secho(f"✅ Successfully promoted future patch {shadow_tid} to the present.", fg="green")
+        click.echo(f"Report: {out_path}")
     else:
         click.secho("❌ Promotion failed.", fg="red")
+        click.echo(f"Report: {out_path}")
 
 @nexus_group.group(name="multi-agent")
 def multi_agent_group():

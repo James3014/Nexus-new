@@ -3,6 +3,7 @@ import sys
 import click
 import subprocess
 from pathlib import Path
+from nexus.engine.canonical_task_seam import build_legacy_cli_service
 
 
 def execute(cli, args):
@@ -59,16 +60,11 @@ def register(nexus_group, REPO_ROOT):
 
         # 🚀 執行真實任務 (接入 NexusEngine)
         try:
-            from nexus.engine.coordinator import NexusEngine
-            from nexus.engine.config import EngineConfig
-            
-            config = EngineConfig(project_root=REPO_ROOT, delivery_mode=delivery_mode)
-            engine = NexusEngine(config=config)
-            run_bug = getattr(engine, "run_bug")
+            service = build_legacy_cli_service(REPO_ROOT)
             
             print(f"📡 [Nexus:Swarm] Dispatching task '{safe_task_id}' to engine (Mode: {delivery_mode})...")
             # 使用安全 ID 呼叫引擎
-            success = run_bug(bug_id=safe_task_id, desc=task_name)
+            success = service.execute_bug(task_name, delivery_mode=delivery_mode, bug_id=safe_task_id)
             
             if success:
                 print("✅ [Nexus:Swarm] Mission Succeeded.")

@@ -18,6 +18,19 @@ from scripts.engine.output_guard import truncate_output
 
 WIKI_DRIFT_REPORT = ROOT / ".nexus" / "reports" / "wiki_drift_report.json"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
+REPORT_TRUST_AUDIT_TARGETS = (
+    "tests/engine/test_canonical_task_seam.py",
+    "tests/test_cli_output_contract.py",
+    "tests/engine/test_cli_runner_async.py",
+    "tests/engine/test_cli_research_seams.py",
+    "tests/engine/test_cli_work_path_audit.py",
+    "tests/engine/test_cli_artifact_gate_audit.py",
+    "tests/research/test_learn_ingest_channels.py",
+    "tests/test_cli_learn_mode.py",
+    "tests/services/test_cli_commands_service_runtime.py",
+    "tests/engine/test_swarm_command_runtime.py",
+    "tests/test_v18_legacy_delivery.py",
+)
 
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
@@ -229,6 +242,16 @@ def run_delivery_tracked_check(evidence_path: str | None = None, dry_run: bool =
     print("✅ Delivery Tracked Check PASSED")
     return True
 
+
+def run_report_trust_audit(dry_run: bool) -> bool:
+    label = "(Dry-run)" if dry_run else ""
+    targets = " ".join(REPORT_TRUST_AUDIT_TARGETS)
+    success, _ = run_step(
+        f"Report Trust Audit {label}".strip(),
+        f'"{VENV_PYTHON}" -m pytest {targets} -q',
+    )
+    return success
+
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
     if not run_integrity_check():
@@ -245,11 +268,13 @@ def run_dry_run():
     checks["protocol_check"] = run_protocol_check(dry_run=True)
     checks["lesson_check"] = run_lesson_check(dry_run=True)
     checks["delivery_tracked"] = run_delivery_tracked_check(dry_run=True)
+    checks["report_trust_audit"] = run_report_trust_audit(dry_run=True)
     wiki_sync_status = run_wiki_sync_check(dry_run=True)
     checks["wiki_sync"] = (wiki_sync_status == "OK")
     
     print(f"- protocol_check: {'OK' if checks['protocol_check'] else 'FAIL'}")
     print(f"- lesson_check: {'OK' if checks['lesson_check'] else 'FAIL'}")
+    print(f"- report_trust_audit: {'OK' if checks['report_trust_audit'] else 'FAIL'}")
     print(f"- wiki_sync: {wiki_sync_status}")
 
     print("\n📊 [Phase 6] Summary Audit (Dry-Run):")
@@ -471,6 +496,9 @@ def main():
         closeout_ok = run_closeout_contract_check(dry_run=args.dry_run, contract_path=args.closeout_contract_path)
         if not closeout_ok and not args.dry_run:
             sys.exit(1)
+
+    if not run_report_trust_audit(dry_run=args.dry_run) and not args.dry_run:
+        sys.exit(1)
 
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
     success, _ = run_step(

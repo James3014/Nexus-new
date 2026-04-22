@@ -14,6 +14,30 @@ class IngestService:
         self.ctx = ctx
 
     @staticmethod
+    def _is_governance_claim(claim: LearnClaim) -> bool:
+        text = str(getattr(claim, "claim", "") or "").lower()
+        governance_keywords = (
+            "mempalace",
+            "governance",
+            "policy",
+            "guard",
+            "boundary",
+            "identity",
+            "lifecycle",
+            "protocol",
+            "audit",
+        )
+        return any(keyword in text for keyword in governance_keywords)
+
+    def _build_channel_counts(self, claims: list[LearnClaim]) -> dict[str, int]:
+        governance_count = sum(1 for claim in claims if self._is_governance_claim(claim))
+        tactical_count = max(len(claims) - governance_count, 0)
+        return {
+            "tactical_data": tactical_count,
+            "governance_principles": governance_count,
+        }
+
+    @staticmethod
     def _normalize_sources(source: str | list[str]) -> list[str]:
         if isinstance(source, str):
             normalized = source.strip()
@@ -127,6 +151,7 @@ class IngestService:
         palace = MemPalace(str(self.ctx.project_root))
         verified = palace.verify([c.to_dict() for c in claims])
         verified_count = len(verified)
+        channel_counts = self._build_channel_counts(claims)
 
         store = FindingsMemoryStore(self.ctx.project_root)
         source_hint = ", ".join(normalized_sources[:3])
@@ -154,6 +179,7 @@ class IngestService:
             "verified_claims_count": verified_count,
             "sources_count": len(set(source_refs)),
             "documents_ingested": len(docs),
+            "channel_counts": channel_counts,
             "claims_store": str(self.ctx.claims_path),
             "source_snapshot_path": snapshot_paths[0] if snapshot_paths else "",
             "source_snapshot_paths": snapshot_paths[:20],

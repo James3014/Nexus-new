@@ -11,8 +11,7 @@ from datetime import datetime, timezone
 # Add the project root to sys.path so we can import nexus
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from nexus.engine.coordinator import NexusEngine
-from nexus.engine.config import EngineConfig
+from nexus.engine.canonical_task_seam import build_engine
 import logging
 
 logger = logging.getLogger("SmokeBenchmark")
@@ -59,7 +58,7 @@ class SmokeBenchmarkRunner:
             # 2. Run Benchmark
             logger.info("Initializing NexusEngine for smoke run...")
             os.environ["NEXUS_SANDBOX_MODE"] = "smoke-ci"
-            engine = NexusEngine(EngineConfig(project_root=self.project_root, benchmark_mode=True))
+            engine = build_engine(self.project_root, benchmark_mode=True)
             results = engine.run_benchmark(framework="smoke", task_count=len(smoke_cases), output_csv=self.output_csv)
             
             # 3. Collect Governance Metrics

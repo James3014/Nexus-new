@@ -21,9 +21,12 @@ def test_ingest_preserves_required_contract_fields(tmp_path: Path) -> None:
         "verified_claims_count",
         "sources_count",
         "documents_ingested",
+        "channel_counts",
     ):
         assert key in payload
     assert payload["claims_count"] >= 1
+    assert "tactical_data" in payload["channel_counts"]
+    assert "governance_principles" in payload["channel_counts"]
 
 
 def test_ingest_source_file_override_avoids_repo_source_path_error(tmp_path: Path) -> None:

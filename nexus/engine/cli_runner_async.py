@@ -3,36 +3,7 @@ import time
 from pathlib import Path
 
 import click
-
-
-def _infer_task_kind(task_text: str) -> str:
-    text = str(task_text or "").strip().lower()
-    feature_keywords = (
-        "build",
-        "create",
-        "add",
-        "implement",
-        "feature",
-        "新增",
-        "建立",
-        "實作",
-        "開發",
-    )
-    if any(keyword in text for keyword in feature_keywords):
-        return "feature"
-    return "bug"
-
-
-def _execute_via_canonical_service(task_text: str, repo_root: Path) -> bool:
-    from nexus.app.command_service import NexusCommandService, TaskRequest
-    from nexus.engine.config import EngineConfig
-    from nexus.engine.coordinator import NexusEngine
-
-    service = NexusCommandService(NexusEngine(EngineConfig(project_root=repo_root)))
-    request = TaskRequest(task=task_text, delivery_mode="standard")
-    if _infer_task_kind(task_text) == "feature":
-        return bool(service.execute_feature(request))
-    return bool(service.execute_bug(request))
+from nexus.engine.canonical_task_seam import execute_single_task_via_service
 
 
 async def async_execute_tactical_node(node, repo_root, commander=None):
@@ -101,4 +72,4 @@ async def campaign_master_loop(commander, task_nodes, repo_root):
 
 def execute_tactical_node(node, repo_root):
     """Route tactical work through the canonical command-service seam."""
-    return _execute_via_canonical_service(node.intent, Path(repo_root))
+    return execute_single_task_via_service(node.intent, Path(repo_root))

@@ -33,6 +33,8 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "nexus",
             "--report-file",
             ".nexus/reports/learn/learn_report.json",
+            "--markdown-report-file",
+            ".nexus/reports/learn/learn_ingest.md",
             "--evidence-file",
             ".nexus/reports/learn/evidence_ingest.json",
             "--output-json",
@@ -41,8 +43,19 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert ingest.exit_code == 0, ingest.output
     ingest_payload = json.loads(ingest.output)
     assert ingest_payload["claims_count"] >= 1
+    assert ingest_payload["semantic_status"] == "VERIFIED"
+    assert "channel_counts" in ingest_payload
+    assert "tactical_data" in ingest_payload["channel_counts"]
+    assert "governance_principles" in ingest_payload["channel_counts"]
     assert (tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl").exists()
     assert (tmp_path / ".nexus" / "reports" / "learn" / "evidence_ingest.json").exists()
+    ingest_md = (tmp_path / ".nexus" / "reports" / "learn" / "learn_ingest.md")
+    assert ingest_md.exists()
+    ingest_md_text = ingest_md.read_text(encoding="utf-8")
+    assert "[Task]" in ingest_md_text
+    assert "[Data]" in ingest_md_text
+    assert "[Evidence]" in ingest_md_text
+    assert "[Residual Debt]" in ingest_md_text
 
     converge = runner.invoke(
         nexus,
@@ -89,12 +102,15 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "learn:report",
             "--topic",
             "nexus pipeline",
+            "--markdown-report-file",
+            ".nexus/reports/learn/learn_report.md",
             "--output-json",
         ],
     )
     assert learn_report.exit_code == 0, learn_report.output
     report_payload = json.loads(learn_report.output)
     assert report_payload["status"] == "SUCCESS"
+    assert report_payload["semantic_status"] == "VERIFIED"
     assert report_payload["claims_count"] >= 1
     assert report_payload["citation_valid_ratio"] > 0.0
     assert "topic_packs" in report_payload
@@ -102,6 +118,13 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert "stale_claims_count" in report_payload
     assert "question_set" in report_payload
     assert "answered_questions" in report_payload
+    report_md = (tmp_path / ".nexus" / "reports" / "learn" / "learn_report.md")
+    assert report_md.exists()
+    report_md_text = report_md.read_text(encoding="utf-8")
+    assert "[Task]" in report_md_text
+    assert "[Data]" in report_md_text
+    assert "[Evidence]" in report_md_text
+    assert "[Residual Debt]" in report_md_text
 
     ask = runner.invoke(
         nexus,
@@ -127,6 +150,34 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert ask_payload["citations"]
     assert "#span=" in ask_payload["answer"]
     assert (tmp_path / ".nexus" / "reports" / "learn" / "evidence_ask.json").exists()
+
+
+def test_learn_ingest_fails_closed_when_semantic_contract_unverified(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+    monkeypatch.setattr(
+        nexus_cli,
+        "_evaluate_learn_semantic_contract",
+        lambda **kwargs: {
+            "semantic_status": "UNVERIFIED",
+            "semantic_failures": ["missing_dual_channel_fields"],
+        },
+    )
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:ingest",
+            "--source",
+            "alpha-keyword",
+            "--topic",
+            "nexus",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "missing_dual_channel_fields" in result.output
 
 
 def test_learn_ask_returns_unknown_without_cited_claims(tmp_path, monkeypatch):
