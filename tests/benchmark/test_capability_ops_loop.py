@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.bench.capability_ops_loop import run_ops_loop
+from scripts.bench.capability_ops_loop import _compute_health_score, run_ops_loop
 
 
 def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
@@ -17,4 +17,15 @@ def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
     assert out["with_llm_mode"] == "off"
     assert out["max_tasks"] == 6
     assert out["paths"]["ab_eval_file"]
+    assert out["health"]["verdict"] in {"PASS", "WARN"}
     assert Path(out["report_file"]).exists()
+
+
+def test_compute_health_score_warns_on_low_quality():
+    payload = {
+        "a": {"summary": {"solve_rate": 0.8, "semantic_verified_rate": 0.7, "trust_mismatch_rate": 0.1, "avg_wall_duration_sec": 1.5}},
+        "b": {"summary": {"avg_wall_duration_sec": 0.5}},
+    }
+    out = _compute_health_score(payload)
+    assert out["verdict"] == "WARN"
+    assert 0.0 <= out["score"] <= 1.0

@@ -77,6 +77,17 @@ def test_compute_tuning_uses_median_over_history_payloads():
     assert out["aggregation_window"] == 3
 
 
+def test_compute_tuning_reduces_search_depth_when_attempt_overhead_high():
+    payload = {
+        "a": {"summary": {"solve_rate": 1.0, "trust_mismatch_rate": 0.0, "avg_wall_duration_sec": 1.0, "avg_attempt_count": 1.2}},
+        "b": {"summary": {"avg_wall_duration_sec": 0.4, "avg_attempt_count": 1.0}},
+    }
+    out = compute_tuning(payload)
+    assert out["knobs"]["candidate_boost"] == 0
+    assert out["knobs"]["max_rounds_boost"] == 0
+    assert "attempt_overhead_high_reduce_search_depth" in out["reasons"]
+
+
 def test_cli_apply_writes_tuning_and_backup(tmp_path: Path):
     eval_file = tmp_path / "ab_eval.json"
     eval_file.write_text(

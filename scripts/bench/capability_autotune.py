@@ -28,6 +28,8 @@ def _collect_median_inputs(eval_payload: dict[str, Any], history_payloads: list[
     with_trust_values: list[float] = []
     wall_with_values: list[float] = []
     wall_without_values: list[float] = []
+    attempts_with_values: list[float] = []
+    attempts_without_values: list[float] = []
     for payload in payloads:
         with_summary = (payload.get("a") or {}).get("summary", {})
         without_summary = (payload.get("b") or {}).get("summary", {})
@@ -36,18 +38,25 @@ def _collect_median_inputs(eval_payload: dict[str, Any], history_payloads: list[
             with_trust_values.append(float(with_summary.get("trust_mismatch_rate", 1.0)))
             wall_with_values.append(float(with_summary.get("avg_wall_duration_sec", 0.0)))
             wall_without_values.append(float(without_summary.get("avg_wall_duration_sec", 0.0)))
+            attempts_with_values.append(float(with_summary.get("avg_attempt_count", 0.0)))
+            attempts_without_values.append(float(without_summary.get("avg_attempt_count", 0.0)))
         except Exception:
             continue
     with_solve = _median(with_solve_values, 0.0)
     with_trust_mismatch = _median(with_trust_values, 1.0)
     wall_with = _median(wall_with_values, 0.0)
     wall_without = _median(wall_without_values, 0.0)
+    attempts_with = _median(attempts_with_values, 0.0)
+    attempts_without = _median(attempts_without_values, 0.0)
     return {
         "with_solve_rate": with_solve,
         "with_trust_mismatch_rate": with_trust_mismatch,
         "with_avg_wall_duration_sec": wall_with,
         "without_avg_wall_duration_sec": wall_without,
         "wall_overhead_sec": max(0.0, wall_with - wall_without),
+        "with_avg_attempt_count": attempts_with,
+        "without_avg_attempt_count": attempts_without,
+        "attempt_overhead": max(0.0, attempts_with - attempts_without),
         "sample_count": max(1, len(with_solve_values)),
     }
 
@@ -71,6 +80,9 @@ def compute_tuning(
     wall_with = med["with_avg_wall_duration_sec"]
     wall_without = med["without_avg_wall_duration_sec"]
     wall_overhead = med["wall_overhead_sec"]
+    attempts_with = med["with_avg_attempt_count"]
+    attempts_without = med["without_avg_attempt_count"]
+    attempt_overhead = med["attempt_overhead"]
     sample_count = int(med["sample_count"])
     prev_knobs = _read_previous_knobs(previous_tuning)
 
@@ -122,6 +134,14 @@ def compute_tuning(
         else:
             reasons.append("wall_overhead_hysteresis_hold_previous")
 
+        # Secondary objective: reduce redundant attempts while preserving quality.
+        if attempt_overhead > 0.08 and with_solve >= 0.95:
+            knobs["candidate_boost"] = min(knobs["candidate_boost"], 0)
+            knobs["max_rounds_boost"] = min(knobs["max_rounds_boost"], 0)
+            reasons.append("attempt_overhead_high_reduce_search_depth")
+        elif attempt_overhead <= 0.03 and with_solve >= 0.95:
+            reasons.append("attempt_overhead_low_keep_search_depth")
+
     return {
         "status": "SUCCESS",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -133,6 +153,9 @@ def compute_tuning(
             "with_avg_wall_duration_sec": wall_with,
             "without_avg_wall_duration_sec": wall_without,
             "wall_overhead_sec": wall_overhead,
+            "with_avg_attempt_count": attempts_with,
+            "without_avg_attempt_count": attempts_without,
+            "attempt_overhead": attempt_overhead,
         },
         "knobs": knobs,
         "reasons": reasons or ["no_change"],
