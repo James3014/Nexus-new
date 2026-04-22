@@ -93,9 +93,11 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "solve_rate": 0.0,
             "avg_duration_sec": 0.0,
             "avg_total_tokens": 0.0,
+            "avg_total_tokens_measured_only": 0.0,
             "avg_model_calls": 0.0,
             "avg_attempt_count": 0.0,
             "token_observable_rate": 0.0,
+            "token_measured_rate": 0.0,
             "trust_mismatch_rate": 0.0,
         }
 
@@ -120,6 +122,12 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in rows
     )
     total_tokens = sum(_as_float(row.get("total_tokens"), 0.0) for row in rows)
+    measured_token_rows = [
+        row
+        for row in rows
+        if str(row.get("token_capture_status", "")).strip().lower() == "measured"
+    ]
+    total_tokens_measured_only = sum(_as_float(row.get("total_tokens"), 0.0) for row in measured_token_rows)
     total_model_calls = sum(_as_int(row.get("model_calls"), 0) for row in rows)
     total_attempts = sum(_as_int(row.get("attempt_count"), 0) for row in rows)
     token_observable = sum(
@@ -128,6 +136,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if str(row.get("token_capture_status", "")).strip().lower()
         not in {"", "unknown", "missing", "none", "null"}
     )
+    token_measured = len(measured_token_rows)
     trust_mismatch = sum(1 for row in rows if _is_trust_mismatch(row))
 
     return {
@@ -137,9 +146,14 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_duration_sec": round(total_duration / total, 4),
         "avg_wall_duration_sec": round(total_wall_duration / total, 4),
         "avg_total_tokens": round(total_tokens / total, 2),
+        "avg_total_tokens_measured_only": round(
+            total_tokens_measured_only / max(1, token_measured),
+            2,
+        ),
         "avg_model_calls": round(total_model_calls / total, 2),
         "avg_attempt_count": round(total_attempts / total, 2),
         "token_observable_rate": round(token_observable / total, 4),
+        "token_measured_rate": round(token_measured / total, 4),
         "trust_mismatch_rate": round(trust_mismatch / total, 4),
     }
 
@@ -157,10 +171,17 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
             summary_b["avg_wall_duration_sec"] - summary_a["avg_wall_duration_sec"], 4
         ),
         "avg_total_tokens_delta": round(summary_b["avg_total_tokens"] - summary_a["avg_total_tokens"], 2),
+        "avg_total_tokens_measured_only_delta": round(
+            summary_b["avg_total_tokens_measured_only"] - summary_a["avg_total_tokens_measured_only"],
+            2,
+        ),
         "avg_model_calls_delta": round(summary_b["avg_model_calls"] - summary_a["avg_model_calls"], 2),
         "avg_attempt_count_delta": round(summary_b["avg_attempt_count"] - summary_a["avg_attempt_count"], 2),
         "token_observable_rate_delta": round(
             summary_b["token_observable_rate"] - summary_a["token_observable_rate"], 4
+        ),
+        "token_measured_rate_delta": round(
+            summary_b["token_measured_rate"] - summary_a["token_measured_rate"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
     }

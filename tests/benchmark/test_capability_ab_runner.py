@@ -9,6 +9,7 @@ from scripts.bench.capability_ab_runner import (
     _extract_json_payload,
     _materialize_fixture,
     load_tasks,
+    run_with_nexus,
     run_without_nexus,
     select_tasks,
 )
@@ -160,3 +161,41 @@ def test_run_without_nexus_bare_mode_hard_task_runs_verify_only(tmp_path: Path):
         mode="bare",
     )
     assert out["status"] == "FAILED"
+
+
+def test_run_with_nexus_enables_llm_mode_for_hard_tasks(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="hard-001",
+        difficulty="hard",
+        task_type="bug",
+        task_desc="Fix flaky timeout race",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    captured = {"args": []}
+
+    class _InvokeRes:
+        def __init__(self):
+            self.output = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":0,"total_tokens":0,"token_capture_status":"not_applicable_local_only"}}}'
+
+    def fake_invoke(_self, _cli, args, **_kwargs):
+        captured["args"] = list(args)
+        return _InvokeRes()
+
+    monkeypatch.setattr("click.testing.CliRunner.invoke", fake_invoke)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="inprocess",
+        with_llm_mode="hard",
+    )
+    assert "--llm-mode" in captured["args"]
+    assert out["semantic_status"] == "VERIFIED"

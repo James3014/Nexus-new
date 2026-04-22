@@ -376,3 +376,58 @@ def test_early_baseline_shortcut_reuses_probe_result_without_second_generation(t
     assert payload["guard"]["early_baseline_shortcut"] is True
     assert payload["result"]["report"]["reused_from_probe"] is True
     assert calls["generate_local"] == 1
+
+
+def test_dynamic_stage1_timeout_can_shrink_using_baseline_probe(tmp_path, monkeypatch):
+    _write_task_files(tmp_path)
+    _patch_common_success(monkeypatch)
+    captured = {"stage1_timeout_sec": None}
+
+    def fake_run_hyper_sprint(*_args, **kwargs):
+        cfg = kwargs.get("config")
+        captured["stage1_timeout_sec"] = getattr(cfg, "stage1_timeout_sec", None)
+        return SprintResult(
+            status="SUCCESS",
+            reason="stage1_pass",
+            target_file="demo.py",
+            winner_source="local",
+            final_score=1.0,
+            elapsed_sec=0.1,
+            attempt_count=1,
+            model_calls=0,
+            quota_backoffs=0,
+            test_timeouts=0,
+            error_codes=[],
+            candidates=[],
+            pytest_cmd=["uv", "run", "pytest", "-q", "--maxfail=1", "tests/test_demo.py"],
+            promotable=True,
+            patch="print('fixed')\n",
+        )
+
+    monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
+
+    payload, _ = rfs.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="fix flaky websocket timeout race",
+        target_file="demo.py",
+        test_file="tests/test_demo.py",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.2,
+        baseline_fast_sec=0.0,
+        history_window=3,
+        history_fail_threshold=2,
+        dynamic_timeout_multiplier=1.0,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+    )
+    assert payload["result"]["status"] == "SUCCESS"
+    assert captured["stage1_timeout_sec"] == 12

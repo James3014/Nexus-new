@@ -38,6 +38,7 @@ version_scope: '[v17.1, v22, v23]'
 
 | Date | Change (項) | Affected Components | Risk | Rollback Plan | Verifier |
 |---|---|---|---|---|---|
+| 2026-04-23 | **Capability Optimization Wave: Median Autotune Hysteresis + Hard First-Pass Lift + Token Measurement Visibility** | `scripts/bench/capability_autotune.py`, `scripts/bench/capability_ab_runner.py`, `scripts/bench/capability_ops_loop.py`, `scripts/bench/ab_eval.py`, `nexus/app/research_flow_service.py`, `nexus/research/local_sprint_mutator.py`, `tests/benchmark/*`, `tests/research/test_local_mutator_safety.py`, `tests/engine/test_research_auto_flow_guard_audit.py` | Medium | Git revert | Codex |
 | 2026-04-23 | **Capability Upgrade: Token Observability + Baseline Probe Reuse + Hard First-Pass Guardrails** | `nexus/research/sprint_service.py`, `nexus/app/research_flow_service.py`, `nexus/research/local_sprint_mutator.py`, `scripts/bench/ab_eval.py`, `scripts/bench/capability_ab_runner.py`, `scripts/bench/capability_autotune.py`, `tests/research/`, `tests/engine/test_research_auto_flow_guard_audit.py`, `tests/benchmark/` | Medium | Git revert | Codex |
 | 2026-04-20 | **TELEMETRY PURIFICATION & ASYNC IO EVOLUTION** | `commander.py`, `context_hub.py`, `msa_indexer.py`, `campaign_general.py` | High | Git revert | Antigravity |
 | 2026-04-20 | **UNIFIED SERVICE REGISTRY** | `nexus/services/registry.py`, `services/__init__.py` | Medium | Git revert | Antigravity |

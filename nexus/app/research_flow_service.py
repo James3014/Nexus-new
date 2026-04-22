@@ -488,7 +488,10 @@ def run_auto_flow(
         effective_stage1_timeout = stage1_timeout_sec
         if baseline_probe and baseline_probe.get("elapsed_sec", 0) > 0:
             dynamic_timeout = int(round(float(baseline_probe["elapsed_sec"]) * max(1.0, dynamic_timeout_multiplier)))
-            effective_stage1_timeout = max(stage1_timeout_sec, min_dynamic_stage1_timeout, dynamic_timeout)
+            effective_stage1_timeout = max(
+                min_dynamic_stage1_timeout,
+                min(stage1_timeout_sec, dynamic_timeout),
+            )
         cfg = SprintConfig(
             task=task_desc,
             target_file=target_file,

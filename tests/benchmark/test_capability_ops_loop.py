@@ -14,6 +14,7 @@ def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
     )
     assert out["status"] == "SUCCESS"
     assert out["profile"] == "daily"
+    assert out["with_llm_mode"] == "off"
     assert out["max_tasks"] == 6
     assert out["paths"]["ab_eval_file"]
     assert Path(out["report_file"]).exists()

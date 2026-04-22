@@ -39,7 +39,14 @@ def _extract_json(stdout: str) -> dict[str, Any]:
     return {}
 
 
-def run_ops_loop(*, repo_root: Path, profile: str, output_dir: Path, apply_autotune: bool) -> dict[str, Any]:
+def run_ops_loop(
+    *,
+    repo_root: Path,
+    profile: str,
+    output_dir: Path,
+    apply_autotune: bool,
+    with_llm_mode: str = "off",
+) -> dict[str, Any]:
     max_tasks = PROFILE_TO_TASKS[profile]
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -56,6 +63,8 @@ def run_ops_loop(*, repo_root: Path, profile: str, output_dir: Path, apply_autot
         str(max_tasks),
         "--with-nexus-runner",
         "inprocess",
+        "--with-llm-mode",
+        with_llm_mode,
         "--without-mode",
         "bare",
         "--neutralize-history",
@@ -100,6 +109,8 @@ def run_ops_loop(*, repo_root: Path, profile: str, output_dir: Path, apply_autot
             "scripts/bench/capability_autotune.py",
             "--eval-file",
             str(eval_file),
+            "--history-dir",
+            str(output_dir),
             "--tuning-file",
             ".nexus/config/capability_tuning.json",
             "--apply",
@@ -114,6 +125,7 @@ def run_ops_loop(*, repo_root: Path, profile: str, output_dir: Path, apply_autot
         "status": "SUCCESS",
         "profile": profile,
         "max_tasks": max_tasks,
+        "with_llm_mode": with_llm_mode,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paths": {
             "with_nexus_file": str(with_file),
@@ -134,6 +146,7 @@ def main() -> int:
     parser.add_argument("--profile", choices=["daily", "iter", "weekly"], required=True)
     parser.add_argument("--output-dir", default=".nexus/reports/bench/ops_loop")
     parser.add_argument("--apply-autotune", action="store_true")
+    parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
     parser.add_argument("--output-json", action="store_true")
     args = parser.parse_args()
 
@@ -143,6 +156,7 @@ def main() -> int:
         profile=args.profile,
         output_dir=(repo_root / args.output_dir).resolve(),
         apply_autotune=bool(args.apply_autotune),
+        with_llm_mode=str(args.with_llm_mode),
     )
     if args.output_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))

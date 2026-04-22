@@ -82,6 +82,9 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["avg_wall_duration_sec_delta"] == 2.0
     assert report["a"]["summary"]["token_observable_rate"] == 1.0
     assert report["b"]["summary"]["token_observable_rate"] == 1.0
+    assert report["a"]["summary"]["token_measured_rate"] == 1.0
+    assert report["b"]["summary"]["token_measured_rate"] == 1.0
+    assert report["a"]["summary"]["avg_total_tokens_measured_only"] == 300.0
 
 
 def test_ab_eval_counts_trust_mismatch_rate(tmp_path):

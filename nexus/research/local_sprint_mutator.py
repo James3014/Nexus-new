@@ -297,7 +297,8 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
         hard_first_pass = any(
             k in lowered for k in ["flaky", "race", "deadlock", "timeout", "latency", "websocket", "sdk", "api"]
         )
-        if hard_first_pass and seed == 0:
+        conservative_ok = "websocket" not in lowered and "deadlock" not in lowered
+        if hard_first_pass and seed == 0 and conservative_ok:
             patched = _patch_compute_backoff_conservative(source)
             if patched != source:
                 return patched

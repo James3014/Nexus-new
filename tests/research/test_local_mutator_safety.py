@@ -70,10 +70,10 @@ def compute_backoff(attempt: int) -> int:
     assert "return 2 ** (attempt - 1)" in patched_seed1
 
 
-def test_compute_backoff_websocket_high_risk_uses_conservative_patch():
+def test_compute_backoff_websocket_high_risk_skips_conservative_patch():
     source = """
 def compute_backoff(attempt: int) -> int:
     return 1
 """
     patched = generate_local_candidate(source, "fix websocket reconnect latency issue", "local", 0)
-    assert "return attempt" in patched
+    assert "return 2 ** (attempt - 1)" in patched

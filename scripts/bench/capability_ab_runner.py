@@ -201,6 +201,7 @@ def run_with_nexus(
     timeout_sec: int,
     force_flow: str | None,
     runner_mode: str,
+    with_llm_mode: str = "off",
     cli_runner: CliRunner | None = None,
     history_window: int = 1,
     history_fail_threshold: int = 9999,
@@ -224,6 +225,9 @@ def run_with_nexus(
         str(timeout_sec),
         "--output-json",
     ]
+    llm_enabled = with_llm_mode == "all" or (with_llm_mode == "hard" and task.difficulty == "hard")
+    if llm_enabled:
+        args.append("--llm-mode")
     if force_flow:
         args.extend(["--force-flow", force_flow])
 
@@ -342,6 +346,7 @@ def main() -> int:
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "all"], default="all")
     parser.add_argument("--force-flow", choices=["auto", "baseline", "hyper_sprint"], default="auto")
     parser.add_argument("--with-nexus-runner", choices=["inprocess", "subprocess"], default="inprocess")
+    parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
     parser.add_argument("--without-mode", choices=["service", "bare"], default="bare")
     parser.add_argument(
         "--neutralize-history",
@@ -382,6 +387,7 @@ def main() -> int:
                 timeout_sec=args.timeout_sec,
                 force_flow=flow,
                 runner_mode=args.with_nexus_runner,
+                with_llm_mode=args.with_llm_mode,
                 cli_runner=shared_cli_runner,
                 history_window=1,
                 history_fail_threshold=9999,
