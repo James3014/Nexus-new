@@ -36,7 +36,13 @@ def read_belief_confidence_fast(repo_root: Path) -> float:
 
 
 def read_capability_tuning_fast(repo_root: Path) -> dict[str, Any]:
-    path = (repo_root / ".nexus" / "config" / "capability_tuning.json").resolve()
+    import os
+
+    override = str(os.environ.get("NEXUS_CAPABILITY_TUNING_FILE", "") or "").strip()
+    if override:
+        path = Path(override).resolve()
+    else:
+        path = (repo_root / ".nexus" / "config" / "capability_tuning.json").resolve()
     if not path.exists():
         return {}
     try:

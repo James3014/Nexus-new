@@ -27,6 +27,7 @@ REPORT_TRUST_AUDIT_TARGETS = (
     "tests/test_cli_output_contract.py",
     "tests/engine/test_cli_runner_async.py",
     "tests/engine/test_cli_research_seams.py",
+    "tests/engine/test_research_auto_flow_guard_audit.py",
     "tests/engine/test_cli_work_path_audit.py",
     "tests/engine/test_cli_artifact_gate_audit.py",
     "tests/engine/test_delegate_completion_contract.py",
@@ -295,6 +296,7 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
         "writeback": ROOT / ".nexus" / "reports" / "wiki_writeback_report.json",
         "coverage": ROOT / ".nexus" / "reports" / "coverage.json"
     }
+    ops_loop_dir = ROOT / ".nexus" / "reports" / "bench" / "ops_loop"
 
     print(f"📊 [Wiki-Sync] Status: {wiki_sync_status}")
     # Drift Summary
@@ -343,6 +345,27 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
             print(f"📊 [Test-Coverage] Total covered: {total_pct:.2f}%")
         except Exception as e:
             print(f"⚠️ Error parsing coverage report: {e}")
+
+    # Capability Health Summary (from latest ops_loop report)
+    if ops_loop_dir.exists():
+        try:
+            latest_reports = sorted(
+                ops_loop_dir.glob("ops_loop_*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if latest_reports:
+                latest = latest_reports[0]
+                payload = json.loads(latest.read_text(encoding="utf-8"))
+                health = payload.get("health", {}) if isinstance(payload, dict) else {}
+                if isinstance(health, dict) and health:
+                    verdict = str(health.get("verdict", "UNKNOWN"))
+                    score = float(health.get("score", 0.0) or 0.0)
+                    print(f"📊 [Capability-Health] Verdict: {verdict}, Score: {score:.2f}, Source: {latest.name}")
+                    if verdict != "PASS":
+                        print("⚠️ [Capability-Health] Latest benchmark health is not PASS. Review ops_loop report before release.")
+        except Exception as e:
+            print(f"⚠️ Error parsing capability health report: {e}")
 
 def run_benchmark_check(mode: str, dry_run: bool):
     if mode == "off": return True

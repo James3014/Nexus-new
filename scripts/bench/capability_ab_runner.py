@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -202,6 +203,7 @@ def run_with_nexus(
     force_flow: str | None,
     runner_mode: str,
     with_llm_mode: str = "off",
+    tuning_profile: str = "",
     cli_runner: CliRunner | None = None,
     history_window: int = 1,
     history_fail_threshold: int = 9999,
@@ -232,14 +234,25 @@ def run_with_nexus(
         args.extend(["--force-flow", force_flow])
 
     start = time.time()
+    env_prev = os.environ.get("NEXUS_CAPABILITY_TUNING_FILE")
+    if tuning_profile:
+        os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = str(
+            (repo_root / ".nexus" / "config" / f"capability_tuning_{tuning_profile}.json").resolve()
+        )
     if runner_mode == "subprocess":
         cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
-        res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True)
+        env = os.environ.copy()
+        res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, env=env)
         output = res.stdout or ""
     else:
         runner = cli_runner or CliRunner()
         res = runner.invoke(nexus_root, args)
         output = res.output or ""
+    if tuning_profile:
+        if env_prev is None:
+            os.environ.pop("NEXUS_CAPABILITY_TUNING_FILE", None)
+        else:
+            os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = env_prev
     wall = time.time() - start
 
     payload = _extract_json_payload(output)
@@ -347,6 +360,8 @@ def main() -> int:
     parser.add_argument("--force-flow", choices=["auto", "baseline", "hyper_sprint"], default="auto")
     parser.add_argument("--with-nexus-runner", choices=["inprocess", "subprocess"], default="inprocess")
     parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
+    parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
+    parser.add_argument("--llm-safe-probe", action="store_true")
     parser.add_argument("--without-mode", choices=["service", "bare"], default="bare")
     parser.add_argument(
         "--neutralize-history",
@@ -363,6 +378,12 @@ def main() -> int:
     )
     parser.add_argument("--materialize-missing", action="store_true", default=True)
     args = parser.parse_args()
+    if args.llm_safe_probe:
+        args.with_llm_mode = "hard"
+        args.force_flow = "hyper_sprint"
+        args.difficulty = "hard"
+        args.max_tasks = min(max(1, args.max_tasks), 3)
+        args.timeout_sec = min(max(8, args.timeout_sec), 25)
 
     repo_root = Path(__file__).resolve().parents[2]
     tasks = select_tasks(load_tasks(args.tasks_file), difficulty=args.difficulty, max_tasks=args.max_tasks)
@@ -388,6 +409,7 @@ def main() -> int:
                 force_flow=flow,
                 runner_mode=args.with_nexus_runner,
                 with_llm_mode=args.with_llm_mode,
+                tuning_profile=args.tuning_profile,
                 cli_runner=shared_cli_runner,
                 history_window=1,
                 history_fail_threshold=9999,

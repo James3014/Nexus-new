@@ -342,6 +342,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     candidates: list[CandidateEval] = []
     model_calls = 0
     total_tokens = 0
+    token_capture_statuses: set[str] = set()
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
@@ -586,6 +587,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 used_source = str(meta.get("source", "local"))
             model_calls += int(meta.get("model_calls", 0))
             total_tokens += int(meta.get("tokens_used", 0) or 0)
+            token_capture_statuses.add(str(meta.get("token_capture_status", "unknown") or "unknown"))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
             guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
@@ -649,7 +651,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             token_capture_status=(
                 "measured"
                 if total_tokens > 0
-                else ("missing" if model_calls > 0 else "not_applicable_local_only")
+                else (
+                    "missing_gateway_stats"
+                    if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
+                    else ("missing" if model_calls > 0 else "not_applicable_local_only")
+                )
             ),
             error_codes=sorted(set(error_codes)),
             rejection_summary={},
@@ -684,7 +690,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             token_capture_status=(
                 "measured"
                 if total_tokens > 0
-                else ("missing" if model_calls > 0 else "not_applicable_local_only")
+                else (
+                    "missing_gateway_stats"
+                    if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
+                    else ("missing" if model_calls > 0 else "not_applicable_local_only")
+                )
             ),
             error_codes=final_codes,
             rejection_summary=rejection_summary,
@@ -755,7 +765,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         token_capture_status=(
             "measured"
             if total_tokens > 0
-            else ("missing" if model_calls > 0 else "not_applicable_local_only")
+            else (
+                "missing_gateway_stats"
+                if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
+                else ("missing" if model_calls > 0 else "not_applicable_local_only")
+            )
         ),
         error_codes=final_codes,
         rejection_summary=rejection_summary,
