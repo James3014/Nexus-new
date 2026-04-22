@@ -249,3 +249,99 @@ def test_verify_claims_report_integrity_fails_when_report_older_than_evidence(tm
     integrity = next(c for c in report["checks"] if c["name"] == "report_integrity_lock")
     assert integrity["passed"] is False
     assert integrity["detail"]["freshness"]["error"] == "report_older_than_reference"
+
+
+def test_verify_claims_report_integrity_fails_without_nexus_command_evidence(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    head = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    changed = [
+        line.strip()
+        for line in subprocess.check_output(
+            ["git", "show", "--name-only", "--pretty=format:", "HEAD"], cwd=tmp_path, text=True
+        ).splitlines()
+        if line.strip()
+    ]
+    branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    report_file = tmp_path / ".nexus" / "reports" / "agent_report.json"
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(
+        json.dumps(
+            {
+                "head_sha": head,
+                "files_changed_in_this_commit": changed,
+                "base_branch": branch,
+                "branch_delta_vs_base": [],
+                "worktree_changed_files": [],
+                "tests_run": [{"command": "uv run pytest -q tests/test_cli_learn_mode.py", "exit_code": 0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = verify_claims(
+        tmp_path,
+        report_file_rel=".nexus/reports/agent_report.json",
+        require_test_evidence=True,
+        require_nexus_command_evidence=True,
+        require_worktree_delta=True,
+    )
+    integrity = next(c for c in report["checks"] if c["name"] == "report_integrity_lock")
+    assert integrity["passed"] is False
+    assert integrity["detail"]["nexus_command_evidence"]["error"] == "missing_nexus_command_evidence"
+
+
+def test_verify_claims_report_integrity_passes_with_nexus_and_worktree_evidence(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    head = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    changed = [
+        line.strip()
+        for line in subprocess.check_output(
+            ["git", "show", "--name-only", "--pretty=format:", "HEAD"], cwd=tmp_path, text=True
+        ).splitlines()
+        if line.strip()
+    ]
+    branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    # Create one untracked file to assert worktree delta parity (including untracked).
+    untracked = tmp_path / "scratch.txt"
+    untracked.write_text("x\n", encoding="utf-8")
+
+    report_file = tmp_path / ".nexus" / "reports" / "agent_report.json"
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    base_payload = {
+        "head_sha": head,
+        "files_changed_in_this_commit": changed,
+        "base_branch": branch,
+        "branch_delta_vs_base": [],
+        "worktree_changed_files": [],
+        "tests_run": [
+            {"command": "uv run scripts/engine/nexus_cli.py nexus research:run --dry-run", "exit_code": 0},
+            {"command": "uv run pytest -q tests/test_cli_learn_mode.py", "exit_code": 0},
+        ],
+    }
+    report_file.write_text(json.dumps(base_payload), encoding="utf-8")
+    # Capture current worktree after report exists and persist exact value.
+    raw_status = subprocess.check_output(["git", "status", "--porcelain"], cwd=tmp_path, text=True)
+    base_payload["worktree_changed_files"] = sorted(_parse_porcelain_paths(raw_status))
+    report_file.write_text(
+        json.dumps(
+            base_payload
+        ),
+        encoding="utf-8",
+    )
+
+    report = verify_claims(
+        tmp_path,
+        report_file_rel=".nexus/reports/agent_report.json",
+        require_test_evidence=True,
+        require_nexus_command_evidence=True,
+        require_worktree_delta=True,
+    )
+    assert report["passed"] is True

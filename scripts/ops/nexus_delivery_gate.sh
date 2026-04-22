@@ -62,6 +62,8 @@ if ! uv run scripts/ops/verify_report_claims.py \
   --json \
   --report-file "$AGENT_REPORT_PATH" \
   --require-test-evidence \
+  --require-nexus-command-evidence \
+  --require-worktree-delta \
   --report-newer-than "$EVIDENCE_PATH" \
   --ignore-dirty-config .nexus/config/delivery_gate_allow_dirty.json \
   --baseline-manifest "$BASELINE_PATH"; then

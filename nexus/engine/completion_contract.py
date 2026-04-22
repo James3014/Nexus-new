@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.engine.completion_enforcer import enforce_completion
+from nexus.engine.runtime_classification import classify_semantic
 
 
 def build_completion_envelope(
@@ -64,14 +65,11 @@ def build_completion_envelope(
             next_action = "escalate_to_human"
 
     if runtime_classification is None:
-        if semantic_status == "VERIFIED":
-            runtime_classification = "verified_pass"
-        elif blocker_type == "governance":
-            runtime_classification = "governance_state_block"
-        elif not runtime_ok:
-            runtime_classification = "runtime_defect"
-        else:
-            runtime_classification = "semantic_incomplete"
+        runtime_classification = classify_semantic(
+            semantic_status=semantic_status,
+            retryable=bool(retryable),
+            blocker_type=blocker_type or "",
+        )
 
     return {
         "command_name": command_name,

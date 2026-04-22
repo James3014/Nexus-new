@@ -18,20 +18,23 @@ def _write_aligned_agent_report() -> None:
     ]
     report_path = Path(".nexus/reports/agent_report.json")
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(
-            {
-                "head_sha": head_sha,
-                "base_branch": "main",
-                "files_changed_in_this_commit": commit_files,
-                "branch_delta_vs_base": branch_delta,
-                "tests_run": [
-                    {"command": "uv run pytest -q tests/ops/test_stage_f_flow.py", "exit_code": 0},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    payload = {
+        "head_sha": head_sha,
+        "base_branch": "main",
+        "files_changed_in_this_commit": commit_files,
+        "branch_delta_vs_base": branch_delta,
+        "worktree_changed_files": [],
+        "tests_run": [
+            {"command": "uv run scripts/engine/nexus_cli.py nexus research:run --dry-run --run-id smoke", "exit_code": 0},
+            {"command": "uv run pytest -q tests/ops/test_stage_f_flow.py", "exit_code": 0},
+        ],
+    }
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    raw_status = subprocess.check_output(["git", "status", "--porcelain"], text=True)
+    worktree_delta = [line[3:].strip() if len(line) >= 4 else line.strip() for line in raw_status.splitlines() if line.strip()]
+    payload["worktree_changed_files"] = sorted([p for p in worktree_delta if p])
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_stage_f():

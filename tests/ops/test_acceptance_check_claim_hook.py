@@ -33,6 +33,8 @@ def test_acceptance_check_runs_claim_verifier(monkeypatch):
     verify_cmd = next(c for c in joined if "scripts/ops/verify_report_claims.py" in c)
     assert "--report-file .nexus/reports/agent_report.json" in verify_cmd
     assert "--require-test-evidence" in verify_cmd
+    assert "--require-nexus-command-evidence" in verify_cmd
+    assert "--require-worktree-delta" in verify_cmd
 
 
 def test_delivery_gate_runs_shell_gate(monkeypatch):

@@ -18,6 +18,8 @@ class ReportClaimsOptions:
     baseline_manifest_rel: str
     report_file_rel: str | None
     require_test_evidence: bool
+    require_nexus_command_evidence: bool
+    require_worktree_delta: bool
     report_newer_than: str | None
 
 
@@ -81,12 +83,32 @@ def sorted_nonempty_lines(raw: str) -> list[str]:
     return sorted([line.strip() for line in raw.splitlines() if line.strip()])
 
 
+def _is_ignored_path(path: str, ignore_paths: set[str]) -> bool:
+    normalized = path.strip()
+    if not normalized:
+        return False
+    for ignore in ignore_paths:
+        token = ignore.strip()
+        if not token:
+            continue
+        if normalized == token:
+            return True
+        if token.endswith("/"):
+            if normalized.startswith(token):
+                return True
+        elif normalized.startswith(f"{token}/"):
+            return True
+    return False
+
+
 def evaluate_report_integrity_lock(
     project_root: Path,
     report_file_rel: str | None,
     run_git: Any,
     *,
     require_test_evidence: bool = False,
+    require_nexus_command_evidence: bool = False,
+    require_worktree_delta: bool = False,
     report_newer_than: str | None = None,
 ) -> dict[str, Any]:
     if not report_file_rel:
@@ -133,11 +155,13 @@ def evaluate_report_integrity_lock(
 
     tests_ok = True
     test_detail: dict[str, Any] = {"required": require_test_evidence}
+    tests_run_entries: list[dict[str, Any]] = []
     if require_test_evidence:
         tests_run = report.get("tests_run")
         if not isinstance(tests_run, list) or not tests_run:
             tests_ok = False
             test_detail["error"] = "missing_tests_run"
+            tests_run = []
         else:
             invalid_rows: list[int] = []
             nonzero_rows: list[dict[str, Any]] = []
@@ -167,7 +191,49 @@ def evaluate_report_integrity_lock(
             else:
                 test_detail["count"] = len(tests_run)
                 test_detail["passed"] = True
+        tests_run_entries = [item for item in tests_run if isinstance(item, dict)]
+    elif isinstance(report.get("tests_run"), list):
+        tests_run_entries = [item for item in report.get("tests_run", []) if isinstance(item, dict)]
     detail["test_evidence"] = test_detail
+
+    nexus_cmd_ok = True
+    nexus_cmd_detail: dict[str, Any] = {"required": require_nexus_command_evidence}
+    if require_nexus_command_evidence:
+        commands = [str(item.get("command", "")).strip() for item in tests_run_entries]
+        matched_commands = [cmd for cmd in commands if "nexus_cli.py nexus" in cmd.lower()]
+        nexus_cmd_ok = len(matched_commands) > 0
+        nexus_cmd_detail["matched_count"] = len(matched_commands)
+        nexus_cmd_detail["matched_commands"] = matched_commands
+        if not nexus_cmd_ok:
+            nexus_cmd_detail["error"] = "missing_nexus_command_evidence"
+    detail["nexus_command_evidence"] = nexus_cmd_detail
+
+    worktree_ok = True
+    worktree_detail: dict[str, Any] = {"required": require_worktree_delta}
+    if require_worktree_delta:
+        reported_worktree = sorted(
+            [str(v).strip() for v in report.get("worktree_changed_files", []) if str(v).strip()]
+        )
+        report_rel = str(report_file_rel or "").strip()
+        ignore_paths: set[str] = set()
+        if report_rel:
+            report_rel_path = Path(report_rel)
+            ignore_paths.add(report_rel)
+            for parent in report_rel_path.parents:
+                parent_str = str(parent).strip()
+                if parent_str and parent_str != ".":
+                    ignore_paths.add(parent_str)
+                    ignore_paths.add(f"{parent_str}/")
+
+        reported_worktree = [p for p in reported_worktree if not _is_ignored_path(p, ignore_paths)]
+        actual_worktree = sorted(parse_porcelain_paths(run_git(project_root, ["status", "--porcelain"])))
+        actual_worktree = [p for p in actual_worktree if not _is_ignored_path(p, ignore_paths)]
+        worktree_ok = reported_worktree == actual_worktree
+        worktree_detail["reported_worktree"] = reported_worktree
+        worktree_detail["actual_worktree"] = actual_worktree
+        if not worktree_ok:
+            worktree_detail["error"] = "worktree_delta_mismatch"
+    detail["worktree_delta_integrity"] = worktree_detail
 
     freshness_ok = True
     freshness_detail: dict[str, Any] = {"reference_required": bool(report_newer_than)}
@@ -192,7 +258,7 @@ def evaluate_report_integrity_lock(
 
     return {
         "name": "report_integrity_lock",
-        "passed": head_ok and commit_ok and delta_ok and tests_ok and freshness_ok,
+        "passed": head_ok and commit_ok and delta_ok and tests_ok and nexus_cmd_ok and worktree_ok and freshness_ok,
         "detail": detail,
     }
 
@@ -283,6 +349,8 @@ def verify_claims_core(project_root: Path, options: ReportClaimsOptions, run_git
             options.report_file_rel,
             run_git,
             require_test_evidence=options.require_test_evidence,
+            require_nexus_command_evidence=options.require_nexus_command_evidence,
+            require_worktree_delta=options.require_worktree_delta,
             report_newer_than=options.report_newer_than,
         )
     )

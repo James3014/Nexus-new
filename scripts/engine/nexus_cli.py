@@ -392,6 +392,8 @@ def acceptance_check(as_json, evidence_path):
         "--report-file",
         ".nexus/reports/agent_report.json",
         "--require-test-evidence",
+        "--require-nexus-command-evidence",
+        "--require-worktree-delta",
         "--report-newer-than",
         str(evidence_path) if evidence_path else ".nexus/reports/hallucination_evidence.json",
         "--require-path",

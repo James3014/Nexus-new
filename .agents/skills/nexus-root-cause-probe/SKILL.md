@@ -165,6 +165,20 @@ uv run scripts/ops/ci_gate.py --dry-run
 ```
 - 若真實 Nexus smoke 和 targeted tests 的結論不一致，繼續追 artifact，不要宣布完成。
 
+8. 提交後復驗（必做）
+- 建議在完成 commit 後立即重跑一輪 report-trust 回歸，確認「已提交狀態」仍一致：
+```bash
+uv run pytest -q \
+  tests/ops/test_verify_report_claims.py \
+  tests/ops/test_acceptance_check_claim_hook.py \
+  tests/ops/test_delivery_gate_contract.py \
+  tests/ops/test_stage_f_flow.py \
+  tests/engine/test_runtime_classification.py
+```
+- 若提交前綠、提交後紅，優先檢查：
+  - 是否有 runtime artifact 被帶入 commit（例如 `.nexus/reports/*`）。
+  - `worktree_changed_files` 與 `git status --porcelain` 是否在 gate 執行後產生偏差。
+
 ## 常見陷阱
 - 只看 pytest，不穿 Nexus 跑真實命令。
 - 將 `UNVERIFIED_COLD_START` 當成回報造假；它通常是治理狀態，不一定是 runtime bug。

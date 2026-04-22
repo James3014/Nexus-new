@@ -41,6 +41,8 @@ def verify_claims(
     baseline_manifest_rel: str = ".nexus/reports/baseline/baseline_manifest.json",
     report_file_rel: str | None = None,
     require_test_evidence: bool = False,
+    require_nexus_command_evidence: bool = False,
+    require_worktree_delta: bool = False,
     report_newer_than: str | None = None,
 ) -> Dict[str, Any]:
     options = ReportClaimsOptions(
@@ -53,6 +55,8 @@ def verify_claims(
         baseline_manifest_rel=baseline_manifest_rel,
         report_file_rel=report_file_rel,
         require_test_evidence=bool(require_test_evidence),
+        require_nexus_command_evidence=bool(require_nexus_command_evidence),
+        require_worktree_delta=bool(require_worktree_delta),
         report_newer_than=report_newer_than,
     )
     return verify_claims_core(project_root, options, _run_git)
@@ -100,6 +104,16 @@ def main() -> int:
         help="Require report_file tests_run evidence with all exit_code=0.",
     )
     parser.add_argument(
+        "--require-nexus-command-evidence",
+        action="store_true",
+        help="Require tests_run to include at least one canonical Nexus CLI command evidence.",
+    )
+    parser.add_argument(
+        "--require-worktree-delta",
+        action="store_true",
+        help="Require report.worktree_changed_files to match `git status --porcelain` (includes untracked files).",
+    )
+    parser.add_argument(
         "--report-newer-than",
         default=None,
         help="Require report_file mtime to be newer than the given reference file.",
@@ -119,6 +133,8 @@ def main() -> int:
         baseline_manifest_rel=args.baseline_manifest,
         report_file_rel=args.report_file,
         require_test_evidence=bool(args.require_test_evidence),
+        require_nexus_command_evidence=bool(args.require_nexus_command_evidence),
+        require_worktree_delta=bool(args.require_worktree_delta),
         report_newer_than=args.report_newer_than,
     )
 
