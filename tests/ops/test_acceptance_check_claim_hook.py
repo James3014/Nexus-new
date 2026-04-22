@@ -62,6 +62,76 @@ def test_delivery_gate_runs_shell_gate(monkeypatch):
     assert any("scripts/ops/nexus_delivery_gate.sh" in c for c in joined)
 
 
+def test_acceptance_check_allows_cold_start_in_dev_policy(monkeypatch):
+    from scripts.engine.nexus_cli import nexus
+
+    calls = []
+
+    class _Res:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = b"ok"
+            self.stderr = b""
+
+    def _fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        joined = " ".join(map(str, cmd))
+        if "scripts/ops/nexus_acceptance_check.py" in joined:
+            return _Res(1)
+        return _Res(0)
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.check_hallucination", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", _fake_run)
+    monkeypatch.setenv("NEXUS_ACCEPTANCE_POLICY", "dev")
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path(".nexus/reports").mkdir(parents=True, exist_ok=True)
+        Path(".nexus/reports/acceptance_check.json").write_text(
+            json.dumps({"status": "UNVERIFIED_COLD_START", "gate_passed": False}),
+            encoding="utf-8",
+        )
+        Path(".nexus/reports/acceptance_check.md").write_text("# check", encoding="utf-8")
+        result = runner.invoke(nexus, ["nexus", "acceptance-check"])
+
+    assert result.exit_code == 0
+    joined = [" ".join(map(str, c)) for c in calls]
+    verify_cmd = next(c for c in joined if "scripts/ops/verify_report_claims.py" in c)
+    assert "--require-acceptance-pass" not in verify_cmd
+
+
+def test_acceptance_check_blocks_cold_start_in_prod_policy(monkeypatch):
+    from scripts.engine.nexus_cli import nexus
+
+    class _Res:
+        def __init__(self, returncode=0):
+            self.returncode = returncode
+            self.stdout = b"ok"
+            self.stderr = b""
+
+    def _fake_run(cmd, *args, **kwargs):
+        joined = " ".join(map(str, cmd))
+        if "scripts/ops/nexus_acceptance_check.py" in joined:
+            return _Res(1)
+        return _Res(0)
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.check_hallucination", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", _fake_run)
+    monkeypatch.setenv("NEXUS_ACCEPTANCE_POLICY", "prod")
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path(".nexus/reports").mkdir(parents=True, exist_ok=True)
+        Path(".nexus/reports/acceptance_check.json").write_text(
+            json.dumps({"status": "UNVERIFIED_COLD_START", "gate_passed": False}),
+            encoding="utf-8",
+        )
+        Path(".nexus/reports/acceptance_check.md").write_text("# check", encoding="utf-8")
+        result = runner.invoke(nexus, ["nexus", "acceptance-check"])
+
+    assert result.exit_code != 0
+
+
 def test_delivery_receipt_renders_json(tmp_path, monkeypatch):
     from scripts.engine.nexus_cli import nexus
 

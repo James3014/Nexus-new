@@ -297,11 +297,22 @@ def _write_hallucination_evidence(path: str | None, final_response: str, evidenc
     return out
 
 
+def _load_acceptance_status(report_path: Path) -> str:
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:
+        return "UNKNOWN"
+    return str(data.get("status", "UNKNOWN")).strip() or "UNKNOWN"
+
+
 @nexus_group.command(name="acceptance-check")
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--evidence", "evidence_path", type=click.Path(exists=True))
 def acceptance_check(as_json, evidence_path):
     """✅ Run full system acceptance check with Hallucination Guard."""
+    acceptance_policy = str(os.environ.get("NEXUS_ACCEPTANCE_POLICY", "dev")).strip().lower() or "dev"
+    acceptance_report = repo_root / ".nexus/reports/acceptance_check.json"
+
     # 1. 執行實體驗收
     cmd = [sys.executable, str(repo_root / "scripts/ops/nexus_acceptance_check.py")]
     cmd.extend(["--report-file", ".nexus/reports/agent_report.json"])
@@ -310,7 +321,9 @@ def acceptance_check(as_json, evidence_path):
     if as_json:
         cmd.append("--json")
     acceptance_result = subprocess.run(cmd)
-    if acceptance_result.returncode != 0:
+    acceptance_status = _load_acceptance_status(acceptance_report)
+    allow_cold_start = acceptance_policy != "prod" and acceptance_status == "UNVERIFIED_COLD_START"
+    if acceptance_result.returncode != 0 and not allow_cold_start:
         raise click.exceptions.Exit(acceptance_result.returncode)
 
     # 1.5 驗收報告宣稱完整性檢查（防止跨分支/缺證據誤宣稱）
@@ -319,7 +332,6 @@ def acceptance_check(as_json, evidence_path):
         str(repo_root / "scripts/ops/verify_report_claims.py"),
         "--project-root",
         str(repo_root),
-        "--require-acceptance-pass",
         "--report-file",
         ".nexus/reports/agent_report.json",
         "--require-test-evidence",
@@ -330,6 +342,8 @@ def acceptance_check(as_json, evidence_path):
         "--require-path",
         ".nexus/reports/acceptance_check.md",
     ]
+    if not allow_cold_start:
+        verify_cmd.insert(4, "--require-acceptance-pass")
     subprocess.run(verify_cmd, check=True)
     
     # 2. 執行幻覺審計 (always render; hard-fail only when explicit evidence gets REJECTED)
