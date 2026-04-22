@@ -81,6 +81,10 @@ class LLMCandidateGenerator:
         self.safe_mode = safe_mode
 
     def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
+        def _estimate_tokens(text: str) -> int:
+            # Fallback estimate when gateway does not return token usage.
+            return max(1, len(text) // 4)
+
         prompt_text = (
             "You are executing Stage 1 of a Hyper-Sprint (Gladiator mode).\n"
             f"Task: {task}\n"
@@ -111,6 +115,9 @@ class LLMCandidateGenerator:
                     except (TypeError, ValueError):
                         tokens_used = 0
                     token_capture_status = str(out.get("token_capture_status", "unknown") or "unknown")
+                if tokens_used <= 0 and model_calls > 0:
+                    tokens_used = _estimate_tokens(prompt_text) + _estimate_tokens(str(code))
+                    token_capture_status = "estimated"
                 return code, {
                     "source": self.source,
                     "model_calls": model_calls,

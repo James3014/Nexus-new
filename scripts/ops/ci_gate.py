@@ -364,6 +364,18 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
                     print(f"📊 [Capability-Health] Verdict: {verdict}, Score: {score:.2f}, Source: {latest.name}")
                     if verdict != "PASS":
                         print("⚠️ [Capability-Health] Latest benchmark health is not PASS. Review ops_loop report before release.")
+                trend_gate = payload.get("trend_gate", {}) if isinstance(payload, dict) else {}
+                if isinstance(trend_gate, dict) and trend_gate:
+                    t_verdict = str(trend_gate.get("verdict", "UNKNOWN"))
+                    mk = trend_gate.get("median_kpi", {}) if isinstance(trend_gate.get("median_kpi"), dict) else {}
+                    print(
+                        "📊 [Capability-TrendGate] Verdict: "
+                        f"{t_verdict}, Solve: {float(mk.get('with_solve_rate', 0.0) or 0.0):.2f}, "
+                        f"Semantic: {float(mk.get('with_semantic_verified_rate', 0.0) or 0.0):.2f}, "
+                        f"WallOverhead: {float(mk.get('wall_overhead_sec', 0.0) or 0.0):.2f}s"
+                    )
+                    if t_verdict != "PASS":
+                        print("⚠️ [Capability-TrendGate] 3-round median KPI gate is not PASS.")
         except Exception as e:
             print(f"⚠️ Error parsing capability health report: {e}")
 

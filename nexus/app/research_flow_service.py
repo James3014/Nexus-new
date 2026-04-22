@@ -109,7 +109,9 @@ def build_route(
     
     task_upper = (task_desc or "").upper()
     hard_keywords = ["FLAKY", "RACE", "DEADLOCK", "TIMEOUT", "LATENCY", "WEBSOCKET", "SDK", "API"]
-    has_hard_signal = any(kw in task_upper for kw in hard_keywords)
+    cross_module_keywords = ["CROSS-MODULE", "MULTI-MODULE", "COORDINATOR", "SWARM", "DRONE", "NIGHTSHIFT"]
+    is_cross_module_task = "cross_module" in str(task_type).lower() or any(kw in task_upper for kw in cross_module_keywords)
+    has_hard_signal = any(kw in task_upper for kw in hard_keywords) or is_cross_module_task
     
     # R2 Tuning: Feature/Refactor prefer baseline, Bugfix with risk prefers hyper
     if is_doc_fix:
@@ -149,10 +151,12 @@ def build_route(
     risk_score += 25 if adjusted_root_cause_confidence < 0.7 else 0
     risk_score += 15 if findings_hits > 0 else 0
     risk_score += 10 if candidate_count > 1 else 0
+    risk_score += 20 if is_cross_module_task else 0
     risk_score = min(100, risk_score)
     route_features = {
         "task_type": task_type,
         "has_hard_signal": has_hard_signal,
+        "is_cross_module_task": is_cross_module_task,
         "is_doc_fix": is_doc_fix,
         "candidate_count": int(candidate_count),
         "findings_hits": int(findings_hits),
@@ -201,13 +205,17 @@ def build_hyper_execution_profile(
     text = (task_desc or "").lower()
     hard_keywords = ["flaky", "race", "deadlock", "timeout", "latency", "websocket", "sdk", "api"]
     has_hard_keyword = any(keyword in text for keyword in hard_keywords)
+    is_cross_module = "cross_module" in str(task_type).lower() or any(
+        kw in text for kw in ["cross-module", "multi-module", "coordinator", "swarm", "drone", "nightshift"]
+    )
     low_confidence = float(root_cause_confidence) < 0.75
     risk_bug = task_type == "bug" and route_recommended_flow == "hyper_sprint"
-    is_hard_task = bool(has_hard_keyword or low_confidence or risk_bug)
+    is_hard_task = bool(has_hard_keyword or is_cross_module or low_confidence or risk_bug)
 
     effective_candidate_count = max(1, int(candidate_count))
     effective_max_rounds = 1
     effective_stage1_max_parallel = 1
+    prefer_direct_hyper = False
     tuning_reasons: list[str] = []
 
     if risk_bug:
@@ -241,6 +249,12 @@ def build_hyper_execution_profile(
         effective_candidate_count = max(effective_candidate_count, 6)
         effective_stage1_max_parallel = max(effective_stage1_max_parallel, 3)
         tuning_reasons.append("prior_fix_hits_first_pass_accelerate")
+    if is_cross_module:
+        effective_candidate_count = max(effective_candidate_count, 5)
+        effective_max_rounds = max(effective_max_rounds, 3)
+        effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
+        prefer_direct_hyper = True
+        tuning_reasons.append("cross_module_refactor_direct_hyper")
 
     knobs = (tuning or {}).get("knobs", {}) if isinstance(tuning, dict) else {}
     candidate_boost = int(knobs.get("candidate_boost", 0) or 0)
@@ -266,6 +280,8 @@ def build_hyper_execution_profile(
         "has_hard_keyword": has_hard_keyword,
         "low_confidence": low_confidence,
         "risk_bug": risk_bug,
+        "is_cross_module": is_cross_module,
+        "prefer_direct_hyper": prefer_direct_hyper,
         "belief_confidence": float(belief_confidence),
         "prior_fix_hits": int(prior_fix_hits or 0),
         "effective_candidate_count": effective_candidate_count,
@@ -561,14 +577,15 @@ def run_auto_flow(
         result = _run_baseline_apply()
         strategy_path = "baseline_only"
     else:
+        direct_hyper = bool(execution_profile.get("prefer_direct_hyper", False))
         if (
             force_flow is None
             and execution_profile["is_hard_task"]
-            and skip_baseline_probe_for_hard
+            and (skip_baseline_probe_for_hard or direct_hyper)
         ):
             baseline_probe_skipped = True
             result = _run_hyper_apply()
-            strategy_path = "hyper_direct_hard_skip_probe"
+            strategy_path = "hyper_direct_hard_skip_probe" if skip_baseline_probe_for_hard else "hyper_direct_cross_module"
         else:
         # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
             baseline_probe = _run_baseline_probe()

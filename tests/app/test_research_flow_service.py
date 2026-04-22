@@ -38,6 +38,31 @@ def test_build_hyper_execution_profile_boosts_hard_bug():
     assert profile["is_hard_task"] is True
 
 
+def test_build_route_cross_module_task_has_high_risk_feature(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Cross-module refactor for swarm/drone/nightshift handoff",
+        task_type="cross_module_refactor_drone",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+    )
+    assert out["route_features"]["is_cross_module_task"] is True
+    assert out["route_features"]["risk_score"] >= 50
+
+
+def test_build_hyper_execution_profile_prefers_direct_hyper_for_cross_module():
+    profile = research_flow_service.build_hyper_execution_profile(
+        task_desc="cross-module refactor for swarm and drone coordination",
+        task_type="cross_module_refactor_swarm",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        route_recommended_flow="hyper_sprint",
+    )
+    assert profile["is_cross_module"] is True
+    assert profile["prefer_direct_hyper"] is True
+
+
 def test_build_hyper_execution_profile_keeps_light_for_simple_task():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix typo in markdown title",

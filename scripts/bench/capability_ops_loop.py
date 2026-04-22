@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +69,12 @@ def _avg(values: list[float]) -> float:
     if not values:
         return 0.0
     return float(sum(values) / len(values))
+
+
+def _median(values: list[float], default: float = 0.0) -> float:
+    if not values:
+        return float(default)
+    return float(statistics.median(values))
 
 
 def _compute_pillar_scores(with_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -151,6 +158,22 @@ def _compute_health_score(eval_payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _extract_kpi(eval_payload: dict[str, Any]) -> dict[str, float]:
+    with_summary = (eval_payload.get("a") or {}).get("summary", {}) if isinstance(eval_payload, dict) else {}
+    without_summary = (eval_payload.get("b") or {}).get("summary", {}) if isinstance(eval_payload, dict) else {}
+    with_solve = _num(with_summary, "solve_rate")
+    with_semantic = _num(with_summary, "semantic_verified_rate")
+    with_wall = _num(with_summary, "avg_wall_duration_sec")
+    without_wall = _num(without_summary, "avg_wall_duration_sec")
+    return {
+        "with_solve_rate": with_solve,
+        "with_semantic_verified_rate": with_semantic,
+        "with_avg_wall_duration_sec": with_wall,
+        "without_avg_wall_duration_sec": without_wall,
+        "wall_overhead_sec": max(0.0, with_wall - without_wall),
+    }
+
+
 def run_ops_loop(
     *,
     repo_root: Path,
@@ -215,6 +238,7 @@ def run_ops_loop(
         raise RuntimeError(f"ab_eval_failed: {eval_res.stderr.strip()}")
     eval_payload = _extract_json(eval_res.stdout)
     health = _compute_health_score(eval_payload)
+    kpi = _extract_kpi(eval_payload)
     with_rows = _load_jsonl_rows(with_file)
     pillar_metrics = _compute_pillar_scores(with_rows)
     self_heal_metrics = _compute_self_heal_metrics(with_rows)
@@ -372,6 +396,7 @@ def run_ops_loop(
             "ab_eval_file": str(eval_file),
         },
         "ab_eval": eval_payload,
+        "kpi": kpi,
         "health": health,
         "pillars": pillar_metrics,
         "self_heal": self_heal_metrics,
@@ -384,6 +409,71 @@ def run_ops_loop(
     return report
 
 
+def run_ops_loop_rounds(
+    *,
+    repo_root: Path,
+    profile: str,
+    output_dir: Path,
+    apply_autotune: bool,
+    with_llm_mode: str = "off",
+    run_llm_probe: bool = False,
+    rounds: int = 3,
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    reports: list[dict[str, Any]] = []
+    for _ in range(max(1, rounds)):
+        reports.append(
+            run_ops_loop(
+                repo_root=repo_root,
+                profile=profile,
+                output_dir=output_dir,
+                apply_autotune=apply_autotune,
+                with_llm_mode=with_llm_mode,
+                run_llm_probe=run_llm_probe,
+            )
+        )
+    solve_values = [float((r.get("kpi", {}) or {}).get("with_solve_rate", 0.0) or 0.0) for r in reports]
+    semantic_values = [float((r.get("kpi", {}) or {}).get("with_semantic_verified_rate", 0.0) or 0.0) for r in reports]
+    wall_values = [float((r.get("kpi", {}) or {}).get("with_avg_wall_duration_sec", 0.0) or 0.0) for r in reports]
+    wall_without_values = [float((r.get("kpi", {}) or {}).get("without_avg_wall_duration_sec", 0.0) or 0.0) for r in reports]
+    median_kpi = {
+        "with_solve_rate": round(_median(solve_values), 4),
+        "with_semantic_verified_rate": round(_median(semantic_values), 4),
+        "with_avg_wall_duration_sec": round(_median(wall_values), 4),
+        "without_avg_wall_duration_sec": round(_median(wall_without_values), 4),
+    }
+    median_kpi["wall_overhead_sec"] = round(
+        max(0.0, median_kpi["with_avg_wall_duration_sec"] - median_kpi["without_avg_wall_duration_sec"]), 4
+    )
+    trend_gate = {
+        "verdict": (
+            "PASS"
+            if (
+                median_kpi["with_solve_rate"] >= 0.95
+                and median_kpi["with_semantic_verified_rate"] >= 0.95
+                and median_kpi["wall_overhead_sec"] <= 1.5
+            )
+            else "WARN"
+        ),
+        "rules": {
+            "min_solve_rate": 0.95,
+            "min_semantic_rate": 0.95,
+            "max_wall_overhead_sec": 1.5,
+        },
+        "median_kpi": median_kpi,
+    }
+    final = dict(reports[-1])
+    final["rounds"] = len(reports)
+    final["kpi_median_3round"] = median_kpi
+    final["trend_gate"] = trend_gate
+    final["round_reports"] = [str(r.get("report_file", "")) for r in reports]
+    ts = int(datetime.now(timezone.utc).timestamp())
+    rounds_report_path = output_dir / f"ops_loop_rounds_{profile}_{ts}.json"
+    rounds_report_path.write_text(json.dumps(final, indent=2, ensure_ascii=False), encoding="utf-8")
+    final["report_file"] = str(rounds_report_path)
+    return final
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capability operations loop (daily/iter/weekly).")
     parser.add_argument("--profile", choices=["daily", "iter", "weekly"], required=True)
@@ -391,18 +481,30 @@ def main() -> int:
     parser.add_argument("--apply-autotune", action="store_true")
     parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
     parser.add_argument("--run-llm-probe", action="store_true")
+    parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--output-json", action="store_true")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
-    payload = run_ops_loop(
-        repo_root=repo_root,
-        profile=args.profile,
-        output_dir=(repo_root / args.output_dir).resolve(),
-        apply_autotune=bool(args.apply_autotune),
-        with_llm_mode=str(args.with_llm_mode),
-        run_llm_probe=bool(args.run_llm_probe),
-    )
+    if int(args.rounds) > 1:
+        payload = run_ops_loop_rounds(
+            repo_root=repo_root,
+            profile=args.profile,
+            output_dir=(repo_root / args.output_dir).resolve(),
+            apply_autotune=bool(args.apply_autotune),
+            with_llm_mode=str(args.with_llm_mode),
+            run_llm_probe=bool(args.run_llm_probe),
+            rounds=int(args.rounds),
+        )
+    else:
+        payload = run_ops_loop(
+            repo_root=repo_root,
+            profile=args.profile,
+            output_dir=(repo_root / args.output_dir).resolve(),
+            apply_autotune=bool(args.apply_autotune),
+            with_llm_mode=str(args.with_llm_mode),
+            run_llm_probe=bool(args.run_llm_probe),
+        )
     if args.output_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
