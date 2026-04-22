@@ -20,6 +20,12 @@ from nexus.app.oracle_dispatcher import OracleDispatcher
 from nexus.app.oracle_advisor import OracleAdvisor
 from nexus.app import research_flow_service
 from nexus.engine.canonical_task_seam import build_legacy_cli_service, execute_single_task_via_service
+from nexus.engine.completion_contract import build_completion_envelope
+from nexus.engine.completion_contract import ensure_verified_completion
+from nexus.engine.completion_contract import write_completion_envelope
+from nexus.engine.completion_enforcer import CompletionEnforcementError
+from nexus.engine.completion_enforcer import write_completion_handoff
+from nexus.engine.direct_mode import evaluate_direct_mode_completion
 
 def validate_claim_integrity(evidence_path: str):
     """🛡️ 硬性物理守門：驗證結論與證據的匹配度。"""
@@ -225,12 +231,29 @@ def _write_output_file(path: Path, payload: dict) -> Path:
     return out
 
 
-def _render_run_classification(status: str) -> None:
-    normalized = str(status or "").strip().upper()
-    if normalized == "SUCCESS":
-        click.echo("[run-classification] verified_pass")
-        return
-    click.echo("[run-classification] runtime_defect")
+def _render_run_classification(runtime_classification: str) -> None:
+    click.echo(f"[run-classification] {runtime_classification}")
+
+
+def _merge_completion_payload(base_payload: dict, completion_payload: dict) -> dict:
+    merged = dict(base_payload)
+    for key, value in completion_payload.items():
+        if key == "status" and "status" in merged:
+            merged["runtime_status"] = value
+            continue
+        merged[key] = value
+    return merged
+
+
+def _persist_completion_handoff(payload: dict, *, context: str, report_file: str | Path | None = None) -> Path:
+    handoff_path = write_completion_handoff(
+        project_root=REPO_ROOT,
+        payload=payload,
+        context=context,
+        report_file=report_file,
+    )
+    payload["next_action_file"] = str(handoff_path)
+    return handoff_path
 
 
 def _local_rewrite_text(text: str) -> str:
@@ -419,7 +442,8 @@ def delivery_receipt(receipt_path, as_json):
 @click.argument("task_id")
 @click.option("--complexity", type=float, default=0.0)
 @click.option("--output-file", type=click.Path(path_type=Path), help="Explicit output path for the task result.")
-def run(task_id, complexity, output_file):
+@click.option("--report-file", type=click.Path(path_type=Path), default=".nexus/reports/run/run_report.json")
+def run(task_id, complexity, output_file, report_file):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
     click.secho(f"🛡️ [NEXUS v24.9.5] Initiating Master Loop for: {task_id}", fg="cyan", bold=True)
 
@@ -433,7 +457,7 @@ def run(task_id, complexity, output_file):
     # 偵測史詩/宏觀任務
     is_macro = any(kw in task_id.lower() for kw in ["system", "app", "complete", "refactor all", "build a", "史詩"])
     
-    status = "SUCCESS"
+    runtime_ok = True
     if is_macro:
         click.secho("🗺️ [L4:Macro-Mode]史詩級任務偵測。啟動戰役大將 (Campaign-General)...", fg="magenta", bold=True)
         commander = CampaignGeneral(REPO_ROOT)
@@ -443,25 +467,48 @@ def run(task_id, complexity, output_file):
         # 啟動異步調度循環
         asyncio.run(campaign_master_loop(commander, task_nodes, REPO_ROOT))
     else:
-        if not execute_single_task_via_service(task_id, REPO_ROOT):
-            status = "FAIL"
+        runtime_ok = bool(execute_single_task_via_service(task_id, REPO_ROOT))
 
+    artifact_paths: list[str] = []
     if output_file:
         output_path = Path(output_file)
-        payload = {
+        output_payload = {
             "task_id": task_id,
-            "status": status,
+            "status": "SUCCESS" if runtime_ok else "FAILED",
             "output_written": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        written = _write_output_file(output_path, payload)
+        written = _write_output_file(output_path, output_payload)
+        artifact_paths.append(str(written))
         click.echo(f"✅ Result written to {written}")
 
-    _render_run_classification(status)
-    if status != "SUCCESS":
-        raise click.ClickException(
-            "Nexus run failed closed: task is not verified complete. Check runtime logs and gate evidence."
-        )
+    direct_mode_audit = evaluate_direct_mode_completion(
+        project_root=REPO_ROOT,
+        task_desc=task_id,
+        artifact_paths=artifact_paths,
+    )
+    report_payload = build_completion_envelope(
+        command_name="run",
+        task_name=task_id,
+        runtime_ok=runtime_ok,
+        execution_path="cli->command_service->engine",
+        artifact_paths=artifact_paths,
+        semantic_failures=direct_mode_audit["semantic_failures"],
+        tests_run=direct_mode_audit["verify_results"],
+    )
+    if direct_mode_audit["enabled"]:
+        report_payload["direct_mode"] = direct_mode_audit["spec"]
+        report_payload["changed_targets"] = direct_mode_audit["changed_targets"]
+    report_written = write_completion_envelope(REPO_ROOT, report_file, report_payload)
+    _render_run_classification(report_payload["runtime_classification"])
+    click.echo(f"Report: {report_written}")
+    try:
+        ensure_verified_completion(report_payload, context="run")
+    except CompletionEnforcementError as exc:
+        handoff = _persist_completion_handoff(report_payload, context="run", report_file=report_written)
+        report_written.write_text(json.dumps(report_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        click.echo(f"Next Action: {handoff}")
+        raise click.ClickException(str(exc))
 
 @nexus_group.command(name="content:rewrite")
 @click.option("--input-file", required=True, type=click.Path(exists=True, path_type=Path), help="Source text/markdown file.")
@@ -1273,16 +1320,27 @@ def resume():
 @click.option("--output-json", is_flag=True)
 def delegate(task_name, report_file, output_json):
     """📡 [Supervisor] Decompose and delegate task to fleet."""
-    subprocess.run([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=True)
-    payload = {"status": "SUCCESS", "task_name": task_name}
-    out_path = (repo_root / report_file).resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    res = subprocess.run([sys.executable, str(repo_root / "scripts/ops/supervisor_engine.py"), task_name], check=False)
+    payload = build_completion_envelope(
+        command_name="delegate",
+        task_name=task_name,
+        runtime_ok=(res.returncode == 0),
+        execution_path="cli->supervisor_engine",
+    )
+    out_path = write_completion_envelope(repo_root, report_file, payload)
     if output_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        click.echo(f"✅ Delegated task: {task_name}")
+        click.echo(f"{'✅' if payload['status'] == 'SUCCESS' else '❌'} Delegated task: {task_name}")
         click.echo(f"Report: {out_path}")
+    try:
+        ensure_verified_completion(payload, context="delegate")
+    except CompletionEnforcementError as exc:
+        handoff = _persist_completion_handoff(payload, context="delegate", report_file=out_path)
+        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        if not output_json:
+            click.echo(f"Next Action: {handoff}")
+        raise click.ClickException(str(exc))
 
 
 @nexus_group.command(name="research:route")
@@ -1450,16 +1508,46 @@ def research_auto_flow(
         report_file=report_file,
         output_file=output_file,
     )
+    result_payload = payload.get("result", {})
+    io_payload = payload.get("io", {})
+    artifact_paths = [str(out_path)]
+    output_path = io_payload.get("output_path")
+    if output_path:
+        artifact_paths.append(str(output_path))
+    semantic_failures: list[str] = []
+    if output_file and not io_payload.get("output_written", False):
+        semantic_failures.append("requested_output_not_written")
+    completion_payload = build_completion_envelope(
+        command_name="research:auto-flow",
+        task_name=task_desc,
+        runtime_ok=(result_payload.get("status") == "SUCCESS"),
+        execution_path="cli->research_flow_service",
+        artifact_paths=artifact_paths,
+        semantic_failures=semantic_failures,
+    )
+    response_payload = _merge_completion_payload(payload, completion_payload)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(response_payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
-        click.echo(json.dumps(payload, indent=2))
+        click.echo(json.dumps(response_payload, indent=2, ensure_ascii=False))
     else:
-        click.echo(f"Chosen Flow: {payload['chosen_flow']}")
-        click.echo(f"Status: {payload['result']['status']}")
-        click.echo(f"Elapsed: {payload['result']['elapsed_sec']} sec")
+        click.echo(f"Chosen Flow: {response_payload['chosen_flow']}")
+        click.echo(f"Status: {response_payload['result']['status']}")
+        click.echo(f"Elapsed: {response_payload['result']['elapsed_sec']} sec")
         click.echo(f"Report: {out_path}")
-        io = payload.get("io", {})
-        click.echo(f"Output Written: {io.get('output_written', False)}")
-        click.echo(f"Output Path: {io.get('output_path') or 'N/A'}")
+        click.echo(f"Output Written: {io_payload.get('output_written', False)}")
+        click.echo(f"Output Path: {io_payload.get('output_path') or 'N/A'}")
+        click.echo(f"Semantic Status: {response_payload['semantic_status']}")
+    try:
+        ensure_verified_completion(response_payload, context="research:auto-flow")
+    except CompletionEnforcementError as exc:
+        handoff = _persist_completion_handoff(response_payload, context="research:auto-flow", report_file=out_path)
+        out_path.write_text(json.dumps(response_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        if not output_json:
+            click.echo(f"Next Action: {handoff}")
+        if not output_json:
+            click.echo(str(exc))
+        raise SystemExit(1)
 
 
 
@@ -1477,6 +1565,7 @@ def research_auto_flow(
 @click.option("--report-file", default=".nexus/reports/research/report.json", type=click.Path(path_type=Path), show_default=True)
 @click.option("--max-parallel", default=1, type=int, show_default=True)
 @click.option("--max-retries", default=0, type=int, show_default=True)
+@click.option("--continuation-attempts", default=1, type=int, show_default=True, help="Auto continuation loops when semantic_status is UNVERIFIED and retryable=true.")
 @click.option("--timeout-sec", default=600, type=int, show_default=True)
 @click.option("--retain-last-n", default=20, type=int, show_default=True)
 @click.option("--disk-watermark-gb", default=5.0, type=float, show_default=True)
@@ -1494,6 +1583,7 @@ def research_run(
     report_file,
     max_parallel,
     max_retries,
+    continuation_attempts,
     timeout_sec,
     retain_last_n,
     disk_watermark_gb,
@@ -1541,6 +1631,10 @@ def research_run(
         status = "failed"
         rejected_reasons.append("invalid_retries")
         decision_log.append("governance: invalid_retries")
+    if continuation_attempts < 0:
+        status = "failed"
+        rejected_reasons.append("invalid_continuation_attempts")
+        decision_log.append("governance: invalid_continuation_attempts")
     if timeout_sec <= 0:
         status = "failed"
         rejected_reasons.append("invalid_timeout")
@@ -1821,9 +1915,129 @@ def research_run(
         },
     }
 
+    governance_failure_reasons = {
+        "low_disk_space",
+        "invalid_candidate_count",
+        "invalid_parallelism",
+        "invalid_retries",
+        "invalid_timeout",
+        "invalid_retain_n",
+    }
+    blocker_type = "none"
+    semantic_status = "VERIFIED"
+    retryable = False
+    next_action = "none"
+    if status != "success":
+        if any(reason in governance_failure_reasons for reason in rejected_reasons):
+            blocker_type = "governance"
+            semantic_status = "BLOCKED"
+            next_action = "stop"
+        else:
+            blocker_type = "semantic_incomplete"
+            semantic_status = "UNVERIFIED"
+            retryable = True
+            next_action = "retry_repair"
+    completion_payload = build_completion_envelope(
+        command_name="research:run",
+        task_name=hypothesis,
+        runtime_ok=(status == "success"),
+        execution_path="cli->research_control_plane",
+        artifact_paths=[str(report_path)],
+        semantic_failures=rejected_reasons,
+        blocker_type=blocker_type,
+        semantic_status=semantic_status,
+        retryable=retryable,
+        next_action=next_action,
+    )
+    report_payload = _merge_completion_payload(report_payload, completion_payload)
+
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
-    click.echo(json.dumps({"status": status, "winner": winner, "report_file": str(report_path)}, indent=2))
+    summary_payload = {
+        "status": status,
+        "winner": winner,
+        "report_file": str(report_path),
+        "semantic_status": report_payload["semantic_status"],
+        "retryable": report_payload["retryable"],
+        "blocker_type": report_payload["blocker_type"],
+        "next_action": report_payload["next_action"],
+        "next_action_file": report_payload.get("next_action_file"),
+    }
+    try:
+        ensure_verified_completion(report_payload, context="research:run")
+    except CompletionEnforcementError:
+        if (
+            report_payload.get("retryable")
+            and int(continuation_attempts) > 0
+        ):
+            continuation_report = (
+                report_path.parent
+                / f"{report_path.stem}.retry{continuation_attempts}{report_path.suffix}"
+            )
+            continuation_cmd = [
+                "uv",
+                "run",
+                "scripts/engine/nexus_cli.py",
+                "nexus",
+                "research:run",
+                "--run-id",
+                f"{run_id}-retry{continuation_attempts}",
+                "--candidate-id",
+                candidate_id,
+                "--candidate-count",
+                str(candidate_count),
+                "--hypothesis",
+                hypothesis,
+                "--candidate-src-root",
+                str(candidate_src_root),
+                "--budget-limit",
+                str(budget_limit),
+                "--min-score-threshold",
+                str(min_score_threshold),
+                "--estimated-cost-per-round",
+                str(estimated_cost_per_round),
+                "--report-file",
+                str(continuation_report),
+                "--max-parallel",
+                str(max_parallel),
+                "--max-retries",
+                str(max_retries),
+                "--continuation-attempts",
+                str(continuation_attempts - 1),
+                "--timeout-sec",
+                str(timeout_sec),
+                "--retain-last-n",
+                str(retain_last_n),
+                "--disk-watermark-gb",
+                str(disk_watermark_gb),
+            ]
+            if dry_run:
+                continuation_cmd.append("--dry-run")
+            for one_scope in scope_list:
+                continuation_cmd.extend(["--scope", str(one_scope)])
+
+            continuation_proc = subprocess.run(
+                continuation_cmd,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            summary_payload["continuation"] = {
+                "attempted": True,
+                "attempts_left_after_call": continuation_attempts - 1,
+                "exit_code": continuation_proc.returncode,
+                "report_file": str(continuation_report),
+            }
+            if continuation_proc.returncode == 0:
+                click.echo(continuation_proc.stdout.strip())
+                return
+        handoff = _persist_completion_handoff(report_payload, context="research:run", report_file=report_path)
+        report_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
+        summary_payload["next_action_file"] = str(handoff)
+        click.echo(json.dumps(summary_payload, indent=2))
+        raise SystemExit(1)
+    click.echo(json.dumps(summary_payload, indent=2))
 
 
 @nexus_group.command(name="research:benchmark")

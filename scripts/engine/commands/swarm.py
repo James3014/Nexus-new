@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 import sys
 import click
-import subprocess
+import json
 from pathlib import Path
 from nexus.engine.canonical_task_seam import build_legacy_cli_service
+from nexus.engine.completion_contract import build_completion_envelope
+from nexus.engine.completion_contract import ensure_verified_completion
+from nexus.engine.completion_contract import write_completion_envelope
+from nexus.engine.completion_enforcer import CompletionEnforcementError
 
 
 def execute(cli, args):
@@ -35,7 +39,9 @@ def register(nexus_group, REPO_ROOT):
     @click.argument("task_name")
     @click.option("--verbose-prompt", is_flag=True, help="Display injected self-awareness prompt")
     @click.option("--delivery-mode", default="standard", help="Execution priority: low|standard|high")
-    def swarm_run(task_name, verbose_prompt, delivery_mode):
+    @click.option("--report-file", default=None, type=click.Path(path_type=Path), help="Optional completion envelope path.")
+    @click.option("--output-json", is_flag=True)
+    def swarm_run(task_name, verbose_prompt, delivery_mode, report_file, output_json):
         """🚀 Initiate swarm mission with cognitive awareness."""
         # 🛡️ 物理化任務 ID 安全化 (防止檔名衝突與特殊字元)
         import hashlib
@@ -58,6 +64,8 @@ def register(nexus_group, REPO_ROOT):
             except (ImportError, AttributeError) as e:
                 print(f"⚠️  [Nexus:Swarm] Self-Awareness injection failed: {e}")
 
+        report_target = report_file or f".nexus/reports/swarm/{safe_task_id}.json"
+
         # 🚀 執行真實任務 (接入 NexusEngine)
         try:
             service = build_legacy_cli_service(REPO_ROOT)
@@ -65,11 +73,40 @@ def register(nexus_group, REPO_ROOT):
             print(f"📡 [Nexus:Swarm] Dispatching task '{safe_task_id}' to engine (Mode: {delivery_mode})...")
             # 使用安全 ID 呼叫引擎
             success = service.execute_bug(task_name, delivery_mode=delivery_mode, bug_id=safe_task_id)
-            
-            if success:
-                print("✅ [Nexus:Swarm] Mission Succeeded.")
+
+            payload = build_completion_envelope(
+                command_name="swarm:run",
+                task_name=task_name,
+                runtime_ok=bool(success),
+                execution_path="cli->legacy_cli_service->command_service->engine",
+            )
+            written = write_completion_envelope(REPO_ROOT, report_target, payload)
+            if output_json:
+                print(json.dumps(payload, indent=2, ensure_ascii=False))
             else:
-                print("❌ [Nexus:Swarm] Mission Failed.")
+                if success:
+                    print("✅ [Nexus:Swarm] Mission Succeeded.")
+                else:
+                    print("❌ [Nexus:Swarm] Mission Failed.")
+                print(f"Report: {written}")
+            ensure_verified_completion(payload, context="swarm:run")
+        except CompletionEnforcementError as e:
+            if not output_json:
+                print(str(e))
+            sys.exit(1)
         except Exception as e:
-            print(f"❌ [Nexus:Swarm] Critical execution error: {e}")
+            payload = build_completion_envelope(
+                command_name="swarm:run",
+                task_name=task_name,
+                runtime_ok=False,
+                execution_path="cli->legacy_cli_service->command_service->engine",
+                semantic_failures=[f"swarm_exception:{type(e).__name__}"],
+                blocker_type="runtime_defect",
+            )
+            written = write_completion_envelope(REPO_ROOT, report_target, payload)
+            if output_json:
+                print(json.dumps(payload, indent=2, ensure_ascii=False))
+            else:
+                print(f"❌ [Nexus:Swarm] Critical execution error: {e}")
+                print(f"Report: {written}")
             sys.exit(1)

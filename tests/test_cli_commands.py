@@ -53,10 +53,12 @@ def test_research_run_success(tmp_path, monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.output.strip())
     assert payload["status"] == "success"
+    assert payload["semantic_status"] == "VERIFIED"
     report_path = tmp_path / ".nexus" / "reports" / "research" / "report-success.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["run_id"] == "r-success"
     assert report["status"] == "success"
+    assert report["semantic_status"] == "VERIFIED"
     assert report["winner"] == "candidate-main"
     assert isinstance(report["top_k"], list) and report["top_k"]
     assert "budget_summary" in report
@@ -89,14 +91,114 @@ def test_research_run_rollback_on_failed_gate(tmp_path, monkeypatch):
             ".nexus/reports/research/report-fail.json",
         ],
     )
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     payload = json.loads(result.output.strip())
     assert payload["status"] == "failed"
+    assert payload["semantic_status"] == "UNVERIFIED"
+    assert payload["retryable"] is True
+    assert payload["next_action_file"]
     report_path = tmp_path / ".nexus" / "reports" / "research" / "report-fail.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
+    assert report["semantic_status"] == "UNVERIFIED"
+    assert report["next_action_file"]
     assert "below_threshold" in report["rejected_reasons"]
     assert report["rollback_trace"]
+
+
+def test_research_run_continuation_attempts_retryable_failures(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
+    target = tmp_path / "docs" / "sample.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ok", encoding="utf-8")
+
+    captured = {}
+
+    class _Res:
+        returncode = 0
+        stdout = json.dumps({"status": "success", "semantic_status": "VERIFIED"})
+        stderr = ""
+
+    def _fake_subprocess_run(cmd, *args, **kwargs):
+        captured["cmd"] = cmd
+        return _Res()
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", _fake_subprocess_run)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "r-cont",
+            "--scope",
+            "docs/sample.txt",
+            "--candidate-src-root",
+            ".",
+            "--budget-limit",
+            "0",
+            "--estimated-cost-per-round",
+            "1",
+            "--continuation-attempts",
+            "1",
+            "--report-file",
+            ".nexus/reports/research/report-cont.json",
+        ],
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output.strip())
+    assert payload["status"] == "success"
+    assert payload["semantic_status"] == "VERIFIED"
+    cmd = captured["cmd"]
+    idx = cmd.index("--continuation-attempts")
+    assert cmd[idx + 1] == "0"
+
+
+def test_research_run_blocked_does_not_attempt_continuation(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
+
+    import shutil
+
+    def mock_disk_usage(path):
+        return (100 * 1024**3, 99 * 1024**3, 1 * 1024**3)
+
+    monkeypatch.setattr(shutil, "disk_usage", mock_disk_usage)
+
+    called = {"count": 0}
+
+    class _Res:
+        returncode = 0
+        stdout = "{}"
+        stderr = ""
+
+    def _fake_subprocess_run(*_args, **_kwargs):
+        called["count"] += 1
+        return _Res()
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.subprocess.run", _fake_subprocess_run)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:run",
+            "--run-id",
+            "gov-low-disk-no-cont",
+            "--disk-watermark-gb",
+            "5.0",
+            "--continuation-attempts",
+            "2",
+            "--report-file",
+            ".nexus/reports/research/gov-low-disk-no-cont.json",
+        ],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.output.strip())
+    assert payload["semantic_status"] == "BLOCKED"
+    assert called["count"] == 0
 
 
 def test_research_governance_success(tmp_path, monkeypatch):
@@ -127,6 +229,7 @@ def test_research_governance_success(tmp_path, monkeypatch):
     report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-ok.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "success"
+    assert report["semantic_status"] == "VERIFIED"
 
 
 def test_research_governance_low_disk(tmp_path, monkeypatch):
@@ -152,10 +255,12 @@ def test_research_governance_low_disk(tmp_path, monkeypatch):
             ".nexus/reports/research/gov-low-disk.json",
         ],
     )
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-low-disk.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
+    assert report["semantic_status"] == "BLOCKED"
+    assert report["blocker_type"] == "governance"
     assert "low_disk_space" in report["rejected_reasons"]
 
 
@@ -176,10 +281,11 @@ def test_research_governance_invalid_parallelism(tmp_path, monkeypatch):
             ".nexus/reports/research/gov-inv-par.json",
         ],
     )
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-par.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
+    assert report["semantic_status"] == "BLOCKED"
     assert "invalid_parallelism" in report["rejected_reasons"]
 
 
@@ -200,10 +306,11 @@ def test_research_governance_invalid_timeout(tmp_path, monkeypatch):
             ".nexus/reports/research/gov-inv-timeout.json",
         ],
     )
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-timeout.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
+    assert report["semantic_status"] == "BLOCKED"
     assert "invalid_timeout" in report["rejected_reasons"]
 
 
@@ -224,10 +331,11 @@ def test_research_governance_invalid_retries(tmp_path, monkeypatch):
             ".nexus/reports/research/gov-inv-retries.json",
         ],
     )
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-retries.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
+    assert report["semantic_status"] == "BLOCKED"
     assert "invalid_retries" in report["rejected_reasons"]
 
 
@@ -248,10 +356,11 @@ def test_research_governance_invalid_retain_n(tmp_path, monkeypatch):
             ".nexus/reports/research/gov-inv-retain.json",
         ],
     )
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     report_path = tmp_path / ".nexus" / "reports" / "research" / "gov-inv-retain.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
+    assert report["semantic_status"] == "BLOCKED"
     assert "invalid_retain_n" in report["rejected_reasons"]
 
 
@@ -293,6 +402,7 @@ def test_research_retain_cleanup_executor(tmp_path, monkeypatch):
     assert result.exit_code == 0
     report = json.loads((report_dir / "retain-check.json").read_text(encoding="utf-8"))
     assert report["retention"]["retain_last_n"] == 2
+    assert report["semantic_status"] == "VERIFIED"
     assert report["retention"]["cleaned"]["reports"] >= 1
     assert report["retention"]["cleaned"]["experiments"] >= 1
     assert report["retention"]["cleaned"]["backups"] >= 1
@@ -327,6 +437,7 @@ def test_research_schema(tmp_path, monkeypatch):
     report = json.loads(report_path.read_text(encoding="utf-8"))
     
     assert report["schema_version"] == "1.0"
+    assert report["semantic_status"] == "VERIFIED"
     assert "decision_log" in report
     assert any("schedule" in step for step in report["decision_log"])
     assert any("evaluate" in step for step in report["decision_log"])
@@ -367,9 +478,11 @@ def test_research_schema(tmp_path, monkeypatch):
             ".nexus/reports/research/schema-fail.json",
         ],
     )
+    assert result_fail.exit_code != 0
     report_path_fail = tmp_path / ".nexus" / "reports" / "research" / "schema-fail.json"
     report_fail = json.loads(report_path_fail.read_text(encoding="utf-8"))
     assert report_fail["status"] == "failed"
+    assert report_fail["semantic_status"] == "BLOCKED"
     assert "elimination_matrix" in report_fail
     assert len(report_fail["elimination_matrix"]) > 0
     assert report_fail["elimination_matrix"][0]["candidate_id"] == "candidate-main"
@@ -397,11 +510,11 @@ def test_research_timeout(tmp_path, monkeypatch):
             ".nexus/reports/research/timeout.json",
         ],
     )
-    # The command should succeed but report failure in the JSON
-    assert result.exit_code == 0
+    assert result.exit_code != 0
     report_path = tmp_path / ".nexus" / "reports" / "research" / "timeout.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
+    assert report["semantic_status"] == "UNVERIFIED"
     # Seed details should show timeout
     for seed in report.get("candidate", {}).get("seed_details", []):
         assert "timed out" in seed.get("error", "").lower()
@@ -411,6 +524,9 @@ def test_research_cleanup(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
     report_dir = tmp_path / ".nexus" / "reports" / "research"
     report_dir.mkdir(parents=True, exist_ok=True)
+    target = tmp_path / "docs" / "sample.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("ok", encoding="utf-8")
     
     # Pre-create 5 reports
     for i in range(5):
@@ -426,6 +542,8 @@ def test_research_cleanup(tmp_path, monkeypatch):
             "research:run",
             "--run-id",
             "cleanup-test",
+            "--scope",
+            "docs/sample.txt",
             "--retain-last-n",
             "3",
             "--report-file",
@@ -437,6 +555,8 @@ def test_research_cleanup(tmp_path, monkeypatch):
     # Should only have 3 reports left
     remaining = list(report_dir.glob("*.json"))
     assert len(remaining) == 3
+    report = json.loads((report_dir / "new.json").read_text(encoding="utf-8"))
+    assert report["semantic_status"] == "VERIFIED"
 
 def test_research_route_findings_reinjection(tmp_path, monkeypatch):
     runner = CliRunner()
@@ -565,6 +685,7 @@ def test_research_auto_flow_baseline(tmp_path, monkeypatch):
     data = json.loads(result.output)
     assert data["chosen_flow"] == "baseline"
     assert data["result"]["status"] == "SUCCESS"
+    assert data["semantic_status"] == "VERIFIED"
 
 
 def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
@@ -631,6 +752,7 @@ def test_research_auto_flow_force_hyper(tmp_path, monkeypatch):
     data = json.loads(result.output)
     assert data["chosen_flow"] == "hyper_sprint"
     assert data["result"]["status"] == "SUCCESS"
+    assert data["semantic_status"] == "VERIFIED"
 
 
 def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
@@ -686,6 +808,7 @@ def test_research_auto_flow_early_baseline_shortcut(tmp_path, monkeypatch):
     data = json.loads(result.output)
     assert data["chosen_flow"] == "baseline"
     assert data["guard"]["early_baseline_shortcut"] is True
+    assert data["semantic_status"] == "VERIFIED"
     assert called["hyper"] == 0
 
 
@@ -716,6 +839,10 @@ def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
 
     monkeypatch.setattr("nexus.app.research_flow_service.subprocess.run", fake_subprocess_run)
     monkeypatch.setattr("nexus.app.research_flow_service.run_hyper_sprint", fake_run_hyper_sprint)
+    monkeypatch.setattr(
+        "nexus.app.research_flow_service.generate_local_candidate",
+        lambda source, *_args, **_kwargs: source.replace("buggy", "fixed"),
+    )
 
     result = runner.invoke(
         nexus,
@@ -735,6 +862,7 @@ def test_research_auto_flow_learn_guard_forces_baseline(tmp_path, monkeypatch):
     data = json.loads(result.output)
     assert data["chosen_flow"] == "baseline"
     assert data["guard"]["learn_forced_baseline"] is True
+    assert data["semantic_status"] == "VERIFIED"
     assert called["hyper"] == 0
 
 
@@ -809,12 +937,14 @@ def test_research_run_multi_candidate(tmp_path, monkeypatch):
     # In my implementation it's click.echo(json.dumps(...))
     data = json.loads(result.output)
     assert data["status"] == "success"
+    assert data["semantic_status"] == "VERIFIED"
     
     report_file = data["report_file"]
     with open(report_file, "r") as f:
         report = json.load(f)
     assert len(report["top_k"]) == 3
     assert report["winner"] == "candidate-main"
+    assert report["semantic_status"] == "VERIFIED"
 
 def test_research_benchmark(tmp_path, monkeypatch):
     runner = CliRunner()
@@ -929,4 +1059,3 @@ def _write_ready_learn_slo(tmp_path):
         '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
         encoding="utf-8",
     )
-

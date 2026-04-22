@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -45,6 +46,47 @@ def test_research_auto_flow_cli_uses_service_seam(monkeypatch, tmp_path):
     assert captured["target_file"] == "demo.py"
     assert captured["test_file"] == "tests/test_demo.py"
     assert captured["force_flow"] == "hyper_sprint"
+
+
+def test_research_auto_flow_emits_completion_contract(monkeypatch, tmp_path):
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-report.json"
+
+    def _fake_run_auto_flow(**kwargs):
+        return (
+            {
+                "chosen_flow": "baseline",
+                "result": {"status": "SUCCESS", "elapsed_sec": 0.1},
+                "io": {"output_written": False, "output_path": None},
+            },
+            report_path,
+        )
+
+    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
+    monkeypatch.setattr("nexus.app.research_flow_service.run_auto_flow", _fake_run_auto_flow)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:auto-flow",
+            "--task-desc",
+            "fix race",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+            "--output-json",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["semantic_status"] == "VERIFIED"
+    assert payload["runtime_classification"] == "verified_pass"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["semantic_status"] == "VERIFIED"
+    assert report["execution_path"] == "cli->research_flow_service"
 
 
 def test_research_benchmark_cli_uses_service_seam(monkeypatch, tmp_path):

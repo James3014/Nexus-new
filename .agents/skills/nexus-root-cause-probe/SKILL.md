@@ -25,6 +25,10 @@ version: 2026.04.22
 - `research` / `hyper` 類命令要做 CLI vs direct service paired probe。
 - 全工作路徑不只看 seam，還要看 artifact/gate contract 是否存在。
 - 對會回傳 `status=SUCCESS` 的工作命令，不只看 runtime status，還要檢查是否存在更高層的 `semantic_status` / semantic failures。
+- 對既有 JSON 報表命令（特別是 `research:*`），若歷史上已經有自定義 `status`（例如 `success` / `failed`），不要直接被 completion envelope 的 `SUCCESS` / `FAILED` 覆蓋；應保留原欄位，另存 `runtime_status` 或等價欄位。
+- JSON 型 CLI 若需要 fail-closed，避免用 `ClickException` 汙染 JSON；優先先輸出 machine-readable payload，再以 `SystemExit(1)` 結束。
+- 若命令尚未統一完成語義，優先補成單一 completion envelope，而不是繼續在 CLI / gate / report 各加一層特判。
+- completion envelope 補齊後，下一步要抽單一 completion enforcer；不要讓 CLI 直接根據 `semantic_status` 字串各自 `if/raise`。
 
 ## 標準流程
 1. 建立基線
@@ -103,6 +107,11 @@ _run_engine_flow(
   - 不可把 `status=SUCCESS` 直接當成任務完成
   - 必須同時核對 `semantic_status`
   - 若 `semantic_status != VERIFIED`，分類為 `semantic-completion defect`
+- 若命令是 DIRECT MODE repair spec：
+  - 除了看 `semantic_status`，還要核對
+    - `target_files` 是否真的出現在 worktree status / diff
+    - `verify_commands` 是否真的執行且 exit code = 0
+  - 若兩者任一缺失，分類為 `semantic-completion defect`，不可接受 `runtime success`。
 - 對 report 至少檢查：
   - `head_alignment`
   - `commit_integrity`
@@ -137,6 +146,7 @@ _run_engine_flow(
 
 6. 修最小邊界
 - 優先順序：
+  - `nexus/engine/completion_contract.py`
   - `scripts/engine/nexus_cli.py`
   - `nexus/app/research_flow_service.py`
   - `nexus/app/research_benchmark_service.py`
@@ -171,6 +181,37 @@ uv run scripts/ops/ci_gate.py --dry-run
   - 在 facade 層 fail-closed，要求必要欄位存在。
 - 若是命令表面重複或漂移：
   - 先加命令唯一性測試，再修 CLI 註冊。
+- 若發現 `status=SUCCESS` 與任務完成被混用：
+  - 抽單一 completion envelope，至少包含：
+    - `status`
+    - `runtime_classification`
+    - `semantic_status`
+    - `semantic_failures`
+    - `retryable`
+    - `blocker_type`
+    - `next_action`
+    - `execution_path`
+    - `artifact_paths`
+    - `next_action_file`
+  - 再由單一 enforcer 決定是否 fail-closed，禁止每個命令自己散寫完成判定。
+- 單一 enforcer 至少要能區分：
+  - `VERIFIED`：可結束
+  - `UNVERIFIED + retryable=true`：可續修
+  - `BLOCKED`：停止並保留 blocker 訊息
+  - `REJECTED`：停止並要求回滾/人工介入
+- 若 `semantic_status != VERIFIED`：
+  - 除了 exit code，還要檢查是否寫出 `next_action_file`
+  - 若命令支援 continuation（例如 `research:run`），要檢查 summary payload 是否含 `continuation.attempted=true`
+  - continuation 應是有界重試；需確認 `attempts_left_after_call` 會遞減
+  - sidecar 內至少應含：
+    - `next_action`
+    - `next_actor`
+    - `escalation_reasons`
+    - `action_brief.context.report_file`
+  - 若系統宣稱支援跨回合接續，還要檢查 `.nexus/state/last_handoff.json` 是否同步更新，且包含：
+    - `task_id`
+    - `phase`
+    - `state_token`
 - 若發現 CLI seam 與 async seam 各自複製一份 task routing / service 呼叫：
   - 先用測試鎖定兩者都必須共用單一 canonical helper。
   - 再把重複邏輯集中到單一模組，避免一邊修好、另一邊回退。

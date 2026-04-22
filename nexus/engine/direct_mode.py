@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import re
+import subprocess
 from typing import Iterable
 
 
@@ -89,3 +91,91 @@ def analyze_task_spec(task_desc: str) -> DirectModeSpec:
         target_files=target_files,
         verify_commands=verify_commands,
     )
+
+
+def evaluate_direct_mode_completion(
+    *,
+    project_root: Path,
+    task_desc: str,
+    artifact_paths: list[str] | None = None,
+) -> dict:
+    spec = analyze_task_spec(task_desc)
+    if not spec.enabled:
+        return {
+            "enabled": False,
+            "semantic_failures": [],
+            "verify_results": [],
+            "changed_targets": [],
+        }
+
+    failures: list[str] = []
+    verify_results: list[dict] = []
+    changed_targets: list[str] = []
+
+    for rel_path in spec.target_files:
+        try:
+            res = subprocess.run(
+                ["git", "status", "--short", "--", rel_path],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"target_status_probe_failed:{rel_path}:{exc}")
+            continue
+        if res.stdout.strip():
+            changed_targets.append(rel_path)
+
+    if spec.target_files and not changed_targets:
+        failures.append("direct_mode_target_files_unchanged")
+
+    for cmd in spec.verify_commands:
+        try:
+            res = subprocess.run(
+                cmd,
+                cwd=project_root,
+                shell=True,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            verify_results.append(
+                {
+                    "command": cmd,
+                    "exit_code": int(res.returncode),
+                    "stdout": (res.stdout or "")[:400],
+                    "stderr": (res.stderr or "")[:400],
+                }
+            )
+            if res.returncode != 0:
+                failures.append(f"direct_mode_verify_failed:{cmd}")
+        except Exception as exc:  # noqa: BLE001
+            verify_results.append(
+                {
+                    "command": cmd,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": str(exc),
+                }
+            )
+            failures.append(f"direct_mode_verify_error:{cmd}")
+
+    resolved_artifacts = [
+        str(path)
+        for path in (artifact_paths or [])
+        if Path(path).exists() or (project_root / path).exists()
+    ]
+
+    return {
+        "enabled": True,
+        "semantic_failures": failures,
+        "verify_results": verify_results,
+        "changed_targets": changed_targets,
+        "artifact_paths": resolved_artifacts,
+        "spec": {
+            "reason": spec.reason,
+            "target_files": list(spec.target_files),
+            "verify_commands": list(spec.verify_commands),
+        },
+    }

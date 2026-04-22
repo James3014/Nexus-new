@@ -17,12 +17,17 @@ def test_run_report_trust_audit_uses_expected_pytest_suite(monkeypatch):
     assert ci_gate.run_report_trust_audit(dry_run=False) is True
     assert seen["name"] == "Report Trust Audit"
     for target in (
+        "tests/engine/test_completion_contract.py",
+        "tests/engine/test_completion_enforcer.py",
         "tests/engine/test_canonical_task_seam.py",
+        "tests/engine/test_direct_mode_semantic_audit.py",
+        "tests/engine/test_cli_semantic_contract_audit.py",
         "tests/test_cli_output_contract.py",
         "tests/engine/test_cli_runner_async.py",
         "tests/engine/test_cli_research_seams.py",
         "tests/engine/test_cli_work_path_audit.py",
         "tests/engine/test_cli_artifact_gate_audit.py",
+        "tests/engine/test_delegate_completion_contract.py",
         "tests/research/test_learn_ingest_channels.py",
         "tests/test_cli_learn_mode.py",
         "tests/services/test_cli_commands_service_runtime.py",

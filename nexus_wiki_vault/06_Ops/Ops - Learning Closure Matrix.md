@@ -202,3 +202,9 @@ version_scope:
 - **Root Cause**: Wrapper simplification removed monkeypatch seams and strict return-code contracts that ops tests and governance flows depend on.
 - **Decision**: Restored explicit helper APIs and fail-closed status behavior (`wiki_sync_check` returns `2` for protected code drift without wiki updates) while keeping runtime flow unchanged.
 - **Prevention**: Any wrapper refactor in `scripts/ops/` must run contract tests (`test_learn_refresh_*`, `test_verify_report_claims`, `test_wiki_sync_check`) before acceptance.
+
+## 2026-04-22: Dry-Run Governance Block Requires Explicit Evidence Hygiene
+- **Phenomenon**: `ci_gate --dry-run` was blocked by three governance conditions at once: missing lesson evidence, missing same-round wiki update, and untracked `code_artifacts` path in hallucination evidence.
+- **Root Cause**: Gate inputs depended on mutable report artifacts from previous failed runs; stale/untracked artifact paths leaked into delivery-tracked checks.
+- **Decision**: Persisted `lesson_writeback.json`, added same-day learning entry, and normalized hallucination evidence artifacts to tracked-safe values.
+- **Prevention**: Treat gate input files (`lesson_writeback.json`, `hallucination_evidence.json`, wiki closure matrix) as first-class deliverables and validate them before dry-run.
