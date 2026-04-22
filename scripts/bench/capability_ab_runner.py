@@ -155,6 +155,7 @@ def _extract_record(
     route_features = route.get("route_features", {}) if isinstance(route, dict) else {}
     guard = payload.get("guard", {}) if isinstance(payload, dict) else {}
     strategy = payload.get("strategy", {}) if isinstance(payload, dict) else {}
+    artifact_summary = payload.get("artifact_summary", {}) if isinstance(payload, dict) else {}
     learn_phase_slo = payload.get("learn_phase_slo", {}) if isinstance(payload, dict) else {}
     consensus = route.get("consensus", {}) if isinstance(route, dict) else {}
     consensus_votes = consensus.get("votes", {}) if isinstance(consensus, dict) else {}
@@ -195,6 +196,7 @@ def _extract_record(
         "route_consensus_hyper_votes": int(consensus_votes.get("hyper_sprint", 0) or 0),
         "route_consensus_baseline_votes": int(consensus_votes.get("baseline", 0) or 0),
         "route_findings_hits": int(route.get("findings_hits", 0) or 0),
+        "route_memory_hits": int(route_features.get("memory_hits", 0) or 0),
         "prior_fix_hits": int(route.get("prior_fix_hits", 0) or 0),
         "belief_confidence": float((payload.get("execution_profile", {}) or {}).get("belief_confidence", 1.0) or 1.0),
         "chosen_flow": payload.get("chosen_flow"),
@@ -203,6 +205,8 @@ def _extract_record(
         "guard_nightshift_recommended": bool(guard.get("nightshift_recommended", False)),
         "guard_stage1_fail_signals": int(guard.get("stage1_fail_signals", 0) or 0),
         "learn_phase_slo_pass": bool(learn_phase_slo.get("phase_slo_pass", False)),
+        "artifact_changed": bool(artifact_summary.get("changed", False)),
+        "artifact_diff_line_count": int(artifact_summary.get("diff_line_count", 0) or 0),
     }
 
 
@@ -397,7 +401,7 @@ def main() -> int:
         dest="neutralize_history",
         action="store_true",
         default=True,
-        help="Reset auto-flow history between mode runs for fair A/B comparison.",
+        help="Reset auto-flow history before mode runs for fair A/B comparison.",
     )
     parser.add_argument(
         "--keep-history",
@@ -406,6 +410,18 @@ def main() -> int:
         help="Keep auto-flow history between runs.",
     )
     parser.add_argument("--materialize-missing", action="store_true", default=True)
+    parser.add_argument(
+        "--allow-learning-loop",
+        action="store_true",
+        default=True,
+        help="Allow within-mode history accumulation across tasks.",
+    )
+    parser.add_argument(
+        "--disable-learning-loop",
+        dest="allow_learning_loop",
+        action="store_false",
+        help="Disable within-mode learning and reset per task (legacy mode).",
+    )
     args = parser.parse_args()
     if args.llm_safe_probe:
         args.with_llm_mode = "hard"
@@ -420,12 +436,14 @@ def main() -> int:
     with_rows: list[dict[str, Any]] = []
     without_rows: list[dict[str, Any]] = []
     shared_cli_runner = CliRunner() if args.with_nexus_runner == "inprocess" else None
+    if args.neutralize_history:
+        _reset_auto_flow_history(repo_root)
     for task in tasks:
         target_file, test_file = task.target_file, task.test_file
         if args.materialize_missing:
             target_file, test_file = _materialize_fixture(repo_root, task)
         flow = None if args.force_flow == "auto" else args.force_flow
-        if args.neutralize_history:
+        if args.neutralize_history and not args.allow_learning_loop:
             _reset_auto_flow_history(repo_root)
 
         with_rows.append(
@@ -444,9 +462,14 @@ def main() -> int:
                 history_fail_threshold=9999,
             )
         )
+    if args.neutralize_history:
+        _reset_auto_flow_history(repo_root)
+    for task in tasks:
+        target_file, test_file = task.target_file, task.test_file
         if args.materialize_missing:
             target_file, test_file = _materialize_fixture(repo_root, task)
-        if args.neutralize_history:
+        flow = None if args.force_flow == "auto" else args.force_flow
+        if args.neutralize_history and not args.allow_learning_loop:
             _reset_auto_flow_history(repo_root)
         without_rows.append(
             run_without_nexus(

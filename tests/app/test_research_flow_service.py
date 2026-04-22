@@ -1,4 +1,5 @@
 import pytest
+import json
 from pathlib import Path
 from nexus.app import research_flow_service
 from nexus.research.learn_mode import LearnModeService
@@ -198,6 +199,38 @@ def test_build_route_uses_auto_findings_query_when_not_provided(tmp_path: Path, 
     assert out["route_features"]["findings_hits"] == 1
 
 
+def test_build_route_includes_history_memory_hits(tmp_path: Path):
+    history_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-history.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(
+        json.dumps(
+            {
+                "a|b": [
+                    {
+                        "flow": "hyper_sprint",
+                        "status": "SUCCESS",
+                        "reason": "stage1_pass",
+                        "task_type": "bug",
+                        "task_desc": "fix websocket timeout race in coordinator",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="fix websocket timeout race in orchestrator",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query="",
+        target_file="demo.py",
+    )
+    assert out["route_features"]["memory_hits"] >= 1
+    assert out["prior_fix_hits"] >= 1
+
+
 def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text(
@@ -258,3 +291,5 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
 
     assert payload["result"]["status"] == "SUCCESS"
     assert payload["strategy"]["path"] == "baseline_only"
+    assert "artifact_summary" in payload
+    assert payload["artifact_summary"]["changed"] is True

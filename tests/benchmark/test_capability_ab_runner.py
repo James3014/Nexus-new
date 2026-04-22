@@ -73,12 +73,13 @@ def test_extract_record_maps_semantic_fields():
             "findings_hits": 2,
             "prior_fix_hits": 2,
             "consensus": {"winner": "hyper_sprint", "votes": {"hyper_sprint": 3, "baseline": 1}},
-            "route_features": {"risk_score": 87},
+            "route_features": {"risk_score": 87, "memory_hits": 1},
         },
         "guard": {"hit": False, "nightshift_recommended": True, "stage1_fail_signals": 1},
         "strategy": {"path": "probe_then_hyper"},
         "execution_profile": {"belief_confidence": 0.72},
         "learn_phase_slo": {"phase_slo_pass": True},
+        "artifact_summary": {"changed": True, "diff_line_count": 12},
         "result": {
             "elapsed_sec": 2.3,
             "report": {
@@ -100,9 +101,12 @@ def test_extract_record_maps_semantic_fields():
     assert out["route_risk_score"] == 87
     assert out["route_consensus_winner"] == "hyper_sprint"
     assert out["route_consensus_hyper_votes"] == 3
+    assert out["route_memory_hits"] == 1
     assert out["guard_nightshift_recommended"] is True
     assert out["strategy_path"] == "probe_then_hyper"
     assert out["learn_phase_slo_pass"] is True
+    assert out["artifact_changed"] is True
+    assert out["artifact_diff_line_count"] == 12
     assert out["semantic_completed"] is False
 
 

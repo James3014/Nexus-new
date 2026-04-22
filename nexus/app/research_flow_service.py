@@ -4,6 +4,8 @@ import json
 import time
 import concurrent.futures
 import subprocess
+import re
+import difflib
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
@@ -60,6 +62,71 @@ def _derive_findings_query(task_desc: str, target_file: str | None = None) -> st
     if target_file:
         text = f"{text} {target_file}".strip()
     return text[:200]
+
+
+def _extract_keywords(text: str, *, limit: int = 12) -> list[str]:
+    tokens = re.findall(r"[a-zA-Z_]{4,}", (text or "").lower())
+    stop = {
+        "fix",
+        "with",
+        "under",
+        "from",
+        "that",
+        "this",
+        "task",
+        "mode",
+        "flow",
+        "test",
+        "file",
+        "when",
+    }
+    out: list[str] = []
+    for token in tokens:
+        if token in stop:
+            continue
+        if token not in out:
+            out.append(token)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _load_history_memory_signal(repo_root: Path, *, task_desc: str, task_type: str) -> dict[str, Any]:
+    history_path = (repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
+    if not history_path.exists():
+        return {"memory_hits": 0, "memory_hints": []}
+    try:
+        payload = json.loads(history_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"memory_hits": 0, "memory_hints": []}
+    if not isinstance(payload, dict):
+        return {"memory_hits": 0, "memory_hints": []}
+
+    task_keywords = set(_extract_keywords(task_desc))
+    memory_hits = 0
+    memory_hints: list[str] = []
+    for entries in payload.values():
+        if not isinstance(entries, list):
+            continue
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status", "")) != "SUCCESS":
+                continue
+            hist_task = str(item.get("task_desc", ""))
+            hist_type = str(item.get("task_type", ""))
+            hist_keywords = set(_extract_keywords(hist_task))
+            keyword_overlap = len(task_keywords & hist_keywords)
+            type_match = bool(task_type and hist_type and task_type == hist_type)
+            if keyword_overlap >= 2 or type_match:
+                memory_hits += 1
+                if str(item.get("flow", "")):
+                    memory_hints.append(f"flow:{item['flow']}")
+                if str(item.get("reason", "")):
+                    memory_hints.append(f"reason:{item['reason']}")
+    # Deduplicate while keeping order.
+    uniq_hints = list(dict.fromkeys(memory_hints))[:4]
+    return {"memory_hits": memory_hits, "memory_hints": uniq_hints}
 
 
 def read_belief_confidence_fast(repo_root: Path) -> float:
@@ -121,6 +188,7 @@ def build_route(
 ) -> dict:
 
     findings_hits = 0
+    memory_hits = 0
     historical_hints = []
     adjusted_root_cause_confidence = root_cause_confidence
     effective_findings_query = findings_query or _derive_findings_query(task_desc, target_file=target_file)
@@ -133,6 +201,11 @@ def build_route(
 
         if findings_hits >= 1:
             adjusted_root_cause_confidence = max(0.0, root_cause_confidence - 0.15)
+    memory_signal = _load_history_memory_signal(repo_root, task_desc=task_desc, task_type=task_type)
+    memory_hits = int(memory_signal.get("memory_hits", 0) or 0)
+    historical_hints.extend(list(memory_signal.get("memory_hints", [])))
+    if memory_hits > 0:
+        adjusted_root_cause_confidence = max(0.0, adjusted_root_cause_confidence - 0.1)
 
     policy = ResearchPolicy()
     prediction = {
@@ -166,6 +239,7 @@ def build_route(
             candidate_count > 1
             or adjusted_root_cause_confidence < 0.75
             or findings_hits > 0
+            or memory_hits > 0
             or has_hard_signal
             or decision.should_research
         )
@@ -189,6 +263,9 @@ def build_route(
     if findings_hits > 0:
         consensus_votes["hyper_sprint"] += 1
         vote_reasons.append("history_hits_prefers_hyper")
+    if memory_hits > 0:
+        consensus_votes["hyper_sprint"] += 1
+        vote_reasons.append("memory_hits_prefers_hyper")
     if task_type in {"feature", "refactor"}:
         consensus_votes["baseline"] += 1
         vote_reasons.append("structural_task_prefers_baseline")
@@ -211,6 +288,7 @@ def build_route(
     risk_score += 25 if task_type in {"feature", "refactor"} else 10
     risk_score += 25 if adjusted_root_cause_confidence < 0.7 else 0
     risk_score += 15 if findings_hits > 0 else 0
+    risk_score += 12 if memory_hits > 0 else 0
     risk_score += 10 if candidate_count > 1 else 0
     risk_score += 20 if is_cross_module_task else 0
     risk_score = min(100, risk_score)
@@ -221,6 +299,7 @@ def build_route(
         "is_doc_fix": is_doc_fix,
         "candidate_count": int(candidate_count),
         "findings_hits": int(findings_hits),
+        "memory_hits": int(memory_hits),
         "adjusted_root_cause_confidence": round(float(adjusted_root_cause_confidence), 4),
         "risk_score": risk_score,
     }
@@ -229,7 +308,7 @@ def build_route(
         "task_type": task_type,
         "risk": risk_level,
         "files": [target_file] if target_file else [],
-        "history": {"findings_hits": findings_hits, "hints_count": len(historical_hints)},
+        "history": {"findings_hits": findings_hits, "memory_hits": memory_hits, "hints_count": len(historical_hints)},
         "confidence": round(adjusted_root_cause_confidence, 2),
         "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. TaskType: {task_type}."
     }
@@ -241,7 +320,7 @@ def build_route(
         "rounds": decision.rounds if should_research else 0,
         "stable_wins": decision.stable_wins if should_research else 0,
         "findings_hits": findings_hits,
-        "prior_fix_hits": findings_hits,
+        "prior_fix_hits": findings_hits + memory_hits,
         "historical_hints": list(dict.fromkeys(historical_hints))[:3],  # Unique, max 3
         "adjusted_root_cause_confidence": adjusted_root_cause_confidence,
         "require_codex_audit": adjusted_root_cause_confidence < 0.6,
@@ -695,6 +774,20 @@ def run_auto_flow(
     if isinstance(baseline_probe, dict):
         baseline_probe_for_report = {k: v for k, v in baseline_probe.items() if k != "_patch"}
 
+    final_code = target_path.read_text(encoding="utf-8") if target_path.exists() else original_code
+    diff_lines = list(
+        difflib.unified_diff(
+            original_code.splitlines(),
+            final_code.splitlines(),
+            lineterm="",
+        )
+    )
+    artifact_summary = {
+        "changed": bool(final_code != original_code),
+        "diff_line_count": len(diff_lines),
+        "pytest_cmd": " ".join(pytest_cmd),
+    }
+
     payload = {
         "schema_version": "1.0",
         "task_desc": task_desc,
@@ -729,6 +822,7 @@ def run_auto_flow(
             "flow_ladder": ["baseline_probe", "hyper_sprint", "baseline_fallback"],
             "learn_gate_blocked": bool(learn_gate_blocked),
         },
+        "artifact_summary": artifact_summary,
         "io": {
             "output_written": False,
             "output_path": None,
@@ -748,6 +842,9 @@ def run_auto_flow(
             "flow": chosen_flow,
             "status": result["status"],
             "reason": result.get("error", ""),
+            "task_type": task_type,
+            "task_desc": task_desc[:200],
+            "route_recommended_flow": str(route.get("recommended_flow", "")),
             "ts": datetime.now(timezone.utc).isoformat(),
         }
     )

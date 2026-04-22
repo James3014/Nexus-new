@@ -79,14 +79,26 @@ def _median(values: list[float], default: float = 0.0) -> float:
 
 def _compute_pillar_scores(with_rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = max(1, len(with_rows))
-    lance_hits = sum(1 for r in with_rows if int(r.get("route_findings_hits", 0) or 0) > 0)
-    memory_hits = sum(1 for r in with_rows if int(r.get("prior_fix_hits", 0) or 0) > 0)
+    lance_hits = sum(
+        1
+        for r in with_rows
+        if int(r.get("route_findings_hits", 0) or 0) > 0
+    )
+    memory_hits = sum(
+        1
+        for r in with_rows
+        if int(r.get("route_memory_hits", 0) or 0) > 0 or int(r.get("prior_fix_hits", 0) or 0) > 0
+    )
     mempalace_hits = sum(1 for r in with_rows if not bool(r.get("guard_hit", False)))
     belief_values = [float(r.get("belief_confidence", 0.0) or 0.0) for r in with_rows]
     artifact_hits = sum(
         1
         for r in with_rows
-        if str(r.get("semantic_status", "")) in {"VERIFIED", "PARTIAL"} and not bool(r.get("report_trust_mismatch", True))
+        if (
+            str(r.get("semantic_status", "")) in {"VERIFIED", "PARTIAL"}
+            and not bool(r.get("report_trust_mismatch", True))
+            and (bool(r.get("artifact_changed", False)) or int(r.get("artifact_diff_line_count", 0) or 0) > 0)
+        )
     )
     scores = {
         "LanceDB": round(lance_hits / total, 4),
