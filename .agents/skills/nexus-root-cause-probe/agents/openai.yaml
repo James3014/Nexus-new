@@ -1,0 +1,7 @@
+interface:
+  display_name: "Nexus Root Cause Probe"
+  short_description: "用真實 Nexus 流程抓回報與 gate 真因"
+  default_prompt: "Use $nexus-root-cause-probe to diagnose why Nexus reports, evidence, and gates disagree on this task."
+
+policy:
+  allow_implicit_invocation: true
