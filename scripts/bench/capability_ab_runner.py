@@ -151,10 +151,20 @@ def _extract_record(
 ) -> dict[str, Any]:
     result = payload.get("result", {}) if isinstance(payload, dict) else {}
     report = result.get("report", {}) if isinstance(result, dict) else {}
+    route = payload.get("route", {}) if isinstance(payload, dict) else {}
+    route_features = route.get("route_features", {}) if isinstance(route, dict) else {}
+    guard = payload.get("guard", {}) if isinstance(payload, dict) else {}
+    strategy = payload.get("strategy", {}) if isinstance(payload, dict) else {}
+    learn_phase_slo = payload.get("learn_phase_slo", {}) if isinstance(payload, dict) else {}
     task_duration = float(result.get("elapsed_sec", wall_time_sec) or wall_time_sec)
     model_calls = int(report.get("model_calls", 0) or 0)
     total_tokens = int(report.get("total_tokens", 0) or 0)
     token_capture_status = str(report.get("token_capture_status", "unknown") or "unknown")
+    semantic_status = payload.get("semantic_status")
+    semantic_completed = bool(
+        payload.get("status") == "SUCCESS"
+        and semantic_status in {"VERIFIED", "PARTIAL"}
+    )
     return {
         "mode": mode,
         "task_id": task.id,
@@ -162,7 +172,8 @@ def _extract_record(
         "task_type": task.task_type,
         "task_desc": task.task_desc,
         "status": payload.get("status", result.get("status", "")),
-        "semantic_status": payload.get("semantic_status"),
+        "semantic_status": semantic_status,
+        "semantic_completed": semantic_completed,
         "runtime_classification": payload.get("runtime_classification"),
         "retryable": payload.get("retryable"),
         "duration_sec": round(task_duration, 4),
@@ -173,7 +184,20 @@ def _extract_record(
         "model_calls": model_calls,
         "total_tokens": total_tokens,
         "token_capture_status": token_capture_status,
+        "token_measured": bool(total_tokens > 0),
         "report_trust_mismatch": bool(payload.get("semantic_status") is None),
+        "route_recommended_flow": route.get("recommended_flow"),
+        "route_reason": route.get("recommended_reason"),
+        "route_risk_score": int(route_features.get("risk_score", 0) or 0),
+        "route_findings_hits": int(route.get("findings_hits", 0) or 0),
+        "prior_fix_hits": int(route.get("prior_fix_hits", 0) or 0),
+        "belief_confidence": float((payload.get("execution_profile", {}) or {}).get("belief_confidence", 1.0) or 1.0),
+        "chosen_flow": payload.get("chosen_flow"),
+        "strategy_path": strategy.get("path"),
+        "guard_hit": bool(guard.get("hit", False)),
+        "guard_nightshift_recommended": bool(guard.get("nightshift_recommended", False)),
+        "guard_stage1_fail_signals": int(guard.get("stage1_fail_signals", 0) or 0),
+        "learn_phase_slo_pass": bool(learn_phase_slo.get("phase_slo_pass", False)),
     }
 
 

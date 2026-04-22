@@ -25,6 +25,7 @@ def _collect_median_inputs(eval_payload: dict[str, Any], history_payloads: list[
         payloads.extend(history_payloads)
 
     with_solve_values: list[float] = []
+    with_semantic_values: list[float] = []
     with_trust_values: list[float] = []
     wall_with_values: list[float] = []
     wall_without_values: list[float] = []
@@ -35,6 +36,7 @@ def _collect_median_inputs(eval_payload: dict[str, Any], history_payloads: list[
         without_summary = (payload.get("b") or {}).get("summary", {})
         try:
             with_solve_values.append(float(with_summary.get("solve_rate", 0.0)))
+            with_semantic_values.append(float(with_summary.get("semantic_verified_rate", 0.0)))
             with_trust_values.append(float(with_summary.get("trust_mismatch_rate", 1.0)))
             wall_with_values.append(float(with_summary.get("avg_wall_duration_sec", 0.0)))
             wall_without_values.append(float(without_summary.get("avg_wall_duration_sec", 0.0)))
@@ -43,6 +45,7 @@ def _collect_median_inputs(eval_payload: dict[str, Any], history_payloads: list[
         except Exception:
             continue
     with_solve = _median(with_solve_values, 0.0)
+    with_semantic = _median(with_semantic_values, 0.0)
     with_trust_mismatch = _median(with_trust_values, 1.0)
     wall_with = _median(wall_with_values, 0.0)
     wall_without = _median(wall_without_values, 0.0)
@@ -50,6 +53,7 @@ def _collect_median_inputs(eval_payload: dict[str, Any], history_payloads: list[
     attempts_without = _median(attempts_without_values, 0.0)
     return {
         "with_solve_rate": with_solve,
+        "with_semantic_verified_rate": with_semantic,
         "with_trust_mismatch_rate": with_trust_mismatch,
         "with_avg_wall_duration_sec": wall_with,
         "without_avg_wall_duration_sec": wall_without,
@@ -76,6 +80,7 @@ def compute_tuning(
 ) -> dict[str, Any]:
     med = _collect_median_inputs(eval_payload, history_payloads)
     with_solve = med["with_solve_rate"]
+    with_semantic = med["with_semantic_verified_rate"]
     with_trust_mismatch = med["with_trust_mismatch_rate"]
     wall_with = med["with_avg_wall_duration_sec"]
     wall_without = med["without_avg_wall_duration_sec"]
@@ -105,11 +110,11 @@ def compute_tuning(
     else:
         # Solve-rate hysteresis:
         # below 0.92 => expand search; above 0.97 => release expansion; otherwise hold.
-        if with_solve < 0.92:
+        if with_solve < 0.92 or with_semantic < 0.9:
             knobs["candidate_boost"] = 1
             knobs["max_rounds_boost"] = 1
             reasons.append("solve_rate_below_target_expand_search")
-        elif with_solve > 0.97:
+        elif with_solve > 0.97 and with_semantic >= 0.97:
             knobs["candidate_boost"] = 0
             knobs["max_rounds_boost"] = 0
             reasons.append("solve_rate_strong_release_expand_search")
@@ -149,6 +154,7 @@ def compute_tuning(
         "aggregation_window": sample_count,
         "input_metrics": {
             "with_solve_rate": with_solve,
+            "with_semantic_verified_rate": with_semantic,
             "with_trust_mismatch_rate": with_trust_mismatch,
             "with_avg_wall_duration_sec": wall_with,
             "without_avg_wall_duration_sec": wall_without,

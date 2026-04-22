@@ -18,6 +18,9 @@ def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
     assert out["max_tasks"] == 6
     assert out["paths"]["ab_eval_file"]
     assert out["health"]["verdict"] in {"PASS", "WARN"}
+    assert "pillars" in out
+    assert "self_heal" in out
+    assert 0.0 <= out["pillars"]["overall"] <= 1.0
     assert Path(out["report_file"]).exists()
 
 

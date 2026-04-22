@@ -18,7 +18,9 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert "reason" in out
     assert "recommended_flow" in out
     assert "explain_payload" in out
+    assert "route_features" in out
     assert out["explain_payload"]["risk"] == "CRITICAL"
+    assert out["route_features"]["risk_score"] >= 50
 
 
 def test_build_hyper_execution_profile_boosts_hard_bug():
@@ -79,6 +81,14 @@ def test_read_capability_tuning_fast_reads_file(tmp_path: Path):
     path.write_text('{"knobs":{"candidate_boost":1}}', encoding="utf-8")
     out = research_flow_service.read_capability_tuning_fast(tmp_path)
     assert out["knobs"]["candidate_boost"] == 1
+
+
+def test_read_capability_tuning_fast_honors_env_override(tmp_path: Path, monkeypatch):
+    override = tmp_path / "override.json"
+    override.write_text('{"knobs":{"max_rounds_boost":2}}', encoding="utf-8")
+    monkeypatch.setenv("NEXUS_CAPABILITY_TUNING_FILE", str(override))
+    out = research_flow_service.read_capability_tuning_fast(tmp_path)
+    assert out["knobs"]["max_rounds_boost"] == 2
 
 
 def test_build_hyper_execution_profile_applies_tuning_and_prior_fix_hits():
@@ -158,6 +168,7 @@ def test_build_route_uses_auto_findings_query_when_not_provided(tmp_path: Path, 
     assert "demo.py" in captured["query"]
     assert out["findings_hits"] == 1
     assert out["prior_fix_hits"] == 1
+    assert out["route_features"]["findings_hits"] == 1
 
 
 def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: Path, monkeypatch):
@@ -219,3 +230,4 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
     )
 
     assert payload["result"]["status"] == "SUCCESS"
+    assert payload["strategy"]["path"] == "baseline_only"

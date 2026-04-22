@@ -1,0 +1,33 @@
+{
+  "version": "2026-04-23",
+  "description": "Cross-module refactor benchmark pack for validating swarm/drone/nightshift advantage.",
+  "tasks": [
+    {
+      "id": "xmod-hard-001",
+      "difficulty": "hard",
+      "task_type": "cross_module_refactor",
+      "task_desc": "Cross-module refactor: reconcile coordinator/service contracts and preserve semantic completion under drone escalation",
+      "target_file": "engine/coordinator.py",
+      "test_file": "tests/engine/test_coordinator_contracts.py",
+      "success_criteria": "all_target_tests_pass"
+    },
+    {
+      "id": "xmod-hard-002",
+      "difficulty": "hard",
+      "task_type": "cross_module_refactor",
+      "task_desc": "Cross-module refactor: align swarm ownership lock and report claims causality for nightshift fallback",
+      "target_file": "core/swarm_orchestrator.py",
+      "test_file": "tests/combat/test_swarm_ownership_and_report_causality.py",
+      "success_criteria": "all_target_tests_pass"
+    },
+    {
+      "id": "xmod-hard-003",
+      "difficulty": "hard",
+      "task_type": "cross_module_refactor",
+      "task_desc": "Cross-module refactor: unify learn pipeline closure between research_flow_service and sprint_service with guarded escalation",
+      "target_file": "app/research_flow_service.py",
+      "test_file": "tests/app/test_research_flow_cross_module_closure.py",
+      "success_criteria": "all_target_tests_pass"
+    }
+  ]
+}

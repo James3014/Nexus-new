@@ -67,6 +67,17 @@ def test_extract_record_maps_semantic_fields():
         "status": "FAILED",
         "semantic_status": "UNVERIFIED",
         "runtime_classification": "runtime_defect",
+        "route": {
+            "recommended_flow": "hyper_sprint",
+            "recommended_reason": "complex_bug_prefer_hyper",
+            "findings_hits": 2,
+            "prior_fix_hits": 2,
+            "route_features": {"risk_score": 87},
+        },
+        "guard": {"hit": False, "nightshift_recommended": True, "stage1_fail_signals": 1},
+        "strategy": {"path": "probe_then_hyper"},
+        "execution_profile": {"belief_confidence": 0.72},
+        "learn_phase_slo": {"phase_slo_pass": True},
         "result": {
             "elapsed_sec": 2.3,
             "report": {
@@ -85,6 +96,10 @@ def test_extract_record_maps_semantic_fields():
     assert out["total_tokens"] == 321
     assert out["token_capture_status"] == "measured"
     assert out["report_trust_mismatch"] is False
+    assert out["route_risk_score"] == 87
+    assert out["guard_nightshift_recommended"] is True
+    assert out["strategy_path"] == "probe_then_hyper"
+    assert out["learn_phase_slo_pass"] is True
 
 
 def test_extract_json_payload_from_prefixed_output():

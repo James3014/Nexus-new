@@ -46,6 +46,76 @@ def _num(src: dict[str, Any], key: str, default: float = 0.0) -> float:
         return float(default)
 
 
+def _load_jsonl_rows(path: str | Path) -> list[dict[str, Any]]:
+    fp = Path(path)
+    if not fp.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in fp.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            rows.append(payload)
+    return rows
+
+
+def _avg(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return float(sum(values) / len(values))
+
+
+def _compute_pillar_scores(with_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = max(1, len(with_rows))
+    lance_hits = sum(1 for r in with_rows if int(r.get("route_findings_hits", 0) or 0) > 0)
+    memory_hits = sum(1 for r in with_rows if int(r.get("prior_fix_hits", 0) or 0) > 0)
+    mempalace_hits = sum(1 for r in with_rows if not bool(r.get("guard_hit", False)))
+    belief_values = [float(r.get("belief_confidence", 0.0) or 0.0) for r in with_rows]
+    artifact_hits = sum(
+        1
+        for r in with_rows
+        if str(r.get("semantic_status", "")) in {"VERIFIED", "PARTIAL"} and not bool(r.get("report_trust_mismatch", True))
+    )
+    scores = {
+        "LanceDB": round(lance_hits / total, 4),
+        "Memory": round(memory_hits / total, 4),
+        "MemPalace": round(mempalace_hits / total, 4),
+        "Belief": round(max(0.0, min(1.0, _avg(belief_values))), 4),
+        "Artifact": round(artifact_hits / total, 4),
+    }
+    return {
+        "scores": scores,
+        "overall": round(_avg(list(scores.values())), 4),
+    }
+
+
+def _compute_self_heal_metrics(with_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = max(1, len(with_rows))
+    success_rows = [r for r in with_rows if str(r.get("status", "")) == "SUCCESS"]
+    attempts_gt_one = [r for r in with_rows if int(r.get("attempt_count", 0) or 0) > 1]
+    repair_success_count = sum(1 for r in attempts_gt_one if str(r.get("status", "")) == "SUCCESS")
+    first_pass_success = sum(
+        1 for r in with_rows if int(r.get("attempt_count", 0) or 0) <= 1 and str(r.get("status", "")) == "SUCCESS"
+    )
+    fallback_activated = sum(
+        1 for r in with_rows if bool(r.get("guard_nightshift_recommended", False)) or int(r.get("guard_stage1_fail_signals", 0) or 0) > 0
+    )
+    attempt_values = [float(r.get("attempt_count", 0) or 0.0) for r in with_rows]
+    return {
+        "solve_rate": round(len(success_rows) / total, 4),
+        "first_pass_success_rate": round(first_pass_success / total, 4),
+        "repair_attempt_rate": round(len(attempts_gt_one) / total, 4),
+        "repair_success_rate": round((repair_success_count / len(attempts_gt_one)) if attempts_gt_one else 0.0, 4),
+        "fallback_activation_rate": round(fallback_activated / total, 4),
+        "avg_attempt_count": round(_avg(attempt_values), 4),
+    }
+
+
 def _compute_health_score(eval_payload: dict[str, Any]) -> dict[str, Any]:
     with_summary = (eval_payload.get("a") or {}).get("summary", {}
     ) if isinstance(eval_payload, dict) else {}
@@ -145,6 +215,9 @@ def run_ops_loop(
         raise RuntimeError(f"ab_eval_failed: {eval_res.stderr.strip()}")
     eval_payload = _extract_json(eval_res.stdout)
     health = _compute_health_score(eval_payload)
+    with_rows = _load_jsonl_rows(with_file)
+    pillar_metrics = _compute_pillar_scores(with_rows)
+    self_heal_metrics = _compute_self_heal_metrics(with_rows)
 
     llm_probe_payload: dict[str, Any] | None = None
     if run_llm_probe:
@@ -206,6 +279,65 @@ def run_ops_loop(
                 "status": "FAILED",
                 "reason": "llm_probe_run_failed_or_output_missing",
             }
+        else:
+            cross_cmd = [
+                "uv",
+                "run",
+                "python",
+                "scripts/bench/capability_ab_runner.py",
+                "--tasks-file",
+                "scripts/bench/capability_tasks_cross_module_v1.json",
+                "--difficulty",
+                "hard",
+                "--max-tasks",
+                "3",
+                "--with-nexus-runner",
+                "inprocess",
+                "--with-llm-mode",
+                "hard",
+                "--tuning-profile",
+                profile,
+                "--without-mode",
+                "bare",
+                "--llm-safe-probe",
+                "--neutralize-history",
+                "--output-dir",
+                str(output_dir),
+            ]
+            cross_res = _run(cross_cmd, cwd=repo_root)
+            cross_probe_payload: dict[str, Any] = {"status": "FAILED", "reason": "cross_module_probe_failed"}
+            if cross_res.returncode == 0:
+                cross_raw = _extract_json(cross_res.stdout)
+                if cross_raw.get("with_nexus_file") and cross_raw.get("without_nexus_file"):
+                    cross_eval_file = output_dir / f"ab_eval_cross_module_probe_{ts}.json"
+                    cross_eval_cmd = [
+                        "uv",
+                        "run",
+                        "python",
+                        "scripts/bench/ab_eval.py",
+                        "--a",
+                        str(cross_raw["with_nexus_file"]),
+                        "--b",
+                        str(cross_raw["without_nexus_file"]),
+                        "--output-file",
+                        str(cross_eval_file),
+                        "--output-json",
+                    ]
+                    cross_eval_res = _run(cross_eval_cmd, cwd=repo_root)
+                    cross_eval = _extract_json(cross_eval_res.stdout) if cross_eval_res.returncode == 0 else {}
+                    with_cross_rows = _load_jsonl_rows(str(cross_raw["with_nexus_file"]))
+                    cross_probe_payload = {
+                        "status": "SUCCESS" if cross_eval_res.returncode == 0 else "FAILED",
+                        "paths": {
+                            "with_nexus_file": str(cross_raw.get("with_nexus_file", "")),
+                            "without_nexus_file": str(cross_raw.get("without_nexus_file", "")),
+                            "ab_eval_file": str(cross_eval_file),
+                        },
+                        "ab_eval": cross_eval,
+                        "pillars": _compute_pillar_scores(with_cross_rows),
+                        "self_heal": _compute_self_heal_metrics(with_cross_rows),
+                    }
+            llm_probe_payload["cross_module_refactor_probe"] = cross_probe_payload
 
     autotune_payload: dict[str, Any] = {}
     if apply_autotune:
@@ -241,6 +373,8 @@ def run_ops_loop(
         },
         "ab_eval": eval_payload,
         "health": health,
+        "pillars": pillar_metrics,
+        "self_heal": self_heal_metrics,
         "llm_probe": llm_probe_payload,
         "autotune": autotune_payload or None,
     }

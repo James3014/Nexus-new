@@ -143,6 +143,23 @@ def build_route(
     if adjusted_root_cause_confidence < 0.5:
         risk_level = "CRITICAL"
 
+    risk_score = 0
+    risk_score += 30 if has_hard_signal else 0
+    risk_score += 25 if task_type in {"feature", "refactor"} else 10
+    risk_score += 25 if adjusted_root_cause_confidence < 0.7 else 0
+    risk_score += 15 if findings_hits > 0 else 0
+    risk_score += 10 if candidate_count > 1 else 0
+    risk_score = min(100, risk_score)
+    route_features = {
+        "task_type": task_type,
+        "has_hard_signal": has_hard_signal,
+        "is_doc_fix": is_doc_fix,
+        "candidate_count": int(candidate_count),
+        "findings_hits": int(findings_hits),
+        "adjusted_root_cause_confidence": round(float(adjusted_root_cause_confidence), 4),
+        "risk_score": risk_score,
+    }
+
     explain = {
         "task_type": task_type,
         "risk": risk_level,
@@ -166,6 +183,7 @@ def build_route(
         "recommended_flow": recommended_flow,
         "recommended_reason": recommended_reason,
         "explain_payload": explain,
+        "route_features": route_features,
     }
 
 
@@ -541,6 +559,7 @@ def run_auto_flow(
     baseline_probe_skipped = False
     if chosen_flow == "baseline":
         result = _run_baseline_apply()
+        strategy_path = "baseline_only"
     else:
         if (
             force_flow is None
@@ -549,6 +568,7 @@ def run_auto_flow(
         ):
             baseline_probe_skipped = True
             result = _run_hyper_apply()
+            strategy_path = "hyper_direct_hard_skip_probe"
         else:
         # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
             baseline_probe = _run_baseline_probe()
@@ -576,8 +596,10 @@ def run_auto_flow(
                     target_path.write_text(original_code, encoding="utf-8")
                     result = _run_baseline_apply()
                 chosen_flow = "baseline"
+                strategy_path = "probe_success_fastpath_baseline"
             else:
                 result = _run_hyper_apply()
+                strategy_path = "probe_then_hyper"
                 min_probe_sec_for_ratio_guard = 0.05
                 if (
                     baseline_probe["status"] == "SUCCESS"
@@ -589,6 +611,7 @@ def run_auto_flow(
                     target_path.write_text(original_code, encoding="utf-8")
                     result = _run_baseline_apply()
                     chosen_flow = "baseline"
+                    strategy_path = "hyper_guard_fallback_to_baseline"
 
     baseline_probe_for_report = None
     if isinstance(baseline_probe, dict):
@@ -622,6 +645,12 @@ def run_auto_flow(
             "reason": learn_phase_slo.get("reason", ""),
         },
         "result": result,
+        "strategy": {
+            "path": strategy_path,
+            "forced_flow": force_flow or "auto",
+            "flow_ladder": ["baseline_probe", "hyper_sprint", "baseline_fallback"],
+            "learn_gate_blocked": bool(learn_gate_blocked),
+        },
         "io": {
             "output_written": False,
             "output_path": None,
