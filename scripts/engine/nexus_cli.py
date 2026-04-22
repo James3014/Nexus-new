@@ -199,6 +199,44 @@ def _write_output_file(path: Path, payload: dict) -> Path:
     return out
 
 
+def _infer_run_task_kind(task_text: str) -> str:
+    text = str(task_text or "").strip().lower()
+    feature_keywords = (
+        "build",
+        "create",
+        "add",
+        "implement",
+        "feature",
+        "新增",
+        "建立",
+        "實作",
+        "開發",
+    )
+    if any(keyword in text for keyword in feature_keywords):
+        return "feature"
+    return "bug"
+
+
+def _execute_single_run_task(task_text: str, project_root: Path) -> bool:
+    from nexus.app.command_service import NexusCommandService, TaskRequest
+    from nexus.engine.config import EngineConfig
+    from nexus.engine.coordinator import NexusEngine
+
+    service = NexusCommandService(NexusEngine(EngineConfig(project_root=project_root)))
+    request = TaskRequest(task=task_text, delivery_mode="standard")
+    if _infer_run_task_kind(task_text) == "feature":
+        return bool(service.execute_feature(request))
+    return bool(service.execute_bug(request))
+
+
+def _render_run_classification(status: str) -> None:
+    normalized = str(status or "").strip().upper()
+    if normalized == "SUCCESS":
+        click.echo("[run-classification] verified_pass")
+        return
+    click.echo("[run-classification] runtime_defect")
+
+
 def _local_rewrite_text(text: str) -> str:
     # Local-safe rewrite: normalize trailing spaces and repeated blank lines.
     lines = [ln.rstrip() for ln in text.splitlines()]
@@ -409,22 +447,8 @@ def run(task_id, complexity, output_file):
         # 啟動異步調度循環
         asyncio.run(campaign_master_loop(commander, task_nodes, REPO_ROOT))
     else:
-        # --- 以下為單一任務 (Non-Macro) 流路 ---
-        from nexus.engine.cli_runner_async import execute_tactical_node
-        class MockNode:
-            def __init__(self, tid, intent):
-                self.node_id = tid
-                self.intent = intent
-                self.envelope = None
-        
-        try:
-            if not execute_tactical_node(MockNode("RUN-SINGLE", task_id), REPO_ROOT):
-                status = "FAIL"
-        except AttributeError as exc:
-            if "assemble_feature_pack" not in str(exc) and "materialize_test_scripts" not in str(exc):
-                raise
-            click.secho("⚠️ [Compat-Fallback] Minimal test harness fallback engaged.", fg="yellow")
-            status = "SUCCESS"
+        if not _execute_single_run_task(task_id, REPO_ROOT):
+            status = "FAIL"
 
     if output_file:
         output_path = Path(output_file)
@@ -436,6 +460,12 @@ def run(task_id, complexity, output_file):
         }
         written = _write_output_file(output_path, payload)
         click.echo(f"✅ Result written to {written}")
+
+    _render_run_classification(status)
+    if status != "SUCCESS":
+        raise click.ClickException(
+            "Nexus run failed closed: task is not verified complete. Check runtime logs and gate evidence."
+        )
 
 @nexus_group.command(name="content:rewrite")
 @click.option("--input-file", required=True, type=click.Path(exists=True, path_type=Path), help="Source text/markdown file.")
