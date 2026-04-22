@@ -86,6 +86,13 @@ class LearnModeService:
 
 
     PHASES: tuple[str, ...] = ("P", "X", "D", "R", "A", "C")
+    INGEST_REQUIRED_FIELDS: tuple[str, ...] = (
+        "status",
+        "claims_count",
+        "verified_claims_count",
+        "sources_count",
+        "documents_ingested",
+    )
 
     def _resolve_path(self, p: str | Path) -> Path:
         path = Path(p)
@@ -707,8 +714,17 @@ class LearnModeService:
             
         return self.__class__._claims_cache
 
+    def _validate_ingest_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        missing = [field for field in self.INGEST_REQUIRED_FIELDS if field not in payload]
+        if missing:
+            raise RuntimeError(f"learn_ingest_contract_violation: missing={missing}")
+        return payload
+
     def ingest(self, source: str, source_file: str | None = None, topic: str = "") -> dict[str, Any]:
-        return self._ingest_svc.ingest(source, source_file, topic)
+        payload = self._ingest_svc.ingest(source, source_file, topic)
+        if not isinstance(payload, dict):
+            raise RuntimeError("learn_ingest_contract_violation: payload_must_be_dict")
+        return self._validate_ingest_payload(payload)
 
     def _extract_tokens(self, topic: str) -> set[str]:
         raw = set(re.findall(r"[A-Za-z0-9_-]+", topic.lower()))

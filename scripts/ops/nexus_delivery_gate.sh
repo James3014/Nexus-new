@@ -8,6 +8,7 @@ EVIDENCE_PATH=".nexus/reports/hallucination_evidence.json"
 RECEIPT_PATH=".nexus/reports/delivery_gate.json"
 BASELINE_PATH=".nexus/reports/baseline/baseline_manifest.json"
 ACCEPTANCE_REPORT_PATH=".nexus/reports/acceptance_check.json"
+AGENT_REPORT_PATH=".nexus/reports/agent_report.json"
 ACCEPTANCE_POLICY="${NEXUS_ACCEPTANCE_POLICY:-dev}" # dev | prod
 
 echo "[delivery-gate] Canonical Flow v24.1 Initiated"
@@ -59,6 +60,9 @@ fi
 echo "== Step 7: Integrity Claims (Report/Context Truth) =="
 if ! uv run scripts/ops/verify_report_claims.py \
   --json \
+  --report-file "$AGENT_REPORT_PATH" \
+  --require-test-evidence \
+  --report-newer-than "$EVIDENCE_PATH" \
   --ignore-dirty-config .nexus/config/delivery_gate_allow_dirty.json \
   --baseline-manifest "$BASELINE_PATH"; then
   echo "❌ [FAIL] Report integrity check failed!" >&2

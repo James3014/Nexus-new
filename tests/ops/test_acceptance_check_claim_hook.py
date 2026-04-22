@@ -28,7 +28,11 @@ def test_acceptance_check_runs_claim_verifier(monkeypatch):
     assert result.exit_code == 0
     joined = [" ".join(map(str, c)) for c in calls]
     assert any("scripts/ops/nexus_acceptance_check.py" in c for c in joined)
-    assert any("scripts/ops/verify_report_claims.py" in c for c in joined)
+    acceptance_cmd = next(c for c in joined if "scripts/ops/nexus_acceptance_check.py" in c)
+    assert "--report-file .nexus/reports/agent_report.json" in acceptance_cmd
+    verify_cmd = next(c for c in joined if "scripts/ops/verify_report_claims.py" in c)
+    assert "--report-file .nexus/reports/agent_report.json" in verify_cmd
+    assert "--require-test-evidence" in verify_cmd
 
 
 def test_delivery_gate_runs_shell_gate(monkeypatch):

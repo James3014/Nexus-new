@@ -405,6 +405,9 @@ def _evaluate_report_claim_integrity(
     *,
     required_paths: List[str],
     require_acceptance_pass: bool,
+    report_file_rel: str,
+    require_test_evidence: bool,
+    report_newer_than: str | None,
 ) -> CriterionResult:
     """新增準則: report_claim_integrity."""
     report = verify_claims(
@@ -412,6 +415,9 @@ def _evaluate_report_claim_integrity(
         required_paths=required_paths,
         require_clean=False,
         require_acceptance_pass=require_acceptance_pass,
+        report_file_rel=report_file_rel,
+        require_test_evidence=require_test_evidence,
+        report_newer_than=report_newer_than,
     )
     return CriterionResult(
         name="report_claim_integrity",
@@ -475,6 +481,28 @@ def main():
         "--required-claim-paths",
         default=os.environ.get("NEXUS_REQUIRED_CLAIM_PATHS", ""),
         help="Comma-separated files that must exist before claims can be marked PASS.",
+    )
+    parser.add_argument(
+        "--report-file",
+        default=".nexus/reports/agent_report.json",
+        help="Agent report path for integrity lock checks.",
+    )
+    parser.add_argument(
+        "--require-test-evidence",
+        action="store_true",
+        default=True,
+        help="Require tests_run evidence in report_file for claim integrity.",
+    )
+    parser.add_argument(
+        "--no-require-test-evidence",
+        action="store_false",
+        dest="require_test_evidence",
+        help="Disable tests_run evidence requirement for claim integrity.",
+    )
+    parser.add_argument(
+        "--report-newer-than",
+        default=None,
+        help="Reference file that the agent report must be newer than.",
     )
     
     parser.add_argument("--json", action="store_true", help="Output as JSON.")
@@ -544,6 +572,9 @@ def main():
         project_root,
         required_paths=required_paths,
         require_acceptance_pass=True, # T13: 固定為True，打破循環依賴
+        report_file_rel=args.report_file,
+        require_test_evidence=bool(args.require_test_evidence),
+        report_newer_than=args.report_newer_than,
     )
     all_checks.append(claim_check)
     gate_passed = gate_passed and claim_check.passed

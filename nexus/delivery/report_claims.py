@@ -17,6 +17,8 @@ class ReportClaimsOptions:
     require_baseline: bool
     baseline_manifest_rel: str
     report_file_rel: str | None
+    require_test_evidence: bool
+    report_newer_than: str | None
 
 
 def resolve_required_paths(project_root: Path, required_paths: list[str]) -> list[Path]:
@@ -80,7 +82,12 @@ def sorted_nonempty_lines(raw: str) -> list[str]:
 
 
 def evaluate_report_integrity_lock(
-    project_root: Path, report_file_rel: str | None, run_git: Any
+    project_root: Path,
+    report_file_rel: str | None,
+    run_git: Any,
+    *,
+    require_test_evidence: bool = False,
+    report_newer_than: str | None = None,
 ) -> dict[str, Any]:
     if not report_file_rel:
         return {"name": "report_integrity_lock", "passed": True, "detail": {"skipped": True}}
@@ -124,7 +131,70 @@ def evaluate_report_integrity_lock(
         "actual_delta": actual_delta,
     }
 
-    return {"name": "report_integrity_lock", "passed": head_ok and commit_ok and delta_ok, "detail": detail}
+    tests_ok = True
+    test_detail: dict[str, Any] = {"required": require_test_evidence}
+    if require_test_evidence:
+        tests_run = report.get("tests_run")
+        if not isinstance(tests_run, list) or not tests_run:
+            tests_ok = False
+            test_detail["error"] = "missing_tests_run"
+        else:
+            invalid_rows: list[int] = []
+            nonzero_rows: list[dict[str, Any]] = []
+            for idx, item in enumerate(tests_run):
+                if not isinstance(item, dict):
+                    invalid_rows.append(idx)
+                    continue
+                command = str(item.get("command", "")).strip()
+                if not command:
+                    invalid_rows.append(idx)
+                    continue
+                try:
+                    exit_code = int(item.get("exit_code", 1))
+                except Exception:
+                    invalid_rows.append(idx)
+                    continue
+                if exit_code != 0:
+                    nonzero_rows.append({"index": idx, "command": command, "exit_code": exit_code})
+            if invalid_rows:
+                tests_ok = False
+                test_detail["error"] = "invalid_tests_run_entry"
+                test_detail["invalid_indices"] = invalid_rows
+            elif nonzero_rows:
+                tests_ok = False
+                test_detail["error"] = "tests_with_nonzero_exit"
+                test_detail["failed_tests"] = nonzero_rows
+            else:
+                test_detail["count"] = len(tests_run)
+                test_detail["passed"] = True
+    detail["test_evidence"] = test_detail
+
+    freshness_ok = True
+    freshness_detail: dict[str, Any] = {"reference_required": bool(report_newer_than)}
+    if report_newer_than:
+        reference_path = Path(report_newer_than)
+        if not reference_path.is_absolute():
+            reference_path = (project_root / reference_path).resolve()
+        freshness_detail["reference_path"] = str(reference_path)
+        freshness_detail["reference_exists"] = reference_path.exists()
+        if not reference_path.exists():
+            freshness_ok = False
+            freshness_detail["error"] = "reference_file_not_found"
+        else:
+            report_mtime = report_path.stat().st_mtime
+            reference_mtime = reference_path.stat().st_mtime
+            freshness_detail["report_mtime"] = report_mtime
+            freshness_detail["reference_mtime"] = reference_mtime
+            freshness_ok = report_mtime >= reference_mtime
+            if not freshness_ok:
+                freshness_detail["error"] = "report_older_than_reference"
+    detail["freshness"] = freshness_detail
+
+    return {
+        "name": "report_integrity_lock",
+        "passed": head_ok and commit_ok and delta_ok and tests_ok and freshness_ok,
+        "detail": detail,
+    }
 
 
 def verify_claims_core(project_root: Path, options: ReportClaimsOptions, run_git: Any) -> dict[str, Any]:
@@ -207,7 +277,15 @@ def verify_claims_core(project_root: Path, options: ReportClaimsOptions, run_git
             acceptance_ok = acceptance_detail["status"] == "PASS" and acceptance_detail["gate_passed"] is True
     checks.append({"name": "acceptance_report", "passed": acceptance_ok, "detail": acceptance_detail})
 
-    checks.append(evaluate_report_integrity_lock(project_root, options.report_file_rel, run_git))
+    checks.append(
+        evaluate_report_integrity_lock(
+            project_root,
+            options.report_file_rel,
+            run_git,
+            require_test_evidence=options.require_test_evidence,
+            report_newer_than=options.report_newer_than,
+        )
+    )
 
     passed = all(bool(c.get("passed", False)) for c in checks)
     return {

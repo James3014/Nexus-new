@@ -41,13 +41,31 @@ def test_delegation_to_subservices(tmp_path, monkeypatch):
     
     def fake_ingest(source, source_file=None, topic=""):
         called["ingest"] = True
-        return {"status": "ok"}
+        return {
+            "status": "SUCCESS",
+            "claims_count": 1,
+            "verified_claims_count": 1,
+            "sources_count": 1,
+            "documents_ingested": 1,
+        }
         
     monkeypatch.setattr(svc._ingest_svc, "ingest", fake_ingest)
     
     res = svc.ingest("test-source")
     assert called["ingest"] is True
-    assert res["status"] == "ok"
+    assert res["status"] == "SUCCESS"
+
+
+def test_ingest_fail_closed_on_contract_violation(tmp_path, monkeypatch):
+    svc = LearnModeService(tmp_path)
+
+    def fake_ingest(source, source_file=None, topic=""):
+        return {"status": "SUCCESS"}  # missing required fields
+
+    monkeypatch.setattr(svc._ingest_svc, "ingest", fake_ingest)
+
+    with pytest.raises(RuntimeError, match="learn_ingest_contract_violation"):
+        svc.ingest("repo:nexus", source_file=None, topic="nexus")
 
 
 def test_report_delegation_to_subservice(tmp_path, monkeypatch):

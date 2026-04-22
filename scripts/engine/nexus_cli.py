@@ -304,7 +304,11 @@ def acceptance_check(as_json, evidence_path):
     """✅ Run full system acceptance check with Hallucination Guard."""
     # 1. 執行實體驗收
     cmd = [sys.executable, str(repo_root / "scripts/ops/nexus_acceptance_check.py")]
-    if as_json: cmd.append("--json")
+    cmd.extend(["--report-file", ".nexus/reports/agent_report.json"])
+    if evidence_path:
+        cmd.extend(["--report-newer-than", str(evidence_path)])
+    if as_json:
+        cmd.append("--json")
     acceptance_result = subprocess.run(cmd)
     if acceptance_result.returncode != 0:
         raise click.exceptions.Exit(acceptance_result.returncode)
@@ -316,6 +320,11 @@ def acceptance_check(as_json, evidence_path):
         "--project-root",
         str(repo_root),
         "--require-acceptance-pass",
+        "--report-file",
+        ".nexus/reports/agent_report.json",
+        "--require-test-evidence",
+        "--report-newer-than",
+        str(evidence_path) if evidence_path else ".nexus/reports/hallucination_evidence.json",
         "--require-path",
         ".nexus/reports/acceptance_check.json",
         "--require-path",
@@ -782,7 +791,7 @@ def learn_phase_slo(window, report_file, output_json):
     click.echo(f"Report: {out_path}")
 
 
-@nexus_group.command(name="learn:benchmark")
+@nexus_group.command(name="learn:benchmark-legacy")
 @click.option("--manifest-file", required=True, type=click.Path(exists=True))
 @click.option("--source", default="", help="Optional source to ingest before benchmark.")
 @click.option("--source-file", default=None, type=click.Path(exists=True))
@@ -2059,7 +2068,7 @@ def learn_scheduler_status_cmd(output_json):
 @click.option("--output-json", is_flag=True)
 @click.option("--output", default=".nexus/reports/learn/precision_benchmark.json", type=click.Path())
 def learn_benchmark_cmd(manifest_file, topic, source, source_file, output_json, output):
-    """📊 Benchmark Learn ask precision and Unknown gate quality."""
+    """📊 Legacy benchmark alias (kept for backward compatibility)."""
     import json
     from nexus.research.learn_mode import LearnModeService
     

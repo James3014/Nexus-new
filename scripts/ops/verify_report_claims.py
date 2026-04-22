@@ -5,7 +5,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from nexus.delivery.report_claims import ReportClaimsOptions
 from nexus.delivery.report_claims import load_ignore_dirty_paths as _load_ignore_dirty_paths_core
@@ -40,6 +40,8 @@ def verify_claims(
     require_baseline: bool = False,
     baseline_manifest_rel: str = ".nexus/reports/baseline/baseline_manifest.json",
     report_file_rel: str | None = None,
+    require_test_evidence: bool = False,
+    report_newer_than: str | None = None,
 ) -> Dict[str, Any]:
     options = ReportClaimsOptions(
         required_paths=list(required_paths or []),
@@ -50,6 +52,8 @@ def verify_claims(
         require_baseline=bool(require_baseline),
         baseline_manifest_rel=baseline_manifest_rel,
         report_file_rel=report_file_rel,
+        require_test_evidence=bool(require_test_evidence),
+        report_newer_than=report_newer_than,
     )
     return verify_claims_core(project_root, options, _run_git)
 
@@ -90,6 +94,16 @@ def main() -> int:
         default=None,
         help="Report JSON path used for report_integrity_lock checks.",
     )
+    parser.add_argument(
+        "--require-test-evidence",
+        action="store_true",
+        help="Require report_file tests_run evidence with all exit_code=0.",
+    )
+    parser.add_argument(
+        "--report-newer-than",
+        default=None,
+        help="Require report_file mtime to be newer than the given reference file.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON output.")
     args = parser.parse_args()
 
@@ -104,6 +118,8 @@ def main() -> int:
         require_baseline=not args.no_require_baseline,
         baseline_manifest_rel=args.baseline_manifest,
         report_file_rel=args.report_file,
+        require_test_evidence=bool(args.require_test_evidence),
+        report_newer_than=args.report_newer_than,
     )
 
     if args.json:

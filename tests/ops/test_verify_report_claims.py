@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -123,3 +124,128 @@ def test_verify_claims_loads_ignore_dirty_paths_from_config(tmp_path: Path) -> N
         require_acceptance_pass=True,
     )
     assert report["passed"] is True
+
+
+def test_verify_claims_report_integrity_fails_when_tests_evidence_missing(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    head = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    changed = [
+        line.strip()
+        for line in subprocess.check_output(
+            ["git", "show", "--name-only", "--pretty=format:", "HEAD"], cwd=tmp_path, text=True
+        ).splitlines()
+        if line.strip()
+    ]
+    branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    report_file = tmp_path / ".nexus" / "reports" / "agent_report.json"
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(
+        json.dumps(
+            {
+                "head_sha": head,
+                "files_changed_in_this_commit": changed,
+                "base_branch": branch,
+                "branch_delta_vs_base": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = verify_claims(
+        tmp_path,
+        report_file_rel=".nexus/reports/agent_report.json",
+        require_test_evidence=True,
+    )
+    integrity = next(c for c in report["checks"] if c["name"] == "report_integrity_lock")
+    assert integrity["passed"] is False
+    assert integrity["detail"]["test_evidence"]["error"] == "missing_tests_run"
+
+
+def test_verify_claims_report_integrity_passes_with_valid_tests_evidence(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    head = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    changed = [
+        line.strip()
+        for line in subprocess.check_output(
+            ["git", "show", "--name-only", "--pretty=format:", "HEAD"], cwd=tmp_path, text=True
+        ).splitlines()
+        if line.strip()
+    ]
+    branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    report_file = tmp_path / ".nexus" / "reports" / "agent_report.json"
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(
+        json.dumps(
+            {
+                "head_sha": head,
+                "files_changed_in_this_commit": changed,
+                "base_branch": branch,
+                "branch_delta_vs_base": [],
+                "tests_run": [
+                    {"command": "uv run pytest -q tests/test_cli_learn_mode.py", "exit_code": 0}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = verify_claims(
+        tmp_path,
+        report_file_rel=".nexus/reports/agent_report.json",
+        require_test_evidence=True,
+    )
+    assert report["passed"] is True
+
+
+def test_verify_claims_report_integrity_fails_when_report_older_than_evidence(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    head = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    changed = [
+        line.strip()
+        for line in subprocess.check_output(
+            ["git", "show", "--name-only", "--pretty=format:", "HEAD"], cwd=tmp_path, text=True
+        ).splitlines()
+        if line.strip()
+    ]
+    branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    report_file = tmp_path / ".nexus" / "reports" / "agent_report.json"
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(
+        json.dumps(
+            {
+                "head_sha": head,
+                "files_changed_in_this_commit": changed,
+                "base_branch": branch,
+                "branch_delta_vs_base": [],
+                "tests_run": [{"command": "uv run pytest -q tests/test_cli_learn_mode.py", "exit_code": 0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence_file = tmp_path / ".nexus" / "reports" / "hallucination_evidence.json"
+    evidence_file.parent.mkdir(parents=True, exist_ok=True)
+    evidence_file.write_text('{"final_response":"x","evidence_bundle":{}}', encoding="utf-8")
+    os.utime(report_file, (1000, 1000))
+    os.utime(evidence_file, (2000, 2000))
+
+    report = verify_claims(
+        tmp_path,
+        report_file_rel=".nexus/reports/agent_report.json",
+        require_test_evidence=True,
+        report_newer_than=".nexus/reports/hallucination_evidence.json",
+    )
+    integrity = next(c for c in report["checks"] if c["name"] == "report_integrity_lock")
+    assert integrity["passed"] is False
+    assert integrity["detail"]["freshness"]["error"] == "report_older_than_reference"
