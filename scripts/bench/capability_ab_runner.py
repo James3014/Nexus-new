@@ -100,6 +100,13 @@ def select_tasks(tasks: list[CapabilityTask], *, difficulty: str, max_tasks: int
     return ordered[:limit]
 
 
+def filter_tasks_by_repo_kind(tasks: list[CapabilityTask], repo_kind_filter: str) -> list[CapabilityTask]:
+    if repo_kind_filter.strip().lower() in {"", "all"}:
+        return tasks
+    allowed = {part.strip() for part in repo_kind_filter.split(",") if part.strip()}
+    return [task for task in tasks if task.repo_kind in allowed]
+
+
 def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuffle_seed: int | None) -> list[CapabilityTask]:
     expanded: list[CapabilityTask] = []
     trials = max(1, repeat_trials)
@@ -195,6 +202,12 @@ def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, st
 
 
 def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_missing: bool) -> tuple[str, str]:
+    if task.repo_kind == "nexus_internal":
+        materialize_missing = False
+    if task.repo_kind == "external" and materialize_missing:
+        raise NotImplementedError(
+            f"{task.id} is external; clone/setup adapter is required before public execution"
+        )
     if materialize_missing:
         return _materialize_fixture(repo_root, task)
 
@@ -849,6 +862,11 @@ def main() -> int:
     parser.add_argument("--no-progress-log", dest="progress_log", action="store_false")
     parser.add_argument("--repeat-trials", type=int, default=1)
     parser.add_argument("--shuffle-seed", type=int, default=None)
+    parser.add_argument(
+        "--repo-kind-filter",
+        default="all",
+        help="Comma-separated repo_kind allowlist, e.g. neutral_fixture,nexus_internal. Default: all.",
+    )
     parser.add_argument("--evidence-bundle", dest="evidence_bundle", action="store_true", default=True)
     parser.add_argument("--no-evidence-bundle", dest="evidence_bundle", action="store_false")
     parser.add_argument("--require-clean-worktree", action="store_true", default=False)
@@ -869,7 +887,8 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     if args.require_clean_worktree:
         assert_clean_worktree(repo_root)
-    selected_tasks = select_tasks(load_tasks(args.tasks_file), difficulty=args.difficulty, max_tasks=args.max_tasks)
+    filtered_tasks = filter_tasks_by_repo_kind(load_tasks(args.tasks_file), args.repo_kind_filter)
+    selected_tasks = select_tasks(filtered_tasks, difficulty=args.difficulty, max_tasks=args.max_tasks)
     tasks = expand_task_trials(
         selected_tasks,
         repeat_trials=int(args.repeat_trials),
@@ -1080,6 +1099,7 @@ def main() -> int:
                     "unique_tasks_requested": len(selected_tasks),
                     "repeat_trials": max(1, int(args.repeat_trials)),
                     "shuffle_seed": args.shuffle_seed,
+                    "repo_kind_filter": args.repo_kind_filter,
                     "isolation_mode": args.isolation_mode,
                     "require_clean_worktree": bool(args.require_clean_worktree),
                     "history_policy": history_policy,
@@ -1098,6 +1118,7 @@ def main() -> int:
                 "unique_tasks_requested": len(selected_tasks),
                 "repeat_trials": max(1, int(args.repeat_trials)),
                 "shuffle_seed": args.shuffle_seed,
+                "repo_kind_filter": args.repo_kind_filter,
                 "tasks_executed": min(len(with_rows), len(without_rows)) if without_tasks else len(with_rows),
                 "with_nexus_executed": len(with_rows),
                 "without_nexus_executed": len(without_rows),

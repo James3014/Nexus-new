@@ -19,6 +19,7 @@ from scripts.bench.capability_ab_runner import (
     _resolve_task_files,
     _write_trial_evidence,
     assert_clean_worktree,
+    filter_tasks_by_repo_kind,
     load_tasks,
     run_with_nexus,
     run_without_nexus,
@@ -138,6 +139,44 @@ def test_resolve_task_files_preserves_existing_real_paths(tmp_path: Path):
     target, test = _resolve_task_files(tmp_path, task, materialize_missing=False)
     assert target.endswith("src.py")
     assert test.endswith("tests/test_src.py")
+
+
+def test_resolve_task_files_uses_real_paths_for_nexus_internal_even_when_materializing(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_src.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    task = CapabilityTask(
+        id="pub-internal",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Use real internal files",
+        target_file="src.py",
+        test_file="tests/test_src.py",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="nexus_internal",
+    )
+    target, test = _resolve_task_files(tmp_path, task, materialize_missing=True)
+    assert target.endswith("src.py")
+    assert test.endswith("tests/test_src.py")
+
+
+def test_resolve_task_files_fails_closed_for_external_without_adapter(tmp_path: Path):
+    task = CapabilityTask(
+        id="pub-external",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="External task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="external",
+    )
+    try:
+        _resolve_task_files(tmp_path, task, materialize_missing=True)
+    except NotImplementedError as exc:
+        assert "clone/setup adapter" in str(exc)
+    else:
+        raise AssertionError("external tasks must not materialize local fixtures")
 
 
 def test_preserve_target_helpers_restore_real_task_file(tmp_path: Path):
@@ -348,6 +387,15 @@ def test_select_tasks_balances_buckets_for_all_mode():
     ]
     selected = select_tasks(tasks, difficulty="all", max_tasks=6)
     assert [task.id for task in selected] == ["easy-1", "medium-1", "hard-1", "easy-2", "medium-2", "hard-2"]
+
+
+def test_filter_tasks_by_repo_kind_allows_non_external_subset():
+    tasks = [
+        CapabilityTask(id="a", difficulty="medium", task_type="bug", task_desc="a", target_file="a", test_file="a", success_criteria="x", repo_kind="neutral_fixture"),
+        CapabilityTask(id="b", difficulty="hard", task_type="bug", task_desc="b", target_file="b", test_file="b", success_criteria="x", repo_kind="external"),
+        CapabilityTask(id="c", difficulty="hard", task_type="bug", task_desc="c", target_file="c", test_file="c", success_criteria="x", repo_kind="nexus_internal"),
+    ]
+    assert [task.id for task in filter_tasks_by_repo_kind(tasks, "neutral_fixture,nexus_internal")] == ["a", "c"]
 
 
 def test_run_without_nexus_bare_mode_returns_record(tmp_path: Path):
