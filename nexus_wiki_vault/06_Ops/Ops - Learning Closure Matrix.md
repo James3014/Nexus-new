@@ -280,3 +280,9 @@ version_scope:
 - **Root Cause**: The benchmark can prove substantial mutation uplift on completed Nexus rows, but intermittent long-tail execution can still consume the whole task budget before the battle-suit telemetry reaches the evaluator.
 - **Decision**: Keep the run as pilot evidence only (`+92.59 percentage points`, formal valid `50/54`) and do not use it as a product-grade public claim until slow-case replay and phase timing isolate the timeout source.
 - **Prevention**: Before scaling public benchmarks, replay timeout rows by task/trial with per-phase timing and fail-fast subprocess envelopes; publish uplift together with formal-treatment validity and timeout rate.
+
+## 2026-04-25: Longer Timeout Does Not Fix Pre-Receipt Nexus Hangs
+- **Phenomenon**: Re-running the same `neutral_fixture 18x3` pilot with `timeout_sec=240` still produced four invalid Nexus rows (`pub-test-002`, `pub-ref-002`, `pub-ref-004`, `pub-test-002`). All failed before any receipt, Gemini call, phase timing, or Nexus usage trace was emitted.
+- **Root Cause**: The timeout was not a simple 180s budget shortage. The failed subprocesses stalled before JSON receipt generation, with only Redis fallback and `MemoryService auto-init warning (non-fatal): Table 'policy' already exists` visible on stderr.
+- **Decision**: Stop increasing per-task timeout as the mitigation. Treat these rows as pre-receipt process isolation failures and fix startup/resource isolation before the next full pilot.
+- **Prevention**: Long-running public benchmark legs must isolate mutable startup state per task or make MemoryService bootstrap idempotent; the runner should classify pre-receipt hangs separately from Gemini/Nexus reasoning failures.
