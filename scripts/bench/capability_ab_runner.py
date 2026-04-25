@@ -369,12 +369,8 @@ def _extract_record(
         "artifact_verification_only": bool(artifact_summary.get("verification_only", False)),
         "artifact_diff_line_count": int(artifact_summary.get("diff_line_count", 0) or 0),
         "success_criteria": str(success_criteria_payload.get("name") or task.success_criteria),
-        "mutation_required": bool(
-            success_criteria_payload.get(
-                "mutation_required",
-                task.success_criteria in {"artifact_changed_and_tests_pass", "patch_and_tests_pass", "mutation_required"},
-            )
-        ),
+        "mutation_required": bool(success_criteria_payload.get("mutation_required", False))
+        or task.success_criteria in {"artifact_changed_and_tests_pass", "patch_and_tests_pass", "mutation_required"},
         "verification_only_allowed": bool(success_criteria_payload.get("verification_only_allowed", task.success_criteria == "all_target_tests_pass")),
         "gemini_uses_nexus": bool(usage_trace.get("gemini_uses_nexus", False)),
         "nexus_context_delivered": bool(usage_trace.get("nexus_context_delivered", False)),
