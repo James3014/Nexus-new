@@ -194,7 +194,7 @@ def test_preserve_target_helpers_restore_real_task_file(tmp_path: Path):
     target.write_text("VALUE = 2\n", encoding="utf-8")
     _restore_preserved_target(str(target), original)
     assert target.read_text(encoding="utf-8") == "VALUE = 1\n"
-    assert _read_preserved_target(str(target), materialize_missing=True) is None
+    assert _read_preserved_target(str(target), materialize_missing=True) == "VALUE = 1\n"
 
 
 def test_write_trial_evidence_and_bundle(tmp_path: Path):
@@ -585,22 +585,18 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
     )
     target_file, test_file = _materialize_fixture(tmp_path, task)
 
-    class _Gateway:
-        def __init__(self, project_root):
-            self.project_root = project_root
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        assert "[CURRENT TESTS]" in prompt
+        return (
+            {
+                "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
+                "tokens_used": 123,
+                "token_capture_status": "measured",
+            },
+            "",
+        )
 
-        def ask_structured(self, **kwargs):
-            assert kwargs["model_name"] == "gemini-3-flash-preview"
-            return (
-                {
-                    "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
-                    "tokens_used": 123,
-                    "token_capture_status": "measured",
-                },
-                "",
-            )
-
-    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", _Gateway)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
     out = run_without_nexus(
         repo_root=tmp_path,
         task=task,
@@ -615,6 +611,9 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
     assert out["model_calls"] == 1
     assert out["total_tokens"] == 123
     assert out["token_capture_status"] == "measured"
+    assert out["artifact_changed"] is True
+    assert out["baseline_patch_changed"] is True
+    assert out["baseline_patch_len"] > 0
 
 
 def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):

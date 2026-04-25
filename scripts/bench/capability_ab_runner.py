@@ -8,6 +8,7 @@ import json
 import os
 import random
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -236,8 +237,6 @@ def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_mi
 
 
 def _read_preserved_target(target_file: str, *, materialize_missing: bool) -> str | None:
-    if materialize_missing:
-        return None
     return Path(target_file).read_text(encoding="utf-8")
 
 
@@ -342,6 +341,8 @@ def _extract_record(
     phase_trace = phase_trace if isinstance(phase_trace, dict) else {}
     capabilities = usage_trace.get("capabilities", {}) if isinstance(usage_trace, dict) else {}
     capabilities = capabilities if isinstance(capabilities, dict) else {}
+    baseline_trace = payload.get("baseline_trace", {}) if isinstance(payload, dict) else {}
+    baseline_trace = baseline_trace if isinstance(baseline_trace, dict) else {}
     learn_phase_slo = payload.get("learn_phase_slo", {}) if isinstance(payload, dict) else {}
     consensus = route.get("consensus", {}) if isinstance(route, dict) else {}
     consensus_votes = consensus.get("votes", {}) if isinstance(consensus, dict) else {}
@@ -394,6 +395,12 @@ def _extract_record(
         "total_tokens": total_tokens,
         "token_capture_status": token_capture_status,
         "token_measured": bool(total_tokens > 0),
+        "baseline_gateway_error_category": baseline_trace.get("gateway_error_category"),
+        "baseline_patch_len": int(baseline_trace.get("patch_len", 0) or 0),
+        "baseline_patch_changed": bool(baseline_trace.get("patch_changed", False)),
+        "baseline_raw_tail": baseline_trace.get("raw_tail"),
+        "baseline_pytest_stdout_tail": baseline_trace.get("pytest_stdout_tail"),
+        "baseline_pytest_stderr_tail": baseline_trace.get("pytest_stderr_tail"),
         "report_trust_mismatch": bool(payload.get("semantic_status") is None),
         "route_recommended_flow": route.get("recommended_flow"),
         "route_reason": route.get("recommended_reason"),
@@ -526,6 +533,62 @@ def _with_nexus_timeout_payload(*, timeout_sec: int, exc: subprocess.TimeoutExpi
     }
 
 
+def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
+    try:
+        outer = json.loads(raw_stdout)
+    except json.JSONDecodeError:
+        outer, _ = json.JSONDecoder().raw_decode(raw_stdout)
+    output_text = str(outer.get("output") or outer.get("response") or raw_stdout)
+    try:
+        payload = json.loads(output_text)
+    except json.JSONDecodeError:
+        start = output_text.find("{")
+        end = output_text.rfind("}")
+        if start == -1 or end == -1:
+            raise
+        payload = json.loads(output_text[start : end + 1])
+    tokens_total = 0
+    stats = outer.get("stats", {}).get("models", {})
+    if isinstance(stats, dict):
+        for model_stats in stats.values():
+            if isinstance(model_stats, dict):
+                tokens_total += int(((model_stats.get("tokens") or {}).get("total")) or 0)
+    payload["tokens_used"] = tokens_total
+    payload["token_capture_status"] = "ok"
+    return payload, output_text
+
+
+def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
+    gemini_bin = shutil.which("gemini") or "/Users/jameschen/.npm-global/bin/gemini"
+    if not Path(gemini_bin).exists():
+        return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0}, "gemini_missing"
+    cmd = [
+        gemini_bin,
+        "--skip-trust",
+        "--approval-mode",
+        "plan",
+        "-m",
+        "gemini-3-flash-preview",
+        "-p",
+        prompt,
+        "--output-format",
+        "json",
+    ]
+    env = os.environ.copy()
+    env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
+    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    try:
+        res = subprocess.run(cmd, cwd="/tmp", env=env, text=True, capture_output=True, timeout=timeout_sec)
+    except subprocess.TimeoutExpired as exc:
+        return {"status": "FAIL", "error_category": "timeout", "tokens_used": 0}, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
+    if res.returncode != 0:
+        return {"status": "FAIL", "error_category": "cli_error", "tokens_used": 0}, _tail_text(res.stderr or res.stdout)
+    try:
+        return _parse_direct_gemini_json(res.stdout.strip())
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "FAIL", "error_category": "parse_failure", "tokens_used": 0}, f"{type(exc).__name__}: {_tail_text(res.stdout)}"
+
+
 def run_with_nexus(
     *,
     repo_root: Path,
@@ -614,34 +677,38 @@ def run_without_nexus(
 ) -> dict[str, Any]:
     if mode == "gemini":
         target_path = Path(target_file)
+        test_path = Path(test_file)
         original = target_path.read_text(encoding="utf-8")
+        test_source = test_path.read_text(encoding="utf-8")
         start = time.time()
         status = "FAILED"
         err = ""
         model_calls = 0
         total_tokens = 0
         token_capture_status = "unknown"
+        gateway_error_category = ""
+        raw_tail = ""
+        patch_changed = False
+        patch_len = 0
+        pytest_stdout_tail = ""
+        pytest_stderr_tail = ""
         try:
-            from nexus.services.gateway import BattlesuitGateway
-
             prompt = (
-                "You are Gemini 3 Flash running without Nexus orchestration.\n"
+                "You are Gemini 3 Flash running without Nexus orchestration. "
+                "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
+                "The patch value must be the full updated target file content.\n"
                 f"Task: {task.task_desc}\n\n"
                 f"[CURRENT SOURCE]\n{original}\n\n"
+                f"[CURRENT TESTS]\n{test_source}\n\n"
                 "Return the full updated file content in the patch field."
             )
-            gateway = BattlesuitGateway(project_root=repo_root)
-            out, raw = gateway.ask_structured(
-                prompt=prompt,
-                payload="Return FULL file content only.",
-                phase="R",
-                output_schema={"status": "APPROVED | FAIL", "patch": "Full target file content"},
-                model_name="gemini-3-flash-preview",
-            )
+            out, raw = _ask_direct_gemini_flash_patch(prompt=prompt, timeout_sec=timeout_sec)
             model_calls = 1
             patch = raw
+            raw_tail = _tail_text(raw, max_chars=1000)
             if isinstance(out, dict):
-                patch = str(out.get("patch") or raw)
+                patch = str(out.get("patch") or "")
+                gateway_error_category = str(out.get("error_category", "") or "")
                 try:
                     total_tokens = int(out.get("tokens_used", 0) or 0)
                 except (TypeError, ValueError):
@@ -650,10 +717,14 @@ def run_without_nexus(
             if total_tokens <= 0:
                 total_tokens = max(1, (len(prompt) + len(str(patch))) // 4)
                 token_capture_status = "estimated"
-            if patch and patch != original:
+            patch_len = len(str(patch or ""))
+            patch_changed = bool(patch and patch != original)
+            if patch_changed:
                 target_path.write_text(patch, encoding="utf-8")
                 cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
                 res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, timeout=timeout_sec)
+                pytest_stdout_tail = _tail_text(res.stdout, max_chars=1000)
+                pytest_stderr_tail = _tail_text(res.stderr, max_chars=1000)
                 status = "SUCCESS" if res.returncode == 0 else "FAILED"
                 if status != "SUCCESS":
                     err = "pytest_failed"
@@ -683,6 +754,27 @@ def run_without_nexus(
             "status": status,
             "semantic_status": "VERIFIED" if status == "SUCCESS" else "UNVERIFIED",
             "runtime_classification": "direct_gemini_flash",
+            "artifact_summary": {
+                "changed": patch_changed,
+                "verification_only": False,
+                "diff_line_count": len(list(difflib.unified_diff(original.splitlines(), str(patch or "").splitlines()))) if patch_changed else 0,
+                "success_criteria": task.success_criteria,
+                "mutation_required": task.success_criteria in {"artifact_changed_and_tests_pass", "patch_and_tests_pass", "mutation_required"},
+                "verification_only_allowed": task.success_criteria == "all_target_tests_pass",
+            },
+            "success_criteria": {
+                "name": task.success_criteria,
+                "mutation_required": task.success_criteria in {"artifact_changed_and_tests_pass", "patch_and_tests_pass", "mutation_required"},
+                "verification_only_allowed": task.success_criteria == "all_target_tests_pass",
+            },
+            "baseline_trace": {
+                "gateway_error_category": gateway_error_category,
+                "patch_len": patch_len,
+                "patch_changed": patch_changed,
+                "raw_tail": raw_tail,
+                "pytest_stdout_tail": pytest_stdout_tail,
+                "pytest_stderr_tail": pytest_stderr_tail,
+            },
         }
         return _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
 
