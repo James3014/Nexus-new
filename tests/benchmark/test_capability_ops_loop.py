@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.bench.capability_ops_loop import _compute_health_score, run_ops_loop, run_ops_loop_rounds
+from scripts.bench.capability_ops_loop import _compute_health_score, _compute_pillar_scores, run_ops_loop, run_ops_loop_rounds
 
 
 def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
@@ -51,3 +51,14 @@ def test_compute_health_score_warns_on_low_quality():
     out = _compute_health_score(payload)
     assert out["verdict"] == "WARN"
     assert 0.0 <= out["score"] <= 1.0
+
+
+def test_memory_pillar_uses_route_memory_hits_only():
+    out = _compute_pillar_scores(
+        [
+            {"route_findings_hits": 2, "prior_fix_hits": 2, "route_memory_hits": 0},
+            {"route_findings_hits": 0, "prior_fix_hits": 1, "route_memory_hits": 1},
+        ]
+    )
+    assert out["scores"]["LanceDB"] == 0.5
+    assert out["scores"]["Memory"] == 0.5

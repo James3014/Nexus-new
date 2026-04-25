@@ -1,5 +1,6 @@
 import pytest
 import json
+from types import SimpleNamespace
 from pathlib import Path
 from nexus.app import research_flow_service
 from nexus.research.learn_mode import LearnModeService
@@ -231,6 +232,38 @@ def test_build_route_includes_history_memory_hits(tmp_path: Path):
     assert out["prior_fix_hits"] >= 1
 
 
+def test_build_route_ignores_unrelated_same_type_history(tmp_path: Path):
+    history_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-history.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(
+        json.dumps(
+            {
+                "a|b": [
+                    {
+                        "flow": "baseline",
+                        "status": "SUCCESS",
+                        "reason": "stage1_pass",
+                        "task_type": "bug",
+                        "task_desc": "fix invoice rounding drift",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="repair websocket timeout in orchestrator",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query="",
+        target_file="demo.py",
+    )
+    assert out["route_features"]["memory_hits"] == 0
+    assert out["prior_fix_hits"] == 0
+
+
 def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text(
@@ -293,3 +326,127 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
     assert payload["strategy"]["path"] == "baseline_only"
     assert "artifact_summary" in payload
     assert payload["artifact_summary"]["changed"] is True
+    trace = payload["nexus_usage_trace"]
+    assert trace["nexus_context_delivered"] is True
+    assert trace["gemini_uses_nexus"] is False
+    assert trace["pillars"]["lancedb"]["active"] is True
+    assert trace["pillars"]["memory"]["active"] is True
+    assert trace["pillars"]["mempalace"]["active"] is False
+    assert trace["pillars"]["belief"]["route_influenced"] is True
+    assert trace["pillars"]["artifact"]["tests_passed"] is True
+    assert trace["phase_trace"]["P"] == "route_built"
+    assert trace["phase_trace"]["A"] == "artifact_verified"
+    assert trace["capabilities"]["claim_verified"] is True
+
+
+def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="FAILED",
+            reason="stage1_no_passing_candidate",
+            patch="",
+            winner_source="local",
+            error_codes=["stage1_no_passing_candidate"],
+            rejection_summary={"pytest_failed": 1},
+            attempt_count=5,
+            model_calls=5,
+            total_tokens=1234,
+            token_capture_status="measured",
+            learning_trace={"mempalace_verified": True},
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Cross-module refactor: stabilize drone semantic completion over multi-step repair handoff",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="cross_module_refactor_drone",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=9.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        success_criteria="all_target_tests_pass",
+    )
+
+    assert payload["result"]["status"] == "SUCCESS"
+    assert payload["artifact_summary"]["changed"] is False
+    assert payload["artifact_summary"]["verification_only"] is True
+    trace = payload["nexus_usage_trace"]
+    assert trace["gemini_uses_nexus"] is True
+    assert trace["usage_valid"] is True
+    assert trace["nexus_rescued"] is True
+    assert trace["winner_source"] == "verification_only"
+    assert trace["capabilities"]["claim_verified"] is True
+
+
+def test_cross_module_mutation_required_does_not_use_verification_only_rescue(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="FAILED",
+            reason="stage1_no_passing_candidate",
+            patch="",
+            winner_source="local",
+            error_codes=["stage1_no_passing_candidate"],
+            rejection_summary={"pytest_failed": 1},
+            attempt_count=5,
+            model_calls=5,
+            total_tokens=1234,
+            token_capture_status="measured",
+            learning_trace={"mempalace_verified": True},
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Cross-module refactor: mutate drone engine contract",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="cross_module_refactor_drone",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=9.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        success_criteria="artifact_changed_and_tests_pass",
+    )
+
+    assert payload["result"]["status"] == "FAILED"
+    assert payload["artifact_summary"]["verification_only"] is False
+    assert payload["success_criteria"]["mutation_required"] is True
+    trace = payload["nexus_usage_trace"]
+    assert trace["usage_valid"] is False
+    assert trace["capabilities"]["claim_verified"] is False

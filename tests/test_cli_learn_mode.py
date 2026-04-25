@@ -6,6 +6,50 @@ from scripts.engine import nexus_cli
 from scripts.engine.nexus_cli import nexus
 
 
+def test_learn_report_formats_structured_unresolved_questions(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+    monkeypatch.setattr(nexus_cli, "_identity_vault_status", lambda _root: (True, []))
+
+    class _Service:
+        def __init__(self, _root):
+            pass
+
+        def build_report(self, topic="", question_count=5, pass_threshold=0.6):
+            return {
+                "status": "SUCCESS",
+                "topic": topic,
+                "claims_count": 1,
+                "converged": False,
+                "citation_valid_ratio": 1.0,
+                "unresolved_questions": [
+                    {"question": "What governs Nexus?", "reason": "insufficient evidence"},
+                    {"id": "q2", "status": "OPEN"},
+                ],
+            }
+
+    monkeypatch.setattr("nexus.research.learn_mode.LearnModeService", _Service)
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:report",
+            "--topic",
+            "nexus-governance",
+            "--report-file",
+            ".nexus/reports/learn/report.json",
+            "--markdown-report-file",
+            ".nexus/reports/learn/report.md",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["semantic_status"] == "VERIFIED"
+    report_md = tmp_path / ".nexus" / "reports" / "learn" / "report.md"
+    assert "What governs Nexus? - insufficient evidence" in report_md.read_text(encoding="utf-8")
+
+
 def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)

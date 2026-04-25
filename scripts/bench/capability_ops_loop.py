@@ -87,7 +87,7 @@ def _compute_pillar_scores(with_rows: list[dict[str, Any]]) -> dict[str, Any]:
     memory_hits = sum(
         1
         for r in with_rows
-        if int(r.get("route_memory_hits", 0) or 0) > 0 or int(r.get("prior_fix_hits", 0) or 0) > 0
+        if int(r.get("route_memory_hits", 0) or 0) > 0
     )
     mempalace_hits = sum(1 for r in with_rows if not bool(r.get("guard_hit", False)))
     belief_values = [float(r.get("belief_confidence", 0.0) or 0.0) for r in with_rows]

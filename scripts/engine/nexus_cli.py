@@ -174,6 +174,24 @@ def _write_dual_gate_markdown(base_root: Path, path: Path, task: str, data: dict
     return out
 
 
+def _format_report_debt_items(items) -> str:
+    rendered: list[str] = []
+    for item in items or []:
+        if isinstance(item, str):
+            text = item.strip()
+        elif isinstance(item, dict):
+            question = str(item.get("question") or item.get("text") or item.get("id") or "").strip()
+            reason = str(item.get("reason") or item.get("status") or "").strip()
+            text = " - ".join(part for part in (question, reason) if part)
+            if not text:
+                text = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        else:
+            text = str(item).strip()
+        if text:
+            rendered.append(text)
+    return "; ".join(rendered) or "None"
+
+
 def _evaluate_learn_semantic_contract(
     *,
     root: Path,
@@ -919,7 +937,7 @@ def learn_report(topic, question_count, pass_threshold, report_file, markdown_re
             f"converged={payload.get('converged')} "
             f"citation_valid_ratio={payload.get('citation_valid_ratio', 0.0)}"
         ),
-        debt="; ".join(payload.get("unresolved_questions", [])) or "None",
+        debt=_format_report_debt_items(payload.get("unresolved_questions", [])),
     )
     semantic_contract = _evaluate_learn_semantic_contract(
         root=repo_root,
@@ -1522,6 +1540,7 @@ def research_report_cmd(input_dir, rolling, output):
 @click.option("--target-file", required=True)
 @click.option("--test-file", required=True)
 @click.option("--task-type", default="bug")
+@click.option("--success-criteria", default="all_target_tests_pass", show_default=True)
 @click.option("--candidate-count", default=1, type=int)
 @click.option("--root-cause-confidence", default=1.0, type=float)
 @click.option("--findings-query")
@@ -1545,6 +1564,7 @@ def research_auto_flow(
     target_file,
     test_file,
     task_type,
+    success_criteria,
     candidate_count,
     root_cause_confidence,
     findings_query,
@@ -1582,6 +1602,7 @@ def research_auto_flow(
         target_file=target_file,
         test_file=test_file,
         task_type=task_type,
+        success_criteria=success_criteria,
         candidate_count=candidate_count,
         root_cause_confidence=root_cause_confidence,
         findings_query=findings_query,
@@ -2389,6 +2410,7 @@ def run_bug(task, auto_flow, target_file, test_file, root_cause_confidence, cand
             target_file=target_file,
             test_file=test_file,
             task_type="bug",
+            success_criteria="all_target_tests_pass",
             candidate_count=candidate_count,
             root_cause_confidence=root_cause_confidence,
             findings_query=findings_query,

@@ -162,9 +162,15 @@ class SprintExecutor:
         self.broker = SwarmBroker(repo_root)
 
     def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
-        evaluator = CandidateEvaluator(self.repo_root, self.pytest_cmd, self.timeout_sec)
         target_rel = self.scope_files[0]
-        original = (self.repo_root / target_rel).read_text(encoding="utf-8") if (self.repo_root / target_rel).exists() else ""
+        if Path(target_rel).is_absolute():
+            direct_executor = InPlaceSprintExecutor(
+                repo_root=self.repo_root,
+                target_file=target_rel,
+                pytest_cmd=self.pytest_cmd,
+                timeout_sec=self.timeout_sec,
+            )
+            return direct_executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
 
         # Swarm handling (Executor-specific) with timing instrumentation
         start_create = time.time()
@@ -175,14 +181,28 @@ class SprintExecutor:
             return CandidateEval(seed=seed, score=0.0, hint=hint, error="broker_timeout", source=source)
 
         try:
+            if swarm_dir.resolve() == self.repo_root.resolve():
+                swarm_executor = InPlaceSprintExecutor(
+                    repo_root=self.repo_root,
+                    target_file=target_rel,
+                    pytest_cmd=self.pytest_cmd,
+                    timeout_sec=self.timeout_sec,
+                )
+                return swarm_executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
+
             start_sync = time.time()
             self.broker.sync_scope(swarm_dir, scope_files=self.scope_files)
             sync_elapsed = time.time() - start_sync
 
             # Use evaluator but on swarm_dir
-            evaluator.repo_root = swarm_dir
             start_test = time.time()
-            res = evaluator.evaluate(seed=seed, hint=hint, code=code, source=source, target_file=target_rel, original_code=original)
+            swarm_executor = InPlaceSprintExecutor(
+                repo_root=swarm_dir,
+                target_file=target_rel,
+                pytest_cmd=self.pytest_cmd,
+                timeout_sec=self.timeout_sec,
+            )
+            res = swarm_executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
             test_elapsed = time.time() - start_test
 
             # Record detailed timings in hint or extra (here we use CandidateEval which we'll ensure has enough fields)

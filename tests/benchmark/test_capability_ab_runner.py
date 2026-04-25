@@ -5,13 +5,26 @@ from pathlib import Path
 
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
+    _budget_exceeded,
+    _emit_progress,
     _extract_record,
     _extract_json_payload,
+    expand_task_trials,
+    _force_learn_slo_ready,
+    _history_policy_name,
     _materialize_fixture,
+    _read_preserved_target,
+    _remaining_leg_timeout,
+    _restore_preserved_target,
+    _resolve_task_files,
+    _write_trial_evidence,
+    assert_clean_worktree,
     load_tasks,
     run_with_nexus,
     run_without_nexus,
     select_tasks,
+    write_evidence_bundle,
+    write_jsonl,
 )
 
 
@@ -35,6 +48,44 @@ def test_load_tasks_parses_capability_schema(tmp_path: Path):
     assert len(tasks) == 1
     assert tasks[0].id == "hard-001"
     assert tasks[0].difficulty == "hard"
+    assert len(tasks[0].manifest_hash) == 64
+
+
+def test_load_tasks_parses_public_manifest_metadata(tmp_path: Path):
+    payload = {
+        "tasks": [
+            {
+                "id": "pub-001",
+                "category": "bugfix",
+                "difficulty": "hard",
+                "repo_kind": "neutral_fixture",
+                "repo": "fixture://demo",
+                "repo_ref": "v1",
+                "task_desc": "Fix public task",
+                "fixture_kind": "python_demo",
+                "success_criteria": "patch_and_tests_pass",
+            }
+        ]
+    }
+    src = tmp_path / "public.json"
+    src.write_text(json.dumps(payload), encoding="utf-8")
+    tasks = load_tasks(src)
+    assert tasks[0].task_type == "public_bugfix"
+    assert tasks[0].target_file == "python_demo"
+    assert tasks[0].category == "bugfix"
+    assert tasks[0].repo_kind == "neutral_fixture"
+    assert tasks[0].repo == "fixture://demo"
+    assert tasks[0].repo_ref == "v1"
+
+
+def test_expand_task_trials_repeats_and_shuffles_deterministically():
+    tasks = [
+        CapabilityTask(id="a", difficulty="hard", task_type="bug", task_desc="a", target_file="a", test_file="a", success_criteria="x"),
+        CapabilityTask(id="b", difficulty="hard", task_type="bug", task_desc="b", target_file="b", test_file="b", success_criteria="x"),
+    ]
+    expanded = expand_task_trials(tasks, repeat_trials=2, shuffle_seed=7)
+    assert sorted((task.id, task.trial_index) for task in expanded) == [("a", 1), ("a", 2), ("b", 1), ("b", 2)]
+    assert [task.id for task in expanded] == [task.id for task in expand_task_trials(tasks, repeat_trials=2, shuffle_seed=7)]
 
 
 def test_materialize_fixture_writes_files(tmp_path: Path):
@@ -51,6 +102,108 @@ def test_materialize_fixture_writes_files(tmp_path: Path):
     assert Path(target).exists()
     assert Path(test).exists()
     assert "normalize_flag" in Path(target).read_text(encoding="utf-8")
+
+
+def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
+    task = CapabilityTask(
+        id="real-001",
+        difficulty="hard",
+        task_type="cross_module_refactor_swarm",
+        task_desc="Use real files",
+        target_file="src.py",
+        test_file="tests/test_src.py",
+        success_criteria="all_target_tests_pass",
+    )
+    try:
+        _resolve_task_files(tmp_path, task, materialize_missing=False)
+    except FileNotFoundError as exc:
+        assert "real-001" in str(exc)
+    else:
+        raise AssertionError("missing real task files should fail closed")
+
+
+def test_resolve_task_files_preserves_existing_real_paths(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_src.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    task = CapabilityTask(
+        id="real-002",
+        difficulty="hard",
+        task_type="cross_module_refactor_swarm",
+        task_desc="Use real files",
+        target_file="src.py",
+        test_file="tests/test_src.py",
+        success_criteria="all_target_tests_pass",
+    )
+    target, test = _resolve_task_files(tmp_path, task, materialize_missing=False)
+    assert target.endswith("src.py")
+    assert test.endswith("tests/test_src.py")
+
+
+def test_preserve_target_helpers_restore_real_task_file(tmp_path: Path):
+    target = tmp_path / "src.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    original = _read_preserved_target(str(target), materialize_missing=False)
+    target.write_text("VALUE = 2\n", encoding="utf-8")
+    _restore_preserved_target(str(target), original)
+    assert target.read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert _read_preserved_target(str(target), materialize_missing=True) is None
+
+
+def test_write_trial_evidence_and_bundle(tmp_path: Path):
+    row = {"mode": "with_nexus", "task_id": "task/1", "trial_index": 2, "status": "SUCCESS"}
+    evidence = _write_trial_evidence(
+        evidence_root=tmp_path / "evidence",
+        row=row,
+        target_before="VALUE = 1\n",
+        target_after="VALUE = 2\n",
+    )
+    row.update(evidence)
+    assert Path(evidence["evidence_record_file"]).exists()
+    diff_text = Path(evidence["evidence_diff_file"]).read_text(encoding="utf-8")
+    assert "-VALUE = 1" in diff_text
+    assert "+VALUE = 2" in diff_text
+
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    write_jsonl(with_path, [row])
+    write_jsonl(without_path, [])
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row],
+        config={"repeat_trials": 1},
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    assert payload["schema"] == "nexus_public_benchmark_evidence_bundle_v1"
+    assert payload["raw_files"]["with_nexus"]["sha256"]
+    assert len(payload["artifact_files"]) == 2
+
+
+def test_total_timeout_budget_helper():
+    assert _budget_exceeded(0.0, 1) is True
+    assert _budget_exceeded(0.0, 0) is False
+    assert _remaining_leg_timeout(30, 0.0, 0) == 30
+    assert _remaining_leg_timeout(30, 0.0, 1) == 1
+
+
+def test_emit_progress_writes_json_to_stderr(capsys):
+    task = CapabilityTask(
+        id="real-003",
+        difficulty="hard",
+        task_type="cross_module_refactor_swarm",
+        task_desc="Progress",
+        target_file="src.py",
+        test_file="tests/test_src.py",
+        success_criteria="all_target_tests_pass",
+    )
+    _emit_progress(enabled=True, event="task_start", mode="with_nexus", task=task, elapsed_sec=1.25)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert payload["event"] == "task_start"
+    assert payload["mode"] == "with_nexus"
+    assert payload["task_id"] == "real-003"
 
 
 def test_extract_record_maps_semantic_fields():
@@ -79,7 +232,36 @@ def test_extract_record_maps_semantic_fields():
         "strategy": {"path": "probe_then_hyper"},
         "execution_profile": {"belief_confidence": 0.72},
         "learn_phase_slo": {"phase_slo_pass": True},
-        "artifact_summary": {"changed": True, "diff_line_count": 12},
+        "artifact_summary": {
+            "changed": True,
+            "verification_only": False,
+            "diff_line_count": 12,
+            "success_criteria": "artifact_changed_and_tests_pass",
+            "mutation_required": True,
+            "verification_only_allowed": False,
+        },
+        "success_criteria": {
+            "name": "artifact_changed_and_tests_pass",
+            "mutation_required": True,
+            "verification_only_allowed": False,
+        },
+        "nexus_usage_trace": {
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "usage_valid": True,
+            "gemini_patch_status": "failed",
+            "nexus_rescued": True,
+            "winner_source": "nexus_rescue",
+            "pillars": {
+                "lancedb": {"active": True, "hits": 2},
+                "memory": {"active": True, "hits": 1},
+                "mempalace": {"active": True, "verified": True},
+                "belief": {"active": True},
+                "artifact": {"active": True, "tests_passed": True},
+            },
+            "phase_trace": {"P": "route_built", "X": "retrieval_checked", "D": "guard_decision", "R": "hyper_executed", "A": "artifact_verified", "C": "closure_written"},
+            "capabilities": {"research_used": True, "hyper_used": True, "self_heal_used": True, "claim_verified": True, "nightshift_recommended": False, "swarm_used": False, "drone_used": False},
+        },
         "result": {
             "elapsed_sec": 2.3,
             "report": {
@@ -92,6 +274,7 @@ def test_extract_record_maps_semantic_fields():
     }
     out = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=2.5)
     assert out["task_id"] == "hard-001"
+    assert out["trial_index"] == 1
     assert out["semantic_status"] == "UNVERIFIED"
     assert out["attempt_count"] == 4
     assert out["model_calls"] == 1
@@ -106,8 +289,40 @@ def test_extract_record_maps_semantic_fields():
     assert out["strategy_path"] == "probe_then_hyper"
     assert out["learn_phase_slo_pass"] is True
     assert out["artifact_changed"] is True
+    assert out["artifact_verification_only"] is False
     assert out["artifact_diff_line_count"] == 12
+    assert out["success_criteria"] == "artifact_changed_and_tests_pass"
+    assert out["mutation_required"] is True
+    assert out["verification_only_allowed"] is False
+    assert out["gemini_uses_nexus"] is True
+    assert out["nexus_usage_valid"] is True
+    assert out["nexus_rescued"] is True
+    assert out["pillar_mempalace_verified"] is True
+    assert out["phase_r"] == "hyper_executed"
+    assert out["capability_hyper_used"] is True
+    assert out["capability_claim_verified"] is True
     assert out["semantic_completed"] is False
+
+
+def test_extract_record_treats_patch_and_tests_pass_as_mutation_required():
+    task = CapabilityTask(
+        id="pub-001",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix public task",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+    )
+    out = _extract_record(
+        mode="with_nexus",
+        task=task,
+        payload={"status": "SUCCESS", "semantic_status": "VERIFIED", "artifact_summary": {"changed": True}},
+        wall_time_sec=1.0,
+    )
+    assert out["success_criteria"] == "patch_and_tests_pass"
+    assert out["mutation_required"] is True
+    assert out["verification_only_allowed"] is False
 
 
 def test_extract_json_payload_from_prefixed_output():
@@ -222,3 +437,71 @@ def test_run_with_nexus_enables_llm_mode_for_hard_tasks(tmp_path: Path, monkeypa
     )
     assert "--llm-mode" in captured["args"]
     assert out["semantic_status"] == "VERIFIED"
+
+
+def test_history_policy_defaults_to_per_task_reset():
+    assert _history_policy_name(neutralize_history=True, allow_learning_loop=False) == "per_task_reset"
+    assert _history_policy_name(neutralize_history=True, allow_learning_loop=True) == "within_mode_learning"
+    assert _history_policy_name(neutralize_history=False, allow_learning_loop=True) == "shared_existing_history"
+
+
+def test_assert_clean_worktree_fails_closed_on_dirty_status(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._git_status_porcelain", lambda _root: " M file.py")
+    try:
+        assert_clean_worktree(tmp_path)
+    except RuntimeError as exc:
+        assert "clean worktree" in str(exc)
+        assert "file.py" in str(exc)
+    else:
+        raise AssertionError("dirty worktree should fail closed")
+
+
+def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="easy-001",
+        difficulty="easy",
+        task_type="bug",
+        task_desc="Fix text normalization",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    class _Gateway:
+        def __init__(self, project_root):
+            self.project_root = project_root
+
+        def ask_structured(self, **kwargs):
+            assert kwargs["model_name"] == "gemini-3-flash-preview"
+            return (
+                {
+                    "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
+                    "tokens_used": 123,
+                    "token_capture_status": "measured",
+                },
+                "",
+            )
+
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", _Gateway)
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+    assert out["status"] == "SUCCESS"
+    assert out["semantic_status"] == "VERIFIED"
+    assert out["model_calls"] == 1
+    assert out["total_tokens"] == 123
+    assert out["token_capture_status"] == "measured"
+
+
+def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):
+    _force_learn_slo_ready(tmp_path)
+    payload = json.loads((tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").read_text(encoding="utf-8"))
+    assert payload["phase_slo_pass"] is True
+    assert payload["global"]["required_done_ratio"] == 1.0

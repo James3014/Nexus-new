@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Nexus Public Benchmark Manifest",
+  "type": "object",
+  "required": ["version", "frozen", "benchmark_id", "description", "tasks"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"type": "string"},
+    "frozen": {"type": "boolean"},
+    "benchmark_id": {"type": "string"},
+    "description": {"type": "string"},
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "difficulty",
+          "repo_kind",
+          "repo",
+          "repo_ref",
+          "task_desc",
+          "success_criteria",
+          "mutation_required",
+          "allowed_files",
+          "forbidden_files",
+          "setup_command",
+          "verification_command"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "category": {
+            "enum": ["bugfix", "test_repair", "refactor", "feature", "docs_code_sync", "ops_research"]
+          },
+          "difficulty": {"enum": ["easy", "medium", "hard"]},
+          "repo_kind": {"enum": ["nexus_internal", "neutral_fixture", "external"]},
+          "repo": {"type": "string"},
+          "repo_ref": {"type": "string"},
+          "task_desc": {"type": "string"},
+          "target_file": {"type": "string"},
+          "test_file": {"type": "string"},
+          "fixture_kind": {"type": "string"},
+          "success_criteria": {"enum": ["all_target_tests_pass", "patch_and_tests_pass", "report_contract_verified"]},
+          "mutation_required": {"type": "boolean"},
+          "allowed_files": {"type": "array", "items": {"type": "string"}},
+          "forbidden_files": {"type": "array", "items": {"type": "string"}},
+          "setup_command": {"type": "string"},
+          "verification_command": {"type": "string"}
+        }
+      }
+    }
+  }
+}
