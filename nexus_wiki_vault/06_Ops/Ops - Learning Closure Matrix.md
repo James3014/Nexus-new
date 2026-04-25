@@ -262,3 +262,15 @@ version_scope:
 - **Root Cause**: The benchmark runner only mapped legacy criteria names (`artifact_changed_and_tests_pass`, `mutation_required`) to mutation-required telemetry.
 - **Decision**: Added `patch_and_tests_pass` to the mutation-required mapping and covered it with a runner extraction test.
 - **Prevention**: Any new public benchmark success criterion must have an explicit telemetry mapping test before pilot runs are accepted.
+
+## 2026-04-25: Public External Tasks Must Not Materialize Local Fixtures
+- **Phenomenon**: A small public pilot started an `external` task but executed a generated local fixture instead of cloning and running the pinned external repository.
+- **Root Cause**: The runner's `materialize_missing` path was still global and did not respect `repo_kind`.
+- **Decision**: Added repo-kind filtering and made `external` tasks fail closed until a clone/setup adapter exists.
+- **Prevention**: Public benchmark runners must reject unresolved execution adapters rather than substituting simpler local fixtures.
+
+## 2026-04-25: Real-File Evidence Preservation Must Follow Effective Task Mode
+- **Phenomenon**: Real-file benchmark evidence showed empty `target.before` for `nexus_internal` tasks even though the target file existed.
+- **Root Cause**: File resolution correctly forced `nexus_internal` tasks onto real paths, but preservation still used the original global `materialize_missing=True` flag.
+- **Decision**: Added an effective task materialization helper and reused it for resolution and target preservation.
+- **Prevention**: Evidence capture must derive preservation behavior from the effective task execution mode, not the raw CLI default.
