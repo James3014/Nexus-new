@@ -358,6 +358,11 @@ def _extract_record(
         "semantic_status": semantic_status,
         "semantic_completed": semantic_completed,
         "runtime_classification": payload.get("runtime_classification"),
+        "timeout_scope": payload.get("timeout_scope"),
+        "timeout_stage": payload.get("timeout_stage"),
+        "timeout_sec": payload.get("timeout_sec"),
+        "partial_stdout_tail": payload.get("partial_stdout_tail"),
+        "partial_stderr_tail": payload.get("partial_stderr_tail"),
         "retryable": payload.get("retryable"),
         "duration_sec": round(task_duration, 4),
         "task_duration_sec": round(task_duration, 4),
@@ -439,6 +444,40 @@ def _extract_json_payload(raw_output: str) -> dict[str, Any]:
     return {}
 
 
+def _tail_text(value: Any, *, max_chars: int = 2000) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace")
+    else:
+        text = str(value)
+    return text[-max_chars:]
+
+
+def _with_nexus_timeout_payload(*, timeout_sec: int, exc: subprocess.TimeoutExpired | None = None) -> dict[str, Any]:
+    stdout_tail = _tail_text(getattr(exc, "stdout", None) or getattr(exc, "output", None))
+    stderr_tail = _tail_text(getattr(exc, "stderr", None))
+    return {
+        "status": "FAILED",
+        "semantic_status": "UNVERIFIED",
+        "runtime_classification": "subprocess_timeout",
+        "timeout_scope": "with_nexus_subprocess",
+        "timeout_stage": "timeout_before_receipt",
+        "timeout_sec": int(timeout_sec),
+        "partial_stdout_tail": stdout_tail,
+        "partial_stderr_tail": stderr_tail,
+        "result": {
+            "elapsed_sec": timeout_sec,
+            "report": {
+                "attempt_count": 1,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_capture_status": "unknown",
+            },
+        },
+    }
+
+
 def run_with_nexus(
     *,
     repo_root: Path,
@@ -493,23 +532,8 @@ def run_with_nexus(
         try:
             res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, env=env, timeout=timeout_sec)
             output = res.stdout or ""
-        except subprocess.TimeoutExpired:
-            output = json.dumps(
-                {
-                    "status": "FAILED",
-                    "semantic_status": "UNVERIFIED",
-                    "runtime_classification": "subprocess_timeout",
-                    "result": {
-                        "elapsed_sec": timeout_sec,
-                        "report": {
-                            "attempt_count": 1,
-                            "model_calls": 0,
-                            "total_tokens": 0,
-                            "token_capture_status": "unknown",
-                        },
-                    },
-                }
-            )
+        except subprocess.TimeoutExpired as exc:
+            output = json.dumps(_with_nexus_timeout_payload(timeout_sec=timeout_sec, exc=exc), ensure_ascii=False)
     else:
         runner = cli_runner or CliRunner()
         res = runner.invoke(nexus_root, args)

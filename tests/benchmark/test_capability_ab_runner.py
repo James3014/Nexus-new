@@ -17,7 +17,9 @@ from scripts.bench.capability_ab_runner import (
     _remaining_leg_timeout,
     _restore_preserved_target,
     _resolve_task_files,
+    _tail_text,
     _task_uses_materialized_fixture,
+    _with_nexus_timeout_payload,
     _write_trial_evidence,
     assert_clean_worktree,
     filter_tasks_by_repo_kind,
@@ -365,6 +367,31 @@ def test_extract_record_treats_patch_and_tests_pass_as_mutation_required():
     assert out["success_criteria"] == "patch_and_tests_pass"
     assert out["mutation_required"] is True
     assert out["verification_only_allowed"] is False
+
+
+def test_timeout_payload_preserves_stage_and_partial_output():
+    payload = _with_nexus_timeout_payload(timeout_sec=7)
+    task = CapabilityTask(
+        id="pub-timeout",
+        difficulty="medium",
+        task_type="public_refactor",
+        task_desc="Replay timeout",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+    )
+    out = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=7.2)
+    assert out["runtime_classification"] == "subprocess_timeout"
+    assert out["timeout_scope"] == "with_nexus_subprocess"
+    assert out["timeout_stage"] == "timeout_before_receipt"
+    assert out["timeout_sec"] == 7
+    assert out["model_calls"] == 0
+    assert out["gemini_uses_nexus"] is False
+
+
+def test_tail_text_decodes_bytes_and_limits_output():
+    assert _tail_text(b"abc") == "abc"
+    assert _tail_text("abcdef", max_chars=3) == "def"
 
 
 def test_extract_json_payload_from_prefixed_output():
