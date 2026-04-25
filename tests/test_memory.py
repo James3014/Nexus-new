@@ -69,6 +69,12 @@ class TestMemoryService(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], "POL-001")
 
+    def test_memory_db_path_can_be_overridden_for_benchmark_isolation(self):
+        override = self.project_root / "isolated" / "lancedb"
+        with patch.dict(os.environ, {"NEXUS_MEMORY_DB_PATH": str(override)}):
+            service = MemoryService(project_root=str(self.project_root))
+        self.assertEqual(service.db_path, override)
+
     def test_fault_lessons_roundtrip_jsonl(self):
         fault_hash = "abc123hash"
         self.service.record_fault_lesson(FaultLesson(

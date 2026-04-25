@@ -154,10 +154,22 @@ class MemoryRepository:
         if db is None:
             return
         
-        if table_name not in db.list_tables():
-            if initial_data:
-                tbl = db.create_table(table_name, data=initial_data)
-                if fts_column: tbl.create_fts_index(fts_column, replace=True)
+        if table_name in db.list_tables() or not initial_data:
+            return
+
+        try:
+            tbl = db.create_table(table_name, data=initial_data)
+        except Exception as e:
+            if "already exists" in str(e).lower() or table_name in db.list_tables():
+                logger.debug(f"LanceDB table already exists during ensure_table race: {table_name}")
+                return
+            raise
+
+        if fts_column:
+            try:
+                tbl.create_fts_index(fts_column, replace=True)
+            except Exception as e:
+                logger.debug(f"LanceDB FTS index init skipped for {table_name}: {e}")
 
     def add_rows(self, table_name: str, rows: List[Dict[str, Any]]):
         db = self._get_db()

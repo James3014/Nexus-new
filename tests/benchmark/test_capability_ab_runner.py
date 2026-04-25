@@ -5,6 +5,7 @@ from pathlib import Path
 
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
+    _benchmark_memory_db_path,
     _budget_exceeded,
     _classify_timeout_stage,
     _emit_progress,
@@ -404,7 +405,23 @@ def test_classify_timeout_stage_from_partial_output():
     assert _classify_timeout_stage("running pytest", "") == "timeout_during_artifact_verify"
     assert _classify_timeout_stage("Gemini model call started", "") == "timeout_during_gemini"
     assert _classify_timeout_stage("hyper sprint candidate", "") == "timeout_during_hyper"
+    assert _classify_timeout_stage("", "MemoryService auto-init warning: Table 'policy' already exists") == "timeout_during_memory_bootstrap"
     assert _classify_timeout_stage("", "") == "timeout_before_receipt"
+
+
+def test_benchmark_memory_db_path_is_per_task_trial(tmp_path: Path):
+    task = CapabilityTask(
+        id="pub/test:002",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix public task",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+        trial_index=3,
+    )
+    path = _benchmark_memory_db_path(tmp_path, task, 123.456)
+    assert path == tmp_path / ".nexus" / "reports" / "bench_runtime" / "memory" / "pub_test_002_trial3_123456"
 
 
 def test_extract_json_payload_from_prefixed_output():

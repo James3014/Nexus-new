@@ -42,3 +42,14 @@ def test_add_rows_and_get_all(repo):
         df = repo.get_all_rows("skills")
         assert len(df) == 1
         assert df.iloc[0]["id"] == "s1"
+
+
+def test_ensure_table_tolerates_concurrent_create_race(repo):
+    mock_db = MagicMock()
+    mock_db.list_tables.side_effect = [[], ["policy"]]
+    mock_db.create_table.side_effect = RuntimeError("Table 'policy' already exists")
+    repo._db = mock_db
+
+    repo.ensure_table("policy", [{"condition": "x"}], fts_column="condition")
+
+    mock_db.create_table.assert_called_once()

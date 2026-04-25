@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import signal
 import subprocess
 import sys
@@ -476,6 +477,8 @@ def _tail_text(value: Any, *, max_chars: int = 2000) -> str:
 
 def _classify_timeout_stage(stdout_tail: str, stderr_tail: str) -> str:
     combined = f"{stdout_tail}\n{stderr_tail}".lower()
+    if "memoryservice" in combined or "lancedb" in combined or "redis init" in combined or "policy" in combined:
+        return "timeout_during_memory_bootstrap"
     if "artifact" in combined or "pytest" in combined:
         return "timeout_during_artifact_verify"
     if "gemini" in combined or "model_calls" in combined or "llm" in combined:
@@ -485,6 +488,18 @@ def _classify_timeout_stage(stdout_tail: str, stderr_tail: str) -> str:
     if "route" in combined or "phase_p" in combined or "route_built" in combined:
         return "timeout_after_route_before_gemini"
     return "timeout_before_receipt"
+
+
+def _benchmark_memory_db_path(repo_root: Path, task: CapabilityTask, start_time: float) -> Path:
+    safe_task_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", task.id).strip("_") or "task"
+    return (
+        repo_root
+        / ".nexus"
+        / "reports"
+        / "bench_runtime"
+        / "memory"
+        / f"{safe_task_id}_trial{task.trial_index}_{int(start_time * 1000)}"
+    )
 
 
 def _with_nexus_timeout_payload(*, timeout_sec: int, exc: subprocess.TimeoutExpired | None = None) -> dict[str, Any]:
@@ -562,6 +577,7 @@ def run_with_nexus(
     if runner_mode == "subprocess":
         cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
         env = os.environ.copy()
+        env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start).resolve())
         try:
             res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, env=env, timeout=timeout_sec)
             output = res.stdout or ""

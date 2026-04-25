@@ -5,6 +5,7 @@ import json
 import hashlib
 import gc
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from nexus.core.memory_coordinator import MemoryCoordinator
@@ -38,7 +39,8 @@ class MemoryService:
     def __init__(self, project_root: str, run_dir: Optional[str] = None):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if run_dir else None
-        self.db_path = self.project_root / ".nexus" / "knowledge" / "lancedb"
+        db_path_override = os.environ.get("NEXUS_MEMORY_DB_PATH")
+        self.db_path = Path(db_path_override) if db_path_override else self.project_root / ".nexus" / "knowledge" / "lancedb"
         self.fault_lessons_jsonl = self.project_root / ".nexus" / "knowledge" / "fault_lessons.jsonl"
         self.policy_memory_jsonl = self.project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
         self.coordinator = MemoryCoordinator()
