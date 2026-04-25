@@ -17,6 +17,7 @@ from scripts.bench.capability_ab_runner import (
     _remaining_leg_timeout,
     _restore_preserved_target,
     _resolve_task_files,
+    _task_uses_materialized_fixture,
     _write_trial_evidence,
     assert_clean_worktree,
     filter_tasks_by_repo_kind,
@@ -158,6 +159,7 @@ def test_resolve_task_files_uses_real_paths_for_nexus_internal_even_when_materia
     target, test = _resolve_task_files(tmp_path, task, materialize_missing=True)
     assert target.endswith("src.py")
     assert test.endswith("tests/test_src.py")
+    assert _task_uses_materialized_fixture(task, materialize_missing=True) is False
 
 
 def test_resolve_task_files_fails_closed_for_external_without_adapter(tmp_path: Path):
@@ -177,6 +179,7 @@ def test_resolve_task_files_fails_closed_for_external_without_adapter(tmp_path: 
         assert "clone/setup adapter" in str(exc)
     else:
         raise AssertionError("external tasks must not materialize local fixtures")
+    assert _task_uses_materialized_fixture(task, materialize_missing=True) is False
 
 
 def test_preserve_target_helpers_restore_real_task_file(tmp_path: Path):

@@ -201,13 +201,20 @@ def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, st
     return str(target_path), str(test_path)
 
 
-def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_missing: bool) -> tuple[str, str]:
+def _task_uses_materialized_fixture(task: CapabilityTask, *, materialize_missing: bool) -> bool:
     if task.repo_kind == "nexus_internal":
-        materialize_missing = False
+        return False
+    if task.repo_kind == "external":
+        return False
+    return materialize_missing
+
+
+def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_missing: bool) -> tuple[str, str]:
     if task.repo_kind == "external" and materialize_missing:
         raise NotImplementedError(
             f"{task.id} is external; clone/setup adapter is required before public execution"
         )
+    materialize_missing = _task_uses_materialized_fixture(task, materialize_missing=materialize_missing)
     if materialize_missing:
         return _materialize_fixture(repo_root, task)
 
@@ -929,7 +936,8 @@ def main() -> int:
         if args.force_learn_slo_ready:
             _force_learn_slo_ready(repo_root)
 
-        original_target = _read_preserved_target(target_file, materialize_missing=bool(args.materialize_missing))
+        materialized_task = _task_uses_materialized_fixture(task, materialize_missing=bool(args.materialize_missing))
+        original_target = _read_preserved_target(target_file, materialize_missing=materialized_task)
         try:
             leg_start = time.time()
             _emit_progress(
@@ -1014,7 +1022,8 @@ def main() -> int:
         flow = None if args.force_flow == "auto" else args.force_flow
         if args.neutralize_history and not args.allow_learning_loop:
             _reset_auto_flow_history(repo_root)
-        original_target = _read_preserved_target(target_file, materialize_missing=bool(args.materialize_missing))
+        materialized_task = _task_uses_materialized_fixture(task, materialize_missing=bool(args.materialize_missing))
+        original_target = _read_preserved_target(target_file, materialize_missing=materialized_task)
         try:
             leg_start = time.time()
             _emit_progress(
