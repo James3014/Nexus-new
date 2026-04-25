@@ -274,3 +274,9 @@ version_scope:
 - **Root Cause**: File resolution correctly forced `nexus_internal` tasks onto real paths, but preservation still used the original global `materialize_missing=True` flag.
 - **Decision**: Added an effective task materialization helper and reused it for resolution and target preservation.
 - **Prevention**: Evidence capture must derive preservation behavior from the effective task execution mode, not the raw CLI default.
+
+## 2026-04-25: Public Neutral Pilot Must Treat Timeout as Invalid Nexus Wearing
+- **Phenomenon**: The `neutral_fixture 18x3` public pilot produced Gemini `0/54` versus Gemini+Nexus `50/54`, but four Nexus rows hit the 180s task timeout and failed formal treatment because no Gemini call, Nexus context, pillars, phases, or claim verification were recorded.
+- **Root Cause**: The benchmark can prove substantial mutation uplift on completed Nexus rows, but intermittent long-tail execution can still consume the whole task budget before the battle-suit telemetry reaches the evaluator.
+- **Decision**: Keep the run as pilot evidence only (`+92.59 percentage points`, formal valid `50/54`) and do not use it as a product-grade public claim until slow-case replay and phase timing isolate the timeout source.
+- **Prevention**: Before scaling public benchmarks, replay timeout rows by task/trial with per-phase timing and fail-fast subprocess envelopes; publish uplift together with formal-treatment validity and timeout rate.
