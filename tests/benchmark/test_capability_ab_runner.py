@@ -22,6 +22,7 @@ from scripts.bench.capability_ab_runner import (
     _with_nexus_timeout_payload,
     _write_trial_evidence,
     assert_clean_worktree,
+    filter_tasks_by_id,
     filter_tasks_by_repo_kind,
     load_tasks,
     run_with_nexus,
@@ -426,6 +427,15 @@ def test_filter_tasks_by_repo_kind_allows_non_external_subset():
         CapabilityTask(id="c", difficulty="hard", task_type="bug", task_desc="c", target_file="c", test_file="c", success_criteria="x", repo_kind="nexus_internal"),
     ]
     assert [task.id for task in filter_tasks_by_repo_kind(tasks, "neutral_fixture,nexus_internal")] == ["a", "c"]
+
+
+def test_filter_tasks_by_id_allows_targeted_replay():
+    tasks = [
+        CapabilityTask(id="a", difficulty="medium", task_type="bug", task_desc="a", target_file="a", test_file="a", success_criteria="x"),
+        CapabilityTask(id="b", difficulty="hard", task_type="bug", task_desc="b", target_file="b", test_file="b", success_criteria="x"),
+    ]
+    assert [task.id for task in filter_tasks_by_id(tasks, "b")] == ["b"]
+    assert [task.id for task in filter_tasks_by_id(tasks, "all")] == ["a", "b"]
 
 
 def test_run_without_nexus_bare_mode_returns_record(tmp_path: Path):

@@ -107,6 +107,13 @@ def filter_tasks_by_repo_kind(tasks: list[CapabilityTask], repo_kind_filter: str
     return [task for task in tasks if task.repo_kind in allowed]
 
 
+def filter_tasks_by_id(tasks: list[CapabilityTask], task_id_filter: str) -> list[CapabilityTask]:
+    if task_id_filter.strip().lower() in {"", "all"}:
+        return tasks
+    allowed = {part.strip() for part in task_id_filter.split(",") if part.strip()}
+    return [task for task in tasks if task.id in allowed]
+
+
 def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuffle_seed: int | None) -> list[CapabilityTask]:
     expanded: list[CapabilityTask] = []
     trials = max(1, repeat_trials)
@@ -898,6 +905,11 @@ def main() -> int:
         default="all",
         help="Comma-separated repo_kind allowlist, e.g. neutral_fixture,nexus_internal. Default: all.",
     )
+    parser.add_argument(
+        "--task-id-filter",
+        default="all",
+        help="Comma-separated task id allowlist for targeted replay. Default: all.",
+    )
     parser.add_argument("--evidence-bundle", dest="evidence_bundle", action="store_true", default=True)
     parser.add_argument("--no-evidence-bundle", dest="evidence_bundle", action="store_false")
     parser.add_argument("--require-clean-worktree", action="store_true", default=False)
@@ -918,7 +930,10 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     if args.require_clean_worktree:
         assert_clean_worktree(repo_root)
-    filtered_tasks = filter_tasks_by_repo_kind(load_tasks(args.tasks_file), args.repo_kind_filter)
+    filtered_tasks = filter_tasks_by_id(
+        filter_tasks_by_repo_kind(load_tasks(args.tasks_file), args.repo_kind_filter),
+        args.task_id_filter,
+    )
     selected_tasks = select_tasks(filtered_tasks, difficulty=args.difficulty, max_tasks=args.max_tasks)
     tasks = expand_task_trials(
         selected_tasks,
