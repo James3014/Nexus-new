@@ -331,6 +331,10 @@ def _extract_record(
     success_criteria_payload = success_criteria_payload if isinstance(success_criteria_payload, dict) else {}
     usage_trace = payload.get("nexus_usage_trace", {}) if isinstance(payload, dict) else {}
     usage_trace = usage_trace if isinstance(usage_trace, dict) else {}
+    timing = payload.get("timing", {}) if isinstance(payload, dict) else {}
+    timing = timing if isinstance(timing, dict) else {}
+    phase_wall = timing.get("phase_wall_sec") or usage_trace.get("phase_wall_sec") or {}
+    phase_wall = phase_wall if isinstance(phase_wall, dict) else {}
     pillars = usage_trace.get("pillars", {}) if isinstance(usage_trace, dict) else {}
     pillars = pillars if isinstance(pillars, dict) else {}
     phase_trace = usage_trace.get("phase_trace", {}) if isinstance(usage_trace, dict) else {}
@@ -374,6 +378,15 @@ def _extract_record(
         "duration_sec": round(task_duration, 4),
         "task_duration_sec": round(task_duration, 4),
         "wall_duration_sec": round(wall_time_sec, 4),
+        "subprocess_wall_sec": round(wall_time_sec, 4) if mode == "with_nexus" else None,
+        "cli_elapsed_sec": timing.get("cli_elapsed_sec"),
+        "receipt_elapsed_sec": timing.get("cli_elapsed_sec"),
+        "phase_wall_p_sec": phase_wall.get("P"),
+        "phase_wall_x_sec": phase_wall.get("X"),
+        "phase_wall_d_sec": phase_wall.get("D"),
+        "phase_wall_r_sec": phase_wall.get("R"),
+        "phase_wall_a_sec": phase_wall.get("A"),
+        "phase_wall_c_sec": phase_wall.get("C"),
         "elapsed_sec": task_duration,
         "attempt_count": int(report.get("attempt_count", 0) or 0),
         "model_calls": model_calls,
@@ -461,6 +474,19 @@ def _tail_text(value: Any, *, max_chars: int = 2000) -> str:
     return text[-max_chars:]
 
 
+def _classify_timeout_stage(stdout_tail: str, stderr_tail: str) -> str:
+    combined = f"{stdout_tail}\n{stderr_tail}".lower()
+    if "artifact" in combined or "pytest" in combined:
+        return "timeout_during_artifact_verify"
+    if "gemini" in combined or "model_calls" in combined or "llm" in combined:
+        return "timeout_during_gemini"
+    if "hyper" in combined or "sprint" in combined:
+        return "timeout_during_hyper"
+    if "route" in combined or "phase_p" in combined or "route_built" in combined:
+        return "timeout_after_route_before_gemini"
+    return "timeout_before_receipt"
+
+
 def _with_nexus_timeout_payload(*, timeout_sec: int, exc: subprocess.TimeoutExpired | None = None) -> dict[str, Any]:
     stdout_tail = _tail_text(getattr(exc, "stdout", None) or getattr(exc, "output", None))
     stderr_tail = _tail_text(getattr(exc, "stderr", None))
@@ -469,7 +495,7 @@ def _with_nexus_timeout_payload(*, timeout_sec: int, exc: subprocess.TimeoutExpi
         "semantic_status": "UNVERIFIED",
         "runtime_classification": "subprocess_timeout",
         "timeout_scope": "with_nexus_subprocess",
-        "timeout_stage": "timeout_before_receipt",
+        "timeout_stage": _classify_timeout_stage(stdout_tail, stderr_tail),
         "timeout_sec": int(timeout_sec),
         "partial_stdout_tail": stdout_tail,
         "partial_stderr_tail": stderr_tail,

@@ -337,6 +337,9 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
     assert trace["phase_trace"]["P"] == "route_built"
     assert trace["phase_trace"]["A"] == "artifact_verified"
     assert trace["capabilities"]["claim_verified"] is True
+    assert payload["timing"]["cli_elapsed_sec"] >= 0
+    for phase in ["P", "X", "D", "R", "A", "C"]:
+        assert phase in payload["timing"]["phase_wall_sec"]
 
 
 def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification(tmp_path: Path, monkeypatch):

@@ -6,6 +6,7 @@ from pathlib import Path
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
     _budget_exceeded,
+    _classify_timeout_stage,
     _emit_progress,
     _extract_record,
     _extract_json_payload,
@@ -305,8 +306,10 @@ def test_extract_record_maps_semantic_fields():
                 "artifact": {"active": True, "tests_passed": True},
             },
             "phase_trace": {"P": "route_built", "X": "retrieval_checked", "D": "guard_decision", "R": "hyper_executed", "A": "artifact_verified", "C": "closure_written"},
+            "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5},
             "capabilities": {"research_used": True, "hyper_used": True, "self_heal_used": True, "claim_verified": True, "nightshift_recommended": False, "swarm_used": False, "drone_used": False},
         },
+        "timing": {"cli_elapsed_sec": 2.4, "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5}},
         "result": {
             "elapsed_sec": 2.3,
             "report": {
@@ -344,6 +347,8 @@ def test_extract_record_maps_semantic_fields():
     assert out["nexus_rescued"] is True
     assert out["pillar_mempalace_verified"] is True
     assert out["phase_r"] == "hyper_executed"
+    assert out["cli_elapsed_sec"] == 2.4
+    assert out["phase_wall_r_sec"] == 1.1
     assert out["capability_hyper_used"] is True
     assert out["capability_claim_verified"] is True
     assert out["semantic_completed"] is False
@@ -393,6 +398,13 @@ def test_timeout_payload_preserves_stage_and_partial_output():
 def test_tail_text_decodes_bytes_and_limits_output():
     assert _tail_text(b"abc") == "abc"
     assert _tail_text("abcdef", max_chars=3) == "def"
+
+
+def test_classify_timeout_stage_from_partial_output():
+    assert _classify_timeout_stage("running pytest", "") == "timeout_during_artifact_verify"
+    assert _classify_timeout_stage("Gemini model call started", "") == "timeout_during_gemini"
+    assert _classify_timeout_stage("hyper sprint candidate", "") == "timeout_during_hyper"
+    assert _classify_timeout_stage("", "") == "timeout_before_receipt"
 
 
 def test_extract_json_payload_from_prefixed_output():

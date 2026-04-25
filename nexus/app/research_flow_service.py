@@ -465,6 +465,9 @@ def run_auto_flow(
 ):
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
 
+    flow_started_at = time.time()
+    phase_wall_sec: dict[str, float] = {}
+    phase_started_at = time.time()
     route = build_route(
         repo_root=repo_root,
         task_desc=task_desc,
@@ -474,6 +477,8 @@ def run_auto_flow(
         findings_query=findings_query,
         target_file=target_file,
     )
+    phase_wall_sec["P"] = round(time.time() - phase_started_at, 4)
+    phase_started_at = time.time()
     tuning_payload = read_capability_tuning_fast(repo_root)
     parsed_knobs = _parse_tuning_knobs(tuning_payload)
     execution_profile = build_hyper_execution_profile(
@@ -491,6 +496,8 @@ def run_auto_flow(
     skip_baseline_probe_for_hard = bool(parsed_knobs.skip_baseline_probe_for_hard)
     chosen_flow = force_flow or route["recommended_flow"]
     learn_phase_slo = read_phase_slo_summary_fast(repo_root)
+    phase_wall_sec["X"] = round(time.time() - phase_started_at, 4)
+    phase_started_at = time.time()
     learn_gate_blocked = (
         not bool(learn_phase_slo.get("phase_slo_pass", False))
         or float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0) < 0.95
@@ -528,6 +535,7 @@ def run_auto_flow(
     if force_flow is None and chosen_flow == "hyper_sprint" and recent_hyper_fails >= max(1, history_fail_threshold):
         chosen_flow = "baseline"
         history_forced_baseline = True
+    phase_wall_sec["D"] = round(time.time() - phase_started_at, 4)
 
     guard_hit = False
     target_path = (repo_root / target_file).resolve()
@@ -744,6 +752,7 @@ def run_auto_flow(
     baseline_probe = None
     early_baseline_shortcut = False
     baseline_probe_skipped = False
+    phase_started_at = time.time()
     if chosen_flow == "baseline":
         result = _run_baseline_apply()
         strategy_path = "baseline_only"
@@ -822,11 +831,13 @@ def run_auto_flow(
                             result["report"]["token_capture_status"] = "measured"
                     chosen_flow = "baseline"
                     strategy_path = "hyper_guard_fallback_to_baseline"
+    phase_wall_sec["R"] = round(time.time() - phase_started_at, 4)
 
     baseline_probe_for_report = None
     if isinstance(baseline_probe, dict):
         baseline_probe_for_report = {k: v for k, v in baseline_probe.items() if k != "_patch"}
 
+    phase_started_at = time.time()
     final_code = target_path.read_text(encoding="utf-8") if target_path.exists() else original_code
     diff_lines = list(
         difflib.unified_diff(
@@ -858,6 +869,7 @@ def run_auto_flow(
     artifact_verified = bool(tests_passed and (artifact_summary["changed"] or verification_only_rescue))
     nexus_rescued = bool((guard_hit or verification_only_rescue) and tests_passed)
     mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False))
+    phase_wall_sec["A"] = round(time.time() - phase_started_at, 4)
     nexus_usage_trace = {
         "gemini_uses_nexus": bool(gemini_invoked),
         "nexus_context_delivered": True,
@@ -894,6 +906,7 @@ def run_auto_flow(
             "self_heal_used": bool(nexus_rescued or history_forced_baseline or early_baseline_shortcut),
             "claim_verified": artifact_verified,
         },
+        "phase_wall_sec": phase_wall_sec,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),
         "nexus_rescued": nexus_rescued,
         "winner_source": result_report.get("winner_source") or guard_fallback_from.get("winner_source") or ("nexus_rescue" if nexus_rescued else "local_only"),
@@ -941,6 +954,10 @@ def run_auto_flow(
             "verification_only_allowed": verification_only_allowed,
         },
         "nexus_usage_trace": nexus_usage_trace,
+        "timing": {
+            "cli_elapsed_sec": round(time.time() - flow_started_at, 4),
+            "phase_wall_sec": phase_wall_sec,
+        },
         "io": {
             "output_written": False,
             "output_path": None,
@@ -955,6 +972,7 @@ def run_auto_flow(
         payload["io"]["output_path"] = str(written)
         # keep report + output payload in sync
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    phase_started_at = time.time()
     recent.append(
         {
             "flow": chosen_flow,
@@ -968,6 +986,13 @@ def run_auto_flow(
     )
     history_data[flow_key] = recent[-200:]
     _write_history(history_data)
+    phase_wall_sec["C"] = round(time.time() - phase_started_at, 4)
+    payload["timing"]["cli_elapsed_sec"] = round(time.time() - flow_started_at, 4)
+    payload["timing"]["phase_wall_sec"] = phase_wall_sec
+    payload["nexus_usage_trace"]["phase_wall_sec"] = phase_wall_sec
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    if payload["io"].get("output_path"):
+        Path(str(payload["io"]["output_path"])).write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload, out_path
 
 
