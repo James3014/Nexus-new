@@ -328,3 +328,9 @@ version_scope:
 - **Root Cause**: The public pilot is easy for Pro overall, but test-repair tasks can still require the Nexus battle-suit loop: task classification, bounded hyper execution, policy/claim verification, and artifact-backed semantic gating. The direct baseline can write a patch yet miss the required behavioral contract.
 - **Decision**: Treat this as a calibrated Pro-model uplift claim for this suite only: `+5.56pp` verified-rate lift, `100%` baseline-error reduction, `0` Nexus fallback rows, `54/54` valid wearing rows, with higher wall time (`24.61s` vs `17.84s`) and lower average tokens (`20757.20` vs `21240.59`).
 - **Prevention**: Public product copy must qualify the suite and model, report both lift and cost, and include per-task wins. The next benchmark must use harder tasks or a stronger test-repair bucket before claiming broad capability uplift.
+
+## 2026-04-26: JIT Test Entrypoints Need Sandbox-Aware Verification
+- **Phenomenon**: `bash scripts/ops/test_changed.sh scripts/ops/select_tests.py` initially failed inside the sandbox with `uv` unable to open `~/.cache/uv/sdists-v9/.git`, while the same command passed when rerun with approved `uv run` access.
+- **Root Cause**: The selector logic was correct, but the wrapper executes `uv run`, which may touch user-level uv cache metadata outside the current workspace sandbox.
+- **Decision**: Keep `select_tests.py` pure and report-free, and verify wrapper commands with explicit sandbox escalation when uv cache access is blocked.
+- **Prevention**: JIT test validation should distinguish selector failures from environment/cache permission failures; CI or local gate notes should preserve the exact failing layer.

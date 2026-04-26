@@ -4,8 +4,37 @@
 建議依序執行，確保從最快、最核心的驗證開始。
 
 1. **L1 (Commit 級別)**: `bash scripts/ops/test_fast.sh`
-2. **L2 (PR 級別)**: `bash scripts/ops/test_changed.sh [變更檔案路徑]`
+2. **L2 (PR 級別)**: `bash scripts/ops/test_changed.sh [變更檔案路徑...]`
 3. **L3 (合併級別)**: `bash scripts/ops/test_full.sh`
+
+## 1.1 L2 變更關聯層
+
+`test_changed.sh` 透過 `scripts/ops/select_tests.py` 查詢
+`docs/testing/test_impact_map.md`，再執行選出的 pytest targets。
+
+範例：
+
+```bash
+bash scripts/ops/test_changed.sh nexus/app/nightshift_runner_service.py
+```
+
+會選到：
+
+```text
+tests/app
+```
+
+多檔案變更可一次傳入：
+
+```bash
+bash scripts/ops/test_changed.sh nexus/core/state_validator.py docs/testing/test_runbook.md
+```
+
+若任何路徑沒有 active mapping，L2 會額外加入 core smoke fallback：
+
+```text
+tests/core tests/services/test_policy_gate.py
+```
 
 ## 2. 失敗排查清單 (Troubleshooting)
 
