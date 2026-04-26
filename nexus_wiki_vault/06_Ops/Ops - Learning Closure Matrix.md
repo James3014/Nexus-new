@@ -466,3 +466,15 @@ version_scope:
 - **Root Cause**: The execution timeout covered dependency bootstrap cost instead of only the regression command's useful work.
 - **Decision**: Run sandbox-mirror pytest through `uv run --active` so file isolation is preserved while dependency setup reuses the current verified environment.
 - **Prevention**: Hard timeouts should measure the behavior under review; dependency cold-start timing needs a separate readiness check or preflight lane.
+
+## 2026-04-26: Logic Review Needs Repro Artifacts Before Gate Trust
+- **Phenomenon**: Ultra Review's Logic Breaker lane appeared in the fleet but had no executed artifact, so a logic repro failure could not affect gate outcome.
+- **Root Cause**: The lane was represented as a plan-only review card while Ghost Regression already had executable evidence.
+- **Decision**: Generate `ultra_logic_repro.py`, run it in the sandbox mirror, expose `logic_breaker` evidence in the report, and fail `ultra_gate.py` when it reports `passed=false`.
+- **Prevention**: Every ultra-review lane promoted into gate semantics must have a concrete repro command, execution cwd, timeout, and pass/fail evidence before being treated as trustworthy.
+
+## 2026-04-26: Repro Scripts Must Parse Diff Headers With Spaces
+- **Phenomenon**: A real Ultra Review run failed Logic Breaker because the generated repro script parsed `Ops - Learning Closure Matrix.md` with `split()` and treated `-` as the changed path.
+- **Root Cause**: The repro script did not reuse the same diff-header assumptions as the service parser.
+- **Decision**: Parse `diff --git a/... b/...` headers with a regex inside `ultra_logic_repro.py` and add a path-with-spaces regression test.
+- **Prevention**: Generated repro scripts must handle repository-real filenames, including spaces, before their failures are trusted as product findings.

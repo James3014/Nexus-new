@@ -47,6 +47,15 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
     assert payload["ghost_regression"]["dependency_mode"] == "active_venv"
     assert payload["ghost_regression"]["execution_cwd"].startswith(payload["sandbox_path"])
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "worktree").exists()
+    logic = payload["logic_breaker"]
+    assert logic["passed"] is True
+    assert logic["execution_mode"] == "sandbox_mirror"
+    assert logic["repro_script"].startswith(payload["sandbox_path"])
+    assert "ultra_logic_repro.py" in logic["repro_command"]
+    assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "ultra_logic_repro.py").exists()
+    logic_lane = next(item for item in payload["fleet"] if item["lane"] == "logic_breaker")
+    assert logic_lane["status"] == "PASS"
+    assert logic_lane["executed_checks"] == ["ultra_logic_repro.py"]
     assert payload["regression_candidate_map"] == [
         {
             "changed_file": "nexus/engine/sample.py",
@@ -134,6 +143,33 @@ def test_ultra_review_ghost_regression_timeout_becomes_verified_finding(tmp_path
     assert finding["state"] == "VERIFIED_FINDING"
 
 
+def test_ultra_review_logic_breaker_failure_becomes_verified_finding(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:4] == ["uv", "run", "--active", "python"] and str(cmd[4]).endswith("ultra_logic_repro.py"):
+            return subprocess.CompletedProcess(cmd, 1, stdout="logic failed", stderr="edge mismatch")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["logic_breaker"]["passed"] is False
+    finding = payload["findings"][0]
+    assert finding["lane"] == "logic_breaker"
+    assert finding["rule_id"] == "logic_repro_failed"
+    assert finding["state"] == "VERIFIED_FINDING"
+    assert finding["repro_command"]
+
+
 def test_security_sentry_covers_shell_and_delete_rules(tmp_path):
     _init_repo(tmp_path)
     (tmp_path / "nexus" / "engine" / "sample.py").write_text(
@@ -158,6 +194,23 @@ def test_changed_files_preserves_paths_with_spaces(tmp_path):
     diff_text = "diff --git a/docs/Ops - Learning Closure Matrix.md b/docs/Ops - Learning Closure Matrix.md\n"
 
     assert service._changed_files(diff_text) == ["docs/Ops - Learning Closure Matrix.md"]
+
+
+def test_ultra_review_logic_repro_handles_changed_paths_with_spaces(tmp_path):
+    _init_repo(tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "Ops - Learning Closure Matrix.md").write_text("before\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "add docs"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "docs" / "Ops - Learning Closure Matrix.md").write_text("after\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    assert payload["gate_passed"] is True
+    assert payload["logic_breaker"]["passed"] is True
 
 
 def test_ultra_review_cli_help_includes_contract_options():

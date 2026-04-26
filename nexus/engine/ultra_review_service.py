@@ -12,6 +12,7 @@ from typing import Any
 DEFAULT_FLEET_LANES = ("security_sentry", "logic_breaker", "ghost_regression")
 SCHEMA_VERSION = "ultra-review.v1"
 GHOST_REGRESSION_TIMEOUT_SEC = 30
+LOGIC_BREAKER_TIMEOUT_SEC = 15
 TEST_DIR_BY_SOURCE_DIR = {
     "app": "tests/app",
     "core": "tests/core",
@@ -62,10 +63,15 @@ class UltraReviewService:
         test_candidates = self._existing_regression_candidates(regression_map)
         security_findings = self._scan_security_observations(diff_text)
         execution_root = self._prepare_execution_workspace(sandbox_path)
+        logic_breaker = self._run_logic_breaker(
+            diff_path=diff_path,
+            execution_root=execution_root,
+            sandbox_path=sandbox_path,
+        )
         ghost_regression = self._run_ghost_regression(test_candidates, execution_root=execution_root)
-        findings = [*security_findings, *ghost_regression["findings"]]
-        gate_passed = bool(ghost_regression["passed"])
-        fleet = self._build_dry_run_fleet(test_candidates, security_findings, ghost_regression)
+        findings = [*security_findings, *logic_breaker["findings"], *ghost_regression["findings"]]
+        gate_passed = bool(logic_breaker["passed"] and ghost_regression["passed"])
+        fleet = self._build_dry_run_fleet(test_candidates, security_findings, logic_breaker, ghost_regression)
         out_path = self._resolve(report_path)
         payload = {
             "schema_version": SCHEMA_VERSION,
@@ -88,6 +94,7 @@ class UltraReviewService:
             },
             "fleet": fleet,
             "findings": findings,
+            "logic_breaker": {k: v for k, v in logic_breaker.items() if k != "findings"},
             "ghost_regression": {k: v for k, v in ghost_regression.items() if k != "findings"},
             "regression_candidate_map": regression_map,
             "verification": {
@@ -256,9 +263,15 @@ class UltraReviewService:
         self,
         test_candidates: list[str],
         security_findings: list[dict[str, Any]] | None = None,
+        logic_breaker: dict[str, Any] | None = None,
         ghost_regression: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         security_findings = security_findings or []
+        logic_breaker = logic_breaker or {
+            "passed": True,
+            "repro_script": "",
+            "repro_command": "",
+        }
         ghost_regression = ghost_regression or {
             "passed": True,
             "executed_tests": [],
@@ -268,6 +281,7 @@ class UltraReviewService:
         ghost_status = "SKIPPED"
         if test_candidates:
             ghost_status = "PASS" if bool(ghost_regression.get("passed", False)) else "FAIL"
+        logic_status = "PASS" if bool(logic_breaker.get("passed", False)) else "FAIL"
         return [
             {
                 "lane": "security_sentry",
@@ -278,9 +292,11 @@ class UltraReviewService:
             },
             {
                 "lane": "logic_breaker",
-                "status": "DRY_RUN_READY",
+                "status": logic_status,
                 "planned_checks": ["edge-case-review-card-generation"],
-                "verified_findings": 0,
+                "executed_checks": ["ultra_logic_repro.py"],
+                "repro_script": logic_breaker.get("repro_script", ""),
+                "verified_findings": 0 if logic_breaker.get("passed", True) else 1,
             },
             {
                 "lane": "ghost_regression",
@@ -293,6 +309,92 @@ class UltraReviewService:
                 "verified_findings": len(ghost_regression.get("failed_tests", [])),
             },
         ]
+
+    def _run_logic_breaker(self, *, diff_path: Path, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
+        repro_script = sandbox_path / "ultra_logic_repro.py"
+        mirror_diff_path = execution_root / ".nexus_ultra_changes.diff"
+        shutil.copy2(diff_path, mirror_diff_path)
+        repro_script.write_text(
+            "\n".join(
+                [
+                    "import re",
+                    "from pathlib import Path",
+                    "",
+                    "diff_path = Path('.nexus_ultra_changes.diff')",
+                    "if not diff_path.exists():",
+                    "    raise SystemExit('missing diff artifact')",
+                    "diff_text = diff_path.read_text(encoding='utf-8')",
+                    "for line in diff_text.splitlines():",
+                    "    if not line.startswith('diff --git '):",
+                    "        continue",
+                    "    parsed = re.match(r'^diff --git a/(.*) b/(.*)$', line)",
+                    "    if not parsed:",
+                    "        raise SystemExit(f'malformed diff header: {line}')",
+                    "    changed = parsed.group(2)",
+                    "    if changed and not Path(changed).exists():",
+                    "        raise SystemExit(f'changed file missing from sandbox mirror: {changed}')",
+                    "print('logic_repro_ok')",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        cmd = ["uv", "run", "--active", "python", str(repro_script)]
+        timeout = False
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=execution_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=LOGIC_BREAKER_TIMEOUT_SEC,
+            )
+            passed = result.returncode == 0
+            stdout_tail = (result.stdout or "")[-2000:]
+            stderr_tail = (result.stderr or "")[-2000:]
+            rule_id = "logic_repro_failed"
+            summary = "Logic Breaker deterministic repro failed in ultra-review dry-run."
+        except subprocess.TimeoutExpired as exc:
+            passed = False
+            timeout = True
+            stdout_tail = str(exc.output or "")[-2000:]
+            stderr_tail = str(exc.stderr or "")[-2000:]
+            rule_id = "logic_repro_timeout"
+            summary = "Logic Breaker deterministic repro timed out in ultra-review dry-run."
+
+        findings = []
+        if not passed:
+            findings.append(
+                {
+                    "id": "logic-breaker-1",
+                    "lane": "logic_breaker",
+                    "rule_id": rule_id,
+                    "state": "VERIFIED_FINDING",
+                    "severity": "high",
+                    "file": "",
+                    "line": 0,
+                    "repro_command": " ".join(cmd),
+                    "summary": summary,
+                    "execution_cwd": str(execution_root),
+                    "stdout_tail": stdout_tail,
+                    "stderr_tail": stderr_tail,
+                }
+            )
+
+        return {
+            "passed": passed,
+            "repro_script": str(repro_script),
+            "repro_command": " ".join(cmd),
+            "execution_mode": "sandbox_mirror",
+            "execution_cwd": str(execution_root),
+            "timeout": timeout,
+            "timeout_sec": LOGIC_BREAKER_TIMEOUT_SEC,
+            "dependency_mode": "active_venv",
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "findings": findings,
+        }
 
     def _run_ghost_regression(self, test_candidates: list[str], *, execution_root: Path) -> dict[str, Any]:
         if not test_candidates:

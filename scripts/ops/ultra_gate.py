@@ -84,6 +84,10 @@ def evaluate_report(
     if isinstance(ghost_regression, dict) and ghost_regression.get("passed") is False:
         failures.append("ghost_regression_failed")
 
+    logic_breaker = payload.get("logic_breaker", {})
+    if isinstance(logic_breaker, dict) and logic_breaker.get("passed") is False:
+        failures.append("logic_breaker_failed")
+
     fleet = payload.get("fleet")
     if not isinstance(fleet, list) or not fleet:
         failures.append("missing_fleet")

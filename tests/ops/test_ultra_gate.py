@@ -74,6 +74,19 @@ def test_evaluate_report_blocks_failed_ghost_regression():
     assert failures == ["ghost_regression_failed"]
 
 
+def test_evaluate_report_blocks_failed_logic_breaker():
+    payload = _valid_report()
+    payload["logic_breaker"] = {
+        "passed": False,
+        "repro_script": "/tmp/nexus-ultra/ultra_logic_repro.py",
+    }
+
+    passed, failures = ultra_gate.evaluate_report(payload)
+
+    assert passed is False
+    assert failures == ["logic_breaker_failed"]
+
+
 def test_evaluate_report_fails_closed_for_schema_gaps():
     payload = _valid_report()
     del payload["sandbox_path"]
