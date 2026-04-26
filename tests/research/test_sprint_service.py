@@ -230,6 +230,9 @@ def test_llm_mode_propagates_token_observability(monkeypatch, tmp_path: Path):
                 "quota_backoffs": 0,
                 "tokens_used": 222,
                 "token_capture_status": "measured",
+                "gateway_stats_present": True,
+                "gateway_usage_metadata_present": False,
+                "gateway_token_source": "stats",
             }
 
     class FakeExecutor:
@@ -248,6 +251,9 @@ def test_llm_mode_propagates_token_observability(monkeypatch, tmp_path: Path):
     assert res.model_calls == 1
     assert res.total_tokens == 222
     assert res.token_capture_status == "measured"
+    assert res.gateway_stats_present is True
+    assert res.gateway_usage_metadata_present is False
+    assert res.gateway_token_source == "stats"
 
 
 def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path):
@@ -261,7 +267,15 @@ def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_p
 
         def ask_structured(self, **_kwargs):
             return (
-                {"status": "APPROVED", "patch": "print('ok')\n", "tokens_used": 0, "token_capture_status": "unknown"},
+                {
+                    "status": "APPROVED",
+                    "patch": "print('ok')\n",
+                    "tokens_used": 0,
+                    "token_capture_status": "unknown",
+                    "gateway_stats_present": False,
+                    "gateway_usage_metadata_present": False,
+                    "gateway_token_source": "missing",
+                },
                 "print('ok')\n",
             )
 
@@ -281,6 +295,51 @@ def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_p
     assert res.model_calls == 1
     assert res.total_tokens > 0
     assert res.token_capture_status in {"measured", "estimated"}
+    assert res.gateway_token_source == "missing"
+
+
+def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeGateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ask_structured(self, **_kwargs):
+            return (
+                {
+                    "status": "FAIL",
+                    "summary": "no patch",
+                    "tokens_used": 333,
+                    "token_capture_status": "measured",
+                    "gateway_stats_present": True,
+                    "gateway_usage_metadata_present": False,
+                    "gateway_token_source": "stats",
+                },
+                "{}",
+            )
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.total_tokens == 333
+    assert res.token_capture_status == "measured"
+    assert res.gateway_stats_present is True
+    assert res.gateway_token_source == "stats"
+    assert res.fallback_used is True
 
 
 def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path):

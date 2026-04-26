@@ -251,10 +251,11 @@ class BattlesuitGateway:
                         resp_json, _ = json.JSONDecoder().raw_decode(raw_stdout)
                     output_text = resp_json.get("output") or resp_json.get("response") or raw_stdout
                     
-                    tokens_total = self._extract_total_tokens(resp_json)
+                    token_info = self._extract_token_info(resp_json)
+                    tokens_total = int(token_info["total_tokens"])
                                 
                     capture_status = "measured" if tokens_total > 0 else "missing_gateway_stats"
-                    parsed = self._parse_json_result(output_text, tokens_total, capture_status)
+                    parsed = self._parse_json_result(output_text, tokens_total, capture_status, token_info)
                     if tmp_payload.exists():
                         tmp_payload.unlink()
                     return parsed
@@ -289,17 +290,23 @@ class BattlesuitGateway:
                 return candidate
         return None
 
-    def _extract_total_tokens(self, payload: Dict[str, Any]) -> int:
+    def _extract_token_info(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         total = 0
-        stats = payload.get("stats", {}).get("models", {})
+        stats_root = payload.get("stats")
+        stats = stats_root.get("models", {}) if isinstance(stats_root, dict) else {}
+        stats_present = isinstance(stats_root, dict)
+        stats_tokens = 0
         if isinstance(stats, dict):
             for m_stats in stats.values():
                 if isinstance(m_stats, dict):
                     try:
-                        total += int(m_stats.get("tokens", {}).get("total", 0) or 0)
+                        stats_tokens += int(m_stats.get("tokens", {}).get("total", 0) or 0)
                     except (TypeError, ValueError):
                         continue
+        total += stats_tokens
         usage = payload.get("usageMetadata") or payload.get("usage_metadata") or payload.get("usage")
+        usage_present = isinstance(usage, dict)
+        usage_tokens = 0
         if isinstance(usage, dict):
             for key in ("totalTokenCount", "total_tokens", "totalTokens"):
                 try:
@@ -307,11 +314,22 @@ class BattlesuitGateway:
                 except (TypeError, ValueError):
                     continue
                 if value > 0:
-                    total += value
+                    usage_tokens = value
                     break
-        return total
+        total += usage_tokens
+        source = "missing"
+        if stats_tokens > 0:
+            source = "stats"
+        elif usage_tokens > 0:
+            source = "usage_metadata"
+        return {
+            "total_tokens": total,
+            "gateway_stats_present": stats_present,
+            "gateway_usage_metadata_present": usage_present,
+            "gateway_token_source": source,
+        }
 
-    def _parse_json_result(self, raw_text, tokens_total, capture_status):
+    def _parse_json_result(self, raw_text, tokens_total, capture_status, token_info=None):
         """解析模型產出的 JSON 內容。"""
         try:
             try:
@@ -333,6 +351,10 @@ class BattlesuitGateway:
             data.setdefault("violations", [])
             data["tokens_used"] = tokens_total
             data["token_capture_status"] = capture_status
+            if isinstance(token_info, dict):
+                data["gateway_stats_present"] = bool(token_info.get("gateway_stats_present", False))
+                data["gateway_usage_metadata_present"] = bool(token_info.get("gateway_usage_metadata_present", False))
+                data["gateway_token_source"] = str(token_info.get("gateway_token_source") or "missing")
             
             return data, raw_text
             

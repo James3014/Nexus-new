@@ -45,6 +45,12 @@ class CandidateEval:
     elapsed_sec: float = 0.0
 
 
+class LLMCandidateError(RuntimeError):
+    def __init__(self, category: str, metadata: dict[str, Any]):
+        super().__init__(category)
+        self.metadata = metadata
+
+
 @dataclass
 class SprintResult:
     status: str
@@ -59,6 +65,9 @@ class SprintResult:
     test_timeouts: int
     total_tokens: int = 0
     token_capture_status: str = "not_applicable_local_only"
+    gateway_stats_present: bool = False
+    gateway_usage_metadata_present: bool = False
+    gateway_token_source: str = "missing"
     model_name: str = ""
     model_patch_generated: bool = False
     fallback_used: bool = False
@@ -108,9 +117,6 @@ class LLMCandidateGenerator:
                 )
                 status = str(out.get("status", "")).upper() if isinstance(out, dict) else ""
                 code = out.get("patch") if isinstance(out, dict) else None
-                if status == "FAIL" or not code:
-                    category = str(out.get("error_category", "llm_no_patch") if isinstance(out, dict) else "llm_no_patch")
-                    raise RuntimeError(category)
                 tokens_used = 0
                 token_capture_status = "unknown"
                 if isinstance(out, dict):
@@ -119,18 +125,28 @@ class LLMCandidateGenerator:
                     except (TypeError, ValueError):
                         tokens_used = 0
                     token_capture_status = str(out.get("token_capture_status", "unknown") or "unknown")
-                if tokens_used <= 0 and model_calls > 0:
-                    tokens_used = _estimate_tokens(prompt_text) + _estimate_tokens(str(code))
-                    token_capture_status = "estimated"
-                return code, {
+                metadata = {
                     "source": self.source,
                     "model_calls": model_calls,
                     "quota_backoffs": quota_backoffs,
                     "tokens_used": tokens_used,
                     "token_capture_status": token_capture_status,
+                    "gateway_stats_present": bool(out.get("gateway_stats_present", False)) if isinstance(out, dict) else False,
+                    "gateway_usage_metadata_present": bool(out.get("gateway_usage_metadata_present", False)) if isinstance(out, dict) else False,
+                    "gateway_token_source": str(out.get("gateway_token_source") or "missing") if isinstance(out, dict) else "missing",
                     "model_name": model,
-                    "model_patch_generated": True,
+                    "model_patch_generated": False,
                 }
+                if status == "FAIL" or not code:
+                    category = str(out.get("error_category", "llm_no_patch") if isinstance(out, dict) else "llm_no_patch")
+                    raise LLMCandidateError(category, metadata)
+                if tokens_used <= 0 and model_calls > 0:
+                    tokens_used = _estimate_tokens(prompt_text) + _estimate_tokens(str(code))
+                    token_capture_status = "estimated"
+                metadata["tokens_used"] = tokens_used
+                metadata["token_capture_status"] = token_capture_status
+                metadata["model_patch_generated"] = True
+                return code, metadata
             except Exception as exc:  # noqa: BLE001
                 err = str(exc).lower()
                 last_err = str(exc)
@@ -172,6 +188,15 @@ def _resolve_token_capture_status(*, total_tokens: int, model_calls: int, status
     if model_calls > 0 and normalized & {"unknown", "ok"}:
         return "missing_gateway_stats"
     return "missing" if model_calls > 0 else "not_applicable_local_only"
+
+
+def _resolve_gateway_token_source(sources: set[str]) -> str:
+    normalized = {str(source or "missing").strip().lower() for source in sources}
+    if "stats" in normalized:
+        return "stats"
+    if "usage_metadata" in normalized:
+        return "usage_metadata"
+    return "missing"
 
 
 class LocalCandidateGenerator:
@@ -438,6 +463,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     fallback_used = False
     total_tokens = 0
     token_capture_statuses: set[str] = set()
+    gateway_stats_present = False
+    gateway_usage_metadata_present = False
+    gateway_token_sources: set[str] = set()
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
@@ -658,21 +686,34 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     )
                     used_source = str(meta.get("source", "llm"))
                 except Exception as llm_exc:  # noqa: BLE001
-                    model_calls += 1
                     fallback_used = True
-                    if llm_generator is not None and getattr(llm_generator, "model_chain", None):
+                    failure_meta = getattr(llm_exc, "metadata", {})
+                    failure_meta = failure_meta if isinstance(failure_meta, dict) else {}
+                    meta_model_calls = int(failure_meta.get("model_calls", 0) or 0)
+                    model_calls += meta_model_calls if meta_model_calls > 0 else 1
+                    meta_model_name = str(failure_meta.get("model_name") or "")
+                    if meta_model_name:
+                        model_names.add(meta_model_name)
+                    elif llm_generator is not None and getattr(llm_generator, "model_chain", None):
                         model_names.add(str(llm_generator.model_chain[0]))
                     err = str(llm_exc).lower()
                     infra_code = classify_infra_block(err)
+                    if failure_meta:
+                        total_tokens += int(failure_meta.get("tokens_used", 0) or 0)
+                        token_capture_statuses.add(str(failure_meta.get("token_capture_status", "unknown") or "unknown"))
+                        gateway_stats_present = gateway_stats_present or bool(failure_meta.get("gateway_stats_present", False))
+                        gateway_usage_metadata_present = gateway_usage_metadata_present or bool(failure_meta.get("gateway_usage_metadata_present", False))
+                        gateway_token_sources.add(str(failure_meta.get("gateway_token_source") or "missing"))
                     if infra_code != "infra_blocked:quota":
-                        total_tokens += _estimate_tokens(
-                            _build_llm_candidate_prompt(
-                                source_code=source_code,
-                                task=config.task,
-                                mutation_hint=hint,
+                        if not failure_meta or int(failure_meta.get("tokens_used", 0) or 0) <= 0:
+                            total_tokens += _estimate_tokens(
+                                _build_llm_candidate_prompt(
+                                    source_code=source_code,
+                                    task=config.task,
+                                    mutation_hint=hint,
+                                )
                             )
-                        )
-                        token_capture_statuses.add("estimated")
+                            token_capture_statuses.add("estimated")
                     if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
                         quota_backoffs += 1
                         error_codes.append("quota")
@@ -703,6 +744,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 fallback_used = True
             total_tokens += int(meta.get("tokens_used", 0) or 0)
             token_capture_statuses.add(str(meta.get("token_capture_status", "unknown") or "unknown"))
+            gateway_stats_present = gateway_stats_present or bool(meta.get("gateway_stats_present", False))
+            gateway_usage_metadata_present = gateway_usage_metadata_present or bool(meta.get("gateway_usage_metadata_present", False))
+            gateway_token_sources.add(str(meta.get("gateway_token_source") or "missing"))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
             guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
@@ -768,6 +812,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 model_calls=model_calls,
                 statuses=token_capture_statuses,
             ),
+            gateway_stats_present=gateway_stats_present,
+            gateway_usage_metadata_present=gateway_usage_metadata_present,
+            gateway_token_source=_resolve_gateway_token_source(gateway_token_sources),
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
             fallback_used=fallback_used,
@@ -806,6 +853,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 model_calls=model_calls,
                 statuses=token_capture_statuses,
             ),
+            gateway_stats_present=gateway_stats_present,
+            gateway_usage_metadata_present=gateway_usage_metadata_present,
+            gateway_token_source=_resolve_gateway_token_source(gateway_token_sources),
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
             fallback_used=fallback_used,
@@ -883,6 +933,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             model_calls=model_calls,
             statuses=token_capture_statuses,
         ),
+        gateway_stats_present=gateway_stats_present,
+        gateway_usage_metadata_present=gateway_usage_metadata_present,
+        gateway_token_source=_resolve_gateway_token_source(gateway_token_sources),
         model_name=",".join(sorted(model_names)),
         model_patch_generated=model_patch_generated,
         fallback_used=fallback_used,

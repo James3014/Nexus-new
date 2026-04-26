@@ -282,6 +282,16 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if str(row.get("rescue_cost_status", "")).strip().lower() == "local_only"
         or _is_true(row.get("nexus_rescued"))
     ]
+    gateway_stats_source_rows = [
+        row
+        for row in rows
+        if str(row.get("gateway_token_source", "")).strip().lower() == "stats"
+    ]
+    gateway_usage_source_rows = [
+        row
+        for row in rows
+        if str(row.get("gateway_token_source", "")).strip().lower() == "usage_metadata"
+    ]
     total_tokens_measured_only = sum(_as_float(row.get("total_tokens"), 0.0) for row in measured_token_rows)
     total_model_tokens = sum(_as_float(row.get("model_total_tokens"), 0.0) for row in rows)
     total_model_calls = sum(_as_int(row.get("model_calls"), 0) for row in rows)
@@ -327,6 +337,8 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "model_token_measured_rate": round(len(model_measured_rows) / total, 4),
         "model_token_estimated_rate": round(len(model_estimated_rows) / total, 4),
         "local_rescue_rate": round(len(local_rescue_rows) / total, 4),
+        "gateway_stats_source_rate": round(len(gateway_stats_source_rows) / total, 4),
+        "gateway_usage_metadata_source_rate": round(len(gateway_usage_source_rows) / total, 4),
         "trust_mismatch_rate": round(trust_mismatch / total, 4),
         "nexus_usage_valid_rate": _rate(rows, lambda r: _is_true(r.get("nexus_usage_valid"))),
         "gemini_uses_nexus_rate": _rate(rows, lambda r: _is_true(r.get("gemini_uses_nexus"))),
@@ -423,6 +435,12 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "model_token_estimated_rate_delta": round(
             summary_b["model_token_estimated_rate"] - summary_a["model_token_estimated_rate"], 4
+        ),
+        "gateway_stats_source_rate_delta": round(
+            summary_b["gateway_stats_source_rate"] - summary_a["gateway_stats_source_rate"], 4
+        ),
+        "gateway_usage_metadata_source_rate_delta": round(
+            summary_b["gateway_usage_metadata_source_rate"] - summary_a["gateway_usage_metadata_source_rate"], 4
         ),
         "local_rescue_rate_delta": round(
             summary_b["local_rescue_rate"] - summary_a["local_rescue_rate"], 4

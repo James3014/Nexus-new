@@ -141,6 +141,9 @@ def _annotate_benchmark_eligibility(
             model_token_status = "missing_gateway_stats"
     row["model_total_tokens"] = int(row.get("model_total_tokens", total_tokens if model_calls > 0 else 0) or 0)
     row["model_token_capture_status"] = model_token_status
+    row["gateway_stats_present"] = bool(row.get("gateway_stats_present", False))
+    row["gateway_usage_metadata_present"] = bool(row.get("gateway_usage_metadata_present", False))
+    row["gateway_token_source"] = str(row.get("gateway_token_source") or "missing")
     row["local_rescue_tokens"] = int(row.get("local_rescue_tokens", 0) or 0)
     default_rescue_cost_status = (
         "local_only" if bool(row.get("nexus_rescued", False)) or token_status == "not_applicable_local_only" else "not_rescue"
@@ -443,14 +446,20 @@ def _normalize_token_status(status: str, total_tokens: int) -> str:
     return normalized
 
 
-def _extract_total_tokens_from_payload(payload: dict[str, Any]) -> int:
+def _extract_token_info_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     total = 0
-    stats = payload.get("stats", {}).get("models", {})
+    stats_root = payload.get("stats")
+    stats = stats_root.get("models", {}) if isinstance(stats_root, dict) else {}
+    stats_present = isinstance(stats_root, dict)
+    stats_tokens = 0
     if isinstance(stats, dict):
         for model_stats in stats.values():
             if isinstance(model_stats, dict):
-                total += int(((model_stats.get("tokens") or {}).get("total")) or 0)
+                stats_tokens += int(((model_stats.get("tokens") or {}).get("total")) or 0)
+    total += stats_tokens
     usage = payload.get("usageMetadata") or payload.get("usage_metadata") or payload.get("usage")
+    usage_present = isinstance(usage, dict)
+    usage_tokens = 0
     if isinstance(usage, dict):
         for key in ("totalTokenCount", "total_tokens", "totalTokens"):
             try:
@@ -458,9 +467,20 @@ def _extract_total_tokens_from_payload(payload: dict[str, Any]) -> int:
             except (TypeError, ValueError):
                 continue
             if value > 0:
-                total += value
+                usage_tokens = value
                 break
-    return total
+    total += usage_tokens
+    source = "missing"
+    if stats_tokens > 0:
+        source = "stats"
+    elif usage_tokens > 0:
+        source = "usage_metadata"
+    return {
+        "total_tokens": total,
+        "gateway_stats_present": stats_present,
+        "gateway_usage_metadata_present": usage_present,
+        "gateway_token_source": source,
+    }
 
 
 def _emit_progress(
@@ -590,6 +610,9 @@ def _extract_record(
         "token_measured": token_capture_status == "measured",
         "model_total_tokens": int(report.get("model_total_tokens", total_tokens if model_calls > 0 else 0) or 0),
         "model_token_capture_status": str(report.get("model_token_capture_status") or ""),
+        "gateway_stats_present": bool(report.get("gateway_stats_present", False)),
+        "gateway_usage_metadata_present": bool(report.get("gateway_usage_metadata_present", False)),
+        "gateway_token_source": str(report.get("gateway_token_source") or ""),
         "local_rescue_tokens": int(report.get("local_rescue_tokens", 0) or 0),
         "rescue_cost_status": str(report.get("rescue_cost_status") or ""),
         "baseline_gateway_error_category": baseline_trace.get("gateway_error_category"),
@@ -750,9 +773,13 @@ def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
         if start == -1 or end == -1:
             raise
         payload = json.loads(output_text[start : end + 1])
-    tokens_total = _extract_total_tokens_from_payload(outer)
+    token_info = _extract_token_info_from_payload(outer)
+    tokens_total = int(token_info["total_tokens"])
     payload["tokens_used"] = tokens_total
     payload["token_capture_status"] = "measured" if tokens_total > 0 else "missing_gateway_stats"
+    payload["gateway_stats_present"] = bool(token_info["gateway_stats_present"])
+    payload["gateway_usage_metadata_present"] = bool(token_info["gateway_usage_metadata_present"])
+    payload["gateway_token_source"] = str(token_info["gateway_token_source"])
     return payload, output_text
 
 
@@ -977,6 +1004,9 @@ def run_without_nexus(
                     "model_name": model_name,
                     "model_patch_generated": model_patch_generated,
                     "fallback_used": False,
+                    "gateway_stats_present": bool(out.get("gateway_stats_present", False)) if isinstance(out, dict) else False,
+                    "gateway_usage_metadata_present": bool(out.get("gateway_usage_metadata_present", False)) if isinstance(out, dict) else False,
+                    "gateway_token_source": str(out.get("gateway_token_source") or "") if isinstance(out, dict) else "",
                 },
             },
             "status": status,

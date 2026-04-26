@@ -123,6 +123,9 @@ def test_parse_direct_gemini_json_marks_stats_tokens_measured():
     payload, _ = _parse_direct_gemini_json(raw)
     assert payload["tokens_used"] == 321
     assert payload["token_capture_status"] == "measured"
+    assert payload["gateway_stats_present"] is True
+    assert payload["gateway_usage_metadata_present"] is False
+    assert payload["gateway_token_source"] == "stats"
 
 
 def test_parse_direct_gemini_json_reads_usage_metadata_tokens():
@@ -135,6 +138,9 @@ def test_parse_direct_gemini_json_reads_usage_metadata_tokens():
     payload, _ = _parse_direct_gemini_json(raw)
     assert payload["tokens_used"] == 456
     assert payload["token_capture_status"] == "measured"
+    assert payload["gateway_stats_present"] is False
+    assert payload["gateway_usage_metadata_present"] is True
+    assert payload["gateway_token_source"] == "usage_metadata"
 
 
 def test_parse_direct_gemini_json_marks_missing_gateway_stats():
@@ -142,6 +148,9 @@ def test_parse_direct_gemini_json_marks_missing_gateway_stats():
     payload, _ = _parse_direct_gemini_json(raw)
     assert payload["tokens_used"] == 0
     assert payload["token_capture_status"] == "missing_gateway_stats"
+    assert payload["gateway_stats_present"] is False
+    assert payload["gateway_usage_metadata_present"] is False
+    assert payload["gateway_token_source"] == "missing"
 
 
 def test_materialize_fixture_writes_files(tmp_path: Path):
@@ -934,6 +943,9 @@ def test_benchmark_row_splits_model_tokens_from_local_rescue():
         "total_tokens": 112,
         "model_calls": 1,
         "token_capture_status": "not_applicable_local_only",
+        "gateway_stats_present": True,
+        "gateway_usage_metadata_present": False,
+        "gateway_token_source": "stats",
         "gemini_uses_nexus": True,
         "nexus_context_delivered": True,
         "nexus_rescued": True,
@@ -961,6 +973,9 @@ def test_benchmark_row_splits_model_tokens_from_local_rescue():
     assert row["model_token_capture_status"] == "estimated"
     assert row["local_rescue_tokens"] == 0
     assert row["rescue_cost_status"] == "local_only"
+    assert row["gateway_stats_present"] is True
+    assert row["gateway_usage_metadata_present"] is False
+    assert row["gateway_token_source"] == "stats"
     assert row["token_reliable"] is False
     assert row["token_unreliable_reason"] == "local_only_rescue_not_model_comparable"
 

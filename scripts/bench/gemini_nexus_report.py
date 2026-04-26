@@ -117,6 +117,8 @@ def render_markdown_report(
         f"| Token local-only rate | {_pct(a['token_local_only_rate'])} | {_pct(b['token_local_only_rate'])} | {_pct(delta['token_local_only_rate_delta'])} |",
         f"| Cost-comparable rate | {_pct(a['cost_comparable_rate'])} | {_pct(b['cost_comparable_rate'])} | {_pct(delta['cost_comparable_rate_delta'])} |",
         f"| Model token measured rate | {_pct(a['model_token_measured_rate'])} | {_pct(b['model_token_measured_rate'])} | {_pct(delta['model_token_measured_rate_delta'])} |",
+        f"| Gateway stats source rate | {_pct(a['gateway_stats_source_rate'])} | {_pct(b['gateway_stats_source_rate'])} | {_pct(delta['gateway_stats_source_rate_delta'])} |",
+        f"| Gateway usage metadata source rate | {_pct(a['gateway_usage_metadata_source_rate'])} | {_pct(b['gateway_usage_metadata_source_rate'])} | {_pct(delta['gateway_usage_metadata_source_rate_delta'])} |",
         f"| Local rescue rate | {_pct(a['local_rescue_rate'])} | {_pct(b['local_rescue_rate'])} | {_pct(delta['local_rescue_rate_delta'])} |",
         f"| Token public-safe claim | {token_public_safe} | {token_public_safe} | n/a |",
         "",

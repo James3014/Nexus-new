@@ -497,6 +497,12 @@ version_scope:
 - **Decision**: Keep token-cost claims blocked until benchmark rows expose raw gateway token-source evidence such as `gateway_stats_present`, `gateway_usage_metadata_present`, and `gateway_token_source`.
 - **Prevention**: A public benchmark cannot infer measured model cost from non-zero estimates; it must prove the source field came from provider usage telemetry.
 
+## 2026-04-27: Nexus Token Source Must Survive Rescue Paths
+- **Phenomenon**: A 1x1 Gemini 3 Flash probe showed bare Gemini rows with `gateway_token_source=stats`, while Nexus rows remained `gateway_token_source=missing` and `token_capture_status=not_applicable_local_only`.
+- **Root Cause**: Nexus can invoke Gemini, reject or outlive the model candidate, and then finish via local rescue or guard fallback; without explicit source propagation, the final benchmark row hides whether the provider returned token stats.
+- **Decision**: Add raw token-source fields to gateway, sprint result, research-flow report, benchmark rows, A/B summaries, and markdown reports; preserve failed LLM call metadata before local fallback.
+- **Prevention**: Do not expand to 6x2/12x2 token-cost claims until a 1x1 Nexus probe shows `gateway_token_source=stats` or `usage_metadata` in the final row.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

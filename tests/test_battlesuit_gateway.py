@@ -35,6 +35,9 @@ def test_gateway_uses_response_key_from_gemini_cli_json():
     assert data["summary"] == "ok"
     assert data["tokens_used"] == 42
     assert data["token_capture_status"] == "measured"
+    assert data["gateway_stats_present"] is True
+    assert data["gateway_usage_metadata_present"] is False
+    assert data["gateway_token_source"] == "stats"
 
 
 def test_gateway_reads_usage_metadata_tokens():
@@ -56,6 +59,9 @@ def test_gateway_reads_usage_metadata_tokens():
 
     assert data["tokens_used"] == 77
     assert data["token_capture_status"] == "measured"
+    assert data["gateway_stats_present"] is False
+    assert data["gateway_usage_metadata_present"] is True
+    assert data["gateway_token_source"] == "usage_metadata"
 
 
 def test_gateway_ignores_hook_text_after_cli_json():
@@ -77,6 +83,8 @@ def test_gateway_ignores_hook_text_after_cli_json():
 
     assert data["status"] == "PASS"
     assert data["summary"] == "ok"
+    assert data["gateway_stats_present"] is True
+    assert data["gateway_token_source"] == "missing"
 
 
 def test_gateway_sets_headless_trust_flags_and_neutral_cwd():

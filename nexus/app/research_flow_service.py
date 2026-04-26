@@ -786,6 +786,9 @@ def run_auto_flow(
                     "fallback_used": bool(getattr(res, "fallback_used", False)),
                     "total_tokens": res.total_tokens,
                     "token_capture_status": res.token_capture_status,
+                    "gateway_stats_present": bool(getattr(res, "gateway_stats_present", False)),
+                    "gateway_usage_metadata_present": bool(getattr(res, "gateway_usage_metadata_present", False)),
+                    "gateway_token_source": str(getattr(res, "gateway_token_source", "missing") or "missing"),
                     "effective_stage1_timeout_sec": effective_stage1_timeout,
                     "learning_trace": res.learning_trace,
                 },
@@ -867,6 +870,9 @@ def run_auto_flow(
                             "fallback_used": bool(hyper_report.get("fallback_used", False)),
                             "total_tokens": int(hyper_report.get("total_tokens", 0) or 0),
                             "token_capture_status": hyper_report.get("token_capture_status", "unknown"),
+                            "gateway_stats_present": bool(hyper_report.get("gateway_stats_present", False)),
+                            "gateway_usage_metadata_present": bool(hyper_report.get("gateway_usage_metadata_present", False)),
+                            "gateway_token_source": hyper_report.get("gateway_token_source", "missing"),
                             "winner_source": hyper_report.get("winner_source", "unknown"),
                             "learning_trace": hyper_report.get("learning_trace", {}),
                         }
@@ -877,6 +883,18 @@ def run_auto_flow(
                         result["report"]["total_tokens"] = int(result["report"].get("total_tokens", 0) or 0) + int(hyper_report.get("total_tokens", 0) or 0)
                         if hyper_report.get("token_capture_status") == "measured":
                             result["report"]["token_capture_status"] = "measured"
+                        result["report"]["gateway_stats_present"] = bool(
+                            result["report"].get("gateway_stats_present", False)
+                            or hyper_report.get("gateway_stats_present", False)
+                        )
+                        result["report"]["gateway_usage_metadata_present"] = bool(
+                            result["report"].get("gateway_usage_metadata_present", False)
+                            or hyper_report.get("gateway_usage_metadata_present", False)
+                        )
+                        result["report"]["gateway_token_source"] = hyper_report.get(
+                            "gateway_token_source",
+                            result["report"].get("gateway_token_source", "missing"),
+                        )
                     chosen_flow = "baseline"
                     strategy_path = "hyper_guard_fallback_to_baseline"
     phase_wall_sec["R"] = round(time.time() - phase_started_at, 4)
