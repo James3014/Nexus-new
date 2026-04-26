@@ -18,6 +18,7 @@ from scripts.bench.capability_ab_runner import (
     _materialize_fixture,
     _read_preserved_target,
     _remaining_leg_timeout,
+    _report_model_label,
     _restore_preserved_target,
     _resolve_task_files,
     _tail_text,
@@ -94,6 +95,11 @@ def test_expand_task_trials_repeats_and_shuffles_deterministically():
     expanded = expand_task_trials(tasks, repeat_trials=2, shuffle_seed=7)
     assert sorted((task.id, task.trial_index) for task in expanded) == [("a", 1), ("a", 2), ("b", 1), ("b", 2)]
     assert [task.id for task in expanded] == [task.id for task in expand_task_trials(tasks, repeat_trials=2, shuffle_seed=7)]
+
+
+def test_report_model_label_uses_configured_gemini_model(monkeypatch):
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    assert _report_model_label() == "gemini-3-flash-preview"
 
 
 def test_materialize_fixture_writes_files(tmp_path: Path):

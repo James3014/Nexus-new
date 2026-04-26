@@ -14,10 +14,13 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from click.testing import CliRunner
+
+from scripts.bench.gemini_nexus_report import render_markdown_report
 
 from nexus.app.research_flow_service import run_auto_flow
 from nexus.research.local_sprint_mutator import generate_local_candidate
@@ -1126,6 +1129,15 @@ def _history_policy_name(*, neutralize_history: bool, allow_learning_loop: bool)
     return "per_task_reset"
 
 
+def _report_model_label() -> str:
+    model = str(
+        os.environ.get("NEXUS_GEMINI_MODEL_NAME")
+        or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL")
+        or "gemini"
+    ).strip()
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", model) or "gemini"
+
+
 def _force_learn_slo_ready(repo_root: Path) -> None:
     path = (repo_root / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1229,6 +1241,11 @@ def main() -> int:
     )
     parser.add_argument("--evidence-bundle", dest="evidence_bundle", action="store_true", default=True)
     parser.add_argument("--no-evidence-bundle", dest="evidence_bundle", action="store_false")
+    parser.add_argument(
+        "--markdown-report",
+        default="",
+        help="Optional markdown report path. Use 'auto' to write gemini_nexus_report_<timestamp>.md in output-dir.",
+    )
     parser.add_argument("--require-clean-worktree", action="store_true", default=False)
     parser.add_argument(
         "--isolation-mode",
@@ -1476,6 +1493,27 @@ def main() -> int:
             )
         )
 
+    markdown_report_path = ""
+    if args.markdown_report:
+        if args.markdown_report == "auto":
+            markdown_report = out_dir / f"gemini_nexus_report_{ts}.md"
+        else:
+            markdown_report = Path(args.markdown_report)
+            if not markdown_report.is_absolute():
+                markdown_report = (repo_root / markdown_report).resolve()
+        markdown_report.parent.mkdir(parents=True, exist_ok=True)
+        markdown_report.write_text(
+            render_markdown_report(
+                without_path=str(without_path),
+                with_path=str(with_path),
+                label_without=f"{_report_model_label()}_bare",
+                label_with=f"{_report_model_label()}_nexus",
+                benchmark_date=datetime.now().date().isoformat(),
+            ),
+            encoding="utf-8",
+        )
+        markdown_report_path = str(markdown_report)
+
     print(
         json.dumps(
             {
@@ -1492,6 +1530,7 @@ def main() -> int:
                 "with_nexus_file": str(with_path),
                 "without_nexus_file": str(without_path),
                 "evidence_bundle_file": evidence_bundle_path,
+                "markdown_report_file": markdown_report_path,
                 "history_policy": history_policy,
                 "learn_slo_policy": "forced_ready" if args.force_learn_slo_ready else "repo_state",
                 "benchmark_summary": benchmark_summary,

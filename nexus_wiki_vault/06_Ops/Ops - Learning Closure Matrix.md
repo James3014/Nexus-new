@@ -443,6 +443,12 @@ version_scope:
 - **Decision**: Estimate prompt tokens only for non-quota LLM failures; keep quota rows at zero tokens so eligibility/infra handling remains the source of truth.
 - **Prevention**: Token telemetry fixes must classify infra failures before adding cost estimates.
 
+## 2026-04-27: Auto Benchmark Reports Need Model-Specific Labels
+- **Phenomenon**: The first auto-generated Gemini/Nexus markdown report labeled arms as `gemini_gemini_bare` and `gemini_all_nexus`.
+- **Root Cause**: The report hook derived labels from runner mode flags instead of the configured model name.
+- **Decision**: Derive report labels from `NEXUS_GEMINI_MODEL_NAME` / `NEXUS_DIRECT_GEMINI_MODEL` and suffix them with `_bare` or `_nexus`.
+- **Prevention**: Public benchmark report generators must encode model identity from runtime configuration, not execution-mode shorthand.
+
 ## 2026-04-26: JIT ML Needs Observation Before Prediction
 - **Phenomenon**: Full regression is growing, but jumping straight to ML test selection would train on sparse and noisy failure data.
 - **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.
