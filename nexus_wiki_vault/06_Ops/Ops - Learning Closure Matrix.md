@@ -455,6 +455,12 @@ version_scope:
 - **Decision**: Cap benchmark gateway timeout at 30s by default, with `NEXUS_BENCH_GATEWAY_TIMEOUT_SEC` as an explicit override.
 - **Prevention**: Benchmark timeout knobs must bound failed model attempts independently from the total per-task timeout.
 
+## 2026-04-27: Hard-Only Follow-Up Must Declare Actual Unique Count
+- **Phenomenon**: A requested hard-only 12x2 benchmark executed 12 rows, but the neutral-fixture hard subset only contained 6 unique tasks repeated twice.
+- **Root Cause**: `max_tasks=12` is an upper bound after filters, not a guarantee that 12 unique tasks exist in the filtered manifest.
+- **Decision**: Report the run as hard-only 6x2 and keep the raw runner fields `unique_tasks_requested` and `repeat_trials` visible.
+- **Prevention**: Public benchmark summaries must state both unique task count and repeated row count.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

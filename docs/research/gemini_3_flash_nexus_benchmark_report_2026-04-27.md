@@ -4,10 +4,13 @@
 - Model: `gemini-3-flash-preview`
 - Baseline: `gemini-3-flash-preview_bare`
 - Treatment: `gemini-3-flash-preview_nexus`
-- Task set: `public_benchmark_pilot_v1`, `neutral_fixture`, 12 unique tasks x 2 trials
+- Broad task set: `public_benchmark_pilot_v1`, `neutral_fixture`, 12 unique tasks x 2 trials
+- Hard-only follow-up: `public_benchmark_pilot_v1`, `neutral_fixture`, 6 unique hard tasks x 2 trials
 - History policy: `per_task_reset`
 
 ## Result
+
+### Broad Neutral Fixture 12x2
 
 | Metric | Bare Gemini | Gemini + Nexus | Delta |
 | --- | ---: | ---: | ---: |
@@ -21,6 +24,20 @@
 | Avg model calls | 1.00 | 1.00 | 0.00 |
 | Token reliable rate | 95.7% | 91.7% | -4.0 pp |
 
+### Hard-Only Gateway30 6x2
+
+| Metric | Bare Gemini | Gemini + Nexus | Delta |
+| --- | ---: | ---: | ---: |
+| Runs | 12 | 12 | 0 |
+| Eligible runs | 11 | 12 | +1 |
+| Solve rate | 91.7% | 100.0% | +8.3 pp |
+| Semantic verified | 91.7% | 100.0% | +8.3 pp |
+| Hard success | 91.7% | 100.0% | +8.3 pp |
+| Trust mismatch | 0.0% | 0.0% | 0.0 pp |
+| Avg wall time | 33.59s | 34.01s | +0.42s |
+| Avg model calls | 1.00 | 1.00 | 0.00 |
+| Token measured rate | 0.0% | 0.0% | 0.0 pp |
+
 ## Nexus Wearing Evidence
 
 | Evidence | Result |
@@ -32,6 +49,10 @@
 | six phases present | 24/24 |
 | capability claim verified | 24/24 |
 | Nexus rescue rate | 91.7% |
+
+The hard-only gateway30 follow-up also passed Nexus treatment evidence:
+`gemini_uses_nexus=true`, `nexus_context_delivered=true`, five pillars, six
+phases, and capability claim verification were all 12/12.
 
 ## What Improved
 
@@ -58,8 +79,13 @@ runner now caps the Nexus subprocess gateway timeout at 30s by default, with
 
 A 3-task hard smoke after the timeout cap showed the intended direction:
 Gemini + Nexus stayed at 3/3 solved and average wall time dropped to 34.12s,
-compared with 40.11s for bare Gemini on the same smoke. This is only a smoke,
-not a replacement for the 12x2 result.
+compared with 40.11s for bare Gemini on the same smoke.
+
+The follow-up hard-only 6 unique tasks x 2 trials run confirmed that the timeout
+cap did not break Nexus completion: Gemini + Nexus solved 12/12 and bare Gemini
+solved 11/12. Average wall time was effectively tied at 34.01s vs 33.59s, so the
+previous 61.57s Nexus average was a benchmark timeout artifact, not an inherent
+Nexus requirement.
 
 Token/cost claims are not yet public-safe. Token reliability improved compared
 with the earlier 2026-04-26 run, but Nexus still has estimated-token rows and
@@ -72,11 +98,15 @@ bare Gemini still has one `model_call_without_tokens` row.
 - Evidence bundle: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/evidence_bundle.json`
 - Auto markdown: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/gemini_nexus_report_1777220242.md`
 - Gateway-timeout smoke: `.nexus/reports/bench_gemini3flash_vs_nexus_gateway30_smoke_3x1_20260427/gemini_nexus_report_1777223214.md`
+- Hard-only gateway30 with Nexus: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_12x2_gateway30_20260427/with_nexus_1777226288.jsonl`
+- Hard-only gateway30 bare Gemini: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_12x2_gateway30_20260427/without_nexus_1777226288.jsonl`
+- Hard-only gateway30 report: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_12x2_gateway30_20260427/gemini_nexus_report_1777226288.md`
 
 ## Public-Safe Claim Draft
 
 On a fixed 12-task neutral-fixture benchmark repeated twice, Gemini 3 Flash with
 Nexus improved semantic solve rate from 83.3% to 100.0% while keeping trust
-mismatch at 0.0%. The same benchmark also shows Nexus currently adds wall-time
-overhead, so speed and token-cost claims require further telemetry hardening and
-performance tuning.
+mismatch at 0.0%. After capping benchmark gateway timeout at 30s, a hard-only
+follow-up preserved Nexus' 100.0% solve rate and brought wall time roughly in
+line with bare Gemini. Token-cost claims still require further telemetry
+hardening.
