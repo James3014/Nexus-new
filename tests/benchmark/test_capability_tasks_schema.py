@@ -108,3 +108,40 @@ def test_public_benchmark_pilot_manifest_distribution():
     assert repo_kinds["neutral_fixture"] == 18
     assert repo_kinds["external"] == 6
     assert (repo_kinds["neutral_fixture"] + repo_kinds["external"]) / len(tasks) == 0.8
+
+
+def test_public_hard_neutral_v2_manifest_has_12_unique_hard_tasks():
+    path = Path("scripts/bench/public_benchmark_hard_neutral_v2.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    tasks = payload["tasks"]
+    assert len(tasks) == 12
+    assert payload["frozen"] is True
+
+    categories = {
+        "bugfix": 0,
+        "test_repair": 0,
+        "refactor": 0,
+        "feature": 0,
+        "docs_code_sync": 0,
+        "ops_research": 0,
+    }
+    ids: set[str] = set()
+
+    for task in tasks:
+        assert task["id"] not in ids
+        ids.add(task["id"])
+        assert task["difficulty"] == "hard"
+        assert task["repo_kind"] == "neutral_fixture"
+        assert task["fixture_kind"]
+        assert task["success_criteria"] == "patch_and_tests_pass"
+        assert task["mutation_required"] is True
+        categories[task["category"]] += 1
+
+    assert categories == {
+        "bugfix": 2,
+        "test_repair": 2,
+        "refactor": 2,
+        "feature": 2,
+        "docs_code_sync": 2,
+        "ops_research": 2,
+    }

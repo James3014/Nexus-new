@@ -41,6 +41,29 @@ def _count_text(counts: dict[str, int], key: str) -> str:
     return str(counts.get(key, 0))
 
 
+def _scope_summary(rows: list[dict[str, Any]]) -> dict[str, int]:
+    task_ids = {str(row.get("task_id") or "") for row in rows if row.get("task_id")}
+    trials = {
+        int(row.get("trial_index") or 1)
+        for row in rows
+        if str(row.get("trial_index") or "").strip()
+    }
+    return {
+        "rows": len(rows),
+        "unique_tasks": len(task_ids),
+        "repeat_trials": max(trials) if trials else 1,
+    }
+
+
+def _public_token_claim_status(a: dict[str, Any], b: dict[str, Any], *, min_rate: float = 0.8) -> str:
+    try:
+        without_rate = float(a.get("token_measured_rate", 0.0) or 0.0)
+        with_rate = float(b.get("token_measured_rate", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return "NO"
+    return "YES" if without_rate >= min_rate and with_rate >= min_rate else "NO"
+
+
 def render_markdown_report(
     *,
     without_path: str,
@@ -65,6 +88,9 @@ def render_markdown_report(
     baseline_wall = float(a["avg_wall_duration_sec"])
     token_without = _token_status_counts(rows_without)
     token_with = _token_status_counts(rows_with)
+    without_scope = _scope_summary(rows_without)
+    with_scope = _scope_summary(rows_with)
+    token_public_safe = _public_token_claim_status(a, b)
 
     lines = [
         "# Gemini 3 Flash + Nexus Benchmark Report",
@@ -74,6 +100,8 @@ def render_markdown_report(
         f"- Treatment: `{label_with}`",
         f"- Without Nexus: `{without_path}`",
         f"- With Nexus: `{with_path}`",
+        f"- Without Nexus scope: {without_scope['unique_tasks']} unique tasks x {without_scope['repeat_trials']} trials = {without_scope['rows']} rows",
+        f"- With Nexus scope: {with_scope['unique_tasks']} unique tasks x {with_scope['repeat_trials']} trials = {with_scope['rows']} rows",
         "",
         "## Result",
         "",
@@ -86,6 +114,7 @@ def render_markdown_report(
         f"| Wall speedup | n/a | {_wall_speedup(wall_delta, baseline_wall)} | n/a |",
         f"| Avg model calls | {_num(a['avg_model_calls'])} | {_num(b['avg_model_calls'])} | {_num(delta['avg_model_calls_delta'])} |",
         f"| Token measured rate | {_pct(a['token_measured_rate'])} | {_pct(b['token_measured_rate'])} | {_pct(delta['token_measured_rate_delta'])} |",
+        f"| Token public-safe claim | {token_public_safe} | {token_public_safe} | n/a |",
         "",
         "## Token Telemetry",
         "",

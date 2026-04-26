@@ -461,6 +461,12 @@ version_scope:
 - **Decision**: Report the run as hard-only 6x2 and keep the raw runner fields `unique_tasks_requested` and `repeat_trials` visible.
 - **Prevention**: Public benchmark summaries must state both unique task count and repeated row count.
 
+## 2026-04-27: Token Safety Tests Must Match Claim Policy
+- **Phenomenon**: A report-rendering test expected token claims to be public-safe even though one Nexus row used `token_capture_status=estimated`.
+- **Root Cause**: The fixture mixed telemetry quality examples with public-claim eligibility in the same assertion.
+- **Decision**: Treat any arm below the token measured-rate threshold as `Token public-safe claim=NO`.
+- **Prevention**: Benchmark report tests must separate token status counting from public claim approval.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.
