@@ -49,7 +49,7 @@ tests/core tests/services/test_policy_gate.py
 uv run python scripts/ops/select_tests.py --json nexus/core/state_validator.py
 ```
 
-JSON 會包含 `targets`、`reasons`、`confidence`、`risk`、`sources`。
+JSON 會包含 `targets`、`reasons`、`confidence`、`risk`、`sources`、`selected_count`、`fallback_used`、`high_risk_escalated`、`unmatched_paths`、`retry_recommended`。
 若 `.nexus/reports/test_history.jsonl` 存在，selector 也會使用歷史耗時與 flaky 訊號排序。
 
 CI gate 也提供相同 selector 的 changed-only lane：
@@ -59,6 +59,7 @@ uv run python scripts/ops/ci_gate.py --changed-only scripts/ops/select_tests.py
 ```
 
 這條 lane 只跑受影響 pytest targets，不執行 wiki、benchmark、learn 或 release gates。
+它會產生 `.nexus/reports/changed_only_junit.xml`，並把總耗時與 per-target duration 寫回 `.nexus/reports/test_history.jsonl`。
 
 Strict gate 可把 JIT preflight 放在完整治理檢查之前：
 
@@ -79,6 +80,11 @@ High-risk escalation:
 - `scripts/ops/ci_gate.py`
 
 這些路徑會自動標記 `risk=high`，並追加 policy-gate safety target。
+
+Flaky retry recommendation:
+
+- selector 會根據歷史 `0 < failures < runs` 標記 `retry_recommended`
+- v3 只輸出 retry 建議，不自動重跑；自動 retry 需要等 history 穩定後再接
 
 ## 2. 失敗排查清單 (Troubleshooting)
 

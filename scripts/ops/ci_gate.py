@@ -7,6 +7,7 @@ import argparse
 import subprocess
 import concurrent.futures
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +40,43 @@ REPORT_TRUST_AUDIT_TARGETS = (
     "tests/engine/test_swarm_command_runtime.py",
     "tests/test_v18_legacy_delivery.py",
 )
+
+
+def _target_matches_test_file(target: str, test_file: str) -> bool:
+    target = target.strip().replace("\\", "/").strip("/")
+    test_file = test_file.strip().replace("\\", "/").strip("/")
+    if not target or not test_file:
+        return False
+    if target.endswith(".py"):
+        return test_file == target
+    return test_file == target or test_file.startswith(f"{target.rstrip('/')}/")
+
+
+def _extract_junit_target_durations(junit_path: Path, targets: list[str]) -> dict[str, float]:
+    if not junit_path.exists():
+        return {}
+    try:
+        root = ET.fromstring(junit_path.read_text(encoding="utf-8"))
+    except (ET.ParseError, OSError):
+        return {}
+
+    durations = {target: 0.0 for target in targets}
+    for testcase in root.iter("testcase"):
+        test_file = str(testcase.attrib.get("file") or "")
+        if not test_file:
+            classname = str(testcase.attrib.get("classname") or "")
+            test_file = classname.replace(".", "/") + ".py" if classname else ""
+        try:
+            elapsed = float(testcase.attrib.get("time") or 0.0)
+        except (TypeError, ValueError):
+            elapsed = 0.0
+        for target in targets:
+            if _target_matches_test_file(target, test_file):
+                durations[target] += elapsed
+                break
+
+    return {target: round(value, 4) for target, value in durations.items() if value > 0}
+
 
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
@@ -266,6 +304,7 @@ def run_changed_only_check(changed_paths: list[str]) -> bool:
 
     start = time.time()
     details = select_target_details(changed_paths, load_impact_rules())
+    junit_path = ROOT / ".nexus" / "reports" / "changed_only_junit.xml"
     print("\n🚀 [CI-Gate] Running Changed-Only JIT Tests...")
     for reason in details.reasons:
         print(f"  - {reason}")
@@ -273,22 +312,36 @@ def run_changed_only_check(changed_paths: list[str]) -> bool:
         f"🎯 [CI-Gate] Changed-only targets: {' '.join(details.targets)} "
         f"(confidence={details.confidence:.1f}, risk={details.risk}, sources={','.join(details.sources)})"
     )
-    command = f'"{VENV_PYTHON}" -m pytest {" ".join(details.targets)} -q'
-    success, _ = run_step(
+    if details.unmatched_paths:
+        print(f"⏭️ [CI-Gate] Unmatched changed paths: {', '.join(details.unmatched_paths)}")
+    if details.retry_recommended:
+        print(f"🔁 [CI-Gate] Retry recommended for flaky targets: {', '.join(details.retry_recommended)}")
+    junit_path.parent.mkdir(parents=True, exist_ok=True)
+    command = f'"{VENV_PYTHON}" -m pytest {" ".join(details.targets)} -q --junitxml="{junit_path}"'
+    success, output = run_step(
         "Changed-Only JIT Tests",
         command,
     )
+    target_durations = _extract_junit_target_durations(junit_path, details.targets)
     record_test_history(
         mode="changed-only",
         command=command,
         success=success,
         targets=details.targets,
         duration_sec=round(time.time() - start, 4),
+        target_durations=target_durations,
         metadata={
             "changed_paths": changed_paths,
             "confidence": details.confidence,
             "risk": details.risk,
             "sources": details.sources,
+            "selected_count": len(details.targets),
+            "fallback_used": details.fallback_used,
+            "high_risk_escalated": details.high_risk_escalated,
+            "unmatched_paths": details.unmatched_paths,
+            "retry_recommended": details.retry_recommended,
+            "junit_path": str(junit_path),
+            "output_excerpt": output[:1000],
         },
     )
     return success
@@ -300,6 +353,7 @@ def record_test_history(
     success: bool,
     targets: list[str] | None = None,
     duration_sec: float | None = None,
+    target_durations: dict[str, float] | None = None,
     metadata: dict | None = None,
 ) -> None:
     history_path = ROOT / ".nexus" / "reports" / "test_history.jsonl"
@@ -313,6 +367,8 @@ def record_test_history(
     }
     if duration_sec is not None:
         entry["duration_sec"] = duration_sec
+    if target_durations:
+        entry["target_durations"] = target_durations
     if metadata:
         entry["metadata"] = metadata
     with history_path.open("a", encoding="utf-8") as handle:

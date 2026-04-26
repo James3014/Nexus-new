@@ -424,3 +424,9 @@ version_scope:
 - **Root Cause**: Regression tests encoded local filesystem assumptions instead of constructing minimal fixtures.
 - **Decision**: Assert repo-root behavior without hard-coding the parent workspace, and use `tmp_path` fixtures for benchmark dependency crossings.
 - **Prevention**: Tests that validate cross-repo behavior must build the external repo shape locally unless the external tree is the subject under test.
+
+## 2026-04-26: JIT Must Explain Coverage, Not Only Select Targets
+- **Phenomenon**: Affected-test selection could run the right targets while leaving unclear whether fallback, high-risk escalation, unmatched paths, or flaky retry needs influenced the run.
+- **Root Cause**: The selector contract emphasized target lists and reasons, but did not expose compact machine-readable evidence for skipped/unmatched interpretation.
+- **Decision**: Add explicit selector evidence fields and write per-target duration data from changed-only JUnit output into test history.
+- **Prevention**: Every JIT selection improvement must preserve a public evidence trail: selected count, fallback status, risk escalation, unmatched paths, retry recommendation, and duration basis.

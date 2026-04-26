@@ -39,6 +39,10 @@ class SelectionDetails:
     risk: str
     sources: list[str]
     history: dict[str, dict]
+    unmatched_paths: list[str]
+    fallback_used: bool
+    high_risk_escalated: bool
+    retry_recommended: list[str]
 
 
 def _normalize_path(value: str) -> str:
@@ -240,6 +244,7 @@ def select_target_details(
     history = load_test_history(history_path)
 
     normalized_paths = [_normalize_path(path) for path in changed_paths if path.strip()]
+    unmatched_paths: list[str] = []
     high_risk = any(
         changed_path == prefix or changed_path.startswith(f"{prefix}/")
         for changed_path in normalized_paths
@@ -267,6 +272,7 @@ def select_target_details(
             reasons.extend(mapped_reasons)
             path_matched = True
         elif not path_matched:
+            unmatched_paths.append(changed_path)
             reasons.extend(mapped_reasons or [f"{changed_path}: fallback"])
 
     needs_fallback = not selected or any(reason.endswith(": fallback") for reason in reasons)
@@ -288,6 +294,9 @@ def select_target_details(
         reasons.append("high-risk escalation")
 
     expanded = _sort_targets_by_history(_expand_existing_targets(selected), history)
+    retry_recommended = [
+        target for target in expanded if bool(history.get(target, {}).get("flaky", False))
+    ]
     if "fallback" in sources:
         confidence = 0.4
         risk = "high"
@@ -300,7 +309,18 @@ def select_target_details(
     else:
         confidence = 0.7
         risk = "medium"
-    return SelectionDetails(targets=expanded, reasons=reasons, confidence=confidence, risk=risk, sources=sources, history=history)
+    return SelectionDetails(
+        targets=expanded,
+        reasons=reasons,
+        confidence=confidence,
+        risk=risk,
+        sources=sources,
+        history=history,
+        unmatched_paths=unmatched_paths,
+        fallback_used=needs_fallback,
+        high_risk_escalated=high_risk,
+        retry_recommended=retry_recommended,
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -360,6 +380,11 @@ def main(argv: list[str] | None = None) -> int:
                     "risk": details.risk,
                     "sources": details.sources,
                     "history": {target: details.history.get(target, {}) for target in targets},
+                    "selected_count": len(targets),
+                    "fallback_used": details.fallback_used,
+                    "high_risk_escalated": details.high_risk_escalated,
+                    "unmatched_paths": details.unmatched_paths,
+                    "retry_recommended": details.retry_recommended,
                     "impact_map": str(Path(args.impact_map)),
                     "impact_index": str(Path(args.impact_index)),
                     "test_history": str(Path(args.test_history)),

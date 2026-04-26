@@ -150,6 +150,7 @@ def test_select_target_details_handles_empty_changed_paths():
     assert details.confidence == 0.4
     assert details.risk == "high"
     assert details.sources == ["fallback"]
+    assert details.fallback_used is True
 
 
 def test_load_test_history_aggregates_duration_failures_and_flaky(tmp_path):
@@ -195,6 +196,22 @@ def test_select_target_details_uses_history_and_high_risk_escalation(tmp_path):
     assert "high_risk" in details.sources
     assert details.history["tests/core/flaky.py"]["flaky"] is True
     assert "tests/services/test_policy_gate.py" in details.targets
+    assert details.retry_recommended == ["tests/core/flaky.py"]
+    assert details.high_risk_escalated is True
+
+
+def test_select_target_details_reports_unmatched_paths_and_fallback(tmp_path):
+    details = select_target_details(
+        ["docs/testing/unknown.md"],
+        [ImpactRule("nexus/core", ("tests/core",), "active")],
+        fallback_targets=("tests/smoke",),
+        history_path=tmp_path / "missing.jsonl",
+    )
+
+    assert details.targets == ["tests/smoke"]
+    assert details.unmatched_paths == ["docs/testing/unknown.md"]
+    assert details.fallback_used is True
+    assert details.high_risk_escalated is False
 
 
 def test_main_json_includes_selection_metadata(tmp_path, capsys):
@@ -229,3 +246,8 @@ def test_main_json_includes_selection_metadata(tmp_path, capsys):
     assert payload["confidence"] == 0.85
     assert payload["risk"] == "high"
     assert payload["sources"] == ["import_index", "impact_map", "high_risk"]
+    assert payload["selected_count"] == 3
+    assert payload["fallback_used"] is False
+    assert payload["high_risk_escalated"] is True
+    assert payload["unmatched_paths"] == []
+    assert payload["retry_recommended"] == []

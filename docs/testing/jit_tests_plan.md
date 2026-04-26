@@ -1,4 +1,4 @@
-# JIT Tests v0 Plan
+# JIT Tests Plan
 
 ## Goal
 
@@ -58,10 +58,19 @@ Selection now also reads `.nexus/reports/test_history.jsonl` when present.
 - `nexus/core`, `nexus/security`, and `scripts/ops/ci_gate.py` changes are marked high risk and receive the policy-gate safety target.
 - `ci_gate.py --changed-only` writes changed-only run evidence back to test history.
 
+## v3 Behavior
+
+Changed-only CI now records richer evidence without changing the selector-only
+contract.
+
+- `ci_gate.py --changed-only` emits a JUnit XML report and aggregates `target_durations` into `.nexus/reports/test_history.jsonl`.
+- Selector JSON includes `selected_count`, `fallback_used`, `high_risk_escalated`, `unmatched_paths`, and `retry_recommended`.
+- Historical flaky targets are surfaced through `retry_recommended`; v3 recommends retry but does not automatically rerun.
+- Fallback and high-risk selection are explicit evidence fields, so skipped/unmatched coverage can be reviewed before benchmark interpretation.
+
 ## Next Wiring Order
 
 1. Expand impact-map coverage from observed misses.
-2. Add per-target duration extraction from pytest reports.
-3. Add skipped-test evidence reporting.
-4. Add run eligibility semantics for Gemini benchmark quota/infra invalid rows.
-5. Add predictive ranking only after enough `.nexus/reports/test_history.jsonl` data exists.
+2. Add run eligibility semantics for Gemini benchmark quota/infra invalid rows.
+3. Add optional flaky auto-retry after retry recommendation data is stable.
+4. Add predictive ranking only after enough `.nexus/reports/test_history.jsonl` data exists.

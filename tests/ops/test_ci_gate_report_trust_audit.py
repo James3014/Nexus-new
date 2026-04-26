@@ -1,4 +1,5 @@
 import argparse
+import json
 from unittest.mock import patch
 
 from scripts.ops import ci_gate
@@ -44,6 +45,16 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, cap
     def fake_run_step(name, cmd):
         seen["name"] = name
         seen["cmd"] = cmd
+        junit_path = tmp_path / ".nexus" / "reports" / "changed_only_junit.xml"
+        junit_path.parent.mkdir(parents=True, exist_ok=True)
+        junit_path.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<testsuite>
+  <testcase classname="tests.ops.test_select_tests" name="test_a" file="tests/ops/test_select_tests.py" time="0.12"/>
+</testsuite>
+""",
+            encoding="utf-8",
+        )
         return True, "ok"
 
     monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
@@ -58,6 +69,33 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, cap
     history = (tmp_path / ".nexus" / "reports" / "test_history.jsonl").read_text(encoding="utf-8")
     assert '"mode": "changed-only"' in history
     assert "tests/ops/test_select_tests.py" in history
+    payload = json.loads(history)
+    assert payload["target_durations"]["tests/ops/test_select_tests.py"] == 0.12
+    assert payload["metadata"]["selected_count"] >= 1
+
+
+def test_extract_junit_target_durations_aggregates_by_file_and_directory(tmp_path):
+    junit_path = tmp_path / "junit.xml"
+    junit_path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<testsuite>
+  <testcase classname="tests.ops.test_select_tests" name="test_a" file="tests/ops/test_select_tests.py" time="0.10"/>
+  <testcase classname="tests.ops.test_select_tests" name="test_b" file="tests/ops/test_select_tests.py" time="0.20"/>
+  <testcase classname="tests.services.test_policy_gate" name="test_c" file="tests/services/test_policy_gate.py" time="0.30"/>
+</testsuite>
+""",
+        encoding="utf-8",
+    )
+
+    durations = ci_gate._extract_junit_target_durations(
+        junit_path,
+        ["tests/ops/test_select_tests.py", "tests/services"],
+    )
+
+    assert durations == {
+        "tests/ops/test_select_tests.py": 0.3,
+        "tests/services": 0.3,
+    }
 
 
 def test_run_nightly_full_check_records_history(monkeypatch, tmp_path):
