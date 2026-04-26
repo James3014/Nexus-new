@@ -117,6 +117,14 @@ def test_gateway_sets_headless_trust_flags_and_neutral_cwd():
     assert captured["cwd"] == "/tmp"
 
 
+def test_gateway_system_instruction_disables_tools():
+    gateway = BattlesuitGateway(project_root=".")
+    instruction = gateway._build_system_instruction({"status": "PASS | FAIL"})
+
+    assert "Do not use tools" in instruction
+    assert "Return ONLY valid JSON" in instruction
+
+
 def test_gateway_timeout_returns_budget_telemetry(monkeypatch):
     import subprocess
 

@@ -115,13 +115,19 @@ class LLMCandidateGenerator:
                 model_calls += 1
                 out, raw = self.gateway.ask_structured(
                     prompt=prompt_text,
-                    payload="Return FULL file content.",
+                    payload="Return one small edit. Prefer operation=replace with exact target_snippet and replacement.",
                     phase="R",
-                    output_schema={"status": "APPROVED | FAIL", "patch": "Full target file content"},
+                    output_schema={
+                        "status": "APPROVED | FAIL",
+                        "operation": "replace | append | full_patch",
+                        "target_snippet": "Exact existing text to replace",
+                        "replacement": "New text",
+                        "patch": "Optional full target file content fallback",
+                    },
                     model_name=model,
                 )
                 status = str(out.get("status", "")).upper() if isinstance(out, dict) else ""
-                code = out.get("patch") if isinstance(out, dict) else None
+                code, edit_error = _candidate_code_from_llm_output(source_code, out if isinstance(out, dict) else {})
                 tokens_used = 0
                 token_capture_status = "unknown"
                 if isinstance(out, dict):
@@ -146,9 +152,10 @@ class LLMCandidateGenerator:
                     "gateway_timeout_sec": int(out.get("gateway_timeout_sec", 0) or 0) if isinstance(out, dict) else 0,
                     "model_name": model,
                     "model_patch_generated": False,
+                    "llm_edit_protocol": str(out.get("operation") or "legacy_patch") if isinstance(out, dict) else "invalid",
                 }
                 if status == "FAIL" or not code:
-                    category = str(out.get("error_category", "llm_no_patch") if isinstance(out, dict) else "llm_no_patch")
+                    category = str(out.get("error_category", edit_error or "llm_no_patch") if isinstance(out, dict) else "llm_no_patch")
                     raise LLMCandidateError(category, metadata)
                 if tokens_used <= 0 and model_calls > 0:
                     tokens_used = _estimate_tokens(prompt_text) + _estimate_tokens(str(code))
@@ -177,11 +184,36 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _candidate_code_from_llm_output(source_code: str, out: dict[str, Any]) -> tuple[Optional[str], str]:
+    patch = out.get("patch")
+    if isinstance(patch, str) and patch.strip():
+        return patch, ""
+
+    operation = str(out.get("operation") or "replace").strip().lower()
+    if operation not in {"replace", "append"}:
+        return None, "llm_invalid_edit_operation"
+
+    replacement = out.get("replacement")
+    if not isinstance(replacement, str):
+        return None, "llm_missing_replacement"
+
+    if operation == "append":
+        separator = "" if source_code.endswith("\n") or not source_code else "\n"
+        return f"{source_code}{separator}{replacement}", ""
+
+    target = out.get("target_snippet")
+    if not isinstance(target, str) or not target:
+        return None, "llm_missing_target_snippet"
+    if source_code.count(target) != 1:
+        return None, "llm_target_snippet_not_unique"
+    return source_code.replace(target, replacement, 1), ""
+
+
 def _build_llm_candidate_prompt(*, source_code: str, task: str, mutation_hint: str) -> str:
     compact = os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"}
     if compact:
         return (
-            "Return JSON with status=APPROVED and patch=FULL updated file content.\n"
+            "Return JSON with status=APPROVED, operation=replace, target_snippet, replacement.\n"
             f"Task: {task}\n"
             f"Hint: {mutation_hint}\n"
             f"Source:\n{source_code}"
@@ -191,7 +223,9 @@ def _build_llm_candidate_prompt(*, source_code: str, task: str, mutation_hint: s
         f"Task: {task}\n"
         f"Strategy/Hint for this candidate: {mutation_hint}\n\n"
         f"[CURRENT SOURCE]\n{source_code}\n\n"
-        "Return ONLY the full updated file content in the 'patch' field."
+        "Return ONLY JSON for one minimal edit: status, operation, target_snippet, replacement. "
+        "Use operation=replace when possible; the target_snippet must be exact and unique. "
+        "Use patch only as a fallback when a minimal edit cannot represent the change."
     )
 
 

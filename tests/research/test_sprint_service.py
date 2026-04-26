@@ -5,6 +5,7 @@ from nexus.research.sprint_service import (
     InPlaceSprintExecutor,
     SprintConfig,
     _build_llm_candidate_prompt,
+    _candidate_code_from_llm_output,
     run_hyper_sprint,
     write_sprint_report,
 )
@@ -272,8 +273,86 @@ def test_compact_gateway_prompt_is_shorter(monkeypatch):
     compact = _build_llm_candidate_prompt(source_code=source, task="Fix flaky websocket timeout", mutation_hint="baseline")
 
     assert len(compact) < len(full)
-    assert "patch=FULL updated file content" in compact
+    assert "target_snippet" in compact
     assert source in compact
+
+
+def test_llm_edit_protocol_replaces_unique_snippet():
+    source = "def normalize(text):\n    return text\n"
+    code, reason = _candidate_code_from_llm_output(
+        source,
+        {
+            "operation": "replace",
+            "target_snippet": "return text",
+            "replacement": "return text.strip().lower()",
+        },
+    )
+
+    assert reason == ""
+    assert code == "def normalize(text):\n    return text.strip().lower()\n"
+
+
+def test_llm_edit_protocol_rejects_ambiguous_snippet():
+    source = "x = 1\nx = 1\n"
+    code, reason = _candidate_code_from_llm_output(
+        source,
+        {
+            "operation": "replace",
+            "target_snippet": "x = 1",
+            "replacement": "x = 2",
+        },
+    )
+
+    assert code is None
+    assert reason == "llm_target_snippet_not_unique"
+
+
+def test_llm_generator_applies_edit_protocol(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def normalize(text):\n    return text\n", encoding="utf-8")
+    captured = {}
+
+    class FakeGateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ask_structured(self, **kwargs):
+            captured["payload"] = kwargs["payload"]
+            captured["schema"] = kwargs["output_schema"]
+            return (
+                {
+                    "status": "APPROVED",
+                    "operation": "replace",
+                    "target_snippet": "return text",
+                    "replacement": "return text.strip().lower()",
+                    "tokens_used": 55,
+                    "token_capture_status": "measured",
+                    "gateway_stats_present": True,
+                    "gateway_token_source": "stats",
+                },
+                "{}",
+            )
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            assert kwargs["code"] == "def normalize(text):\n    return text.strip().lower()\n"
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix normalize", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_patch_generated is True
+    assert res.gateway_token_source == "stats"
+    assert "one small edit" in captured["payload"]
+    assert "target_snippet" in captured["schema"]
 
 
 def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path):

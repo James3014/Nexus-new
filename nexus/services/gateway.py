@@ -86,6 +86,7 @@ class BattlesuitGateway:
         base = system_instruction or "You are the pilot of the Nexus Battlesuit v16."
         return (
             f"{base} "
+            "Do not use tools, do not inspect files, and do not create an execution plan. "
             "Return ONLY valid JSON. Do not wrap the answer in markdown. "
             f"Required output shape: {json.dumps(output_schema, ensure_ascii=False)}"
         )

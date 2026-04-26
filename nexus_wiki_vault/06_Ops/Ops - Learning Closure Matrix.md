@@ -521,6 +521,12 @@ version_scope:
 - **Decision**: Treat gateway smoke and research auto-flow as separate gates: smoke proves provider telemetry availability; auto-flow must prove the benchmark prompt can return a patch before 3x1/6x2 runs.
 - **Prevention**: The next benchmark-readiness change should replace full-file patch generation with a smaller edit/diff protocol or add a strict patch-size/response-budget mode, then rerun a hard-task 1x1 before expanding.
 
+## 2026-04-27: No-Tool Gateway Instruction Unblocked Token Evidence
+- **Phenomenon**: Hard-task auto-flow kept timing out until the gateway system instruction explicitly forbade tool use and execution planning. After that change, the same 1x1 returned `gateway_token_source=stats`, `token_capture_status=measured`, and a generated model patch, though the patch still failed tests.
+- **Root Cause**: `--approval-mode plan` alone did not prevent Gemini CLI from spending benchmark time in planning/tool behavior; the gateway prompt also needed an explicit no-tool contract.
+- **Decision**: Keep no-tool JSON-only gateway instructions as the default for benchmark-bound structured calls.
+- **Prevention**: Future token-source investigations must separate transport/parser failures from model patch-quality failures. Once token evidence is measured, the next gate is candidate correctness, not token instrumentation.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.
