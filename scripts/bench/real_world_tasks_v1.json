@@ -1,0 +1,62 @@
+{
+  "version": "2026-04-24",
+  "description": "Real-world coding harness tasks for measuring Nexus value beyond solve-rate deltas.",
+  "tasks": [
+    {
+      "id": "rw-ambiguous-001",
+      "category": "ambiguous_bug_report",
+      "difficulty": "hard",
+      "task_desc": "Users report that boolean feature flags with whitespace and uppercase are not recognized consistently. Find the cause and fix it.",
+      "fixture_kind": "flag_normalization",
+      "expected_root_cause": "flag normalization misses strip/lower conversion"
+    },
+    {
+      "id": "rw-multifile-001",
+      "category": "multi_file_refactor",
+      "difficulty": "hard",
+      "task_desc": "Refactor pricing so tax is calculated in one shared place and invoice totals stay consistent across modules.",
+      "fixture_kind": "pricing_refactor",
+      "expected_root_cause": "tax logic duplicated and invoice uses stale subtotal"
+    },
+    {
+      "id": "rw-missing-test-001",
+      "category": "missing_test_bugfix",
+      "difficulty": "hard",
+      "task_desc": "A retry backoff edge case is broken and there is no regression test. Add the missing test first, then fix the bug.",
+      "fixture_kind": "missing_test_retry",
+      "expected_root_cause": "retry backoff lacks exponential cap regression coverage"
+    },
+    {
+      "id": "rw-dirty-001",
+      "category": "dirty_worktree_guard",
+      "difficulty": "hard",
+      "task_desc": "Fix slug generation while preserving unrelated user edits already present in the workspace.",
+      "fixture_kind": "dirty_slug",
+      "expected_root_cause": "slug generation does not collapse whitespace"
+    },
+    {
+      "id": "rw-timeout-001",
+      "category": "flaky_or_timeout_diagnosis",
+      "difficulty": "hard",
+      "task_desc": "Diagnose a timeout-prone polling helper and replace the sleep-based loop with bounded deterministic retries.",
+      "fixture_kind": "timeout_polling",
+      "expected_root_cause": "polling helper uses unbounded sleep loop"
+    },
+    {
+      "id": "rw-nightshift-001",
+      "category": "nightshift_needed_cross_module",
+      "difficulty": "hard",
+      "task_desc": "Cross-module nightshift escalation bug: when stage1_no_passing_candidate is observed, the runner must escalate to nightshift and persist the trigger reason across modules.",
+      "fixture_kind": "nightshift_escalation",
+      "expected_root_cause": "coordinator escalation and persisted trigger reason diverged across modules"
+    },
+    {
+      "id": "rw-nightshift-002",
+      "category": "nightshift_only_audit_bridge",
+      "difficulty": "hard",
+      "task_desc": "Cross-module nightshift recovery bug: when a stage1 no-pass signal appears, the runner must enter nightshift and emit canonical reason metadata through the audit bridge helper.",
+      "fixture_kind": "nightshift_audit_bridge",
+      "expected_root_cause": "nightshift escalation metadata is split across runner, store, and audit bridge helper"
+    }
+  ]
+}
