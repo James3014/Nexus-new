@@ -334,3 +334,9 @@ version_scope:
 - **Root Cause**: The selector logic was correct, but the wrapper executes `uv run`, which may touch user-level uv cache metadata outside the current workspace sandbox.
 - **Decision**: Keep `select_tests.py` pure and report-free, and verify wrapper commands with explicit sandbox escalation when uv cache access is blocked.
 - **Prevention**: JIT test validation should distinguish selector failures from environment/cache permission failures; CI or local gate notes should preserve the exact failing layer.
+
+## 2026-04-26: Merge Preflight May Need Git Tempfile Access
+- **Phenomenon**: `git merge-tree --write-tree main codex/public-benchmark-framework` failed inside the sandbox with `unable to create temporary file`, then succeeded with approved git access and returned merge tree `fb1eef1359a1415aef8519f4ad67b46a9a175f2f`.
+- **Root Cause**: Git merge preflight writes temporary object data even when it does not update the working tree; workspace sandbox permissions can block that object/tempfile path.
+- **Decision**: Treat merge-tree as a non-mutating but filesystem-writing preflight and rerun with explicit approval when sandboxed.
+- **Prevention**: Branch integration reports must separate merge conflicts from preflight environment failures before deciding whether a branch is safe to merge.
