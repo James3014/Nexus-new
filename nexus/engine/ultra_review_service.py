@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 
 DEFAULT_FLEET_LANES = ("security_sentry", "logic_breaker", "ghost_regression")
 SCHEMA_VERSION = "ultra-review.v1"
+GHOST_REGRESSION_TIMEOUT_SEC = 30
 TEST_DIR_BY_SOURCE_DIR = {
     "app": "tests/app",
     "core": "tests/core",
@@ -59,7 +61,8 @@ class UltraReviewService:
         regression_map = self._derive_regression_candidate_map(diff_text)
         test_candidates = self._existing_regression_candidates(regression_map)
         security_findings = self._scan_security_observations(diff_text)
-        ghost_regression = self._run_ghost_regression(test_candidates)
+        execution_root = self._prepare_execution_workspace(sandbox_path)
+        ghost_regression = self._run_ghost_regression(test_candidates, execution_root=execution_root)
         findings = [*security_findings, *ghost_regression["findings"]]
         gate_passed = bool(ghost_regression["passed"])
         fleet = self._build_dry_run_fleet(test_candidates, security_findings, ghost_regression)
@@ -111,6 +114,33 @@ class UltraReviewService:
             encoding="utf-8",
         )
         return sandbox_path
+
+    def _prepare_execution_workspace(self, sandbox_path: Path) -> Path:
+        execution_root = sandbox_path / "worktree"
+        ignored_patterns = shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            ".nexus",
+            ".pytest_cache",
+            "__pycache__",
+            "MagicMock",
+            "compliance/audit",
+        )
+
+        def ignore(path: str, names: list[str]) -> set[str]:
+            ignored = set(ignored_patterns(path, names))
+            current = Path(path).resolve()
+            if current == self.project_root:
+                try:
+                    sandbox_anchor = sandbox_path.relative_to(self.project_root).parts[0]
+                except ValueError:
+                    sandbox_anchor = ""
+                if sandbox_anchor in names:
+                    ignored.add(sandbox_anchor)
+            return ignored
+
+        shutil.copytree(self.project_root, execution_root, ignore=ignore)
+        return execution_root
 
     def _capture_diff(self, base_ref: str) -> str:
         return self._git(["diff", "--binary", base_ref])
@@ -264,7 +294,7 @@ class UltraReviewService:
             },
         ]
 
-    def _run_ghost_regression(self, test_candidates: list[str]) -> dict[str, Any]:
+    def _run_ghost_regression(self, test_candidates: list[str], *, execution_root: Path) -> dict[str, Any]:
         if not test_candidates:
             return {
                 "passed": True,
@@ -272,21 +302,38 @@ class UltraReviewService:
                 "failed_tests": [],
                 "skipped_tests": [],
                 "findings": [],
+                "execution_mode": "sandbox_mirror",
+                "execution_cwd": str(execution_root),
+                "timeout": False,
+                "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+                "dependency_mode": "active_venv",
                 "pytest_stdout_tail": "",
                 "pytest_stderr_tail": "",
             }
 
-        cmd = ["uv", "run", "pytest", "-q", *test_candidates]
-        result = subprocess.run(
-            cmd,
-            cwd=self.project_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        passed = result.returncode == 0
-        stdout_tail = (result.stdout or "")[-2000:]
-        stderr_tail = (result.stderr or "")[-2000:]
+        cmd = ["uv", "run", "--active", "pytest", "-q", *test_candidates]
+        timeout = False
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=execution_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=GHOST_REGRESSION_TIMEOUT_SEC,
+            )
+            passed = result.returncode == 0
+            stdout_tail = (result.stdout or "")[-2000:]
+            stderr_tail = (result.stderr or "")[-2000:]
+            rule_id = "regression_test_failed"
+            summary = "Ghost regression candidate failed in ultra-review dry-run."
+        except subprocess.TimeoutExpired as exc:
+            passed = False
+            timeout = True
+            stdout_tail = str(exc.output or "")[-2000:]
+            stderr_tail = str(exc.stderr or "")[-2000:]
+            rule_id = "regression_test_timeout"
+            summary = "Ghost regression candidate timed out in ultra-review dry-run."
         failed_tests = [] if passed else list(test_candidates)
         findings = []
         if not passed:
@@ -294,13 +341,14 @@ class UltraReviewService:
                 {
                     "id": "ghost-regression-1",
                     "lane": "ghost_regression",
-                    "rule_id": "regression_test_failed",
+                    "rule_id": rule_id,
                     "state": "VERIFIED_FINDING",
                     "severity": "high",
                     "file": "",
                     "line": 0,
                     "repro_command": " ".join(cmd),
-                    "summary": "Ghost regression candidate failed in ultra-review dry-run.",
+                    "summary": summary,
+                    "execution_cwd": str(execution_root),
                     "stdout_tail": stdout_tail,
                     "stderr_tail": stderr_tail,
                 }
@@ -311,6 +359,11 @@ class UltraReviewService:
             "failed_tests": failed_tests,
             "skipped_tests": [],
             "findings": findings,
+            "execution_mode": "sandbox_mirror",
+            "execution_cwd": str(execution_root),
+            "timeout": timeout,
+            "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+            "dependency_mode": "active_venv",
             "pytest_stdout_tail": stdout_tail,
             "pytest_stderr_tail": stderr_tail,
         }

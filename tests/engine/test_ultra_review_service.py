@@ -42,6 +42,11 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
     assert ghost["status"] == "PASS"
     assert payload["ghost_regression"]["passed"] is True
     assert payload["ghost_regression"]["executed_tests"] == ["tests/engine/test_sample.py"]
+    assert payload["ghost_regression"]["execution_mode"] == "sandbox_mirror"
+    assert payload["ghost_regression"]["timeout_sec"] == 30
+    assert payload["ghost_regression"]["dependency_mode"] == "active_venv"
+    assert payload["ghost_regression"]["execution_cwd"].startswith(payload["sandbox_path"])
+    assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "worktree").exists()
     assert payload["regression_candidate_map"] == [
         {
             "changed_file": "nexus/engine/sample.py",
@@ -99,6 +104,34 @@ def test_ultra_review_ghost_regression_failure_becomes_verified_finding(tmp_path
     assert finding["state"] == "VERIFIED_FINDING"
     assert finding["lane"] == "ghost_regression"
     assert finding["repro_command"]
+    assert finding["execution_cwd"].startswith(payload["sandbox_path"])
+
+
+def test_ultra_review_ghost_regression_timeout_becomes_verified_finding(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    (tmp_path / "tests" / "engine").mkdir(parents=True)
+    (tmp_path / "tests" / "engine" / "test_sample.py").write_text("def test_sample(): pass\n", encoding="utf-8")
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:5] == ["uv", "run", "--active", "pytest", "-q"]:
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=30, output="running", stderr="timeout")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    assert payload["gate_passed"] is False
+    assert payload["ghost_regression"]["timeout"] is True
+    finding = payload["findings"][0]
+    assert finding["rule_id"] == "regression_test_timeout"
+    assert finding["state"] == "VERIFIED_FINDING"
 
 
 def test_security_sentry_covers_shell_and_delete_rules(tmp_path):

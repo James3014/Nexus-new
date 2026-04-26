@@ -454,3 +454,15 @@ version_scope:
 - **Root Cause**: The research-flow suite still has state/order sensitivity that can appear only during full-regression runs.
 - **Decision**: Treat the single full-run failure as residual test isolation debt for this task and keep ultra-review verification focused on its own service/gate suite.
 - **Prevention**: Future hardening should isolate research-flow history/artifact state per test before relying on full-suite failures as product regressions.
+
+## 2026-04-26: Sandbox Mirrors Must Exclude Their Own Anchor
+- **Phenomenon**: Ultra Review sandbox mirror tests failed with `File name too long` because the mirror destination lived under the source tree and was recursively copied into itself.
+- **Root Cause**: The initial copy ignore list excluded `.nexus` but did not exclude a caller-provided sandbox root such as `reports/sandboxes`.
+- **Decision**: Exclude the sandbox anchor directory when preparing the mirror and keep Ghost Regression execution evidence tied to the sandbox mirror path.
+- **Prevention**: Any future isolated execution mode that mirrors a worktree must prove it cannot copy its own destination, even when tests use a non-default sandbox root.
+
+## 2026-04-26: Sandbox Regression Timeouts Must Exclude Dependency Bootstrap
+- **Phenomenon**: A real `nexus ultra-review` run timed out while `uv run` was creating a fresh sandbox `.venv`, before the Ghost Regression tests could produce useful evidence.
+- **Root Cause**: The execution timeout covered dependency bootstrap cost instead of only the regression command's useful work.
+- **Decision**: Run sandbox-mirror pytest through `uv run --active` so file isolation is preserved while dependency setup reuses the current verified environment.
+- **Prevention**: Hard timeouts should measure the behavior under review; dependency cold-start timing needs a separate readiness check or preflight lane.

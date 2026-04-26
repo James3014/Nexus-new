@@ -4,20 +4,24 @@
 
 `nexus ultra-review` is a fail-closed review gate for high-risk changes. The
 current implementation is still dry-run mode, but Ghost Regression now executes
-candidate pytest targets and converts failing candidates into verified findings.
+candidate pytest targets inside a sandbox mirror and converts failing candidates
+into verified findings.
 
 ## Current Capabilities
 
 - Captures `git diff --binary HEAD` and `git status --short`.
 - Writes sandbox artifacts under `.nexus/reports/ultra_review/sandboxes`.
+- Creates a sandbox mirror worktree for Ghost Regression execution.
 - Builds three review lanes:
   - `security_sentry`
   - `logic_breaker`
   - `ghost_regression`
 - Scans added diff lines for secret literals, `shell=True`, and unsafe delete patterns.
 - Maps changed source files to likely regression tests.
-- Executes existing Ghost Regression pytest candidates.
-- Marks failed Ghost Regression candidates as `VERIFIED_FINDING`.
+- Executes existing Ghost Regression pytest candidates in `sandbox_mirror` mode
+  with the active virtualenv.
+- Enforces a 30-second Ghost Regression timeout.
+- Marks failed or timed-out Ghost Regression candidates as `VERIFIED_FINDING`.
 - `scripts/ops/ultra_gate.py` blocks failed Ghost Regression and blocking verified findings.
 
 ## Commands
@@ -35,8 +39,7 @@ uv run pytest -q tests/engine/test_ultra_review_service.py tests/ops/test_ultra_
 
 ## Future Work
 
-1. Add true isolated worktree execution.
-2. Add Logic Breaker reproduction scripts.
-3. Add Security Sentry repro commands for verified security findings.
-4. Wire ultra gate into `ci_gate.py` strict/high-risk lanes.
-5. Add background progress tracking only after the execution contract is stable.
+1. Add Logic Breaker reproduction scripts.
+2. Add Security Sentry repro commands for verified security findings.
+3. Wire ultra gate into `ci_gate.py` strict/high-risk lanes.
+4. Add background progress tracking only after the execution contract is stable.
