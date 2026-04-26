@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from scripts.bench.capability_ops_loop import _compute_health_score, _compute_pillar_scores, run_ops_loop, run_ops_loop_rounds
+from scripts.bench.capability_ops_loop import (
+    _compute_health_score,
+    _compute_pillar_scores,
+    _compute_route_consensus_metrics,
+    run_ops_loop,
+    run_ops_loop_rounds,
+)
 
 
 def test_run_ops_loop_smoke_without_autotune(tmp_path: Path):
@@ -62,3 +68,28 @@ def test_memory_pillar_uses_route_memory_hits_only():
     )
     assert out["scores"]["LanceDB"] == 0.5
     assert out["scores"]["Memory"] == 0.5
+
+
+def test_route_consensus_treats_hyper_fastpath_baseline_as_aligned():
+    out = _compute_route_consensus_metrics(
+        [
+            {
+                "route_consensus_winner": "hyper_sprint",
+                "route_recommended_flow": "hyper_sprint",
+                "chosen_flow": "baseline",
+                "strategy_path": "probe_success_fastpath_baseline",
+                "capability_self_heal_used": True,
+                "route_consensus_hyper_votes": 1,
+                "route_consensus_baseline_votes": 0,
+            },
+            {
+                "route_consensus_winner": "baseline",
+                "route_recommended_flow": "baseline",
+                "chosen_flow": "baseline",
+                "route_consensus_hyper_votes": 0,
+                "route_consensus_baseline_votes": 1,
+            },
+        ]
+    )
+    assert out["winner_match_recommended_rate"] == 1.0
+    assert out["winner_match_chosen_flow_rate"] == 1.0

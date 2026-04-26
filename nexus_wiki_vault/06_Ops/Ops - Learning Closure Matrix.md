@@ -370,3 +370,9 @@ version_scope:
 - **Root Cause**: The orchestrator reused the public S9 default for offline health checks, and the regression guard allowed ratio-only overhead failures on tiny baseline denominators after the absolute overhead gate had already passed.
 - **Decision**: Default offline Wave3/4 guard minimum to `A_PASS` unless the caller explicitly sets `--min-grade`, and make service overhead ratio gates fail only when the corresponding absolute overhead also exceeds its limit.
 - **Prevention**: Public claim gates and local no-LLM health gates must have separate defaults; ratio gates should be secondary diagnostics, not stricter replacements for the absolute budget.
+
+## 2026-04-26: Route Consensus Must Recognize Hyper Fastpath Execution
+- **Phenomenon**: Offline ops-loop trend gate stayed at `WARN` with `winner_match_chosen_flow_rate=0.6667` even though route consensus matched the recommended flow on every row and the mismatches were hyper decisions that successfully used `probe_success_fastpath_baseline`.
+- **Root Cause**: The metric compared consensus winner only to the final `chosen_flow`, collapsing a controlled hyper fastpath into a route disagreement.
+- **Decision**: Count `hyper_sprint -> probe_success_fastpath_baseline -> baseline` rows as execution-aligned when self-heal was active.
+- **Prevention**: Routing observability should distinguish decision alignment from optimized execution strategy; fastpath strategies need explicit metric semantics.

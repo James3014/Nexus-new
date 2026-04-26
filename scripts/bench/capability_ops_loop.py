@@ -145,11 +145,7 @@ def _compute_route_consensus_metrics(with_rows: list[dict[str, Any]]) -> dict[st
         for r in winner_defined
         if str(r.get("route_consensus_winner", "")) == str(r.get("route_recommended_flow", ""))
     ]
-    flow_alignment = [
-        r
-        for r in winner_defined
-        if str(r.get("route_consensus_winner", "")) == str(r.get("chosen_flow", ""))
-    ]
+    flow_alignment = [r for r in winner_defined if _route_winner_matches_execution(r)]
     hyper_wins = [
         r
         for r in winner_defined
@@ -167,6 +163,19 @@ def _compute_route_consensus_metrics(with_rows: list[dict[str, Any]]) -> dict[st
         "hyper_consensus_rate": round((len(hyper_wins) / len(winner_defined)) if winner_defined else 0.0, 4),
         "baseline_consensus_rate": round((len(baseline_wins) / len(winner_defined)) if winner_defined else 0.0, 4),
     }
+
+
+def _route_winner_matches_execution(row: dict[str, Any]) -> bool:
+    winner = str(row.get("route_consensus_winner", "")).strip()
+    chosen = str(row.get("chosen_flow", "")).strip()
+    if winner == chosen:
+        return True
+    return (
+        winner == "hyper_sprint"
+        and chosen == "baseline"
+        and str(row.get("strategy_path", "")) == "probe_success_fastpath_baseline"
+        and bool(row.get("capability_self_heal_used", False))
+    )
 
 
 def _compute_health_score(eval_payload: dict[str, Any]) -> dict[str, Any]:
