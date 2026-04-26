@@ -598,6 +598,7 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     assert captured["env"]["NEXUS_GATEWAY_TIMEOUT_SEC"] == "30"
     assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "1"
     assert captured["env"]["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] == "1"
+    assert captured["env"]["NEXUS_FORCE_INPLACE_EXECUTOR"] == "1"
     assert "NEXUS_MEMORY_DB_PATH" in captured["env"]
     assert out["semantic_status"] == "VERIFIED"
 

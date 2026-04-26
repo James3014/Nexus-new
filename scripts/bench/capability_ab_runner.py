@@ -651,6 +651,7 @@ def run_with_nexus(
             env["NEXUS_GATEWAY_TIMEOUT_SEC"] = str(max(30, min(90, max(5, timeout_sec - 30))))
             env["NEXUS_LLM_CANDIDATE_CAP"] = "1"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
+            env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
         try:
             res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, env=env, timeout=timeout_sec)
             output = res.stdout or ""

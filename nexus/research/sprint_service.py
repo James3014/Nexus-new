@@ -107,7 +107,11 @@ class LLMCandidateGenerator:
                     output_schema={"status": "APPROVED | FAIL", "patch": "Full target file content"},
                     model_name=model,
                 )
-                code = out.get("patch") or raw
+                status = str(out.get("status", "")).upper() if isinstance(out, dict) else ""
+                code = out.get("patch") if isinstance(out, dict) else None
+                if status == "FAIL" or not code:
+                    category = str(out.get("error_category", "llm_no_patch") if isinstance(out, dict) else "llm_no_patch")
+                    raise RuntimeError(category)
                 tokens_used = 0
                 token_capture_status = "unknown"
                 if isinstance(out, dict):
@@ -361,7 +365,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     llm_generator: Optional[LLMCandidateGenerator] = LLMCandidateGenerator(repo_root, config.safe_mode) if llm_mode_effective else None
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
-    if llm_mode_effective:
+    force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+    if llm_mode_effective and not force_inplace_executor:
         executor = SprintExecutor(repo_root, scope_files=scope_files, pytest_cmd=pytest_cmd, timeout_sec=config.stage1_timeout_sec)
     else:
         executor = InPlaceSprintExecutor(
@@ -595,6 +600,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     )
                     used_source = str(meta.get("source", "llm"))
                 except Exception as llm_exc:  # noqa: BLE001
+                    model_calls += 1
                     err = str(llm_exc).lower()
                     if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
                         quota_backoffs += 1
@@ -657,10 +663,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
 # R1.1: Emergency Fallback Valve - Ensure we match baseline if all else fails
     has_success = any(c.score >= 1.0 for c in candidates)
-    tried_local = any(c.source == "local" for c in candidates)
-    if not has_success and not tried_local:
-        # Perform one last verified local run as "local" source
-        code, meta = local_generator.generate(source_code=source_code, task=config.task, mutation_hint="emergency_baseline_match", seed=0)
+    if not has_success:
+        # Perform one last verified local run as "local" source. This remains active even
+        # after a failed local fallback so bounded LLM runs do not under-sample simple fixes.
+        code, meta = local_generator.generate(source_code=source_code, task=config.task, mutation_hint="emergency_baseline_match", seed=999)
         if code != source_code:
             guard_ok, _ = _semantic_guard(source_code, code, config.task, meta.get("source", "local"))
             if guard_ok:
