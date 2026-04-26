@@ -14,7 +14,7 @@ import click
 
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.findings_memory import FindingsMemoryStore
-from nexus.research.local_sprint_mutator import generate_local_candidate
+from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator
 
 
@@ -599,20 +599,38 @@ def run_auto_flow(
         start = time.time()
         ok = False
         err = ""
+        source = "local"
+        companion_edits: dict[Path, str] = {}
+        restored_files: dict[Path, str | None] = {}
         try:
             patched, source = _generate_baseline_patch()
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
+                companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
+                restored_files[target_path] = original_code
                 target_path.write_text(patched, encoding="utf-8")
+                for extra_path, extra_code in companion_edits.items():
+                    if extra_path == target_path:
+                        continue
+                    restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
+                    extra_path.parent.mkdir(parents=True, exist_ok=True)
+                    extra_path.write_text(extra_code, encoding="utf-8")
                 res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
                 ok = res.returncode == 0
                 if not ok:
                     err = "pytest_failed"
-                    target_path.write_text(original_code, encoding="utf-8")
         except subprocess.TimeoutExpired:
             err = "test_timeout"
-            target_path.write_text(original_code, encoding="utf-8")
+        finally:
+            for path, original_text in restored_files.items():
+                if ok and path == target_path:
+                    continue
+                if original_text is None:
+                    if path.exists():
+                        path.unlink()
+                else:
+                    path.write_text(original_text, encoding="utf-8")
         return {
             "flow": "baseline",
             "status": "SUCCESS" if ok else "FAILED",
@@ -634,12 +652,21 @@ def run_auto_flow(
         err = ""
         source = "local"
         patched = original_code
+        restored_files: dict[Path, str | None] = {}
         try:
             patched, source = _generate_baseline_patch()
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
+                companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
+                restored_files[target_path] = original_code
                 target_path.write_text(patched, encoding="utf-8")
+                for extra_path, extra_code in companion_edits.items():
+                    if extra_path == target_path:
+                        continue
+                    restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
+                    extra_path.parent.mkdir(parents=True, exist_ok=True)
+                    extra_path.write_text(extra_code, encoding="utf-8")
                 res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
                 ok = res.returncode == 0
                 if not ok:
@@ -647,7 +674,12 @@ def run_auto_flow(
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
-            target_path.write_text(original_code, encoding="utf-8")
+            for path, original_text in restored_files.items():
+                if original_text is None:
+                    if path.exists():
+                        path.unlink()
+                else:
+                    path.write_text(original_text, encoding="utf-8")
         return {
             "flow": "baseline_probe",
             "status": "SUCCESS" if ok else "FAILED",
@@ -799,7 +831,11 @@ def run_auto_flow(
             "hit": guard_hit,
             "early_baseline_shortcut": early_baseline_shortcut,
             "history_forced_baseline": history_forced_baseline,
-            "learn_forced_baseline": bool(learn_gate_blocked and force_flow is None and not execution_profile["is_hard_task"]),
+            "learn_forced_baseline": bool(
+                learn_gate_blocked
+                and force_flow is None
+                and (not execution_profile["is_hard_task"] or chosen_flow == "baseline")
+            ),
             "recent_hyper_failures": recent_hyper_fails,
             "nightshift_recommended": nightshift_recommended,
             "stage1_fail_signals": stage1_fail_signals,

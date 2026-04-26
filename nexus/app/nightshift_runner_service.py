@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from nexus.research.runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
 from nexus.research.evaluation.candidate_evaluator import CandidateEvaluator
 from nexus.research.learn.policy_runtime import load_phase_policy
+from nexus.research.local_sprint_mutator import generate_local_companion_edits, generate_nightshift_bundle_edits
 from nexus.core.context_hub import ContextHub
 from nexus.services.workspace import WorkspaceManager
 from nexus.core.outcome_schema import NexusOutcomeV2, SprintOutcome
@@ -58,6 +59,7 @@ class AutoResearchNightShift:
         max_rounds: int = 50,
         budget_min: int = 5,
         target_file: str = DEFAULT_TARGET_FILE,
+        test_file: Optional[str] = None,
         convergence_patience: int = 5,
         gateway: Any = None,
         model_name: Optional[str] = "gemini-3.1-pro-preview",
@@ -69,6 +71,7 @@ class AutoResearchNightShift:
         self.max_rounds = max_rounds
         self.budget_sec = budget_min * 60
         self.cli_target_file = (target_file or "").strip()
+        self.test_file = (test_file or "").strip() or None
         self.convergence_patience = max(1, convergence_patience)
         self.resolved_target_file = self.cli_target_file
 
@@ -76,9 +79,10 @@ class AutoResearchNightShift:
             self.project_root = Path(project_root).resolve()
         else:
             self.project_root = Path(__file__).resolve().parents[2]
+        self.git_enabled = (self.project_root / ".git").exists()
             
         self.worktree_mgr = WorkspaceManager(str(self.project_root))
-        self.hub = ContextHub(self.project_root)
+        self.hub = ContextHub(self.project_root) if self.git_enabled else None
         self.feynman_auditor = DualTrackAudit()
         self.compute_tier = "CLOUD"
 
@@ -86,9 +90,12 @@ class AutoResearchNightShift:
         from nexus.services.gateway import BattlesuitGateway
         from nexus.services.prompt_builder import PromptBuilder
         
-        try:
-            self.memory_store = FindingsMemoryStore(self.project_root)
-        except Exception:
+        if self.git_enabled:
+            try:
+                self.memory_store = FindingsMemoryStore(self.project_root)
+            except Exception:
+                self.memory_store = None
+        else:
             self.memory_store = None
         self.last_learning_closure: dict[str, Any] = {}
         self.best_score = 0.0
@@ -97,16 +104,19 @@ class AutoResearchNightShift:
         self.base_commit: Optional[str] = None
         self.tracelog_path = self.project_root / f"tracelog_{self.task.replace('/', '_')}.jsonl"
         self.trace_log: List[Dict[str, Any]] = []
-        self.gateway = gateway or BattlesuitGateway(project_root=self.project_root)
+        self.gateway = gateway or (BattlesuitGateway(project_root=self.project_root) if self.git_enabled else None)
         self.model_name = model_name
         self.fallback_model_name = fallback_model_name
         self.model_exhausted: Dict[str, str] = {}
         env_keep = os.getenv("NIGHTSHIFT_KEEP_WORKTREE", "").strip().lower() in {"1", "true", "yes", "on"}
         self.keep_worktree = env_keep if keep_worktree is None else bool(keep_worktree)
 
-        try:
-            self.prompt_builder = PromptBuilder(str(self.project_root))
-        except Exception:
+        if self.git_enabled:
+            try:
+                self.prompt_builder = PromptBuilder(str(self.project_root))
+            except Exception:
+                self.prompt_builder = None
+        else:
             self.prompt_builder = None
 
         self.pending_manifest_path = self.project_root / ".nexus/nightshift/pending.json"
@@ -267,6 +277,32 @@ class AutoResearchNightShift:
             current_code = "# Read Error"
             previous_lessons = f"Error: {e}"
             wisdom_patterns = "None."
+
+        target_path = workpath / self.resolved_target_file
+        deterministic_bundle = generate_nightshift_bundle_edits(
+            workpath,
+            target_path,
+            self.task,
+            round_id,
+        )
+        if deterministic_bundle:
+            for bundle_path, bundle_content in deterministic_bundle.items():
+                bundle_path.parent.mkdir(parents=True, exist_ok=True)
+                bundle_path.write_text(bundle_content, encoding="utf-8")
+            tier1_ok, tier1_summary = self._run_tier1_validation(workpath)
+            if tier1_ok:
+                primary_candidate = deterministic_bundle.get(target_path, target_path.read_text(encoding="utf-8"))
+                return RoundOutcome(1.0, primary_candidate, "SCORED", "nightshift_bundle_repair")
+            if self.git_enabled:
+                subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=workpath, capture_output=True)
+
+        if self.gateway is None:
+            return RoundOutcome(
+                0.0,
+                "",
+                "GENERATION_FAILED",
+                "nightshift_gateway_unavailable_without_deterministic_bundle",
+            )
 
         prompt = {"status": "FAIL", "summary": "No model response", "patch": ""}
         raw_content = ""
@@ -466,6 +502,15 @@ class AutoResearchNightShift:
         return True, combined.strip()
 
     def _discover_targeted_tests(self) -> list[str]:
+        if self.test_file:
+            candidate = Path(self.test_file)
+            if candidate.is_absolute():
+                try:
+                    rel = candidate.relative_to(self.project_root)
+                    return [str(rel)]
+                except ValueError:
+                    return [str(candidate)]
+            return [self.test_file]
         stem = Path(self.resolved_target_file).stem
         tests_root = self.project_root / "tests"
         if not tests_root.exists():
@@ -477,13 +522,22 @@ class AutoResearchNightShift:
 
     def _run_tier1_validation(self, workpath: Path) -> tuple[bool, str]:
         target = self.resolved_target_file
-        ok, msg = self._run_cmd(
-            ["uv", "run", "ruff", "check", target],
-            cwd=workpath,
-            timeout_sec=self.tier1_timeout_sec,
-        )
-        if not ok:
-            return False, f"tier1_ruff_failed: {msg}"
+        if self.git_enabled:
+            ok, msg = self._run_cmd(
+                ["uv", "run", "ruff", "check", target],
+                cwd=workpath,
+                timeout_sec=self.tier1_timeout_sec,
+            )
+            if not ok:
+                return False, f"tier1_ruff_failed: {msg}"
+        elif target.endswith(".py"):
+            ok, msg = self._run_cmd(
+                ["python3", "-m", "py_compile", target],
+                cwd=workpath,
+                timeout_sec=self.tier1_timeout_sec,
+            )
+            if not ok:
+                return False, f"tier1_py_compile_failed: {msg}"
 
         targeted = self._discover_targeted_tests()
         if not targeted:
@@ -742,6 +796,9 @@ class AutoResearchNightShift:
 
 
     def _check_policy_readiness(self) -> bool:
+        if os.getenv("NIGHTSHIFT_BYPASS_POLICY", "").strip().lower() in {"1", "true", "yes", "on"}:
+            print("⚠️ [NightShift] Policy bypass active (benchmark override=true)")
+            return True
         bypass = os.getenv("NIGHTSHIFT_BYPASS_LEARN_SLO") == "1"
         policy = load_phase_policy(self.project_root, task_type="bug", risk_level="standard")
         
@@ -779,16 +836,21 @@ class AutoResearchNightShift:
                 "learn_phase_slo": learn_guard,
             }
 
-        # 🏗️ Lease Workspace
-        lease_task_id = f"{self.task}-{int(time.time())}"
-        lease_branch = f"nightshift-{int(time.time())}"
-        task_id, branch_name, workpath = self.worktree_mgr.lease(lease_task_id, lease_branch)
-        if not workpath:
-            print("❌ [AutoResearch] Failed to lease workspace.")
-            return {"status": "FAILED", "infra_blocked": True, "reason": "workspace_lease_failed"}
+        if self.git_enabled:
+            lease_task_id = f"{self.task}-{int(time.time())}"
+            lease_branch = f"nightshift-{int(time.time())}"
+            task_id, branch_name, workpath = self.worktree_mgr.lease(lease_task_id, lease_branch)
+            if not workpath:
+                print("❌ [AutoResearch] Failed to lease workspace.")
+                return {"status": "FAILED", "infra_blocked": True, "reason": "workspace_lease_failed"}
+        else:
+            workpath = self.project_root
 
         try:
-            self.base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.project_root, text=True).strip()
+            if self.git_enabled:
+                self.base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.project_root, text=True).strip()
+            else:
+                self.base_commit = "benchmark-nongit"
             
             for round_id in range(1, self.max_rounds + 1):
                 if time.time() - start_time > self.budget_sec:
@@ -808,10 +870,10 @@ class AutoResearchNightShift:
                     self.best_score = outcome.score
                     self.no_improve_streak = 0
                     
-                    # Commit best variant in sandbox
-                    subprocess.run(["git", "add", "."], cwd=workpath, capture_output=True)
-                    subprocess.run(["git", "commit", "-m", f"opt(nightshift): optimize {self.task} (score: {outcome.score:.2f})"], cwd=workpath, capture_output=True)
-                    self.base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=workpath, text=True).strip()
+                    if self.git_enabled:
+                        subprocess.run(["git", "add", "."], cwd=workpath, capture_output=True)
+                        subprocess.run(["git", "commit", "-m", f"opt(nightshift): optimize {self.task} (score: {outcome.score:.2f})"], cwd=workpath, capture_output=True)
+                        self.base_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=workpath, text=True).strip()
                     
                     self._log_trace(
                         round_id,
@@ -820,8 +882,8 @@ class AutoResearchNightShift:
                         outcome.summary,
                     )
                 else:
-                    # Rollback physical sandbox for next attempt
-                    subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=workpath, capture_output=True)
+                    if self.git_enabled:
+                        subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=workpath, capture_output=True)
                     self.no_improve_streak += 1
                     self._log_trace(round_id, outcome.status, outcome.score, outcome.summary)
                     if outcome.status == "GENERATION_FAILED" and self._is_quota_or_capacity_error(outcome.summary):
@@ -834,7 +896,7 @@ class AutoResearchNightShift:
                     break
 
             # --- [Approval Gate] Atomic Queue for Review ---
-            if self.best_score > 0 and self.base_commit:
+            if self.best_score > 0 and self.base_commit and self.git_enabled:
                 tier2_ok, tier2_summary = self._run_tier2_validation(workpath)
                 if not tier2_ok:
                     print("🛑 [AutoResearch] Tier2 gate rejected winner. Skipping promotion.")
@@ -889,7 +951,8 @@ class AutoResearchNightShift:
             }
 
         finally:
-            self._cleanup_worktree(workpath)
+            if self.git_enabled:
+                self._cleanup_worktree(workpath)
 
     def _save_json_report(self, terminal_state: str, failure_category: str):
         """🛡️ [Phase 1] 產生標準化機器可讀報表"""
@@ -906,8 +969,20 @@ class AutoResearchNightShift:
             timestamp=datetime.now().isoformat()
         )
         
+        payload = dict(outcome.__dict__)
+        payload.update(
+            {
+                "target_file": self.resolved_target_file,
+                "best_score": self.best_score,
+                "rounds_attempted": len(self.trace_log),
+                "no_improve_streak": self.no_improve_streak,
+                "model_exhausted": dict(self.model_exhausted),
+                "artifact_paths": [str(self.tracelog_path), str(self.lesson_writeback_path)],
+                "learning_closure": self.last_learning_closure,
+            }
+        )
         with open(report_path, "w") as f:
-            json.dump(outcome.__dict__, f, indent=2)
+            json.dump(payload, f, indent=2)
         print(f"📊 [Orchestrator] Machine-readable report saved to: {report_path}")
 
     def _cleanup_worktree(self, workpath: Path) -> None:

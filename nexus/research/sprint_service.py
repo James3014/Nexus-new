@@ -12,7 +12,7 @@ from typing import Any, Optional
 from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
-from nexus.research.local_sprint_mutator import generate_local_candidate
+from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.swarm_broker import SwarmBroker
 from .runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
 
@@ -154,11 +154,12 @@ class LocalCandidateGenerator:
         }
 
 class SprintExecutor:
-    def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int):
+    def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int, task: str):
         self.repo_root = repo_root
         self.scope_files = scope_files
         self.pytest_cmd = pytest_cmd
         self.timeout_sec = timeout_sec
+        self.task = task
         self.broker = SwarmBroker(repo_root)
 
     def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
@@ -182,7 +183,22 @@ class SprintExecutor:
             # Use evaluator but on swarm_dir
             evaluator.repo_root = swarm_dir
             start_test = time.time()
-            res = evaluator.evaluate(seed=seed, hint=hint, code=code, source=source, target_file=target_rel, original_code=original)
+            companion_edits = generate_local_companion_edits(
+                swarm_dir,
+                swarm_dir / target_rel,
+                self.task,
+                hint,
+                seed,
+            )
+            res = evaluator.evaluate(
+                seed=seed,
+                hint=hint,
+                code=code,
+                source=source,
+                target_file=target_rel,
+                original_code=original,
+                companion_edits=companion_edits,
+            )
             test_elapsed = time.time() - start_test
 
             # Record detailed timings in hint or extra (here we use CandidateEval which we'll ensure has enough fields)
@@ -205,16 +221,19 @@ class InPlaceSprintExecutor:
     Applies candidate code in-place, runs scoped tests, then restores the original file.
     """
 
-    def __init__(self, repo_root: Path, target_file: str, pytest_cmd: list[str], timeout_sec: int):
+    def __init__(self, repo_root: Path, target_file: str, pytest_cmd: list[str], timeout_sec: int, task: str = ""):
         self.repo_root = repo_root
         self.target_file = target_file
         self.pytest_cmd = pytest_cmd
         self.timeout_sec = timeout_sec
+        self.task = task
 
     def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
         start = time.time()
         target_path = self.repo_root / self.target_file
         original = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
+        companion_edits = generate_local_companion_edits(self.repo_root, target_path, self.task, hint, seed)
+        restored_files: dict[Path, str | None] = {}
         try:
             if code == original:
                 return CandidateEval(
@@ -241,6 +260,13 @@ class InPlaceSprintExecutor:
                     )
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(code, encoding="utf-8")
+            restored_files[target_path] = original
+            for extra_path, extra_code in companion_edits.items():
+                if extra_path == target_path:
+                    continue
+                restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
+                extra_path.parent.mkdir(parents=True, exist_ok=True)
+                extra_path.write_text(extra_code, encoding="utf-8")
             res = subprocess.run(
                 self.pytest_cmd,
                 capture_output=True,
@@ -278,7 +304,12 @@ class InPlaceSprintExecutor:
                 elapsed_sec=round(time.time() - start, 4),
             )
         finally:
-            target_path.write_text(original, encoding="utf-8")
+            for path, original_text in restored_files.items():
+                if original_text is None:
+                    if path.exists():
+                        path.unlink()
+                else:
+                    path.write_text(original_text, encoding="utf-8")
 
 
 def promote_patch_to_branch(*, repo_root: Path, target_file: str, patch_code: str, score: float, run_id: str) -> str:
@@ -337,13 +368,20 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
     if llm_mode_effective:
-        executor = SprintExecutor(repo_root, scope_files=scope_files, pytest_cmd=pytest_cmd, timeout_sec=config.stage1_timeout_sec)
+        executor = SprintExecutor(
+            repo_root,
+            scope_files=scope_files,
+            pytest_cmd=pytest_cmd,
+            timeout_sec=config.stage1_timeout_sec,
+            task=config.task,
+        )
     else:
         executor = InPlaceSprintExecutor(
             repo_root=repo_root,
             target_file=config.target_file,
             pytest_cmd=pytest_cmd,
             timeout_sec=config.stage1_timeout_sec,
+            task=config.task,
         )
 
     candidates: list[CandidateEval] = []

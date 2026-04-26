@@ -26,6 +26,7 @@ class CapabilityTask:
     target_file: str
     test_file: str
     success_criteria: str
+    fixture_kind: str = ""
 
 
 def load_tasks(path: str | Path) -> list[CapabilityTask]:
@@ -42,6 +43,7 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
                 target_file=str(row["target_file"]),
                 test_file=str(row["test_file"]),
                 success_criteria=str(row.get("success_criteria", "all_target_tests_pass")),
+                fixture_kind=str(row.get("fixture_kind", "")),
             )
         )
     return tasks

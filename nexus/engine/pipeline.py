@@ -94,6 +94,15 @@ class NexusPipeline(
         self.registry = PhaseRegistry()
         self._register_default_plugins()
 
+    def _init_stage_status(self, state: NexusState) -> None:
+        stage_flow = ["S", "P", "X", "D", "R", "A", "C"]
+        state.metadata.setdefault("stage_flow", stage_flow)
+        state.metadata.setdefault("stage_status", {stage: "pending" for stage in stage_flow})
+
+    def _mark_stage(self, state: NexusState, stage: str, status: str) -> None:
+        self._init_stage_status(state)
+        state.metadata["stage_status"][stage] = status
+
     def _register_default_plugins(self):
         """Registers standard phases using the core PHASES_MAP (MUSE-PLUGIN-2.0)."""
         if not hasattr(self.engine, 'phases') or not self.engine.phases:
