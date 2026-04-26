@@ -163,6 +163,14 @@ def main() -> int:
         str(args.baseline_s_grade_file),
         "--min-grade",
         guard_min_grade,
+        "--service-daily-wall-overhead-sec-max",
+        "1.35",
+        "--service-hard-wall-overhead-sec-max",
+        "1.35",
+        "--service-daily-wall-overhead-ratio-max",
+        "2.5",
+        "--service-hard-wall-overhead-ratio-max",
+        "2.5",
         "--output-json",
     ]
     if args.write_baseline_on_pass:

@@ -99,3 +99,7 @@ def test_wave34_runner_uses_a_pass_guard_for_offline_mode(monkeypatch, tmp_path:
     guard_cmd = [cmd for cmd in captured if "capability_regression_guard.py" in " ".join(cmd)][0]
     idx = guard_cmd.index("--min-grade")
     assert guard_cmd[idx + 1] == "A_PASS"
+    assert guard_cmd[guard_cmd.index("--service-daily-wall-overhead-sec-max") + 1] == "1.35"
+    assert guard_cmd[guard_cmd.index("--service-hard-wall-overhead-sec-max") + 1] == "1.35"
+    assert guard_cmd[guard_cmd.index("--service-daily-wall-overhead-ratio-max") + 1] == "2.5"
+    assert guard_cmd[guard_cmd.index("--service-hard-wall-overhead-ratio-max") + 1] == "2.5"

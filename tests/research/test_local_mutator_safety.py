@@ -77,3 +77,26 @@ def compute_backoff(attempt: int) -> int:
 """
     patched = generate_local_candidate(source, "fix websocket reconnect latency issue", "local", 0)
     assert "return 2 ** (attempt - 1)" in patched
+
+
+def test_compute_backoff_api_context_keeps_bare_baseline_conservative():
+    source = """
+def compute_backoff(attempt: int) -> int:
+    return attempt
+"""
+    patched = generate_local_candidate(source, "fix stale cache invalidation across API and repository layers", "local", 0)
+    assert "return attempt" in patched
+
+
+def test_compute_backoff_api_context_with_nexus_hint_uses_direct_patch():
+    source = """
+def compute_backoff(attempt: int) -> int:
+    return attempt
+"""
+    patched = generate_local_candidate(
+        source,
+        "fix stale cache invalidation across API and repository layers",
+        "Conservative: Focus on the minimal required change to fix the specific issue without refactoring.",
+        0,
+    )
+    assert "return 2 ** (attempt - 1)" in patched

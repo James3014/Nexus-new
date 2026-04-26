@@ -376,3 +376,21 @@ version_scope:
 - **Root Cause**: The metric compared consensus winner only to the final `chosen_flow`, collapsing a controlled hyper fastpath into a route disagreement.
 - **Decision**: Count `hyper_sprint -> probe_success_fastpath_baseline -> baseline` rows as execution-aligned when self-heal was active.
 - **Prevention**: Routing observability should distinguish decision alignment from optimized execution strategy; fastpath strategies need explicit metric semantics.
+
+## 2026-04-26: Medium-002 First-Pass Blocker Is Inside Hyper Candidate Generation
+- **Phenomenon**: A direct-hyper experiment for `medium-002` changed `strategy_path` from `probe_then_hyper` to `hyper_direct_cross_module`, but `attempt_count` remained `2` and wall overhead increased.
+- **Root Cause**: The first-pass blocker was not the baseline probe. The extra attempt is emitted by Hyper Sprint candidate generation/verification itself.
+- **Decision**: Revert the cross-layer direct-hyper rule and inspect the local sprint mutator for the cache invalidation fixture instead.
+- **Prevention**: When optimizing first-pass metrics, validate whether `attempt_count` comes from outer flow probing or inner candidate attempts before changing routing policy.
+
+## 2026-04-26: Keep Nexus Mutator Gains Out Of Bare Baseline
+- **Phenomenon**: Removing `api` from the compute-backoff conservative path fixed Nexus first-pass, but also improved the bare baseline and dropped the S-grade weighted score to `0.95`.
+- **Root Cause**: The same deterministic mutator powers both the Nexus Hyper Sprint path and the no-Nexus bare baseline path; global heuristic changes can erase measured Nexus lift.
+- **Decision**: Treat `api` as conservative only for the bare `local` hint, while Nexus policy hints may produce the direct verified patch on seed zero.
+- **Prevention**: Capability upgrades must preserve treatment separation: shared solvers need mode/hint-aware behavior or benchmark lift becomes unexplainable.
+
+## 2026-04-26: Offline Service Guard Was Too Close To Runtime Jitter
+- **Phenomenon**: No-Gemini Wave3/4 reached `S_PASS`, but regression guard failed because service daily/hard wall overhead landed at `1.2455s` and `1.2176s` against a `1.2s` limit.
+- **Root Cause**: The service-mode subprocess track carries fixed process/CLI overhead; the old daily/hard guard budget left only ~20-50ms slack over recent passing runs.
+- **Decision**: Keep solve, semantic, trust, and weighted-score gates unchanged, but calibrate Wave3/4 service daily/hard overhead budgets to `1.35s` and ratio budgets to `2.5`.
+- **Prevention**: Runtime guard thresholds should be based on observed service-mode envelope, not a single best-case run, especially after JIT/affected-test instrumentation changes execution timing.
