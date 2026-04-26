@@ -13,9 +13,20 @@ class CandidateEvaluator:
         self.pytest_cmd = pytest_cmd
         self.timeout_sec = timeout_sec
 
-    def evaluate(self, *, seed: int, hint: str, code: str, source: str, target_file: str, original_code: str) -> CandidateEvalResult:
+    def evaluate(
+        self,
+        *,
+        seed: int,
+        hint: str,
+        code: str,
+        source: str,
+        target_file: str,
+        original_code: str,
+        companion_edits: Optional[dict[Path, str]] = None,
+    ) -> CandidateEvalResult:
         start = time.time()
         res = CandidateEvalResult(seed=seed, hint=hint, source=source, candidate_code=code)
+        restored_files: dict[Path, Optional[str]] = {}
         
         try:
             # 1. Syntax Check
@@ -40,6 +51,13 @@ class CandidateEvaluator:
             target_path = self.repo_root / target_file
             target_path.parent.mkdir(parents=True, exist_ok=True)
             target_path.write_text(code, encoding="utf-8")
+            restored_files[target_path] = original_code
+            for extra_path, extra_code in (companion_edits or {}).items():
+                if extra_path == target_path:
+                    continue
+                restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
+                extra_path.parent.mkdir(parents=True, exist_ok=True)
+                extra_path.write_text(extra_code, encoding="utf-8")
             
             try:
                 # Use sys.executable -m pytest optimization from P0
@@ -69,8 +87,12 @@ class CandidateEvaluator:
             
             finally:
                 # Restore original
-                if original_code is not None:
-                    target_path.write_text(original_code, encoding="utf-8")
+                for path, original_text in restored_files.items():
+                    if original_text is None:
+                        if path.exists():
+                            path.unlink()
+                    else:
+                        path.write_text(original_text, encoding="utf-8")
 
         except Exception as exc:
             res.score = 0.0

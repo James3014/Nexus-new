@@ -43,6 +43,7 @@ class CapabilityTask:
     repo_ref: str = ""
     manifest_hash: str = ""
     trial_index: int = 1
+    fixture_kind: str = ""
 
 
 def load_tasks(path: str | Path) -> list[CapabilityTask]:
@@ -69,6 +70,7 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
                 repo=str(row.get("repo", "")),
                 repo_ref=str(row.get("repo_ref", "")),
                 manifest_hash=manifest_hash,
+                fixture_kind=str(row.get("fixture_kind", "")),
             )
         )
     return tasks

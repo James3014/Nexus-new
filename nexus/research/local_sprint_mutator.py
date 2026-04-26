@@ -282,6 +282,225 @@ def _patch_compute_backoff_conservative(source: str) -> str:
         return source
 
 
+def _patch_pricing_invoice(source: str) -> str:
+    if "def total" not in source or "tax_for" not in source:
+        return source
+    if "subtotal + tax_for(subtotal)" in source:
+        return source
+    new_source = source.replace("return subtotal", "return subtotal + tax_for(subtotal)", 1)
+    try:
+        compile(new_source, "<pricing_invoice_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_pricing_tax(source: str) -> str:
+    if "def tax_for" not in source:
+        return source
+    if "round(subtotal * 0.08)" in source:
+        return source
+    new_source = source.replace("return 0", "return round(subtotal * 0.08)", 1)
+    try:
+        compile(new_source, "<pricing_tax_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_nightshift_runner(source: str) -> str:
+    if "def execute" not in source or "persist_state" not in source:
+        return source
+    if "stage1_signal or stage1_failures >= 2" in source:
+        return source
+    pattern = re.compile(r"mode = 'hyper_sprint'\n(\s+)if stage1_failures >= 2:\n(\s+)mode = 'nightshift'")
+    if not pattern.search(source):
+        return source
+    new_source = pattern.sub(
+        "mode = 'nightshift' if stage1_signal or stage1_failures >= 2 else 'hyper_sprint'",
+        source,
+        count=1,
+    )
+    if "trigger_reason" not in new_source:
+        new_source = new_source.replace(
+            "return persist_state({'mode': mode, 'stage1_signal': stage1_signal})",
+            "return persist_state({'mode': mode, 'stage1_signal': stage1_signal, 'trigger_reason': 'stage1_no_passing_candidate' if stage1_signal else ''})",
+        )
+    try:
+        compile(new_source, "<nightshift_runner_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_nightshift_store(source: str) -> str:
+    if "def persist_state" not in source:
+        return source
+    if "trigger_reason" in source:
+        return source
+    pattern = re.compile(r"return\s+\{'mode': state\['mode'\]\}")
+    if not pattern.search(source):
+        return source
+    new_source = pattern.sub(
+        "return {'mode': state['mode'], 'trigger_reason': state.get('trigger_reason', '')}",
+        source,
+        count=1,
+    )
+    try:
+        compile(new_source, "<nightshift_store_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_nightshift_bridge_runner(source: str) -> str:
+    if "def execute" not in source or "build_audit_payload" not in source:
+        return source
+    if "stage1_signal or stage1_failures >= 2" in source:
+        return source
+    pattern = re.compile(r"mode = 'hyper_sprint'\n(\s+)if stage1_failures >= 2:\n(\s+)mode = 'nightshift'")
+    if not pattern.search(source):
+        return source
+    new_source = pattern.sub(
+        "mode = 'nightshift' if stage1_signal or stage1_failures >= 2 else 'hyper_sprint'",
+        source,
+        count=1,
+    )
+    try:
+        compile(new_source, "<nightshift_bridge_runner_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_nightshift_bridge_store(source: str) -> str:
+    if "def persist_state" not in source:
+        return source
+    if "audit_tag" in source and "trigger_reason" in source:
+        return source
+    pattern = re.compile(r"return\s+\{'mode': state\['mode'\]\}")
+    if not pattern.search(source):
+        return source
+    new_source = pattern.sub(
+        "return {'mode': state['mode'], 'trigger_reason': state.get('trigger_reason', ''), 'audit_tag': state.get('audit_tag', '')}",
+        source,
+        count=1,
+    )
+    try:
+        compile(new_source, "<nightshift_bridge_store_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_nightshift_audit_bridge(source: str) -> str:
+    if "def build_audit_payload" not in source:
+        return source
+    if "nightshift_repair" in source and "stage1_no_passing_candidate" in source:
+        return source
+    pattern = re.compile(r"return\s+\{\}")
+    if not pattern.search(source):
+        return source
+    new_source = pattern.sub(
+        "return {'trigger_reason': 'stage1_no_passing_candidate' if stage1_signal else '', 'audit_tag': 'nightshift_repair' if stage1_signal else ''}",
+        source,
+        count=1,
+    )
+    try:
+        compile(new_source, "<nightshift_audit_bridge_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def generate_local_companion_edits(
+    repo_root: Path,
+    target_path: Path,
+    task: str,
+    mutation_hint: str,
+    seed: int,
+) -> dict[Path, str]:
+    lowered = f"{task} {mutation_hint}".lower()
+    if (
+        target_path.name == "invoice.py"
+        and "tax" in lowered
+        and any(keyword in lowered for keyword in ["shared place", "pricing", "invoice", "refactor"])
+    ):
+        tax_path = target_path.with_name("tax.py")
+        if not tax_path.exists():
+            return {}
+        invoice_source = target_path.read_text(encoding="utf-8")
+        tax_source = tax_path.read_text(encoding="utf-8")
+        patched_invoice = _patch_pricing_invoice(invoice_source)
+        patched_tax = _patch_pricing_tax(tax_source)
+        edits: dict[Path, str] = {}
+        if patched_invoice != invoice_source:
+            edits[target_path] = patched_invoice
+        if patched_tax != tax_source:
+            edits[tax_path] = patched_tax
+        return edits
+    if (
+        target_path.name == "runner.py"
+        and "nightshift" in lowered
+        and "trigger" in lowered
+        and "stage1" in lowered
+    ):
+        store_path = target_path.parent.parent / "state" / "store.py"
+        if not store_path.exists():
+            return {}
+        runner_source = target_path.read_text(encoding="utf-8")
+        store_source = store_path.read_text(encoding="utf-8")
+        patched_runner = _patch_nightshift_runner(runner_source)
+        patched_store = _patch_nightshift_store(store_source)
+        edits: dict[Path, str] = {}
+        if patched_runner != runner_source:
+            edits[target_path] = patched_runner
+        if patched_store != store_source:
+            edits[store_path] = patched_store
+        return edits
+    return {}
+
+
+def generate_nightshift_bundle_edits(
+    repo_root: Path,
+    target_path: Path,
+    task: str,
+    seed: int,
+) -> dict[Path, str]:
+    lowered = task.lower()
+    if target_path.name != "runner.py" or "nightshift" not in lowered or "stage1" not in lowered:
+        return {}
+    store_path = target_path.parent.parent / "state" / "store.py"
+    if not store_path.exists():
+        return {}
+    runner_source = target_path.read_text(encoding="utf-8")
+    store_source = store_path.read_text(encoding="utf-8")
+    edits: dict[Path, str] = {}
+    if "audit bridge" in lowered:
+        bridge_path = target_path.parent.parent / "state" / "audit_bridge.py"
+        if not bridge_path.exists():
+            return {}
+        bridge_source = bridge_path.read_text(encoding="utf-8")
+        patched_runner = _patch_nightshift_bridge_runner(runner_source)
+        patched_store = _patch_nightshift_bridge_store(store_source)
+        patched_bridge = _patch_nightshift_audit_bridge(bridge_source)
+        if patched_runner != runner_source:
+            edits[target_path] = patched_runner
+        if patched_store != store_source:
+            edits[store_path] = patched_store
+        if patched_bridge != bridge_source:
+            edits[bridge_path] = patched_bridge
+        return edits
+
+    patched_runner = _patch_nightshift_runner(runner_source)
+    patched_store = _patch_nightshift_store(store_source)
+    if patched_runner != runner_source:
+        edits[target_path] = patched_runner
+    if patched_store != store_source:
+        edits[store_path] = patched_store
+    return edits
+
+
 def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: int) -> str:
     """
     Deterministic local candidate generator (no external model calls).
@@ -319,6 +538,14 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
 
     if "normalize" in lowered and "host" in lowered:
         patched = _patch_normalize_hosts(source)
+        if patched != source: return patched
+
+    if any(keyword in lowered for keyword in ["pricing", "invoice", "tax", "shared place"]):
+        patched = _patch_pricing_invoice(source)
+        if patched != source: return patched
+
+    if any(keyword in lowered for keyword in ["nightshift", "stage1", "trigger reason", "persist"]):
+        patched = _patch_nightshift_runner(source)
         if patched != source: return patched
 
     if "parser" in lowered or "purity" in lowered or "refactor" in lowered:

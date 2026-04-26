@@ -340,3 +340,9 @@ version_scope:
 - **Root Cause**: Git merge preflight writes temporary object data even when it does not update the working tree; workspace sandbox permissions can block that object/tempfile path.
 - **Decision**: Treat merge-tree as a non-mutating but filesystem-writing preflight and rerun with explicit approval when sandboxed.
 - **Prevention**: Branch integration reports must separate merge conflicts from preflight environment failures before deciding whether a branch is safe to merge.
+
+## 2026-04-26: Cleanup Branch Merge Must Preserve Benchmark Mainline Contracts
+- **Phenomenon**: Merging `nightshift-1777081808` into local `main` produced conflicts in JIT docs/selector, benchmark task schema, sprint executor wiring, CLI learn-report debt rendering, and this learning matrix.
+- **Root Cause**: The cleanup branch was created before the public benchmark framework landed on `main`, so both branches changed the same seams for different reasons: main added model/fallback benchmark telemetry while the cleanup branch added JIT/nightly and companion-edit hardening.
+- **Decision**: Resolve conflicts by preserving mainline benchmark semantics (`repo_kind`, manifest hash, trial telemetry, forced in-place executor) and adding the cleanup branch's new fields or helpers only where they are additive (`fixture_kind`, companion edits, CI/nightly docs).
+- **Prevention**: Before merging long-lived cleanup branches, run `merge-tree` and list semantic owners per conflicted file; benchmark framework files must keep public-claim telemetry as the source of truth.

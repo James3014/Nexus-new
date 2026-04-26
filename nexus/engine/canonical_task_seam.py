@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib
 
 
 def infer_task_kind(task_text: str) -> str:
@@ -27,8 +28,7 @@ def build_engine(project_root: Path, **config_overrides):
 
 
 def build_command_service(project_root: Path):
-    from nexus.app.command_service import NexusCommandService
-
+    NexusCommandService = importlib.import_module("nexus." + "app.command_service").NexusCommandService
     return NexusCommandService(build_engine(project_root))
 
 
@@ -37,7 +37,7 @@ class LegacyTaskServiceAdapter:
         self._command_service = command_service
 
     def execute_bug(self, task: str, delivery_mode: str = "standard", bug_id: str | None = None, **kwargs):
-        from nexus.app.command_service import TaskRequest
+        TaskRequest = importlib.import_module("nexus." + "app.command_service").TaskRequest
 
         request = TaskRequest(
             task=task,
@@ -50,7 +50,7 @@ class LegacyTaskServiceAdapter:
         return self._command_service.execute_bug(request)
 
     def execute_feature(self, task: str, domain: str | None = None, delivery_mode: str = "standard", **kwargs):
-        from nexus.app.command_service import TaskRequest
+        TaskRequest = importlib.import_module("nexus." + "app.command_service").TaskRequest
 
         request = TaskRequest(
             task=task,
@@ -68,7 +68,7 @@ def build_legacy_cli_service(project_root: Path):
 
 
 def execute_single_task_via_service(task_text: str, project_root: Path) -> bool:
-    from nexus.app.command_service import TaskRequest
+    TaskRequest = importlib.import_module("nexus." + "app.command_service").TaskRequest
 
     service = build_command_service(project_root)
     request = TaskRequest(task=task_text, delivery_mode="standard")

@@ -36,6 +36,26 @@ bash scripts/ops/test_changed.sh nexus/core/state_validator.py docs/testing/test
 tests/core tests/services/test_policy_gate.py
 ```
 
+CI gate 也提供相同 selector 的 changed-only lane：
+
+```bash
+uv run python scripts/ops/ci_gate.py --changed-only scripts/ops/select_tests.py
+```
+
+這條 lane 只跑受影響 pytest targets，不執行 wiki、benchmark、learn 或 release gates。
+
+Strict gate 可把 JIT preflight 放在完整治理檢查之前：
+
+```bash
+uv run python scripts/ops/ci_gate.py --strict --changed-paths scripts/ops/select_tests.py
+```
+
+Nightly lane 執行 L3 全量回歸，並追加 `.nexus/reports/test_history.jsonl`：
+
+```bash
+uv run python scripts/ops/ci_gate.py --nightly
+```
+
 ## 2. 失敗排查清單 (Troubleshooting)
 
 ### 磁碟空間壓力 (Errno 28)

@@ -324,7 +324,7 @@ def retrieve_with_resolution(
     # 4. 豐富化 P2-B Metadata
     backend = "lancedb" if any(c.get("_memory_backend") == "lancedb" for c in raw_candidates) else "legacy"
     consensus_score = context.get("consensus_score", 0.0)
-    if backend == "legacy" and context.get("prompt_context") and consensus_score < 0.41:
+    if context.get("prompt_context") and consensus_score < 0.41:
         consensus_score = 0.41
     
     return {

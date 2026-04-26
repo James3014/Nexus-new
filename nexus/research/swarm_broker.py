@@ -78,10 +78,17 @@ class SwarmBroker:
         all_paths = list(scope_files) + required_configs
         
         for rel_path in all_paths:
-            src = self.workspace / rel_path
-            dst = swarm_dir / rel_path
+            raw_path = Path(rel_path)
+            src = raw_path if raw_path.is_absolute() else self.workspace / raw_path
+            try:
+                dst_rel = src.resolve().relative_to(self.workspace)
+            except ValueError:
+                dst_rel = raw_path if not raw_path.is_absolute() else Path(raw_path.name)
+            dst = swarm_dir / dst_rel
             if src.exists():
                 dst.parent.mkdir(parents=True, exist_ok=True)
+                if src.resolve() == dst.resolve():
+                    continue
                 if src.is_dir():
                     shutil.copytree(src, dst, dirs_exist_ok=True)
                 else:
@@ -97,6 +104,10 @@ class SwarmBroker:
             
         lock_file = swarm_dir / ".swarm_lock"
         try:
+            for cache_dir in [".venv", "node_modules", ".ruff_cache"]:
+                mounted = swarm_dir / cache_dir
+                if mounted.is_symlink():
+                    mounted.unlink()
             # 實施重用策略 (Reuse)
             is_git = (swarm_dir / ".git").exists()
             if is_git:

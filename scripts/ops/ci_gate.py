@@ -6,6 +6,7 @@ import json
 import argparse
 import subprocess
 import concurrent.futures
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add project root to sys.path before importing core modules
@@ -255,6 +256,50 @@ def run_report_trust_audit(dry_run: bool) -> bool:
     success, _ = run_step(
         f"Report Trust Audit {label}".strip(),
         f'"{VENV_PYTHON}" -m pytest {targets} -q',
+    )
+    return success
+
+
+def run_changed_only_check(changed_paths: list[str]) -> bool:
+    from scripts.ops.select_tests import load_impact_rules, select_targets
+
+    targets, reasons = select_targets(changed_paths, load_impact_rules())
+    print("\n🚀 [CI-Gate] Running Changed-Only JIT Tests...")
+    for reason in reasons:
+        print(f"  - {reason}")
+    print(f"🎯 [CI-Gate] Changed-only targets: {' '.join(targets)}")
+    success, _ = run_step(
+        "Changed-Only JIT Tests",
+        f'"{VENV_PYTHON}" -m pytest {" ".join(targets)} -q',
+    )
+    return success
+
+
+def record_test_history(mode: str, command: str, success: bool, targets: list[str] | None = None) -> None:
+    history_path = ROOT / ".nexus" / "reports" / "test_history.jsonl"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode": mode,
+        "command": command,
+        "success": success,
+        "targets": targets or [],
+    }
+    with history_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def run_nightly_full_check() -> bool:
+    command = "bash scripts/ops/test_full.sh"
+    success, _ = run_step("Nightly Full Regression", command)
+    record_test_history(mode="nightly-full", command=command, success=success)
+    return success
+
+
+def run_changed_scope_wiki_governance() -> bool:
+    success, _ = run_step(
+        "Changed-Scope Wiki Governance Audit",
+        f'"{VENV_PYTHON}" scripts/ops/wiki_linter.py --strict --changed-only --ci-report wiki_audit_changed.json',
     )
     return success
 
@@ -522,7 +567,17 @@ def main():
     parser.add_argument("--require-closeout-contract", action="store_true", help="Block CI if done contract closeout check fails")
     parser.add_argument("--closeout-contract-path", default=".nexus/reports/done_contract.json", help="Path to done contract JSON")
     parser.add_argument("--auto-heal", action="store_true", help="Launch autonomous repair loop on failure")
+    parser.add_argument("--changed-only", nargs="*", help="Run only pytest targets affected by changed paths")
+    parser.add_argument("--changed-paths", nargs="*", default=[], help="Changed paths used by strict JIT preflight")
+    parser.add_argument("--nightly", action="store_true", help="Run full L3 regression and append test history")
     args = parser.parse_args()
+
+    changed_only = getattr(args, "changed_only", None)
+    if changed_only is not None:
+        sys.exit(0 if run_changed_only_check(changed_only) else 1)
+
+    if getattr(args, "nightly", False):
+        sys.exit(0 if run_nightly_full_check() else 1)
 
     if args.dry_run:
         dry_exit = run_dry_run()
@@ -533,6 +588,10 @@ def main():
         sys.exit(dry_exit)
 
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
+
+    if args.strict:
+        if not run_changed_only_check(args.changed_paths):
+            sys.exit(1)
     
     # 0. Agent Protocol Check
     if not run_protocol_check(dry_run=args.dry_run):
@@ -554,6 +613,13 @@ def main():
 
     if not run_report_trust_audit(dry_run=args.dry_run) and not args.dry_run:
         sys.exit(1)
+
+    if args.strict and args.changed_paths:
+        if not run_changed_scope_wiki_governance() and not args.dry_run:
+            sys.exit(1)
+        print_phase_6_summaries(wiki_sync_status=wiki_sync_status)
+        print("\n🎉 [CI-Gate] STRICT CHANGED-SCOPE QUALITY GATES PASSED!")
+        sys.exit(0)
 
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
     success, _ = run_step(
