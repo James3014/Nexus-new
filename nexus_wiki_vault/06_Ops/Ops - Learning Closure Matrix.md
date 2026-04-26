@@ -430,3 +430,9 @@ version_scope:
 - **Root Cause**: The selector contract emphasized target lists and reasons, but did not expose compact machine-readable evidence for skipped/unmatched interpretation.
 - **Decision**: Add explicit selector evidence fields and write per-target duration data from changed-only JUnit output into test history.
 - **Prevention**: Every JIT selection improvement must preserve a public evidence trail: selected count, fallback status, risk escalation, unmatched paths, retry recommendation, and duration basis.
+
+## 2026-04-26: Gemini Benchmark Rows Need Eligibility Before Scoring
+- **Phenomenon**: Gemini quota uncertainty made it possible to interpret infra failures as baseline capability failures.
+- **Root Cause**: The A/B runner lacked an eligibility denominator and could estimate token usage even after CLI/quota errors.
+- **Decision**: Add `run_eligible`, `infra_invalid_reason`, invocation/response flags, Nexus-wearing evidence, and eligible-only benchmark summaries.
+- **Prevention**: Public lift claims must report `total_n`, `eligible_n`, and `infra_invalid_n` before solve-rate or Nexus-lift percentages.

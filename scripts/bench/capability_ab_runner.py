@@ -46,6 +46,123 @@ class CapabilityTask:
     fixture_kind: str = ""
 
 
+PILLAR_OBSERVATION_FIELDS = {
+    "lancedb": "pillar_lancedb_active",
+    "memory": "pillar_memory_active",
+    "mempalace": "pillar_mempalace_active",
+    "belief": "pillar_belief_active",
+    "artifact": "pillar_artifact_active",
+}
+PHASE_OBSERVATION_FIELDS = {
+    "P": "phase_p",
+    "X": "phase_x",
+    "D": "phase_d",
+    "R": "phase_r",
+    "A": "phase_a",
+    "C": "phase_c",
+}
+
+
+def _observed_nexus_pillars(row: dict[str, Any]) -> list[str]:
+    return [name for name, field in PILLAR_OBSERVATION_FIELDS.items() if bool(row.get(field, False))]
+
+
+def _observed_nexus_phases(row: dict[str, Any]) -> list[str]:
+    return [name for name, field in PHASE_OBSERVATION_FIELDS.items() if bool(row.get(field))]
+
+
+def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool, nexus_required: bool) -> str | None:
+    gateway_error = str(row.get("baseline_gateway_error_category") or "").strip()
+    raw_tail = str(row.get("baseline_raw_tail") or "")
+    combined = f"{gateway_error}\n{raw_tail}".lower()
+    model_calls = int(row.get("model_calls", 0) or 0)
+
+    if "quota" in combined or "resource exhausted" in combined or "rate limit" in combined or "429" in combined:
+        return "quota_exhausted"
+    if "auth" in combined or "oauth" in combined or "login" in combined or "permission denied" in combined:
+        return "auth_failed"
+    if gateway_error == "binary_missing":
+        return "cli_missing"
+    if gateway_error == "parse_failure":
+        return "parse_error"
+    if model_required and gateway_error == "timeout" and model_calls == 0:
+        return "timeout_before_model_call"
+
+    if nexus_required:
+        pillars = _observed_nexus_pillars(row)
+        phases = _observed_nexus_phases(row)
+        if (
+            model_calls <= 0
+            or not bool(row.get("gemini_uses_nexus", False))
+            or not bool(row.get("nexus_context_delivered", False))
+            or len(pillars) < len(PILLAR_OBSERVATION_FIELDS)
+            or len(phases) < len(PHASE_OBSERVATION_FIELDS)
+        ):
+            return "nexus_delivery_invalid"
+
+    if model_required and model_calls <= 0:
+        return "timeout_before_model_call"
+    return None
+
+
+def _annotate_benchmark_eligibility(
+    row: dict[str, Any],
+    *,
+    provider: str,
+    model_required: bool,
+    nexus_required: bool,
+) -> dict[str, Any]:
+    row["provider"] = provider
+    row["nexus_pillars_observed"] = _observed_nexus_pillars(row)
+    row["nexus_phases_observed"] = _observed_nexus_phases(row)
+    gateway_error = str(row.get("baseline_gateway_error_category") or "").strip()
+    model_calls = int(row.get("model_calls", 0) or 0)
+    row["invocation_started"] = bool(model_calls > 0 or gateway_error in {"cli_error", "parse_failure", "timeout"})
+    row["model_response_received"] = bool(
+        row.get("model_patch_generated", False)
+        or int(row.get("total_tokens", 0) or 0) > 0
+        or str(row.get("token_capture_status", "")) in {"ok", "measured"}
+    )
+    row["nexus_bootstrap_completed"] = bool(row.get("nexus_context_delivered", False) or row["nexus_phases_observed"])
+    reason = _classify_infra_invalid_reason(row, model_required=model_required, nexus_required=nexus_required)
+    row["infra_invalid_reason"] = reason
+    row["run_eligible"] = reason is None
+    row["nexus_wearing_valid"] = bool(nexus_required and reason is None)
+    return row
+
+
+def _avg(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 4)
+
+
+def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    for mode in sorted({str(row.get("mode", "")) for row in rows if row.get("mode") is not None}):
+        mode_rows = [row for row in rows if str(row.get("mode", "")) == mode]
+        eligible = [row for row in mode_rows if bool(row.get("run_eligible", True))]
+        infra_invalid = [row for row in mode_rows if not bool(row.get("run_eligible", True))]
+        solved = [row for row in eligible if row.get("status") == "SUCCESS"]
+        semantic = [row for row in eligible if bool(row.get("semantic_completed", False))]
+        trust_mismatch = [row for row in eligible if bool(row.get("report_trust_mismatch", False))]
+        first_pass = [row for row in eligible if int(row.get("attempt_count", 0) or 0) <= 1 and row.get("status") == "SUCCESS"]
+        summary[mode] = {
+            "total_n": len(mode_rows),
+            "eligible_n": len(eligible),
+            "infra_invalid_n": len(infra_invalid),
+            "infra_invalid_reasons": sorted({str(row.get("infra_invalid_reason")) for row in infra_invalid if row.get("infra_invalid_reason")}),
+            "solve_rate": round(len(solved) / len(eligible), 4) if eligible else None,
+            "semantic_verified_rate": round(len(semantic) / len(eligible), 4) if eligible else None,
+            "trust_mismatch_rate": round(len(trust_mismatch) / len(eligible), 4) if eligible else None,
+            "first_pass_rate": round(len(first_pass) / len(eligible), 4) if eligible else None,
+            "avg_wall_time_sec": _avg([float(row.get("wall_duration_sec", 0) or 0) for row in eligible]),
+            "avg_tokens": _avg([float(row.get("total_tokens", 0) or 0) for row in eligible]),
+            "avg_model_calls": _avg([float(row.get("model_calls", 0) or 0) for row in eligible]),
+        }
+    return summary
+
+
 def load_tasks(path: str | Path) -> list[CapabilityTask]:
     src = Path(path)
     raw_text = src.read_text(encoding="utf-8")
@@ -358,7 +475,7 @@ def _extract_record(
         payload.get("status") == "SUCCESS"
         and semantic_status in {"VERIFIED", "PARTIAL"}
     )
-    return {
+    row = {
         "mode": mode,
         "task_id": task.id,
         "trial_index": task.trial_index,
@@ -460,6 +577,12 @@ def _extract_record(
         "capability_swarm_used": bool(capabilities.get("swarm_used", False)),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
     }
+    return _annotate_benchmark_eligibility(
+        row,
+        provider="gemini" if model_name or model_calls > 0 or mode == "with_nexus" else "local",
+        model_required=False,
+        nexus_required=False,
+    )
 
 
 def _extract_json_payload(raw_output: str) -> dict[str, Any]:
@@ -682,7 +805,13 @@ def run_with_nexus(
     payload = _extract_json_payload(output)
     if not payload:
         payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
-    return _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    return _annotate_benchmark_eligibility(
+        row,
+        provider="gemini" if llm_enabled else "local",
+        model_required=llm_enabled,
+        nexus_required=llm_enabled,
+    )
 
 
 def run_without_nexus(
@@ -731,6 +860,8 @@ def run_without_nexus(
             patch = raw
             raw_tail = _tail_text(raw, max_chars=1000)
             if isinstance(out, dict):
+                if str(out.get("error_category", "") or "") == "binary_missing":
+                    model_calls = 0
                 patch = str(out.get("patch") or "")
                 gateway_error_category = str(out.get("error_category", "") or "")
                 model_name = str(out.get("model_name", "") or "")
@@ -740,7 +871,7 @@ def run_without_nexus(
                 except (TypeError, ValueError):
                     total_tokens = 0
                 token_capture_status = str(out.get("token_capture_status", "unknown") or "unknown")
-            if total_tokens <= 0:
+            if total_tokens <= 0 and not gateway_error_category:
                 total_tokens = max(1, (len(prompt) + len(str(patch))) // 4)
                 token_capture_status = "estimated"
             patch_len = len(str(patch or ""))
@@ -804,7 +935,13 @@ def run_without_nexus(
                 "pytest_stderr_tail": pytest_stderr_tail,
             },
         }
-        return _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
+        row = _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
+        return _annotate_benchmark_eligibility(
+            row,
+            provider="gemini",
+            model_required=True,
+            nexus_required=False,
+        )
 
     if mode == "bare":
         target_path = Path(target_file)
@@ -1290,6 +1427,7 @@ def main() -> int:
     for row in [*with_rows, *without_rows]:
         row["history_policy"] = history_policy
         row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
+    benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
 
     with_path = out_dir / f"with_nexus_{ts}.jsonl"
     without_path = out_dir / f"without_nexus_{ts}.jsonl"
@@ -1338,6 +1476,7 @@ def main() -> int:
                 "evidence_bundle_file": evidence_bundle_path,
                 "history_policy": history_policy,
                 "learn_slo_policy": "forced_ready" if args.force_learn_slo_ready else "repo_state",
+                "benchmark_summary": benchmark_summary,
             },
             ensure_ascii=False,
         )

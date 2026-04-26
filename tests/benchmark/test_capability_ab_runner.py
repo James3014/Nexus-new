@@ -11,6 +11,7 @@ from scripts.bench.capability_ab_runner import (
     _emit_progress,
     _extract_record,
     _extract_json_payload,
+    _summarize_benchmark_rows,
     expand_task_trials,
     _force_learn_slo_ready,
     _history_policy_name,
@@ -353,6 +354,8 @@ def test_extract_record_maps_semantic_fields():
     assert out["capability_hyper_used"] is True
     assert out["capability_claim_verified"] is True
     assert out["semantic_completed"] is False
+    assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
+    assert out["nexus_phases_observed"] == ["P", "X", "D", "R", "A", "C"]
 
 
 def test_extract_record_treats_patch_and_tests_pass_as_mutation_required():
@@ -704,10 +707,110 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
     assert out["total_tokens"] == 123
     assert out["token_capture_status"] == "measured"
     assert out["model_name"] == "gemini-3.1-pro-preview"
+    assert out["provider"] == "gemini"
+    assert out["run_eligible"] is True
+    assert out["infra_invalid_reason"] is None
+    assert out["invocation_started"] is True
+    assert out["model_response_received"] is True
+    assert out["nexus_bootstrap_completed"] is False
     assert out["model_patch_generated"] is True
     assert out["artifact_changed"] is True
     assert out["baseline_patch_changed"] is True
     assert out["baseline_patch_len"] > 0
+
+
+def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="easy-quota",
+        difficulty="easy",
+        task_type="bug",
+        task_desc="Fix text normalization",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        return (
+            {
+                "status": "FAIL",
+                "error_category": "cli_error",
+                "tokens_used": 0,
+                "model_name": "gemini-3-flash-preview",
+            },
+            "Resource exhausted: quota exceeded",
+        )
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert out["run_eligible"] is False
+    assert out["infra_invalid_reason"] == "quota_exhausted"
+    assert out["model_calls"] == 1
+    assert out["invocation_started"] is True
+    assert out["model_response_received"] is False
+
+
+def test_run_with_nexus_llm_requires_model_and_nexus_evidence(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="nexus-invalid",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix public bug",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":0,"total_tokens":0,"token_capture_status":"unknown"}}}'
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.subprocess.run", lambda *_args, **_kwargs: _Proc())
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert out["provider"] == "gemini"
+    assert out["run_eligible"] is False
+    assert out["infra_invalid_reason"] == "nexus_delivery_invalid"
+    assert out["gemini_uses_nexus"] is False
+    assert out["nexus_context_delivered"] is False
+
+
+def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
+    rows = [
+        {"mode": "without_nexus", "run_eligible": True, "status": "SUCCESS", "semantic_completed": True, "report_trust_mismatch": False, "wall_duration_sec": 2.0, "total_tokens": 100, "model_calls": 1},
+        {"mode": "without_nexus", "run_eligible": False, "infra_invalid_reason": "quota_exhausted", "status": "FAILED", "semantic_completed": False, "report_trust_mismatch": True, "wall_duration_sec": 3.0, "total_tokens": 0, "model_calls": 1},
+        {"mode": "with_nexus", "run_eligible": True, "status": "FAILED", "semantic_completed": False, "report_trust_mismatch": True, "wall_duration_sec": 4.0, "total_tokens": 200, "model_calls": 2},
+    ]
+
+    summary = _summarize_benchmark_rows(rows)
+
+    assert summary["without_nexus"]["total_n"] == 2
+    assert summary["without_nexus"]["eligible_n"] == 1
+    assert summary["without_nexus"]["infra_invalid_n"] == 1
+    assert summary["without_nexus"]["solve_rate"] == 1.0
+    assert summary["with_nexus"]["solve_rate"] == 0.0
 
 
 def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):
