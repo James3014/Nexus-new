@@ -946,6 +946,10 @@ def test_benchmark_row_splits_model_tokens_from_local_rescue():
         "gateway_stats_present": True,
         "gateway_usage_metadata_present": False,
         "gateway_token_source": "stats",
+        "gateway_prompt_chars": 10,
+        "gateway_payload_chars": 20,
+        "gateway_total_chars": 30,
+        "gateway_timeout_sec": 60,
         "gemini_uses_nexus": True,
         "nexus_context_delivered": True,
         "nexus_rescued": True,
@@ -976,6 +980,8 @@ def test_benchmark_row_splits_model_tokens_from_local_rescue():
     assert row["gateway_stats_present"] is True
     assert row["gateway_usage_metadata_present"] is False
     assert row["gateway_token_source"] == "stats"
+    assert row["gateway_total_chars"] == 30
+    assert row["gateway_timeout_sec"] == 60
     assert row["token_reliable"] is False
     assert row["token_unreliable_reason"] == "local_only_rescue_not_model_comparable"
 

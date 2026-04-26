@@ -4,6 +4,7 @@ from nexus.research.sprint_service import (
     CandidateEval,
     InPlaceSprintExecutor,
     SprintConfig,
+    _build_llm_candidate_prompt,
     run_hyper_sprint,
     write_sprint_report,
 )
@@ -233,6 +234,10 @@ def test_llm_mode_propagates_token_observability(monkeypatch, tmp_path: Path):
                 "gateway_stats_present": True,
                 "gateway_usage_metadata_present": False,
                 "gateway_token_source": "stats",
+                "gateway_prompt_chars": 10,
+                "gateway_payload_chars": 20,
+                "gateway_total_chars": 30,
+                "gateway_timeout_sec": 60,
             }
 
     class FakeExecutor:
@@ -254,6 +259,21 @@ def test_llm_mode_propagates_token_observability(monkeypatch, tmp_path: Path):
     assert res.gateway_stats_present is True
     assert res.gateway_usage_metadata_present is False
     assert res.gateway_token_source == "stats"
+    assert res.gateway_prompt_chars == 10
+    assert res.gateway_payload_chars == 20
+    assert res.gateway_total_chars == 30
+    assert res.gateway_timeout_sec == 60
+
+
+def test_compact_gateway_prompt_is_shorter(monkeypatch):
+    source = "def normalize_flag(text):\n    return text\n"
+    full = _build_llm_candidate_prompt(source_code=source, task="Fix flaky websocket timeout", mutation_hint="baseline")
+    monkeypatch.setenv("NEXUS_GATEWAY_COMPACT_PROMPT", "1")
+    compact = _build_llm_candidate_prompt(source_code=source, task="Fix flaky websocket timeout", mutation_hint="baseline")
+
+    assert len(compact) < len(full)
+    assert "patch=FULL updated file content" in compact
+    assert source in compact
 
 
 def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path):
@@ -275,6 +295,10 @@ def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_p
                     "gateway_stats_present": False,
                     "gateway_usage_metadata_present": False,
                     "gateway_token_source": "missing",
+                    "gateway_prompt_chars": 11,
+                    "gateway_payload_chars": 22,
+                    "gateway_total_chars": 33,
+                    "gateway_timeout_sec": 7,
                 },
                 "print('ok')\n",
             )
@@ -296,6 +320,8 @@ def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_p
     assert res.total_tokens > 0
     assert res.token_capture_status in {"measured", "estimated"}
     assert res.gateway_token_source == "missing"
+    assert res.gateway_total_chars == 33
+    assert res.gateway_timeout_sec == 7
 
 
 def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path):
@@ -317,6 +343,10 @@ def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path)
                     "gateway_stats_present": True,
                     "gateway_usage_metadata_present": False,
                     "gateway_token_source": "stats",
+                    "gateway_prompt_chars": 44,
+                    "gateway_payload_chars": 55,
+                    "gateway_total_chars": 99,
+                    "gateway_timeout_sec": 12,
                 },
                 "{}",
             )
@@ -339,6 +369,8 @@ def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path)
     assert res.token_capture_status == "measured"
     assert res.gateway_stats_present is True
     assert res.gateway_token_source == "stats"
+    assert res.gateway_total_chars == 99
+    assert res.gateway_timeout_sec == 12
     assert res.fallback_used is True
 
 

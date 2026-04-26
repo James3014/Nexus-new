@@ -509,6 +509,12 @@ version_scope:
 - **Decision**: Classify gateway timeout as `gateway_error_category=timeout` and propagate it through sprint result, research-flow report, and benchmark row.
 - **Prevention**: Token-source probes must separate `missing because provider returned no stats` from `missing because gateway timed out before stats existed`; 3x1/6x2 should wait for a non-timeout Nexus 1x1.
 
+## 2026-04-27: Compact Prompt Did Not Fix Gemini Gateway Timeout
+- **Phenomenon**: Full and compact Nexus-only probes both timed out at 75s. Compact mode reduced `gateway_total_chars` from 634 to 547, but still produced `gateway_token_source=missing`.
+- **Root Cause**: The timeout is not explained by prompt character count alone; Gemini CLI appears to spend time in invocation mode, tool-policy planning, or response generation before returning provider stats.
+- **Decision**: Keep prompt-budget telemetry, but do not expand to 3x1/6x2 until a Nexus-only 1x1 proves a non-timeout `gateway_token_source=stats` or `usage_metadata`.
+- **Prevention**: Next probes must compare CLI invocation mode, approval mode, stdin versus inline payload, and stricter no-tool system instructions before treating token telemetry as benchmark-ready.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

@@ -82,14 +82,17 @@ class BattlesuitGateway:
             f"Required output shape: {json.dumps(output_schema, ensure_ascii=False)}"
         )
 
-    def _build_error_result(self, summary, category="gateway_error"):
-        return {
+    def _build_error_result(self, summary, category="gateway_error", telemetry: Optional[Dict[str, Any]] = None):
+        result = {
             "status": "FAIL",
             "summary": summary,
             "violations": [],
             "tokens_used": 0,
             "error_category": category,
         }
+        if isinstance(telemetry, dict):
+            result.update(telemetry)
+        return result
 
     def ask_with_template(
         self, task: str, diff: str, task_id: str = "unknown", model_hint: str = "flash", phase: str = "R"
@@ -153,6 +156,12 @@ class BattlesuitGateway:
         tmp_payload = (self.project_root / f".nexus/payload_{os.getpid()}.txt").resolve()
         tmp_payload.parent.mkdir(parents=True, exist_ok=True)
         tmp_payload.write_text(content, encoding="utf-8")
+        gateway_telemetry = {
+            "gateway_prompt_chars": len(sys_msg),
+            "gateway_payload_chars": len(content),
+            "gateway_total_chars": len(sys_msg) + len(content),
+            "gateway_timeout_sec": dynamic_timeout,
+        }
         
         custom_env = os.environ.copy()
         custom_env["HOME"] = "/Users/jameschen"
@@ -255,7 +264,7 @@ class BattlesuitGateway:
                     tokens_total = int(token_info["total_tokens"])
                                 
                     capture_status = "measured" if tokens_total > 0 else "missing_gateway_stats"
-                    parsed = self._parse_json_result(output_text, tokens_total, capture_status, token_info)
+                    parsed = self._parse_json_result(output_text, tokens_total, capture_status, token_info, gateway_telemetry)
                     if tmp_payload.exists():
                         tmp_payload.unlink()
                     return parsed
@@ -270,7 +279,7 @@ class BattlesuitGateway:
                 
         if tmp_payload.exists(): tmp_payload.unlink()
         category = "timeout" if str(last_err).strip().upper() == "TIMEOUT" else "gateway_error"
-        return self._build_error_result(f"Gateway Exhausted: {last_err}", category=category), last_err
+        return self._build_error_result(f"Gateway Exhausted: {last_err}", category=category, telemetry=gateway_telemetry), last_err
 
     def _resolve_binary(
         self,
@@ -330,7 +339,7 @@ class BattlesuitGateway:
             "gateway_token_source": source,
         }
 
-    def _parse_json_result(self, raw_text, tokens_total, capture_status, token_info=None):
+    def _parse_json_result(self, raw_text, tokens_total, capture_status, token_info=None, gateway_telemetry=None):
         """解析模型產出的 JSON 內容。"""
         try:
             try:
@@ -356,8 +365,14 @@ class BattlesuitGateway:
                 data["gateway_stats_present"] = bool(token_info.get("gateway_stats_present", False))
                 data["gateway_usage_metadata_present"] = bool(token_info.get("gateway_usage_metadata_present", False))
                 data["gateway_token_source"] = str(token_info.get("gateway_token_source") or "missing")
+            if isinstance(gateway_telemetry, dict):
+                data.update(gateway_telemetry)
             
             return data, raw_text
             
         except Exception as e:
-            return self._build_error_result(f"Parse Error: {str(e)}", category="parse_failure"), raw_text
+            return self._build_error_result(
+                f"Parse Error: {str(e)}",
+                category="parse_failure",
+                telemetry=gateway_telemetry if isinstance(gateway_telemetry, dict) else None,
+            ), raw_text

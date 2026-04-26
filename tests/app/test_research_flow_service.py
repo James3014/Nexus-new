@@ -449,6 +449,10 @@ def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, mon
             gateway_usage_metadata_present=False,
             gateway_token_source="stats",
             gateway_error_category="",
+            gateway_prompt_chars=10,
+            gateway_payload_chars=20,
+            gateway_total_chars=30,
+            gateway_timeout_sec=60,
             learning_trace={"mempalace_verified": True},
         )
 
@@ -492,6 +496,9 @@ def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, mon
     assert report["gateway_stats_present"] is True
     assert report["gateway_token_source"] == "stats"
     assert report["gateway_error_category"] == ""
+    assert report["gateway_total_chars"] == 30
+    assert report["gateway_timeout_sec"] == 60
+    assert report["guard_fallback_from"]["gateway_total_chars"] == 30
     assert report["token_capture_status"] == "measured"
     assert report["model_calls"] == 1
     assert payload["nexus_usage_trace"]["gemini_uses_nexus"] is True

@@ -797,6 +797,10 @@ def run_auto_flow(
                     "gateway_usage_metadata_present": bool(getattr(res, "gateway_usage_metadata_present", False)),
                     "gateway_token_source": str(getattr(res, "gateway_token_source", "missing") or "missing"),
                     "gateway_error_category": str(getattr(res, "gateway_error_category", "") or ""),
+                    "gateway_prompt_chars": int(getattr(res, "gateway_prompt_chars", 0) or 0),
+                    "gateway_payload_chars": int(getattr(res, "gateway_payload_chars", 0) or 0),
+                    "gateway_total_chars": int(getattr(res, "gateway_total_chars", 0) or 0),
+                    "gateway_timeout_sec": int(getattr(res, "gateway_timeout_sec", 0) or 0),
                     "effective_stage1_timeout_sec": effective_stage1_timeout,
                     "learning_trace": res.learning_trace,
                 },
@@ -882,6 +886,10 @@ def run_auto_flow(
                             "gateway_usage_metadata_present": bool(hyper_report.get("gateway_usage_metadata_present", False)),
                             "gateway_token_source": hyper_report.get("gateway_token_source", "missing"),
                             "gateway_error_category": hyper_report.get("gateway_error_category", ""),
+                            "gateway_prompt_chars": int(hyper_report.get("gateway_prompt_chars", 0) or 0),
+                            "gateway_payload_chars": int(hyper_report.get("gateway_payload_chars", 0) or 0),
+                            "gateway_total_chars": int(hyper_report.get("gateway_total_chars", 0) or 0),
+                            "gateway_timeout_sec": int(hyper_report.get("gateway_timeout_sec", 0) or 0),
                             "winner_source": hyper_report.get("winner_source", "unknown"),
                             "learning_trace": hyper_report.get("learning_trace", {}),
                         }
@@ -907,6 +915,22 @@ def run_auto_flow(
                         result["report"]["gateway_error_category"] = hyper_report.get(
                             "gateway_error_category",
                             result["report"].get("gateway_error_category", ""),
+                        )
+                        result["report"]["gateway_prompt_chars"] = max(
+                            int(result["report"].get("gateway_prompt_chars", 0) or 0),
+                            int(hyper_report.get("gateway_prompt_chars", 0) or 0),
+                        )
+                        result["report"]["gateway_payload_chars"] = max(
+                            int(result["report"].get("gateway_payload_chars", 0) or 0),
+                            int(hyper_report.get("gateway_payload_chars", 0) or 0),
+                        )
+                        result["report"]["gateway_total_chars"] = max(
+                            int(result["report"].get("gateway_total_chars", 0) or 0),
+                            int(hyper_report.get("gateway_total_chars", 0) or 0),
+                        )
+                        result["report"]["gateway_timeout_sec"] = max(
+                            int(result["report"].get("gateway_timeout_sec", 0) or 0),
+                            int(hyper_report.get("gateway_timeout_sec", 0) or 0),
                         )
                     chosen_flow = "baseline"
                     strategy_path = "hyper_guard_fallback_to_baseline"
