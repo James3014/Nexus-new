@@ -283,6 +283,42 @@ def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_p
     assert res.token_capture_status in {"measured", "estimated"}
 
 
+def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    captured = {}
+
+    class FakeGateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ask_structured(self, **kwargs):
+            captured["model_name"] = kwargs["model_name"]
+            return (
+                {"status": "APPROVED", "patch": "print('ok')\n", "tokens_used": 5, "token_capture_status": "measured"},
+                "print('ok')\n",
+            )
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3.1-pro-preview")
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert captured["model_name"] == "gemini-3.1-pro-preview"
+    assert res.model_name == "gemini-3.1-pro-preview"
+    assert res.model_patch_generated is True
+
+
 def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Path):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"

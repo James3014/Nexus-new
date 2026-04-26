@@ -749,6 +749,9 @@ def run_auto_flow(
                     "rejection_summary": res.rejection_summary,
                     "attempt_count": res.attempt_count,
                     "model_calls": res.model_calls,
+                    "model_name": getattr(res, "model_name", ""),
+                    "model_patch_generated": bool(getattr(res, "model_patch_generated", False)),
+                    "fallback_used": bool(getattr(res, "fallback_used", False)),
                     "total_tokens": res.total_tokens,
                     "token_capture_status": res.token_capture_status,
                     "effective_stage1_timeout_sec": effective_stage1_timeout,
@@ -827,12 +830,18 @@ def run_auto_flow(
                             "flow": hyper_result_for_guard.get("flow"),
                             "elapsed_sec": hyper_result_for_guard.get("elapsed_sec"),
                             "model_calls": int(hyper_report.get("model_calls", 0) or 0),
+                            "model_name": hyper_report.get("model_name", ""),
+                            "model_patch_generated": bool(hyper_report.get("model_patch_generated", False)),
+                            "fallback_used": bool(hyper_report.get("fallback_used", False)),
                             "total_tokens": int(hyper_report.get("total_tokens", 0) or 0),
                             "token_capture_status": hyper_report.get("token_capture_status", "unknown"),
                             "winner_source": hyper_report.get("winner_source", "unknown"),
                             "learning_trace": hyper_report.get("learning_trace", {}),
                         }
                         result["report"]["model_calls"] = int(result["report"].get("model_calls", 0) or 0) + int(hyper_report.get("model_calls", 0) or 0)
+                        result["report"]["model_name"] = hyper_report.get("model_name", result["report"].get("model_name", ""))
+                        result["report"]["model_patch_generated"] = bool(hyper_report.get("model_patch_generated", False))
+                        result["report"]["fallback_used"] = bool(hyper_report.get("fallback_used", False))
                         result["report"]["total_tokens"] = int(result["report"].get("total_tokens", 0) or 0) + int(hyper_report.get("total_tokens", 0) or 0)
                         if hyper_report.get("token_capture_status") == "measured":
                             result["report"]["token_capture_status"] = "measured"

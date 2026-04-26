@@ -571,7 +571,7 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     captured = {}
 
     class _Proc:
-        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"total_tokens":10,"token_capture_status":"ok"}}}'
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"model_name":"gemini-3.1-pro-preview","model_patch_generated":true,"fallback_used":false,"total_tokens":10,"token_capture_status":"ok"}}}'
         stderr = ""
         returncode = 0
 
@@ -593,6 +593,7 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     )
 
     assert captured["env"]["NEXUS_MEMORY_AUTO_INIT"] == "0"
+    assert captured["env"]["NEXUS_GEMINI_MODEL_NAME"] == "gemini-3.1-pro-preview"
     assert captured["env"]["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] == "1"
     assert captured["env"]["NEXUS_GATEWAY_MAX_RETRIES"] == "1"
     assert captured["env"]["NEXUS_GATEWAY_TIMEOUT_SEC"] == "30"
@@ -601,6 +602,9 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     assert captured["env"]["NEXUS_FORCE_INPLACE_EXECUTOR"] == "1"
     assert "NEXUS_MEMORY_DB_PATH" in captured["env"]
     assert out["semantic_status"] == "VERIFIED"
+    assert out["model_name"] == "gemini-3.1-pro-preview"
+    assert out["model_patch_generated"] is True
+    assert out["fallback_used"] is False
 
 
 def test_run_with_nexus_llm_all_forces_hyper_flow(tmp_path: Path, monkeypatch):
@@ -678,6 +682,8 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
                 "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
                 "tokens_used": 123,
                 "token_capture_status": "measured",
+                "model_name": "gemini-3.1-pro-preview",
+                "model_patch_generated": True,
             },
             "",
         )
@@ -697,6 +703,8 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
     assert out["model_calls"] == 1
     assert out["total_tokens"] == 123
     assert out["token_capture_status"] == "measured"
+    assert out["model_name"] == "gemini-3.1-pro-preview"
+    assert out["model_patch_generated"] is True
     assert out["artifact_changed"] is True
     assert out["baseline_patch_changed"] is True
     assert out["baseline_patch_len"] > 0

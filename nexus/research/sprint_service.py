@@ -59,6 +59,9 @@ class SprintResult:
     test_timeouts: int
     total_tokens: int = 0
     token_capture_status: str = "not_applicable_local_only"
+    model_name: str = ""
+    model_patch_generated: bool = False
+    fallback_used: bool = False
     error_codes: list[str] = field(default_factory=list)
     rejection_summary: dict[str, int] = field(default_factory=dict)
     learning_trace: dict[str, Any] = field(default_factory=dict)
@@ -80,6 +83,13 @@ class LLMCandidateGenerator:
         from nexus.services.gateway import BattlesuitGateway
         self.gateway = BattlesuitGateway(project_root=project_root)
         self.safe_mode = safe_mode
+        self.model_chain = self._model_chain()
+
+    def _model_chain(self) -> list[str]:
+        override = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME", "") or "").strip()
+        if override:
+            return [override]
+        return ["gemini-3-flash-preview"] if self.safe_mode else ["gemini-3-flash-preview", "gemini-3.1-pro-preview"]
 
     def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
         def _estimate_tokens(text: str) -> int:
@@ -93,11 +103,10 @@ class LLMCandidateGenerator:
             f"[CURRENT SOURCE]\n{source_code}\n\n"
             "Return ONLY the full updated file content in the 'patch' field."
         )
-        model_chain = ["gemini-3-flash-preview"] if self.safe_mode else ["gemini-3-flash-preview", "gemini-3.1-pro-preview"]
         quota_backoffs = 0
         model_calls = 0
         last_err = ""
-        for idx, model in enumerate(model_chain):
+        for idx, model in enumerate(self.model_chain):
             try:
                 model_calls += 1
                 out, raw = self.gateway.ask_structured(
@@ -129,6 +138,8 @@ class LLMCandidateGenerator:
                     "quota_backoffs": quota_backoffs,
                     "tokens_used": tokens_used,
                     "token_capture_status": token_capture_status,
+                    "model_name": model,
+                    "model_patch_generated": True,
                 }
             except Exception as exc:  # noqa: BLE001
                 err = str(exc).lower()
@@ -139,7 +150,7 @@ class LLMCandidateGenerator:
                     delay = get_retry_delay(RetryParams(attempt=quota_backoffs, max_retries=3))
                     time.sleep(delay)
                     continue
-                if idx < len(model_chain) - 1:
+                if idx < len(self.model_chain) - 1:
                     continue
                 raise
         raise RuntimeError(last_err or "all_models_failed")
@@ -378,6 +389,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     candidates: list[CandidateEval] = []
     model_calls = 0
+    model_names: set[str] = set()
+    model_patch_generated = False
+    fallback_used = False
     total_tokens = 0
     token_capture_statuses: set[str] = set()
     quota_backoffs = 0
@@ -601,6 +615,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     used_source = str(meta.get("source", "llm"))
                 except Exception as llm_exc:  # noqa: BLE001
                     model_calls += 1
+                    fallback_used = True
+                    if llm_generator is not None and getattr(llm_generator, "model_chain", None):
+                        model_names.add(str(llm_generator.model_chain[0]))
                     err = str(llm_exc).lower()
                     if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
                         quota_backoffs += 1
@@ -624,6 +641,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 )
                 used_source = str(meta.get("source", "local"))
             model_calls += int(meta.get("model_calls", 0))
+            if str(meta.get("model_name", "") or ""):
+                model_names.add(str(meta.get("model_name")))
+            if bool(meta.get("model_patch_generated", False)):
+                model_patch_generated = True
+            if used_source.startswith("local") and llm_generator is not None:
+                fallback_used = True
             total_tokens += int(meta.get("tokens_used", 0) or 0)
             token_capture_statuses.add(str(meta.get("token_capture_status", "unknown") or "unknown"))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
@@ -695,6 +718,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     else ("missing" if model_calls > 0 else "not_applicable_local_only")
                 )
             ),
+            model_name=",".join(sorted(model_names)),
+            model_patch_generated=model_patch_generated,
+            fallback_used=fallback_used,
             error_codes=sorted(set(error_codes)),
             rejection_summary={},
             learning_trace=learning_trace,
@@ -734,6 +760,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     else ("missing" if model_calls > 0 else "not_applicable_local_only")
                 )
             ),
+            model_name=",".join(sorted(model_names)),
+            model_patch_generated=model_patch_generated,
+            fallback_used=fallback_used,
             error_codes=final_codes,
             rejection_summary=rejection_summary,
             learning_trace=learning_trace,
@@ -812,6 +841,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 else ("missing" if model_calls > 0 else "not_applicable_local_only")
             )
         ),
+        model_name=",".join(sorted(model_names)),
+        model_patch_generated=model_patch_generated,
+        fallback_used=fallback_used,
         error_codes=final_codes,
         rejection_summary=rejection_summary,
         learning_trace=learning_trace,

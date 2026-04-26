@@ -348,6 +348,7 @@ def _extract_record(
     consensus_votes = consensus.get("votes", {}) if isinstance(consensus, dict) else {}
     task_duration = float(result.get("elapsed_sec", wall_time_sec) or wall_time_sec)
     model_calls = int(report.get("model_calls", 0) or 0)
+    model_name = str(report.get("model_name", "") or "")
     total_tokens = int(report.get("total_tokens", 0) or 0)
     token_capture_status = str(report.get("token_capture_status", "unknown") or "unknown")
     semantic_status = payload.get("semantic_status")
@@ -392,6 +393,9 @@ def _extract_record(
         "elapsed_sec": task_duration,
         "attempt_count": int(report.get("attempt_count", 0) or 0),
         "model_calls": model_calls,
+        "model_name": model_name,
+        "model_patch_generated": bool(report.get("model_patch_generated", False)),
+        "fallback_used": bool(report.get("fallback_used", False)),
         "total_tokens": total_tokens,
         "token_capture_status": token_capture_status,
         "token_measured": bool(total_tokens > 0),
@@ -560,15 +564,16 @@ def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
 
 def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
     gemini_bin = shutil.which("gemini") or "/Users/jameschen/.npm-global/bin/gemini"
+    model_name = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "gemini-3.1-pro-preview")
     if not Path(gemini_bin).exists():
-        return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0}, "gemini_missing"
+        return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0, "model_name": model_name}, "gemini_missing"
     cmd = [
         gemini_bin,
         "--skip-trust",
         "--approval-mode",
         "plan",
         "-m",
-        "gemini-3-flash-preview",
+        model_name,
         "-p",
         prompt,
         "--output-format",
@@ -580,13 +585,16 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
     try:
         res = subprocess.run(cmd, cwd="/tmp", env=env, text=True, capture_output=True, timeout=timeout_sec)
     except subprocess.TimeoutExpired as exc:
-        return {"status": "FAIL", "error_category": "timeout", "tokens_used": 0}, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
+        return {"status": "FAIL", "error_category": "timeout", "tokens_used": 0, "model_name": model_name}, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
     if res.returncode != 0:
-        return {"status": "FAIL", "error_category": "cli_error", "tokens_used": 0}, _tail_text(res.stderr or res.stdout)
+        return {"status": "FAIL", "error_category": "cli_error", "tokens_used": 0, "model_name": model_name}, _tail_text(res.stderr or res.stdout)
     try:
-        return _parse_direct_gemini_json(res.stdout.strip())
+        payload, output_text = _parse_direct_gemini_json(res.stdout.strip())
+        payload["model_name"] = model_name
+        payload["model_patch_generated"] = bool(payload.get("patch"))
+        return payload, output_text
     except Exception as exc:  # noqa: BLE001
-        return {"status": "FAIL", "error_category": "parse_failure", "tokens_used": 0}, f"{type(exc).__name__}: {_tail_text(res.stdout)}"
+        return {"status": "FAIL", "error_category": "parse_failure", "tokens_used": 0, "model_name": model_name}, f"{type(exc).__name__}: {_tail_text(res.stdout)}"
 
 
 def run_with_nexus(
@@ -646,6 +654,7 @@ def run_with_nexus(
         env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start).resolve())
         env["NEXUS_MEMORY_AUTO_INIT"] = "0"
         if llm_enabled:
+            env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
             env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
             env["NEXUS_GATEWAY_MAX_RETRIES"] = "1"
             env["NEXUS_GATEWAY_TIMEOUT_SEC"] = str(max(30, min(90, max(5, timeout_sec - 30))))
@@ -697,6 +706,8 @@ def run_without_nexus(
         model_calls = 0
         total_tokens = 0
         token_capture_status = "unknown"
+        model_name = ""
+        model_patch_generated = False
         gateway_error_category = ""
         raw_tail = ""
         patch_changed = False
@@ -720,6 +731,8 @@ def run_without_nexus(
             if isinstance(out, dict):
                 patch = str(out.get("patch") or "")
                 gateway_error_category = str(out.get("error_category", "") or "")
+                model_name = str(out.get("model_name", "") or "")
+                model_patch_generated = bool(out.get("model_patch_generated", False))
                 try:
                     total_tokens = int(out.get("tokens_used", 0) or 0)
                 except (TypeError, ValueError):
@@ -759,7 +772,9 @@ def run_without_nexus(
                     "model_calls": model_calls,
                     "total_tokens": total_tokens,
                     "token_capture_status": token_capture_status,
-                    "model_name": "gemini-3-flash-preview",
+                    "model_name": model_name,
+                    "model_patch_generated": model_patch_generated,
+                    "fallback_used": False,
                 },
             },
             "status": status,
