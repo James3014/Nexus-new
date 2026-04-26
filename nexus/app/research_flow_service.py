@@ -6,6 +6,7 @@ import concurrent.futures
 import subprocess
 import re
 import difflib
+import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
@@ -419,6 +420,12 @@ def build_hyper_execution_profile(
     effective_candidate_count = min(effective_candidate_count, 6)
     effective_max_rounds = min(effective_max_rounds, 4)
     effective_stage1_max_parallel = min(effective_stage1_max_parallel, 3)
+    llm_candidate_cap = os.environ.get("NEXUS_LLM_CANDIDATE_CAP", "").strip()
+    if llm_candidate_cap:
+        try:
+            effective_candidate_count = min(effective_candidate_count, max(1, int(llm_candidate_cap)))
+        except ValueError:
+            pass
 
     return {
         "is_hard_task": is_hard_task,

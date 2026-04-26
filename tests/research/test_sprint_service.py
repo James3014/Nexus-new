@@ -310,6 +310,46 @@ def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
     assert res.learning_trace.get("learn_slo_guard", {}).get("active") is True
 
 
+def test_benchmark_can_force_llm_despite_learn_slo_guard(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "quota_backoffs": 0,
+                "tokens_used": 111,
+                "token_capture_status": "measured",
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.total_tokens == 111
+    assert "learn_slo_block" not in res.error_codes
+    assert res.learning_trace.get("learn_slo_guard", {}).get("reason") == "benchmark_force_llm_despite_learn_slo"
+
+
 def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")

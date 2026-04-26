@@ -45,6 +45,7 @@ class MemoryService:
         self.policy_memory_jsonl = self.project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
         self.coordinator = MemoryCoordinator()
         self.repo = MemoryRepository(self.db_path)
+        self.bootstrap_status = "pending"
         
         try:
             if redis is None:
@@ -56,7 +57,16 @@ class MemoryService:
             logger.warning(f"Redis init failed, falling back to local: {e}")
             self.redis_available = False
         
-        self._auto_init_tables()
+        if self._auto_init_disabled():
+            self.bootstrap_status = "skipped_fail_open"
+            logger.warning("MemoryService auto-init skipped by NEXUS_MEMORY_AUTO_INIT=0")
+        else:
+            self._auto_init_tables()
+
+    @staticmethod
+    def _auto_init_disabled() -> bool:
+        value = os.environ.get("NEXUS_MEMORY_AUTO_INIT", "").strip().lower()
+        return value in {"0", "false", "no", "off", "skip"}
 
     def _auto_init_tables(self):
         """🛡️ Auto-Init: Ensure core tables exist."""
@@ -79,7 +89,9 @@ class MemoryService:
                         self.repo.ensure_table("fault_lessons", initial_data=fault_data)
                 except (OSError, json.JSONDecodeError) as e:
                     logger.warning(f"Failed to load fault lessons during init: {e}")
+            self.bootstrap_status = "initialized"
         except Exception as e:
+            self.bootstrap_status = "failed_open"
             logger.warning(f"MemoryService auto-init warning (non-fatal): {e}")
 
     def semantic_search(self, query: str, table_name: str = "policy", limit: int = 3) -> List[Dict]:

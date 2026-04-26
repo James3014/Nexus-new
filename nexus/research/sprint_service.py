@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import subprocess
 import time
@@ -346,10 +347,14 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         phase_slo_pass = bool(learn_slo.get("phase_slo_pass", False))
         learn_slo_guard["phase_slo_pass"] = phase_slo_pass
         learn_slo_guard["required_done_ratio"] = required_done_ratio
-        if llm_mode_effective and (not phase_slo_pass or required_done_ratio < 0.95):
+        force_llm_for_benchmark = os.environ.get("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "").strip().lower() in {"1", "true", "yes"}
+        if llm_mode_effective and (not phase_slo_pass or required_done_ratio < 0.95) and not force_llm_for_benchmark:
             llm_mode_effective = False
             learn_slo_guard["active"] = True
             learn_slo_guard["reason"] = "learn_phase_slo_not_ready"
+        elif llm_mode_effective and force_llm_for_benchmark and (not phase_slo_pass or required_done_ratio < 0.95):
+            learn_slo_guard["active"] = True
+            learn_slo_guard["reason"] = "benchmark_force_llm_despite_learn_slo"
     except Exception as exc:  # noqa: BLE001
         learn_slo_guard["reason"] = f"learn_slo_read_error:{exc}"
 
@@ -734,8 +739,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_score = best.score
     final_patch = best.candidate_code or source_code
     final_reason = "stage1_pass"
+    disable_dayshift = os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
     # Stage 2 is optional enhancement only. Core success must not depend on external quota.
-    if llm_mode_effective and "quota" not in error_codes:
+    if llm_mode_effective and "quota" not in error_codes and not disable_dayshift:
         swarm_dir = SwarmBroker(repo_root).acquire(timeout_sec=config.timeout_sec)
         if swarm_dir:
             try:
@@ -763,6 +769,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 SwarmBroker(repo_root).release(swarm_dir)
     elif llm_mode_effective and "quota" in error_codes:
         final_reason = "dayshift_skipped_due_quota_fallback"
+    elif llm_mode_effective and disable_dayshift:
+        final_reason = "dayshift_skipped_by_benchmark_budget"
     elif config.llm_mode and not llm_mode_effective:
         error_codes.append("learn_slo_block")
         final_reason = "dayshift_skipped_due_learn_slo_guard"

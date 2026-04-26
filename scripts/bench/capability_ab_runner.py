@@ -484,16 +484,16 @@ def _tail_text(value: Any, *, max_chars: int = 2000) -> str:
 
 def _classify_timeout_stage(stdout_tail: str, stderr_tail: str) -> str:
     combined = f"{stdout_tail}\n{stderr_tail}".lower()
-    if "memoryservice" in combined or "lancedb" in combined or "redis init" in combined or "policy" in combined:
-        return "timeout_during_memory_bootstrap"
+    if "gateway" in combined or "gemini" in combined or "model_calls" in combined or "llm" in combined:
+        return "timeout_during_gemini"
     if "artifact" in combined or "pytest" in combined:
         return "timeout_during_artifact_verify"
-    if "gemini" in combined or "model_calls" in combined or "llm" in combined:
-        return "timeout_during_gemini"
     if "hyper" in combined or "sprint" in combined:
         return "timeout_during_hyper"
     if "route" in combined or "phase_p" in combined or "route_built" in combined:
         return "timeout_after_route_before_gemini"
+    if "memoryservice" in combined or "lancedb" in combined or "redis init" in combined or "policy" in combined:
+        return "timeout_during_memory_bootstrap"
     return "timeout_before_receipt"
 
 
@@ -628,8 +628,11 @@ def run_with_nexus(
     llm_enabled = with_llm_mode == "all" or (with_llm_mode == "hard" and task.difficulty == "hard")
     if llm_enabled:
         args.append("--llm-mode")
-    if force_flow:
-        args.extend(["--force-flow", force_flow])
+    effective_force_flow = force_flow
+    if llm_enabled and with_llm_mode == "all" and effective_force_flow is None:
+        effective_force_flow = "hyper_sprint"
+    if effective_force_flow:
+        args.extend(["--force-flow", effective_force_flow])
 
     start = time.time()
     env_prev = os.environ.get("NEXUS_CAPABILITY_TUNING_FILE")
@@ -641,6 +644,13 @@ def run_with_nexus(
         cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
         env = os.environ.copy()
         env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start).resolve())
+        env["NEXUS_MEMORY_AUTO_INIT"] = "0"
+        if llm_enabled:
+            env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
+            env["NEXUS_GATEWAY_MAX_RETRIES"] = "1"
+            env["NEXUS_GATEWAY_TIMEOUT_SEC"] = str(max(30, min(90, max(5, timeout_sec - 30))))
+            env["NEXUS_LLM_CANDIDATE_CAP"] = "1"
+            env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
         try:
             res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, env=env, timeout=timeout_sec)
             output = res.stdout or ""

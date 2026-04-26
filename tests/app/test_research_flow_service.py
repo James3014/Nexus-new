@@ -42,6 +42,19 @@ def test_build_hyper_execution_profile_boosts_hard_bug():
     assert profile["is_hard_task"] is True
 
 
+def test_build_hyper_execution_profile_honors_llm_candidate_cap(monkeypatch):
+    monkeypatch.setenv("NEXUS_LLM_CANDIDATE_CAP", "1")
+    profile = research_flow_service.build_hyper_execution_profile(
+        task_desc="Fix flaky websocket timeout race with deadlock symptoms",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.6,
+        route_recommended_flow="hyper_sprint",
+    )
+
+    assert profile["effective_candidate_count"] == 1
+
+
 def test_build_route_cross_module_task_has_high_risk_feature(tmp_path: Path):
     out = research_flow_service.build_route(
         repo_root=tmp_path,

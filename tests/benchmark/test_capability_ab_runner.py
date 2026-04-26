@@ -404,6 +404,7 @@ def test_tail_text_decodes_bytes_and_limits_output():
 def test_classify_timeout_stage_from_partial_output():
     assert _classify_timeout_stage("running pytest", "") == "timeout_during_artifact_verify"
     assert _classify_timeout_stage("Gemini model call started", "") == "timeout_during_gemini"
+    assert _classify_timeout_stage("", "MemoryService auto-init skipped\n[Gateway] Dynamic timeout") == "timeout_during_gemini"
     assert _classify_timeout_stage("hyper sprint candidate", "") == "timeout_during_hyper"
     assert _classify_timeout_stage("", "MemoryService auto-init warning: Table 'policy' already exists") == "timeout_during_memory_bootstrap"
     assert _classify_timeout_stage("", "") == "timeout_before_receipt"
@@ -554,6 +555,90 @@ def test_run_with_nexus_enables_llm_mode_for_hard_tasks(tmp_path: Path, monkeypa
     )
     assert "--llm-mode" in captured["args"]
     assert out["semantic_status"] == "VERIFIED"
+
+
+def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-001",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix public bug",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"total_tokens":10,"token_capture_status":"ok"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.subprocess.run", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert captured["env"]["NEXUS_MEMORY_AUTO_INIT"] == "0"
+    assert captured["env"]["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] == "1"
+    assert captured["env"]["NEXUS_GATEWAY_MAX_RETRIES"] == "1"
+    assert captured["env"]["NEXUS_GATEWAY_TIMEOUT_SEC"] == "30"
+    assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "1"
+    assert captured["env"]["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] == "1"
+    assert "NEXUS_MEMORY_DB_PATH" in captured["env"]
+    assert out["semantic_status"] == "VERIFIED"
+
+
+def test_run_with_nexus_llm_all_forces_hyper_flow(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-001",
+        difficulty="medium",
+        task_type="public_docs_code_sync",
+        task_desc="Fix docs task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"total_tokens":10,"token_capture_status":"ok"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(cmd, **_kwargs):
+        captured["cmd"] = list(cmd)
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.subprocess.run", fake_run)
+
+    run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert "--force-flow" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--force-flow") + 1] == "hyper_sprint"
 
 
 def test_history_policy_defaults_to_per_task_reset():
