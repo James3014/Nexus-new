@@ -47,11 +47,21 @@ JSON output includes:
 - `confidence`
 - `risk`
 - `sources`
+- `history`
+
+## v2 Behavior
+
+Selection now also reads `.nexus/reports/test_history.jsonl` when present.
+
+- Flaky targets are prioritized earlier.
+- Faster historical targets are prioritized before slower targets when other risk signals are equal.
+- `nexus/core`, `nexus/security`, and `scripts/ops/ci_gate.py` changes are marked high risk and receive the policy-gate safety target.
+- `ci_gate.py --changed-only` writes changed-only run evidence back to test history.
 
 ## Next Wiring Order
 
 1. Expand impact-map coverage from observed misses.
-2. Add pytest duration and flaky-history metadata.
-3. Add high-risk escalation rules for `security`, `core`, and CI gate changes.
-4. Add skipped-test evidence reporting.
+2. Add per-target duration extraction from pytest reports.
+3. Add skipped-test evidence reporting.
+4. Add run eligibility semantics for Gemini benchmark quota/infra invalid rows.
 5. Add predictive ranking only after enough `.nexus/reports/test_history.jsonl` data exists.

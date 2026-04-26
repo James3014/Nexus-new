@@ -1,6 +1,13 @@
 import json
 
-from scripts.ops.select_tests import ImpactRule, load_impact_rules, main, select_target_details, select_targets
+from scripts.ops.select_tests import (
+    ImpactRule,
+    load_impact_rules,
+    load_test_history,
+    main,
+    select_target_details,
+    select_targets,
+)
 
 
 def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
@@ -112,12 +119,12 @@ def test_select_target_details_merges_import_index_and_impact_map(tmp_path):
     )
     rules = [ImpactRule("nexus/core", ("tests/core",), "active")]
 
-    details = select_target_details(["nexus/core/state.py"], rules, index_path=index_path)
+    details = select_target_details(["nexus/core/state.py"], rules, index_path=index_path, history_path=tmp_path / "missing.jsonl")
 
-    assert details.targets == ["tests/core/test_state.py", "tests/core"]
-    assert details.confidence == 0.9
-    assert details.risk == "low"
-    assert details.sources == ["import_index", "impact_map"]
+    assert details.targets == ["tests/core/test_state.py", "tests/core", "tests/services/test_policy_gate.py"]
+    assert details.confidence == 0.85
+    assert details.risk == "high"
+    assert details.sources == ["import_index", "impact_map", "high_risk"]
     assert "nexus/core/state.py: import-index" in details.reasons
 
 
@@ -145,6 +152,51 @@ def test_select_target_details_handles_empty_changed_paths():
     assert details.sources == ["fallback"]
 
 
+def test_load_test_history_aggregates_duration_failures_and_flaky(tmp_path):
+    history = tmp_path / "test_history.jsonl"
+    history.write_text(
+        "\n".join(
+            [
+                json.dumps({"targets": ["tests/a.py"], "success": True, "duration_sec": 2.0}),
+                json.dumps({"targets": ["tests/a.py"], "success": False, "duration_sec": 4.0}),
+                json.dumps({"targets": ["tests/b.py"], "success": True, "target_durations": {"tests/b.py": 1.0}}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    stats = load_test_history(history)
+
+    assert stats["tests/a.py"]["runs"] == 2
+    assert stats["tests/a.py"]["failures"] == 1
+    assert stats["tests/a.py"]["avg_duration_sec"] == 3.0
+    assert stats["tests/a.py"]["flaky"] is True
+    assert stats["tests/b.py"]["avg_duration_sec"] == 1.0
+
+
+def test_select_target_details_uses_history_and_high_risk_escalation(tmp_path):
+    history = tmp_path / "test_history.jsonl"
+    history.write_text(
+        "\n".join(
+            [
+                json.dumps({"targets": ["tests/core/slow.py"], "success": True, "duration_sec": 10.0}),
+                json.dumps({"targets": ["tests/core/flaky.py"], "success": False, "duration_sec": 1.0}),
+                json.dumps({"targets": ["tests/core/flaky.py"], "success": True, "duration_sec": 1.0}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    rules = [ImpactRule("nexus/core", ("tests/core/slow.py", "tests/core/flaky.py"), "active")]
+
+    details = select_target_details(["nexus/core/state.py"], rules, history_path=history)
+
+    assert details.targets[:2] == ["tests/core/flaky.py", "tests/core/slow.py"]
+    assert details.risk == "high"
+    assert "high_risk" in details.sources
+    assert details.history["tests/core/flaky.py"]["flaky"] is True
+    assert "tests/services/test_policy_gate.py" in details.targets
+
+
 def test_main_json_includes_selection_metadata(tmp_path, capsys):
     impact_map = tmp_path / "test_impact_map.md"
     impact_map.write_text(
@@ -165,13 +217,15 @@ def test_main_json_includes_selection_metadata(tmp_path, capsys):
             str(impact_map),
             "--impact-index",
             str(index_path),
+            "--test-history",
+            str(tmp_path / "missing.jsonl"),
             "--json",
             "nexus/core/state.py",
         ]
     ) == 0
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload["targets"] == ["tests/core/test_state.py", "tests/core"]
-    assert payload["confidence"] == 0.9
-    assert payload["risk"] == "low"
-    assert payload["sources"] == ["import_index", "impact_map"]
+    assert payload["targets"] == ["tests/core/test_state.py", "tests/core", "tests/services/test_policy_gate.py"]
+    assert payload["confidence"] == 0.85
+    assert payload["risk"] == "high"
+    assert payload["sources"] == ["import_index", "impact_map", "high_risk"]

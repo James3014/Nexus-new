@@ -406,3 +406,21 @@ version_scope:
 - **Root Cause**: `select_target_details` referenced per-path map state inside the fallback branch even when no path loop had executed.
 - **Decision**: Make fallback depend on accumulated reasons, not a loop-local variable, and add an empty-input selector test.
 - **Prevention**: Selector contracts must cover empty, index-only, map-only, mixed, and fallback-only input shapes.
+
+## 2026-04-26: Gemini Quota Failures Are Benchmark Eligibility Failures
+- **Phenomenon**: A Gemini 3 Flash smoke was started after quota was believed available, then stopped because quota was still unavailable.
+- **Root Cause**: The benchmark plan did not clearly separate model/infra eligibility from capability outcome.
+- **Decision**: Treat quota, auth, binary, and timeout-before-model-call as infra-invalid rows, not as Gemini or Nexus solve failures.
+- **Prevention**: Public benchmark reports need an eligibility denominator before solve-rate interpretation.
+
+## 2026-04-26: JIT History Metadata Must Be JSON-Safe
+- **Phenomenon**: `ci_gate.py --changed-only` failed in mocked argument tests because `changed_paths` could be a `MagicMock` and was written into test history metadata.
+- **Root Cause**: Test-history writeback assumed metadata values were already JSON-serializable.
+- **Decision**: Serialize history entries with `default=str` so diagnostic metadata never blocks the gate.
+- **Prevention**: Evidence writeback must be best-effort and serialization-safe; validation failures should not hide the underlying gate result.
+
+## 2026-04-26: Full Regression Fixtures Must Be Worktree-Safe
+- **Phenomenon**: Full pytest failed in a Codex worktree because one launchd test expected `/Workspace/nexus`, and one XRay test depended on the real `benchmarks` checkout containing `click`.
+- **Root Cause**: Regression tests encoded local filesystem assumptions instead of constructing minimal fixtures.
+- **Decision**: Assert repo-root behavior without hard-coding the parent workspace, and use `tmp_path` fixtures for benchmark dependency crossings.
+- **Prevention**: Tests that validate cross-repo behavior must build the external repo shape locally unless the external tree is the subject under test.

@@ -50,6 +50,7 @@ uv run python scripts/ops/select_tests.py --json nexus/core/state_validator.py
 ```
 
 JSON 會包含 `targets`、`reasons`、`confidence`、`risk`、`sources`。
+若 `.nexus/reports/test_history.jsonl` 存在，selector 也會使用歷史耗時與 flaky 訊號排序。
 
 CI gate 也提供相同 selector 的 changed-only lane：
 
@@ -70,6 +71,14 @@ Nightly lane 執行 L3 全量回歸，並追加 `.nexus/reports/test_history.jso
 ```bash
 uv run python scripts/ops/ci_gate.py --nightly
 ```
+
+High-risk escalation:
+
+- `nexus/core`
+- `nexus/security`
+- `scripts/ops/ci_gate.py`
+
+這些路徑會自動標記 `risk=high`，並追加 policy-gate safety target。
 
 ## 2. 失敗排查清單 (Troubleshooting)
 

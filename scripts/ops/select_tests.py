@@ -18,7 +18,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_IMPACT_MAP = ROOT / "docs" / "testing" / "test_impact_map.md"
 DEFAULT_IMPACT_INDEX = ROOT / ".nexus" / "test_impact_index.json"
+DEFAULT_TEST_HISTORY = ROOT / ".nexus" / "reports" / "test_history.jsonl"
 DEFAULT_FALLBACK_TARGETS = ("tests/core", "tests/services/test_policy_gate.py")
+HIGH_RISK_PREFIXES = ("nexus/core", "nexus/security", "scripts/ops/ci_gate.py")
+HIGH_RISK_TARGETS = ("tests/services/test_policy_gate.py",)
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ class SelectionDetails:
     confidence: float
     risk: str
     sources: list[str]
+    history: dict[str, dict]
 
 
 def _normalize_path(value: str) -> str:
@@ -111,6 +115,73 @@ def load_impact_index(path: Path = DEFAULT_IMPACT_INDEX) -> dict[str, list[str]]
     return out
 
 
+def load_test_history(path: Path = DEFAULT_TEST_HISTORY) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+
+    buckets: dict[str, dict] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        targets = [_normalize_path(str(target)) for target in row.get("targets", []) if str(target).strip()]
+        target_durations = row.get("target_durations", {})
+        if not isinstance(target_durations, dict):
+            target_durations = {}
+        success = bool(row.get("success", False))
+        row_duration = row.get("duration_sec")
+        for target in targets:
+            bucket = buckets.setdefault(
+                target,
+                {"runs": 0, "failures": 0, "duration_total_sec": 0.0, "duration_samples": 0},
+            )
+            bucket["runs"] += 1
+            if not success:
+                bucket["failures"] += 1
+            duration = target_durations.get(target, row_duration)
+            try:
+                duration_float = float(duration)
+            except (TypeError, ValueError):
+                duration_float = 0.0
+            if duration_float > 0:
+                bucket["duration_total_sec"] += duration_float
+                bucket["duration_samples"] += 1
+
+    stats: dict[str, dict] = {}
+    for target, bucket in buckets.items():
+        runs = int(bucket["runs"])
+        failures = int(bucket["failures"])
+        samples = int(bucket["duration_samples"])
+        avg_duration = round(float(bucket["duration_total_sec"]) / samples, 4) if samples else 0.0
+        stats[target] = {
+            "runs": runs,
+            "failures": failures,
+            "failure_rate": round(failures / runs, 4) if runs else 0.0,
+            "avg_duration_sec": avg_duration,
+            "flaky": 0 < failures < runs,
+        }
+    return stats
+
+
+def _sort_targets_by_history(targets: list[str], history: dict[str, dict]) -> list[str]:
+    def key(item: tuple[int, str]) -> tuple[int, int, float, float, int]:
+        index, target = item
+        meta = history.get(target, {})
+        if not meta:
+            return (1, 1, 0.0, 0.0, index)
+        flaky_rank = 0 if bool(meta.get("flaky", False)) else 1
+        failure_rate = -float(meta.get("failure_rate", 0.0) or 0.0)
+        avg_duration = float(meta.get("avg_duration_sec", 0.0) or 0.0)
+        return (0, flaky_rank, failure_rate, avg_duration, index)
+
+    return [target for _, target in sorted(enumerate(targets), key=key)]
+
+
 def select_targets(
     changed_paths: list[str],
     rules: list[ImpactRule],
@@ -160,13 +231,20 @@ def select_target_details(
     fallback_targets: tuple[str, ...] = DEFAULT_FALLBACK_TARGETS,
     *,
     index_path: Path = DEFAULT_IMPACT_INDEX,
+    history_path: Path = DEFAULT_TEST_HISTORY,
 ) -> SelectionDetails:
     selected: list[str] = []
     reasons: list[str] = []
     sources: list[str] = []
     index = load_impact_index(index_path)
+    history = load_test_history(history_path)
 
     normalized_paths = [_normalize_path(path) for path in changed_paths if path.strip()]
+    high_risk = any(
+        changed_path == prefix or changed_path.startswith(f"{prefix}/")
+        for changed_path in normalized_paths
+        for prefix in HIGH_RISK_PREFIXES
+    )
     for changed_path in normalized_paths:
         path_matched = False
         index_targets = index.get(changed_path, [])
@@ -201,9 +279,20 @@ def select_target_details(
         if not reasons:
             reasons.extend(f"{path}: fallback" for path in normalized_paths)
 
-    expanded = _expand_existing_targets(selected)
+    if high_risk:
+        for target in HIGH_RISK_TARGETS:
+            if target not in selected:
+                selected.append(target)
+        if "high_risk" not in sources:
+            sources.append("high_risk")
+        reasons.append("high-risk escalation")
+
+    expanded = _sort_targets_by_history(_expand_existing_targets(selected), history)
     if "fallback" in sources:
         confidence = 0.4
+        risk = "high"
+    elif high_risk:
+        confidence = 0.85
         risk = "high"
     elif "import_index" in sources:
         confidence = 0.9
@@ -211,7 +300,7 @@ def select_target_details(
     else:
         confidence = 0.7
         risk = "medium"
-    return SelectionDetails(targets=expanded, reasons=reasons, confidence=confidence, risk=risk, sources=sources)
+    return SelectionDetails(targets=expanded, reasons=reasons, confidence=confidence, risk=risk, sources=sources, history=history)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -239,6 +328,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=",".join(DEFAULT_FALLBACK_TARGETS),
         help="Comma-separated pytest targets used when no rule matches.",
     )
+    parser.add_argument(
+        "--test-history",
+        default=str(DEFAULT_TEST_HISTORY),
+        help="JSONL test history path used for duration/flaky ranking.",
+    )
     return parser.parse_args(argv)
 
 
@@ -251,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
         rules,
         fallback or DEFAULT_FALLBACK_TARGETS,
         index_path=Path(args.impact_index),
+        history_path=Path(args.test_history),
     )
     targets, reasons = details.targets, details.reasons
 
@@ -264,8 +359,10 @@ def main(argv: list[str] | None = None) -> int:
                     "confidence": details.confidence,
                     "risk": details.risk,
                     "sources": details.sources,
+                    "history": {target: details.history.get(target, {}) for target in targets},
                     "impact_map": str(Path(args.impact_map)),
                     "impact_index": str(Path(args.impact_index)),
+                    "test_history": str(Path(args.test_history)),
                     "rules_loaded": len(rules),
                 },
                 ensure_ascii=False,

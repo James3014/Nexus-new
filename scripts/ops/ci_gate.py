@@ -6,6 +6,7 @@ import json
 import argparse
 import subprocess
 import concurrent.futures
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -263,6 +264,7 @@ def run_report_trust_audit(dry_run: bool) -> bool:
 def run_changed_only_check(changed_paths: list[str]) -> bool:
     from scripts.ops.select_tests import load_impact_rules, select_target_details
 
+    start = time.time()
     details = select_target_details(changed_paths, load_impact_rules())
     print("\n🚀 [CI-Gate] Running Changed-Only JIT Tests...")
     for reason in details.reasons:
@@ -271,14 +273,35 @@ def run_changed_only_check(changed_paths: list[str]) -> bool:
         f"🎯 [CI-Gate] Changed-only targets: {' '.join(details.targets)} "
         f"(confidence={details.confidence:.1f}, risk={details.risk}, sources={','.join(details.sources)})"
     )
+    command = f'"{VENV_PYTHON}" -m pytest {" ".join(details.targets)} -q'
     success, _ = run_step(
         "Changed-Only JIT Tests",
-        f'"{VENV_PYTHON}" -m pytest {" ".join(details.targets)} -q',
+        command,
+    )
+    record_test_history(
+        mode="changed-only",
+        command=command,
+        success=success,
+        targets=details.targets,
+        duration_sec=round(time.time() - start, 4),
+        metadata={
+            "changed_paths": changed_paths,
+            "confidence": details.confidence,
+            "risk": details.risk,
+            "sources": details.sources,
+        },
     )
     return success
 
 
-def record_test_history(mode: str, command: str, success: bool, targets: list[str] | None = None) -> None:
+def record_test_history(
+    mode: str,
+    command: str,
+    success: bool,
+    targets: list[str] | None = None,
+    duration_sec: float | None = None,
+    metadata: dict | None = None,
+) -> None:
     history_path = ROOT / ".nexus" / "reports" / "test_history.jsonl"
     history_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
@@ -288,8 +311,12 @@ def record_test_history(mode: str, command: str, success: bool, targets: list[st
         "success": success,
         "targets": targets or [],
     }
+    if duration_sec is not None:
+        entry["duration_sec"] = duration_sec
+    if metadata:
+        entry["metadata"] = metadata
     with history_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
 
 
 def run_nightly_full_check() -> bool:
