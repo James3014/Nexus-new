@@ -261,16 +261,19 @@ def run_report_trust_audit(dry_run: bool) -> bool:
 
 
 def run_changed_only_check(changed_paths: list[str]) -> bool:
-    from scripts.ops.select_tests import load_impact_rules, select_targets
+    from scripts.ops.select_tests import load_impact_rules, select_target_details
 
-    targets, reasons = select_targets(changed_paths, load_impact_rules())
+    details = select_target_details(changed_paths, load_impact_rules())
     print("\n🚀 [CI-Gate] Running Changed-Only JIT Tests...")
-    for reason in reasons:
+    for reason in details.reasons:
         print(f"  - {reason}")
-    print(f"🎯 [CI-Gate] Changed-only targets: {' '.join(targets)}")
+    print(
+        f"🎯 [CI-Gate] Changed-only targets: {' '.join(details.targets)} "
+        f"(confidence={details.confidence:.1f}, risk={details.risk}, sources={','.join(details.sources)})"
+    )
     success, _ = run_step(
         "Changed-Only JIT Tests",
-        f'"{VENV_PYTHON}" -m pytest {" ".join(targets)} -q',
+        f'"{VENV_PYTHON}" -m pytest {" ".join(details.targets)} -q',
     )
     return success
 

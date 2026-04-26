@@ -394,3 +394,15 @@ version_scope:
 - **Root Cause**: The service-mode subprocess track carries fixed process/CLI overhead; the old daily/hard guard budget left only ~20-50ms slack over recent passing runs.
 - **Decision**: Keep solve, semantic, trust, and weighted-score gates unchanged, but calibrate Wave3/4 service daily/hard overhead budgets to `1.35s` and ratio budgets to `2.5`.
 - **Prevention**: Runtime guard thresholds should be based on observed service-mode envelope, not a single best-case run, especially after JIT/affected-test instrumentation changes execution timing.
+
+## 2026-04-26: JIT Generic Ops Mapping Can Pull In Environment-Sensitive Tests
+- **Phenomenon**: `test_changed.sh scripts/ops/select_tests.py scripts/ops/build_test_impact_index.py` selected broad `tests/ops` and failed on unrelated acceptance/launchd tests while the JIT selector tests passed.
+- **Root Cause**: The new `build_test_impact_index.py` file had no specific impact-map row, so selection fell through to generic `scripts/ops -> tests/ops`.
+- **Decision**: Add a specific mapping from `scripts/ops/build_test_impact_index.py` to `tests/ops/test_build_test_impact_index.py`.
+- **Prevention**: Every new ops tool must get a precise impact-map row before using the generic ops fallback.
+
+## 2026-04-26: JIT Selector Fallback Must Handle Empty Changed Paths
+- **Phenomenon**: `ci_gate.py --changed-only` coverage surfaced an `UnboundLocalError` when changed-path input normalized to an empty list.
+- **Root Cause**: `select_target_details` referenced per-path map state inside the fallback branch even when no path loop had executed.
+- **Decision**: Make fallback depend on accumulated reasons, not a loop-local variable, and add an empty-input selector test.
+- **Prevention**: Selector contracts must cover empty, index-only, map-only, mixed, and fallback-only input shapes.

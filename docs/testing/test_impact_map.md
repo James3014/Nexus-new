@@ -15,6 +15,7 @@
 | scripts/ops/ci_gate.py | tests/ops/test_ci_gate_report_trust_audit.py, tests/ops/test_ci_gate_closeout_contract.py, tests/ops/test_ci_gate_wiki_sync_block.py | active |
 | scripts/ops/__init__.py | tests/ops/test_anti_drift_gate.py, tests/ops/test_soul_artifact_vault.py | active |
 | scripts/ops/select_tests.py | tests/ops/test_select_tests.py | active |
+| scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active |
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active |
 | scripts/ops | tests/ops | active |
 | scripts/bench | tests/benchmark | active |

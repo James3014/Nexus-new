@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_IMPACT_MAP = ROOT / "docs" / "testing" / "test_impact_map.md"
+DEFAULT_IMPACT_INDEX = ROOT / ".nexus" / "test_impact_index.json"
 DEFAULT_FALLBACK_TARGETS = ("tests/core", "tests/services/test_policy_gate.py")
 
 
@@ -25,6 +26,15 @@ class ImpactRule:
     code_path: str
     targets: tuple[str, ...]
     status: str
+
+
+@dataclass(frozen=True)
+class SelectionDetails:
+    targets: list[str]
+    reasons: list[str]
+    confidence: float
+    risk: str
+    sources: list[str]
 
 
 def _normalize_path(value: str) -> str:
@@ -84,6 +94,23 @@ def load_impact_rules(path: Path = DEFAULT_IMPACT_MAP) -> list[ImpactRule]:
     return rules
 
 
+def load_impact_index(path: Path = DEFAULT_IMPACT_INDEX) -> dict[str, list[str]]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    mappings = payload.get("mappings", {}) if isinstance(payload, dict) else {}
+    if not isinstance(mappings, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for key, value in mappings.items():
+        if isinstance(key, str) and isinstance(value, list):
+            out[_normalize_path(key)] = [_normalize_path(str(item)) for item in value if str(item).strip()]
+    return out
+
+
 def select_targets(
     changed_paths: list[str],
     rules: list[ImpactRule],
@@ -127,6 +154,66 @@ def select_targets(
     return _expand_existing_targets(selected), reasons
 
 
+def select_target_details(
+    changed_paths: list[str],
+    rules: list[ImpactRule],
+    fallback_targets: tuple[str, ...] = DEFAULT_FALLBACK_TARGETS,
+    *,
+    index_path: Path = DEFAULT_IMPACT_INDEX,
+) -> SelectionDetails:
+    selected: list[str] = []
+    reasons: list[str] = []
+    sources: list[str] = []
+    index = load_impact_index(index_path)
+
+    normalized_paths = [_normalize_path(path) for path in changed_paths if path.strip()]
+    for changed_path in normalized_paths:
+        path_matched = False
+        index_targets = index.get(changed_path, [])
+        if index_targets:
+            for target in index_targets:
+                if target not in selected:
+                    selected.append(target)
+            reasons.append(f"{changed_path}: import-index")
+            if "import_index" not in sources:
+                sources.append("import_index")
+            path_matched = True
+
+        mapped_targets, mapped_reasons = select_targets([changed_path], rules, ())
+        for target in mapped_targets:
+            if target not in selected:
+                selected.append(target)
+        if mapped_targets:
+            if "impact_map" not in sources:
+                sources.append("impact_map")
+            reasons.extend(mapped_reasons)
+            path_matched = True
+        elif not path_matched:
+            reasons.extend(mapped_reasons or [f"{changed_path}: fallback"])
+
+    needs_fallback = not selected or any(reason.endswith(": fallback") for reason in reasons)
+    if needs_fallback:
+        for target in fallback_targets:
+            if target not in selected:
+                selected.append(target)
+        if "fallback" not in sources:
+            sources.append("fallback")
+        if not reasons:
+            reasons.extend(f"{path}: fallback" for path in normalized_paths)
+
+    expanded = _expand_existing_targets(selected)
+    if "fallback" in sources:
+        confidence = 0.4
+        risk = "high"
+    elif "import_index" in sources:
+        confidence = 0.9
+        risk = "low"
+    else:
+        confidence = 0.7
+        risk = "medium"
+    return SelectionDetails(targets=expanded, reasons=reasons, confidence=confidence, risk=risk, sources=sources)
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Select pytest targets for changed Nexus files without running pytest."
@@ -136,6 +223,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--impact-map",
         default=str(DEFAULT_IMPACT_MAP),
         help="Markdown impact map path.",
+    )
+    parser.add_argument(
+        "--impact-index",
+        default=str(DEFAULT_IMPACT_INDEX),
+        help="JSON import impact index path.",
     )
     parser.add_argument(
         "--json",
@@ -154,7 +246,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(list(argv or sys.argv[1:]))
     rules = load_impact_rules(Path(args.impact_map))
     fallback = _split_targets(args.fallback)
-    targets, reasons = select_targets(args.paths, rules, fallback or DEFAULT_FALLBACK_TARGETS)
+    details = select_target_details(
+        args.paths,
+        rules,
+        fallback or DEFAULT_FALLBACK_TARGETS,
+        index_path=Path(args.impact_index),
+    )
+    targets, reasons = details.targets, details.reasons
 
     if args.json:
         print(
@@ -163,7 +261,11 @@ def main(argv: list[str] | None = None) -> int:
                     "changed_paths": [_normalize_path(path) for path in args.paths],
                     "targets": targets,
                     "reasons": reasons,
+                    "confidence": details.confidence,
+                    "risk": details.risk,
+                    "sources": details.sources,
                     "impact_map": str(Path(args.impact_map)),
+                    "impact_index": str(Path(args.impact_index)),
                     "rules_loaded": len(rules),
                 },
                 ensure_ascii=False,

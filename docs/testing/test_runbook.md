@@ -10,7 +10,14 @@
 ## 1.1 L2 變更關聯層
 
 `test_changed.sh` 透過 `scripts/ops/select_tests.py` 查詢
-`docs/testing/test_impact_map.md`，再執行選出的 pytest targets。
+`.nexus/test_impact_index.json` 與 `docs/testing/test_impact_map.md`，
+再執行選出的 pytest targets。
+
+更新 import index：
+
+```bash
+uv run python scripts/ops/build_test_impact_index.py
+```
 
 範例：
 
@@ -35,6 +42,14 @@ bash scripts/ops/test_changed.sh nexus/core/state_validator.py docs/testing/test
 ```text
 tests/core tests/services/test_policy_gate.py
 ```
+
+檢查 selector 決策細節：
+
+```bash
+uv run python scripts/ops/select_tests.py --json nexus/core/state_validator.py
+```
+
+JSON 會包含 `targets`、`reasons`、`confidence`、`risk`、`sources`。
 
 CI gate 也提供相同 selector 的 changed-only lane：
 

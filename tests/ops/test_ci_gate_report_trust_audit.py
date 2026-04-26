@@ -37,7 +37,7 @@ def test_run_report_trust_audit_uses_expected_pytest_suite(monkeypatch):
         assert target in seen["cmd"]
 
 
-def test_run_changed_only_check_uses_selector_targets(monkeypatch):
+def test_run_changed_only_check_uses_selector_targets(monkeypatch, capsys):
     seen = {}
 
     def fake_run_step(name, cmd):
@@ -51,6 +51,9 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch):
     assert seen["name"] == "Changed-Only JIT Tests"
     assert "tests/ops/test_select_tests.py" in seen["cmd"]
     assert "tests/ops " not in seen["cmd"]
+    out = capsys.readouterr().out
+    assert "confidence=" in out
+    assert "risk=" in out
 
 
 def test_run_nightly_full_check_records_history(monkeypatch, tmp_path):
