@@ -533,6 +533,72 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
     assert "llm_error" in res.error_codes
 
 
+def test_llm_self_heal_repairs_failed_candidate(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def normalize(text):\n    return text\n", encoding="utf-8")
+    calls = {"llm": 0}
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            calls["llm"] += 1
+            if calls["llm"] == 1:
+                return "def normalize(text):\n    return text.strip()\n", {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "quota_backoffs": 0,
+                    "tokens_used": 10,
+                    "token_capture_status": "measured",
+                    "gateway_token_source": "stats",
+                    "model_patch_generated": True,
+                }
+            assert "Previous candidate failed verification" in kwargs["task"]
+            return "def normalize(text):\n    return text.strip().lower()\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "quota_backoffs": 0,
+                "tokens_used": 20,
+                "token_capture_status": "measured",
+                "gateway_token_source": "stats",
+                "model_patch_generated": True,
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            if "lower()" in kwargs["code"]:
+                return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=0.4,
+                stdout="expected lower-case normalized text",
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+            )
+
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix normalize", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert calls["llm"] == 2
+    assert res.model_calls == 2
+    assert res.total_tokens == 30
+    assert res.winner_source == "llm_self_heal"
+    assert "llm_self_heal_attempted" in res.error_codes
+    assert len(res.candidates) == 2
+
+
 def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_path: Path):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"

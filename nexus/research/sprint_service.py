@@ -251,6 +251,25 @@ def _resolve_gateway_token_source(sources: set[str]) -> str:
     return "missing"
 
 
+def _candidate_summaries(items: list[CandidateEval], *, max_text: int = 1200) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for item in items:
+        summaries.append(
+            {
+                "seed": item.seed,
+                "score": item.score,
+                "source": item.source,
+                "hint": item.hint,
+                "error": item.error,
+                "stdout_tail": item.stdout[-max_text:] if item.stdout else "",
+                "candidate_len": len(item.candidate_code or ""),
+                "candidate_head": (item.candidate_code or "")[:max_text],
+                "elapsed_sec": item.elapsed_sec,
+            }
+        )
+    return summaries
+
+
 class LocalCandidateGenerator:
     source = "local"
 
@@ -638,6 +657,28 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             return "reduce_trials_or_raise_wall_time_budget"
         return "review_failure_trace_and_refine_strategy"
 
+    def _record_llm_meta(meta: dict[str, Any]) -> None:
+        nonlocal model_calls, model_patch_generated, total_tokens, gateway_stats_present
+        nonlocal gateway_usage_metadata_present, gateway_prompt_chars, gateway_payload_chars
+        nonlocal gateway_total_chars, gateway_timeout_sec, quota_backoffs
+        model_calls += int(meta.get("model_calls", 0) or 0)
+        if str(meta.get("model_name", "") or ""):
+            model_names.add(str(meta.get("model_name")))
+        if bool(meta.get("model_patch_generated", False)):
+            model_patch_generated = True
+        total_tokens += int(meta.get("tokens_used", 0) or 0)
+        token_capture_statuses.add(str(meta.get("token_capture_status", "unknown") or "unknown"))
+        gateway_stats_present = gateway_stats_present or bool(meta.get("gateway_stats_present", False))
+        gateway_usage_metadata_present = gateway_usage_metadata_present or bool(meta.get("gateway_usage_metadata_present", False))
+        gateway_token_sources.add(str(meta.get("gateway_token_source") or "missing"))
+        if meta.get("gateway_error_category"):
+            gateway_error_categories.add(str(meta.get("gateway_error_category")))
+        gateway_prompt_chars = max(gateway_prompt_chars, int(meta.get("gateway_prompt_chars", 0) or 0))
+        gateway_payload_chars = max(gateway_payload_chars, int(meta.get("gateway_payload_chars", 0) or 0))
+        gateway_total_chars = max(gateway_total_chars, int(meta.get("gateway_total_chars", 0) or 0))
+        gateway_timeout_sec = max(gateway_timeout_sec, int(meta.get("gateway_timeout_sec", 0) or 0))
+        quota_backoffs += int(meta.get("quota_backoffs", 0) or 0)
+
     def _persist_learning(
         *,
         status: str,
@@ -732,6 +773,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             historical_hints=historical_hints,
         )
         used_source = "local"
+        ev_recorded = False
         try:
             if llm_generator is not None:
                 try:
@@ -798,25 +840,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     seed=idx,
                 )
                 used_source = str(meta.get("source", "local"))
-            model_calls += int(meta.get("model_calls", 0))
-            if str(meta.get("model_name", "") or ""):
-                model_names.add(str(meta.get("model_name")))
-            if bool(meta.get("model_patch_generated", False)):
-                model_patch_generated = True
+            _record_llm_meta(meta)
             if used_source.startswith("local") and llm_generator is not None:
                 fallback_used = True
-            total_tokens += int(meta.get("tokens_used", 0) or 0)
-            token_capture_statuses.add(str(meta.get("token_capture_status", "unknown") or "unknown"))
-            gateway_stats_present = gateway_stats_present or bool(meta.get("gateway_stats_present", False))
-            gateway_usage_metadata_present = gateway_usage_metadata_present or bool(meta.get("gateway_usage_metadata_present", False))
-            gateway_token_sources.add(str(meta.get("gateway_token_source") or "missing"))
-            if meta.get("gateway_error_category"):
-                gateway_error_categories.add(str(meta.get("gateway_error_category")))
-            gateway_prompt_chars = max(gateway_prompt_chars, int(meta.get("gateway_prompt_chars", 0) or 0))
-            gateway_payload_chars = max(gateway_payload_chars, int(meta.get("gateway_payload_chars", 0) or 0))
-            gateway_total_chars = max(gateway_total_chars, int(meta.get("gateway_total_chars", 0) or 0))
-            gateway_timeout_sec = max(gateway_timeout_sec, int(meta.get("gateway_timeout_sec", 0) or 0))
-            quota_backoffs += int(meta.get("quota_backoffs", 0))
             guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
                 # R8: If LLM fails semantic guard, try one Local Candidate as a backup
@@ -837,6 +863,63 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
             else:
                 ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
+            self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
+            if (
+                self_heal_enabled
+                and llm_generator is not None
+                and used_source.startswith("llm")
+                and ev.score < 1.0
+                and "quota" not in error_codes
+            ):
+                candidates.append(ev)
+                ev_recorded = True
+                failure_tail = (ev.error or ev.stdout or "")[-1200:]
+                repair_task = (
+                    f"{config.task}\n\n"
+                    "Previous candidate failed verification. "
+                    "Repair the candidate using the failure evidence below.\n"
+                    f"[FAILURE]\n{failure_tail}"
+                )
+                try:
+                    repair_code, repair_meta = llm_generator.generate(
+                        source_code=candidate_code,
+                        task=repair_task,
+                        mutation_hint=f"{hint}\nself_heal_after_pytest_failed",
+                        seed=idx + 10000,
+                    )
+                    _record_llm_meta(repair_meta)
+                    repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")
+                    if repair_guard_ok:
+                        repair_ev = executor.evaluate_candidate(
+                            seed=idx + 10000,
+                            hint=f"{hint} | self_heal_after_pytest_failed",
+                            code=repair_code,
+                            source="llm_self_heal",
+                        )
+                    else:
+                        repair_ev = CandidateEval(
+                            seed=idx + 10000,
+                            score=0.0,
+                            hint=f"{hint} | self_heal_after_pytest_failed",
+                            error=repair_guard_reason,
+                            candidate_code=repair_code,
+                            source="llm_self_heal",
+                        )
+                    candidates.append(repair_ev)
+                    error_codes.append("llm_self_heal_attempted")
+                    if repair_ev.score >= 1.0:
+                        ev = repair_ev
+                except Exception as heal_exc:  # noqa: BLE001
+                    error_codes.append("llm_self_heal_failed")
+                    candidates.append(
+                        CandidateEval(
+                            seed=idx + 10000,
+                            score=0.0,
+                            hint=f"{hint} | self_heal_after_pytest_failed",
+                            error=str(heal_exc),
+                            source="llm_self_heal",
+                        )
+                    )
         except Exception as exc:  # noqa: BLE001
             ev = CandidateEval(seed=idx, score=0.0, hint=hint, error=str(exc), source=used_source)
         if "timed out" in (ev.error or "").lower():
@@ -844,7 +927,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             error_codes.append("test_timeout")
         if "quota" in (ev.error or "").lower() or "429" in (ev.error or "").lower():
             error_codes.append("quota")
-        candidates.append(ev)
+        if not ev_recorded:
+            candidates.append(ev)
         if config.safe_mode and ev.score >= 1.0:
             break
 
@@ -895,6 +979,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             error_codes=sorted(set(error_codes)),
             rejection_summary={},
             learning_trace=learning_trace,
+            candidates=candidates,
             pytest_cmd=pytest_cmd,
         )
 

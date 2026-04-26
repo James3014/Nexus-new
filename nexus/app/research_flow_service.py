@@ -16,7 +16,7 @@ import click
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
-from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator
+from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, _candidate_summaries
 
 
 @dataclass(frozen=True)
@@ -802,6 +802,7 @@ def run_auto_flow(
                     "gateway_total_chars": int(getattr(res, "gateway_total_chars", 0) or 0),
                     "gateway_timeout_sec": int(getattr(res, "gateway_timeout_sec", 0) or 0),
                     "effective_stage1_timeout_sec": effective_stage1_timeout,
+                    "candidate_summaries": _candidate_summaries(list(getattr(res, "candidates", []) or [])),
                     "learning_trace": res.learning_trace,
                 },
             }
@@ -971,6 +972,14 @@ def run_auto_flow(
     verification_only_rescue = bool(result_report.get("verification_only_rescue", False))
     artifact_verified = bool(tests_passed and (artifact_summary["changed"] or verification_only_rescue))
     nexus_rescued = bool((guard_hit or verification_only_rescue) and tests_passed)
+    winner_source = result_report.get("winner_source") or guard_fallback_from.get("winner_source") or ("nexus_rescue" if nexus_rescued else "local_only")
+    self_heal_used = bool(
+        nexus_rescued
+        or history_forced_baseline
+        or early_baseline_shortcut
+        or "self_heal" in str(winner_source)
+        or any("self_heal" in str(code) for code in result_report.get("error_codes", []))
+    )
     mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False))
     phase_wall_sec["A"] = round(time.time() - phase_started_at, 4)
     nexus_usage_trace = {
@@ -1006,13 +1015,13 @@ def run_auto_flow(
             "nightshift_recommended": bool(nightshift_recommended),
             "swarm_used": bool(result_report.get("winner_source") not in {None, "", "local"} and hyper_used),
             "drone_used": False,
-            "self_heal_used": bool(nexus_rescued or history_forced_baseline or early_baseline_shortcut),
+            "self_heal_used": self_heal_used,
             "claim_verified": artifact_verified,
         },
         "phase_wall_sec": phase_wall_sec,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),
         "nexus_rescued": nexus_rescued,
-        "winner_source": result_report.get("winner_source") or guard_fallback_from.get("winner_source") or ("nexus_rescue" if nexus_rescued else "local_only"),
+        "winner_source": winner_source,
         "usage_valid": bool(gemini_invoked and artifact_verified),
     }
 

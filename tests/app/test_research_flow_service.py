@@ -366,14 +366,26 @@ def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verificati
             status="FAILED",
             reason="stage1_no_passing_candidate",
             patch="",
-            winner_source="local",
-            error_codes=["stage1_no_passing_candidate"],
+            winner_source="llm_self_heal",
+            error_codes=["stage1_no_passing_candidate", "llm_self_heal_attempted"],
             rejection_summary={"pytest_failed": 1},
             attempt_count=5,
             model_calls=5,
             total_tokens=1234,
             token_capture_status="measured",
             learning_trace={"mempalace_verified": True},
+            candidates=[
+                SimpleNamespace(
+                    seed=1,
+                    score=0.4,
+                    source="llm",
+                    hint="baseline",
+                    error="",
+                    stdout="pytest failed: expected normalized value",
+                    candidate_code="VALUE = 2\n",
+                    elapsed_sec=0.2,
+                )
+            ],
         )
 
     monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
@@ -561,14 +573,26 @@ def test_cross_module_mutation_required_does_not_use_verification_only_rescue(tm
             status="FAILED",
             reason="stage1_no_passing_candidate",
             patch="",
-            winner_source="local",
-            error_codes=["stage1_no_passing_candidate"],
+            winner_source="llm_self_heal",
+            error_codes=["stage1_no_passing_candidate", "llm_self_heal_attempted"],
             rejection_summary={"pytest_failed": 1},
             attempt_count=5,
             model_calls=5,
             total_tokens=1234,
             token_capture_status="measured",
             learning_trace={"mempalace_verified": True},
+            candidates=[
+                SimpleNamespace(
+                    seed=1,
+                    score=0.4,
+                    source="llm",
+                    hint="baseline",
+                    error="",
+                    stdout="pytest failed: expected normalized value",
+                    candidate_code="VALUE = 2\n",
+                    elapsed_sec=0.2,
+                )
+            ],
         )
 
     monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
@@ -602,4 +626,9 @@ def test_cross_module_mutation_required_does_not_use_verification_only_rescue(tm
     assert payload["success_criteria"]["mutation_required"] is True
     trace = payload["nexus_usage_trace"]
     assert trace["usage_valid"] is False
+    assert trace["capabilities"]["self_heal_used"] is True
     assert trace["capabilities"]["claim_verified"] is False
+    summaries = payload["result"]["report"]["candidate_summaries"]
+    assert summaries[0]["source"] == "llm"
+    assert "pytest failed" in summaries[0]["stdout_tail"]
+    assert summaries[0]["candidate_len"] > 0

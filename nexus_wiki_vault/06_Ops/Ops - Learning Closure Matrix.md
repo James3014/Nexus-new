@@ -527,6 +527,12 @@ version_scope:
 - **Decision**: Keep no-tool JSON-only gateway instructions as the default for benchmark-bound structured calls.
 - **Prevention**: Future token-source investigations must separate transport/parser failures from model patch-quality failures. Once token evidence is measured, the next gate is candidate correctness, not token instrumentation.
 
+## 2026-04-27: Measured Token Evidence Needs Candidate Failure Evidence
+- **Phenomenon**: After token telemetry became measured, the hard-task 1x1 still failed because the first Gemini edit introduced random backoff output. The report did not initially expose enough candidate stdout/code context to diagnose the failed patch from the top-level auto-flow payload.
+- **Root Cause**: The benchmark report preserved aggregate outcome fields but hid candidate-level failure tails, forcing manual report spelunking and making self-heal routing blind.
+- **Decision**: Preserve candidate summaries in research-flow reports and allow one bounded LLM self-heal turn with pytest failure evidence.
+- **Prevention**: Do not classify a measured-token failed row as a token problem. If `gateway_token_source=stats` and `model_patch_generated=true`, route next work to candidate correctness and failure-tail repair.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.
