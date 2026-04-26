@@ -467,6 +467,12 @@ version_scope:
 - **Decision**: Treat any arm below the token measured-rate threshold as `Token public-safe claim=NO`.
 - **Prevention**: Benchmark report tests must separate token status counting from public claim approval.
 
+## 2026-04-27: Gemini Benchmark Runs Need Host Cache Access
+- **Phenomenon**: The first hard-neutral v2 smoke command failed because sandboxed `uv run` could not open the user uv cache `.git` path.
+- **Root Cause**: Gemini benchmark execution depends on host-level uv/Gemini CLI environment outside the workspace sandbox.
+- **Decision**: Re-run real Gemini benchmark commands with approved `uv run` escalation and keep generated runtime reports out of source commits.
+- **Prevention**: Treat real Gemini A/B runs as environment-bound operations; validate source changes separately with non-escalated tests where possible.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

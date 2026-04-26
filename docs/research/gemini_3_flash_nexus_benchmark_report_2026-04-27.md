@@ -6,6 +6,7 @@
 - Treatment: `gemini-3-flash-preview_nexus`
 - Broad task set: `public_benchmark_pilot_v1`, `neutral_fixture`, 12 unique tasks x 2 trials
 - Hard-only follow-up: `public_benchmark_pilot_v1`, `neutral_fixture`, 6 unique hard tasks x 2 trials
+- Hard-neutral v2: `public_benchmark_hard_neutral_v2`, 12 unique hard neutral tasks x 2 trials
 - History policy: `per_task_reset`
 
 ## Result
@@ -38,6 +39,22 @@
 | Avg model calls | 1.00 | 1.00 | 0.00 |
 | Token measured rate | 0.0% | 0.0% | 0.0 pp |
 
+### Hard-Neutral v2 12x2
+
+| Metric | Bare Gemini | Gemini + Nexus | Delta |
+| --- | ---: | ---: | ---: |
+| Runs | 24 | 24 | 0 |
+| Eligible runs | 24 | 24 | 0 |
+| Solve rate | 100.0% | 100.0% | 0.0 pp |
+| Semantic verified | 100.0% | 100.0% | 0.0 pp |
+| Hard success | 100.0% | 100.0% | 0.0 pp |
+| Trust mismatch | 0.0% | 0.0% | 0.0 pp |
+| Avg wall time | 38.05s | 34.62s | -3.43s |
+| Wall speedup | n/a | 9.0% | n/a |
+| Avg model calls | 1.00 | 1.00 | 0.00 |
+| Token measured rate | 0.0% | 0.0% | 0.0 pp |
+| Token public-safe claim | NO | NO | n/a |
+
 ## Nexus Wearing Evidence
 
 | Evidence | Result |
@@ -53,6 +70,11 @@
 The hard-only gateway30 follow-up also passed Nexus treatment evidence:
 `gemini_uses_nexus=true`, `nexus_context_delivered=true`, five pillars, six
 phases, and capability claim verification were all 12/12.
+
+The hard-neutral v2 12x2 run passed the same formal treatment criteria 24/24.
+It also confirmed Gemini was invoked in both arms with average model calls at
+1.00, while Nexus delivered context, five pillars, six phases, and claim
+verification on every Nexus row.
 
 ## What Improved
 
@@ -87,6 +109,14 @@ solved 11/12. Average wall time was effectively tied at 34.01s vs 33.59s, so the
 previous 61.57s Nexus average was a benchmark timeout artifact, not an inherent
 Nexus requirement.
 
+The hard-neutral v2 12 unique tasks x 2 trials run used a stronger hard-only
+neutral fixture set. Both arms solved 24/24, so it does not show solve-rate lift.
+It does show that Gemini wearing Nexus stayed fully verified and finished faster
+on average: 34.62s vs 38.05s, a 9.0% wall-time improvement. Nexus also recorded
+a 91.7% rescue rate, meaning most successful rows were completed by Nexus'
+self-healing/local verification path after the Gemini-wrapped path supplied the
+required context and trace.
+
 Token/cost claims are not yet public-safe. Token reliability improved compared
 with the earlier 2026-04-26 run, but Nexus still has estimated-token rows and
 bare Gemini still has one `model_call_without_tokens` row.
@@ -101,6 +131,11 @@ bare Gemini still has one `model_call_without_tokens` row.
 - Hard-only gateway30 with Nexus: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_12x2_gateway30_20260427/with_nexus_1777226288.jsonl`
 - Hard-only gateway30 bare Gemini: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_12x2_gateway30_20260427/without_nexus_1777226288.jsonl`
 - Hard-only gateway30 report: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_12x2_gateway30_20260427/gemini_nexus_report_1777226288.md`
+- Hard-neutral v2 smoke report: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_smoke_3x1_20260427/gemini_nexus_report_1777227663.md`
+- Hard-neutral v2 with Nexus: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/with_nexus_1777227906.jsonl`
+- Hard-neutral v2 bare Gemini: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/without_nexus_1777227906.jsonl`
+- Hard-neutral v2 report: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/gemini_nexus_report_1777227906.md`
+- Hard-neutral v2 A/B eval: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/ab_eval_1777227906.json`
 
 ## Public-Safe Claim Draft
 
@@ -108,5 +143,7 @@ On a fixed 12-task neutral-fixture benchmark repeated twice, Gemini 3 Flash with
 Nexus improved semantic solve rate from 83.3% to 100.0% while keeping trust
 mismatch at 0.0%. After capping benchmark gateway timeout at 30s, a hard-only
 follow-up preserved Nexus' 100.0% solve rate and brought wall time roughly in
-line with bare Gemini. Token-cost claims still require further telemetry
-hardening.
+line with bare Gemini. On the later hard-neutral v2 12x2 run, both arms solved
+100.0%, while Gemini wearing Nexus was 9.0% faster on average and retained
+24/24 formal Nexus usage evidence. Token-cost claims still require further
+telemetry hardening.
