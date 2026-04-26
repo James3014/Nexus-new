@@ -803,7 +803,7 @@ def run_with_nexus(
             env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
             env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
             env["NEXUS_GATEWAY_MAX_RETRIES"] = "1"
-            env["NEXUS_GATEWAY_TIMEOUT_SEC"] = str(max(30, min(90, max(5, timeout_sec - 30))))
+            env["NEXUS_GATEWAY_TIMEOUT_SEC"] = _benchmark_gateway_timeout_sec()
             env["NEXUS_LLM_CANDIDATE_CAP"] = "1"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
             env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
@@ -1136,6 +1136,16 @@ def _report_model_label() -> str:
         or "gemini"
     ).strip()
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", model) or "gemini"
+
+
+def _benchmark_gateway_timeout_sec(default_sec: int = 30) -> str:
+    override = str(os.environ.get("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "") or "").strip()
+    if override:
+        try:
+            return str(max(5, int(override)))
+        except ValueError:
+            pass
+    return str(max(5, int(default_sec)))
 
 
 def _force_learn_slo_ready(repo_root: Path) -> None:

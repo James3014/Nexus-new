@@ -29,6 +29,18 @@ def _wall_speedup(delta_sec: float, baseline_sec: float) -> str:
     return _pct(-delta_sec / baseline_sec)
 
 
+def _token_status_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        status = str(row.get("token_capture_status") or "unknown").strip().lower() or "unknown"
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _count_text(counts: dict[str, int], key: str) -> str:
+    return str(counts.get(key, 0))
+
+
 def render_markdown_report(
     *,
     without_path: str,
@@ -37,11 +49,13 @@ def render_markdown_report(
     label_with: str,
     benchmark_date: str,
 ) -> str:
+    rows_without = load_runs(without_path)
+    rows_with = load_runs(with_path)
     report = compare_datasets(
         label_without,
-        load_runs(without_path),
+        rows_without,
         label_with,
-        load_runs(with_path),
+        rows_with,
     )
     a = report["a"]["summary"]
     b = report["b"]["summary"]
@@ -49,6 +63,8 @@ def render_markdown_report(
     formal = report["formal_treatment"]
     wall_delta = float(delta["avg_wall_duration_sec_delta"])
     baseline_wall = float(a["avg_wall_duration_sec"])
+    token_without = _token_status_counts(rows_without)
+    token_with = _token_status_counts(rows_with)
 
     lines = [
         "# Gemini 3 Flash + Nexus Benchmark Report",
@@ -70,6 +86,15 @@ def render_markdown_report(
         f"| Wall speedup | n/a | {_wall_speedup(wall_delta, baseline_wall)} | n/a |",
         f"| Avg model calls | {_num(a['avg_model_calls'])} | {_num(b['avg_model_calls'])} | {_num(delta['avg_model_calls_delta'])} |",
         f"| Token measured rate | {_pct(a['token_measured_rate'])} | {_pct(b['token_measured_rate'])} | {_pct(delta['token_measured_rate_delta'])} |",
+        "",
+        "## Token Telemetry",
+        "",
+        "| Token status | Without Nexus | With Nexus |",
+        "| --- | ---: | ---: |",
+        f"| measured | {_count_text(token_without, 'measured')} | {_count_text(token_with, 'measured')} |",
+        f"| estimated | {_count_text(token_without, 'estimated')} | {_count_text(token_with, 'estimated')} |",
+        f"| missing/unknown | {_count_text(token_without, 'missing')}/{_count_text(token_without, 'unknown')} | {_count_text(token_with, 'missing')}/{_count_text(token_with, 'unknown')} |",
+        f"| not applicable local only | {_count_text(token_without, 'not_applicable_local_only')} | {_count_text(token_with, 'not_applicable_local_only')} |",
         "",
         "## Nexus Wearing Evidence",
         "",

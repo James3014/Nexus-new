@@ -50,6 +50,17 @@ Nexus was slower in wall time: 61.57s vs 46.97s average. The likely cause is
 bounded LLM/repair orchestration waiting even when local rescue wins. This is
 now the main optimization target before making speed or efficiency claims.
 
+The follow-up phase analysis found that the overhead was concentrated in Phase
+R: median `phase_wall_r_sec` was 63.22s, and 23/24 Nexus rows ultimately used a
+local winner after the Gemini/Hyper path failed or timed out. The benchmark
+runner now caps the Nexus subprocess gateway timeout at 30s by default, with
+`NEXUS_BENCH_GATEWAY_TIMEOUT_SEC` available for explicit overrides.
+
+A 3-task hard smoke after the timeout cap showed the intended direction:
+Gemini + Nexus stayed at 3/3 solved and average wall time dropped to 34.12s,
+compared with 40.11s for bare Gemini on the same smoke. This is only a smoke,
+not a replacement for the 12x2 result.
+
 Token/cost claims are not yet public-safe. Token reliability improved compared
 with the earlier 2026-04-26 run, but Nexus still has estimated-token rows and
 bare Gemini still has one `model_call_without_tokens` row.
@@ -60,6 +71,7 @@ bare Gemini still has one `model_call_without_tokens` row.
 - Bare Gemini: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/without_nexus_1777220242.jsonl`
 - Evidence bundle: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/evidence_bundle.json`
 - Auto markdown: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/gemini_nexus_report_1777220242.md`
+- Gateway-timeout smoke: `.nexus/reports/bench_gemini3flash_vs_nexus_gateway30_smoke_3x1_20260427/gemini_nexus_report_1777223214.md`
 
 ## Public-Safe Claim Draft
 

@@ -449,6 +449,18 @@ version_scope:
 - **Decision**: Derive report labels from `NEXUS_GEMINI_MODEL_NAME` / `NEXUS_DIRECT_GEMINI_MODEL` and suffix them with `_bare` or `_nexus`.
 - **Prevention**: Public benchmark report generators must encode model identity from runtime configuration, not execution-mode shorthand.
 
+## 2026-04-27: Benchmark Gateway Timeout Must Stay Bounded
+- **Phenomenon**: Gemini + Nexus 12x2 solved 24/24, but most rows spent about 64s in Phase R before falling back to a local winner.
+- **Root Cause**: The benchmark runner expanded `NEXUS_GATEWAY_TIMEOUT_SEC` to 60s when task timeout was 90s, so failed Gemini/Hyper attempts dominated wall time.
+- **Decision**: Cap benchmark gateway timeout at 30s by default, with `NEXUS_BENCH_GATEWAY_TIMEOUT_SEC` as an explicit override.
+- **Prevention**: Benchmark timeout knobs must bound failed model attempts independently from the total per-task timeout.
+
+## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
+- **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
+- **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.
+- **Decision**: Re-run the analysis with explicit loops and keep evidence scripts boring.
+- **Prevention**: Benchmark evidence extraction should prefer small named helpers or plain loops over compact comprehension tricks.
+
 ## 2026-04-26: JIT ML Needs Observation Before Prediction
 - **Phenomenon**: Full regression is growing, but jumping straight to ML test selection would train on sparse and noisy failure data.
 - **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.

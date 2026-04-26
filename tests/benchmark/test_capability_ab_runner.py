@@ -15,6 +15,7 @@ from scripts.bench.capability_ab_runner import (
     expand_task_trials,
     _force_learn_slo_ready,
     _history_policy_name,
+    _benchmark_gateway_timeout_sec,
     _materialize_fixture,
     _read_preserved_target,
     _remaining_leg_timeout,
@@ -100,6 +101,15 @@ def test_expand_task_trials_repeats_and_shuffles_deterministically():
 def test_report_model_label_uses_configured_gemini_model(monkeypatch):
     monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
     assert _report_model_label() == "gemini-3-flash-preview"
+
+
+def test_benchmark_gateway_timeout_has_short_default_and_override(monkeypatch):
+    monkeypatch.delenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", raising=False)
+    assert _benchmark_gateway_timeout_sec() == "30"
+    monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "12")
+    assert _benchmark_gateway_timeout_sec() == "12"
+    monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "bad")
+    assert _benchmark_gateway_timeout_sec() == "30"
 
 
 def test_materialize_fixture_writes_files(tmp_path: Path):

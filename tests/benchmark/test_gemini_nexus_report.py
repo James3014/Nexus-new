@@ -72,7 +72,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "wall_duration_sec": 10,
                         "model_calls": 1,
                         "total_tokens": 90,
-                        "token_capture_status": "measured",
+                        "token_capture_status": "estimated",
                         "gemini_uses_nexus": True,
                         "nexus_context_delivered": True,
                         "nexus_usage_valid": True,
@@ -106,6 +106,8 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     )
 
     assert "Solve rate | 50.0% | 100.0% | 50.0%" in out
+    assert "| measured | 2 | 1 |" in out
+    assert "| estimated | 0 | 1 |" in out
     assert "Formal treatment valid: 2/2 (100.0%)" in out
     assert "Gemini uses Nexus rate: 100.0%" in out
     assert "Token/cost claims are not public-safe" in out
