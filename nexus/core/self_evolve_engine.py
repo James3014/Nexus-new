@@ -29,7 +29,6 @@ class SelfEvolveEngine:
         
         # 1. Audit Phase (自省)
         logger.info("🔍 [Evolve:Audit] Identifying capability gaps for v25 features...")
-        time.sleep(0.5)
         
         # 2. Planning Phase (規約寫定)
         logger.info(f"🧠 [Evolve:Plan] Generating specifications for {features}...")

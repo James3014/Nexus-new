@@ -5,15 +5,18 @@ from nexus.health.scoring import HealthScorer
 from nexus.core.state_contracts import NexusState
 
 def test_preflight_blocking():
-    # 模擬錯誤版本 (動態比對)
-    specs = {"rustc": "1.99"} # 未發布版本，應攔截
-    report = PreflightCheck.validate_environment(specs)
-    assert report["status"] == "BLOCKED"
-    
-    # 模擬當前穩定版本 (按理應通過)
-    specs_ok = {"rustc": "1.80"}
-    report_ok = PreflightCheck.validate_environment(specs_ok)
-    assert report_ok["status"] == "HEALTHY"
+    from unittest.mock import patch
+    with patch("nexus.core.preflight_check.PreflightCheck.check_version") as mock_check:
+        mock_check.side_effect = lambda tool, ver: ver == "1.80"
+        # 模擬錯誤版本 (動態比對)
+        specs = {"rustc": "1.99"} # 未發布版本，應攔截
+        report = PreflightCheck.validate_environment(specs)
+        assert report["status"] == "BLOCKED"
+        
+        # 模擬當前穩定版本 (按理應通過)
+        specs_ok = {"rustc": "1.80"}
+        report_ok = PreflightCheck.validate_environment(specs_ok)
+        assert report_ok["status"] == "HEALTHY"
 
 def test_acl_integrity_block():
     acl = AccessControlList()

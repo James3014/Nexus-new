@@ -124,7 +124,21 @@ class ProjectPlanner:
         """
         [Reviewer] 模擬門下省封駁邏輯 (Consensus Gate)。
         """
-        # TODO: 這裡未來將對接 MemPalace 與實體 Reviewer Agent
+        # [TD-2 Hardened] 對接 MemPalace 檢查戰略意圖是否違規
+        try:
+            from nexus.services.mem_palace import MemPalace
+            palace = MemPalace(str(self.project_root))
+            task_desc = intent.get("task", "")
+            if task_desc:
+                check_result = palace.verify_context(task_desc)
+                if check_result.get("status") == "BLOCKED":
+                    logger.warning(f"Guard-Reviewer: VETO - MemPalace Blocked: {check_result.get('reason')}")
+                    strategy.risk_level = "HIGH"
+                    strategy.swarm_config.consensus = True
+                    strategy.explanation += f" [REVIED BY GUARD: MemPalace VETO - {check_result.get('reason')}]"
+        except Exception as e:
+            logger.debug(f"MemPalace consensus check failed: {e}")
+
         # 目前實作硬性邊界守衛
         if strategy.risk_level == "HIGH" and not strategy.swarm_config.consensus:
             logger.warning("Guard-Reviewer: VETO - High risk task must have consensus swarm.")

@@ -150,13 +150,14 @@ class BattlesuitGateway:
             except ValueError:
                 pass
 
-        tmp_payload = self.project_root / f".nexus/payload_{os.getpid()}.txt"
+        tmp_payload = (self.project_root / f".nexus/payload_{os.getpid()}.txt").resolve()
         tmp_payload.parent.mkdir(parents=True, exist_ok=True)
         tmp_payload.write_text(content, encoding="utf-8")
         
         custom_env = os.environ.copy()
         custom_env["HOME"] = "/Users/jameschen"
         custom_env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{custom_env.get('PATH', '')}"
+        custom_env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
 
         # Resolve binaries dynamically to avoid hard failure on host-specific paths.
         node_bin = self._resolve_binary(
@@ -189,14 +190,14 @@ class BattlesuitGateway:
         
         for attempt in range(max_retries):
             try:
-                with open(tmp_payload, "rb") as f_in:
-                    # Prefer direct CLI execution; fallback to explicit node runtime when needed.
-                    cmd = [gemini_entry, "-m", model_name, "-p", sys_msg, "--output-format", "json"]
-                    if node_bin:
-                        cmd_with_node = [node_bin, gemini_entry, "-m", model_name, "-p", sys_msg, "--output-format", "json"]
-                    else:
-                        cmd_with_node = None
-                    
+                cmd = [gemini_entry, "--skip-trust", "-m", model_name, "-p", sys_msg, "--output-format", "json"]
+                if node_bin:
+                    cmd_with_node = [node_bin, gemini_entry, "--skip-trust", "-m", model_name, "-p", sys_msg, "--output-format", "json"]
+                else:
+                    cmd_with_node = None
+
+                f_in = open(tmp_payload, "rb")
+                try:
                     res = subprocess.run(
                         cmd,
                         stdin=f_in,
@@ -207,11 +208,15 @@ class BattlesuitGateway:
                         cwd="/tmp",
                         timeout=dynamic_timeout
                     )
+                finally:
+                    if f_in is not None:
+                        f_in.close()
                 
                 # Retry with explicit node if gemini shim cannot find node runtime.
                 stderr_lower = (res.stderr or "").lower()
                 if res.returncode != 0 and cmd_with_node and "env: node: no such file or directory" in stderr_lower:
-                    with open(tmp_payload, "rb") as f_in2:
+                    f_in2 = open(tmp_payload, "rb")
+                    try:
                         res = subprocess.run(
                             cmd_with_node,
                             stdin=f_in2,
@@ -222,6 +227,9 @@ class BattlesuitGateway:
                             cwd="/tmp",
                             timeout=dynamic_timeout
                         )
+                    finally:
+                        if f_in2 is not None:
+                            f_in2.close()
                     stderr_lower = (res.stderr or "").lower()
 
                 if "login" in stderr_lower:
@@ -235,10 +243,12 @@ class BattlesuitGateway:
                     continue
                 
                 raw_stdout = res.stdout.strip()
-                if tmp_payload.exists(): tmp_payload.unlink()
 
                 try:
-                    resp_json = json.loads(raw_stdout)
+                    try:
+                        resp_json = json.loads(raw_stdout)
+                    except json.JSONDecodeError:
+                        resp_json, _ = json.JSONDecoder().raw_decode(raw_stdout)
                     output_text = resp_json.get("output") or resp_json.get("response") or raw_stdout
                     
                     tokens_total = 0
@@ -248,8 +258,11 @@ class BattlesuitGateway:
                             if isinstance(m_stats, dict):
                                 tokens_total += m_stats.get("tokens", {}).get("total", 0)
                                 
-                    return self._parse_json_result(output_text, tokens_total, "ok")
-                except json.JSONDecodeError:
+                    parsed = self._parse_json_result(output_text, tokens_total, "ok")
+                    if tmp_payload.exists():
+                        tmp_payload.unlink()
+                    return parsed
+                except (json.JSONDecodeError, ValueError):
                     last_err = f"Malformed JSON: {raw_stdout[:100]}"
                     continue
             except subprocess.TimeoutExpired:

@@ -1,5 +1,5 @@
 {
-  "schema_version": "v2.1",
+  "schema_version": "v2.2",
   "allowed_fields": [
     "outcome_version",
     "task_id",
@@ -7,6 +7,7 @@
     "span_id",
     "terminal_state",
     "exit_code",
+    "failure_category",
     "sandbox_mode",
     "pregate_skip",
     "pregate_skip_reason",

@@ -5,6 +5,7 @@ import sys
 import json
 import argparse
 import subprocess
+import concurrent.futures
 from pathlib import Path
 
 # Add project root to sys.path before importing core modules
@@ -17,6 +18,25 @@ from scripts.engine.output_guard import truncate_output
 
 WIKI_DRIFT_REPORT = ROOT / ".nexus" / "reports" / "wiki_drift_report.json"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
+REPORT_TRUST_AUDIT_TARGETS = (
+    "tests/engine/test_completion_contract.py",
+    "tests/engine/test_completion_enforcer.py",
+    "tests/engine/test_canonical_task_seam.py",
+    "tests/engine/test_direct_mode_semantic_audit.py",
+    "tests/engine/test_cli_semantic_contract_audit.py",
+    "tests/test_cli_output_contract.py",
+    "tests/engine/test_cli_runner_async.py",
+    "tests/engine/test_cli_research_seams.py",
+    "tests/engine/test_research_auto_flow_guard_audit.py",
+    "tests/engine/test_cli_work_path_audit.py",
+    "tests/engine/test_cli_artifact_gate_audit.py",
+    "tests/engine/test_delegate_completion_contract.py",
+    "tests/research/test_learn_ingest_channels.py",
+    "tests/test_cli_learn_mode.py",
+    "tests/services/test_cli_commands_service_runtime.py",
+    "tests/engine/test_swarm_command_runtime.py",
+    "tests/test_v18_legacy_delivery.py",
+)
 
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
@@ -164,6 +184,32 @@ def run_delivery_tracked_check(evidence_path: str | None = None, dry_run: bool =
     if not code_artifacts:
         print("✅ [Delivery-Track] No code artifacts to check.")
         return True
+
+    def _extract_artifact_path(artifact):
+        if isinstance(artifact, str):
+            val = artifact.strip()
+            return val if val else None
+        if isinstance(artifact, dict):
+            for key in ("file_path", "path", "artifact_path"):
+                value = artifact.get(key)
+                if isinstance(value, str):
+                    value = value.strip()
+                    if value:
+                        return value
+        return None
+
+    normalized_artifacts = []
+    invalid_artifacts = []
+    for artifact in code_artifacts:
+        path = _extract_artifact_path(artifact)
+        if path:
+            normalized_artifacts.append(path)
+        else:
+            invalid_artifacts.append(artifact)
+
+    if invalid_artifacts:
+        print(f"❌ [Delivery-Track] Invalid code artifacts entries: {invalid_artifacts}")
+        return False
     
     # 取得 git tracked 清單
     result = subprocess.run(
@@ -172,7 +218,7 @@ def run_delivery_tracked_check(evidence_path: str | None = None, dry_run: bool =
     tracked_files = set(result.stdout.strip().split("\n"))
     
     untracked = []
-    for artifact in code_artifacts:
+    for artifact in normalized_artifacts:
         try:
             # 轉換為相對路徑
             art_path = Path(artifact)
@@ -202,6 +248,16 @@ def run_delivery_tracked_check(evidence_path: str | None = None, dry_run: bool =
     print("✅ Delivery Tracked Check PASSED")
     return True
 
+
+def run_report_trust_audit(dry_run: bool) -> bool:
+    label = "(Dry-run)" if dry_run else ""
+    targets = " ".join(REPORT_TRUST_AUDIT_TARGETS)
+    success, _ = run_step(
+        f"Report Trust Audit {label}".strip(),
+        f'"{VENV_PYTHON}" -m pytest {targets} -q',
+    )
+    return success
+
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
     if not run_integrity_check():
@@ -218,11 +274,13 @@ def run_dry_run():
     checks["protocol_check"] = run_protocol_check(dry_run=True)
     checks["lesson_check"] = run_lesson_check(dry_run=True)
     checks["delivery_tracked"] = run_delivery_tracked_check(dry_run=True)
+    checks["report_trust_audit"] = run_report_trust_audit(dry_run=True)
     wiki_sync_status = run_wiki_sync_check(dry_run=True)
     checks["wiki_sync"] = (wiki_sync_status == "OK")
     
     print(f"- protocol_check: {'OK' if checks['protocol_check'] else 'FAIL'}")
     print(f"- lesson_check: {'OK' if checks['lesson_check'] else 'FAIL'}")
+    print(f"- report_trust_audit: {'OK' if checks['report_trust_audit'] else 'FAIL'}")
     print(f"- wiki_sync: {wiki_sync_status}")
 
     print("\n📊 [Phase 6] Summary Audit (Dry-Run):")
@@ -235,8 +293,10 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
         "drift": ROOT / ".nexus" / "reports" / "wiki_drift_report.json",
         "capability": ROOT / ".nexus" / "reports" / "wiki_capability_coverage_report.json",
         "eval": ROOT / ".nexus" / "reports" / "wiki_eval_report.json",
-        "writeback": ROOT / ".nexus" / "reports" / "wiki_writeback_report.json"
+        "writeback": ROOT / ".nexus" / "reports" / "wiki_writeback_report.json",
+        "coverage": ROOT / ".nexus" / "reports" / "coverage.json"
     }
+    ops_loop_dir = ROOT / ".nexus" / "reports" / "bench" / "ops_loop"
 
     print(f"📊 [Wiki-Sync] Status: {wiki_sync_status}")
     # Drift Summary
@@ -276,6 +336,63 @@ def print_phase_6_summaries(wiki_sync_status="UNKNOWN"):
             print(f"📊 [Wiki-Writeback] Status: {status}, Recent Count: {recent}")
         except Exception as e:
             print(f"⚠️ Error parsing writeback report: {e}")
+
+    # Coverage Summary
+    if reports["coverage"].exists():
+        try:
+            cov_data = json.loads(reports["coverage"].read_text())
+            total_pct = cov_data["totals"]["percent_covered"]
+            print(f"📊 [Test-Coverage] Total covered: {total_pct:.2f}%")
+        except Exception as e:
+            print(f"⚠️ Error parsing coverage report: {e}")
+
+    # Capability Health Summary (from latest ops_loop report)
+    if ops_loop_dir.exists():
+        try:
+            latest_reports = sorted(
+                ops_loop_dir.glob("ops_loop_*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if latest_reports:
+                latest = latest_reports[0]
+                payload = json.loads(latest.read_text(encoding="utf-8"))
+                health = payload.get("health", {}) if isinstance(payload, dict) else {}
+                if isinstance(health, dict) and health:
+                    verdict = str(health.get("verdict", "UNKNOWN"))
+                    score = float(health.get("score", 0.0) or 0.0)
+                    print(f"📊 [Capability-Health] Verdict: {verdict}, Score: {score:.2f}, Source: {latest.name}")
+                    if verdict != "PASS":
+                        print("⚠️ [Capability-Health] Latest benchmark health is not PASS. Review ops_loop report before release.")
+                trend_gate = payload.get("trend_gate", {}) if isinstance(payload, dict) else {}
+                if isinstance(trend_gate, dict) and trend_gate:
+                    t_verdict = str(trend_gate.get("verdict", "UNKNOWN"))
+                    mk = trend_gate.get("median_kpi", {}) if isinstance(trend_gate.get("median_kpi"), dict) else {}
+                    mc = trend_gate.get("median_consensus", {}) if isinstance(trend_gate.get("median_consensus"), dict) else {}
+                    print(
+                        "📊 [Capability-TrendGate] Verdict: "
+                        f"{t_verdict}, Solve: {float(mk.get('with_solve_rate', 0.0) or 0.0):.2f}, "
+                        f"Semantic: {float(mk.get('with_semantic_verified_rate', 0.0) or 0.0):.2f}, "
+                        f"WallOverhead: {float(mk.get('wall_overhead_sec', 0.0) or 0.0):.2f}s"
+                    )
+                    if mc:
+                        print(
+                            "📊 [Capability-TrendGate] Consensus: "
+                            f"Winner->Recommended {float(mc.get('winner_match_recommended_rate', 0.0) or 0.0):.2f}, "
+                            f"Winner->ChosenFlow {float(mc.get('winner_match_chosen_flow_rate', 0.0) or 0.0):.2f}"
+                        )
+                    if t_verdict != "PASS":
+                        print("⚠️ [Capability-TrendGate] 3-round median KPI gate is not PASS.")
+                route_consensus = payload.get("route_consensus", {}) if isinstance(payload, dict) else {}
+                if isinstance(route_consensus, dict) and route_consensus:
+                    print(
+                        "📊 [Route-Consensus] Winner->Recommended: "
+                        f"{float(route_consensus.get('winner_match_recommended_rate', 0.0) or 0.0):.2f}, "
+                        "Winner->ChosenFlow: "
+                        f"{float(route_consensus.get('winner_match_chosen_flow_rate', 0.0) or 0.0):.2f}"
+                    )
+        except Exception as e:
+            print(f"⚠️ Error parsing capability health report: {e}")
 
 def run_benchmark_check(mode: str, dry_run: bool):
     if mode == "off": return True
@@ -435,6 +552,9 @@ def main():
         if not closeout_ok and not args.dry_run:
             sys.exit(1)
 
+    if not run_report_trust_audit(dry_run=args.dry_run) and not args.dry_run:
+        sys.exit(1)
+
     # 1. Wiki Governance Audit (Pass 7 - CI Hardened)
     success, _ = run_step(
         "Wiki Governance Audit",
@@ -442,30 +562,28 @@ def main():
     )
     if not success and not args.dry_run: sys.exit(1)
 
-    # 2. Wiki Drift Audit (Agent I - v2.0)
-    run_step(
-        "Wiki Drift Audit",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_drift_audit.py',
-    )
+    # 2. Parallelize Wiki Audits for efficiency
+    wiki_audits = {
+        "Wiki Drift Audit": f'"{VENV_PYTHON}" scripts/ops/wiki_drift_audit.py',
+        "Wiki Capability Coverage Audit": f'"{VENV_PYTHON}" scripts/ops/wiki_capability_coverage_audit.py',
+        "Wiki Writeback Status Check": f'"{VENV_PYTHON}" scripts/ops/wiki_query_writeback.py',
+        "Wiki Eval Regression": f'"{VENV_PYTHON}" scripts/ops/wiki_eval_regression.py',
+    }
 
-    # 2b. Wiki Capability Coverage Audit (Phase 6 Weighted)
-    run_step(
-        "Wiki Capability Coverage Audit",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_capability_coverage_audit.py',
-    )
-
-    # 2c. Wiki Writeback Status (Phase 6)
-    run_step(
-        "Wiki Writeback Status Check",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_query_writeback.py',
-    )
-
-    # 2d. Wiki Eval Regression (Phase 6)
-    run_step(
-        "Wiki Eval Regression",
-        f'"{VENV_PYTHON}" scripts/ops/wiki_eval_regression.py',
-    )
-    
+    print("\n🚀 [CI-Gate] Launching Parallel Wiki Audits...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(run_step, name, cmd): name for name, cmd in wiki_audits.items()}
+        for future in concurrent.futures.as_completed(futures):
+            name = futures[future]
+            try:
+                success, _ = future.result()
+                if not success and not args.dry_run:
+                    print(f"❌ [CI-BLOCK] Parallel Audit failed: {name}")
+                    sys.exit(1)
+            except Exception as e:
+                print(f"❌ [CI-BLOCK] Parallel Audit crashed: {name} - {e}")
+                if not args.dry_run: sys.exit(1)
+                
     # 2e. Research Benchmark (Phase 6)
     if not run_benchmark_check(args.benchmark_mode, args.dry_run) and not args.dry_run:
         sys.exit(1)

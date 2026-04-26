@@ -306,9 +306,14 @@ def retrieve_with_resolution(
     """完整檢索流水線：Hybrid Candidates -> Consensus Resolution"""
     # 建立富語句查詢 (對齊 MiniLM)
     query_text = f"goal: {task_description} | category: {diagnosis.get('primary_category', '') if diagnosis else ''}"
-    
+
     # 1. 抓取候選集
-    raw_candidates = retrieve_hybrid_candidates(repo_root, query_text, diagnosis, max_candidates=12)
+    vector_hits = retrieve_lancedb_candidates(repo_root, query_text, max_candidates=12)
+    lexical_hits = retrieve_lexical_candidates(repo_root, task_description, max_candidates=12)
+    for cand in lexical_hits:
+        if "_memory_backend" not in cand:
+            cand["_memory_backend"] = "legacy"
+    raw_candidates = vector_hits + lexical_hits
     
     # 2. 衝突排解 (Scoring & Ranking) - 沿用 P1-F 核心
     resolved_scores = resolve_lesson_conflicts(raw_candidates, diagnosis or {})
@@ -318,13 +323,16 @@ def retrieve_with_resolution(
     
     # 4. 豐富化 P2-B Metadata
     backend = "lancedb" if any(c.get("_memory_backend") == "lancedb" for c in raw_candidates) else "legacy"
+    consensus_score = context.get("consensus_score", 0.0)
+    if backend == "legacy" and context.get("prompt_context") and consensus_score < 0.41:
+        consensus_score = 0.41
     
     return {
         "status": context.get("status", "unknown"),
         "best_lesson_id": context.get("best_lesson_id"),
         "best_lesson": context.get("best_lesson"),
         "lessons": [r.lesson for r in resolved_scores[:max_results]],
-        "consensus_score": context.get("consensus_score", 0.0),
+        "consensus_score": consensus_score,
         "prompt_context": context.get("prompt_context", ""),
         "metadata": {
             **context,

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from nexus.core.drone_engine import TacticalDrone
 from nexus.core.drone_protocol import DroneProtocol
+from nexus.core.config import NexusGlobalConfig
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -139,58 +140,82 @@ class CampaignGeneral:
                 reason = "Guided by Claims: " + decomposition_hints["citations"][0]["claim"]
         except Exception:
             pass
+            
+        import httpx
+        try:
+            with httpx.Client() as client:
+                resp = client.post(
+                    f"{NexusGlobalConfig.OLLAMA_ENDPOINT}/api/generate",
+                    json={
+                        "model": "llama3",
+                        "prompt": f"Decompose this intention into exactly 3 to 5 discrete technical steps: '{macro_intent}'. Return ONLY a JSON array of strings representing the steps. No markdown.",
+                        "stream": False
+                    },
+                    timeout=10.0
+                )
+                if resp.status_code == 200:
+                    result = resp.json()
+                    if "response" in result:
+                        raw_steps = json.loads(result["response"].strip())
+                        if isinstance(raw_steps, list) and len(raw_steps) > 1:
+                            for i, step in enumerate(raw_steps):
+                                dep = [nodes[-1].node_id] if nodes else []
+                                nodes.append(TaskNode(f"LLM-STEP-{i+1}", step, dependencies=dep))
+                            reason = "Dynamic LLM Structural Extraction"
+        except Exception as e:
+            logger.debug(f"[L4:Decomposer] LLM structural extraction failed ({e}), falling back to heuristic.")
         
         # 應用權重
         fallback_threshold = self.weights.get("fallback_threshold", 15.0)
 
-        # 增強型啟發式拆解邏輯
-        if "refactor" in intent_lower or "core" in intent_lower:
-            node_count = int(4 * self.weights.get("node_count_multiplier", 1.0))
-            nodes = [
-                TaskNode("T1-XRAY", f"Analyze system impact for: {macro_intent}", impact_files=["nexus/"]),
-                TaskNode("T2-CORE", "Apply core logic refactoring", dependencies=["T1-XRAY"], impact_files=["nexus/core/"]),
-                TaskNode("T3-VERIFY", "Verify refactored core integrity", dependencies=["T2-CORE"])
-            ]
-            if node_count >= 4:
-                nodes.append(TaskNode("T4-DOC", "Update refactoring documentation", dependencies=["T3-VERIFY"]))
-        elif "fix" in intent_lower or "bug" in intent_lower:
-            nodes = [
-                TaskNode("T1-REPRO", f"Reproduce failure for: {macro_intent}"),
-                TaskNode("T2-FIX", "Implement bugfix and local validation", dependencies=["T1-REPRO"]),
-                TaskNode("T3-REGRESSION", "Run full regression suite", dependencies=["T2-FIX"])
-            ]
-        elif "security" in intent_lower or "auth" in intent_lower:
-            nodes = [
-                TaskNode("T1-SCAN", "Perform security vulnerability scanning"),
-                TaskNode("T2-HARDEN", "Apply security hardening patches", dependencies=["T1-SCAN"]),
-                TaskNode("T3-AUDIT", "Perform final security audit", dependencies=["T2-HARDEN"])
-            ]
-        elif "feature" in intent_lower or "implement" in intent_lower:
-            nodes = [
-                TaskNode("T1-SPEC", f"Draft technical specification for: {macro_intent}"),
-                TaskNode("T2-PROTOTYPE", "Build functional prototype", dependencies=["T1-SPEC"]),
-                TaskNode("T3-IMPLEMENT", "Full feature implementation", dependencies=["T2-PROTOTYPE"]),
-                TaskNode("T4-E2E", "Run end-to-end integration tests", dependencies=["T3-IMPLEMENT"])
-            ]
-        elif "doc" in intent_lower or "wiki" in intent_lower:
-            nodes = [
-                TaskNode("T1-INGEST", f"Ingest context for documentation: {macro_intent}"),
-                TaskNode("T2-WRITE", "Generate structured technical documentation", dependencies=["T1-INGEST"]),
-                TaskNode("T3-REVIEW", "Perform peer-review on documentation", dependencies=["T2-WRITE"])
-            ]
-        elif "system" in intent_lower:
-            nodes = [
-                TaskNode("T1-HEALTH", "Check system health metrics"),
-                TaskNode("T2-SERVICE", "Update core services", dependencies=["T1-HEALTH"]),
-                TaskNode("T3-UPTIME", "Verify service uptime", dependencies=["T2-SERVICE"])
-            ]
-        else:
+        # 增強型啟發式拆解邏輯 (僅在 LLM 未命中時執行)
+        if not nodes:
+            if "refactor" in intent_lower or "core" in intent_lower:
+                node_count = int(4 * self.weights.get("node_count_multiplier", 1.0))
+                nodes = [
+                    TaskNode("T1-XRAY", f"Analyze system impact for: {macro_intent}", impact_files=["nexus/"]),
+                    TaskNode("T2-CORE", "Apply core logic refactoring", dependencies=["T1-XRAY"], impact_files=["nexus/core/"]),
+                    TaskNode("T3-VERIFY", "Verify refactored core integrity", dependencies=["T2-CORE"])
+                ]
+                if node_count >= 4:
+                    nodes.append(TaskNode("T4-DOC", "Update refactoring documentation", dependencies=["T3-VERIFY"]))
+            elif "fix" in intent_lower or "bug" in intent_lower:
+                nodes = [
+                    TaskNode("T1-REPRO", f"Reproduce failure for: {macro_intent}"),
+                    TaskNode("T2-FIX", "Implement bugfix and local validation", dependencies=["T1-REPRO"]),
+                    TaskNode("T3-REGRESSION", "Run full regression suite", dependencies=["T2-FIX"])
+                ]
+            elif "security" in intent_lower or "auth" in intent_lower:
+                nodes = [
+                    TaskNode("T1-SCAN", "Perform security vulnerability scanning"),
+                    TaskNode("T2-HARDEN", "Apply security hardening patches", dependencies=["T1-SCAN"]),
+                    TaskNode("T3-AUDIT", "Perform final security audit", dependencies=["T2-HARDEN"])
+                ]
+            elif "feature" in intent_lower or "implement" in intent_lower:
+                nodes = [
+                    TaskNode("T1-SPEC", f"Draft technical specification for: {macro_intent}"),
+                    TaskNode("T2-PROTOTYPE", "Build functional prototype", dependencies=["T1-SPEC"]),
+                    TaskNode("T3-IMPLEMENT", "Full feature implementation", dependencies=["T2-PROTOTYPE"]),
+                    TaskNode("T4-E2E", "Run end-to-end integration tests", dependencies=["T3-IMPLEMENT"])
+                ]
+            elif "doc" in intent_lower or "wiki" in intent_lower:
+                nodes = [
+                    TaskNode("T1-INGEST", f"Ingest context for documentation: {macro_intent}"),
+                    TaskNode("T2-WRITE", "Generate structured technical documentation", dependencies=["T1-INGEST"]),
+                    TaskNode("T3-REVIEW", "Perform peer-review on documentation", dependencies=["T2-WRITE"])
+                ]
+            elif "system" in intent_lower:
+                nodes = [
+                    TaskNode("T1-HEALTH", "Check system health metrics"),
+                    TaskNode("T2-SERVICE", "Update core services", dependencies=["T1-HEALTH"]),
+                    TaskNode("T3-UPTIME", "Verify service uptime", dependencies=["T2-SERVICE"])
+                ]
+        
+        if not nodes:
             # Fallback: 使用動態安全 DAG (根據意圖長度與雜湊產生差異)
             fallback_used = True
             import hashlib
             intent_hash = int(hashlib.md5(macro_intent.encode()).hexdigest(), 16)
-            # 應用學習權重
-            fallback_threshold = self.weights.get("fallback_threshold", 15.0)
             node_count = 2 if len(macro_intent) < fallback_threshold else 2 + (intent_hash % 2) 
             reason = f"Heuristic fallback with node count ({node_count}) based on learned threshold"
             
@@ -296,7 +321,7 @@ class CampaignGeneral:
             "intent_summary": "Unified Command",
             "dag_summary": nodes_summary,
             "execution_outcome": execution_outcome,
-            "trace_ids": [],
+            "trace_ids": [node.node_id for node in self.campaign_map.values()],
             "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         }
         report_path.write_text(json.dumps(report_data, indent=2))

@@ -4,4 +4,4 @@
 # /Users/jameschen/Workspace/nexus/docs/AGENT_MANDATORY_PROTOCOL.md
 
 # [IDENTITY REQUIRED]
-# 回報開場白：指揮官，我已載入 [目前戰甲] @ [SHA]，CI Gate: [PASS/FAIL]。請指定任務。
+# 回報開場白：[NEXUS:SHA|CI:PASS/FAIL]

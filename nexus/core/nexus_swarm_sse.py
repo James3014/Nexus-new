@@ -4,6 +4,11 @@ import socketserver
 import threading
 import json
 import time
+import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("nexus.sse")
 
 class SSEEmitter:
     """🛡️ Swarm Emitter: 基於 SSE 的 Agent 信令中心"""
@@ -14,7 +19,7 @@ class SSEEmitter:
     def add_client(self, client):
         with self.lock:
             self.clients.append(client)
-            print(f"📡 [SSE] Client connected. Total: {len(self.clients)}")
+            logger.info(f"📡 [SSE] Client connected. Total: {len(self.clients)}")
 
     def broadcast(self, data: Dict):
         payload = f"data: {json.dumps(data)}\n\n"
@@ -48,14 +53,18 @@ class SSEHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
-            print(f"📢 [SSE] Broadcasting: {data.get('type')}")
+            logger.info(f"📢 [SSE] Broadcasting: {data.get('type')}")
             emitter.broadcast(data)
             self.send_response(200)
             self.end_headers()
 
-def run_server(port=8080):
+from nexus.core.config import NexusGlobalConfig
+
+def run_server(port=None):
+    if port is None:
+        port = NexusGlobalConfig.SSE_PORT
     with socketserver.ThreadingTCPServer(("", port), SSEHandler) as httpd:
-        print(f"📡 [SSE:Server] Claude-Together Signaling Active on port {port}")
+        logger.info(f"📡 [SSE:Server] Claude-Together Signaling Active on port {port}")
         httpd.serve_forever()
 
 if __name__ == "__main__":

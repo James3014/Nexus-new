@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from nexus.core.state_contracts import NexusState
@@ -6,6 +7,7 @@ from nexus.core.router import SkillsRouter
 from nexus.core.context_hub import ContextHub
 from nexus.health.service import SelfHealService
 
+logger = logging.getLogger("nexus.commander")
 
 class Commander:
     """
@@ -44,7 +46,7 @@ class Commander:
         state = state or self.state_io.load_global_state()
         from nexus.core.crystal_analyzer import TraumaEngine
 
-        print(
+        logger.info(
             f"🧭 [Commander] Current state: {state.current_phase}:{state.current_step_id or 'none'}"
         )
 
@@ -72,7 +74,7 @@ class Commander:
 
         # 🛡️ External Needed Hook (Lesson from 09_STATE_CONTRACT_DRAFT)
         if state.external_needed:
-            print("🌐 [Commander] External knowledge requested (X-stage).")
+            logger.info("🌐 [Commander] External knowledge requested (X-stage).")
             return "RUN_SKILL:external-research"
 
         # 🛡️ Phase Health Autonomy (PHA-001): delegate health/self-heal to dedicated service.
@@ -100,17 +102,17 @@ class Commander:
 
     def _orchestrate_p(self, state):
         """P 階段：計畫生成 (對焦 v5 writing-plans)"""
-        print("🚀 [Commander] Triggering P-stage: Skills Routing...")
+        logger.info("🚀 [Commander] Triggering P-stage: Skills Routing...")
         return "RUN_SKILL:writing-plans"
 
     def _orchestrate_d(self, state):
         """D 階段：診斷 (對焦 systematic-debugging)"""
-        print("🚀 [Commander] Triggering D-stage: Analysis...")
+        logger.info("🚀 [Commander] Triggering D-stage: Analysis...")
         return "RUN_SKILL:systematic-debugging"
 
     def _orchestrate_r(self, state):
         """R 階段：修復 (對接 v5 repair)"""
-        print("🛠️ [Commander] Triggering R-stage: Execution...")
+        logger.info("🛠️ [Commander] Triggering R-stage: Execution...")
         
         # ⚓ [Phase 10] Universal ToolHook 管線
         from nexus.core.harness import default_director
@@ -130,18 +132,18 @@ class Commander:
         if status == "BLOCKED":
             enforce_block = bool(state.metadata.get("harness_enforce_block", False))
             if enforce_block:
-                print(f"🛑 [Commander:HARNESS] Blocked! Reason: {'; '.join(messages)}")
+                logger.error(f"🛑 [Commander:HARNESS] Blocked! Reason: {'; '.join(messages)}")
                 return "HARNESS_BLOCKED"
-            print(f"⚠️ [Commander:HARNESS] Soft-block bypassed: {'; '.join(messages)}")
+            logger.warning(f"⚠️ [Commander:HARNESS] Soft-block bypassed: {'; '.join(messages)}")
             
         if status == "WARN":
-            print(f"⚠️ [Commander:HARNESS] Warning: {'; '.join(messages)}")
+            logger.warning(f"⚠️ [Commander:HARNESS] Warning: {'; '.join(messages)}")
             
         return "RUN_SKILL:repair"
 
     def _orchestrate_a(self, state):
         """A 階段：審計 (對接 v22 Parity Audit)"""
-        print("🔬 [Commander] Triggering A-stage: Phase Parity Audit...")
+        logger.info("🔬 [Commander] Triggering A-stage: Phase Parity Audit...")
         import importlib
         AuditPhaseHandler = importlib.import_module("nexus.engine.phases.audit").AuditPhaseHandler
         handler = AuditPhaseHandler(self.project_root, self.project_root / ".nexus")
@@ -167,7 +169,7 @@ class Commander:
 
     def crystallize(self, state):
         """🧬 Phase C: 結晶化 (符合 2026-03-18_Nexus_記憶與學習v2)"""
-        print(f"💎 [Commander] Crystallizing lessons for task: {state.task_id}")
+        logger.info(f"💎 [Commander] Crystallizing lessons for task: {state.task_id}")
         # 保存至 crystal_lessons.jsonl
         try:
             lesson = {
@@ -181,7 +183,7 @@ class Commander:
             with open(lessons_path, "a") as f:
                 f.write(json.dumps(lesson) + "\n")
         except Exception as e:
-            print(f"⚠️ [Crystallize] Failed to save lesson: {e}")
+            logger.error(f"⚠️ [Crystallize] Failed to save lesson: {e}")
 
     def handle_ink_input(self, ink_content: str):
         """🎨 P5.10: 處理 Ink 緊湊格式輸入"""

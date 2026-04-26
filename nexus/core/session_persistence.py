@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import logging
-import subprocess
+from nexus.services.tmux_session_runtime import create_session
 
 logger = logging.getLogger(__name__)
 
@@ -19,17 +19,12 @@ class SessionPersistence:
         """具現化 tmux session 並進入對應的 worktree"""
         session_name = f"nexus-{shard_id}"
         logger.info(f"🐚 [Session] Creating tmux session: {session_name} for worktree: {worktree_path}")
-        
-        try:
-            # 建立並分離 tmux session (Dimension 1)
-            subprocess.run([
-                "tmux", "new-session", "-d", "-s", session_name, "-c", worktree_path
-            ], check=True)
-            logger.info(f"✅ [Session] {session_name} created and detached.")
-            return session_name
-        except subprocess.CalledProcessError as e:
-            logger.error(f"❌ [Session] Error creating tmux session: {e}")
-            return None
+        created = create_session(session_name, worktree_path)
+        if created:
+            logger.info("✅ [Session] %s created and detached.", session_name)
+            return created
+        logger.error("❌ [Session] Error creating tmux session for %s", session_name)
+        return None
 
     def restore_session(self, session_name: str):
         """還原持久化會話的指令摘要"""

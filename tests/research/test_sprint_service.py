@@ -43,6 +43,8 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     assert res.status == "SUCCESS"
     assert res.winner_source == "local"
     assert res.model_calls == 0
+    assert res.total_tokens == 0
+    assert res.token_capture_status == "not_applicable_local_only"
     assert res.promotable is True
     assert res.attempt_count == 1
     assert "retrieval_hits" in res.learning_trace
@@ -207,6 +209,197 @@ def test_llm_quota_falls_back_to_local(monkeypatch, tmp_path: Path):
     assert res.winner_source == "local"
     assert "quota" in res.error_codes
     assert "llm_fallback_local" in res.error_codes
+    assert res.total_tokens == 0
+
+
+def test_llm_mode_propagates_token_observability(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "quota_backoffs": 0,
+                "tokens_used": 222,
+                "token_capture_status": "measured",
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.total_tokens == 222
+    assert res.token_capture_status == "measured"
+
+
+def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeGateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ask_structured(self, **_kwargs):
+            return (
+                {"status": "APPROVED", "patch": "print('ok')\n", "tokens_used": 0, "token_capture_status": "unknown"},
+                "print('ok')\n",
+            )
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.total_tokens > 0
+    assert res.token_capture_status in {"measured", "estimated"}
+
+
+def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    captured = {}
+
+    class FakeGateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ask_structured(self, **kwargs):
+            captured["model_name"] = kwargs["model_name"]
+            return (
+                {"status": "APPROVED", "patch": "print('ok')\n", "tokens_used": 5, "token_capture_status": "measured"},
+                "print('ok')\n",
+            )
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3.1-pro-preview")
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert captured["model_name"] == "gemini-3.1-pro-preview"
+    assert res.model_name == "gemini-3.1-pro-preview"
+    assert res.model_patch_generated is True
+
+
+def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeGateway:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def ask_structured(self, **_kwargs):
+            return (
+                {"status": "FAIL", "summary": "Gateway Exhausted: TIMEOUT", "error_category": "gateway_error"},
+                "TIMEOUT",
+            )
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.winner_source == "local"
+    assert "llm_error" in res.error_codes
+
+
+def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    calls = {"local": 0}
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            raise RuntimeError("gateway_error")
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *args, **kwargs):
+            calls["local"] += 1
+            return f"print('local-{calls['local']}')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            score = 1.0 if kwargs["hint"] == "emergency_fallback" else 0.4
+            return CandidateEval(seed=kwargs["seed"], score=score, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert calls["local"] == 2
+    assert res.attempt_count == 2
 
 
 def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
@@ -234,6 +427,90 @@ def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
     assert res.status == "SUCCESS"
     assert "learn_slo_block" in res.error_codes
     assert res.learning_trace.get("learn_slo_guard", {}).get("active") is True
+
+
+def test_benchmark_can_force_llm_despite_learn_slo_guard(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "quota_backoffs": 0,
+                "tokens_used": 111,
+                "token_capture_status": "measured",
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.total_tokens == 111
+    assert "learn_slo_block" not in res.error_codes
+    assert res.learning_trace.get("learn_slo_guard", {}).get("reason") == "benchmark_force_llm_despite_learn_slo"
+
+
+def test_llm_mode_can_force_inplace_executor(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    calls = {"inplace": 0, "swarm": 0}
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "quota_backoffs": 0,
+                "tokens_used": 1,
+                "token_capture_status": "measured",
+            }
+
+    class FakeInPlaceExecutor:
+        def __init__(self, *_args, **_kwargs):
+            calls["inplace"] += 1
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    class FakeSwarmExecutor:
+        def __init__(self, *_args, **_kwargs):
+            calls["swarm"] += 1
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeInPlaceExecutor)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeSwarmExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert calls == {"inplace": 1, "swarm": 0}
 
 
 def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):

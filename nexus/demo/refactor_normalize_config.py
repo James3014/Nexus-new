@@ -1,7 +1,7 @@
 def normalize_hosts(hosts):
-    out = []
+    out = set()
     for h in hosts:
-        if h:
-            out.append(h.strip().lower())
-    # BUG: duplicate entries are not removed and order is unstable for consumers.
-    return out
+        normalized = h.strip().lower()
+        if normalized:
+            out.add(normalized)
+    return sorted(out)

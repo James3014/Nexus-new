@@ -56,6 +56,20 @@ class MemPalace:
                 clean_candidates.append(cand)
         return clean_candidates
 
+    def verify_context(self, context: str) -> Dict[str, Any]:
+        """[TD-2] Quick contextual check against blacklist."""
+        blacklist = self.cache.smembers("nexus:ethical_blacklist")
+        for pattern in blacklist:
+            if pattern in context:
+                return {"status": "BLOCKED", "reason": pattern}
+        return {"status": "SUCCESS"}
+
+    def audit_action(self, phase: str, action: str) -> bool:
+        """執行規約審計 (Merged from core/mem_palace.py)."""
+        if phase == "D" and "evidence" not in action.lower():
+            return False
+        return True
+
     def get_skill_constraints(self) -> Dict[str, Any]:
         """🛡️ 從活躍且高信任度的信念中提取技能約束規則 (v24.0 Hardened)。"""
         beliefs = self.list_beliefs(status="ACTIVE")

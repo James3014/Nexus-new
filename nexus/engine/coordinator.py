@@ -4,9 +4,6 @@ import logging
 import os
 import shutil
 import time
-import json
-import subprocess
-from datetime import datetime, timezone
 
 # 🛡️ Nexus 治理與合約導入
 from nexus.core.state_contracts import NexusState
@@ -15,7 +12,6 @@ from nexus.core.pipeline_metadata import PipelineMetadata
 from nexus.core.skill_outcomes import build_outcome_event, OutcomePayload
 from nexus.learning.skill_registry import SkillRegistry
 from nexus.learning.skill_store import SkillStore
-from nexus.learning.lewm_predictor import LeWMPredictor
 
 # 🛰️ 空間與治理協調
 from nexus.services.workspace import WorkspaceManager, WorkspacePermissionError
@@ -26,13 +22,23 @@ from nexus.learning.sota_searcher import SOTASearcher
 from nexus.learning.vector_cache import VectorCache
 from nexus.core.neural_aggregator import NexusNeuralAggregator
 from nexus.engine.federation import FederationLayer
-from nexus.core.hardened_validator import NexusHardenedValidator
+from nexus.governance.hardened_validator import NexusHardenedValidator
 from nexus.learning.latent_predictor_v20 import get_latent_forecaster
 from nexus.engine.self_healing_selector import get_self_healing_selector
 
 from nexus.engine.bootstrap import build_engine_components
 from nexus.engine.config import EngineConfig
-from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
+from nexus.engine.cli_pregate import run_cli_pregate
+from nexus.engine.direct_mode import analyze_task_spec
+from nexus.engine.autonomic_routing_service import AutonomicRoutingService
+from nexus.engine.forecast_gate_service import ForecastGateService
+from nexus.engine.context_enrichment_service import ContextEnrichmentService
+from nexus.engine.attempt_settlement_service import AttemptSettlementService
+from nexus.engine.repair_attempt_service import RepairAttemptService
+from nexus.engine.repair_setup_service import RepairSetupService
+from nexus.engine.crystallization_service import CrystallizationService
+from nexus.engine.subagent_outcome_service import SubagentOutcomeService
+from nexus.engine.repair_loop_service import RepairLoopService
 from nexus.services.memory import MemoryService
 from nexus.services.continuous_learning import finalize_learning_loop
 from scripts.engine.nexus_transaction import TransactionManager
@@ -44,12 +50,6 @@ from nexus.core.policy_loader import PolicyLoader
 
 logger = logging.getLogger(__name__)
 
-
-def _as_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return float(default)
 
 class RepairStrategy:
     """策略模式：決定修復路徑與權重優化"""
@@ -64,6 +64,7 @@ class NexusEngine:
     def __init__(self, config: EngineConfig, **kwargs):
         self.config = config
         self.project_root = config.project_root
+        self.run_dir = config.run_dir
         self.silent = config.silent
         self.fast_mode = config.fast_mode
         self.audit_level = config.audit_level
@@ -76,11 +77,80 @@ class NexusEngine:
         for name, instance in components.items():
             setattr(self, name, instance)
 
+        # Preserve coordinator-level DI contracts for tests and legacy callers.
+        self.reporter = kwargs.get("reporter", getattr(self, "reporter", None))
+        self.state_io = kwargs.get("state_io") or StateIO(self.project_root, run_dir=self.run_dir)
+        self.workspace_mgr = kwargs.get("workspace_mgr") or WorkspaceManager(self.project_root)
+        self.policy = kwargs.get("policy") or getattr(self, "policy", None) or PolicyLoader.load(str(self.project_root), env="dev")
+        self.gate_eval = kwargs.get("gate_eval") or GateEvaluator(self.policy)
+        self.metrics_agg = kwargs.get("metrics_agg") or MetricsAggregator()
+        self.validator = kwargs.get("validator") or NexusHardenedValidator()
+        self.latent_forecaster = kwargs.get("latent_forecaster") or get_latent_forecaster(str(self.project_root))
+        self.ash_selector = kwargs.get("ash_selector") or get_self_healing_selector(str(self.project_root), env="dev")
+        self.memory = kwargs.get("memory") or MemoryService(self.project_root)
+        self.federation = kwargs.get("federation") or FederationLayer(self.project_root)
+        self.vector_cache = kwargs.get("vector_cache") or VectorCache(self.project_root / ".nexus" / "vector_db")
+        self.sota_searcher = kwargs.get("sota_searcher") or SOTASearcher(self.vector_cache)
+        self.neural_aggregator = kwargs.get("neural_aggregator") or NexusNeuralAggregator()
+        self.swarm_planner = kwargs.get("swarm_planner") or HierarchicalGraphPlanner(self.project_root)
+        self.transaction_mgr = kwargs.get("transaction_mgr") or TransactionManager(self.project_root)
+        self.autonomic_routing = kwargs.get("autonomic_routing") or AutonomicRoutingService(
+            project_root=self.project_root,
+            memory_service=self.memory,
+            context_hub=getattr(self, "context_hub", None),
+            mem_palace=getattr(self, "mem_palace", None),
+            selector=self.ash_selector,
+        )
+        self.forecast_gate = kwargs.get("forecast_gate") or ForecastGateService(
+            latent_forecaster=self.latent_forecaster,
+            gate_eval=self.gate_eval,
+            ash_selector=self.ash_selector,
+            state_io=self.state_io,
+        )
+        self.context_enrichment = kwargs.get("context_enrichment") or ContextEnrichmentService(
+            sota_searcher=self.sota_searcher,
+            neural_aggregator=self.neural_aggregator,
+        )
+        self.attempt_settlement = kwargs.get("attempt_settlement") or AttemptSettlementService(
+            project_root=self.project_root,
+            run_dir=self.run_dir,
+            metrics_agg=self.metrics_agg,
+            crystallize_fn=self._crystallize,
+            transaction_mgr=self.transaction_mgr,
+            learning_finalize_fn=finalize_learning_loop,
+            reflex_loop=getattr(self, "reflex_loop", None),
+        )
+        self.repair_attempt = kwargs.get("repair_attempt") or RepairAttemptService(
+            project_root=self.project_root,
+            run_cli_pregate_fn=run_cli_pregate,
+        )
+        self.repair_setup = kwargs.get("repair_setup") or RepairSetupService(
+            project_root=self.project_root,
+            hardened_validator=self.hardened_validator,
+            swarm_planner=self.swarm_planner,
+            federation=self.federation,
+        )
+        self.crystallization = kwargs.get("crystallization") or CrystallizationService(
+            project_root=self.project_root,
+            reporter=self.reporter,
+        )
+        self.subagent_outcome = kwargs.get("subagent_outcome") or SubagentOutcomeService(
+            project_root=self.project_root,
+        )
+        self.repair_loop = kwargs.get("repair_loop") or RepairLoopService(
+            project_root=self.project_root,
+            repair_attempt=self.repair_attempt,
+            attempt_settlement=self.attempt_settlement,
+        )
+
         try:
             from nexus.engine.pipeline import NexusPipeline
             self.pipeline = NexusPipeline(self)
         except Exception:
             self.pipeline = None
+
+    def _detect_direct_mode(self, task_desc: str) -> bool:
+        return analyze_task_spec(task_desc).enabled
 
     def _run_task_pipeline(
         self,
@@ -94,6 +164,18 @@ class NexusEngine:
         kwargs.pop("task_id", None)
         kwargs.pop("task", None)
         kwargs.pop("context", None)
+        
+        context = context or {}
+        spec = analyze_task_spec(task_desc)
+        if spec.enabled:
+            logger.info("⚡ [Coordinator] Detected Direct Mode repair spec. Overriding autonomic routing.")
+            context["direct_mode"] = True
+            context["direct_mode_reason"] = spec.reason
+            if spec.target_files:
+                prior_targets = [str(p) for p in (context.get("target_files") or [])]
+                context["target_files"] = list(dict.fromkeys(prior_targets + spec.target_files))
+            if spec.verify_commands and not context.get("verify_commands"):
+                context["verify_commands"] = spec.verify_commands
         has_runtime_phases = isinstance(self.phases, dict) and all(
             hasattr(p, "run") for p in self.phases.values() if p is not None
         )
@@ -139,13 +221,17 @@ class NexusEngine:
         self.reporter.voice_notify(f"Nexus 啟動：偵測到 Bug {final_task_id}", urgency="critical")
         self.reporter.log_trace("run_bug", final_task_id, "START", 0, 0.0)
         
+        pipeline_kwargs = dict(kwargs)
+        pipeline_kwargs.pop("task_id", None)
+        pipeline_kwargs.pop("context", None)
+        
         return self._run_task_pipeline(
             task_desc=desc,
             task_type="bug",
             task_id=final_task_id,
             context=state.metadata,
             state=state,
-            **kwargs,
+            **pipeline_kwargs,
         )
 
     def _maybe_mark_pipeline_phase(self, phase: str) -> None:
@@ -206,24 +292,7 @@ class NexusEngine:
         final_id = kwargs.get("task_id", f"heal-{int(time.time())}")
         return self._execute_task_workflow(final_id, f"nexus:self-heal:{mode}")
 
-    def run_research(self, **kwargs) -> bool:
-        """執行 SOTA 學術研究任務"""
-        # 研究類任務通常有獨立的工作空間，由 coordinator 統一觸發投影
-        self.workspace_mgr.prepare_physical_sandbox(self.run_dir)
-        """執行基準測試 (v22-ARC 擴張)"""
-        if framework == "arc-agi":
-            from nexus.engine.arc_simulation import ARCVisualReasoner
-            reasoner = ARCVisualReasoner(swarm_mode=swarm_mode)
-            results = reasoner.run_tests(count=task_count)
-            # 物理寫入產出
-            output_dir = self.config.run_dir / "benchmarks"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = output_dir / f"arc_agi_{int(time.time())}.json"
-            report_path.write_text(json.dumps(results, indent=2))
-            return results
-            
-        # 預設 SWE-bench 流程...
-        return {"framework": framework, "status": "simulated", "score": 85.2}
+
 
     def run_benchmark(self, framework: str = "swe-bench", task_count: int = 15, swarm_mode: bool = False, **kwargs):
         """執行 Benchmark 基準測試 (支持蜂群並行模式)"""
@@ -312,285 +381,61 @@ class NexusEngine:
         if state is None:
             state = NexusState(task_id=task_id)
             
-        # --- 🧬 v20 Phase 0: Latent Forecast (JEPA Zero-token) ---
         task_desc = state.metadata.get("task_description", "Unknown Task")
-        
-        # 🛡️ 治理對位：支援元數據 Overdrive (用於測試與手動干預)
-        forecast = {
-            "est_tokens": state.metadata.get("forecast_tokens", 0),
-            "roi_score": state.metadata.get("roi_score", 0.0)
-        }
-        risk = {
-            "reject_prob": state.metadata.get("reject_prob", 0.0)
-        }
-        
-        # 若未提供 Overdrive，則由預測器進行物理推論
-        if forecast["roi_score"] == 0.0:
-            forecast = self.latent_forecaster.forecast_roi(task_desc)
-            risk = self.latent_forecaster.predict_risk(task_desc)
-        
-        est_tokens = _as_float(forecast.get("est_tokens", 0), 0.0)
-        roi_score = _as_float(forecast.get("roi_score", 0.0), 0.0)
-        state.metadata["forecast_tokens"] = est_tokens
-        state.metadata["forecast_roi"] = roi_score
-        
-        print(f"[{state.task_id}] [v20:JEPA] Forecast Tokens: {est_tokens}, ROI: {roi_score:.2f}")
-        
-        # --- 🧠 [Phase 11] Autonomic Routing ---
-        from nexus.engine.autonomic_router import AutonomicRouter
-        arouter = AutonomicRouter(project_root=str(self.project_root), memory_service=self.memory, mem_palace=getattr(self, "mem_palace", None))
-        
-        # 🧪 [Dead Code Resurrected] 獲取上下文預路由決策
-        pre_routing = self.context_hub.make_pre_routing_decision(task_id, state.metadata) if self.context_hub else {}
-        exec_plan = arouter.route(task_desc, state, forecast, pre_routing=pre_routing)
-        
-        state.metadata["autonomic_route"] = exec_plan.mode
-        state.metadata["autonomic_reason"] = exec_plan.reason
-        state.metadata["est_tokens"] = forecast.get("est_tokens", 0)
-        
-        if exec_plan.mode == "swarm":
-            state.metadata["swarm_mode"] = True
-            print(f"🧠 [Autonomic] Auto-escalated to SWARM: {exec_plan.reason}")
-        elif exec_plan.mode == "research_first":
-            state.metadata["force_external"] = True
-            print(f"🧠 [Autonomic] Auto-routed to RESEARCH_FIRST: {exec_plan.reason}")
-        elif exec_plan.mode == "self_heal" and self.ash_selector:
-            print(f"🧠 [Autonomic] Priority: SELF_HEAL triggered by memory match.")
-            # ASH 邏輯將由下方的 gate_eval 觸發或直接介入
-        elif exec_plan.mode == "external_skill":
-            print(f"🧠 [Autonomic] Priority: EXTERNAL_SKILL triggered. Binding {exec_plan.skill_id}...")
-            try:
-                from nexus.core.unified_registry import UnifiedRegistry
-                from pathlib import Path
-                reg = UnifiedRegistry(self.project_root)
-                # Ensure external skills are discoverable in a fresh process.
-                reg.refresh()
-                skill_data = reg.registry.get_by_task_id(exec_plan.skill_id)
-                if skill_data and skill_data.get("external_path"):
-                    skill_md = Path(skill_data["external_path"]).read_text(
-                        encoding="utf-8",
-                        errors="replace",
-                    )
-                    state.metadata["active_external_skill"] = skill_data["name"]
-                    state.metadata["task_description"] += f"\n\n[EXTERNAL SKILL INSTRUCTIONS: {skill_data['name']}]\n{skill_md}"
-                    print(f"✅ [SkillEmbody] Injected {len(skill_md)} bytes of tactical knowledge.")
-            except Exception as e:
-                print(f"⚠️ [SkillEmbody] Failed to inject external skill: {e}")
-        # ----------------------------------------
 
-        # 🛡️ 治理閘門：委託 GateEvaluator 進行 Phase D 判定
-        proceed, reason = self.gate_eval.should_proceed("D", forecast, risk)
-        if not proceed:
-            print(f"🚨 [Gate:Reject] {reason}! Triggering Adaptive Self-Healing...")
-            repair_plan = self.ash_selector.trigger_ash(task_id, task_desc, str(risk))
-            state.metadata["last_rejection_reason"] = reason
-            state.metadata["ash_selected_strategy"] = repair_plan["selected_strategy"]
-            self.state_io.save_global_state(state)
-            return  # 任務預防性終止
+        preflight = self.forecast_gate.evaluate(
+            task_id=task_id,
+            task_desc=task_desc,
+            state=state,
+            phase="D",
+        )
+        forecast = dict(preflight.get("forecast") or {})
+        if not preflight.get("proceed"):
+            return
+
+        self.autonomic_routing.apply(
+            state=state,
+            task_id=task_id,
+            task_desc=task_desc,
+            task_type=state.metadata.get("task_type", "bug"),
+            forecast=forecast,
+        )
 
         # --- 🧬 Phase X: SOTA Search & Academic Anchoring ---
         state.current_phase = "X"
         self._maybe_mark_pipeline_phase("X")
-        print(f"[{state.task_id}] [Phase X] Extracting SOTA patterns...")
-        sota_result = self.sota_searcher.search(state.metadata.get("task_description", ""), state.metadata.get("domain", "general"))
-        state.metadata["sota_patterns"] = sota_result.get("data")
-        
-        # --- 🧬 Phase D: Neural Aggregator (Triage Compression) ---
+        logger.info("[%s] [Phase X] Extracting SOTA patterns...", state.task_id)
         state.current_phase = "D"
-        print(f"[{state.task_id}] [Phase D] Aggregating neural context (Triage)...")
-        history = state.metadata.get("history_events", [])
-        condensed_context = self.neural_aggregator.triage_summarize(history)
-        state.metadata["diagnose_context"] = condensed_context
+        logger.info("[%s] [Phase D] Aggregating neural context (Triage)...", state.task_id)
+        self.context_enrichment.run(state=state)
         
         # --- Phase D: 修復診斷與代碼生成 ---
         self._maybe_mark_pipeline_phase("D")
-        print(f"[{state.task_id}] [Phase D] Running diagnostic engine...")
+        logger.info("[%s] [Phase D] Running diagnostic engine...", state.task_id)
             
         logger.info("🔮 [Nexus:Predict] Scanning environment for task: %s", task_id)
         
         try:
-            # --- 🧬 Phase A: Hardened Validator (AST Security Scan) ---
-            state.current_phase = "A"
-            print(f"[{state.task_id}] [Phase A] Hardening audit (AST X-Ray Scan)...")
-            # Assuming generated_code is available in state or context
-            generated_code = state.metadata.get("generated_code", "")
-            val_result = self.hardened_validator.validate_code(generated_code)
-            if not val_result["passed"]:
-                 print(f"[{state.task_id}] [Phase A] REJECTED: Security Risk Found!")
-                 state.metadata["lewm_sim_status"] = "REJECTED"
-                 return False
+            setup = self.repair_setup.prepare(state=state)
+            if not setup.get("proceed"):
+                return False
+            verify_cmds = list(setup.get("verify_cmds") or [])
+            skip_pregate_for_isolated_workspace = bool(setup.get("skip_pregate", False))
             
-            # --- 🧬 Phase P: Swarm        # 🐝 蜂群調度：DAG 規劃 (Plan Phase P)
-            state.current_phase = "P"
-            # 🛡️ 物理修復：從 metadata 讀取 swarm 標記，解決屬性缺失問題
-            is_swarm = state.metadata.get("swarm_mode", False)
-            if is_swarm:
-                logger.info("[Phase P] Swarm Mode ACTIVE. Orchestrating DAG...")
-                # 具現化元數據以供審計
-                state.metadata["task_graph_nodes"] = 3 # v19 Swarm Baseline
-                state.metadata["orchestration_pattern"] = "DAG_ORCHESTRATOR"
-                
-                # 🛡️ 物理具現：注入任務圖節點 (v19 模擬對位)
-                desc = state.metadata.get("task_description", "Feature development")
-                self.swarm_planner.add_task(f"{state.task_id}-p1", f"Analyze and Prepare {desc}")
-                self.swarm_planner.add_task(f"{state.task_id}-p2", f"Implement core services for {desc}", deps=[f"{state.task_id}-p1"])
-                self.swarm_planner.add_task(f"{state.task_id}-p3", f"Final Integration of {desc}", deps=[f"{state.task_id}-p2"])
-                
-                ready = self.swarm_planner.get_ready_tasks()
-                logger.info("🛰️ [Phase P] Orchestrated %d nodes in Swarm Graph.", len(ready))
-                v_path = self.swarm_planner.create_virtual_workspace(state.task_id)
-                logger.info("🛰️ [Swarm] Virtual Workspace deployed at: %s", v_path)
-                
-            # --- Phase P: 補丁套用與驗證 ---
-            # ⚖️ Phase 3 Quorum 2/3 檢測 (Federation Sensing)
-            if self.federation.quorum_check():
-                selected_node = self.federation.select_node()
-                logger.info("🛰️ [NSP:Sensing] Quorum PASS. Transition: ISOLATED -> DISPATCHED (Node: %s)", selected_node or "all")
-            else:
-                logger.warning("🛑 [NSP:Sensing] Quorum FAIL. Transition: ISOLATED -> FALLBACK_LOCAL")
-
-            verify_cmds = _auto_detect_verify_commands(self.project_root)
-            
-            # 進入修復循環 (模擬)
-            state.current_phase = "R"
-            for attempt in range(1, 4):
-                logger.info("🛠️ [R-Stage] Executing %s Flow (Attempt %d)", skill_id, attempt)
-                
-                # --- JEPA Sidecar (Elite P2) 模擬注入 ---
-                if state.metadata.get("sim_lewm"):
-                    from nexus.learning.lewm_predictor import LeWMPredictor
-                    lewm = LeWMPredictor()
-                    # 模擬時讀取當前任務描述
-                    sim_res = lewm.simulate(state.metadata.get("task_description", ""), None)
-                    sim_status = sim_res.get("status")
-                    if sim_status == "REJECTED":
-                        logger.warning(f"🚫 [JEPA] Simulator Rejected (Cost: {sim_res.get('cost')})")
-                        state.metadata["lewm_sim_status"] = "REJECTED"
-                        state.metadata["lewm_rejected_cost"] = sim_res.get("cost")
-                        # 🛡️ Hardened v18.16: 高風險阻斷
-                        break
-                    elif sim_status == "PASSED":
-                        state.metadata["lewm_sim_status"] = "PASSED"
-                        state.metadata["lewm_prediction_cost"] = sim_res.get("cost")
-                    else:
-                        logger.info(f"ℹ️ [JEPA] Simulator {sim_status}. Continuing standard flow.")
-                        state.metadata["lewm_sim_status"] = sim_status
-                # ----------------------------------------
-                
-                # ⚔️ Layer 4: BattleSwarm Trigger (Real-time Swarm on first failure)
-                if attempt == 2 and hasattr(self, "battle_swarm"):
-                    self.battle_swarm.default_workers = self.reflex_loop.config.get("battle_workers", 4) if hasattr(self, "reflex_loop") else 4
-                    logger.info(f"⚔️ [BattleSwarm] Triggering Layer 4 Parallel Repair with {self.battle_swarm.default_workers} workers...")
-                    
-                    def swarm_worker(strategy, wt_path, tid, desc, ctx):
-                        # 在每個 Worktree 中獨立平行驗證
-                        wt_passed, wt_gates = run_cli_pregate(project_root=wt_path, commands=verify_cmds)
-                        score = (sum(1 for g in wt_gates if g["passed"]) / max(len(wt_gates), 1)) * 10.0
-                        return {"passed": wt_passed, "score": score}
-                        
-                    battle_result = self.battle_swarm.trigger_battle(
-                        task_id=task_id, 
-                        desc=task_desc, 
-                        context=state.metadata, 
-                        execute_fn=swarm_worker
-                    )
-                    
-                    if battle_result.get("status") == "winner_found":
-                        winner = battle_result["winner"]
-                        logger.info(f"🏆 [BattleSwarm] Winner Strategy {winner['strategy']} applied.")
-                        
-                        # 找到 winning branch 並合併
-                        branches = battle_result.get("branches_to_clean", [])
-                        winner_branch = next((b for b in branches if winner["strategy"] in b), None)
-                        if winner_branch:
-                            subprocess.run(["git", "merge", "--squash", winner_branch], cwd=str(self.project_root), capture_output=True)
-                        
-                        passed = True
-                        gate_results = [{"status": "PASSED_VIA_SWARM", "passed": True}]
-                        
-                        # 立即蒸餾此結果
-                        from nexus.research.findings_distiller import FindingsDistiller
-                        from nexus.research.findings_memory import FindingsMemoryStore
-                        if hasattr(self, "wisdom_vault"):
-                            distiller = FindingsDistiller(FindingsMemoryStore(self.project_root), self.skill_registry, self.wisdom_vault)
-                            distiller.distill_battle_results(battle_result, task_id)
-                    else:
-                        # Swarm failed, fallback to standard pregate on current tree
-                        passed, gate_results = run_cli_pregate(project_root=self.run_dir, commands=verify_cmds)
-                        
-                    self.battle_swarm.cleanup(battle_result)
-                else:
-                    passed, gate_results = run_cli_pregate(
-                        project_root=self.run_dir,
-                        commands=verify_cmds
-                    )
-                
-                # 🛡️ [Evidence:Auto] 系統自動採集證據 (防止 Agent 篡改)
-                evidence_path = self.project_root / ".nexus/reports/hallucination_evidence.json"
-                evidence_path.parent.mkdir(parents=True, exist_ok=True)
-                auto_evidence = {
-                    "_source": "system",
-                    "final_response": f"Task {task_id} pregate {'PASSED' if passed else 'FAILED'}",
-                    "evidence_bundle": {
-                        "code_artifacts": [str(self.run_dir)],
-                        "test_artifacts": [{
-                            "cmd": r.get("cmd", ""),
-                            "exit_code": r.get("exit_code", -1),
-                            "passed": r.get("passed", False),
-                            "stdout_tail": r.get("stdout_tail", ""),
-                            "stderr_tail": r.get("stderr_tail", ""),
-                        } for r in gate_results],
-                        "command_artifacts": [
-                            f"{r.get('cmd', '')} -> rc={r.get('exit_code', -1)}"
-                            for r in gate_results
-                        ],
-                        "aggregates": {
-                            "success_rate": sum(1 for r in gate_results if r.get("passed")) / max(len(gate_results), 1),
-                            "total_commands": len(gate_results),
-                        }
-                    }
-                }
-                evidence_path.write_text(json.dumps(auto_evidence, indent=2, ensure_ascii=False), encoding="utf-8")
-                logger.info("🛡️ [Evidence:Auto] Written to %s (agent-tamper-proof)", evidence_path)
-
-                # 💎 結晶化：委託 MetricsAggregator 聚合數據
-                payload = self.metrics_agg.aggregate_crystallize_payload(
-                    task_id, skill_id, passed, gate_results, state.metadata
-                )
-                self._crystallize(payload)
-                
-                # 🧠 [Phase 14c] 神經反射：ReflexLoop 背景參數優化 (NAS + SwarmWorkers)
-                try:
-                    if hasattr(self, "reflex_loop"):
-                        changes = self.reflex_loop.run_cycle()
-                        if changes:
-                            logger.info(f"🧬 [ReflexLoop] Tuned components: {list(changes.keys())}")
-                except Exception as e:
-                    logger.error(f"⚠️ [ReflexLoop] Background optimization failed: {e}")
-                learning_finalize = finalize_learning_loop(
-                    self.project_root,
-                    state,
-                    success=bool(passed),
-                    source="engine.coordinator",
-                )
-                
-                if passed and not learning_finalize.get("writeback_required"):
-                    logger.info("✅ [%s] Successful crystallization.", skill_id)
-                    # 💎 [Transaction: Commit] Audit 通過，物理鎖定變更
-                    self.transaction_mgr.commit_if_passed(task_id)
-                    return True
-                elif passed and learning_finalize.get("writeback_required"):
-                    logger.info("📝 [%s] Code complete but write-back still pending.", skill_id)
-                    state.metadata["delivery_status"] = "code_done_writeback_pending"
-                    self.transaction_mgr.audit_rollback(task_id)
-                    return False
-                else:
-                    logger.info("🔄 Audit Rejected for %s. Retrying...", skill_id)
-                    # 🚨 [Transaction: Rollback] Audit 失敗，物理恢復真相
-                    self.transaction_mgr.audit_rollback(task_id)
-            
-            logger.info("❌ [%s] Mission Aborted after depletion of retries.", skill_id)
-            return False
+            return self.repair_loop.run(
+                task_id=task_id,
+                task_desc=task_desc,
+                skill_id=skill_id,
+                state=state,
+                verify_cmds=verify_cmds,
+                run_dir=self.run_dir,
+                skip_pregate_for_isolated_workspace=skip_pregate_for_isolated_workspace,
+                battle_swarm=getattr(self, "battle_swarm", None),
+                reflex_loop=getattr(self, "reflex_loop", None),
+                skill_registry=getattr(self, "skill_registry", None),
+                wisdom_vault=getattr(self, "wisdom_vault", None),
+                max_attempts=3,
+            )
         finally:
             # ⚓ 物理下沉：狀態主權硬化 (Harvest)
             self.state_io.save_global_state(state)
@@ -600,61 +445,8 @@ class NexusEngine:
         """
         物理結晶化：將指標 Payload 寫入治理日誌與長效索引內容及對等。
         """
-        # 1. 寫入 Event Log
-        log_path = self.project_root / ".nexus/metrics/skill_outcome_events.jsonl"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a") as f:
-            import json
-            f.write(json.dumps(payload) + "\n")
-            
-        # 🚀 [v0.3] Soul-Palace Auto-Archiving
-        try:
-            from scripts.ops.soul_palace_engine import SoulPalaceEngine
-            palace = SoulPalaceEngine(self.project_root)
-            artifact_content = f"Task {payload.get('task_id')} ({payload.get('skill_id')}): Result={payload.get('passed')}"
-            palace.store_knowledge("artifact", artifact_content, layer=2)
-        except Exception as e:
-            logger.warning(f"⚠️ [SoulPalace:A] Archiving failed: {e}")
-
-        # 2. 通知 Reporter/Hub
-        self.reporter.report_outcome(payload)
-        logger.info("💎 [Crystallize] Outcome persisted for task: %s", payload.get("decision_id"))
+        self.crystallization.persist_outcome(payload)
 
     def receive_subagent_outcome(self, payload: Dict[str, Any], state: NexusState):
         """⚖️ AOS-P5.3: 收攏子代理執行期補丁與知識"""
-        task_id = payload.get("taskid", "sub-task")
-        passed = payload.get("audit_passed", False)
-        worktree = payload.get("worktree")
-        
-        logger.info(f"⚖️ [Nexus:Aggregator] Receiving outcome from {task_id}. Audit: {passed}")
-        
-        if not passed:
-            logger.warning(f"🚨 [Aggregator:REJECT] Sub-agent {task_id} failed audit. Discarding patch.")
-            return False
-
-        # 1. 物理合併補丁 (Git Merge Worktree)
-        try:
-            subprocess.run(["git", "merge", worktree], cwd=self.project_root, check=True)
-            logger.info(f"✅ [Aggregator:MERGE] Patch from {task_id} integrated to main chain.")
-        except:
-            logger.error(f"❌ [Aggregator:MERGE_ERROR] Conflict detected during sub-agent merge.")
-            return False
-
-        # 2. 知識結晶化 (Crystal Save Lesson)
-        # 確保分身學到的教訓不會因 worktree 刪除而消失
-        from nexus.core.crystal import Crystal
-        crystal = Crystal(self.project_root)
-        lesson_id = f"lesson-{task_id}-{int(datetime.now(timezone.utc).timestamp())}"
-        crystal.save_lesson(
-            lesson_id=lesson_id,
-            skill_id="sub-agent-repair",
-            payload=payload
-        )
-        logger.info(f"💎 [Aggregator:CRYSTAL] Lesson {lesson_id} persisted to LanceDB.")
-        
-        # 寫入 event log
-        log_path = self.project_root / ".nexus/metrics/skill_outcome_events.jsonl"
-        with open(log_path, "a") as f:
-            f.write(json.dumps(payload) + "\n")
-        
-        return True
+        return self.subagent_outcome.handle(payload, state)

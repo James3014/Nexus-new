@@ -26,6 +26,7 @@ class FindingsCard:
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     recall_accuracy: float = 0.0
     task_id: str = ""
+    tenant_id: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -33,7 +34,14 @@ class FindingsCard:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "FindingsCard":
-        return cls(**data)
+        allowed = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in data.items() if k in allowed}
+        extra_unknown = {k: v for k, v in data.items() if k not in allowed}
+        if extra_unknown:
+            filtered_extra = dict(filtered.get("extra") or {})
+            filtered_extra.update(extra_unknown)
+            filtered["extra"] = filtered_extra
+        return cls(**filtered)
 
     @classmethod
     def from_lesson_event(cls, event: Any) -> "FindingsCard":
@@ -121,12 +129,19 @@ class FindingsMemoryStore:
         self._atomic_write_json(path, payload)
 
         # 🚀 [v24.0 Evolution] Trigger Vector Indexing if repository is available
+        lancedb_synced = False
         try:
             from nexus.services.memory_repository import MemoryRepository
-            repo = MemoryRepository(self.project_root / ".nexus" / "knowledge" / "lancedb")
+            repo = MemoryRepository(self.project_root / ".nexus" / "memory" / "memory_index.lancedb")
             repo.semantic_dedup_ingest("findings_cards", payload)
+            lancedb_synced = True
         except Exception:
             pass
+        
+        card.extra["lancedb_synced"] = lancedb_synced
+        payload["extra"]["lancedb_synced"] = lancedb_synced
+        self._atomic_write_json(path, payload) # re-write with sync status if needed that's fine, but at least card object has it
+
 
         return str(path)
 

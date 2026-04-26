@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import json
 import logging
-from nexus.core.capability_gate import CapabilityGate
+from nexus.governance.capability_gate import CapabilityGate
 from nexus.core.engine.nexus_transaction import TransactionManager
 
 logger = logging.getLogger(__name__)

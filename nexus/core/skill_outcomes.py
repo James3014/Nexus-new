@@ -16,6 +16,15 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _normalize_decision_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "dec_unknown"
+    if text.startswith("dec_"):
+        return text
+    return f"dec_{text}"
+
+
 from dataclasses import dataclass
 
 @dataclass
@@ -52,7 +61,7 @@ def build_outcome_event(payload: OutcomePayload) -> Dict[str, Any]:
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "task_id": str(payload.task_id),
         "phase": str(payload.phase),
-        "decision_id": str(payload.decision_id),
+        "decision_id": _normalize_decision_id(payload.decision_id),
         "skill_id": str(payload.skill_id),
         "pass": bool(payload.passed),
         "fail": bool(fail),

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from nexus.orchestrator.evidence_collector import EvidenceCollector
-from nexus.orchestrator.task_contract import Task, TaskStatus
+from nexus.orchestrator.task_contract import Evidence, Task, TaskStatus
 
 @pytest.fixture
 def task():
@@ -26,6 +26,7 @@ def test_run_check(task, tmp_path):
 
 def test_verify_gate_pass(task, tmp_path):
     collector = EvidenceCollector(reports_dir=str(tmp_path))
+    task.add_evidence(Evidence(command="pytest -q tests/nexus/orchestrator", exit_code=0, output_summary="3 passed"))
     
     with patch("subprocess.run") as mock_run:
         # Delivery gate passes
@@ -34,7 +35,7 @@ def test_verify_gate_pass(task, tmp_path):
         result = collector.verify_gate(task)
         assert result is True
         assert len(task.evidence_list) >= 1
-        assert "delivery-gate" in task.evidence_list[0].command
+        assert any("delivery-gate" in evidence.command for evidence in task.evidence_list)
 
 def test_verify_gate_fail(task, tmp_path):
     collector = EvidenceCollector(reports_dir=str(tmp_path))
@@ -44,4 +45,15 @@ def test_verify_gate_fail(task, tmp_path):
         
         result = collector.verify_gate(task)
         assert result is False
+
+def test_verify_gate_fails_without_required_pytest_evidence(task, tmp_path):
+    collector = EvidenceCollector(reports_dir=str(tmp_path))
+
+    with patch("subprocess.run") as mock_run:
+        result = collector.verify_gate(task)
+
+    assert result is False
+    assert task.evidence_list[-1].command == "evidence-precheck"
+    assert "pytest" in task.evidence_list[-1].output_summary
+    mock_run.assert_not_called()
 # integrity-seal: 1776512137

@@ -248,6 +248,15 @@ def rebuild_memory_index(repo_root: Path) -> Dict[str, Any]:
         existing_ids = set(table.to_pandas()["record_id"].tolist())
     except Exception:
         existing_ids = set()
+    if not existing_ids and hasattr(table, "_rows"):
+        try:
+            existing_ids = {
+                str(row.get("record_id"))
+                for row in list(getattr(table, "_rows", []))
+                if isinstance(row, dict) and row.get("record_id")
+            }
+        except Exception:
+            existing_ids = set()
         
     new_records = [r for r in all_records if r["record_id"] not in existing_ids]
     

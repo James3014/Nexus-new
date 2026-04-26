@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import subprocess
 import time
@@ -56,6 +57,11 @@ class SprintResult:
     model_calls: int
     quota_backoffs: int
     test_timeouts: int
+    total_tokens: int = 0
+    token_capture_status: str = "not_applicable_local_only"
+    model_name: str = ""
+    model_patch_generated: bool = False
+    fallback_used: bool = False
     error_codes: list[str] = field(default_factory=list)
     rejection_summary: dict[str, int] = field(default_factory=dict)
     learning_trace: dict[str, Any] = field(default_factory=dict)
@@ -77,8 +83,19 @@ class LLMCandidateGenerator:
         from nexus.services.gateway import BattlesuitGateway
         self.gateway = BattlesuitGateway(project_root=project_root)
         self.safe_mode = safe_mode
+        self.model_chain = self._model_chain()
+
+    def _model_chain(self) -> list[str]:
+        override = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME", "") or "").strip()
+        if override:
+            return [override]
+        return ["gemini-3-flash-preview"] if self.safe_mode else ["gemini-3-flash-preview", "gemini-3.1-pro-preview"]
 
     def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
+        def _estimate_tokens(text: str) -> int:
+            # Fallback estimate when gateway does not return token usage.
+            return max(1, len(text) // 4)
+
         prompt_text = (
             "You are executing Stage 1 of a Hyper-Sprint (Gladiator mode).\n"
             f"Task: {task}\n"
@@ -86,11 +103,10 @@ class LLMCandidateGenerator:
             f"[CURRENT SOURCE]\n{source_code}\n\n"
             "Return ONLY the full updated file content in the 'patch' field."
         )
-        model_chain = ["gemini-3-flash-preview"] if self.safe_mode else ["gemini-3-flash-preview", "gemini-3.1-pro-preview"]
         quota_backoffs = 0
         model_calls = 0
         last_err = ""
-        for idx, model in enumerate(model_chain):
+        for idx, model in enumerate(self.model_chain):
             try:
                 model_calls += 1
                 out, raw = self.gateway.ask_structured(
@@ -100,8 +116,31 @@ class LLMCandidateGenerator:
                     output_schema={"status": "APPROVED | FAIL", "patch": "Full target file content"},
                     model_name=model,
                 )
-                code = out.get("patch") or raw
-                return code, {"source": self.source, "model_calls": model_calls, "quota_backoffs": quota_backoffs}
+                status = str(out.get("status", "")).upper() if isinstance(out, dict) else ""
+                code = out.get("patch") if isinstance(out, dict) else None
+                if status == "FAIL" or not code:
+                    category = str(out.get("error_category", "llm_no_patch") if isinstance(out, dict) else "llm_no_patch")
+                    raise RuntimeError(category)
+                tokens_used = 0
+                token_capture_status = "unknown"
+                if isinstance(out, dict):
+                    try:
+                        tokens_used = int(out.get("tokens_used", 0) or 0)
+                    except (TypeError, ValueError):
+                        tokens_used = 0
+                    token_capture_status = str(out.get("token_capture_status", "unknown") or "unknown")
+                if tokens_used <= 0 and model_calls > 0:
+                    tokens_used = _estimate_tokens(prompt_text) + _estimate_tokens(str(code))
+                    token_capture_status = "estimated"
+                return code, {
+                    "source": self.source,
+                    "model_calls": model_calls,
+                    "quota_backoffs": quota_backoffs,
+                    "tokens_used": tokens_used,
+                    "token_capture_status": token_capture_status,
+                    "model_name": model,
+                    "model_patch_generated": True,
+                }
             except Exception as exc:  # noqa: BLE001
                 err = str(exc).lower()
                 last_err = str(exc)
@@ -111,7 +150,7 @@ class LLMCandidateGenerator:
                     delay = get_retry_delay(RetryParams(attempt=quota_backoffs, max_retries=3))
                     time.sleep(delay)
                     continue
-                if idx < len(model_chain) - 1:
+                if idx < len(self.model_chain) - 1:
                     continue
                 raise
         raise RuntimeError(last_err or "all_models_failed")
@@ -122,7 +161,13 @@ class LocalCandidateGenerator:
     def generate(self, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
         from .local_sprint_mutator import generate_local_candidate
         code = generate_local_candidate(source_code, task, mutation_hint, seed)
-        return code, {"source": self.source, "model_calls": 0, "quota_backoffs": 0}
+        return code, {
+            "source": self.source,
+            "model_calls": 0,
+            "quota_backoffs": 0,
+            "tokens_used": 0,
+            "token_capture_status": "not_applicable_local_only",
+        }
 
 class SprintExecutor:
     def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int):
@@ -133,9 +178,15 @@ class SprintExecutor:
         self.broker = SwarmBroker(repo_root)
 
     def evaluate_candidate(self, *, seed: int, hint: str, code: str, source: str) -> CandidateEval:
-        evaluator = CandidateEvaluator(self.repo_root, self.pytest_cmd, self.timeout_sec)
         target_rel = self.scope_files[0]
-        original = (self.repo_root / target_rel).read_text(encoding="utf-8") if (self.repo_root / target_rel).exists() else ""
+        if Path(target_rel).is_absolute():
+            direct_executor = InPlaceSprintExecutor(
+                repo_root=self.repo_root,
+                target_file=target_rel,
+                pytest_cmd=self.pytest_cmd,
+                timeout_sec=self.timeout_sec,
+            )
+            return direct_executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
 
         # Swarm handling (Executor-specific) with timing instrumentation
         start_create = time.time()
@@ -146,14 +197,28 @@ class SprintExecutor:
             return CandidateEval(seed=seed, score=0.0, hint=hint, error="broker_timeout", source=source)
 
         try:
+            if swarm_dir.resolve() == self.repo_root.resolve():
+                swarm_executor = InPlaceSprintExecutor(
+                    repo_root=self.repo_root,
+                    target_file=target_rel,
+                    pytest_cmd=self.pytest_cmd,
+                    timeout_sec=self.timeout_sec,
+                )
+                return swarm_executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
+
             start_sync = time.time()
             self.broker.sync_scope(swarm_dir, scope_files=self.scope_files)
             sync_elapsed = time.time() - start_sync
 
             # Use evaluator but on swarm_dir
-            evaluator.repo_root = swarm_dir
             start_test = time.time()
-            res = evaluator.evaluate(seed=seed, hint=hint, code=code, source=source, target_file=target_rel, original_code=original)
+            swarm_executor = InPlaceSprintExecutor(
+                repo_root=swarm_dir,
+                target_file=target_rel,
+                pytest_cmd=self.pytest_cmd,
+                timeout_sec=self.timeout_sec,
+            )
+            res = swarm_executor.evaluate_candidate(seed=seed, hint=hint, code=code, source=source)
             test_elapsed = time.time() - start_test
 
             # Record detailed timings in hint or extra (here we use CandidateEval which we'll ensure has enough fields)
@@ -297,17 +362,22 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         phase_slo_pass = bool(learn_slo.get("phase_slo_pass", False))
         learn_slo_guard["phase_slo_pass"] = phase_slo_pass
         learn_slo_guard["required_done_ratio"] = required_done_ratio
-        if llm_mode_effective and (not phase_slo_pass or required_done_ratio < 0.95):
+        force_llm_for_benchmark = os.environ.get("NEXUS_FORCE_LLM_DESPITE_LEARN_SLO", "").strip().lower() in {"1", "true", "yes"}
+        if llm_mode_effective and (not phase_slo_pass or required_done_ratio < 0.95) and not force_llm_for_benchmark:
             llm_mode_effective = False
             learn_slo_guard["active"] = True
             learn_slo_guard["reason"] = "learn_phase_slo_not_ready"
+        elif llm_mode_effective and force_llm_for_benchmark and (not phase_slo_pass or required_done_ratio < 0.95):
+            learn_slo_guard["active"] = True
+            learn_slo_guard["reason"] = "benchmark_force_llm_despite_learn_slo"
     except Exception as exc:  # noqa: BLE001
         learn_slo_guard["reason"] = f"learn_slo_read_error:{exc}"
 
     llm_generator: Optional[LLMCandidateGenerator] = LLMCandidateGenerator(repo_root, config.safe_mode) if llm_mode_effective else None
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
-    if llm_mode_effective:
+    force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+    if llm_mode_effective and not force_inplace_executor:
         executor = SprintExecutor(repo_root, scope_files=scope_files, pytest_cmd=pytest_cmd, timeout_sec=config.stage1_timeout_sec)
     else:
         executor = InPlaceSprintExecutor(
@@ -319,6 +389,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     candidates: list[CandidateEval] = []
     model_calls = 0
+    model_names: set[str] = set()
+    model_patch_generated = False
+    fallback_used = False
+    total_tokens = 0
+    token_capture_statuses: set[str] = set()
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
@@ -539,6 +614,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     )
                     used_source = str(meta.get("source", "llm"))
                 except Exception as llm_exc:  # noqa: BLE001
+                    model_calls += 1
+                    fallback_used = True
+                    if llm_generator is not None and getattr(llm_generator, "model_chain", None):
+                        model_names.add(str(llm_generator.model_chain[0]))
                     err = str(llm_exc).lower()
                     if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
                         quota_backoffs += 1
@@ -562,6 +641,14 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 )
                 used_source = str(meta.get("source", "local"))
             model_calls += int(meta.get("model_calls", 0))
+            if str(meta.get("model_name", "") or ""):
+                model_names.add(str(meta.get("model_name")))
+            if bool(meta.get("model_patch_generated", False)):
+                model_patch_generated = True
+            if used_source.startswith("local") and llm_generator is not None:
+                fallback_used = True
+            total_tokens += int(meta.get("tokens_used", 0) or 0)
+            token_capture_statuses.add(str(meta.get("token_capture_status", "unknown") or "unknown"))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
             guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
@@ -599,10 +686,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
 # R1.1: Emergency Fallback Valve - Ensure we match baseline if all else fails
     has_success = any(c.score >= 1.0 for c in candidates)
-    tried_local = any(c.source == "local" for c in candidates)
-    if not has_success and not tried_local:
-        # Perform one last verified local run as "local" source
-        code, meta = local_generator.generate(source_code=source_code, task=config.task, mutation_hint="emergency_baseline_match", seed=0)
+    if not has_success:
+        # Perform one last verified local run as "local" source. This remains active even
+        # after a failed local fallback so bounded LLM runs do not under-sample simple fixes.
+        code, meta = local_generator.generate(source_code=source_code, task=config.task, mutation_hint="emergency_baseline_match", seed=999)
         if code != source_code:
             guard_ok, _ = _semantic_guard(source_code, code, config.task, meta.get("source", "local"))
             if guard_ok:
@@ -621,6 +708,19 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             model_calls=model_calls,
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
+            total_tokens=total_tokens,
+            token_capture_status=(
+                "measured"
+                if total_tokens > 0
+                else (
+                    "missing_gateway_stats"
+                    if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
+                    else ("missing" if model_calls > 0 else "not_applicable_local_only")
+                )
+            ),
+            model_name=",".join(sorted(model_names)),
+            model_patch_generated=model_patch_generated,
+            fallback_used=fallback_used,
             error_codes=sorted(set(error_codes)),
             rejection_summary={},
             learning_trace=learning_trace,
@@ -650,6 +750,19 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             model_calls=model_calls,
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
+            total_tokens=total_tokens,
+            token_capture_status=(
+                "measured"
+                if total_tokens > 0
+                else (
+                    "missing_gateway_stats"
+                    if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
+                    else ("missing" if model_calls > 0 else "not_applicable_local_only")
+                )
+            ),
+            model_name=",".join(sorted(model_names)),
+            model_patch_generated=model_patch_generated,
+            fallback_used=fallback_used,
             error_codes=final_codes,
             rejection_summary=rejection_summary,
             learning_trace=learning_trace,
@@ -661,8 +774,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_score = best.score
     final_patch = best.candidate_code or source_code
     final_reason = "stage1_pass"
+    disable_dayshift = os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
     # Stage 2 is optional enhancement only. Core success must not depend on external quota.
-    if llm_mode_effective and "quota" not in error_codes:
+    if llm_mode_effective and "quota" not in error_codes and not disable_dayshift:
         swarm_dir = SwarmBroker(repo_root).acquire(timeout_sec=config.timeout_sec)
         if swarm_dir:
             try:
@@ -690,6 +804,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 SwarmBroker(repo_root).release(swarm_dir)
     elif llm_mode_effective and "quota" in error_codes:
         final_reason = "dayshift_skipped_due_quota_fallback"
+    elif llm_mode_effective and disable_dayshift:
+        final_reason = "dayshift_skipped_by_benchmark_budget"
     elif config.llm_mode and not llm_mode_effective:
         error_codes.append("learn_slo_block")
         final_reason = "dayshift_skipped_due_learn_slo_guard"
@@ -715,6 +831,19 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         model_calls=model_calls,
         quota_backoffs=quota_backoffs,
         test_timeouts=test_timeouts,
+        total_tokens=total_tokens,
+        token_capture_status=(
+            "measured"
+            if total_tokens > 0
+            else (
+                "missing_gateway_stats"
+                if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
+                else ("missing" if model_calls > 0 else "not_applicable_local_only")
+            )
+        ),
+        model_name=",".join(sorted(model_names)),
+        model_patch_generated=model_patch_generated,
+        fallback_used=fallback_used,
         error_codes=final_codes,
         rejection_summary=rejection_summary,
         learning_trace=learning_trace,
@@ -723,5 +852,3 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         promotable=final_score >= 0.9,
         patch=final_patch,
     )
-
-

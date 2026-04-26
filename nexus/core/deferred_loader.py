@@ -33,5 +33,4 @@ def lazily_load(func: Callable) -> Callable:
 @lazily_load
 def build_rg_index():
     """模擬重量級 Ripgrep 索引構建"""
-    time.sleep(0.5)
     return {"status": "INDEXED", "count": 12000}

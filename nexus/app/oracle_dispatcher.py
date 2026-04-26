@@ -13,26 +13,25 @@ class OracleDispatcher:
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.bus = ShadowBus(project_root)
-        self.intent_map = {
-            "refactor": "nightshift",
-            "fix": "hyper",
-            "implement": "hyper",
-            "add": "swarm",
-            "check": "baseline"
-        }
 
     def trigger_shadow_sync(self, user_input: str) -> Optional[str]:
         """
         非阻塞觸發影子執行。
         """
-        user_input_l = user_input.lower()
+        from nexus.experiments.msa_routing.query_classifier import classify_query
         
-        # 簡單意圖識別邏輯 (未來可對接更強的分類器)
-        selected_mode = "hyper" # Default
-        for key, mode in self.intent_map.items():
-            if key in user_input_l:
-                selected_mode = mode
-                break
+        # 使用正式的 MSA 分類器取代原有的樸素對映
+        query_type = classify_query(user_input)
+        
+        # 轉換 MSA query type 到執行 mode
+        mode_mapping = {
+            "code": "hyper",
+            "rule": "swarm",
+            "belief": "baseline",
+            "artifact": "nightshift", 
+            "default": "hyper"
+        }
+        selected_mode = mode_mapping.get(query_type, "hyper")
         
         # 產生唯一影子任務 ID
         tid = f"shadow_{hashlib.md5(user_input.encode()).hexdigest()[:8]}"

@@ -8,7 +8,7 @@ class RateLimiter:
 
     def allow(self):
         now = time.time()
-        # BUG: no pruning of stale hits
+        self.hits = [hit for hit in self.hits if now - hit < self.window_sec]
         if len(self.hits) >= self.limit:
             return False
         self.hits.append(now)

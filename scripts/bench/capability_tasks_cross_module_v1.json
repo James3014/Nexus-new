@@ -1,0 +1,36 @@
+{
+  "version": "2026-04-23",
+  "description": "Cross-module refactor benchmark pack (12 tasks) for validating swarm/drone/nightshift advantage.",
+  "tasks": [
+    {
+      "id": "xmod-hard-001",
+      "difficulty": "hard",
+      "task_type": "cross_module_refactor_swarm",
+      "task_desc": "Cross-module refactor: reconcile coordinator/service contracts and preserve semantic completion under drone escalation",
+      "target_file": "nexus/engine/coordinator.py",
+      "test_file": "tests/engine/test_coordinator.py",
+      "success_criteria": "all_target_tests_pass"
+    },
+    {
+      "id": "xmod-hard-002",
+      "difficulty": "hard",
+      "task_type": "cross_module_refactor_swarm",
+      "task_desc": "Cross-module refactor: align swarm ownership lock and report claims causality for nightshift fallback",
+      "target_file": "nexus/core/swarm_orchestrator.py",
+      "test_file": "tests/combat/test_combat_swarm_race.py",
+      "success_criteria": "all_target_tests_pass"
+    },
+    {"id": "xmod-hard-003", "difficulty": "hard", "task_type": "cross_module_refactor_swarm", "task_desc": "Cross-module refactor: unify learn pipeline closure between research_flow_service and sprint_service with guarded escalation", "target_file": "nexus/app/research_flow_service.py", "test_file": "tests/app/test_research_flow_service.py", "success_criteria": "all_target_tests_pass"},
+    {"id": "xmod-hard-004", "difficulty": "hard", "task_type": "cross_module_refactor_swarm", "task_desc": "Cross-module refactor: align planner output contracts with swarm execution context propagation", "target_file": "nexus/core/planner_executor.py", "test_file": "tests/health/test_planner_executor.py", "success_criteria": "all_target_tests_pass"},
+
+    {"id": "xmod-hard-005", "difficulty": "hard", "task_type": "cross_module_refactor_drone", "task_desc": "Cross-module refactor: stabilize drone semantic completion over multi-step repair handoff", "target_file": "nexus/core/drone_engine.py", "test_file": "tests/core/test_drone_integration.py", "success_criteria": "all_target_tests_pass"},
+    {"id": "xmod-hard-006", "difficulty": "hard", "task_type": "cross_module_refactor_drone", "task_desc": "Cross-module refactor: enforce drone ownership boundaries with report causality evidence", "target_file": "nexus/core/swarm_orchestrator.py", "test_file": "tests/core/test_drone_action_normalizer.py", "success_criteria": "all_target_tests_pass"},
+    {"id": "xmod-hard-007", "difficulty": "hard", "task_type": "cross_module_refactor_drone", "task_desc": "Cross-module refactor: sync drone retry budget with acceptance evidence writer", "target_file": "nexus/delivery/report_claims.py", "test_file": "tests/ops/test_verify_report_claims.py", "success_criteria": "all_target_tests_pass"},
+    {"id": "xmod-hard-008", "difficulty": "hard", "task_type": "cross_module_refactor_drone", "task_desc": "Cross-module refactor: integrate drone repair outcomes into coordinator completion contract", "target_file": "nexus/engine/completion_contract.py", "test_file": "tests/engine/test_completion_contract.py", "success_criteria": "all_target_tests_pass"},
+
+    {"id": "xmod-hard-009", "difficulty": "hard", "task_type": "cross_module_refactor_nightshift", "task_desc": "Cross-module refactor: NightShift escalation criteria alignment with hyper stage1 failures", "target_file": "nexus/app/nightshift_runner_service.py", "test_file": "tests/app/test_nightshift_runner_service.py", "success_criteria": "all_target_tests_pass"},
+    {"id": "xmod-hard-010", "difficulty": "hard", "task_type": "cross_module_refactor_nightshift", "task_desc": "Cross-module refactor: nightshift feedback loop writes closure evidence into learn pipeline", "target_file": "nexus/services/continuous_learning.py", "test_file": "tests/services/test_continuous_learning.py", "success_criteria": "all_target_tests_pass"},
+    {"id": "xmod-hard-011", "difficulty": "hard", "task_type": "cross_module_refactor_nightshift", "task_desc": "Cross-module refactor: reconcile nightshift rollback with artifact contract verification", "target_file": "nexus/engine/coordinator.py", "test_file": "tests/test_engine_coordinator.py", "success_criteria": "all_target_tests_pass"},
+    {"id": "xmod-hard-012", "difficulty": "hard", "task_type": "cross_module_refactor_nightshift", "task_desc": "Cross-module refactor: unify nightshift report trust audit and delivery gate semantics", "target_file": "scripts/ops/ci_gate.py", "test_file": "tests/ops/test_ci_gate_report_trust_audit.py", "success_criteria": "all_target_tests_pass"}
+  ]
+}

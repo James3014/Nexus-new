@@ -142,3 +142,201 @@ version_scope:
 - **Root Cause**: Hard dependency on manual red-team signatures without an automated evidence pipeline.
 - **Decision**: Automated red-team invocation receipts and added them to the `hallucination_evidence.json` schema.
 - **Prevention**: High-security baselines must have automated evidence collection for every external approval step.
+
+## 2026-04-20: Architecture Realignment and Spec-to-Reality Hardening
+- **Phenomenon**: Significant gap between Wiki vision (1-bit core, real MSA) and codebase reality.
+- **Root Cause**: Spec-driven development velocity outpaced physical integration.
+- **Decision**: Physically wired 1-bit Core, GBNF constraints, and real LanceDB upserts.
+- **Prevention**: Monthly "Truth Realignment" audits to ensure Wiki maturity maps match physical `nexus/core` implementations.
+
+## 2026-04-20: Infrastructure Ghost Files and Shadow Mocking Risks
+- **Phenomenon**: Critical logic referenced non-existent infrastructure files (`dist_lock.py`), and `shadow_bus.py` used mock `time.sleep` instead of real execution.
+- **Root Cause**: `git clean -fd` accidentally removed untracked infrastructure prototypes, and legacy mock placeholders were left in "real" engine paths.
+- **Decision**: Restored and committed real infrastructure files. Enforced "Fail-Closed" in `shadow_bus.py`: if real sandbox is missing, task must FAIL.
+- **Prevention**: Mandatory `ls` verification of all imported internal modules in acceptance tests. Prohibit `time.sleep` in any non-test core logic.
+
+## 2026-04-20: Deep Architectural Debt Discovery (Stage 2 Audit)
+- **Phenomenon**: Found duplicated `DomainFirewall` implementation inside `router.py` and hardcoded `time.sleep` in core evolutionary components.
+- **Root Cause**: Rapid integration of siloed features without central refactoring and persistence of legacy mock snippets.
+- **Decision**: Logged as Sev-1 debts in the Evolution Spec. Mandated DRY refactoring for the Firewall and conversion of mocks to event-driven logic.
+- **Prevention**: Pre-promotion "Structural Linting" to detect class duplication and hardcoded delays in core paths.
+
+## 2026-04-20: Deep Purification and Intent Decomposition Hardening (Stage 4)
+- **Phenomenon**: Intent decomposition in `campaign_general.py` was fragile due to regex heuristics, and `context_hub.py` was becoming a monolithic bottleneck.
+- **Root Cause**: Reliance on legacy keyword matching and insufficient class separation during the rapid P-X-D-R-A-C rollout.
+- **Decision**: Integrated real LLM-based decomposition via Ollama and refactored `context_hub.py` into a specialized `KnowledgeInjector`.
+- **Prevention**: Enforce "Single Responsibility Principle" for core orchestrator modules and mandate semantic (LLM) processing for macro-intent handling.
+
+## 2026-04-20: Cognitive Drift and Governance Performance Bottlenecks (Stage 5)
+- **Phenomenon**: Vector retrieval used obsolete models (`MiniLM`), and CI gates were executing sequentially, leading to high latency.
+- **Root Cause**: Hardcoded model dependencies and lack of parallel execution strategy in the audit pipeline.
+- **Decision**: Unified embeddings to `nomic-embed-text` and parallelized `ci_gate.py` using `ThreadPoolExecutor`.
+- **Prevention**: Enforce "Async-First" for I/O bound audit tasks and mandate model-alignment checks in the Cognition Layer.
+
+## 2026-04-20: Sequential Blocking in Intelligence Layers and Telemetry bypass (Stage 7)
+- **Phenomenon**: Large swarms experienced CPU starvation due to synchronous Ollama requests, and many core services bypassed logging via `print()`.
+- **Root Cause**: Reliance on simple `urllib` calls and lack of logging enforcement in research-heavy components.
+- **Decision**: Logged as Sev-1 debts. Initiated transition to `aiohttp` and mandatory logging for all telemetry-relevant paths.
+- **Prevention**: Pre-promotion "Static Analysis" to detect `print()` usage and synchronous network calls in core packages.
+
+## 2026-04-20: Telemetry bypass and Synchronous I/O in Research Paths (Stage 8)
+- **Phenomenon**: Critical status reports from Swarm nodes were not captured by telemetry due to `print()` usage, and indexing latency was high due to `urllib` blocking.
+- **Root Cause**: Reliance on legacy CLI output patterns and synchronous network library defaults.
+- **Decision**: Migrated to `httpx` (Async) for indexer and enforced `logging` across all orchestrator paths. Established `ServiceRegistry` to facilitate component discovery.
+- **Prevention**: Pre-commit hooks must block `print()` in `nexus/core/` and enforce the use of the `ServiceRegistry` for cross-service communication.
+
+## 2026-04-21: Multi-Agent Completion Receipts Must Bind To Real Test Evidence
+- **Phenomenon**: Multi-agent submit flows could emit completion-style JSON even when no real targeted pytest evidence was attached, and `acceptance_check` could appear implied from a delivery receipt.
+- **Root Cause**: `EvidenceCollector` accepted placeholder test artifacts and `submit` summarized receipt data too loosely, allowing narrative completion to outrun empirical verification.
+- **Decision**: Made the orchestrator fail closed when pre-gate required evidence is missing, removed placeholder pytest artifacts, and required explicit acceptance receipt state before emitting a successful submission summary.
+- **Prevention**: Any multi-agent completion path must prove required evidence by command match, and receipt-derived summaries may only report gates that are explicitly present in the machine receipt.
+
+## 2026-04-21: Completion Semantics Drift When Shell, CLI, and Collector Co-Own The Same Truth
+- **Phenomenon**: Completion truth was split across CLI inline logic, collector heuristics, and shell heredoc receipt generation, so the same workflow could regress repeatedly even after local bug fixes.
+- **Root Cause**: Delivery semantics were not owned by a single domain module; shell orchestration and Python business logic both serialized receipt/gate meaning independently.
+- **Decision**: Extracted `delivery.submission`, `delivery.receipt`, and `orchestrator.evidence_policy` so receipt building, submission assessment, and evidence semantics have explicit owners and reusable tests.
+- **Prevention**: Shell scripts may orchestrate execution, but receipt schema construction and pass/fail interpretation must live in Python domain modules with direct unit coverage.
+
+## 2026-04-21: Thin Wrapper Refactor Broke Ops Test Contracts
+- **Phenomenon**: `learn_refresh_*` and `wiki_sync_check` passed superficial smoke behavior but failed contract tests due to missing helper APIs (`load_json`, `_to_plist_xml`) and altered gate status semantics.
+- **Root Cause**: Wrapper simplification removed monkeypatch seams and strict return-code contracts that ops tests and governance flows depend on.
+- **Decision**: Restored explicit helper APIs and fail-closed status behavior (`wiki_sync_check` returns `2` for protected code drift without wiki updates) while keeping runtime flow unchanged.
+- **Prevention**: Any wrapper refactor in `scripts/ops/` must run contract tests (`test_learn_refresh_*`, `test_verify_report_claims`, `test_wiki_sync_check`) before acceptance.
+
+## 2026-04-22: Dry-Run Governance Block Requires Explicit Evidence Hygiene
+- **Phenomenon**: `ci_gate --dry-run` was blocked by three governance conditions at once: missing lesson evidence, missing same-round wiki update, and untracked `code_artifacts` path in hallucination evidence.
+- **Root Cause**: Gate inputs depended on mutable report artifacts from previous failed runs; stale/untracked artifact paths leaked into delivery-tracked checks.
+- **Decision**: Persisted `lesson_writeback.json`, added same-day learning entry, and normalized hallucination evidence artifacts to tracked-safe values.
+- **Prevention**: Treat gate input files (`lesson_writeback.json`, `hallucination_evidence.json`, wiki closure matrix) as first-class deliverables and validate them before dry-run.
+
+## 2026-04-25: A/B Relative Lift Tests Must Separate Aggregate and Segment Baselines
+- **Phenomenon**: A new `ab_eval` test expected `nexus_lift` to be undefined while the fixture still had an aggregate baseline solve rate of 0.5 because an easy task was verified.
+- **Root Cause**: The test mixed hard-segment assertions with aggregate relative-lift semantics.
+- **Decision**: Kept hard success assertions in the segment fixture and added a separate zero-baseline fixture for undefined relative lift.
+- **Prevention**: Metric tests must isolate aggregate, segment, and ratio-denominator cases so benchmark math cannot pass or fail for the wrong reason.
+
+## 2026-04-25: A/B CLI Ambiguity Can Invert Nexus Uplift Reports
+- **Phenomenon**: A 12-task benchmark evaluator run first failed because `--output` ambiguously matched `--output-json` and `--output-file`; the next run also passed Nexus as dataset A, producing negative deltas despite correct summaries.
+- **Root Cause**: The evaluator assumes A is baseline and B is treatment, but the command line did not force explicit baseline/treatment labels or reject ambiguous shorthand.
+- **Decision**: Re-ran the report with `--output-file`, `--label-a gemini_flash`, `--label-b gemini_flash_nexus`, and A/B ordered as baseline/treatment.
+- **Prevention**: Benchmark receipts must include explicit labels and must verify that the treatment dataset has `gemini_uses_nexus_rate > baseline` before interpreting lift direction.
+
+## 2026-04-25: Real-File Benchmarks Must Restore Target State
+- **Phenomenon**: The first cross-module smoke used real repository files with materialization disabled and left a structural sentinel in `nexus/engine/coordinator.py`.
+- **Root Cause**: The benchmark runner was designed around generated fixtures, where preserving a successful mutation is harmless; that assumption is unsafe when target files are real source files.
+- **Decision**: Added fail-closed real-file resolution plus target preservation/restoration around each with/without benchmark leg when fixture materialization is disabled.
+- **Prevention**: Any benchmark mode using repository files directly must restore target content after each leg and must inspect `git status` before reporting evidence.
+
+## 2026-04-25: Hard Timeout Requires Subprocess Isolation
+- **Phenomenon**: A `--total-timeout-sec 1` smoke still waited for a full in-process benchmark leg to finish before emitting `PARTIAL_TIMEOUT`.
+- **Root Cause**: Python signal alarms do not reliably interrupt nested subprocess waits or long in-process benchmark paths with enough control to preserve a partial receipt.
+- **Decision**: When a total timeout is configured, Nexus benchmark legs are executed through subprocess isolation and receive the remaining total budget as their per-leg timeout.
+- **Prevention**: Any long-running real-file LLM benchmark must combine progress logging, partial receipts, and subprocess isolation before scaling beyond smoke size.
+
+## 2026-04-25: Real Cross-Module Suites Expose Artifact-Verified Capability Gaps
+- **Phenomenon**: A representative 3-task real-file LLM run showed Gemini using Nexus on all tasks, but drone and nightshift tasks failed with `artifact_unverified`, no artifact diff, and no self-heal rescue.
+- **Root Cause**: The synthetic fixture path can prove battle-suit activation and rescue behavior, but real cross-module targets require domain-specific mutation strategies for drone/nightshift contracts before claim verification can pass.
+- **Decision**: Added a verification-only rescue for real cross-module tasks: when hyper/Gemini cannot produce a safe patch but the original target test artifact already verifies, Nexus reports a verified claim without forcing a synthetic mutation.
+- **Prevention**: Real-file cross-module benchmarks must distinguish mutation tasks from contract-verification tasks; verified existing artifacts are valid evidence when success criteria is `all_target_tests_pass`.
+
+## 2026-04-25: Learn Report Debt Rendering Must Accept Structured Questions
+- **Phenomenon**: `learn:report --topic nexus-governance --output-json` crashed with `TypeError: sequence item 0: expected str instance, dict found`.
+- **Root Cause**: CLI markdown debt rendering joined `unresolved_questions` as strings even though the learn service returns structured question dictionaries.
+- **Decision**: Added debt item formatting that preserves JSON payload structure while rendering dict/list items into markdown-safe strings.
+- **Prevention**: CLI report layers must not assume service payload lists are scalar strings; structured payloads need explicit presentation formatting.
+
+## 2026-04-25: Real 12-Task Nexus Uplift Requires Separating Mutation From Verification
+- **Phenomenon**: The full real cross-module 12-task run produced Nexus `12/12` versus bare Gemini `3/12`, but half of Nexus successes were verification-only contract passes rather than source mutations.
+- **Root Cause**: The cross-module pack mixes mutation-style refactor language with `all_target_tests_pass` success criteria, so some tasks are better interpreted as contract verification rather than mandatory code changes.
+- **Decision**: Added success-criteria propagation plus evaluator metrics for `verification_only_rate`, `mutation_required_rate`, and `mutation_success_rate`.
+- **Prevention**: Future benchmark reports must publish mutation success separately from contract verification success before claiming real implementation uplift.
+
+## 2026-04-25: Nexus Gate Fast-Path Is Not Gemini Wearing Nexus
+- **Phenomenon**: A contract-verification fast-path reduced wall time by skipping Gemini and directly validating existing tests.
+- **Root Cause**: The optimization treated Nexus as an autonomous solver/gate, which violates the benchmark model where Gemini is the executor and Nexus is the battle-suit context, policy, tool, and evidence layer.
+- **Decision**: Removed the fast-path from the Gemini+Nexus benchmark path; any such optimization must be reported separately as `nexus_gate_only`.
+- **Prevention**: Gemini+Nexus uplift metrics require `gemini_uses_nexus=true`, `model_calls>0`, delivered Nexus context, and artifact/claim verification after Gemini execution.
+
+## 2026-04-25: Public Benchmark Success Criteria Must Drive Mutation Flags
+- **Phenomenon**: A public manifest smoke run recorded `success_criteria=patch_and_tests_pass` but emitted `mutation_required=false`.
+- **Root Cause**: The benchmark runner only mapped legacy criteria names (`artifact_changed_and_tests_pass`, `mutation_required`) to mutation-required telemetry.
+- **Decision**: Added `patch_and_tests_pass` to the mutation-required mapping and covered it with a runner extraction test.
+- **Prevention**: Any new public benchmark success criterion must have an explicit telemetry mapping test before pilot runs are accepted.
+
+## 2026-04-25: Public External Tasks Must Not Materialize Local Fixtures
+- **Phenomenon**: A small public pilot started an `external` task but executed a generated local fixture instead of cloning and running the pinned external repository.
+- **Root Cause**: The runner's `materialize_missing` path was still global and did not respect `repo_kind`.
+- **Decision**: Added repo-kind filtering and made `external` tasks fail closed until a clone/setup adapter exists.
+- **Prevention**: Public benchmark runners must reject unresolved execution adapters rather than substituting simpler local fixtures.
+
+## 2026-04-25: Real-File Evidence Preservation Must Follow Effective Task Mode
+- **Phenomenon**: Real-file benchmark evidence showed empty `target.before` for `nexus_internal` tasks even though the target file existed.
+- **Root Cause**: File resolution correctly forced `nexus_internal` tasks onto real paths, but preservation still used the original global `materialize_missing=True` flag.
+- **Decision**: Added an effective task materialization helper and reused it for resolution and target preservation.
+- **Prevention**: Evidence capture must derive preservation behavior from the effective task execution mode, not the raw CLI default.
+
+## 2026-04-25: Public Neutral Pilot Must Treat Timeout as Invalid Nexus Wearing
+- **Phenomenon**: The `neutral_fixture 18x3` public pilot produced Gemini `0/54` versus Gemini+Nexus `50/54`, but four Nexus rows hit the 180s task timeout and failed formal treatment because no Gemini call, Nexus context, pillars, phases, or claim verification were recorded.
+- **Root Cause**: The benchmark can prove substantial mutation uplift on completed Nexus rows, but intermittent long-tail execution can still consume the whole task budget before the battle-suit telemetry reaches the evaluator.
+- **Decision**: Keep the run as pilot evidence only (`+92.59 percentage points`, formal valid `50/54`) and do not use it as a product-grade public claim until slow-case replay and phase timing isolate the timeout source.
+- **Prevention**: Before scaling public benchmarks, replay timeout rows by task/trial with per-phase timing and fail-fast subprocess envelopes; publish uplift together with formal-treatment validity and timeout rate.
+
+## 2026-04-25: Longer Timeout Does Not Fix Pre-Receipt Nexus Hangs
+- **Phenomenon**: Re-running the same `neutral_fixture 18x3` pilot with `timeout_sec=240` still produced four invalid Nexus rows (`pub-test-002`, `pub-ref-002`, `pub-ref-004`, `pub-test-002`). All failed before any receipt, Gemini call, phase timing, or Nexus usage trace was emitted.
+- **Root Cause**: The timeout was not a simple 180s budget shortage. The failed subprocesses stalled before JSON receipt generation, with only Redis fallback and `MemoryService auto-init warning (non-fatal): Table 'policy' already exists` visible on stderr.
+- **Decision**: Stop increasing per-task timeout as the mitigation. Treat these rows as pre-receipt process isolation failures and fix startup/resource isolation before the next full pilot.
+- **Prevention**: Long-running public benchmark legs must isolate mutable startup state per task or make MemoryService bootstrap idempotent; the runner should classify pre-receipt hangs separately from Gemini/Nexus reasoning failures.
+
+## 2026-04-25: Per-Run LanceDB Isolation Is Not Enough for Memory Bootstrap Hangs
+- **Phenomenon**: The formal Gemini vs Gemini+Nexus `neutral_fixture 18x3` run produced Gemini `0/54` versus Gemini+Nexus `50/54`, but the same four Nexus rows still hit the 240s subprocess timeout before Gemini was invoked. Timeout telemetry classified all four as `timeout_during_memory_bootstrap`; stderr only showed `Redis init failed, falling back to local: redis`.
+- **Root Cause**: Isolating the LanceDB path per benchmark subprocess removes table-create races, but it does not bound every MemoryService startup dependency. A pre-receipt bootstrap path can still hang before route construction, leaving no five-pillar trace, six-phase trace, or claim verification.
+- **Decision**: Treat the `+92.59 percentage point` uplift as valid pilot evidence with `50/54` formal treatment validity, not as a final public reliability claim. The next engineering step is a hard startup deadline/fail-open mode for optional memory bootstrap dependencies before rerunning the formal benchmark.
+- **Prevention**: Benchmark subprocesses must emit a startup marker and enforce a bounded memory bootstrap budget. Optional Redis/LanceDB initialization must fail open with explicit telemetry so Gemini can still wear Nexus or the row can fail fast with a precise reason.
+
+## 2026-04-26: Gemini Baseline Must Prove the Model Actually Ran
+- **Phenomenon**: The public neutral pilot initially reported Gemini `0/54`, but a corrected baseline-only calibration reached `17/18` after the harness passed tests into the prompt and invoked Gemini headlessly with trust flags. The same run also exposed a baseline-only evidence-bundle ordering bug: the script hashed an empty `with_nexus` path before creating it.
+- **Root Cause**: The baseline path reused the battle-suit gateway contract even though Gemini-alone needs a direct headless CLI contract. It also wrote raw gateway errors as candidate patches, omitted current tests from the prompt, and lacked baseline patch/error telemetry, making model-invocation failures look like model capability failures.
+- **Decision**: Split direct Gemini baseline execution from the Nexus gateway path, add `--skip-trust` plus `GEMINI_CLI_TRUST_WORKSPACE=true`, include `[CURRENT TESTS]`, reject empty/error patches, preserve target evidence for materialized fixtures, and capture baseline patch/error/pytest tails.
+- **Prevention**: Public benchmark claims require a baseline validity gate before A/B interpretation: model call completed, patch changed when mutation is required, current tests were visible to the model, token/error telemetry is recorded, and evidence bundles are created before hashing.
+
+## 2026-04-26: Gemini+Nexus Benchmark Must Bound Optional Stages
+- **Phenomenon**: After forcing Gemini to wear Nexus, `pub-test-002` still hit the outer 180s timeout with no receipt. A 45s probe showed the true last marker was `Gateway Dynamic timeout of 30s expired`, but timeout classification reported `timeout_during_memory_bootstrap` because stderr also contained MemoryService fail-open warnings.
+- **Root Cause**: The benchmark subprocess had no bounded inner LLM budget relative to the outer task timeout, Hyper could expand a single hard task into multiple LLM candidates, and DayShift could add another optional optimization stage. Timeout classification also prioritized Memory keywords over Gateway/Gemini evidence.
+- **Decision**: For public LLM treatment runs, disable synchronous MemoryService auto-init, force LLM despite learn-SLO guard, cap LLM candidates to one, disable DayShift optimization, set Gateway to one bounded attempt, and prioritize Gateway/Gemini markers in timeout classification.
+- **Prevention**: Gemini+Nexus benchmark rows must return a receipt before the outer timeout. Optional stages may be measured separately, but formal treatment must first prove `model_calls>0`, `gemini_uses_nexus=true`, `nexus_usage_valid=true`, and five-pillar telemetry on the bounded path.
+
+## 2026-04-26: Easy Neutral Fixtures Do Not Demonstrate Nexus Pass-Rate Lift
+- **Phenomenon**: Corrected same-task `neutral_fixture 18x1` comparison produced Gemini `17/18` versus Gemini+Nexus `16/18` (`-5.56pp`). Nexus did prove wearing validity (`gemini_uses_nexus=18/18`, `nexus_usage_valid=16/18`, timeout `0/18`), but two baseline-success tasks failed in the Nexus path while one baseline-failure task was rescued.
+- **Root Cause**: The neutral fixture set is too easy for Gemini 3 Flash and the bounded Nexus treatment currently adds Hyper/guard overhead that can reject or fail simple doc/test repairs. On this suite, Nexus value is observable governance/context/traceability, not higher pass rate.
+- **Decision**: Do not use this `18x1` as a public uplift claim. Treat it as a calibration run proving valid Gemini wearing and exposing task-class regressions (`pub-doc-004`, `pub-test-004`) that must be debugged before `18x3`.
+- **Prevention**: Product benchmark claims must separate activation validity from outcome lift. Require per-task delta tables, baseline difficulty calibration, and regression triage before reporting any percentage improvement.
+
+## 2026-04-26: Bounded LLM Treatment Needs Real Local Rescue Coverage
+- **Phenomenon**: Regression triage showed `pub-doc-004` and `pub-test-004` failed after a bounded Gemini attempt even though local Hyper variants could solve them. After fixing LLM fail-payload handling, forcing in-place execution, and giving failed local fallback a distinct emergency seed, the rerun produced Gemini `17/18` versus Gemini+Nexus `18/18` (`+5.56pp`) with `gemini_uses_nexus=18/18`, `nexus_usage_valid=18/18`, and timeout `0/18`.
+- **Root Cause**: Gateway `FAIL` payloads and empty patches were treated as candidate code, and the bounded one-candidate treatment under-sampled local rescue. Swarm execution also added unnecessary variance for neutral fixture files.
+- **Decision**: Treat Gateway `FAIL`/missing patch as an LLM failure that still counts as a Gemini attempt, force in-place executor for bounded public fixture treatment, and always allow one distinct emergency local rescue when no candidate passes.
+- **Prevention**: Bounded benchmark modes must prove both wearing and rescue coverage: `model_calls>0` for treatment validity, plus at least one non-identical fallback candidate when the LLM path returns no usable patch.
+
+## 2026-04-26: Benchmark Rows Must Record Which Model Solved
+- **Phenomenon**: A half-run with Gemini 3 Flash became invalid once quota uncertainty appeared; some rows could have been Nexus local rescue after an exhausted model attempt. After switching the treatment model to `gemini-3.1-pro-preview` and adding model/fallback telemetry, the `neutral_fixture 18x3` treatment produced `54/54` verified rows with `model_name=gemini-3.1-pro-preview`, `model_patch_generated=54/54`, `fallback_used=0/54`, `gemini_uses_nexus=54/54`, and timeout `0/54`.
+- **Root Cause**: `model_calls` alone was too coarse. It proved an invocation attempt, but not which model was used, whether the model returned a usable patch, or whether Nexus fallback actually supplied the passing artifact.
+- **Decision**: Add explicit `model_name`, `model_patch_generated`, and `fallback_used` telemetry to sprint reports and benchmark rows; default bounded public treatment to `gemini-3.1-pro-preview` when `NEXUS_GEMINI_MODEL_NAME` is not supplied.
+- **Prevention**: Public claims must report model identity and fallback rate alongside pass rate. A row cannot be counted as model-solved unless `model_patch_generated=true`; fallback-solved rows must be reported as Nexus rescue, not model capability.
+
+## 2026-04-26: Same-Model Pro Benchmark Shows Nexus Test-Repair Lift
+- **Phenomenon**: The apples-to-apples `neutral_fixture 18x3` comparison using `gemini-3.1-pro-preview` produced bare Gemini `51/54` verified rows versus Gemini+Nexus `54/54`. Nexus wins were all three trials of `pub-test-002`; baseline generated patches for all rows but failed semantic verification on that test-repair task.
+- **Root Cause**: The public pilot is easy for Pro overall, but test-repair tasks can still require the Nexus battle-suit loop: task classification, bounded hyper execution, policy/claim verification, and artifact-backed semantic gating. The direct baseline can write a patch yet miss the required behavioral contract.
+- **Decision**: Treat this as a calibrated Pro-model uplift claim for this suite only: `+5.56pp` verified-rate lift, `100%` baseline-error reduction, `0` Nexus fallback rows, `54/54` valid wearing rows, with higher wall time (`24.61s` vs `17.84s`) and lower average tokens (`20757.20` vs `21240.59`).
+- **Prevention**: Public product copy must qualify the suite and model, report both lift and cost, and include per-task wins. The next benchmark must use harder tasks or a stronger test-repair bucket before claiming broad capability uplift.
+
+## 2026-04-26: JIT Test Entrypoints Need Sandbox-Aware Verification
+- **Phenomenon**: `bash scripts/ops/test_changed.sh scripts/ops/select_tests.py` initially failed inside the sandbox with `uv` unable to open `~/.cache/uv/sdists-v9/.git`, while the same command passed when rerun with approved `uv run` access.
+- **Root Cause**: The selector logic was correct, but the wrapper executes `uv run`, which may touch user-level uv cache metadata outside the current workspace sandbox.
+- **Decision**: Keep `select_tests.py` pure and report-free, and verify wrapper commands with explicit sandbox escalation when uv cache access is blocked.
+- **Prevention**: JIT test validation should distinguish selector failures from environment/cache permission failures; CI or local gate notes should preserve the exact failing layer.
+
+## 2026-04-26: Merge Preflight May Need Git Tempfile Access
+- **Phenomenon**: `git merge-tree --write-tree main codex/public-benchmark-framework` failed inside the sandbox with `unable to create temporary file`, then succeeded with approved git access and returned merge tree `fb1eef1359a1415aef8519f4ad67b46a9a175f2f`.
+- **Root Cause**: Git merge preflight writes temporary object data even when it does not update the working tree; workspace sandbox permissions can block that object/tempfile path.
+- **Decision**: Treat merge-tree as a non-mutating but filesystem-writing preflight and rerun with explicit approval when sandboxed.
+- **Prevention**: Branch integration reports must separate merge conflicts from preflight environment failures before deciding whether a branch is safe to merge.

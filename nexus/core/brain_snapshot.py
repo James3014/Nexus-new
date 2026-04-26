@@ -28,10 +28,11 @@ class BrainSnapshot:
         # 2. 擷取思維狀態 (Prompt Hash)
         current_mind = self._get_prompt_hash()
 
+        import datetime
         return {
             "hot_files": git_status.strip().split("\n") if git_status else [],
             "mind_model": current_mind,
-            "timestamp": "2026-04-01T00:56:00Z" # Mocked timestamp
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
     def to_bin(self) -> bytes:

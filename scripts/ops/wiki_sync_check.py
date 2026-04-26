@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
+import argparse
 import subprocess
 import sys
-import argparse
-from pathlib import Path
 
 def get_changed_files(mode="worktree"):
     """獲取變更檔案列表"""
@@ -50,7 +49,7 @@ def check_sync(mode="worktree"):
             wiki_changed = True
 
     if code_changed and not wiki_changed:
-        print(f"❌ [WIKI-SYNC-BLOCK] Code changes detected in protected paths, but no Wiki updates found in nexus_wiki_vault/.")
+        print("❌ [WIKI-SYNC-BLOCK] Code changes detected in protected paths, but no Wiki updates found in nexus_wiki_vault/.")
         print(f"💡 Suggestion: Update nexus_wiki_vault/ or {changelog_path}")
         return 2
     
@@ -58,7 +57,7 @@ def check_sync(mode="worktree"):
         print("✅ [WIKI-SYNC] Code and Wiki changes are synchronized.")
     else:
         print("✅ [WIKI-SYNC] No protected code changes detected.")
-        
+
     return 0
 
 def main():

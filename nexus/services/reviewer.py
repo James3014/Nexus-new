@@ -2,6 +2,7 @@ from pathlib import Path
 #!/usr/bin/env python3
 import os
 import json
+import logging
 import shutil
 import hashlib
 import subprocess
@@ -12,12 +13,15 @@ from nexus.core.review_status import ReviewStatusNormalizer
 from nexus.core.phantom_detect import detect_inconclusive_success
 from nexus.services.gateway import BattlesuitGateway as LLMClient
 from nexus.services.review_strategy import ReviewerFactory  # R04: Strategy Pattern
+from nexus.services.git import GitManager
 
 # Configuration
 BRAIN_SEARCH_BIN = os.getenv("MUSE_CORE_BRAIN_SEARCH", "/usr/local/bin/brain_search")
 DRIFT_DETECTOR_BIN = os.getenv("MUSE_CORE_DRIFT_DETECTOR", "")
 UI_TASTE_MD = os.getenv("MUSE_CORE_UI_TASTE", "")
 UV_BIN = shutil.which("uv") or "uv"
+
+logger = logging.getLogger("nexus.reviewer")
 
 
 class GatewayReviewLoop(NexusOrchestrator):
@@ -28,11 +32,11 @@ class GatewayReviewLoop(NexusOrchestrator):
     """
 
     def __init__(self, **kwargs):
+        from unittest.mock import MagicMock
         from nexus.core.config import OrchestratorConfig
         from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
-        from nexus.services.git import GitManager
-        from nexus.services.gateway import BattlesuitGateway
         from nexus.core.context_hub import ContextHub
+
         from nexus.core.commander import Commander
         from nexus.core.router import SkillsRouter
         from nexus.services.reporter import Reporter
@@ -52,7 +56,7 @@ class GatewayReviewLoop(NexusOrchestrator):
         
         # 🧪 Recovery/Fallback logic for non-DI callers (P4-R5 alignment)
         git_obj = kwargs.get("git") or GitManager(project_root=str(self.project_root))
-        llm_obj = kwargs.get("llm") or BattlesuitGateway()
+        llm_obj = kwargs.get("llm") or LLMClient()
         state_io_obj = kwargs.get("state_io") or StateIO(str(self.project_root), run_dir=run_dir)
         router_obj = kwargs.get("router") or SkillsRouter(str(self.project_root), run_dir=run_dir)
         linter_obj = kwargs.get("linter") or Linter()
@@ -78,6 +82,15 @@ class GatewayReviewLoop(NexusOrchestrator):
 
         super().__init__(config, infra, intel, gov)
 
+        self.git = git_obj
+        self.llm = llm_obj
+        self.context_hub = intel.context_hub
+        self.linter = linter_obj
+        self.patcher = patcher_obj
+        self.reporter = gov.reporter
+        self.state_io = state_io_obj
+        self.router = router_obj
+        self.workspace = workspace_obj
         self.scope = kwargs.get("scope", "staged")
         self.base_ref = kwargs.get("base_ref", "HEAD")
         self.apply_patch = kwargs.get("apply_patch", False)
@@ -87,6 +100,8 @@ class GatewayReviewLoop(NexusOrchestrator):
         self.audit_level = kwargs.get(
             "audit_level", "standard"
         )  # bypass, standard, strict
+        self.execution_mode = kwargs.get("mode", self.mode)
+        self.trigger_reason = f"audit_level={self.audit_level}"
 
         # 🧬 Compatibility Layer
         self.executor = kwargs.get("executor")
@@ -96,6 +111,10 @@ class GatewayReviewLoop(NexusOrchestrator):
         # These should now be provided by the DI container
 
         self.history_hashes = set()
+        self.total_tokens = 0
+        self.total_raw_model = 0
+        self.total_fallback_est = 0
+        self.token_capture_statuses = []
         self.transcripts_dir = self.project_root / ".nexus/transcripts"
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
         self.report_file = self.project_root / ".nexus/review_report.md"
@@ -133,13 +152,14 @@ class GatewayReviewLoop(NexusOrchestrator):
             self.persona_hint = "👤 MODE: DEVELOPER (Balanced cognitive-loop audit)."
 
     def _do_review(self, manual_files=None):
-        print(
-            f"🔍 [Reviewer] Mode: {self.execution_mode} | Level: {self.audit_level} | Scope: {self.scope}"
+        logger.info(
+            "🔍 [Reviewer] Mode: %s | Level: %s | Scope: %s",
+            self.execution_mode, self.audit_level, self.scope
         )
 
         # 🛡️ Governance Gate: Bypass Mode
         if self.audit_level == "bypass":
-            print("⚡ [Reviewer] Audit Level: BYPASS. Auto-approving changes.")
+            logger.info("⚡ [Reviewer] Audit Level: BYPASS. Auto-approving changes.")
             return self._build_review_result(
                 status="APPROVED",
                 summary="Bypassed via audit_level=bypass",
@@ -151,8 +171,9 @@ class GatewayReviewLoop(NexusOrchestrator):
         # 🛡️ Governance Gate: Strict Mode
         if self.audit_level == "strict":
             self.max_strikes += 2
-            print(
-                f"🛡️ [Reviewer] Audit Level: STRICT. Increased max strikes to {self.max_strikes}."
+            logger.info(
+                "🛡️ [Reviewer] Audit Level: STRICT. Increased max strikes to %d.",
+                self.max_strikes
             )
 
         # 🧬 Legacy Hook: Pattern Lock Check (for sanity_check.py Step 3)
@@ -169,7 +190,7 @@ class GatewayReviewLoop(NexusOrchestrator):
         os.chdir(self.git.project_root)
 
         try:
-            print(f"🚀 [One-Shot] Initiating Audit via Strategy: {self.mode}")
+            logger.info("🚀 [One-Shot] Initiating Audit via Strategy: %s", self.mode)
             # R04: 委派給 ReviewerFactory 建立對應策略並執行
             strategy = ReviewerFactory.create(self.mode)
             return strategy.execute(self, manual_files)
@@ -234,7 +255,7 @@ class GatewayReviewLoop(NexusOrchestrator):
         return out
 
     def _run_isolated_review(self, manual_files):
-        print("🧪 [Isolation] Sandbox review initiated (Simulated)")
+        logger.info("🧪 [Isolation] Sandbox review initiated (Simulated)")
         return self._do_review(manual_files)
 
 

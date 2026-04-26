@@ -3,6 +3,40 @@ import json
 import os
 from pathlib import Path
 
+
+def _write_aligned_agent_report() -> None:
+    head_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+    commit_files = [
+        line.strip()
+        for line in subprocess.check_output(["git", "show", "--name-only", "--pretty=format:", "HEAD"], text=True).splitlines()
+        if line.strip()
+    ]
+    branch_delta = [
+        line.strip()
+        for line in subprocess.check_output(["git", "diff", "--name-only", "main...HEAD"], text=True).splitlines()
+        if line.strip()
+    ]
+    report_path = Path(".nexus/reports/agent_report.json")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "head_sha": head_sha,
+        "base_branch": "main",
+        "files_changed_in_this_commit": commit_files,
+        "branch_delta_vs_base": branch_delta,
+        "worktree_changed_files": [],
+        "tests_run": [
+            {"command": "uv run scripts/engine/nexus_cli.py nexus research:run --dry-run --run-id smoke", "exit_code": 0},
+            {"command": "uv run pytest -q tests/ops/test_stage_f_flow.py", "exit_code": 0},
+        ],
+    }
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    raw_status = subprocess.check_output(["git", "status", "--porcelain"], text=True)
+    worktree_delta = [line[3:].strip() if len(line) >= 4 else line.strip() for line in raw_status.splitlines() if line.strip()]
+    payload["worktree_changed_files"] = sorted([p for p in worktree_delta if p])
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_stage_f():
     print("🧪 Running Stage F Validation...")
     
@@ -67,6 +101,7 @@ def test_stage_f():
         
         # Also need skill_optimization_runs.jsonl
         (metrics_dir / "skills_optimization_runs.jsonl").write_text(json.dumps({"success": True, "timestamp": "2026-04-19T10:00:00Z"}) + "\n")
+        _write_aligned_agent_report()
 
         res = subprocess.run(
             ["bash", "scripts/ops/nexus_delivery_gate.sh"],
@@ -85,6 +120,7 @@ def test_stage_f():
         # 4. Test strict acceptance fail with explainable Code 16
         print("Case 4: Strict Acceptance Fail (Code 16 with root cause)")
         (metrics_dir / "skill_outcome_events.jsonl").write_text("")
+        _write_aligned_agent_report()
         res = subprocess.run(
             ["bash", "scripts/ops/nexus_delivery_gate.sh"],
             capture_output=True,

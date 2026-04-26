@@ -1,59 +1,39 @@
 ---
-aliases: '[Orchestrator Node, Nexus CLI Engine]'
+aliases: '[Orchestrator Node, Nexus CLI Engine, Engine Master, NexusEngine]'
 confidence: high
-last_compiled: '2026-04-06'
+last_compiled: '2026-04-22'
 owner: agent
-raw_sources: ''
-related_pages: ''
-source_of_truth: scripts/engine/nexus_cli.py
-status: active
-tags: '[module, core, orchestrator, controller]'
+raw_sources: 'nexus/engine/coordinator.py, nexus/engine/bootstrap.py, nexus/engine/cli_runner_async.py'
+related_pages: '[[Module - Engine Service Registry]]'
+source_of_truth: nexus/engine/coordinator.py
+status: hardened
+tags: '[module, core, orchestrator, engine, service_mesh, seam]'
 title: Module - Core Orchestrator
-type: module
-version_scope: '[v17.1, v22, v23]'
 ---
 
-
-
-# Module - Core Orchestrator
-
-> [!NOTE]
-> **Canonical Page**: 本頁為 Nexus Orchestrator 的高階權威定義。技術細節與微觀實作請參閱 [Module - Core Orchestrator Deep Dive](Module - Core Orchestrator Deep Dive.md)。
+# Module - Core Orchestrator (v26.2 Hardened Seams)
 
 ## One-sentence summary
-本模組為 Nexus Swarm 的「神經中樞」，負責接收任務指令、調度 Phase Runners 並維護全域狀態機。 [Source: scripts/engine/nexus_cli.py]
+本模組為 Nexus 的「動力引擎」，負責協調 L4 指揮層任務拆解與 L3 執行層的 P-X-D-R-A-C 閉環。
 
-## Role / responsibility
-- **命令解析**: 處理 `nexus:*` 全系列子命令與參數校驗。 [Source: scripts/engine/nexus_cli.py]
-- **調度序列**: 驅動 P-X-D-R-A-C 流程的物理執行。 [Source: nexus_wiki_vault/03_Flows/Flow - PXDRAC Runtime.md]]]
-- **異步門禁**: 在 TTY 模式下執行 `Pilot CLI` 的交互監聽與風險阻斷。 [Source: nexus/core/orchestrator.py]
+## 🛡️ 引擎與縫合點硬化 (April 22 Hardening)
+在最近的重構中，Nexus 廢棄了所有的舊版回退機制（Legacy Fallbacks）：
+- **Canonical Seam**: `campaign_master_loop` 現在強制透過 `execute_tactical_node` 委派工作。
+- **Seam Function**: `_execute_via_canonical_service` 成為 L4 與 L3 交互的唯一物理入口。
+- **No Legacy Fallback**: 移除 `scripts/v1.8_mega.py` 等舊版腳本的影子調用路徑。
 
-## Upstream
-- **User Interface (CLI)**: 原始命令輸入流。
-- **Wisdom Layer (v23)**: 提供決策權重與 Bias 修正。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]]]
+## 🧱 服務網格化 (Service Mesh)
+`NexusEngine` 將具備物理執行力的任務委派至以下核心服務：
 
-## Downstream
-- **Phase Runners**: 調用具體的業務執行實體。 [Source: nexus/core/orchestrator.py]
-- **[Module - State Contracts](Module - State Contracts.md)**: 確保交接工件符合 JSON Schema。
+| Domain | Key Service | Source (Path) |
+| :--- | :--- | :--- |
+| **Routing** | `AutonomicRoutingService` | `nexus/engine/autonomic_routing_service.py` |
+| **Repair** | `RepairLoopService` | `nexus/engine/repair_loop_service.py` |
+| **Seam** | `CanonicalTaskSeam` | `nexus/engine/canonical_task_seam.py` |
 
-## Related modules / files
-- `nexus/core/orchestrator.py`: 核心業務管理類。 [Source: nexus/core/orchestrator.py]
-- `nexus/core/state_machine.py`: 狀態轉移權威邏輯。 [Source: nexus/core/state_machine.py]
-
-## Source notes
-- Hardened v17.1 Spec: 定義原始 Orchestrator 的核心責任清單。
-- v22 Engine Spec: 加入了對 `manifest.json` 與 `handoff_bundle` 的原生支援。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
-
-## Open questions / conflicts
-- [ ] **Concurrency**: 多任務併發時鎖定 `.nexus/` 的資源競爭處理。
-- [ ] **External [[api|API]]**: 是否需要開放 FastAPI 入口以支援 [Nexus Desk](Module - Nexus Desk Interface.md) 介面調用。
+## ⚙️ 核心特徵
+- **Atomic Init**: 所有服務由 `bootstrap.py` 原子化產出。
+- **Seam Integrity**: 物理保證 L4 指揮官永遠不會越過 `Coordinator` 直接操作 Drone。
 
 ---
-[System Overview](../00_Home/System Overview.md)
-
-
----
-[System Overview](../00_Home/System Overview.md)
-
----
-[[System Overview]]
+**[Source: nexus/engine/cli_runner_async.py | SEAM-HARDENED]**

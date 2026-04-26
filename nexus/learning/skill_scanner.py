@@ -13,7 +13,7 @@ Inspired by skill-creator-advanced's compatibility/trust audit layer.
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from nexus.core.event_bus import NexusEventBus
+from nexus.events.transport import NexusEventBus
 
 
 @dataclass

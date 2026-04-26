@@ -1,27 +1,63 @@
 from __future__ import annotations
-from .protocols import LearnContextProtocol
-from .learn_models import LearnClaim
-import json
-import re
-import hashlib
-from dataclasses import dataclass
+
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
-from urllib import request
-from urllib.parse import quote_plus
-import html
-import time
-import concurrent.futures
+
+from .learn_models import LearnClaim
+from .protocols import LearnContextProtocol
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
-from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, append_skill_outcome_event
-from nexus.services.memory import MemoryService
+
 
 class IngestService:
     def __init__(self, ctx: LearnContextProtocol):
         self.ctx = ctx
-    def _load_github_repo_documents(self, owner: str, repo: str, max_files: int = 24, max_total_chars: int = 400_000) -> list[tuple[str, str]]:
+
+    @staticmethod
+    def _is_governance_claim(claim: LearnClaim) -> bool:
+        text = str(getattr(claim, "claim", "") or "").lower()
+        governance_keywords = (
+            "mempalace",
+            "governance",
+            "policy",
+            "guard",
+            "boundary",
+            "identity",
+            "lifecycle",
+            "protocol",
+            "audit",
+        )
+        return any(keyword in text for keyword in governance_keywords)
+
+    def _build_channel_counts(self, claims: list[LearnClaim]) -> dict[str, int]:
+        governance_count = sum(1 for claim in claims if self._is_governance_claim(claim))
+        tactical_count = max(len(claims) - governance_count, 0)
+        return {
+            "tactical_data": tactical_count,
+            "governance_principles": governance_count,
+        }
+
+    @staticmethod
+    def _normalize_sources(source: str | list[str]) -> list[str]:
+        if isinstance(source, str):
+            normalized = source.strip()
+            if not normalized:
+                raise ValueError("source must be non-empty")
+            return [normalized]
+        if isinstance(source, list):
+            normalized = [str(item).strip() for item in source if str(item).strip()]
+            if not normalized:
+                raise ValueError("source must be non-empty")
+            return normalized
+        raise TypeError("source must be a string or list of strings")
+
+    def _load_github_repo_documents(
+        self,
+        owner: str,
+        repo: str,
+        max_files: int = 24,
+        max_total_chars: int = 400_000,
+    ) -> list[tuple[str, str]]:
         repo_meta = self.ctx._http_get_json(f"https://api.github.com/repos/{owner}/{repo}", timeout=12)
         default_branch = str(repo_meta.get("default_branch") or "main")
         tree_api = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
@@ -45,7 +81,6 @@ class IngestService:
             candidates.append(path)
 
         if not candidates:
-            # fallback to README only
             candidates = ["README.md"]
 
         candidates = sorted(set(candidates), key=self.ctx._path_priority)[:max_files]
@@ -67,7 +102,7 @@ class IngestService:
             docs.append((cleaned, raw_url))
         return docs
 
-    def _load_source_documents(self, source: str | list[str], source_file: str | None = None) -> list[tuple[str, str]]:
+    def _load_single_source_documents(self, source: str, source_file: str | None = None) -> list[tuple[str, str]]:
         if source_file:
             src_path = self.ctx._resolve_path(source_file)
             txt = self.ctx._clean_text(src_path.read_text(encoding="utf-8"))
@@ -84,7 +119,6 @@ class IngestService:
             payload = self.ctx._http_get_text(source, timeout=12)
             return [(self.ctx._clean_text(payload), source)]
 
-        # keyword/repo fallback path: treat source string itself as seed text
         seed = (
             f"Learning seed for topic: {source}. "
             f"This entry captures baseline context for {source}. "
@@ -92,8 +126,18 @@ class IngestService:
         )
         return [(seed, f"keyword://{source}")]
 
+    def _load_source_documents(self, source: str | list[str], source_file: str | None = None) -> list[tuple[str, str]]:
+        sources = self._normalize_sources(source)
+        if source_file and len(sources) != 1:
+            raise ValueError("source_file requires exactly one source")
+        docs: list[tuple[str, str]] = []
+        for src in sources:
+            docs.extend(self._load_single_source_documents(src, source_file=source_file))
+        return docs
+
     def ingest(self, source: str | list[str], source_file: str | None = None, topic: str = "") -> dict[str, Any]:
-        docs = self.ctx._load_source_documents(source, source_file=source_file)
+        normalized_sources = self._normalize_sources(source)
+        docs = self._load_source_documents(normalized_sources, source_file=source_file)
         snapshot_paths: list[str] = []
         claims: list[LearnClaim] = []
         source_refs: list[str] = []
@@ -101,24 +145,25 @@ class IngestService:
             source_refs.append(source_ref)
             snap = self.ctx._save_source_snapshot(source_ref, text)
             snapshot_paths.append(str(snap))
-            claims.extend(self.ctx._split_to_claims(text, source_ref, topic_hint=topic or source))
+            claims.extend(self.ctx._split_to_claims(text, source_ref, topic_hint=topic or source_ref))
         self.ctx._append_claims(claims)
 
-        # Learning closure hooks: MemPalace verify + Findings write
         palace = MemPalace(str(self.ctx.project_root))
         verified = palace.verify([c.to_dict() for c in claims])
         verified_count = len(verified)
+        channel_counts = self._build_channel_counts(claims)
 
         store = FindingsMemoryStore(self.ctx.project_root)
+        source_hint = ", ".join(normalized_sources[:3])
         card = FindingsCard(
             kind="knowledge",
-            title=f"Learn ingest: {source}",
+            title=f"Learn ingest: {source_hint}",
             scope="task",
             tags=["learn_mode", "ingest"] + ([topic] if topic else []),
             stage="scout",
             confidence="medium",
             evidence_paths=[str(self.ctx.claims_path)] + snapshot_paths[:8],
-            retrieval_hints=[topic or source],
+            retrieval_hints=[topic or source_hint],
             body=f"Ingested {len(claims)} claims from {len(docs)} source docs.",
             task_id=f"learn-{int(datetime.now(timezone.utc).timestamp())}",
             extra={"verified_claims": verified_count, "source_refs": source_refs[:12]},
@@ -134,28 +179,38 @@ class IngestService:
             "verified_claims_count": verified_count,
             "sources_count": len(set(source_refs)),
             "documents_ingested": len(docs),
+            "channel_counts": channel_counts,
             "claims_store": str(self.ctx.claims_path),
             "source_snapshot_path": snapshot_paths[0] if snapshot_paths else "",
             "source_snapshot_paths": snapshot_paths[:20],
             "findings_card_path": card_path,
-            "timestamp": datetime.now(timezone.utc).isoformat()}
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
         report["learning_closure"] = self.ctx._persist_learning_closure(
             action="ingest",
             status=report["status"],
             reason="ingest_completed",
-            topic_or_source=topic or source,
+            topic_or_source=topic or source_hint,
             evidence_paths=[str(self.ctx.claims_path)] + snapshot_paths[:8] + ([card_path] if card_path else []),
-            retrieval_hints=[topic or source],
+            retrieval_hints=[topic or source_hint],
             metrics={
                 "claims_count": report["claims_count"],
                 "coverage": 1.0 if report["claims_count"] > 0 else 0.0,
                 "pass_rate": 1.0 if report["claims_count"] > 0 else 0.0,
-                "citation_valid_ratio": 1.0 if report["claims_count"] > 0 else 0.0},
+                "citation_valid_ratio": 1.0 if report["claims_count"] > 0 else 0.0,
+            },
         )
-        self.ctx._sync_registry_after_ingest(
-            source=source,
-            source_file=source_file,
-            topic=topic,
-            claims_count=report["claims_count"],
-        )
+        for src in normalized_sources:
+            self.ctx._sync_registry_after_ingest(
+                source=src,
+                source_file=source_file,
+                topic=topic,
+                claims_count=report["claims_count"],
+            )
+
+        required_fields = ("status", "claims_count", "verified_claims_count", "sources_count", "documents_ingested")
+        missing = [field for field in required_fields if field not in report]
+        if missing:
+            raise RuntimeError(f"learn_ingest_contract_violation: missing={missing}")
+
         return report

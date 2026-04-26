@@ -1,0 +1,8 @@
+{
+  "status": "WARN",
+  "warnings": [
+    "Logic Leak: TODO/FIXME unresolved markers detected."
+  ],
+  "error_category": "HYGIENE",
+  "feynman_latency": 2.1457672119140625e-06
+}

@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Reference/docs/00_PROJECT_INDEX.md",
+                "file": "06_Ops/Ops - Governance Changelog.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "00_PROJECT_INDEX"
+              "title": "Ops - Governance Changelog"
             }
           }
         ]
@@ -182,16 +182,41 @@
   },
   "active": "70d8cc88b587a980",
   "lastOpenFiles": [
-    "04_Research/RESEARCH_STATUS_REPORT.md",
-    "04_Research/Research - DeepScientist Integration.md",
-    "04_Research",
-    "02_Modules/Module - Intelligence and Logic - Remaining Core.md",
-    "05_Protocols/Protocol - Evidence Chain.md",
-    "05_Protocols/Protocol - Knowledge Lineage.md",
-    "05_Protocols/Protocol - Evidence Map.md",
-    "05_Protocols/Protocol - CLI Drift Matrix.md",
-    "06_Ops/Ops - Closeout Hard Gate.md",
-    "Closeout_Hard_Gate.md",
-    "06_Ops/Ops - Reference Boundary and Archive Policy.md"
+    "99_Schema/WIKI_GOVERNANCE_CHARTER.md",
+    "00_Product/User Stories.md",
+    "06_Ecosystem/SDK Quickstart.md",
+    "00_Product/Investor Deck.md",
+    "05_Commercial/Go-to-Market.md",
+    "06_Ecosystem",
+    "05_Commercial",
+    "00_Product",
+    "Reference/en/SDK_Quickstart.md",
+    "Reference/en/README_Product.md",
+    "Reference/en",
+    "Reference/Role_Guides/Expert_Guide.md",
+    "Reference/Role_Guides",
+    "99_Schema/Wiki_Changelog_Auto.md",
+    "99_Schema/Page_Version_Matrix.md",
+    "00_Home/README_Investor.md",
+    "05_Protocols/CLI_Full_Params.md",
+    "00_Home/README_Contributor.md",
+    "00_Home/README_Agent.md",
+    "00_Home/README_Product.md",
+    "00_Home/Wiki Index and Coverage Map.md",
+    "01_System/Code_Ownership_Matrix.md",
+    "01_System/Swarm_MultiNode.md",
+    "01_System/Errors_Enum.md",
+    "08_Diffs/Code_to_Wiki_Alignment_Matrix.md",
+    "06_Ops/Evidence_Bundle_Format.md",
+    "06_Ops/Retry_Escalation_and_Handoff_Policy.md",
+    "02_Modules/Router_Decision_Flow.md",
+    "07_Compliance/Hallucination_Guard_Scoring_Spec.md",
+    "01_System/Exit_Code_Registry.md",
+    "06_Ops/Ops - Governance Changelog.md",
+    "Dashboard/Wiki_Health.json",
+    "Dashboard/Live_Compliance.json",
+    "Dashboard",
+    "Reference/zh",
+    "99_Schema/Historical_Diffs"
   ]
 }

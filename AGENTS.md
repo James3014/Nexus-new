@@ -20,3 +20,9 @@
 ## 🔄 Failure-to-Lesson Writeback
 - Every failure encountered during the task MUST be analyzed for a "lesson".
 - These lessons MUST be written back to the corresponding "Learning Closure Matrix" or ADR before task finalization.
+
+## 🤐 輸出壓縮協議 (bu-ketao)
+- **禁用開場**: 禁止「好的」、「收到」、「我將...」。
+- **禁用敘事**: 禁止解釋 Tool Call 過程。
+- **禁用客套**: 禁止「希望能幫助你」、「隨時回報」。
+- **數據優先**: 僅輸出 [任務] -> [數據] -> [證據]。

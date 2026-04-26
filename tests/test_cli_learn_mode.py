@@ -6,6 +6,50 @@ from scripts.engine import nexus_cli
 from scripts.engine.nexus_cli import nexus
 
 
+def test_learn_report_formats_structured_unresolved_questions(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+    monkeypatch.setattr(nexus_cli, "_identity_vault_status", lambda _root: (True, []))
+
+    class _Service:
+        def __init__(self, _root):
+            pass
+
+        def build_report(self, topic="", question_count=5, pass_threshold=0.6):
+            return {
+                "status": "SUCCESS",
+                "topic": topic,
+                "claims_count": 1,
+                "converged": False,
+                "citation_valid_ratio": 1.0,
+                "unresolved_questions": [
+                    {"question": "What governs Nexus?", "reason": "insufficient evidence"},
+                    {"id": "q2", "status": "OPEN"},
+                ],
+            }
+
+    monkeypatch.setattr("nexus.research.learn_mode.LearnModeService", _Service)
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:report",
+            "--topic",
+            "nexus-governance",
+            "--report-file",
+            ".nexus/reports/learn/report.json",
+            "--markdown-report-file",
+            ".nexus/reports/learn/report.md",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["semantic_status"] == "VERIFIED"
+    report_md = tmp_path / ".nexus" / "reports" / "learn" / "report.md"
+    assert "What governs Nexus? - insufficient evidence" in report_md.read_text(encoding="utf-8")
+
+
 def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
@@ -33,6 +77,8 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "nexus",
             "--report-file",
             ".nexus/reports/learn/learn_report.json",
+            "--markdown-report-file",
+            ".nexus/reports/learn/learn_ingest.md",
             "--evidence-file",
             ".nexus/reports/learn/evidence_ingest.json",
             "--output-json",
@@ -41,8 +87,19 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert ingest.exit_code == 0, ingest.output
     ingest_payload = json.loads(ingest.output)
     assert ingest_payload["claims_count"] >= 1
+    assert ingest_payload["semantic_status"] == "VERIFIED"
+    assert "channel_counts" in ingest_payload
+    assert "tactical_data" in ingest_payload["channel_counts"]
+    assert "governance_principles" in ingest_payload["channel_counts"]
     assert (tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl").exists()
     assert (tmp_path / ".nexus" / "reports" / "learn" / "evidence_ingest.json").exists()
+    ingest_md = (tmp_path / ".nexus" / "reports" / "learn" / "learn_ingest.md")
+    assert ingest_md.exists()
+    ingest_md_text = ingest_md.read_text(encoding="utf-8")
+    assert "[Task]" in ingest_md_text
+    assert "[Data]" in ingest_md_text
+    assert "[Evidence]" in ingest_md_text
+    assert "[Residual Debt]" in ingest_md_text
 
     converge = runner.invoke(
         nexus,
@@ -89,12 +146,15 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "learn:report",
             "--topic",
             "nexus pipeline",
+            "--markdown-report-file",
+            ".nexus/reports/learn/learn_report.md",
             "--output-json",
         ],
     )
     assert learn_report.exit_code == 0, learn_report.output
     report_payload = json.loads(learn_report.output)
     assert report_payload["status"] == "SUCCESS"
+    assert report_payload["semantic_status"] == "VERIFIED"
     assert report_payload["claims_count"] >= 1
     assert report_payload["citation_valid_ratio"] > 0.0
     assert "topic_packs" in report_payload
@@ -102,6 +162,13 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert "stale_claims_count" in report_payload
     assert "question_set" in report_payload
     assert "answered_questions" in report_payload
+    report_md = (tmp_path / ".nexus" / "reports" / "learn" / "learn_report.md")
+    assert report_md.exists()
+    report_md_text = report_md.read_text(encoding="utf-8")
+    assert "[Task]" in report_md_text
+    assert "[Data]" in report_md_text
+    assert "[Evidence]" in report_md_text
+    assert "[Residual Debt]" in report_md_text
 
     ask = runner.invoke(
         nexus,
@@ -127,6 +194,34 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
     assert ask_payload["citations"]
     assert "#span=" in ask_payload["answer"]
     assert (tmp_path / ".nexus" / "reports" / "learn" / "evidence_ask.json").exists()
+
+
+def test_learn_ingest_fails_closed_when_semantic_contract_unverified(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+    monkeypatch.setattr(
+        nexus_cli,
+        "_evaluate_learn_semantic_contract",
+        lambda **kwargs: {
+            "semantic_status": "UNVERIFIED",
+            "semantic_failures": ["missing_dual_channel_fields"],
+        },
+    )
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:ingest",
+            "--source",
+            "alpha-keyword",
+            "--topic",
+            "nexus",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "missing_dual_channel_fields" in result.output
 
 
 def test_learn_ask_returns_unknown_without_cited_claims(tmp_path, monkeypatch):
@@ -613,3 +708,51 @@ def test_learn_phase_slo_command_outputs_summary(tmp_path, monkeypatch):
     assert payload["status"] == "SUCCESS"
     assert payload["phase_slo_pass"] is True
     assert payload["global"]["required_done_ratio"] >= 0.95
+
+
+def test_learn_phase_kpi_command_outputs_summary(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+
+    phase_log = tmp_path / ".nexus" / "reports" / "learn" / "phase_writeback.jsonl"
+    phase_log.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "timestamp": "2026-04-15T00:00:00+00:00",
+            "topic": "nexus",
+            "phase": "P",
+            "phase_status": "SUCCESS",
+            "route": {"mode": "light"},
+            "writeback_policy": {"required": True, "policy": "required"},
+            "writeback_done": True,
+        },
+        {
+            "timestamp": "2026-04-15T00:01:00+00:00",
+            "topic": "nexus",
+            "phase": "R",
+            "phase_status": "PARTIAL",
+            "route": {"mode": "research"},
+            "writeback_policy": {"required": True, "policy": "required"},
+            "writeback_done": False,
+        },
+    ]
+    phase_log.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:phase-kpi",
+            "--window",
+            "100",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "SUCCESS"
+    assert payload["total_records"] == 2
+    assert "P" in payload["phases"]
+    assert "R" in payload["phases"]
+    assert payload["mode_breakdown"]["light"] == 1
+    assert payload["mode_breakdown"]["research"] == 1

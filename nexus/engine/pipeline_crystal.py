@@ -12,7 +12,7 @@ from nexus.learning.skill_store import SkillStore
 from nexus.learning.skill_exchange import SkillExchange
 from nexus.learning.skill_registry import SkillRegistry
 from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_event
-from nexus.core.event_bus import NexusEventBus
+from nexus.events.transport import NexusEventBus
 from nexus.engine.pipeline_outcome import PipelineOutcome, PipelineTerminalState, HumanReviewHandoff
 from nexus.core.outcome_schema import NexusOutcomeV2
 from nexus.services.continuous_learning import finalize_learning_loop

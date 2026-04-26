@@ -1,33 +1,51 @@
-# 🛡️ Nexus Agent Brain Hub: 深度優化啟動入口
+# 🛡️ Nexus Agent Brain Hub: v32 Code-Reality Remaster
+**[PHYSICAL_STATUS: SSOT_WIRED | VERSION_V32]**
 
 > [!IMPORTANT]
-> **本目錄是 Nexus v22.5 版本的技術精華。**
-> 所有的原始維基文件已聚合為 15 份「超級文件」，旨在減少 Context-Switching 並提供最高的邏輯連貫性。
+> **本目錄是 Nexus v32 時代的「深度代碼對位」導航。**
+> 所有的規則與流程已與 `exit_codes.py`, `hallucination_guard.py`, `router.py` 等實體邏輯完全對位。
 
 ---
 
-## 🧭 導航與學習路徑
+## 🧭 四層實體化矩陣 (Wired Knowledge Matrix)
 
-### 1. 快速同步 (Quick Sync)
-- **[[CORE_01_SYSTEM_OVERVIEW_AND_MUSE_PROTO]]**: 理解 Nexus 的萬用協議與整體架構。
-- **[[MUSE_ENGINE_SPEC_V17.1_HARDENED]]**: 查閱底層引擎的硬化規範。
+### Layer 1: 基礎與邊界 (01-05)
+- [[01_SYSTEM_OVERVIEW_AND_GLOSSARY]]: 術語、縮寫與 **Errors Enum**。
+- [[02_AGENT_PERSONA_AND_CAPABILITY_BOUNDARIES]]: 權責分工與 **Ownership Matrix**。
+- [[03_ARCHITECTURE_STABILITY_AND_MATURITY_MAP]]: 成熟度與風險政策。
+- [[04_RELATIONSHIP_AND_DEPENDENCY_GRAPH]]: 核心組件依賴圖譜。
+- [[05_ACCESS_CONTROL_AND_TAC_FIREWALL]]: ACL 與領地防火牆。
 
-### 2. 深度設計探討 (Deep Dive)
-- **[[ARCH_01_CORE_INTELLIGENCE_AND_ORCHESTRATOR]]**: 核心協調器與智慧調度邏輯。
-- **[[ARCH_02_STATE_MEMORY_AND_PIPELINE]]**: 狀態合約與記憶管道的實現細節。
+### Layer 2: 治理與誠信 (06-10)
+- [[06_MUSE_PROTO_ENFORCED_V2.4]]: 最高規約與 **Exit Code Registry**。
+- [[07_TRUTH_CLAIMS_AND_COMPLIANCE_HARDENING]]: 真值寄存器與紅隊。
+- [[08_HALLUCINATION_GUARD_AND_HI_AUDIT]]: **NEW!** 9 分制審計權重表。
+- [[09_CI_RELEASE_GATE_AND_PARALLEL_AUDIT]]: 並行門禁系統。
+- [[10_CLOSEOUT_CONTRACT_AND_SHA_ALIGNMENT]]: 任務封印與 Git 對位。
 
-### 3. 優化與執行規約 (Optimization & Safety)
-- **[[OPS_02_ARCHITECTURE_DECISION_RECORDS]]**: 了解歷史決策與優化提案協議。
-- **[[PROTO_01_CLI_MATRIX_SURFACE_AND_DRIFT]]**: 界面合規性與漂移檢測機制。
+### Layer 3: 架構與核心 (11-17)
+- [[11_SUPREME_MASTER_LOOP_PXDRAC_PRODUCTION]]: P-X-D-R-A-C 管線。
+- [[12_CORE_ORCHESTRATOR_AND_COORDINATOR_LOGIC]]: 中樞神經與並發鎖。
+- [[13_TACTICAL_DRONE_ENGINE_AND_1BIT_CORE]]: 執行單元與 **Adaptive Threshold**。
+- [[14_CAMPAIGN_GENERAL_AND_LLM_DAG_DECOMP]]: LLM 任務拆解引擎。
+- [[15_STATE_LIFECYCLE_AND_METABOLISM_PRUNING]]: 狀態快照、蒸餾與修剪。
+- [[16_TASK_LINEAGE_AND_PROVENANCE]]: **NEW!** 全鏈路譜系追蹤。
+- [[17_UNIFIED_SERVICE_REGISTRY_AND_MESH_V1]]: 服務註冊中心。
+
+### Layer 4: 操作與演化 (18-29)
+- [[18_CLI_FULL_PARAMS]]: **NEW!** CLI 完整參數手冊。
+- [[19_LAUNCH_SOP_AND_PREFLIGHT_HARDENING]]: 啟動 SOP 與預檢。
+- [[20_DOMAIN_FIREWALL_AND_ACL_ENFORCEMENT]]: 領地防禦與 ACL。
+- [[21_WORKTREE_ISOLATION_AND_SANDBOX_RUNNER]]: 隔離執行與影子總線。
+- [[22_FAILURE_CASE_AND_RECOVERY_MAP]]: **NEW!** 故障恢復與自癒。
+- [[23_COST_HOOK_AND_TOKEN_LEDGER_PREDICTION]]: 預算控制。
+- [[24_MSA_ROUTING_AND_LATENT_MEMORY_WIRED]]: 實體 MSA 架構。
+- [[25_LANCEDB_AND_KNOWLEDGE_INGEST_DIALECT]]: 向量存儲與 AAAK。
+- [[26_WISDOM_LAYER_AND_STRATEGY_TUNING_LOOP]]: 策略調優與注入。
+- [[27_SKILL_FORGE_AND_JIT_ASSEMBLY_PROTO]]: 技能鍛造與 JIT。
+- [[28_FLEET_COMMAND_AND_SWARM_SYNC_PROTO]]: **NEW!** Swarm 部署與 mTLS。
+- [[29_BENCHMARKS_AND_EVOLUTION_SPEC_TO_100]]: 性能基準與硬化指標。
+- [[30_API_AND_SDK_QUICKSTART_GUIDE]]: **NEW!** REST/SSE 與 SDK 開發。
 
 ---
-
-## 🛠️ 如何優化 Nexus？
-
-當你啟動對 Nexus 的優化討論時，請遵循以下步驟：
-1. **讀取 `ARCH_01/02`**：確認目前的物理實現。
-2. **查閱 `OPS_02`**：確認是否已有相關的優化提案或 ADR。
-3. **執行 `PROTO_01/02`**：建立證據鏈，確保優化不會破壞現有的 CLI 漂移合約。
-
----
-**[NEXUS v22 ACTIVE: ENCYCLOPEDIA DISTILLED | BRAIN HUB LIVE]**
+**[NEXUS v32 ACTIVE: CODE-REALITY-ALIGNED | HUB-SEALED]**

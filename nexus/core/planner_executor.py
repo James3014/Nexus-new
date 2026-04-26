@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 from nexus.core.state_contracts import NexusState
-from nexus.core.capability_gate import CapabilityGate
+from nexus.governance.capability_gate import CapabilityGate
 
 logger = logging.getLogger(__name__)
 

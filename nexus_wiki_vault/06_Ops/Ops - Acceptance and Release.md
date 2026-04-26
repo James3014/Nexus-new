@@ -2,71 +2,51 @@
 aliases:
 - Release Gate
 - Acceptance Policy
+- Confidence Levels
+- Cold Start Policy
 confidence: high
-last_compiled: 2026-04-06
+last_compiled: '2026-04-22'
 owner: agent
 related_pages:
-- Ops - CI/[Promotion Gate](Ops - CI/CD Promotion Gate.md)|[[CD [[CD Promotion Gate|Promotion
-  Gate]]|CD [Promotion Gate](Ops - CI/CD Promotion Gate.md)]]]]
-- '[Evidence Map](../05_Protocols/Protocol - Evidence Map.md)|[[Protocol - [[Protocol - Evidence Map|Evidence
-  Map]]|Protocol - [Evidence Map](../05_Protocols/Protocol - Evidence Map.md)]]]]'
-- '[System Overview](../00_Home/System Overview.md)'
-- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
-  - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
-  Conflicts|Unknowns]] and Conflicts]]]]'
-source_of_truth: scripts/ops/nexus_release_gate.sh
-status: active
+- '[[07_HALLUCINATION_GUARD_AND_HI_AUDIT]]'
+source_of_truth: scripts/engine/nexus_cli.py
+status: hardened
 tags:
 - ops
 - release
-- acceptance
-- gate
+- confidence
+- policy
+- cold_start
 title: Ops - Acceptance and Release
 type: ops
 version_scope:
-- v17.1
-- v22
-- v23
+- v24.1
+- v26
 ---
 
-
-
-# Ops - Acceptance and Release
+# Ops - Acceptance and Release (v26.2 Hardened)
 
 ## One-sentence summary
-本頁定義 Nexus 軟體正式封版與發布的流程，對齊測試、審計、Manifest 與環境清理的硬性要求。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。
 
-## Role / responsibility
-- **發布阻斷**: 在未滿足 `[Promotion Gate](Ops - CI/CD Promotion Gate.md)` 指標前禁止執行 `git tag`。 [Source: 00_Home/System Overview.md]
-- **環境清場**: 要求發布前工作區 (Worktree) 必須 100% 乾淨且通過 `git audit`。 [Source: 00_Home/System Overview.md]
-- **同步確認**: 確保 Wiki 與 Repo 之內的 [README](../../README.md) 與 Spec 已同步更新。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+## 🛡️ 冷啟動政策 (Cold-Start Acceptance)
+Nexus 支援任務在初期階段的優雅降級，定義於 `nexus_cli.py`：
+- **UNVERIFIED_COLD_START**: 當任務處於開發模式且證據尚不完整時。
+- **Enforcement**: 
+    - **DEV 模式**: 允許 `UNVERIFIED_COLD_START` 繞過阻斷。
+    - **PROD 模式**: 嚴禁冷啟動。任何 `returncode != 0` 且狀態非 `VERIFIED` 的任務均會被阻斷。
 
-## Upstream
-- **[[Ops - CI/CD Promotion Gate]]**: 提供晉升核准。
-- **Build Server**: 完成底層封裝。
+## 🛡️ 三級置信度標準 (Confidence Levels)
+系統調用 `derive_claim_bundle` 根據物理證據量測置信度：
 
-## Downstream
-- **Production Environment**: 正式部署。
-- **Release Registry**: 更新全域版本號。 [Source: nexus_wiki_vault/90_Sources/Source Index.md]]`]
+| Level | Condition (進入條件) | Claim State |
+| :--- | :--- | :--- |
+| **HIGH** | 無缺失 Requirement + 全數 Passed + 具備 Git Diff。 | `VERIFIED` |
+| **MEDIUM**| 無缺失 Requirement + 全數 Passed + 無物理變更。 | `PARTIAL` |
+| **LOW** | 存在缺失 Requirement 或 測項失敗。 | `UNVERIFIED` |
 
-## Related modules / files
-- `scripts/ops/nexus_release_gate.sh`: 正式發布腳本。 [Code: 00_Home/System Overview.md]
-- `scripts/ops/nexus_completion_gate.py`: 任務完成檢核器。 [Code: 00_Home/System Overview.md]
-
-## Source notes
-- Hardened v17.1 Spec: 定義 acceptance reports 的結構要求。
-- v22 Engine Spec: 確立「無證據不發布」的核心紀律。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
-
-## Open questions / conflicts
-- [ ] **Hotfix Policy**: 針對緊急修復是否允許 Bypass 部分門禁指標。
-- [ ] **Staging Layer**: 是否需要在 Production 前新增一個 Staging 相位。
+## ⚙️ 交付收據規格 (Delivery Receipt)
+結案前必須產出 `receipt.json` (v24.1-canonical)，包含 Integrity, Anti-Drift, Lineage 等 8 大誠信檢查。
 
 ---
-[System Overview](../00_Home/System Overview.md)
-
-
----
-[System Overview](../00_Home/System Overview.md)
-
----
-[[System Overview]]
+Back to [[System Overview]]

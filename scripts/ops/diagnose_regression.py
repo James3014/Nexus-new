@@ -24,8 +24,13 @@ def diagnose(report_path: str = None):
     if not BASELINE_PATH.exists():
         print(f"❌ Missing baseline manifest at {BASELINE_PATH}")
         sys.exit(1)
-    
+
     baseline = json.loads(BASELINE_PATH.read_text())
+    # Stage-A fail-closed contract: baseline schema must contain governance anchors.
+    if not baseline.get("version") or not baseline.get("generated_by_sha"):
+        print("❌ Baseline manifest missing required fields: version/generated_by_sha")
+        sys.exit(1)
+
     thresholds = baseline.get("metrics", {})
     success_min = thresholds.get("success_rate_threshold", 0.8)
 
@@ -77,5 +82,3 @@ if __name__ == "__main__":
     # We might take an optional report_path but we mainly look at lineage
     report_p = sys.argv[1] if len(sys.argv) > 1 else None
     diagnose(report_p)
-# DRIFT
-# DRIFT

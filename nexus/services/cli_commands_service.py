@@ -5,8 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 from nexus.services.aos_service import AosService
-from nexus.services.engine_service import NexusEngineService
 from nexus.services.audit_service import AuditService, SwarmWaveService
+from nexus.engine.canonical_task_seam import build_legacy_cli_service
 
 class CliCommandsService:
     """
@@ -18,7 +18,7 @@ class CliCommandsService:
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root
         self._aos = AosService(repo_root)
-        self._runtime = NexusEngineService(repo_root)
+        self._runtime = build_legacy_cli_service(repo_root)
         self._audit = AuditService(repo_root)
         self._wave = SwarmWaveService(repo_root)
 
@@ -26,10 +26,10 @@ class CliCommandsService:
         return self._aos.get_status(global_view, aos, aos_full)
 
     def bug(self, task: str, dry_run: bool):
-        return self._runtime.run_bug(task, dry_run)
+        return self._runtime.execute_bug(task, plan_only=dry_run)
 
     def feature(self, roadmap_str: str):
-        return self._runtime.run_feature(roadmap_str)
+        return self._runtime.execute_feature(roadmap_str)
 
     def acceptance_check(self, window: int):
         return self._audit.run_acceptance(window)

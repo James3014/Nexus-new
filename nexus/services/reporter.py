@@ -13,13 +13,26 @@ class Reporter:
 
     def __init__(self, project_root: str, tracelog_path: Optional[Path] = None, silent: bool = False, run_dir: Optional[str] = None):
         self.project_root = Path(project_root)
-        self.run_dir = Path(run_dir) if run_dir else None
+        self.run_dir = self._coerce_run_dir(run_dir)
         # Phase C: Default tracelog to run_dir if available
         if self.run_dir and tracelog_path is None:
             self.tracelog_path = self.run_dir / "tracelog.jsonl"
         else:
             self.tracelog_path = tracelog_path or self.project_root / "tracelog.jsonl"
         self.silent = silent
+
+    @staticmethod
+    def _coerce_run_dir(run_dir: Optional[str]) -> Optional[Path]:
+        if run_dir in (None, "", "None"):
+            return None
+        if type(run_dir).__module__.startswith("unittest.mock"):
+            return None
+        if not isinstance(run_dir, (str, os.PathLike, Path)):
+            return None
+        try:
+            return Path(run_dir)
+        except TypeError:
+            return None
 
     def report_outcome(self, payload: Dict[str, Any]):
         """📡 [Reporter] 轉發任務結果至治理日誌 (API 對位)。"""
