@@ -24,6 +24,11 @@ from scripts.bench.gemini_nexus_report import render_markdown_report
 
 from nexus.app.research_flow_service import run_auto_flow
 from nexus.research.local_sprint_mutator import generate_local_candidate
+from nexus.services.gemini_cli import (
+    build_gemini_cli_invocation,
+    extract_token_info,
+    DEFAULT_GEMINI_BIN,
+)
 from scripts.engine.nexus_cli import nexus as nexus_root
 
 
@@ -447,40 +452,7 @@ def _normalize_token_status(status: str, total_tokens: int) -> str:
 
 
 def _extract_token_info_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    total = 0
-    stats_root = payload.get("stats")
-    stats = stats_root.get("models", {}) if isinstance(stats_root, dict) else {}
-    stats_present = isinstance(stats_root, dict)
-    stats_tokens = 0
-    if isinstance(stats, dict):
-        for model_stats in stats.values():
-            if isinstance(model_stats, dict):
-                stats_tokens += int(((model_stats.get("tokens") or {}).get("total")) or 0)
-    total += stats_tokens
-    usage = payload.get("usageMetadata") or payload.get("usage_metadata") or payload.get("usage")
-    usage_present = isinstance(usage, dict)
-    usage_tokens = 0
-    if isinstance(usage, dict):
-        for key in ("totalTokenCount", "total_tokens", "totalTokens"):
-            try:
-                value = int(usage.get(key) or 0)
-            except (TypeError, ValueError):
-                continue
-            if value > 0:
-                usage_tokens = value
-                break
-    total += usage_tokens
-    source = "missing"
-    if stats_tokens > 0:
-        source = "stats"
-    elif usage_tokens > 0:
-        source = "usage_metadata"
-    return {
-        "total_tokens": total,
-        "gateway_stats_present": stats_present,
-        "gateway_usage_metadata_present": usage_present,
-        "gateway_token_source": source,
-    }
+    return extract_token_info(payload)
 
 
 def _emit_progress(
@@ -789,27 +761,27 @@ def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
 
 
 def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
-    gemini_bin = shutil.which("gemini") or "/Users/jameschen/.npm-global/bin/gemini"
+    gemini_bin = shutil.which("gemini") or DEFAULT_GEMINI_BIN
     model_name = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "gemini-3.1-pro-preview")
     if not Path(gemini_bin).exists():
         return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0, "model_name": model_name}, "gemini_missing"
-    cmd = [
-        gemini_bin,
-        "--skip-trust",
-        "--approval-mode",
-        "plan",
-        "-m",
-        model_name,
-        "-p",
-        prompt,
-        "--output-format",
-        "json",
-    ]
-    env = os.environ.copy()
-    env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
-    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    invocation = build_gemini_cli_invocation(
+        prompt=prompt,
+        model_name=model_name,
+        gemini_entry=gemini_bin,
+        node_bin=None,
+        env=os.environ.copy(),
+        transport="inline",
+    )
     try:
-        res = subprocess.run(cmd, cwd="/tmp", env=env, text=True, capture_output=True, timeout=timeout_sec)
+        res = subprocess.run(
+            invocation.command,
+            cwd=invocation.cwd,
+            env=invocation.env,
+            text=True,
+            capture_output=True,
+            timeout=timeout_sec,
+        )
     except subprocess.TimeoutExpired as exc:
         return {"status": "FAIL", "error_category": "timeout", "tokens_used": 0, "model_name": model_name}, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
     if res.returncode != 0:

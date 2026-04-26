@@ -515,6 +515,12 @@ version_scope:
 - **Decision**: Keep prompt-budget telemetry, but do not expand to 3x1/6x2 until a Nexus-only 1x1 proves a non-timeout `gateway_token_source=stats` or `usage_metadata`.
 - **Prevention**: Next probes must compare CLI invocation mode, approval mode, stdin versus inline payload, and stricter no-tool system instructions before treating token telemetry as benchmark-ready.
 
+## 2026-04-27: Gateway Smoke Success Does Not Prove Full-Patch Benchmark Readiness
+- **Phenomenon**: After sharing Gemini CLI invocation with `--approval-mode plan`, short Nexus gateway probes returned `gateway_token_source=stats`, but real Hyper auto-flow still timed out while asking Gemini for full-file patch JSON.
+- **Root Cause**: The invocation contract and token parser can be correct while the Stage-1 patch-generation contract remains too expensive or underspecified for a bounded benchmark row.
+- **Decision**: Treat gateway smoke and research auto-flow as separate gates: smoke proves provider telemetry availability; auto-flow must prove the benchmark prompt can return a patch before 3x1/6x2 runs.
+- **Prevention**: The next benchmark-readiness change should replace full-file patch generation with a smaller edit/diff protocol or add a strict patch-size/response-budget mode, then rerun a hard-task 1x1 before expanding.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

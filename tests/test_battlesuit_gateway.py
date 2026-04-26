@@ -112,6 +112,7 @@ def test_gateway_sets_headless_trust_flags_and_neutral_cwd():
 
     assert data["status"] == "PASS"
     assert "--skip-trust" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--approval-mode") + 1] == "plan"
     assert captured["env"]["GEMINI_CLI_TRUST_WORKSPACE"] == "true"
     assert captured["cwd"] == "/tmp"
 

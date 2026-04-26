@@ -4,11 +4,19 @@ import subprocess
 import json
 import logging
 import fcntl
-import shutil
 import re
 import tempfile
 import os
 import sys
+
+from nexus.services.gemini_cli import (
+    build_gemini_env,
+    build_gemini_cli_invocation,
+    extract_token_info,
+    resolve_binary,
+    DEFAULT_GEMINI_CANDIDATES,
+    DEFAULT_NODE_CANDIDATES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,9 +161,6 @@ class BattlesuitGateway:
             except ValueError:
                 pass
 
-        tmp_payload = (self.project_root / f".nexus/payload_{os.getpid()}.txt").resolve()
-        tmp_payload.parent.mkdir(parents=True, exist_ok=True)
-        tmp_payload.write_text(content, encoding="utf-8")
         gateway_telemetry = {
             "gateway_prompt_chars": len(sys_msg),
             "gateway_payload_chars": len(content),
@@ -163,58 +168,53 @@ class BattlesuitGateway:
             "gateway_timeout_sec": dynamic_timeout,
         }
         
-        custom_env = os.environ.copy()
-        custom_env["HOME"] = "/Users/jameschen"
-        custom_env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{custom_env.get('PATH', '')}"
-        custom_env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
+        custom_env = build_gemini_env(os.environ.copy())
 
         # Resolve binaries dynamically to avoid hard failure on host-specific paths.
-        node_bin = self._resolve_binary(
+        node_bin = resolve_binary(
             env=custom_env,
             env_key="NEXUS_NODE_BIN",
-            candidates=(
-                "/opt/homebrew/bin/node",
-                "/usr/local/bin/node",
-                "/usr/bin/node",
-            ),
+            candidates=DEFAULT_NODE_CANDIDATES,
             binary_name="node",
         )
-        gemini_entry = self._resolve_binary(
+        gemini_entry = resolve_binary(
             env=custom_env,
             env_key="NEXUS_GEMINI_BIN",
-            candidates=(
-                "/Users/jameschen/.npm-global/bin/gemini",
-                "/opt/homebrew/bin/gemini",
-                "/usr/local/bin/gemini",
-            ),
+            candidates=DEFAULT_GEMINI_CANDIDATES,
             binary_name="gemini",
         )
         if not gemini_entry:
-            if tmp_payload.exists():
-                tmp_payload.unlink()
             return self._build_error_result(
                 "Gateway bootstrap failed: cannot locate 'gemini' binary",
                 category="binary_missing",
             ), "gemini_missing"
+
+        invocation = build_gemini_cli_invocation(
+            prompt=sys_msg,
+            payload=content,
+            model_name=model_name,
+            gemini_entry=gemini_entry,
+            node_bin=node_bin,
+            env=custom_env,
+        )
+        tmp_payload = None
+        if invocation.prompt_stdin is not None:
+            tmp_payload = (self.project_root / f".nexus/payload_{os.getpid()}.txt").resolve()
+            tmp_payload.parent.mkdir(parents=True, exist_ok=True)
+            tmp_payload.write_text(invocation.prompt_stdin, encoding="utf-8")
         
         for attempt in range(max_retries):
             try:
-                cmd = [gemini_entry, "--skip-trust", "-m", model_name, "-p", sys_msg, "--output-format", "json"]
-                if node_bin:
-                    cmd_with_node = [node_bin, gemini_entry, "--skip-trust", "-m", model_name, "-p", sys_msg, "--output-format", "json"]
-                else:
-                    cmd_with_node = None
-
-                f_in = open(tmp_payload, "rb")
+                f_in = open(tmp_payload, "rb") if tmp_payload is not None else None
                 try:
                     res = subprocess.run(
-                        cmd,
+                        invocation.command,
                         stdin=f_in,
                         capture_output=True,
                         text=True,
                         check=False,
-                        env=custom_env,
-                        cwd="/tmp",
+                        env=invocation.env,
+                        cwd=invocation.cwd,
                         timeout=dynamic_timeout
                     )
                 finally:
@@ -223,17 +223,17 @@ class BattlesuitGateway:
                 
                 # Retry with explicit node if gemini shim cannot find node runtime.
                 stderr_lower = (res.stderr or "").lower()
-                if res.returncode != 0 and cmd_with_node and "env: node: no such file or directory" in stderr_lower:
-                    f_in2 = open(tmp_payload, "rb")
+                if res.returncode != 0 and invocation.command_with_node and "env: node: no such file or directory" in stderr_lower:
+                    f_in2 = open(tmp_payload, "rb") if tmp_payload is not None else None
                     try:
                         res = subprocess.run(
-                            cmd_with_node,
+                            invocation.command_with_node,
                             stdin=f_in2,
                             capture_output=True,
                             text=True,
                             check=False,
-                            env=custom_env,
-                            cwd="/tmp",
+                            env=invocation.env,
+                            cwd=invocation.cwd,
                             timeout=dynamic_timeout
                         )
                     finally:
@@ -260,12 +260,12 @@ class BattlesuitGateway:
                         resp_json, _ = json.JSONDecoder().raw_decode(raw_stdout)
                     output_text = resp_json.get("output") or resp_json.get("response") or raw_stdout
                     
-                    token_info = self._extract_token_info(resp_json)
+                    token_info = extract_token_info(resp_json)
                     tokens_total = int(token_info["total_tokens"])
                                 
                     capture_status = "measured" if tokens_total > 0 else "missing_gateway_stats"
                     parsed = self._parse_json_result(output_text, tokens_total, capture_status, token_info, gateway_telemetry)
-                    if tmp_payload.exists():
+                    if tmp_payload is not None and tmp_payload.exists():
                         tmp_payload.unlink()
                     return parsed
                 except (json.JSONDecodeError, ValueError):
@@ -277,7 +277,8 @@ class BattlesuitGateway:
             except Exception as e:
                 last_err = str(e)
                 
-        if tmp_payload.exists(): tmp_payload.unlink()
+        if tmp_payload is not None and tmp_payload.exists():
+            tmp_payload.unlink()
         category = "timeout" if str(last_err).strip().upper() == "TIMEOUT" else "gateway_error"
         return self._build_error_result(f"Gateway Exhausted: {last_err}", category=category, telemetry=gateway_telemetry), last_err
 
@@ -292,52 +293,10 @@ class BattlesuitGateway:
         env_override = env.get(env_key)
         if env_override and Path(env_override).exists():
             return env_override
-        found = shutil.which(binary_name, path=env.get("PATH", ""))
-        if found:
-            return found
-        for candidate in candidates:
-            if Path(candidate).exists():
-                return candidate
-        return None
+        return resolve_binary(env=env, env_key=env_key, candidates=candidates, binary_name=binary_name)
 
     def _extract_token_info(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        total = 0
-        stats_root = payload.get("stats")
-        stats = stats_root.get("models", {}) if isinstance(stats_root, dict) else {}
-        stats_present = isinstance(stats_root, dict)
-        stats_tokens = 0
-        if isinstance(stats, dict):
-            for m_stats in stats.values():
-                if isinstance(m_stats, dict):
-                    try:
-                        stats_tokens += int(m_stats.get("tokens", {}).get("total", 0) or 0)
-                    except (TypeError, ValueError):
-                        continue
-        total += stats_tokens
-        usage = payload.get("usageMetadata") or payload.get("usage_metadata") or payload.get("usage")
-        usage_present = isinstance(usage, dict)
-        usage_tokens = 0
-        if isinstance(usage, dict):
-            for key in ("totalTokenCount", "total_tokens", "totalTokens"):
-                try:
-                    value = int(usage.get(key) or 0)
-                except (TypeError, ValueError):
-                    continue
-                if value > 0:
-                    usage_tokens = value
-                    break
-        total += usage_tokens
-        source = "missing"
-        if stats_tokens > 0:
-            source = "stats"
-        elif usage_tokens > 0:
-            source = "usage_metadata"
-        return {
-            "total_tokens": total,
-            "gateway_stats_present": stats_present,
-            "gateway_usage_metadata_present": usage_present,
-            "gateway_token_source": source,
-        }
+        return extract_token_info(payload)
 
     def _parse_json_result(self, raw_text, tokens_total, capture_status, token_info=None, gateway_telemetry=None):
         """解析模型產出的 JSON 內容。"""
