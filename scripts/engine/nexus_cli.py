@@ -202,6 +202,43 @@ def _evaluate_learn_semantic_contract(
     }
 
 
+def _format_unresolved_question_item(item) -> str:
+    if isinstance(item, str):
+        return item.strip()
+
+    if isinstance(item, dict):
+        for key in ("question", "title", "text", "message", "reason"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return json.dumps(item, ensure_ascii=False, sort_keys=True)
+
+    if isinstance(item, (list, tuple, set)):
+        rendered_parts: list[str] = []
+        for part in item:
+            rendered = _format_unresolved_question_item(part)
+            if rendered:
+                rendered_parts.append(rendered)
+        return f"[{', '.join(rendered_parts)}]" if rendered_parts else "[]"
+
+    return str(item)
+
+
+def _format_unresolved_questions_for_debt(unresolved_questions) -> str:
+    if unresolved_questions is None:
+        return ""
+
+    if not isinstance(unresolved_questions, list):
+        unresolved_questions = [unresolved_questions]
+
+    rendered: list[str] = []
+    for item in unresolved_questions:
+        value = _format_unresolved_question_item(item)
+        if value:
+            rendered.append(value)
+    return "; ".join(rendered)
+
+
 def _task_requests_output_file(task_text: str) -> bool:
     text = (task_text or "").lower()
     intent_words = (
@@ -919,7 +956,7 @@ def learn_report(topic, question_count, pass_threshold, report_file, markdown_re
             f"converged={payload.get('converged')} "
             f"citation_valid_ratio={payload.get('citation_valid_ratio', 0.0)}"
         ),
-        debt="; ".join(payload.get("unresolved_questions", [])) or "None",
+        debt=_format_unresolved_questions_for_debt(payload.get("unresolved_questions")) or "None",
     )
     semantic_contract = _evaluate_learn_semantic_contract(
         root=repo_root,
@@ -1639,6 +1676,28 @@ def research_auto_flow(
         if not output_json:
             click.echo(str(exc))
         raise SystemExit(1)
+
+
+@nexus_group.command(name="ultra-review")
+@click.option("--task", default="ultra review", show_default=True)
+@click.option("--dry-run/--no-dry-run", default=True, show_default=True)
+@click.option("--report-file", default=".nexus/reports/ultra_review_report.json", show_default=True, type=click.Path())
+@click.option("--sandbox-root", default=".nexus/reports/ultra_review/sandboxes", show_default=True, type=click.Path())
+@click.option("--output-json", is_flag=True)
+def ultra_review(task, dry_run, report_file, sandbox_root, output_json):
+    from nexus.engine.ultra_review_service import UltraReviewService
+
+    payload = UltraReviewService(repo_root).run(
+        task=task,
+        dry_run=dry_run,
+        report_path=report_file,
+        sandbox_root=sandbox_root,
+    )
+    if output_json:
+        click.echo(json.dumps(payload, ensure_ascii=False))
+    else:
+        click.echo(f"{'✅' if payload.get('gate_passed') else '❌'} Ultra Review: {payload.get('status')}")
+        click.echo(f"Report: {report_file}")
 
 
 
