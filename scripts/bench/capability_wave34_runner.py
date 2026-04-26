@@ -87,7 +87,7 @@ def main() -> int:
         "python",
         "scripts/bench/capability_ab_full_report.py",
         "--with-nexus-runner",
-        "service",
+        "subprocess",
         "--enable-stress-cross-bucket",
         "--stress-tasks-file",
         str(args.stress_tasks_file),
@@ -120,18 +120,10 @@ def main() -> int:
         str(args.ops_profile),
         "--rounds",
         str(max(1, int(args.ops_rounds))),
-        "--force-flow",
-        "auto",
-        "--without-mode",
-        "service",
         "--with-llm-mode",
         str(args.with_llm_mode),
         "--output-json",
     ]
-    if args.with_model_label:
-        ops_cmd.extend(["--with-model-label", str(args.with_model_label)])
-    if args.without_model_label:
-        ops_cmd.extend(["--without-model-label", str(args.without_model_label)])
     ops_res = _run(ops_cmd, cwd=repo_root)
     ops_payload = _extract_json(ops_res.stdout)
     if ops_res.returncode != 0:

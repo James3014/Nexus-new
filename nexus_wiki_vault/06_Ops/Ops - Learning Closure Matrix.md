@@ -346,3 +346,21 @@ version_scope:
 - **Root Cause**: The cleanup branch was created before the public benchmark framework landed on `main`, so both branches changed the same seams for different reasons: main added model/fallback benchmark telemetry while the cleanup branch added JIT/nightly and companion-edit hardening.
 - **Decision**: Resolve conflicts by preserving mainline benchmark semantics (`repo_kind`, manifest hash, trial telemetry, forced in-place executor) and adding the cleanup branch's new fields or helpers only where they are additive (`fixture_kind`, companion edits, CI/nightly docs).
 - **Prevention**: Before merging long-lived cleanup branches, run `merge-tree` and list semantic owners per conflicted file; benchmark framework files must keep public-claim telemetry as the source of truth.
+
+## 2026-04-26: Learn Report Debt Formatting Must Preserve Dict Semantics
+- **Phenomenon**: `uv run scripts/ops/ci_gate.py --strict --changed-paths scripts/ops/select_tests.py` failed in Report Trust Audit because `learn:report` rendered structured unresolved questions as `What governs Nexus?; {"id": "q2", "status": "OPEN"}` instead of preserving the expected `question - reason` markdown text.
+- **Root Cause**: The merge kept the crash-safe dict formatter but collapsed dictionaries to the first string-valued field, dropping paired semantic fields such as `question` plus `reason`.
+- **Decision**: Teach `_format_unresolved_question_item` to render `question` with `reason` when both are present, while retaining JSON fallback for unknown structured dicts.
+- **Prevention**: Report/gate formatter merges must run the trust-audit lane, not only the focused learn-report test, because public report semantics are part of the verification contract.
+
+## 2026-04-26: Wave34 Service Comparison Must Use Supported Runner Mode
+- **Phenomenon**: Offline `capability_wave34_runner.py --with-llm-mode off` failed in `full_ab_service` because it passed `--with-nexus-runner service` to `capability_ab_runner.py`, whose accepted runner choices are `inprocess` and `subprocess`.
+- **Root Cause**: The service comparison label was conflated with the execution runner mode. `without-mode=service` is valid for the comparison side, but the with-Nexus runner must remain one of the runner's supported execution modes.
+- **Decision**: Map legacy `with_nexus_runner=service` to `subprocess` in the full-report wrapper and make Wave3/4 service comparison call the wrapper with `subprocess` explicitly.
+- **Prevention**: Wrapper tests must assert downstream CLI compatibility by checking flag-bound values, not only that high-level labels are propagated or present elsewhere in the command.
+
+## 2026-04-26: Wave34 Ops Loop Must Not Inherit Full-AB Flags
+- **Phenomenon**: After fixing the service runner mode, offline Wave3/4 failed in `ops_loop` because it passed `--force-flow auto --without-mode service` to `capability_ops_loop.py`, whose CLI only accepts profile, rounds, autotune, and LLM-mode controls.
+- **Root Cause**: The Wave3/4 orchestrator reused Full-AB comparison flags for the ops loop stage even though the ops loop has a separate CLI contract.
+- **Decision**: Remove Full-AB-only flags and model-label flags from the ops loop command while preserving `--with-llm-mode`.
+- **Prevention**: Orchestrator smoke tests must validate per-stage allowed flags rather than only checking that every stage was invoked.

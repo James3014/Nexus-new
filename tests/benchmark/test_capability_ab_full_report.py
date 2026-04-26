@@ -83,6 +83,40 @@ def test_run_bucket_service_force_baseline(monkeypatch, tmp_path: Path):
     assert out["kpi"]["overhead_metric"] == "avg_duration_sec"
 
 
+def test_run_bucket_maps_legacy_service_runner_to_subprocess(monkeypatch, tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    class _Res:
+        def __init__(self, stdout: str, returncode: int = 0):
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = returncode
+
+    def _fake_run(cmd: list[str], cwd: Path):  # noqa: ANN001
+        if "capability_ab_runner.py" in " ".join(cmd):
+            captured["runner_cmd"] = cmd
+            return _Res('{"with_nexus_file":"a.jsonl","without_nexus_file":"b.jsonl"}')
+        return _Res('{"a":{"summary":{}},"b":{"summary":{}}}')
+
+    monkeypatch.setattr(full_report, "_run", _fake_run)
+
+    full_report._run_bucket(
+        repo_root=tmp_path,
+        output_dir=tmp_path / "out",
+        name="service",
+        tasks_file="scripts/bench/capability_tasks_v1.json",
+        difficulty="all",
+        max_tasks=1,
+        with_nexus_runner="service",
+        without_mode="service",
+    )
+
+    cmd = captured["runner_cmd"]
+    assert isinstance(cmd, list)
+    idx = cmd.index("--with-nexus-runner")
+    assert cmd[idx + 1] == "subprocess"
+
+
 def test_run_file_task_bucket_uses_emit_ab(monkeypatch, tmp_path: Path):
     captured: dict[str, object] = {}
     eval_file = tmp_path / "ab_eval.json"

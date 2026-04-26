@@ -115,6 +115,7 @@ def _run_bucket(
     ts = int(time.time())
     out_dir = output_dir / name
     out_dir.mkdir(parents=True, exist_ok=True)
+    runner_mode = "subprocess" if with_nexus_runner == "service" else str(with_nexus_runner)
     run_cmd = [
         "uv",
         "run",
@@ -127,7 +128,7 @@ def _run_bucket(
         "--max-tasks",
         str(max_tasks),
         "--with-nexus-runner",
-        str(with_nexus_runner),
+        runner_mode,
         "--with-llm-mode",
         str(with_llm_mode),
         "--without-mode",

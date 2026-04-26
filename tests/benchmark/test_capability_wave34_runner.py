@@ -54,3 +54,10 @@ def test_wave34_runner_smoke(monkeypatch, tmp_path: Path):
     assert rc == 0
     assert any("--with-llm-mode" in cmd and "hard" in cmd for cmd in captured)
     assert any("--with-model-label" in cmd and "gemini-3-flash-preview" in cmd for cmd in captured)
+    runner_modes = [cmd[cmd.index("--with-nexus-runner") + 1] for cmd in captured if "--with-nexus-runner" in cmd]
+    assert "service" not in runner_modes
+    ops_cmds = [cmd for cmd in captured if "capability_ops_loop.py" in " ".join(cmd)]
+    assert len(ops_cmds) == 1
+    assert "--force-flow" not in ops_cmds[0]
+    assert "--without-mode" not in ops_cmds[0]
+    assert "--with-model-label" not in ops_cmds[0]

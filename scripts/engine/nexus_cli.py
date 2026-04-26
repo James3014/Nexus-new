@@ -225,6 +225,13 @@ def _format_unresolved_question_item(item) -> str:
         return item.strip()
 
     if isinstance(item, dict):
+        question = item.get("question")
+        reason = item.get("reason")
+        if isinstance(question, str) and question.strip():
+            text = question.strip()
+            if isinstance(reason, str) and reason.strip():
+                return f"{text} - {reason.strip()}"
+            return text
         for key in ("question", "title", "text", "message", "reason"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
