@@ -135,6 +135,59 @@ def _compute_self_heal_metrics(with_rows: list[dict[str, Any]]) -> dict[str, Any
     }
 
 
+def _compute_overhead_breakdown(with_rows: list[dict[str, Any]], without_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    phase_fields = {
+        "P": "phase_wall_p_sec",
+        "X": "phase_wall_x_sec",
+        "D": "phase_wall_d_sec",
+        "R": "phase_wall_r_sec",
+        "A": "phase_wall_a_sec",
+        "C": "phase_wall_c_sec",
+    }
+    with_wall = _avg([float(r.get("wall_duration_sec", 0.0) or 0.0) for r in with_rows])
+    without_wall = _avg([float(r.get("wall_duration_sec", 0.0) or 0.0) for r in without_rows])
+    phase_avg = {
+        phase: round(_avg([float(r.get(field, 0.0) or 0.0) for r in with_rows]), 4)
+        for phase, field in phase_fields.items()
+    }
+    subprocess_avg = round(_avg([float(r.get("subprocess_wall_sec", 0.0) or 0.0) for r in with_rows]), 4)
+    cli_avg = round(_avg([float(r.get("cli_elapsed_sec", 0.0) or 0.0) for r in with_rows]), 4)
+    phase_sum = round(sum(phase_avg.values()), 4)
+    overhead = max(0.0, with_wall - without_wall)
+    top_phase = max(phase_avg.items(), key=lambda item: item[1])[0] if phase_avg else ""
+    return {
+        "with_avg_wall_duration_sec": round(with_wall, 4),
+        "without_avg_wall_duration_sec": round(without_wall, 4),
+        "wall_overhead_sec": round(overhead, 4),
+        "with_avg_subprocess_wall_sec": subprocess_avg,
+        "with_avg_cli_elapsed_sec": cli_avg,
+        "phase_avg_sec": phase_avg,
+        "phase_sum_sec": phase_sum,
+        "top_phase": top_phase,
+    }
+
+
+def _extract_first_pass_blockers(with_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    for row in with_rows:
+        attempts = int(row.get("attempt_count", 0) or 0)
+        if attempts <= 1:
+            continue
+        blockers.append(
+            {
+                "task_id": row.get("task_id", ""),
+                "attempt_count": attempts,
+                "status": row.get("status", ""),
+                "strategy_path": row.get("strategy_path", ""),
+                "chosen_flow": row.get("chosen_flow", ""),
+                "route_recommended_flow": row.get("route_recommended_flow", ""),
+                "phase_wall_r_sec": row.get("phase_wall_r_sec"),
+                "wall_duration_sec": row.get("wall_duration_sec"),
+            }
+        )
+    return blockers
+
+
 def _compute_route_consensus_metrics(with_rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = max(1, len(with_rows))
     winner_defined = [
@@ -295,9 +348,12 @@ def run_ops_loop(
     health = _compute_health_score(eval_payload)
     kpi = _extract_kpi(eval_payload)
     with_rows = _load_jsonl_rows(with_file)
+    without_rows = _load_jsonl_rows(without_file)
     pillar_metrics = _compute_pillar_scores(with_rows)
     self_heal_metrics = _compute_self_heal_metrics(with_rows)
     route_consensus_metrics = _compute_route_consensus_metrics(with_rows)
+    overhead_breakdown = _compute_overhead_breakdown(with_rows, without_rows)
+    first_pass_blockers = _extract_first_pass_blockers(with_rows)
 
     llm_probe_payload: dict[str, Any] | None = None
     if run_llm_probe:
@@ -456,6 +512,8 @@ def run_ops_loop(
         "health": health,
         "pillars": pillar_metrics,
         "self_heal": self_heal_metrics,
+        "first_pass_blockers": first_pass_blockers,
+        "overhead_breakdown": overhead_breakdown,
         "route_consensus": route_consensus_metrics,
         "llm_probe": llm_probe_payload,
         "autotune": autotune_payload or None,
