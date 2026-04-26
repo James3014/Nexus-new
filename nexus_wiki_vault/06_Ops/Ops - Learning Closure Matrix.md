@@ -533,6 +533,12 @@ version_scope:
 - **Decision**: Preserve candidate summaries in research-flow reports and allow one bounded LLM self-heal turn with pytest failure evidence.
 - **Prevention**: Do not classify a measured-token failed row as a token problem. If `gateway_token_source=stats` and `model_patch_generated=true`, route next work to candidate correctness and failure-tail repair.
 
+## 2026-04-27: Nexus Rescue Is Not The Same As LLM Self-Heal
+- **Phenomenon**: A 6x2 Gemini+Nexus smoke showed guard fallback rows as `nexus_rescued=true`, but the capability flag also marked them as `self_heal_used=true`.
+- **Root Cause**: The report collapsed multiple recovery mechanisms into one boolean, mixing guard fallback/local rescue with LLM self-heal.
+- **Decision**: Keep `nexus_rescued` for guard fallback and verification rescue; reserve `self_heal_used` for explicit `llm_self_heal` winner sources or error codes.
+- **Prevention**: Public benchmark claims must name the recovery mechanism precisely: guard fallback, local rescue, verification rescue, and LLM self-heal are separate Nexus capabilities with different costs.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

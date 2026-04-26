@@ -366,8 +366,8 @@ def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verificati
             status="FAILED",
             reason="stage1_no_passing_candidate",
             patch="",
-            winner_source="llm_self_heal",
-            error_codes=["stage1_no_passing_candidate", "llm_self_heal_attempted"],
+            winner_source="local",
+            error_codes=["stage1_no_passing_candidate"],
             rejection_summary={"pytest_failed": 1},
             attempt_count=5,
             model_calls=5,
@@ -422,6 +422,7 @@ def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verificati
     assert trace["usage_valid"] is True
     assert trace["nexus_rescued"] is True
     assert trace["winner_source"] == "verification_only"
+    assert trace["capabilities"]["self_heal_used"] is False
     assert trace["capabilities"]["claim_verified"] is True
 
 

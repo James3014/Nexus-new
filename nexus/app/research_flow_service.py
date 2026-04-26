@@ -974,10 +974,7 @@ def run_auto_flow(
     nexus_rescued = bool((guard_hit or verification_only_rescue) and tests_passed)
     winner_source = result_report.get("winner_source") or guard_fallback_from.get("winner_source") or ("nexus_rescue" if nexus_rescued else "local_only")
     self_heal_used = bool(
-        nexus_rescued
-        or history_forced_baseline
-        or early_baseline_shortcut
-        or "self_heal" in str(winner_source)
+        "self_heal" in str(winner_source)
         or any("self_heal" in str(code) for code in result_report.get("error_codes", []))
     )
     mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False))
