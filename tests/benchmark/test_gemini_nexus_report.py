@@ -112,6 +112,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Without Nexus scope: 2 unique tasks x 1 trials = 2 rows" in out
     assert "With Nexus scope: 2 unique tasks x 1 trials = 2 rows" in out
     assert "Solve rate | 50.0% | 100.0% | 50.0%" in out
+    assert "Cost-comparable rate | 100.0% | 50.0% | -50.0%" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
     assert "| measured | 2 | 1 |" in out
     assert "| estimated | 0 | 1 |" in out

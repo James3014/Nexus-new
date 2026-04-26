@@ -118,6 +118,10 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["b"]["summary"]["token_observable_rate"] == 1.0
     assert report["a"]["summary"]["token_measured_rate"] == 1.0
     assert report["b"]["summary"]["token_measured_rate"] == 1.0
+    assert report["a"]["summary"]["token_estimated_rate"] == 0.0
+    assert report["b"]["summary"]["token_local_only_rate"] == 0.0
+    assert report["a"]["summary"]["cost_comparable_rate"] == 1.0
+    assert report["b"]["summary"]["cost_comparable_rate"] == 1.0
     assert report["a"]["summary"]["avg_total_tokens_measured_only"] == 300.0
     assert report["b"]["summary"]["nexus_usage_valid_rate"] == 0.5
     assert report["b"]["summary"]["gemini_uses_nexus_rate"] == 0.5
@@ -133,6 +137,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["nexus_usage_valid_rate_delta"] == 0.5
     assert report["delta"]["patch_success_rate_delta"] == 0.5
     assert report["delta"]["verification_only_rate_delta"] == 0.5
+    assert report["delta"]["cost_comparable_rate_delta"] == 0.0
     assert report["by_category"]["bugfix"]["solve_rate_delta"] == 1.0
     assert report["by_category"]["feature"]["patch_success_rate_delta"] == 1.0
     assert report["by_repo_kind"]["neutral_fixture"]["solve_rate_delta"] == 1.0

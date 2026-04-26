@@ -256,6 +256,16 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in rows
         if str(row.get("token_capture_status", "")).strip().lower() == "measured"
     ]
+    estimated_token_rows = [
+        row
+        for row in rows
+        if str(row.get("token_capture_status", "")).strip().lower() == "estimated"
+    ]
+    local_only_token_rows = [
+        row
+        for row in rows
+        if str(row.get("token_capture_status", "")).strip().lower() == "not_applicable_local_only"
+    ]
     total_tokens_measured_only = sum(_as_float(row.get("total_tokens"), 0.0) for row in measured_token_rows)
     total_model_calls = sum(_as_int(row.get("model_calls"), 0) for row in rows)
     total_attempts = sum(_as_int(row.get("attempt_count"), 0) for row in rows)
@@ -266,6 +276,9 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         not in {"", "unknown", "missing", "none", "null"}
     )
     token_measured = len(measured_token_rows)
+    token_estimated = len(estimated_token_rows)
+    token_local_only = len(local_only_token_rows)
+    cost_comparable = token_measured
     trust_mismatch = sum(1 for row in rows if _is_trust_mismatch(row))
     phase_keys = ("phase_p", "phase_x", "phase_d", "phase_r", "phase_a", "phase_c")
     mutation_required_rows = [row for row in rows if _is_true(row.get("mutation_required"))]
@@ -290,6 +303,9 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_attempt_count": round(total_attempts / total, 2),
         "token_observable_rate": round(token_observable / total, 4),
         "token_measured_rate": round(token_measured / total, 4),
+        "token_estimated_rate": round(token_estimated / total, 4),
+        "token_local_only_rate": round(token_local_only / total, 4),
+        "cost_comparable_rate": round(cost_comparable / total, 4),
         "trust_mismatch_rate": round(trust_mismatch / total, 4),
         "nexus_usage_valid_rate": _rate(rows, lambda r: _is_true(r.get("nexus_usage_valid"))),
         "gemini_uses_nexus_rate": _rate(rows, lambda r: _is_true(r.get("gemini_uses_nexus"))),
@@ -367,6 +383,15 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "token_measured_rate_delta": round(
             summary_b["token_measured_rate"] - summary_a["token_measured_rate"], 4
+        ),
+        "token_estimated_rate_delta": round(
+            summary_b["token_estimated_rate"] - summary_a["token_estimated_rate"], 4
+        ),
+        "token_local_only_rate_delta": round(
+            summary_b["token_local_only_rate"] - summary_a["token_local_only_rate"], 4
+        ),
+        "cost_comparable_rate_delta": round(
+            summary_b["cost_comparable_rate"] - summary_a["cost_comparable_rate"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),

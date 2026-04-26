@@ -127,9 +127,11 @@ rows with gateway `stats.models.*.tokens.total` are now normalized to
 `token_capture_status=measured`. On the 1x1 smoke, bare Gemini reached 100.0%
 token measured rate. Nexus remained 0.0% measured on that row because the
 successful Nexus result came from the self-healing/local verification path,
-recorded as `not_applicable_local_only`. This confirms token-cost comparison is
-not hard because of arithmetic; it is hard because the two arms currently expose
-different telemetry surfaces.
+recorded as `not_applicable_local_only`. The report now exposes both
+`token_local_only_rate` and `cost_comparable_rate`; for this smoke the
+cost-comparable rate is 100.0% for bare Gemini and 0.0% for Nexus. This confirms
+token-cost comparison is not hard because of arithmetic; it is hard because the
+two arms currently expose different telemetry surfaces.
 
 ## Evidence Files
 
