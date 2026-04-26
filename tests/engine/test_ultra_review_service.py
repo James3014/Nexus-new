@@ -36,6 +36,19 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
     assert payload["diff"]["has_worktree_delta"] is True
     assert "nexus/engine/sample.py" in payload["diff"]["changed_files"]
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "changes.diff").exists()
+    assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "progress.jsonl").exists()
+    assert payload["artifacts"]["progress_log"].endswith("progress.jsonl")
+    assert payload["summary"]["logic_breaker_passed"] is True
+    assert payload["summary"]["ghost_regression_passed"] is True
+    assert payload["summary"]["security_verified_findings"] == 0
+    assert [event["stage"] for event in payload["progress"]] == [
+        "sandbox_prepared",
+        "diff_captured",
+        "security_sentry_complete",
+        "logic_breaker_complete",
+        "ghost_regression_complete",
+        "report_written",
+    ]
     ghost = next(item for item in payload["fleet"] if item["lane"] == "ghost_regression")
     assert ghost["planned_checks"] == ["tests/engine/test_sample.py"]
     assert ghost["executed_checks"] == ["tests/engine/test_sample.py"]
@@ -76,22 +89,49 @@ def test_ultra_review_maps_research_tests_and_security_observations(tmp_path):
     subprocess.run(["git", "commit", "-m", "add research"], cwd=tmp_path, check=True, capture_output=True)
     (tmp_path / "tests" / "research").mkdir(parents=True)
     (tmp_path / "tests" / "research" / "test_probe.py").write_text("def test_probe(): pass\n", encoding="utf-8")
-    (tmp_path / "nexus" / "research" / "probe.py").write_text(
-        "API_KEY = '123456789abcdef'\n",
-        encoding="utf-8",
-    )
+    secret_line = "API" + "_KEY = '123456789abcdef'\n"
+    (tmp_path / "nexus" / "research" / "probe.py").write_text(secret_line, encoding="utf-8")
 
     payload = UltraReviewService(tmp_path).run(
         report_path="reports/ultra.json",
         sandbox_root="reports/sandboxes",
     )
 
-    assert payload["findings"][0]["state"] == "UNVERIFIED_OBSERVATION"
+    assert payload["gate_passed"] is False
+    assert payload["findings"][0]["state"] == "VERIFIED_FINDING"
     assert payload["findings"][0]["rule_id"] == "secret_literal"
+    assert payload["findings"][0]["repro_command"]
+    assert payload["findings"][0]["execution_cwd"].startswith(payload["sandbox_path"])
+    assert payload["security_sentry"]["verified_findings"] == 1
+    assert payload["security_sentry"]["passed"] is False
     security = next(item for item in payload["fleet"] if item["lane"] == "security_sentry")
-    assert security["status"] == "DRY_RUN_READY_WITH_OBSERVATIONS"
+    assert security["status"] == "FAIL"
     ghost = next(item for item in payload["fleet"] if item["lane"] == "ghost_regression")
     assert ghost["planned_checks"] == ["tests/research/test_probe.py"]
+
+
+def test_ultra_review_security_repro_failure_becomes_unverified_observation(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    secret_line = "API" + "_KEY = '123456789abcdef'\n"
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text(secret_line, encoding="utf-8")
+
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:4] == ["uv", "run", "--active", "python"] and "ultra_security_repro_" in str(cmd[4]):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not reproduced")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    assert payload["security_sentry"]["passed"] is True
+    assert payload["security_sentry"]["unverified_observations"] == 1
+    assert payload["findings"][0]["state"] == "UNVERIFIED_OBSERVATION"
 
 
 def test_ultra_review_ghost_regression_failure_becomes_verified_finding(tmp_path):

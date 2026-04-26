@@ -379,6 +379,64 @@ def run_changed_only_check(changed_paths: list[str]) -> bool:
     return success
 
 
+ULTRA_REVIEW_HIGH_RISK_PREFIXES = (
+    "nexus/engine/",
+    "scripts/engine/nexus_cli.py",
+    "scripts/ops/ci_gate.py",
+    "scripts/ops/ultra_gate.py",
+)
+
+
+def requires_ultra_review(changed_paths: list[str]) -> bool:
+    normalized = [str(path).replace("\\", "/").strip() for path in changed_paths]
+    return any(
+        any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in ULTRA_REVIEW_HIGH_RISK_PREFIXES)
+        for path in normalized
+    )
+
+
+def run_ultra_review_check() -> bool:
+    report_path = ROOT / ".nexus" / "reports" / "ultra_review_report.json"
+    sandbox_root = ROOT / ".nexus" / "reports" / "ultra_review" / "sandboxes"
+    print("\n🚀 [CI-Gate] Running Ultra Review Gate...")
+    review_cmd = [
+        str(VENV_PYTHON),
+        "scripts/engine/nexus_cli.py",
+        "nexus",
+        "ultra-review",
+        "--report-file",
+        str(report_path),
+        "--sandbox-root",
+        str(sandbox_root),
+        "--output-json",
+    ]
+    review = subprocess.run(review_cmd, cwd=ROOT, capture_output=True, text=True, check=False)
+    if review.stdout:
+        print(truncate_output(review.stdout, label="ultra_review_stdout"))
+    if review.returncode != 0:
+        print(truncate_output(review.stderr, label="ultra_review_stderr"))
+        print(f"❌ Ultra Review command FAILED (RC: {review.returncode})")
+        return False
+
+    gate_cmd = [
+        str(VENV_PYTHON),
+        "scripts/ops/ultra_gate.py",
+        "--report",
+        str(report_path),
+        "--check-artifacts",
+        "--json",
+    ]
+    gate = subprocess.run(gate_cmd, cwd=ROOT, capture_output=True, text=True, check=False)
+    if gate.stdout:
+        print(truncate_output(gate.stdout, label="ultra_gate_stdout"))
+    if gate.returncode != 0:
+        print(truncate_output(gate.stderr, label="ultra_gate_stderr"))
+        print(f"❌ Ultra Review Gate FAILED (RC: {gate.returncode})")
+        return False
+    print("✅ Ultra Review Gate PASSED")
+    return True
+
+
 def record_test_history(
     mode: str,
     command: str,
@@ -708,7 +766,10 @@ def main():
     print("🛡️ [Nexus CI Gate] Initializing Automated Audit Lane...")
 
     if args.strict:
-        if not run_changed_only_check(args.changed_paths):
+        changed_paths = getattr(args, "changed_paths", [])
+        if not run_changed_only_check(changed_paths):
+            sys.exit(1)
+        if requires_ultra_review(changed_paths) and not run_ultra_review_check():
             sys.exit(1)
     
     # 0. Agent Protocol Check

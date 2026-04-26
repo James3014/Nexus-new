@@ -88,6 +88,10 @@ def evaluate_report(
     if isinstance(logic_breaker, dict) and logic_breaker.get("passed") is False:
         failures.append("logic_breaker_failed")
 
+    security_sentry = payload.get("security_sentry", {})
+    if isinstance(security_sentry, dict) and security_sentry.get("passed") is False:
+        failures.append("security_sentry_failed")
+
     fleet = payload.get("fleet")
     if not isinstance(fleet, list) or not fleet:
         failures.append("missing_fleet")

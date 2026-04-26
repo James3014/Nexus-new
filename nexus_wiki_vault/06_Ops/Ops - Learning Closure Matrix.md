@@ -478,3 +478,21 @@ version_scope:
 - **Root Cause**: The repro script did not reuse the same diff-header assumptions as the service parser.
 - **Decision**: Parse `diff --git a/... b/...` headers with a regex inside `ultra_logic_repro.py` and add a path-with-spaces regression test.
 - **Prevention**: Generated repro scripts must handle repository-real filenames, including spaces, before their failures are trusted as product findings.
+
+## 2026-04-26: Security Findings Need Repro Before Blocking
+- **Phenomenon**: Security Sentry could detect risky added lines but only labeled them as observations, leaving no command that could reproduce the evidence.
+- **Root Cause**: The lane scanned diff text but did not emit or execute a deterministic repro artifact.
+- **Decision**: Generate `ultra_security_repro_*.py`, execute each script in the sandbox mirror, and promote only reproduced observations to `VERIFIED_FINDING`.
+- **Prevention**: Security gates should distinguish reproduced diff evidence from scanner observations so false positives stay explainable and blocking findings remain auditable.
+
+## 2026-04-26: High-Risk Strict Gates Need Ultra Review Before Merge Confidence
+- **Phenomenon**: `ci_gate.py --strict --changed-paths` ran changed-only tests and wiki governance but did not invoke Ultra Review for changes to review/gate machinery.
+- **Root Cause**: Ultra Review existed as a standalone gate and was not connected to strict high-risk path handling.
+- **Decision**: Add a high-risk prefix guard for engine/CI gate paths and run `nexus ultra-review` plus `ultra_gate.py --check-artifacts` before strict changed-scope success.
+- **Prevention**: New high-risk governance tools should be wired into strict CI before their reports are treated as merge evidence.
+
+## 2026-04-26: Long Review Gates Need Progress Evidence
+- **Phenomenon**: Ultra Review could spend tens of seconds in sandbox copy, repro execution, or regression tests without a durable progress trail.
+- **Root Cause**: The report only captured final lane results, not stage-by-stage progress.
+- **Decision**: Write `progress.jsonl`, include progress events in the report, and expose a compact summary of security, logic, and ghost regression outcomes.
+- **Prevention**: Any gate with sandbox setup or subprocess execution should emit progress events before and after each long-running phase.

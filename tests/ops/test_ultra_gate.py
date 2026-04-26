@@ -15,6 +15,7 @@ def _valid_report(diff_path="/tmp/nexus-ultra/changes.diff", git_status_path="/t
         "artifacts": {
             "diff": str(diff_path),
             "git_status": str(git_status_path),
+            "progress_log": "/tmp/nexus-ultra/progress.jsonl",
         },
         "diff": {
             "changed_files": [],
@@ -26,6 +27,11 @@ def _valid_report(diff_path="/tmp/nexus-ultra/changes.diff", git_status_path="/t
             {"lane": "ghost_regression", "status": "SKIPPED"},
         ],
         "findings": [],
+        "summary": {
+            "security_verified_findings": 0,
+            "logic_breaker_passed": True,
+            "ghost_regression_passed": True,
+        },
         "verification": {
             "verified_findings": 0,
             "unverified_observations": 0,
@@ -85,6 +91,19 @@ def test_evaluate_report_blocks_failed_logic_breaker():
 
     assert passed is False
     assert failures == ["logic_breaker_failed"]
+
+
+def test_evaluate_report_blocks_failed_security_sentry():
+    payload = _valid_report()
+    payload["security_sentry"] = {
+        "passed": False,
+        "verified_findings": 1,
+    }
+
+    passed, failures = ultra_gate.evaluate_report(payload)
+
+    assert passed is False
+    assert failures == ["security_sentry_failed"]
 
 
 def test_evaluate_report_fails_closed_for_schema_gaps():

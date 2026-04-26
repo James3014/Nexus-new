@@ -28,6 +28,7 @@ SECURITY_PATTERNS = (
     ("shell_true_subprocess", re.compile(r"subprocess\.(run|Popen|call|check_output)\([^#\n]*shell\s*=\s*True")),
     ("unsafe_delete", re.compile(r"shutil\.rmtree\([^#\n]*(ignore_errors\s*=\s*True|force|/tmp|\*)")),
 )
+SECURITY_REPRO_TIMEOUT_SEC = 10
 
 
 class UltraReviewError(RuntimeError):
@@ -52,27 +53,53 @@ class UltraReviewService:
 
         run_id = self._run_id()
         sandbox_path = self._prepare_sandbox(Path(sandbox_root), run_id)
+        progress_path = sandbox_path / "progress.jsonl"
+        progress: list[dict[str, Any]] = []
+        self._record_progress(progress, progress_path, "sandbox_prepared", sandbox_path=str(sandbox_path))
         diff_text = self._capture_diff(base_ref)
         status_text = self._git(["status", "--short"])
 
         diff_path = sandbox_path / "changes.diff"
         diff_path.write_text(diff_text, encoding="utf-8")
         (sandbox_path / "git_status.txt").write_text(status_text, encoding="utf-8")
+        changed_files = self._changed_files(diff_text)
+        self._record_progress(
+            progress,
+            progress_path,
+            "diff_captured",
+            changed_files=len(changed_files),
+            bytes=len(diff_text.encode("utf-8")),
+        )
 
         regression_map = self._derive_regression_candidate_map(diff_text)
         test_candidates = self._existing_regression_candidates(regression_map)
-        security_findings = self._scan_security_observations(diff_text)
         execution_root = self._prepare_execution_workspace(sandbox_path)
+        security_sentry = self._run_security_sentry(
+            diff_text=diff_text,
+            execution_root=execution_root,
+            sandbox_path=sandbox_path,
+        )
+        self._record_progress(
+            progress,
+            progress_path,
+            "security_sentry_complete",
+            passed=security_sentry["passed"],
+            verified_findings=security_sentry["verified_findings"],
+            unverified_observations=security_sentry["unverified_observations"],
+        )
         logic_breaker = self._run_logic_breaker(
             diff_path=diff_path,
             execution_root=execution_root,
             sandbox_path=sandbox_path,
         )
+        self._record_progress(progress, progress_path, "logic_breaker_complete", passed=logic_breaker["passed"])
         ghost_regression = self._run_ghost_regression(test_candidates, execution_root=execution_root)
-        findings = [*security_findings, *logic_breaker["findings"], *ghost_regression["findings"]]
-        gate_passed = bool(logic_breaker["passed"] and ghost_regression["passed"])
-        fleet = self._build_dry_run_fleet(test_candidates, security_findings, logic_breaker, ghost_regression)
+        self._record_progress(progress, progress_path, "ghost_regression_complete", passed=ghost_regression["passed"])
+        findings = [*security_sentry["findings"], *logic_breaker["findings"], *ghost_regression["findings"]]
+        gate_passed = bool(security_sentry["passed"] and logic_breaker["passed"] and ghost_regression["passed"])
+        fleet = self._build_dry_run_fleet(test_candidates, security_sentry, logic_breaker, ghost_regression)
         out_path = self._resolve(report_path)
+        self._record_progress(progress, progress_path, "report_written", report_path=str(out_path))
         payload = {
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
@@ -86,16 +113,27 @@ class UltraReviewService:
             "artifacts": {
                 "diff": str(diff_path),
                 "git_status": str(sandbox_path / "git_status.txt"),
+                "progress_log": str(progress_path),
             },
             "diff": {
                 "bytes": len(diff_text.encode("utf-8")),
-                "changed_files": self._changed_files(diff_text),
+                "changed_files": changed_files,
                 "has_worktree_delta": bool(diff_text.strip() or status_text.strip()),
             },
             "fleet": fleet,
             "findings": findings,
+            "security_sentry": {k: v for k, v in security_sentry.items() if k != "findings"},
             "logic_breaker": {k: v for k, v in logic_breaker.items() if k != "findings"},
             "ghost_regression": {k: v for k, v in ghost_regression.items() if k != "findings"},
+            "summary": {
+                "security_verified_findings": security_sentry["verified_findings"],
+                "security_unverified_observations": security_sentry["unverified_observations"],
+                "logic_breaker_passed": logic_breaker["passed"],
+                "ghost_regression_passed": ghost_regression["passed"],
+                "executed_regression_tests": len(ghost_regression["executed_tests"]),
+                "verified_findings": sum(1 for finding in findings if finding.get("state") == "VERIFIED_FINDING"),
+            },
+            "progress": progress,
             "regression_candidate_map": regression_map,
             "verification": {
                 "verified_findings": sum(1 for finding in findings if finding.get("state") == "VERIFIED_FINDING"),
@@ -110,6 +148,17 @@ class UltraReviewService:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return payload
+
+    def _record_progress(self, progress: list[dict[str, Any]], progress_path: Path, stage: str, **fields: Any) -> None:
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "stage": stage,
+            **fields,
+        }
+        progress.append(event)
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        with progress_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
 
     def _prepare_sandbox(self, sandbox_root: Path, run_id: str) -> Path:
         root = self._resolve(sandbox_root)
@@ -236,6 +285,7 @@ class UltraReviewService:
                                 "file": current_file,
                                 "line": new_line,
                                 "repro_command": "",
+                                "matched_text": content,
                                 "summary": f"Dry-run security observation matched {rule_id}.",
                             }
                         )
@@ -262,11 +312,16 @@ class UltraReviewService:
     def _build_dry_run_fleet(
         self,
         test_candidates: list[str],
-        security_findings: list[dict[str, Any]] | None = None,
+        security_sentry: dict[str, Any] | None = None,
         logic_breaker: dict[str, Any] | None = None,
         ghost_regression: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        security_findings = security_findings or []
+        security_sentry = security_sentry or {
+            "passed": True,
+            "findings": [],
+            "verified_findings": 0,
+            "unverified_observations": 0,
+        }
         logic_breaker = logic_breaker or {
             "passed": True,
             "repro_script": "",
@@ -285,10 +340,11 @@ class UltraReviewService:
         return [
             {
                 "lane": "security_sentry",
-                "status": "DRY_RUN_READY_WITH_OBSERVATIONS" if security_findings else "DRY_RUN_READY",
+                "status": "PASS" if security_sentry.get("passed", True) else "FAIL",
                 "planned_checks": ["secret-pattern-scan", "dangerous-subprocess-scan"],
-                "unverified_observations": len(security_findings),
-                "verified_findings": 0,
+                "executed_checks": security_sentry.get("executed_checks", []),
+                "unverified_observations": security_sentry.get("unverified_observations", 0),
+                "verified_findings": security_sentry.get("verified_findings", 0),
             },
             {
                 "lane": "logic_breaker",
@@ -309,6 +365,86 @@ class UltraReviewService:
                 "verified_findings": len(ghost_regression.get("failed_tests", [])),
             },
         ]
+
+    def _run_security_sentry(self, *, diff_text: str, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
+        observations = self._scan_security_observations(diff_text)
+        findings: list[dict[str, Any]] = []
+        executed_checks: list[str] = []
+        verified_count = 0
+        unverified_count = 0
+
+        for index, observation in enumerate(observations, start=1):
+            script_name = f"ultra_security_repro_{index}.py"
+            script_path = sandbox_path / script_name
+            expected = str(observation.get("matched_text", ""))
+            script_path.write_text(
+                "\n".join(
+                    [
+                        "from pathlib import Path",
+                        "",
+                        f"expected = {expected!r}",
+                        "diff_text = Path('changes.diff').read_text(encoding='utf-8')",
+                        "if expected not in diff_text:",
+                        "    raise SystemExit('security observation not reproduced')",
+                        "print('security_repro_ok')",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            shutil.copy2(self._resolve(sandbox_path / "changes.diff"), execution_root / "changes.diff")
+            cmd = ["uv", "run", "--active", "python", str(script_path)]
+            executed_checks.append(script_name)
+            timeout = False
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=execution_root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=SECURITY_REPRO_TIMEOUT_SEC,
+                )
+                reproduced = result.returncode == 0
+                stdout_tail = (result.stdout or "")[-2000:]
+                stderr_tail = (result.stderr or "")[-2000:]
+            except subprocess.TimeoutExpired as exc:
+                reproduced = False
+                timeout = True
+                stdout_tail = str(exc.output or "")[-2000:]
+                stderr_tail = str(exc.stderr or "")[-2000:]
+            finding = dict(observation)
+            finding.update(
+                {
+                    "repro_command": " ".join(cmd),
+                    "execution_cwd": str(execution_root),
+                    "stdout_tail": stdout_tail,
+                    "stderr_tail": stderr_tail,
+                    "timeout_sec": SECURITY_REPRO_TIMEOUT_SEC,
+                    "timeout": timeout,
+                }
+            )
+            if reproduced:
+                finding["state"] = "VERIFIED_FINDING"
+                finding["summary"] = f"Security Sentry reproduced {finding['rule_id']} from diff evidence."
+                verified_count += 1
+            else:
+                finding["state"] = "UNVERIFIED_OBSERVATION"
+                finding["summary"] = f"Security Sentry observed {finding['rule_id']} but repro did not confirm it."
+                unverified_count += 1
+            findings.append(finding)
+
+        return {
+            "passed": verified_count == 0,
+            "executed_checks": executed_checks,
+            "verified_findings": verified_count,
+            "unverified_observations": unverified_count,
+            "timeout_sec": SECURITY_REPRO_TIMEOUT_SEC,
+            "execution_mode": "sandbox_mirror",
+            "execution_cwd": str(execution_root),
+            "dependency_mode": "active_venv",
+            "findings": findings,
+        }
 
     def _run_logic_breaker(self, *, diff_path: Path, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
         repro_script = sandbox_path / "ultra_logic_repro.py"

@@ -161,6 +161,38 @@ def test_ci_gate_main_strict_runs_changed_only_preflight(monkeypatch):
             mock_exit.assert_called_with(1)
 
 
+def test_ci_gate_main_strict_high_risk_runs_ultra_review(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ci_gate, "run_changed_only_check", lambda changed_paths: True)
+    monkeypatch.setattr(ci_gate, "run_ultra_review_check", lambda: calls.append("ultra") or False)
+
+    args = argparse.Namespace(
+        dry_run=False,
+        changed_only=None,
+        changed_paths=["nexus/engine/ultra_review_service.py"],
+        nightly=False,
+        strict=True,
+        benchmark_mode="off",
+        learn_mode="off",
+        learn_topic="nexus",
+        wiki_drift_enforce_level="warn",
+        wiki_capability_enforce_level="warn",
+        wiki_eval_enforce_level="warn",
+        require_closeout_contract=False,
+        closeout_contract_path=".nexus/reports/done_contract.json",
+        auto_heal=False,
+    )
+
+    with patch("argparse.ArgumentParser.parse_args", return_value=args):
+        with patch("sys.exit", side_effect=SystemExit) as mock_exit:
+            try:
+                ci_gate.main()
+            except SystemExit:
+                pass
+            assert calls == ["ultra"]
+            mock_exit.assert_called_with(1)
+
+
 def test_run_dry_run_blocks_when_report_trust_audit_fails(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_integrity_check", lambda: True)
     monkeypatch.setattr(ci_gate, "run_protocol_check", lambda dry_run: True)
