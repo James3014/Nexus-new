@@ -7,6 +7,7 @@
 - Broad task set: `public_benchmark_pilot_v1`, `neutral_fixture`, 12 unique tasks x 2 trials
 - Hard-only follow-up: `public_benchmark_pilot_v1`, `neutral_fixture`, 6 unique hard tasks x 2 trials
 - Hard-neutral v2: `public_benchmark_hard_neutral_v2`, 12 unique hard neutral tasks x 2 trials
+- Token telemetry smoke: `public_benchmark_hard_neutral_v2`, 1 unique hard neutral task x 1 trial
 - History policy: `per_task_reset`
 
 ## Result
@@ -121,6 +122,15 @@ Token/cost claims are not yet public-safe. Token reliability improved compared
 with the earlier 2026-04-26 run, but Nexus still has estimated-token rows and
 bare Gemini still has one `model_call_without_tokens` row.
 
+A follow-up token telemetry smoke fixed one parser issue: direct Gemini CLI
+rows with gateway `stats.models.*.tokens.total` are now normalized to
+`token_capture_status=measured`. On the 1x1 smoke, bare Gemini reached 100.0%
+token measured rate. Nexus remained 0.0% measured on that row because the
+successful Nexus result came from the self-healing/local verification path,
+recorded as `not_applicable_local_only`. This confirms token-cost comparison is
+not hard because of arithmetic; it is hard because the two arms currently expose
+different telemetry surfaces.
+
 ## Evidence Files
 
 - With Nexus: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/with_nexus_1777220242.jsonl`
@@ -136,6 +146,7 @@ bare Gemini still has one `model_call_without_tokens` row.
 - Hard-neutral v2 bare Gemini: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/without_nexus_1777227906.jsonl`
 - Hard-neutral v2 report: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/gemini_nexus_report_1777227906.md`
 - Hard-neutral v2 A/B eval: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/ab_eval_1777227906.json`
+- Token telemetry smoke report: `.nexus/reports/bench_gemini3flash_token_telemetry_smoke_1x1_20260427/gemini_nexus_report_1777230094.md`
 
 ## Public-Safe Claim Draft
 

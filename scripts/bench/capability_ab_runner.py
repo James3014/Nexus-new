@@ -417,6 +417,33 @@ def _clear_total_timeout(previous_handler) -> None:
         signal.signal(signal.SIGALRM, previous_handler)
 
 
+def _normalize_token_status(status: str, total_tokens: int) -> str:
+    normalized = str(status or "unknown").strip().lower() or "unknown"
+    if normalized in {"ok", "captured"} and total_tokens > 0:
+        return "measured"
+    return normalized
+
+
+def _extract_total_tokens_from_payload(payload: dict[str, Any]) -> int:
+    total = 0
+    stats = payload.get("stats", {}).get("models", {})
+    if isinstance(stats, dict):
+        for model_stats in stats.values():
+            if isinstance(model_stats, dict):
+                total += int(((model_stats.get("tokens") or {}).get("total")) or 0)
+    usage = payload.get("usageMetadata") or payload.get("usage_metadata") or payload.get("usage")
+    if isinstance(usage, dict):
+        for key in ("totalTokenCount", "total_tokens", "totalTokens"):
+            try:
+                value = int(usage.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                total += value
+                break
+    return total
+
+
 def _emit_progress(
     *,
     enabled: bool,
@@ -490,7 +517,10 @@ def _extract_record(
     model_calls = int(report.get("model_calls", 0) or 0)
     model_name = str(report.get("model_name", "") or "")
     total_tokens = int(report.get("total_tokens", 0) or 0)
-    token_capture_status = str(report.get("token_capture_status", "unknown") or "unknown")
+    token_capture_status = _normalize_token_status(
+        str(report.get("token_capture_status", "unknown") or "unknown"),
+        total_tokens,
+    )
     semantic_status = payload.get("semantic_status")
     semantic_completed = bool(
         payload.get("status") == "SUCCESS"
@@ -697,14 +727,9 @@ def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
         if start == -1 or end == -1:
             raise
         payload = json.loads(output_text[start : end + 1])
-    tokens_total = 0
-    stats = outer.get("stats", {}).get("models", {})
-    if isinstance(stats, dict):
-        for model_stats in stats.values():
-            if isinstance(model_stats, dict):
-                tokens_total += int(((model_stats.get("tokens") or {}).get("total")) or 0)
+    tokens_total = _extract_total_tokens_from_payload(outer)
     payload["tokens_used"] = tokens_total
-    payload["token_capture_status"] = "ok"
+    payload["token_capture_status"] = "measured" if tokens_total > 0 else "missing_gateway_stats"
     return payload, output_text
 
 

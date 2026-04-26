@@ -473,6 +473,12 @@ version_scope:
 - **Decision**: Re-run real Gemini benchmark commands with approved `uv run` escalation and keep generated runtime reports out of source commits.
 - **Prevention**: Treat real Gemini A/B runs as environment-bound operations; validate source changes separately with non-escalated tests where possible.
 
+## 2026-04-27: Gemini CLI Token Status Must Normalize Gateway Stats
+- **Phenomenon**: Bare Gemini rows had non-zero `tokens_used`, but `ab_eval` still reported `token_measured_rate=0.0`.
+- **Root Cause**: The direct Gemini parser labeled gateway stats as `token_capture_status=ok`, while the evaluator only accepts `measured` as public-safe measured telemetry.
+- **Decision**: Normalize `ok/captured + total_tokens>0` to `measured` and parse both `stats.models.*.tokens.total` and `usageMetadata.totalTokenCount`.
+- **Prevention**: Token comparison reports must distinguish parser-normalized measured usage from Nexus local-only rescue rows.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

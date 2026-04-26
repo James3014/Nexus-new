@@ -17,6 +17,7 @@ from scripts.bench.capability_ab_runner import (
     _history_policy_name,
     _benchmark_gateway_timeout_sec,
     _materialize_fixture,
+    _parse_direct_gemini_json,
     _read_preserved_target,
     _remaining_leg_timeout,
     _report_model_label,
@@ -110,6 +111,37 @@ def test_benchmark_gateway_timeout_has_short_default_and_override(monkeypatch):
     assert _benchmark_gateway_timeout_sec() == "12"
     monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "bad")
     assert _benchmark_gateway_timeout_sec() == "30"
+
+
+def test_parse_direct_gemini_json_marks_stats_tokens_measured():
+    raw = json.dumps(
+        {
+            "output": json.dumps({"status": "OK", "patch": "x = 1\n"}),
+            "stats": {"models": {"gemini-3-flash-preview": {"tokens": {"total": 321}}}},
+        }
+    )
+    payload, _ = _parse_direct_gemini_json(raw)
+    assert payload["tokens_used"] == 321
+    assert payload["token_capture_status"] == "measured"
+
+
+def test_parse_direct_gemini_json_reads_usage_metadata_tokens():
+    raw = json.dumps(
+        {
+            "response": json.dumps({"status": "OK", "patch": "x = 1\n"}),
+            "usageMetadata": {"totalTokenCount": 456},
+        }
+    )
+    payload, _ = _parse_direct_gemini_json(raw)
+    assert payload["tokens_used"] == 456
+    assert payload["token_capture_status"] == "measured"
+
+
+def test_parse_direct_gemini_json_marks_missing_gateway_stats():
+    raw = json.dumps({"output": json.dumps({"status": "OK", "patch": "x = 1\n"})})
+    payload, _ = _parse_direct_gemini_json(raw)
+    assert payload["tokens_used"] == 0
+    assert payload["token_capture_status"] == "missing_gateway_stats"
 
 
 def test_materialize_fixture_writes_files(tmp_path: Path):
@@ -622,6 +654,7 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     assert "NEXUS_MEMORY_DB_PATH" in captured["env"]
     assert out["semantic_status"] == "VERIFIED"
     assert out["model_name"] == "gemini-3.1-pro-preview"
+    assert out["token_capture_status"] == "measured"
     assert out["model_patch_generated"] is True
     assert out["fallback_used"] is False
 
