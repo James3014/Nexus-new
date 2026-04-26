@@ -205,3 +205,99 @@ def test_regression_guard_prefers_duration_ratio_when_service_metric_is_duration
         service_stress_wall_overhead_ratio_max=0.6,
     )
     assert out["status"] == "PASS"
+
+
+def test_regression_guard_ignores_service_ratio_when_absolute_overhead_is_within_limit():
+    current = _s_grade_payload()
+    service_full_ab = {
+        "weighted_score": 0.7,
+        "buckets": [
+            {
+                "name": "daily",
+                "kpi": {
+                    "delta_solve_rate": 0.0,
+                    "with_trust_mismatch_rate": 0.0,
+                    "wall_overhead_sec": 0.9,
+                    "overhead_metric": "avg_duration_sec",
+                    "with_avg_duration_sec": 1.35,
+                    "without_avg_duration_sec": 0.45,
+                },
+            }
+        ],
+    }
+    out = evaluate_regression_guard(
+        current_s_grade=current,
+        baseline_s_grade=None,
+        service_full_ab=service_full_ab,
+        min_grade="S6_PASS",
+        max_weighted_drop=0.01,
+        max_pass_ratio_drop=0.03,
+        max_overhead_p95_increase=0.1,
+        max_overhead_worst_decile_increase=0.1,
+        max_trust_mismatch_increase=0.0,
+        max_learn_citation_drop=0.1,
+        service_weighted_score_min=0.55,
+        service_daily_delta_solve_rate_min=-0.02,
+        service_hard_delta_solve_rate_min=-0.02,
+        service_cross_delta_solve_rate_min=-0.02,
+        service_stress_delta_solve_rate_min=-0.02,
+        service_trust_mismatch_max=0.0,
+        service_daily_wall_overhead_sec_max=1.0,
+        service_hard_wall_overhead_sec_max=1.0,
+        service_cross_wall_overhead_sec_max=1.0,
+        service_stress_wall_overhead_sec_max=1.0,
+        service_daily_wall_overhead_ratio_max=0.5,
+        service_hard_wall_overhead_ratio_max=0.5,
+        service_cross_wall_overhead_ratio_max=0.6,
+        service_stress_wall_overhead_ratio_max=0.6,
+    )
+    assert out["status"] == "PASS"
+
+
+def test_regression_guard_fails_service_ratio_when_absolute_overhead_also_exceeds_limit():
+    current = _s_grade_payload()
+    service_full_ab = {
+        "weighted_score": 0.7,
+        "buckets": [
+            {
+                "name": "daily",
+                "kpi": {
+                    "delta_solve_rate": 0.0,
+                    "with_trust_mismatch_rate": 0.0,
+                    "wall_overhead_sec": 1.4,
+                    "overhead_metric": "avg_duration_sec",
+                    "with_avg_duration_sec": 1.85,
+                    "without_avg_duration_sec": 0.45,
+                },
+            }
+        ],
+    }
+    out = evaluate_regression_guard(
+        current_s_grade=current,
+        baseline_s_grade=None,
+        service_full_ab=service_full_ab,
+        min_grade="S6_PASS",
+        max_weighted_drop=0.01,
+        max_pass_ratio_drop=0.03,
+        max_overhead_p95_increase=0.1,
+        max_overhead_worst_decile_increase=0.1,
+        max_trust_mismatch_increase=0.0,
+        max_learn_citation_drop=0.1,
+        service_weighted_score_min=0.55,
+        service_daily_delta_solve_rate_min=-0.02,
+        service_hard_delta_solve_rate_min=-0.02,
+        service_cross_delta_solve_rate_min=-0.02,
+        service_stress_delta_solve_rate_min=-0.02,
+        service_trust_mismatch_max=0.0,
+        service_daily_wall_overhead_sec_max=1.0,
+        service_hard_wall_overhead_sec_max=1.0,
+        service_cross_wall_overhead_sec_max=1.0,
+        service_stress_wall_overhead_sec_max=1.0,
+        service_daily_wall_overhead_ratio_max=0.5,
+        service_hard_wall_overhead_ratio_max=0.5,
+        service_cross_wall_overhead_ratio_max=0.6,
+        service_stress_wall_overhead_ratio_max=0.6,
+    )
+    assert out["status"] == "FAIL"
+    assert any("service_daily_wall_overhead_above_max" in item for item in out["failures"])
+    assert any("service_daily_wall_overhead_ratio_above_max" in item for item in out["failures"])

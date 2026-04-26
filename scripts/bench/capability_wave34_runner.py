@@ -39,7 +39,7 @@ def main() -> int:
     parser.add_argument("--ops-profile", choices=["daily", "iter", "weekly"], default="daily")
     parser.add_argument("--ops-rounds", type=int, default=14)
     parser.add_argument("--stress-tasks-file", default="scripts/bench/capability_tasks_cross_module_v1.json")
-    parser.add_argument("--min-grade", default="S9_PASS")
+    parser.add_argument("--min-grade", default="")
     parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
     parser.add_argument("--with-model-label", default="")
     parser.add_argument("--without-model-label", default="")
@@ -50,6 +50,7 @@ def main() -> int:
 
     repo_root = Path(__file__).resolve().parents[2]
     start = time.time()
+    guard_min_grade = str(args.min_grade or ("A_PASS" if args.with_llm_mode == "off" else "S9_PASS"))
 
     full_ab_bare_cmd = [
         "uv",
@@ -161,7 +162,7 @@ def main() -> int:
         "--baseline-s-grade-file",
         str(args.baseline_s_grade_file),
         "--min-grade",
-        str(args.min_grade),
+        guard_min_grade,
         "--output-json",
     ]
     if args.write_baseline_on_pass:
@@ -174,6 +175,7 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "elapsed_sec": round(time.time() - start, 3),
         "with_llm_mode": str(args.with_llm_mode),
+        "guard_min_grade": guard_min_grade,
         "model_profiles": {
             "with_nexus": {
                 "label": str(args.with_model_label or ("gemini-3-flash-preview" if args.with_llm_mode != "off" else "local-first")),

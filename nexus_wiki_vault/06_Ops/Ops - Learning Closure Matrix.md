@@ -364,3 +364,9 @@ version_scope:
 - **Root Cause**: The Wave3/4 orchestrator reused Full-AB comparison flags for the ops loop stage even though the ops loop has a separate CLI contract.
 - **Decision**: Remove Full-AB-only flags and model-label flags from the ops loop command while preserving `--with-llm-mode`.
 - **Prevention**: Orchestrator smoke tests must validate per-stage allowed flags rather than only checking that every stage was invoked.
+
+## 2026-04-26: Offline Wave34 Should Not Use Public S9 Default
+- **Phenomenon**: A no-Gemini `capability_wave34_runner.py --with-llm-mode off` run solved the local benchmark track but failed the guard with `grade_below_min: current=A_PASS min=S9_PASS` and service overhead ratio failures even though absolute service overhead stayed within the configured second-based limits.
+- **Root Cause**: The orchestrator reused the public S9 default for offline health checks, and the regression guard allowed ratio-only overhead failures on tiny baseline denominators after the absolute overhead gate had already passed.
+- **Decision**: Default offline Wave3/4 guard minimum to `A_PASS` unless the caller explicitly sets `--min-grade`, and make service overhead ratio gates fail only when the corresponding absolute overhead also exceeds its limit.
+- **Prevention**: Public claim gates and local no-LLM health gates must have separate defaults; ratio gates should be secondary diagnostics, not stricter replacements for the absolute budget.

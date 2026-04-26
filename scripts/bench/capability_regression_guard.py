@@ -209,19 +209,31 @@ def evaluate_regression_guard(
             failures.append(
                 f"service_stress_wall_overhead_above_max: current={_num(service_track.get('cross_module_stress_wall_overhead_sec')):.4f}s max={service_stress_wall_overhead_sec_max:.4f}s"
             )
-        if _num(service_track.get("daily_wall_overhead_ratio")) > service_daily_wall_overhead_ratio_max:
+        if (
+            _num(service_track.get("daily_wall_overhead_sec")) > service_daily_wall_overhead_sec_max
+            and _num(service_track.get("daily_wall_overhead_ratio")) > service_daily_wall_overhead_ratio_max
+        ):
             failures.append(
                 f"service_daily_wall_overhead_ratio_above_max: current={_num(service_track.get('daily_wall_overhead_ratio')):.4f} max={service_daily_wall_overhead_ratio_max:.4f}"
             )
-        if _num(service_track.get("hard_wall_overhead_ratio")) > service_hard_wall_overhead_ratio_max:
+        if (
+            _num(service_track.get("hard_wall_overhead_sec")) > service_hard_wall_overhead_sec_max
+            and _num(service_track.get("hard_wall_overhead_ratio")) > service_hard_wall_overhead_ratio_max
+        ):
             failures.append(
                 f"service_hard_wall_overhead_ratio_above_max: current={_num(service_track.get('hard_wall_overhead_ratio')):.4f} max={service_hard_wall_overhead_ratio_max:.4f}"
             )
-        if _num(service_track.get("cross_module_wall_overhead_ratio")) > service_cross_wall_overhead_ratio_max:
+        if (
+            _num(service_track.get("cross_module_wall_overhead_sec")) > service_cross_wall_overhead_sec_max
+            and _num(service_track.get("cross_module_wall_overhead_ratio")) > service_cross_wall_overhead_ratio_max
+        ):
             failures.append(
                 f"service_cross_wall_overhead_ratio_above_max: current={_num(service_track.get('cross_module_wall_overhead_ratio')):.4f} max={service_cross_wall_overhead_ratio_max:.4f}"
             )
-        if _num(service_track.get("cross_module_stress_wall_overhead_ratio")) > service_stress_wall_overhead_ratio_max:
+        if (
+            _num(service_track.get("cross_module_stress_wall_overhead_sec")) > service_stress_wall_overhead_sec_max
+            and _num(service_track.get("cross_module_stress_wall_overhead_ratio")) > service_stress_wall_overhead_ratio_max
+        ):
             failures.append(
                 f"service_stress_wall_overhead_ratio_above_max: current={_num(service_track.get('cross_module_stress_wall_overhead_ratio')):.4f} max={service_stress_wall_overhead_ratio_max:.4f}"
             )

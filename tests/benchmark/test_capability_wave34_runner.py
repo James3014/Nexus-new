@@ -61,3 +61,41 @@ def test_wave34_runner_smoke(monkeypatch, tmp_path: Path):
     assert "--force-flow" not in ops_cmds[0]
     assert "--without-mode" not in ops_cmds[0]
     assert "--with-model-label" not in ops_cmds[0]
+    guard_cmds = [cmd for cmd in captured if "capability_regression_guard.py" in " ".join(cmd)]
+    assert len(guard_cmds) == 1
+    idx = guard_cmds[0].index("--min-grade")
+    assert guard_cmds[0][idx + 1] == "S9_PASS"
+
+
+def test_wave34_runner_uses_a_pass_guard_for_offline_mode(monkeypatch, tmp_path: Path):
+    class _Res:
+        def __init__(self, stdout: str, returncode: int = 0):
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = returncode
+
+    report = tmp_path / "report.json"
+    report.write_text("{}", encoding="utf-8")
+    s_report = tmp_path / "s_grade.json"
+    s_report.write_text('{"summary":{"verdict":"A_PASS"}}', encoding="utf-8")
+    guard_report = tmp_path / "guard.json"
+    guard_report.write_text("{}", encoding="utf-8")
+    captured: list[list[str]] = []
+
+    def _fake_run(cmd: list[str], cwd: Path):  # noqa: ANN001
+        captured.append(cmd)
+        cmd_text = " ".join(cmd)
+        if "capability_s_grade.py" in cmd_text:
+            return _Res(f'{{"report_file":"{s_report}","summary":{{"verdict":"A_PASS"}}}}')
+        if "capability_regression_guard.py" in cmd_text:
+            return _Res(f'{{"status":"PASS","failures":[],"report_file":"{guard_report}"}}')
+        return _Res(f'{{"report_file":"{report}"}}')
+
+    monkeypatch.setattr(wave34, "_run", _fake_run)
+    monkeypatch.setattr("sys.argv", ["capability_wave34_runner.py", "--with-llm-mode", "off", "--output-json"])
+
+    rc = wave34.main()
+    assert rc == 0
+    guard_cmd = [cmd for cmd in captured if "capability_regression_guard.py" in " ".join(cmd)][0]
+    idx = guard_cmd.index("--min-grade")
+    assert guard_cmd[idx + 1] == "A_PASS"
