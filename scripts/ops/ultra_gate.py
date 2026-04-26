@@ -80,6 +80,10 @@ def evaluate_report(
     elif verification.get("reproduction_required") is not True:
         failures.append("reproduction_not_required")
 
+    ghost_regression = payload.get("ghost_regression", {})
+    if isinstance(ghost_regression, dict) and ghost_regression.get("passed") is False:
+        failures.append("ghost_regression_failed")
+
     fleet = payload.get("fleet")
     if not isinstance(fleet, list) or not fleet:
         failures.append("missing_fleet")

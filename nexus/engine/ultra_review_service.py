@@ -59,14 +59,16 @@ class UltraReviewService:
         regression_map = self._derive_regression_candidate_map(diff_text)
         test_candidates = self._existing_regression_candidates(regression_map)
         security_findings = self._scan_security_observations(diff_text)
-        findings = [*security_findings]
-        fleet = self._build_dry_run_fleet(test_candidates, security_findings)
+        ghost_regression = self._run_ghost_regression(test_candidates)
+        findings = [*security_findings, *ghost_regression["findings"]]
+        gate_passed = bool(ghost_regression["passed"])
+        fleet = self._build_dry_run_fleet(test_candidates, security_findings, ghost_regression)
         out_path = self._resolve(report_path)
         payload = {
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
-            "status": "DRY_RUN_PASS",
-            "gate_passed": True,
+            "status": "DRY_RUN_PASS" if gate_passed else "DRY_RUN_FAIL",
+            "gate_passed": gate_passed,
             "mode": "dry-run",
             "task": task,
             "base_ref": base_ref,
@@ -83,12 +85,13 @@ class UltraReviewService:
             },
             "fleet": fleet,
             "findings": findings,
+            "ghost_regression": {k: v for k, v in ghost_regression.items() if k != "findings"},
             "regression_candidate_map": regression_map,
             "verification": {
-                "verified_findings": 0,
-                "unverified_observations": len(findings),
+                "verified_findings": sum(1 for finding in findings if finding.get("state") == "VERIFIED_FINDING"),
+                "unverified_observations": sum(1 for finding in findings if finding.get("state") != "VERIFIED_FINDING"),
                 "reproduction_required": True,
-                "negative_test_execution": "not_applicable_dry_run",
+                "negative_test_execution": "executed" if test_candidates else "not_applicable_no_candidates",
             },
             "created_at": datetime.now(timezone.utc).isoformat(),
             "report_path": str(out_path),
@@ -223,8 +226,18 @@ class UltraReviewService:
         self,
         test_candidates: list[str],
         security_findings: list[dict[str, Any]] | None = None,
+        ghost_regression: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         security_findings = security_findings or []
+        ghost_regression = ghost_regression or {
+            "passed": True,
+            "executed_tests": [],
+            "failed_tests": [],
+            "skipped_tests": [],
+        }
+        ghost_status = "SKIPPED"
+        if test_candidates:
+            ghost_status = "PASS" if bool(ghost_regression.get("passed", False)) else "FAIL"
         return [
             {
                 "lane": "security_sentry",
@@ -241,12 +254,66 @@ class UltraReviewService:
             },
             {
                 "lane": "ghost_regression",
-                "status": "DRY_RUN_READY" if test_candidates else "SKIPPED",
+                "status": ghost_status,
                 "planned_checks": test_candidates,
+                "executed_checks": ghost_regression.get("executed_tests", []),
+                "failed_checks": ghost_regression.get("failed_tests", []),
+                "skipped_checks": ghost_regression.get("skipped_tests", []),
                 "skip_reason": "" if test_candidates else "no_existing_regression_candidates",
-                "verified_findings": 0,
+                "verified_findings": len(ghost_regression.get("failed_tests", [])),
             },
         ]
+
+    def _run_ghost_regression(self, test_candidates: list[str]) -> dict[str, Any]:
+        if not test_candidates:
+            return {
+                "passed": True,
+                "executed_tests": [],
+                "failed_tests": [],
+                "skipped_tests": [],
+                "findings": [],
+                "pytest_stdout_tail": "",
+                "pytest_stderr_tail": "",
+            }
+
+        cmd = ["uv", "run", "pytest", "-q", *test_candidates]
+        result = subprocess.run(
+            cmd,
+            cwd=self.project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        passed = result.returncode == 0
+        stdout_tail = (result.stdout or "")[-2000:]
+        stderr_tail = (result.stderr or "")[-2000:]
+        failed_tests = [] if passed else list(test_candidates)
+        findings = []
+        if not passed:
+            findings.append(
+                {
+                    "id": "ghost-regression-1",
+                    "lane": "ghost_regression",
+                    "rule_id": "regression_test_failed",
+                    "state": "VERIFIED_FINDING",
+                    "severity": "high",
+                    "file": "",
+                    "line": 0,
+                    "repro_command": " ".join(cmd),
+                    "summary": "Ghost regression candidate failed in ultra-review dry-run.",
+                    "stdout_tail": stdout_tail,
+                    "stderr_tail": stderr_tail,
+                }
+            )
+        return {
+            "passed": passed,
+            "executed_tests": list(test_candidates),
+            "failed_tests": failed_tests,
+            "skipped_tests": [],
+            "findings": findings,
+            "pytest_stdout_tail": stdout_tail,
+            "pytest_stderr_tail": stderr_tail,
+        }
 
     def _changed_files(self, diff_text: str) -> list[str]:
         files: list[str] = []

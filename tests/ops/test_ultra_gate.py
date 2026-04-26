@@ -60,6 +60,20 @@ def test_evaluate_report_blocks_high_verified_finding():
     assert failures == ["blocking_verified_finding:finding-1"]
 
 
+def test_evaluate_report_blocks_failed_ghost_regression():
+    payload = _valid_report()
+    payload["ghost_regression"] = {
+        "passed": False,
+        "executed_tests": ["tests/engine/test_sample.py"],
+        "failed_tests": ["tests/engine/test_sample.py"],
+    }
+
+    passed, failures = ultra_gate.evaluate_report(payload)
+
+    assert passed is False
+    assert failures == ["ghost_regression_failed"]
+
+
 def test_evaluate_report_fails_closed_for_schema_gaps():
     payload = _valid_report()
     del payload["sandbox_path"]

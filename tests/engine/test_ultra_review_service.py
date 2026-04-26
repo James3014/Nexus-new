@@ -38,6 +38,10 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "changes.diff").exists()
     ghost = next(item for item in payload["fleet"] if item["lane"] == "ghost_regression")
     assert ghost["planned_checks"] == ["tests/engine/test_sample.py"]
+    assert ghost["executed_checks"] == ["tests/engine/test_sample.py"]
+    assert ghost["status"] == "PASS"
+    assert payload["ghost_regression"]["passed"] is True
+    assert payload["ghost_regression"]["executed_tests"] == ["tests/engine/test_sample.py"]
     assert payload["regression_candidate_map"] == [
         {
             "changed_file": "nexus/engine/sample.py",
@@ -74,6 +78,27 @@ def test_ultra_review_maps_research_tests_and_security_observations(tmp_path):
     assert security["status"] == "DRY_RUN_READY_WITH_OBSERVATIONS"
     ghost = next(item for item in payload["fleet"] if item["lane"] == "ghost_regression")
     assert ghost["planned_checks"] == ["tests/research/test_probe.py"]
+
+
+def test_ultra_review_ghost_regression_failure_becomes_verified_finding(tmp_path):
+    _init_repo(tmp_path)
+    (tmp_path / "tests" / "engine").mkdir(parents=True)
+    (tmp_path / "tests" / "engine" / "test_sample.py").write_text("def test_sample():\n    assert False\n", encoding="utf-8")
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    ghost = next(item for item in payload["fleet"] if item["lane"] == "ghost_regression")
+    assert ghost["status"] == "FAIL"
+    assert payload["gate_passed"] is False
+    assert payload["ghost_regression"]["passed"] is False
+    finding = payload["findings"][0]
+    assert finding["state"] == "VERIFIED_FINDING"
+    assert finding["lane"] == "ghost_regression"
+    assert finding["repro_command"]
 
 
 def test_security_sentry_covers_shell_and_delete_rules(tmp_path):

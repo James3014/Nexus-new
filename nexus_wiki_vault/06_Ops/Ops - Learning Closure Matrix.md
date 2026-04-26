@@ -442,3 +442,15 @@ version_scope:
 - **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.
 - **Decision**: Add changed-only observation JSONL and a coverage-gap report first; keep predictive ranking as a future opt-in plan.
 - **Prevention**: ML ranking must not become default until defensive full runs can measure miss rate and observation history is large enough.
+
+## 2026-04-26: Ultra Review Must Execute Regression Evidence
+- **Phenomenon**: Ultra Review's Ghost Regression lane listed candidate tests but did not prove whether candidates passed or failed.
+- **Root Cause**: The dry-run report stopped at planning evidence, so `ultra_gate.py` could not distinguish a planned regression check from an executed one.
+- **Decision**: Execute existing Ghost Regression pytest candidates, record pass/fail evidence, and turn failing candidates into `VERIFIED_FINDING`.
+- **Prevention**: Review gates must not promote planned checks to verified evidence until the command has run and its exit code is captured.
+
+## 2026-04-26: Full Regression Can Surface Order-Sensitive Research State
+- **Phenomenon**: Full pytest produced one `test_research_flow_service` artifact-change mismatch, but the exact test passed when rerun in isolation.
+- **Root Cause**: The research-flow suite still has state/order sensitivity that can appear only during full-regression runs.
+- **Decision**: Treat the single full-run failure as residual test isolation debt for this task and keep ultra-review verification focused on its own service/gate suite.
+- **Prevention**: Future hardening should isolate research-flow history/artifact state per test before relying on full-suite failures as product regressions.
