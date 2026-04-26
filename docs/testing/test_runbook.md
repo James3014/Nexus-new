@@ -4,8 +4,57 @@
 建議依序執行，確保從最快、最核心的驗證開始。
 
 1. **L1 (Commit 級別)**: `bash scripts/ops/test_fast.sh`
-2. **L2 (PR 級別)**: `bash scripts/ops/test_changed.sh [變更檔案路徑]`
+2. **L2 (PR 級別)**: `bash scripts/ops/test_changed.sh [變更檔案路徑...]`
 3. **L3 (合併級別)**: `bash scripts/ops/test_full.sh`
+
+## 1.1 L2 變更關聯層
+
+`test_changed.sh` 透過 `scripts/ops/select_tests.py` 查詢
+`docs/testing/test_impact_map.md`，再執行選出的 pytest targets。
+
+範例：
+
+```bash
+bash scripts/ops/test_changed.sh nexus/app/nightshift_runner_service.py
+```
+
+會選到：
+
+```text
+tests/app
+```
+
+多檔案變更可一次傳入：
+
+```bash
+bash scripts/ops/test_changed.sh nexus/core/state_validator.py docs/testing/test_runbook.md
+```
+
+若任何路徑沒有 active mapping，L2 會額外加入 core smoke fallback：
+
+```text
+tests/core tests/services/test_policy_gate.py
+```
+
+CI gate 也提供相同 selector 的 changed-only lane：
+
+```bash
+uv run python scripts/ops/ci_gate.py --changed-only scripts/ops/select_tests.py
+```
+
+這條 lane 只跑受影響 pytest targets，不執行 wiki、benchmark、learn 或 release gates。
+
+Strict gate 可把 JIT preflight 放在完整治理檢查之前：
+
+```bash
+uv run python scripts/ops/ci_gate.py --strict --changed-paths scripts/ops/select_tests.py
+```
+
+Nightly lane 執行 L3 全量回歸，並追加 `.nexus/reports/test_history.jsonl`：
+
+```bash
+uv run python scripts/ops/ci_gate.py --nightly
+```
 
 ## 2. 失敗排查清單 (Troubleshooting)
 

@@ -37,6 +37,78 @@ def test_run_report_trust_audit_uses_expected_pytest_suite(monkeypatch):
         assert target in seen["cmd"]
 
 
+def test_run_changed_only_check_uses_selector_targets(monkeypatch):
+    seen = {}
+
+    def fake_run_step(name, cmd):
+        seen["name"] = name
+        seen["cmd"] = cmd
+        return True, "ok"
+
+    monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
+
+    assert ci_gate.run_changed_only_check(["scripts/ops/select_tests.py"]) is True
+    assert seen["name"] == "Changed-Only JIT Tests"
+    assert "tests/ops/test_select_tests.py" in seen["cmd"]
+    assert "tests/ops " not in seen["cmd"]
+
+
+def test_run_nightly_full_check_records_history(monkeypatch, tmp_path):
+    monkeypatch.setattr(ci_gate, "ROOT", tmp_path)
+    monkeypatch.setattr(ci_gate, "run_step", lambda name, cmd: (True, "ok"))
+
+    assert ci_gate.run_nightly_full_check() is True
+
+    history_path = tmp_path / ".nexus" / "reports" / "test_history.jsonl"
+    payload = history_path.read_text(encoding="utf-8").strip()
+    assert '"mode": "nightly-full"' in payload
+    assert '"success": true' in payload
+
+
+def test_run_changed_scope_wiki_governance_uses_changed_only(monkeypatch):
+    seen = {}
+
+    def fake_run_step(name, cmd):
+        seen["name"] = name
+        seen["cmd"] = cmd
+        return True, "ok"
+
+    monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
+
+    assert ci_gate.run_changed_scope_wiki_governance() is True
+    assert seen["name"] == "Changed-Scope Wiki Governance Audit"
+    assert "--changed-only" in seen["cmd"]
+
+
+def test_ci_gate_main_strict_runs_changed_only_preflight(monkeypatch):
+    monkeypatch.setattr(ci_gate, "run_changed_only_check", lambda changed_paths: False)
+
+    args = argparse.Namespace(
+        dry_run=False,
+        changed_only=None,
+        changed_paths=["scripts/ops/select_tests.py"],
+        nightly=False,
+        strict=True,
+        benchmark_mode="off",
+        learn_mode="off",
+        learn_topic="nexus",
+        wiki_drift_enforce_level="warn",
+        wiki_capability_enforce_level="warn",
+        wiki_eval_enforce_level="warn",
+        require_closeout_contract=False,
+        closeout_contract_path=".nexus/reports/done_contract.json",
+        auto_heal=False,
+    )
+
+    with patch("argparse.ArgumentParser.parse_args", return_value=args):
+        with patch("sys.exit", side_effect=SystemExit) as mock_exit:
+            try:
+                ci_gate.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+
 def test_run_dry_run_blocks_when_report_trust_audit_fails(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_integrity_check", lambda: True)
     monkeypatch.setattr(ci_gate, "run_protocol_check", lambda dry_run: True)
@@ -60,6 +132,7 @@ def test_ci_gate_main_blocks_when_report_trust_audit_fails(monkeypatch):
 
     args = argparse.Namespace(
         dry_run=False,
+        changed_only=None,
         strict=False,
         benchmark_mode="off",
         learn_mode="off",
