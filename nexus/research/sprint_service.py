@@ -92,17 +92,7 @@ class LLMCandidateGenerator:
         return ["gemini-3-flash-preview"] if self.safe_mode else ["gemini-3-flash-preview", "gemini-3.1-pro-preview"]
 
     def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
-        def _estimate_tokens(text: str) -> int:
-            # Fallback estimate when gateway does not return token usage.
-            return max(1, len(text) // 4)
-
-        prompt_text = (
-            "You are executing Stage 1 of a Hyper-Sprint (Gladiator mode).\n"
-            f"Task: {task}\n"
-            f"Strategy/Hint for this candidate: {mutation_hint}\n\n"
-            f"[CURRENT SOURCE]\n{source_code}\n\n"
-            "Return ONLY the full updated file content in the 'patch' field."
-        )
+        prompt_text = _build_llm_candidate_prompt(source_code=source_code, task=task, mutation_hint=mutation_hint)
         quota_backoffs = 0
         model_calls = 0
         last_err = ""
@@ -154,6 +144,35 @@ class LLMCandidateGenerator:
                     continue
                 raise
         raise RuntimeError(last_err or "all_models_failed")
+
+
+def _estimate_tokens(text: str) -> int:
+    # Fallback estimate when gateway does not return token usage.
+    return max(1, len(text) // 4)
+
+
+def _build_llm_candidate_prompt(*, source_code: str, task: str, mutation_hint: str) -> str:
+    return (
+        "You are executing Stage 1 of a Hyper-Sprint (Gladiator mode).\n"
+        f"Task: {task}\n"
+        f"Strategy/Hint for this candidate: {mutation_hint}\n\n"
+        f"[CURRENT SOURCE]\n{source_code}\n\n"
+        "Return ONLY the full updated file content in the 'patch' field."
+    )
+
+
+def _resolve_token_capture_status(*, total_tokens: int, model_calls: int, statuses: set[str]) -> str:
+    normalized = {str(item or "").strip().lower() for item in statuses}
+    if total_tokens > 0:
+        if normalized & {"measured", "ok"}:
+            return "measured"
+        if "estimated" in normalized:
+            return "estimated"
+        return "measured"
+    if model_calls > 0 and normalized & {"unknown", "ok"}:
+        return "missing_gateway_stats"
+    return "missing" if model_calls > 0 else "not_applicable_local_only"
+
 
 class LocalCandidateGenerator:
     source = "local"
@@ -644,6 +663,16 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     if llm_generator is not None and getattr(llm_generator, "model_chain", None):
                         model_names.add(str(llm_generator.model_chain[0]))
                     err = str(llm_exc).lower()
+                    infra_code = classify_infra_block(err)
+                    if infra_code != "infra_blocked:quota":
+                        total_tokens += _estimate_tokens(
+                            _build_llm_candidate_prompt(
+                                source_code=source_code,
+                                task=config.task,
+                                mutation_hint=hint,
+                            )
+                        )
+                        token_capture_statuses.add("estimated")
                     if any(p in err for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"]):
                         quota_backoffs += 1
                         error_codes.append("quota")
@@ -734,14 +763,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
             total_tokens=total_tokens,
-            token_capture_status=(
-                "measured"
-                if total_tokens > 0
-                else (
-                    "missing_gateway_stats"
-                    if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
-                    else ("missing" if model_calls > 0 else "not_applicable_local_only")
-                )
+            token_capture_status=_resolve_token_capture_status(
+                total_tokens=total_tokens,
+                model_calls=model_calls,
+                statuses=token_capture_statuses,
             ),
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
@@ -776,14 +801,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             quota_backoffs=quota_backoffs,
             test_timeouts=test_timeouts,
             total_tokens=total_tokens,
-            token_capture_status=(
-                "measured"
-                if total_tokens > 0
-                else (
-                    "missing_gateway_stats"
-                    if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
-                    else ("missing" if model_calls > 0 else "not_applicable_local_only")
-                )
+            token_capture_status=_resolve_token_capture_status(
+                total_tokens=total_tokens,
+                model_calls=model_calls,
+                statuses=token_capture_statuses,
             ),
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
@@ -857,14 +878,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         quota_backoffs=quota_backoffs,
         test_timeouts=test_timeouts,
         total_tokens=total_tokens,
-        token_capture_status=(
-            "measured"
-            if total_tokens > 0
-            else (
-                "missing_gateway_stats"
-                if model_calls > 0 and ("unknown" in token_capture_statuses or "ok" in token_capture_statuses)
-                else ("missing" if model_calls > 0 else "not_applicable_local_only")
-            )
+        token_capture_status=_resolve_token_capture_status(
+            total_tokens=total_tokens,
+            model_calls=model_calls,
+            statuses=token_capture_statuses,
         ),
         model_name=",".join(sorted(model_names)),
         model_patch_generated=model_patch_generated,

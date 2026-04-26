@@ -437,6 +437,12 @@ version_scope:
 - **Decision**: Add `run_eligible`, `infra_invalid_reason`, invocation/response flags, Nexus-wearing evidence, and eligible-only benchmark summaries.
 - **Prevention**: Public lift claims must report `total_n`, `eligible_n`, and `infra_invalid_n` before solve-rate or Nexus-lift percentages.
 
+## 2026-04-27: Quota Failures Must Not Receive Estimated Token Cost
+- **Phenomenon**: A regression test caught quota fallback being assigned estimated token usage after adding token estimation for failed LLM calls.
+- **Root Cause**: The estimation branch ran before infra classification, so quota errors and real model-response failures were mixed together.
+- **Decision**: Estimate prompt tokens only for non-quota LLM failures; keep quota rows at zero tokens so eligibility/infra handling remains the source of truth.
+- **Prevention**: Token telemetry fixes must classify infra failures before adding cost estimates.
+
 ## 2026-04-26: JIT ML Needs Observation Before Prediction
 - **Phenomenon**: Full regression is growing, but jumping straight to ML test selection would train on sparse and noisy failure data.
 - **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.

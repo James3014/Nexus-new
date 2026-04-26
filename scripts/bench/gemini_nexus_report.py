@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from scripts.bench.ab_eval import compare_datasets, load_runs
+
+
+def _pct(value: Any) -> str:
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _num(value: Any, digits: int = 2) -> str:
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _wall_speedup(delta_sec: float, baseline_sec: float) -> str:
+    if baseline_sec <= 0:
+        return "n/a"
+    return _pct(-delta_sec / baseline_sec)
+
+
+def render_markdown_report(
+    *,
+    without_path: str,
+    with_path: str,
+    label_without: str,
+    label_with: str,
+    benchmark_date: str,
+) -> str:
+    report = compare_datasets(
+        label_without,
+        load_runs(without_path),
+        label_with,
+        load_runs(with_path),
+    )
+    a = report["a"]["summary"]
+    b = report["b"]["summary"]
+    delta = report["delta"]
+    formal = report["formal_treatment"]
+    wall_delta = float(delta["avg_wall_duration_sec_delta"])
+    baseline_wall = float(a["avg_wall_duration_sec"])
+
+    lines = [
+        "# Gemini 3 Flash + Nexus Benchmark Report",
+        "",
+        f"- Date: {benchmark_date}",
+        f"- Baseline: `{label_without}`",
+        f"- Treatment: `{label_with}`",
+        f"- Without Nexus: `{without_path}`",
+        f"- With Nexus: `{with_path}`",
+        "",
+        "## Result",
+        "",
+        "| Metric | Without Nexus | With Nexus | Delta |",
+        "| --- | ---: | ---: | ---: |",
+        f"| Solve rate | {_pct(a['solve_rate'])} | {_pct(b['solve_rate'])} | {_pct(delta['solve_rate_delta'])} |",
+        f"| Semantic verified | {_pct(a['semantic_verified_rate'])} | {_pct(b['semantic_verified_rate'])} | {_pct(delta['semantic_verified_rate_delta'])} |",
+        f"| Trust mismatch | {_pct(a['trust_mismatch_rate'])} | {_pct(b['trust_mismatch_rate'])} | {_pct(delta['trust_mismatch_rate_delta'])} |",
+        f"| Avg wall time | {_num(a['avg_wall_duration_sec'])}s | {_num(b['avg_wall_duration_sec'])}s | {_num(wall_delta)}s |",
+        f"| Wall speedup | n/a | {_wall_speedup(wall_delta, baseline_wall)} | n/a |",
+        f"| Avg model calls | {_num(a['avg_model_calls'])} | {_num(b['avg_model_calls'])} | {_num(delta['avg_model_calls_delta'])} |",
+        f"| Token measured rate | {_pct(a['token_measured_rate'])} | {_pct(b['token_measured_rate'])} | {_pct(delta['token_measured_rate_delta'])} |",
+        "",
+        "## Nexus Wearing Evidence",
+        "",
+        f"- Formal treatment valid: {formal['valid_count']}/{formal['total_runs']} ({_pct(formal['valid_rate'])})",
+        f"- Gemini uses Nexus rate: {_pct(b['gemini_uses_nexus_rate'])}",
+        f"- Nexus usage valid rate: {_pct(b['nexus_usage_valid_rate'])}",
+        f"- Phase completion rate: {_pct(b['phase_completion_rate'])}",
+        f"- Claim verified rate: {_pct(b['claim_verified_rate'])}",
+        f"- Nexus rescue rate: {_pct(b['nexus_rescue_rate'])}",
+        "",
+        "## Public-Safe Claim",
+        "",
+        (
+            f"On this fixed benchmark set, `{label_with}` improved solve rate from "
+            f"{_pct(a['solve_rate'])} to {_pct(b['solve_rate'])} "
+            f"({_pct(delta['solve_rate_delta'])} absolute) while keeping trust mismatch at "
+            f"{_pct(b['trust_mismatch_rate'])}."
+        ),
+        "",
+        "## Limits",
+        "",
+        "- Token/cost claims are not public-safe unless token measured rate is high enough for both arms.",
+        "- Small samples need repeated trials before publication-grade claims.",
+        "- This report proves benchmark-row evidence, not broad production generalization.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Render Gemini bare vs Gemini+Nexus benchmark markdown.")
+    parser.add_argument("--without", required=True, help="Without-Nexus JSON/JSONL/CSV path")
+    parser.add_argument("--with-nexus", required=True, help="With-Nexus JSON/JSONL/CSV path")
+    parser.add_argument("--label-without", default="gemini_3_flash_bare")
+    parser.add_argument("--label-with", default="gemini_3_flash_nexus")
+    parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument("--output", required=True, help="Markdown output path")
+    args = parser.parse_args()
+
+    markdown = render_markdown_report(
+        without_path=args.without,
+        with_path=args.with_nexus,
+        label_without=args.label_without,
+        label_with=args.label_with,
+        benchmark_date=args.date,
+    )
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(markdown, encoding="utf-8")
+    print(str(out))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
