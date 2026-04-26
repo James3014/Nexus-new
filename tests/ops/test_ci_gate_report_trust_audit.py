@@ -72,6 +72,13 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, cap
     payload = json.loads(history)
     assert payload["target_durations"]["tests/ops/test_select_tests.py"] == 0.12
     assert payload["metadata"]["selected_count"] >= 1
+    selection = json.loads((tmp_path / ".nexus" / "reports" / "changed_only_selection.json").read_text(encoding="utf-8"))
+    assert selection["selected_count"] >= 1
+    assert selection["targets"][0] == "tests/ops/test_select_tests.py"
+    observation = json.loads((tmp_path / ".nexus" / "reports" / "jit_observation.jsonl").read_text(encoding="utf-8"))
+    assert observation["event"] == "changed_only"
+    assert observation["success"] is True
+    assert observation["target_durations"]["tests/ops/test_select_tests.py"] == 0.12
 
 
 def test_extract_junit_target_durations_aggregates_by_file_and_directory(tmp_path):

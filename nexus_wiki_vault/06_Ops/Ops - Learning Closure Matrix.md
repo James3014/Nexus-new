@@ -436,3 +436,9 @@ version_scope:
 - **Root Cause**: The A/B runner lacked an eligibility denominator and could estimate token usage even after CLI/quota errors.
 - **Decision**: Add `run_eligible`, `infra_invalid_reason`, invocation/response flags, Nexus-wearing evidence, and eligible-only benchmark summaries.
 - **Prevention**: Public lift claims must report `total_n`, `eligible_n`, and `infra_invalid_n` before solve-rate or Nexus-lift percentages.
+
+## 2026-04-26: JIT ML Needs Observation Before Prediction
+- **Phenomenon**: Full regression is growing, but jumping straight to ML test selection would train on sparse and noisy failure data.
+- **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.
+- **Decision**: Add changed-only observation JSONL and a coverage-gap report first; keep predictive ranking as a future opt-in plan.
+- **Prevention**: ML ranking must not become default until defensive full runs can measure miss rate and observation history is large enough.

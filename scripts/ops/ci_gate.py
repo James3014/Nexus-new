@@ -78,6 +78,17 @@ def _extract_junit_target_durations(junit_path: Path, targets: list[str]) -> dic
     return {target: round(value, 4) for target, value in durations.items() if value > 0}
 
 
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+
+
+def _append_jsonl(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+
+
 def run_step(name, cmd):
     print(f"\n🚀 [CI-Gate] Running: {name}...")
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -323,6 +334,27 @@ def run_changed_only_check(changed_paths: list[str]) -> bool:
         command,
     )
     target_durations = _extract_junit_target_durations(junit_path, details.targets)
+    report_payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": "changed_only",
+        "success": success,
+        "changed_paths": changed_paths,
+        "targets": details.targets,
+        "selected_count": len(details.targets),
+        "reasons": details.reasons,
+        "confidence": details.confidence,
+        "risk": details.risk,
+        "sources": details.sources,
+        "fallback_used": details.fallback_used,
+        "high_risk_escalated": details.high_risk_escalated,
+        "unmatched_paths": details.unmatched_paths,
+        "retry_recommended": details.retry_recommended,
+        "target_durations": target_durations,
+        "junit_path": str(junit_path),
+        "duration_sec": round(time.time() - start, 4),
+    }
+    _write_json(ROOT / ".nexus" / "reports" / "changed_only_selection.json", report_payload)
+    _append_jsonl(ROOT / ".nexus" / "reports" / "jit_observation.jsonl", report_payload)
     record_test_history(
         mode="changed-only",
         command=command,

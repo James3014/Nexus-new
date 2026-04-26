@@ -73,6 +73,14 @@ Nightly lane 執行 L3 全量回歸，並追加 `.nexus/reports/test_history.jso
 uv run python scripts/ops/ci_gate.py --nightly
 ```
 
+JIT observation:
+
+```bash
+uv run python scripts/ops/jit_coverage_gap.py
+```
+
+這會讀 `.nexus/reports/jit_observation.jsonl` 並輸出 `.nexus/reports/jit_coverage_gap.json`，用來找 fallback-heavy、unmatched、high-risk、slow generic target。這不是 ML ranking，只是先累積資料與缺口。
+
 High-risk escalation:
 
 - `nexus/core`
