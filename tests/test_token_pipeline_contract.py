@@ -23,7 +23,7 @@ def test_llm_client_token_capture(mock_llm_output):
         )
         data, raw = client.ask("test prompt", "test payload")
         assert data["tokens_used"] == 1420
-        assert data["token_capture_status"] == "ok"
+        assert data["token_capture_status"] == "measured"
 
 def test_token_propagation_through_phases(mock_llm_output):
     # Mock LLM Client

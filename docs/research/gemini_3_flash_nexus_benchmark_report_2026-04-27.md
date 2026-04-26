@@ -141,6 +141,15 @@ vs 37.60s. This is the current honest interpretation: Nexus value is visible in
 wearing evidence, rescue behavior, and wall time on this smoke, while token-cost
 advantage still cannot be publicly claimed.
 
+A later gateway parser fix added support for Gemini CLI `usageMetadata` token
+fields and normalized non-zero gateway stats to `measured`. The real 3x1
+gateway-measured smoke still showed bare Gemini at 33.3% measured-token rate and
+Nexus at 0.0% measured model-token rate, with Nexus solving 3/3 vs bare
+Gemini's 1/3 and reducing average wall time from 54.04s to 34.35s. This makes
+the next bottleneck more precise: the parser now understands the known token
+shapes, but the Nexus gateway path still needs raw token-source evidence before
+token-cost claims are public-safe.
+
 ## Evidence Files
 
 - With Nexus: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/with_nexus_1777220242.jsonl`
@@ -159,6 +168,8 @@ advantage still cannot be publicly claimed.
 - Token telemetry smoke report: `.nexus/reports/bench_gemini3flash_token_telemetry_smoke_1x1_20260427/gemini_nexus_report_1777230094.md`
 - Token-layer smoke report: `.nexus/reports/bench_gemini3flash_token_layers_smoke_3x1_20260427/gemini_nexus_report_1777231089.md`
 - Token-layer smoke A/B eval: `.nexus/reports/bench_gemini3flash_token_layers_smoke_3x1_20260427/ab_eval_1777231089.json`
+- Gateway-measured token smoke report: `.nexus/reports/bench_gemini3flash_gateway_measured_token_smoke_3x1_20260427/gemini_nexus_report_1777231601.md`
+- Gateway-measured token smoke A/B eval: `.nexus/reports/bench_gemini3flash_gateway_measured_token_smoke_3x1_20260427/ab_eval_1777231601.json`
 
 ## Public-Safe Claim Draft
 

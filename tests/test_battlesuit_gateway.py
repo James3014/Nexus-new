@@ -34,6 +34,28 @@ def test_gateway_uses_response_key_from_gemini_cli_json():
     assert data["status"] == "PASS"
     assert data["summary"] == "ok"
     assert data["tokens_used"] == 42
+    assert data["token_capture_status"] == "measured"
+
+
+def test_gateway_reads_usage_metadata_tokens():
+    cli_stdout = json.dumps(
+        {
+            "response": "{\"status\":\"PASS\",\"summary\":\"ok\"}",
+            "usageMetadata": {"totalTokenCount": 77},
+        }
+    )
+    fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
+
+    gateway = BattlesuitGateway(project_root=".")
+    with patch("nexus.services.gateway.subprocess.run", return_value=fake_proc):
+        data, _ = gateway.ask_structured(
+            "Return pass JSON",
+            "{}",
+            output_schema={"status": "PASS | FAIL", "summary": "Short explanation"},
+        )
+
+    assert data["tokens_used"] == 77
+    assert data["token_capture_status"] == "measured"
 
 
 def test_gateway_ignores_hook_text_after_cli_json():

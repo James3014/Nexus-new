@@ -491,6 +491,12 @@ version_scope:
 - **Decision**: Treat blank rescue cost status as missing and derive `local_only` from `nexus_rescued`; `ab_eval` also falls back to `nexus_rescued` for old raw rows.
 - **Prevention**: Cost-surface summaries must be derivable from existing semantic rescue evidence so old benchmark artifacts remain interpretable.
 
+## 2026-04-27: Gateway Stats Patch Needs Raw Source Evidence
+- **Phenomenon**: After the gateway parser learned `stats.models.*.tokens.total` and `usageMetadata.totalTokenCount`, a real Nexus 3x1 smoke still reported `model_token_measured_rate=0.0%` while bare Gemini had measured rows.
+- **Root Cause**: Parser support is necessary but not sufficient; the Nexus gateway invocation path may receive CLI JSON without official token stats, so fallback estimates can remain even when the parser is correct.
+- **Decision**: Keep token-cost claims blocked until benchmark rows expose raw gateway token-source evidence such as `gateway_stats_present`, `gateway_usage_metadata_present`, and `gateway_token_source`.
+- **Prevention**: A public benchmark cannot infer measured model cost from non-zero estimates; it must prove the source field came from provider usage telemetry.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

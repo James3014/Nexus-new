@@ -251,14 +251,10 @@ class BattlesuitGateway:
                         resp_json, _ = json.JSONDecoder().raw_decode(raw_stdout)
                     output_text = resp_json.get("output") or resp_json.get("response") or raw_stdout
                     
-                    tokens_total = 0
-                    stats = resp_json.get("stats", {}).get("models", {})
-                    if isinstance(stats, dict):
-                        for m_stats in stats.values():
-                            if isinstance(m_stats, dict):
-                                tokens_total += m_stats.get("tokens", {}).get("total", 0)
+                    tokens_total = self._extract_total_tokens(resp_json)
                                 
-                    parsed = self._parse_json_result(output_text, tokens_total, "ok")
+                    capture_status = "measured" if tokens_total > 0 else "missing_gateway_stats"
+                    parsed = self._parse_json_result(output_text, tokens_total, capture_status)
                     if tmp_payload.exists():
                         tmp_payload.unlink()
                     return parsed
@@ -292,6 +288,28 @@ class BattlesuitGateway:
             if Path(candidate).exists():
                 return candidate
         return None
+
+    def _extract_total_tokens(self, payload: Dict[str, Any]) -> int:
+        total = 0
+        stats = payload.get("stats", {}).get("models", {})
+        if isinstance(stats, dict):
+            for m_stats in stats.values():
+                if isinstance(m_stats, dict):
+                    try:
+                        total += int(m_stats.get("tokens", {}).get("total", 0) or 0)
+                    except (TypeError, ValueError):
+                        continue
+        usage = payload.get("usageMetadata") or payload.get("usage_metadata") or payload.get("usage")
+        if isinstance(usage, dict):
+            for key in ("totalTokenCount", "total_tokens", "totalTokens"):
+                try:
+                    value = int(usage.get(key) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if value > 0:
+                    total += value
+                    break
+        return total
 
     def _parse_json_result(self, raw_text, tokens_total, capture_status):
         """解析模型產出的 JSON 內容。"""
