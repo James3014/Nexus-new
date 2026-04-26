@@ -124,6 +124,15 @@ def _annotate_benchmark_eligibility(
         or str(row.get("token_capture_status", "")) in {"ok", "measured"}
     )
     row["nexus_bootstrap_completed"] = bool(row.get("nexus_context_delivered", False) or row["nexus_phases_observed"])
+    token_status = str(row.get("token_capture_status", "") or "").strip().lower()
+    total_tokens = int(row.get("total_tokens", 0) or 0)
+    token_unreliable_reason = None
+    if model_calls > 0 and total_tokens <= 0:
+        token_unreliable_reason = "model_call_without_tokens"
+    elif token_status in {"estimated", "fallback_est", "unknown", ""}:
+        token_unreliable_reason = "estimated_tokens" if token_status == "estimated" else "unknown_token_capture"
+    row["token_reliable"] = token_unreliable_reason is None
+    row["token_unreliable_reason"] = token_unreliable_reason
     reason = _classify_infra_invalid_reason(row, model_required=model_required, nexus_required=nexus_required)
     row["infra_invalid_reason"] = reason
     row["run_eligible"] = reason is None
@@ -147,6 +156,7 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
         semantic = [row for row in eligible if bool(row.get("semantic_completed", False))]
         trust_mismatch = [row for row in eligible if bool(row.get("report_trust_mismatch", False))]
         first_pass = [row for row in eligible if int(row.get("attempt_count", 0) or 0) <= 1 and row.get("status") == "SUCCESS"]
+        token_reliable = [row for row in eligible if bool(row.get("token_reliable", False))]
         summary[mode] = {
             "total_n": len(mode_rows),
             "eligible_n": len(eligible),
@@ -158,6 +168,14 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
             "first_pass_rate": round(len(first_pass) / len(eligible), 4) if eligible else None,
             "avg_wall_time_sec": _avg([float(row.get("wall_duration_sec", 0) or 0) for row in eligible]),
             "avg_tokens": _avg([float(row.get("total_tokens", 0) or 0) for row in eligible]),
+            "token_reliable_rate": round(len(token_reliable) / len(eligible), 4) if eligible else None,
+            "token_unreliable_reasons": sorted(
+                {
+                    str(row.get("token_unreliable_reason"))
+                    for row in eligible
+                    if row.get("token_unreliable_reason")
+                }
+            ),
             "avg_model_calls": _avg([float(row.get("model_calls", 0) or 0) for row in eligible]),
         }
     return summary

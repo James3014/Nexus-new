@@ -813,6 +813,65 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
     assert summary["with_nexus"]["solve_rate"] == 0.0
 
 
+def test_benchmark_rows_mark_zero_token_model_calls_unreliable():
+    rows = [
+        {
+            "mode": "with_nexus",
+            "run_eligible": True,
+            "status": "SUCCESS",
+            "semantic_completed": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 2.0,
+            "total_tokens": 0,
+            "model_calls": 1,
+            "token_capture_status": "unknown",
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "pillar_lancedb_active": True,
+            "pillar_memory_active": True,
+            "pillar_mempalace_active": True,
+            "pillar_belief_active": True,
+            "pillar_artifact_active": True,
+            "phase_p": "route_built",
+            "phase_x": "retrieval_checked",
+            "phase_d": "guard_decision",
+            "phase_r": "hyper_executed",
+            "phase_a": "artifact_verified",
+            "phase_c": "closure_written",
+        },
+        {
+            "mode": "without_nexus",
+            "run_eligible": True,
+            "status": "SUCCESS",
+            "semantic_completed": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 2.0,
+            "total_tokens": 123,
+            "model_calls": 1,
+            "token_capture_status": "estimated",
+        },
+    ]
+
+    for row in rows:
+        from scripts.bench.capability_ab_runner import _annotate_benchmark_eligibility
+
+        _annotate_benchmark_eligibility(
+            row,
+            provider="gemini",
+            model_required=True,
+            nexus_required=row["mode"] == "with_nexus",
+        )
+
+    summary = _summarize_benchmark_rows(rows)
+
+    assert rows[0]["token_reliable"] is False
+    assert rows[0]["token_unreliable_reason"] == "model_call_without_tokens"
+    assert rows[1]["token_reliable"] is False
+    assert rows[1]["token_unreliable_reason"] == "estimated_tokens"
+    assert summary["with_nexus"]["token_reliable_rate"] == 0.0
+    assert summary["without_nexus"]["token_reliable_rate"] == 0.0
+
+
 def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):
     _force_learn_slo_ready(tmp_path)
     payload = json.loads((tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").read_text(encoding="utf-8"))
