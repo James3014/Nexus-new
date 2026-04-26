@@ -266,7 +266,24 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for row in rows
         if str(row.get("token_capture_status", "")).strip().lower() == "not_applicable_local_only"
     ]
+    model_measured_rows = [
+        row
+        for row in rows
+        if str(row.get("model_token_capture_status", "")).strip().lower() == "measured"
+    ]
+    model_estimated_rows = [
+        row
+        for row in rows
+        if str(row.get("model_token_capture_status", "")).strip().lower() == "estimated"
+    ]
+    local_rescue_rows = [
+        row
+        for row in rows
+        if str(row.get("rescue_cost_status", "")).strip().lower() == "local_only"
+        or _is_true(row.get("nexus_rescued"))
+    ]
     total_tokens_measured_only = sum(_as_float(row.get("total_tokens"), 0.0) for row in measured_token_rows)
+    total_model_tokens = sum(_as_float(row.get("model_total_tokens"), 0.0) for row in rows)
     total_model_calls = sum(_as_int(row.get("model_calls"), 0) for row in rows)
     total_attempts = sum(_as_int(row.get("attempt_count"), 0) for row in rows)
     token_observable = sum(
@@ -299,6 +316,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             total_tokens_measured_only / max(1, token_measured),
             2,
         ),
+        "avg_model_total_tokens": round(total_model_tokens / total, 2),
         "avg_model_calls": round(total_model_calls / total, 2),
         "avg_attempt_count": round(total_attempts / total, 2),
         "token_observable_rate": round(token_observable / total, 4),
@@ -306,6 +324,9 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "token_estimated_rate": round(token_estimated / total, 4),
         "token_local_only_rate": round(token_local_only / total, 4),
         "cost_comparable_rate": round(cost_comparable / total, 4),
+        "model_token_measured_rate": round(len(model_measured_rows) / total, 4),
+        "model_token_estimated_rate": round(len(model_estimated_rows) / total, 4),
+        "local_rescue_rate": round(len(local_rescue_rows) / total, 4),
         "trust_mismatch_rate": round(trust_mismatch / total, 4),
         "nexus_usage_valid_rate": _rate(rows, lambda r: _is_true(r.get("nexus_usage_valid"))),
         "gemini_uses_nexus_rate": _rate(rows, lambda r: _is_true(r.get("gemini_uses_nexus"))),
@@ -376,6 +397,10 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
             summary_b["avg_total_tokens_measured_only"] - summary_a["avg_total_tokens_measured_only"],
             2,
         ),
+        "avg_model_total_tokens_delta": round(
+            summary_b["avg_model_total_tokens"] - summary_a["avg_model_total_tokens"],
+            2,
+        ),
         "avg_model_calls_delta": round(summary_b["avg_model_calls"] - summary_a["avg_model_calls"], 2),
         "avg_attempt_count_delta": round(summary_b["avg_attempt_count"] - summary_a["avg_attempt_count"], 2),
         "token_observable_rate_delta": round(
@@ -392,6 +417,15 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "cost_comparable_rate_delta": round(
             summary_b["cost_comparable_rate"] - summary_a["cost_comparable_rate"], 4
+        ),
+        "model_token_measured_rate_delta": round(
+            summary_b["model_token_measured_rate"] - summary_a["model_token_measured_rate"], 4
+        ),
+        "model_token_estimated_rate_delta": round(
+            summary_b["model_token_estimated_rate"] - summary_a["model_token_estimated_rate"], 4
+        ),
+        "local_rescue_rate_delta": round(
+            summary_b["local_rescue_rate"] - summary_a["local_rescue_rate"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),

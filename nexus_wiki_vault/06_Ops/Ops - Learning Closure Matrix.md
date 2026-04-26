@@ -485,6 +485,12 @@ version_scope:
 - **Decision**: Add `token_local_only_rate` and `cost_comparable_rate` to A/B summaries and markdown reports.
 - **Prevention**: Do not publish token-cost comparisons unless both arms have a high `cost_comparable_rate`; report local-only rescue as a separate Nexus value signal.
 
+## 2026-04-27: Rescue Cost Must Not Hide Behind Blank Status
+- **Phenomenon**: A token-layer smoke showed `nexus_rescue_rate=66.7%` but `local_rescue_rate=0.0%`.
+- **Root Cause**: Benchmark rows carried an empty `rescue_cost_status`, which prevented the annotation default from deriving `local_only` from `nexus_rescued=true`.
+- **Decision**: Treat blank rescue cost status as missing and derive `local_only` from `nexus_rescued`; `ab_eval` also falls back to `nexus_rescued` for old raw rows.
+- **Prevention**: Cost-surface summaries must be derivable from existing semantic rescue evidence so old benchmark artifacts remain interpretable.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

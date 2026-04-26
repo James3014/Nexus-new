@@ -133,6 +133,14 @@ cost-comparable rate is 100.0% for bare Gemini and 0.0% for Nexus. This confirms
 token-cost comparison is not hard because of arithmetic; it is hard because the
 two arms currently expose different telemetry surfaces.
 
+A 3x1 token-layer smoke then separated model-token and local-rescue cost
+surfaces. Bare Gemini had 100.0% measured token rows. Nexus had 0.0% measured
+token rows, 66.7% local-only rows, 100.0% estimated model-token rows, and 66.7%
+local rescue rows. Both arms solved 3/3; Nexus was faster on wall time at 34.65s
+vs 37.60s. This is the current honest interpretation: Nexus value is visible in
+wearing evidence, rescue behavior, and wall time on this smoke, while token-cost
+advantage still cannot be publicly claimed.
+
 ## Evidence Files
 
 - With Nexus: `.nexus/reports/bench_gemini3flash_vs_nexus_12x2_20260427/with_nexus_1777220242.jsonl`
@@ -149,6 +157,8 @@ two arms currently expose different telemetry surfaces.
 - Hard-neutral v2 report: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/gemini_nexus_report_1777227906.md`
 - Hard-neutral v2 A/B eval: `.nexus/reports/bench_gemini3flash_vs_nexus_hard_neutral_v2_12x2_20260427/ab_eval_1777227906.json`
 - Token telemetry smoke report: `.nexus/reports/bench_gemini3flash_token_telemetry_smoke_1x1_20260427/gemini_nexus_report_1777230094.md`
+- Token-layer smoke report: `.nexus/reports/bench_gemini3flash_token_layers_smoke_3x1_20260427/gemini_nexus_report_1777231089.md`
+- Token-layer smoke A/B eval: `.nexus/reports/bench_gemini3flash_token_layers_smoke_3x1_20260427/ab_eval_1777231089.json`
 
 ## Public-Safe Claim Draft
 

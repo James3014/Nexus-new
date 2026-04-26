@@ -129,11 +129,30 @@ def _annotate_benchmark_eligibility(
     row["nexus_bootstrap_completed"] = bool(row.get("nexus_context_delivered", False) or row["nexus_phases_observed"])
     token_status = str(row.get("token_capture_status", "") or "").strip().lower()
     total_tokens = int(row.get("total_tokens", 0) or 0)
+    model_token_status = str(row.get("model_token_capture_status") or "").strip().lower()
+    if not model_token_status:
+        if model_calls <= 0:
+            model_token_status = "not_applicable_no_model"
+        elif token_status == "measured":
+            model_token_status = "measured"
+        elif total_tokens > 0:
+            model_token_status = "estimated"
+        else:
+            model_token_status = "missing_gateway_stats"
+    row["model_total_tokens"] = int(row.get("model_total_tokens", total_tokens if model_calls > 0 else 0) or 0)
+    row["model_token_capture_status"] = model_token_status
+    row["local_rescue_tokens"] = int(row.get("local_rescue_tokens", 0) or 0)
+    default_rescue_cost_status = (
+        "local_only" if bool(row.get("nexus_rescued", False)) or token_status == "not_applicable_local_only" else "not_rescue"
+    )
+    row["rescue_cost_status"] = str(row.get("rescue_cost_status") or default_rescue_cost_status)
     token_unreliable_reason = None
     if model_calls > 0 and total_tokens <= 0:
         token_unreliable_reason = "model_call_without_tokens"
     elif token_status in {"estimated", "fallback_est", "unknown", ""}:
         token_unreliable_reason = "estimated_tokens" if token_status == "estimated" else "unknown_token_capture"
+    elif token_status == "not_applicable_local_only" and model_calls > 0:
+        token_unreliable_reason = "local_only_rescue_not_model_comparable"
     row["token_reliable"] = token_unreliable_reason is None
     row["token_unreliable_reason"] = token_unreliable_reason
     reason = _classify_infra_invalid_reason(row, model_required=model_required, nexus_required=nexus_required)
@@ -568,7 +587,11 @@ def _extract_record(
         "fallback_used": bool(report.get("fallback_used", False)),
         "total_tokens": total_tokens,
         "token_capture_status": token_capture_status,
-        "token_measured": bool(total_tokens > 0),
+        "token_measured": token_capture_status == "measured",
+        "model_total_tokens": int(report.get("model_total_tokens", total_tokens if model_calls > 0 else 0) or 0),
+        "model_token_capture_status": str(report.get("model_token_capture_status") or ""),
+        "local_rescue_tokens": int(report.get("local_rescue_tokens", 0) or 0),
+        "rescue_cost_status": str(report.get("rescue_cost_status") or ""),
         "baseline_gateway_error_category": baseline_trace.get("gateway_error_category"),
         "baseline_patch_len": int(baseline_trace.get("patch_len", 0) or 0),
         "baseline_patch_changed": bool(baseline_trace.get("patch_changed", False)),

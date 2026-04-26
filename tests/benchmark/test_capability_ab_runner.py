@@ -921,6 +921,50 @@ def test_benchmark_rows_mark_zero_token_model_calls_unreliable():
     assert summary["without_nexus"]["token_reliable_rate"] == 0.0
 
 
+def test_benchmark_row_splits_model_tokens_from_local_rescue():
+    from scripts.bench.capability_ab_runner import _annotate_benchmark_eligibility
+
+    row = {
+        "mode": "with_nexus",
+        "run_eligible": True,
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 2.0,
+        "total_tokens": 112,
+        "model_calls": 1,
+        "token_capture_status": "not_applicable_local_only",
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_rescued": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "hyper_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+    }
+
+    _annotate_benchmark_eligibility(
+        row,
+        provider="gemini",
+        model_required=True,
+        nexus_required=True,
+    )
+
+    assert row["model_total_tokens"] == 112
+    assert row["model_token_capture_status"] == "estimated"
+    assert row["local_rescue_tokens"] == 0
+    assert row["rescue_cost_status"] == "local_only"
+    assert row["token_reliable"] is False
+    assert row["token_unreliable_reason"] == "local_only_rescue_not_model_comparable"
+
+
 def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):
     _force_learn_slo_ready(tmp_path)
     payload = json.loads((tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").read_text(encoding="utf-8"))

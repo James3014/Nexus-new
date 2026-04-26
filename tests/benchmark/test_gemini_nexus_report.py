@@ -50,6 +50,9 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "model_calls": 1,
                         "total_tokens": 90,
                         "token_capture_status": "measured",
+                        "model_total_tokens": 90,
+                        "model_token_capture_status": "measured",
+                        "rescue_cost_status": "local_only",
                         "gemini_uses_nexus": True,
                         "nexus_context_delivered": True,
                         "nexus_usage_valid": True,
@@ -113,6 +116,8 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "With Nexus scope: 2 unique tasks x 1 trials = 2 rows" in out
     assert "Solve rate | 50.0% | 100.0% | 50.0%" in out
     assert "Cost-comparable rate | 100.0% | 50.0% | -50.0%" in out
+    assert "Model token measured rate | 0.0% | 50.0% | 50.0%" in out
+    assert "Local rescue rate | 0.0% | 50.0% | 50.0%" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
     assert "| measured | 2 | 1 |" in out
     assert "| estimated | 0 | 1 |" in out
