@@ -68,6 +68,7 @@ class SprintResult:
     gateway_stats_present: bool = False
     gateway_usage_metadata_present: bool = False
     gateway_token_source: str = "missing"
+    gateway_error_category: str = ""
     model_name: str = ""
     model_patch_generated: bool = False
     fallback_used: bool = False
@@ -134,6 +135,7 @@ class LLMCandidateGenerator:
                     "gateway_stats_present": bool(out.get("gateway_stats_present", False)) if isinstance(out, dict) else False,
                     "gateway_usage_metadata_present": bool(out.get("gateway_usage_metadata_present", False)) if isinstance(out, dict) else False,
                     "gateway_token_source": str(out.get("gateway_token_source") or "missing") if isinstance(out, dict) else "missing",
+                    "gateway_error_category": str(out.get("error_category") or "") if isinstance(out, dict) else "",
                     "model_name": model,
                     "model_patch_generated": False,
                 }
@@ -466,6 +468,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     gateway_stats_present = False
     gateway_usage_metadata_present = False
     gateway_token_sources: set[str] = set()
+    gateway_error_categories: set[str] = set()
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
@@ -704,6 +707,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         gateway_stats_present = gateway_stats_present or bool(failure_meta.get("gateway_stats_present", False))
                         gateway_usage_metadata_present = gateway_usage_metadata_present or bool(failure_meta.get("gateway_usage_metadata_present", False))
                         gateway_token_sources.add(str(failure_meta.get("gateway_token_source") or "missing"))
+                        if failure_meta.get("gateway_error_category"):
+                            gateway_error_categories.add(str(failure_meta.get("gateway_error_category")))
                     if infra_code != "infra_blocked:quota":
                         if not failure_meta or int(failure_meta.get("tokens_used", 0) or 0) <= 0:
                             total_tokens += _estimate_tokens(
@@ -747,6 +752,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             gateway_stats_present = gateway_stats_present or bool(meta.get("gateway_stats_present", False))
             gateway_usage_metadata_present = gateway_usage_metadata_present or bool(meta.get("gateway_usage_metadata_present", False))
             gateway_token_sources.add(str(meta.get("gateway_token_source") or "missing"))
+            if meta.get("gateway_error_category"):
+                gateway_error_categories.add(str(meta.get("gateway_error_category")))
             quota_backoffs += int(meta.get("quota_backoffs", 0))
             guard_ok, guard_reason = _semantic_guard(source_code, candidate_code, config.task, used_source)
             if not guard_ok:
@@ -815,6 +822,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             gateway_stats_present=gateway_stats_present,
             gateway_usage_metadata_present=gateway_usage_metadata_present,
             gateway_token_source=_resolve_gateway_token_source(gateway_token_sources),
+            gateway_error_category=",".join(sorted(gateway_error_categories)),
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
             fallback_used=fallback_used,
@@ -856,6 +864,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             gateway_stats_present=gateway_stats_present,
             gateway_usage_metadata_present=gateway_usage_metadata_present,
             gateway_token_source=_resolve_gateway_token_source(gateway_token_sources),
+            gateway_error_category=",".join(sorted(gateway_error_categories)),
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
             fallback_used=fallback_used,
@@ -936,6 +945,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         gateway_stats_present=gateway_stats_present,
         gateway_usage_metadata_present=gateway_usage_metadata_present,
         gateway_token_source=_resolve_gateway_token_source(gateway_token_sources),
+        gateway_error_category=",".join(sorted(gateway_error_categories)),
         model_name=",".join(sorted(model_names)),
         model_patch_generated=model_patch_generated,
         fallback_used=fallback_used,

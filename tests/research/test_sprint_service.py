@@ -389,7 +389,7 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
 
         def ask_structured(self, **_kwargs):
             return (
-                {"status": "FAIL", "summary": "Gateway Exhausted: TIMEOUT", "error_category": "gateway_error"},
+                {"status": "FAIL", "summary": "Gateway Exhausted: TIMEOUT", "error_category": "timeout"},
                 "TIMEOUT",
             )
 
@@ -417,6 +417,7 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
     assert res.model_calls == 1
     assert res.total_tokens > 0
     assert res.token_capture_status == "estimated"
+    assert res.gateway_error_category == "timeout"
     assert res.winner_source == "local"
     assert "llm_error" in res.error_codes
 

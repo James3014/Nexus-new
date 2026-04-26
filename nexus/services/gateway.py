@@ -269,7 +269,8 @@ class BattlesuitGateway:
                 last_err = str(e)
                 
         if tmp_payload.exists(): tmp_payload.unlink()
-        return self._build_error_result(f"Gateway Exhausted: {last_err}"), last_err
+        category = "timeout" if str(last_err).strip().upper() == "TIMEOUT" else "gateway_error"
+        return self._build_error_result(f"Gateway Exhausted: {last_err}", category=category), last_err
 
     def _resolve_binary(
         self,

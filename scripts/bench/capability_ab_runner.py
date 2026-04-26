@@ -613,6 +613,7 @@ def _extract_record(
         "gateway_stats_present": bool(report.get("gateway_stats_present", False)),
         "gateway_usage_metadata_present": bool(report.get("gateway_usage_metadata_present", False)),
         "gateway_token_source": str(report.get("gateway_token_source") or ""),
+        "gateway_error_category": str(report.get("gateway_error_category") or ""),
         "local_rescue_tokens": int(report.get("local_rescue_tokens", 0) or 0),
         "rescue_cost_status": str(report.get("rescue_cost_status") or ""),
         "baseline_gateway_error_category": baseline_trace.get("gateway_error_category"),

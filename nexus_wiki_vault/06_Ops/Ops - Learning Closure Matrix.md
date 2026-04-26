@@ -503,6 +503,12 @@ version_scope:
 - **Decision**: Add raw token-source fields to gateway, sprint result, research-flow report, benchmark rows, A/B summaries, and markdown reports; preserve failed LLM call metadata before local fallback.
 - **Prevention**: Do not expand to 6x2/12x2 token-cost claims until a 1x1 Nexus probe shows `gateway_token_source=stats` or `usage_metadata` in the final row.
 
+## 2026-04-27: Gateway Timeout Is Not Missing Token Telemetry
+- **Phenomenon**: Nexus-only auto-flow debug timed out inside `BattlesuitGateway` after 75s and final benchmark rows showed `gateway_token_source=missing`.
+- **Root Cause**: The real hard-neutral prompt can exceed the gateway timeout before provider usage stats are returned; treating that as generic `llm_error` makes timeout look like an unknown token parser failure.
+- **Decision**: Classify gateway timeout as `gateway_error_category=timeout` and propagate it through sprint result, research-flow report, and benchmark row.
+- **Prevention**: Token-source probes must separate `missing because provider returned no stats` from `missing because gateway timed out before stats existed`; 3x1/6x2 should wait for a non-timeout Nexus 1x1.
+
 ## 2026-04-27: Scratch Analysis Scripts Should Stay Simple
 - **Phenomenon**: A JSONL inspection command failed with a Python `SyntaxError` after reusing a walrus assignment variable inside a comprehension.
 - **Root Cause**: The scratch script used clever inline assignment instead of a simple loop while analyzing benchmark evidence.

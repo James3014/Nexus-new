@@ -413,6 +413,136 @@ def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verificati
     assert trace["capabilities"]["claim_verified"] is True
 
 
+def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("def normalize_flag(text):\n    return text\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text(
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('target', r'%s')\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "def test_normalize_flag():\n"
+        "    assert mod.normalize_flag(' YES ') == 'yes'\n" % target,
+        encoding="utf-8",
+    )
+
+    def fake_hyper(*, repo_root, config):
+        import time
+
+        time.sleep(0.02)
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="def normalize_flag(text):\n    return text.strip().lower()\n",
+            winner_source="llm",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=1,
+            model_calls=1,
+            model_name="gemini-3-flash-preview",
+            model_patch_generated=True,
+            fallback_used=False,
+            total_tokens=333,
+            token_capture_status="measured",
+            gateway_stats_present=True,
+            gateway_usage_metadata_present=False,
+            gateway_token_source="stats",
+            gateway_error_category="",
+            learning_trace={"mempalace_verified": True},
+        )
+
+    def fake_subprocess_run(*_args, **_kwargs):
+        import time
+
+        time.sleep(0.06)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    monkeypatch.setattr(research_flow_service.subprocess, "run", fake_subprocess_run)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix flaky websocket normalization timeout",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=0.01,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        success_criteria="artifact_changed_and_tests_pass",
+    )
+
+    report = payload["result"]["report"]
+    assert payload["strategy"]["path"] == "hyper_guard_fallback_to_baseline"
+    assert report["guard_fallback_from"]["gateway_token_source"] == "stats"
+    assert report["gateway_stats_present"] is True
+    assert report["gateway_token_source"] == "stats"
+    assert report["gateway_error_category"] == ""
+    assert report["token_capture_status"] == "measured"
+    assert report["model_calls"] == 1
+    assert payload["nexus_usage_trace"]["gemini_uses_nexus"] is True
+
+
+def test_auto_flow_writes_explicit_output_file(tmp_path: Path):
+    target = tmp_path / "target.py"
+    target.write_text("def normalize_flag(text):\n    return text\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text(
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('target', r'%s')\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "def test_normalize_flag():\n"
+        "    assert mod.normalize_flag(' YES ') == 'yes'\n" % target,
+        encoding="utf-8",
+    )
+    output_file = Path(".nexus/reports/research/test-output.json")
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix normalize flag helper",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query="",
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=99.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="baseline",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=output_file,
+        success_criteria="artifact_changed_and_tests_pass",
+    )
+
+    written = tmp_path / output_file
+    assert payload["io"]["output_written"] is True
+    assert written.exists()
+    assert json.loads(written.read_text(encoding="utf-8"))["io"]["output_written"] is True
+
+
 def test_cross_module_mutation_required_does_not_use_verification_only_rescue(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")

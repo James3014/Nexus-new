@@ -443,6 +443,13 @@ def build_hyper_execution_profile(
     }
 
 
+def _write_output_file(repo_root: Path, path: Path, payload: dict) -> Path:
+    out = path if path.is_absolute() else (repo_root / path).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
 
 
 def run_auto_flow(
@@ -789,6 +796,7 @@ def run_auto_flow(
                     "gateway_stats_present": bool(getattr(res, "gateway_stats_present", False)),
                     "gateway_usage_metadata_present": bool(getattr(res, "gateway_usage_metadata_present", False)),
                     "gateway_token_source": str(getattr(res, "gateway_token_source", "missing") or "missing"),
+                    "gateway_error_category": str(getattr(res, "gateway_error_category", "") or ""),
                     "effective_stage1_timeout_sec": effective_stage1_timeout,
                     "learning_trace": res.learning_trace,
                 },
@@ -873,6 +881,7 @@ def run_auto_flow(
                             "gateway_stats_present": bool(hyper_report.get("gateway_stats_present", False)),
                             "gateway_usage_metadata_present": bool(hyper_report.get("gateway_usage_metadata_present", False)),
                             "gateway_token_source": hyper_report.get("gateway_token_source", "missing"),
+                            "gateway_error_category": hyper_report.get("gateway_error_category", ""),
                             "winner_source": hyper_report.get("winner_source", "unknown"),
                             "learning_trace": hyper_report.get("learning_trace", {}),
                         }
@@ -894,6 +903,10 @@ def run_auto_flow(
                         result["report"]["gateway_token_source"] = hyper_report.get(
                             "gateway_token_source",
                             result["report"].get("gateway_token_source", "missing"),
+                        )
+                        result["report"]["gateway_error_category"] = hyper_report.get(
+                            "gateway_error_category",
+                            result["report"].get("gateway_error_category", ""),
                         )
                     chosen_flow = "baseline"
                     strategy_path = "hyper_guard_fallback_to_baseline"
@@ -1037,7 +1050,7 @@ def run_auto_flow(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     if output_file:
-        written = _write_output_file(output_file, payload)
+        written = _write_output_file(repo_root, output_file, payload)
         payload["io"]["output_written"] = True
         payload["io"]["output_path"] = str(written)
         # keep report + output payload in sync
