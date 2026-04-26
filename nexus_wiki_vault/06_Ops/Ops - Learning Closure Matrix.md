@@ -545,6 +545,12 @@ version_scope:
 - **Decision**: Re-run the analysis with explicit loops and keep evidence scripts boring.
 - **Prevention**: Benchmark evidence extraction should prefer small named helpers or plain loops over compact comprehension tricks.
 
+## 2026-04-27: Public Claims Need A Nexus-Value Slice
+- **Phenomenon**: Gemini 3 Flash solved the existing hard smoke both with and without Nexus, leaving no solve-rate lift to publish.
+- **Root Cause**: The hard smoke verified runner health, token capture, and Nexus wearing, but it did not target failures that Nexus is designed to prevent.
+- **Decision**: Add a frozen Nexus-value benchmark slice for hidden failures, bounded repair, governance, evidence, context, and trust mismatch prevention.
+- **Prevention**: Do not publish Nexus uplift from a benchmark where the bare arm is already saturated; report overhead and evidence value until the value slice is run.
+
 ## 2026-04-26: JIT ML Needs Observation Before Prediction
 - **Phenomenon**: Full regression is growing, but jumping straight to ML test selection would train on sparse and noisy failure data.
 - **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.

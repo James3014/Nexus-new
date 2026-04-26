@@ -53,10 +53,13 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "model_total_tokens": 90,
                         "model_token_capture_status": "measured",
                         "rescue_cost_status": "local_only",
+                        "guard_hit": True,
+                        "artifact_verification_only": True,
                         "gemini_uses_nexus": True,
                         "nexus_context_delivered": True,
                         "nexus_usage_valid": True,
                         "nexus_rescued": True,
+                        "nexus_winner_source": "local",
                         "pillar_lancedb_active": True,
                         "pillar_memory_active": True,
                         "pillar_mempalace_active": True,
@@ -69,6 +72,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "phase_a": "artifact_verified",
                         "phase_c": "closure_written",
                         "capability_claim_verified": True,
+                        "capability_self_heal_used": False,
                     }
                 ),
                 json.dumps(
@@ -84,6 +88,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "nexus_context_delivered": True,
                         "nexus_usage_valid": True,
                         "nexus_rescued": False,
+                        "nexus_winner_source": "llm_self_heal",
                         "pillar_lancedb_active": True,
                         "pillar_memory_active": True,
                         "pillar_mempalace_active": True,
@@ -96,6 +101,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "phase_a": "artifact_verified",
                         "phase_c": "closure_written",
                         "capability_claim_verified": True,
+                        "capability_self_heal_used": True,
                     }
                 ),
             ]
@@ -118,6 +124,9 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Cost-comparable rate | 100.0% | 50.0% | -50.0%" in out
     assert "Model token measured rate | 0.0% | 50.0% | 50.0%" in out
     assert "Local rescue rate | 0.0% | 50.0% | 50.0%" in out
+    assert "Guard fallback rate | 0.0% | 50.0% | 50.0%" in out
+    assert "Verification rescue rate | 0.0% | 50.0% | 50.0%" in out
+    assert "LLM self-heal rate | 0.0% | 50.0% | 50.0%" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
     assert "| measured | 2 | 1 |" in out
     assert "| estimated | 0 | 1 |" in out

@@ -202,6 +202,10 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "nexus_usage_valid_rate": 0.0,
             "gemini_uses_nexus_rate": 0.0,
             "nexus_rescue_rate": 0.0,
+            "local_rescue_rate": 0.0,
+            "guard_fallback_rate": 0.0,
+            "verification_rescue_rate": 0.0,
+            "llm_self_heal_rate": 0.0,
             "gemini_patch_pass_rate": 0.0,
             "pillar_lancedb_active_rate": 0.0,
             "pillar_memory_active_rate": 0.0,
@@ -279,8 +283,32 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
     local_rescue_rows = [
         row
         for row in rows
-        if str(row.get("rescue_cost_status", "")).strip().lower() == "local_only"
-        or _is_true(row.get("nexus_rescued"))
+        if str(row.get("nexus_winner_source", "")).strip().lower() == "local"
+        or (
+            not str(row.get("nexus_winner_source", "")).strip()
+            and str(row.get("rescue_cost_status", "")).strip().lower() == "local_only"
+        )
+    ]
+    guard_fallback_rows = [
+        row
+        for row in rows
+        if _is_true(row.get("guard_hit")) and _is_true(row.get("nexus_rescued"))
+        and str(row.get("nexus_winner_source", "")).strip().lower() in {"local", "verification_only"}
+    ]
+    verification_rescue_rows = [
+        row
+        for row in rows
+        if _is_true(row.get("artifact_verification_only"))
+        and _is_true(row.get("nexus_rescued"))
+    ]
+    llm_self_heal_rows = [
+        row
+        for row in rows
+        if "self_heal" in str(row.get("nexus_winner_source", "")).strip().lower()
+        or (
+            not str(row.get("nexus_winner_source", "")).strip()
+            and _is_true(row.get("capability_self_heal_used"))
+        )
     ]
     gateway_stats_source_rows = [
         row
@@ -337,6 +365,9 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "model_token_measured_rate": round(len(model_measured_rows) / total, 4),
         "model_token_estimated_rate": round(len(model_estimated_rows) / total, 4),
         "local_rescue_rate": round(len(local_rescue_rows) / total, 4),
+        "guard_fallback_rate": round(len(guard_fallback_rows) / total, 4),
+        "verification_rescue_rate": round(len(verification_rescue_rows) / total, 4),
+        "llm_self_heal_rate": round(len(llm_self_heal_rows) / total, 4),
         "gateway_stats_source_rate": round(len(gateway_stats_source_rows) / total, 4),
         "gateway_usage_metadata_source_rate": round(len(gateway_usage_source_rows) / total, 4),
         "trust_mismatch_rate": round(trust_mismatch / total, 4),
@@ -444,6 +475,15 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "local_rescue_rate_delta": round(
             summary_b["local_rescue_rate"] - summary_a["local_rescue_rate"], 4
+        ),
+        "guard_fallback_rate_delta": round(
+            summary_b["guard_fallback_rate"] - summary_a["guard_fallback_rate"], 4
+        ),
+        "verification_rescue_rate_delta": round(
+            summary_b["verification_rescue_rate"] - summary_a["verification_rescue_rate"], 4
+        ),
+        "llm_self_heal_rate_delta": round(
+            summary_b["llm_self_heal_rate"] - summary_a["llm_self_heal_rate"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),
