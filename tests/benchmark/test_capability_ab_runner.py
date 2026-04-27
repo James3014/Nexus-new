@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
+    _annotate_benchmark_eligibility,
     _benchmark_memory_db_path,
     _budget_exceeded,
     _classify_timeout_stage,
@@ -23,6 +26,7 @@ from scripts.bench.capability_ab_runner import (
     _report_model_label,
     _restore_preserved_target,
     _resolve_task_files,
+    _run_process_group,
     _tail_text,
     _task_uses_materialized_fixture,
     _with_nexus_timeout_payload,
@@ -167,6 +171,44 @@ def test_materialize_fixture_writes_files(tmp_path: Path):
     assert Path(target).exists()
     assert Path(test).exists()
     assert "normalize_flag" in Path(target).read_text(encoding="utf-8")
+
+
+def test_materialize_nexus_value_fixture_uses_fixture_kind(tmp_path: Path):
+    task = CapabilityTask(
+        id="nexus-value-trust-001",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix trust mismatch",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_trust_phase_aggregator",
+    )
+
+    target, test = _materialize_fixture(tmp_path, task)
+
+    target_source = Path(target).read_text(encoding="utf-8")
+    test_source = Path(test).read_text(encoding="utf-8")
+    assert "overall_status" in target_source
+    assert "compute_backoff" not in target_source
+    assert "spec_from_file_location" in test_source
+    assert "missing_evidence" in test_source
+
+
+def test_materialize_all_nexus_value_manifest_fixtures_are_distinct(tmp_path: Path):
+    tasks = [
+        task
+        for task in load_tasks("scripts/bench/public_benchmark_nexus_value_v1.json")
+        if task.fixture_kind.startswith("nexus_value_")
+    ]
+
+    signatures = set()
+    for task in tasks:
+        target, test = _materialize_fixture(tmp_path, task)
+        signatures.add((Path(target).read_text(encoding="utf-8"), Path(test).read_text(encoding="utf-8")))
+
+    assert len(signatures) == len(tasks)
 
 
 def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
@@ -528,6 +570,25 @@ def test_filter_tasks_by_id_allows_targeted_replay():
     assert [task.id for task in filter_tasks_by_id(tasks, "all")] == ["a", "b"]
 
 
+def test_expand_task_trials_preserves_fixture_kind():
+    task = CapabilityTask(
+        id="nexus-value-hidden-001",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix hidden state",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_hidden_state",
+    )
+
+    expanded = expand_task_trials([task], repeat_trials=2, shuffle_seed=None)
+
+    assert [item.trial_index for item in expanded] == [1, 2]
+    assert {item.fixture_kind for item in expanded} == {"nexus_value_hidden_state"}
+
+
 def test_run_without_nexus_bare_mode_returns_record(tmp_path: Path):
     task = CapabilityTask(
         id="easy-001",
@@ -639,7 +700,7 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
         captured["env"] = kwargs.get("env", {})
         return _Proc()
 
-    monkeypatch.setattr("scripts.bench.capability_ab_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
 
     out = run_with_nexus(
         repo_root=tmp_path,
@@ -690,7 +751,7 @@ def test_run_with_nexus_llm_all_forces_hyper_flow(tmp_path: Path, monkeypatch):
         captured["cmd"] = list(cmd)
         return _Proc()
 
-    monkeypatch.setattr("scripts.bench.capability_ab_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
 
     run_with_nexus(
         repo_root=tmp_path,
@@ -777,6 +838,50 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
     assert out["baseline_patch_len"] > 0
 
 
+def test_run_without_nexus_hidden_verifier_omits_tests_from_prompt(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="nexus-value-hidden-001",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix hidden verifier task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_hidden_state",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        assert "test_duplicate_events_are_idempotent" not in prompt
+        original = Path(target_file).read_text(encoding="utf-8")
+        return (
+            {
+                "patch": original,
+                "tokens_used": 123,
+                "token_capture_status": "measured",
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": True,
+            },
+            "",
+        )
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert out["baseline_patch_changed"] is False
+
+
 def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="easy-quota",
@@ -816,6 +921,38 @@ def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeyp
     assert out["model_calls"] == 1
     assert out["invocation_started"] is True
     assert out["model_response_received"] is False
+
+
+def test_authorization_task_text_is_not_auth_infra_invalid():
+    row = {
+        "baseline_raw_tail": "Refactor authorization helper while preserving deny-by-default behavior.",
+        "baseline_gateway_error_category": "",
+        "model_calls": 1,
+    }
+
+    out = _annotate_benchmark_eligibility(
+        row,
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+    )
+
+    assert out["run_eligible"] is True
+    assert out["infra_invalid_reason"] is None
+
+
+def test_run_process_group_raises_timeout(tmp_path: Path):
+    try:
+        _run_process_group(
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            cwd=tmp_path,
+            env=os.environ.copy(),
+            timeout_sec=1,
+        )
+    except Exception as exc:
+        assert exc.__class__.__name__ == "TimeoutExpired"
+    else:
+        raise AssertionError("process group timeout should fail closed")
 
 
 def test_run_with_nexus_llm_requires_model_and_nexus_evidence(tmp_path: Path, monkeypatch):

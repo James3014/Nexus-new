@@ -105,8 +105,21 @@ class LLMCandidateGenerator:
             return [override]
         return ["gemini-3-flash-preview"] if self.safe_mode else ["gemini-3-flash-preview", "gemini-3.1-pro-preview"]
 
-    def generate(self, *, source_code: str, task: str, mutation_hint: str, seed: int) -> tuple[str, dict[str, Any]]:
-        prompt_text = _build_llm_candidate_prompt(source_code=source_code, task=task, mutation_hint=mutation_hint)
+    def generate(
+        self,
+        *,
+        source_code: str,
+        task: str,
+        mutation_hint: str,
+        seed: int,
+        test_source: str = "",
+    ) -> tuple[str, dict[str, Any]]:
+        prompt_text = _build_llm_candidate_prompt(
+            source_code=source_code,
+            task=task,
+            mutation_hint=mutation_hint,
+            test_source=test_source,
+        )
         quota_backoffs = 0
         model_calls = 0
         last_err = ""
@@ -209,20 +222,24 @@ def _candidate_code_from_llm_output(source_code: str, out: dict[str, Any]) -> tu
     return source_code.replace(target, replacement, 1), ""
 
 
-def _build_llm_candidate_prompt(*, source_code: str, task: str, mutation_hint: str) -> str:
+def _build_llm_candidate_prompt(*, source_code: str, task: str, mutation_hint: str, test_source: str = "") -> str:
     compact = os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"}
+    test_block = f"\nTests:\n{test_source}" if test_source else ""
     if compact:
         return (
             "Return JSON with status=APPROVED, operation=replace, target_snippet, replacement.\n"
             f"Task: {task}\n"
             f"Hint: {mutation_hint}\n"
             f"Source:\n{source_code}"
+            f"{test_block}"
         )
+    full_test_block = f"\n[CURRENT TESTS]\n{test_source}\n" if test_source else ""
     return (
         "You are executing Stage 1 of a Hyper-Sprint (Gladiator mode).\n"
         f"Task: {task}\n"
         f"Strategy/Hint for this candidate: {mutation_hint}\n\n"
         f"[CURRENT SOURCE]\n{source_code}\n\n"
+        f"{full_test_block}"
         "Return ONLY JSON for one minimal edit: status, operation, target_snippet, replacement. "
         "Use operation=replace when possible; the target_snippet must be exact and unique. "
         "Use patch only as a fallback when a minimal edit cannot represent the change."
@@ -480,6 +497,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
     target_path = repo_root / config.target_file
     source_code = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
+    test_path = repo_root / config.test_file if config.test_file else None
+    test_source = test_path.read_text(encoding="utf-8") if test_path and test_path.exists() else ""
+    hidden_verifier_mode = os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
+    initial_test_source = "" if hidden_verifier_mode else test_source
     llm_mode_effective = bool(config.llm_mode)
     learn_slo_guard = {
         "phase_slo_pass": False,
@@ -782,6 +803,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         task=config.task,
                         mutation_hint=hint,
                         seed=idx,
+                        test_source=initial_test_source,
                     )
                     used_source = str(meta.get("source", "llm"))
                 except Exception as llm_exc:  # noqa: BLE001
@@ -816,6 +838,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                                     source_code=source_code,
                                     task=config.task,
                                     mutation_hint=hint,
+                                    test_source=initial_test_source,
                                 )
                             )
                             token_capture_statuses.add("estimated")
@@ -886,6 +909,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         task=repair_task,
                         mutation_hint=f"{hint}\nself_heal_after_pytest_failed",
                         seed=idx + 10000,
+                        test_source=test_source,
                     )
                     _record_llm_meta(repair_meta)
                     repair_guard_ok, repair_guard_reason = _semantic_guard(candidate_code, repair_code, config.task, "llm_self_heal")

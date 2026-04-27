@@ -87,7 +87,7 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
 
     if "quota" in combined or "resource exhausted" in combined or "rate limit" in combined or "429" in combined:
         return "quota_exhausted"
-    if "auth" in combined or "oauth" in combined or "login" in combined or "permission denied" in combined:
+    if "oauth" in combined or "login required" in combined or "permission denied" in combined:
         return "auth_failed"
     if gateway_error == "binary_missing":
         return "cli_missing"
@@ -303,6 +303,7 @@ def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuff
                     repo_ref=task.repo_ref,
                     manifest_hash=task.manifest_hash,
                     trial_index=trial_index,
+                    fixture_kind=task.fixture_kind,
                 )
             )
     if shuffle_seed is not None:
@@ -315,6 +316,13 @@ def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, st
     case_dir.mkdir(parents=True, exist_ok=True)
     target_path = case_dir / "target.py"
     test_path = case_dir / "test_target.py"
+
+    fixture = task.fixture_kind.strip()
+    if fixture.startswith("nexus_value_"):
+        target_code, test_code = _nexus_value_fixture_sources(fixture)
+        target_path.write_text(target_code, encoding="utf-8")
+        test_path.write_text(test_code, encoding="utf-8")
+        return str(target_path), str(test_path)
 
     difficulty = task.difficulty.lower()
     if difficulty == "easy":
@@ -375,6 +383,153 @@ def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, st
     target_path.write_text(target_code, encoding="utf-8")
     test_path.write_text(test_code, encoding="utf-8")
     return str(target_path), str(test_path)
+
+
+def _nexus_value_fixture_sources(fixture_kind: str) -> tuple[str, str]:
+    fixtures: dict[str, tuple[str, str]] = {
+        "nexus_value_hidden_state": (
+            "def apply_events(events):\n"
+            "    state = {'count': 0, 'seen': []}\n"
+            "    for event in events:\n"
+            "        state['count'] += int(event.get('delta', 0))\n"
+            "        state['seen'].append(event.get('id'))\n"
+            "    return state\n",
+            "from target import apply_events\n\n"
+            "def test_duplicate_events_are_idempotent():\n"
+            "    events = [{'id': 'a', 'delta': 2}, {'id': 'a', 'delta': 2}, {'id': 'b', 'delta': 3}]\n"
+            "    assert apply_events(events) == {'count': 5, 'seen': ['a', 'b']}\n",
+        ),
+        "nexus_value_hidden_parser": (
+            "def normalize_key(text):\n"
+            "    return text.strip().lower().replace(' ', '-')\n",
+            "from target import normalize_key\n\n"
+            "def test_normalize_key_boundaries():\n"
+            "    assert normalize_key('  User   Name  ') == 'user-name'\n"
+            "    assert normalize_key('') == ''\n"
+            "    assert normalize_key('API__Token') == 'api-token'\n",
+        ),
+        "nexus_value_self_heal_invariant": (
+            "def merge_limits(defaults, override):\n"
+            "    result = defaults\n"
+            "    result.update(override or {})\n"
+            "    return result\n",
+            "from target import merge_limits\n\n"
+            "def test_merge_limits_preserves_inputs_and_drops_none():\n"
+            "    defaults = {'timeout': 10, 'retries': 2}\n"
+            "    merged = merge_limits(defaults, {'timeout': None, 'jitter': 1})\n"
+            "    assert merged == {'timeout': 10, 'retries': 2, 'jitter': 1}\n"
+            "    assert defaults == {'timeout': 10, 'retries': 2}\n",
+        ),
+        "nexus_value_self_heal_timeout": (
+            "def remaining_ms(start_ms, now_ms, timeout_ms):\n"
+            "    return timeout_ms - now_ms - start_ms\n",
+            "from target import remaining_ms\n\n"
+            "def test_remaining_ms_clamps_and_uses_elapsed_time():\n"
+            "    assert remaining_ms(100, 125, 50) == 25\n"
+            "    assert remaining_ms(100, 200, 50) == 0\n"
+            "    assert remaining_ms(100, 90, 50) == 50\n",
+        ),
+        "nexus_value_mempalace_secret_redaction": (
+            "def redact(record):\n"
+            "    return dict(record)\n",
+            "from target import redact\n\n"
+            "def test_redact_never_leaks_secret_fields():\n"
+            "    out = redact({'user': 'ada', 'token': 'abc', 'password': 'pw', 'note': 'ok'})\n"
+            "    assert out == {'user': 'ada', 'token': '[REDACTED]', 'password': '[REDACTED]', 'note': 'ok'}\n",
+        ),
+        "nexus_value_mempalace_deny_default": (
+            "def can_access(role, scope):\n"
+            "    if role == 'admin':\n"
+            "        return True\n"
+            "    return scope == 'read'\n",
+            "from target import can_access\n\n"
+            "def test_deny_by_default_for_unknowns_and_missing_scope():\n"
+            "    assert can_access('admin', 'write') is True\n"
+            "    assert can_access('viewer', 'read') is True\n"
+            "    assert can_access('viewer', 'write') is False\n"
+            "    assert can_access('unknown', 'read') is False\n"
+            "    assert can_access('viewer', None) is False\n",
+        ),
+        "nexus_value_artifact_claim_rollup": (
+            "def verified_claims(claims):\n"
+            "    return [claim['id'] for claim in claims if claim.get('status') == 'pass']\n",
+            "from target import verified_claims\n\n"
+            "def test_claims_need_pass_status_and_artifact_reference():\n"
+            "    claims = [\n"
+            "        {'id': 'a', 'status': 'pass', 'artifact': 'reports/a.json'},\n"
+            "        {'id': 'b', 'status': 'pass'},\n"
+            "        {'id': 'c', 'status': 'fail', 'artifact': 'reports/c.json'},\n"
+            "    ]\n"
+            "    assert verified_claims(claims) == ['a']\n",
+        ),
+        "nexus_value_artifact_phase_report": (
+            "def phase_ready(phase):\n"
+            "    return phase.get('status') == 'pass'\n",
+            "from target import phase_ready\n\n"
+            "def test_phase_ready_requires_evidence_and_failure_reason():\n"
+            "    assert phase_ready({'status': 'pass', 'evidence': 'x.json', 'reason': ''}) is True\n"
+            "    assert phase_ready({'status': 'pass', 'reason': ''}) is False\n"
+            "    assert phase_ready({'status': 'fail', 'evidence': 'x.json', 'reason': 'missing claim'}) is False\n"
+            "    assert phase_ready({'status': 'fail', 'evidence': 'x.json', 'reason': ''}) is False\n",
+        ),
+        "nexus_value_context_docs_contract": (
+            "FIELD = 'status'\n\n"
+            "def build_response(value):\n"
+            "    return {FIELD: value}\n",
+            "from target import build_response\n\n"
+            "def test_response_uses_canonical_result_field():\n"
+            "    assert build_response('ok') == {'result': 'ok'}\n",
+        ),
+        "nexus_value_context_config_contract": (
+            "def parse_config(data):\n"
+            "    return {'strict': bool(data.get('strict', False)), 'retries': data.get('retries', 0)}\n",
+            "from target import parse_config\n\n"
+            "def test_config_defaults_follow_strict_contract():\n"
+            "    assert parse_config({}) == {'strict': True, 'retries': 3}\n"
+            "    assert parse_config({'strict': False, 'retries': 0}) == {'strict': False, 'retries': 0}\n",
+        ),
+        "nexus_value_trust_phase_aggregator": (
+            "def overall_status(phases):\n"
+            "    return 'pass' if all(p.get('status') == 'pass' for p in phases) else 'fail'\n",
+            "from target import overall_status\n\n"
+            "def test_overall_status_rejects_missing_evidence():\n"
+            "    assert overall_status([{'status': 'pass', 'evidence': 'a'}, {'status': 'pass', 'evidence': 'b'}]) == 'pass'\n"
+            "    assert overall_status([{'status': 'pass'}, {'status': 'pass', 'evidence': 'b'}]) == 'fail'\n",
+        ),
+        "nexus_value_trust_incident_classifier": (
+            "def classify(smoke_passed, semantic_evidence):\n"
+            "    return 'resolved' if smoke_passed else 'open'\n",
+            "from target import classify\n\n"
+            "def test_classifier_does_not_trust_smoke_without_semantic_evidence():\n"
+            "    assert classify(True, {'verified': True}) == 'resolved'\n"
+            "    assert classify(True, {'verified': False}) == 'needs_evidence'\n"
+            "    assert classify(False, {'verified': True}) == 'open'\n",
+        ),
+    }
+    try:
+        target_code, test_code = fixtures[fixture_kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown_nexus_value_fixture:{fixture_kind}") from exc
+    return target_code, _portable_fixture_test_import(test_code)
+
+
+def _portable_fixture_test_import(test_code: str) -> str:
+    first, _, rest = test_code.partition("\n")
+    prefix = "from target import "
+    if not first.startswith(prefix):
+        return test_code
+    names = [name.strip() for name in first[len(prefix) :].split(",") if name.strip()]
+    bindings = "".join(f"{name} = _MOD.{name}\n" for name in names)
+    prelude = (
+        "import importlib.util\n"
+        "from pathlib import Path\n\n"
+        "_TARGET_PATH = Path(__file__).resolve().parent / 'target.py'\n"
+        "_SPEC = importlib.util.spec_from_file_location('bench_target', _TARGET_PATH)\n"
+        "_MOD = importlib.util.module_from_spec(_SPEC)\n"
+        "assert _SPEC is not None and _SPEC.loader is not None\n"
+        "_SPEC.loader.exec_module(_MOD)\n"
+    )
+    return prelude + bindings + ("\n" + rest if rest else "")
 
 
 def _task_uses_materialized_fixture(task: CapabilityTask, *, materialize_missing: bool) -> bool:
@@ -736,6 +891,34 @@ def _with_nexus_timeout_payload(*, timeout_sec: int, exc: subprocess.TimeoutExpi
     }
 
 
+def _run_process_group(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_sec: int,
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_sec)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(cmd, timeout_sec, output=stdout, stderr=stderr) from exc
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
 def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
     try:
         outer = json.loads(raw_stdout)
@@ -860,7 +1043,7 @@ def run_with_nexus(
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
             env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
         try:
-            res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, env=env, timeout=timeout_sec)
+            res = _run_process_group(cmd, cwd=repo_root, env=env, timeout_sec=timeout_sec)
             output = res.stdout or ""
         except subprocess.TimeoutExpired as exc:
             output = json.dumps(_with_nexus_timeout_payload(timeout_sec=timeout_sec, exc=exc), ensure_ascii=False)
@@ -919,13 +1102,15 @@ def run_without_nexus(
         pytest_stdout_tail = ""
         pytest_stderr_tail = ""
         try:
+            hidden_verifier_mode = os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
+            prompt_tests = "" if hidden_verifier_mode and task.fixture_kind.startswith("nexus_value_") else test_source
             prompt = (
                 "You are Gemini 3 Flash running without Nexus orchestration. "
                 "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
                 "The patch value must be the full updated target file content.\n"
                 f"Task: {task.task_desc}\n\n"
                 f"[CURRENT SOURCE]\n{original}\n\n"
-                f"[CURRENT TESTS]\n{test_source}\n\n"
+                f"[CURRENT TESTS]\n{prompt_tests}\n\n"
                 "Return the full updated file content in the patch field."
             )
             out, raw = _ask_direct_gemini_flash_patch(prompt=prompt, timeout_sec=timeout_sec)

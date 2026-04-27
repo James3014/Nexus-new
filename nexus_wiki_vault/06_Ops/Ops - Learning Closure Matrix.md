@@ -551,6 +551,36 @@ version_scope:
 - **Decision**: Add a frozen Nexus-value benchmark slice for hidden failures, bounded repair, governance, evidence, context, and trust mismatch prevention.
 - **Prevention**: Do not publish Nexus uplift from a benchmark where the bare arm is already saturated; report overhead and evidence value until the value slice is run.
 
+## 2026-04-27: Fixture Names Must Materialize Real Tasks
+- **Phenomenon**: A Nexus-value run started producing the same generic hard fixture for every task, so it could not prove where Nexus is stronger.
+- **Root Cause**: The benchmark runner selected fixture source by difficulty only and ignored `fixture_kind`.
+- **Decision**: Materialize each `nexus_value_*` fixture kind into a distinct target/test pair before running Gemini comparisons.
+- **Prevention**: Public benchmark manifests must have a materialization test proving each value fixture creates distinct code and verification behavior before any Gemini quota is spent.
+
+## 2026-04-27: Nexus LLM Needs The Same Verification Context As Bare
+- **Phenomenon**: After real Nexus-value fixtures were enabled, bare Gemini solved more rows than Gemini wearing Nexus.
+- **Root Cause**: The bare prompt included current tests, while the Nexus Stage-1 LLM prompt only included source, task, and hint.
+- **Decision**: Include `test_source` in Nexus LLM candidate and self-heal prompts so treatment measures the battlesuit rather than a context-starved model.
+- **Prevention**: A/B runners must compare different orchestration layers, not different prompt evidence; public reports should flag context asymmetry before claiming Nexus value.
+
+## 2026-04-27: Hidden Verifier Is The Right Self-Heal Benchmark
+- **Phenomenon**: When both arms see the full verifier tests up front, Gemini 3 Flash can solve simple fixture tasks without needing Nexus.
+- **Root Cause**: The benchmark was measuring one-shot coding with visible tests, not Nexus' closed-loop repair advantage.
+- **Decision**: Add an opt-in hidden-verifier benchmark mode where initial prompts omit verifier tests, while Nexus can still use test execution and failure evidence for bounded repair.
+- **Prevention**: Self-heal claims must be measured on hidden-verifier tasks; visible-test tasks should be used for parity and cost, not repair-lift claims.
+
+## 2026-04-27: Benchmark Timeouts Must Kill Process Groups
+- **Phenomenon**: A Nexus-value row ran for more than 900 seconds despite a per-task timeout, making the result unusable for public cost claims.
+- **Root Cause**: The runner timed out the immediate `uv` subprocess but did not reliably kill the process group beneath it.
+- **Decision**: Execute Nexus subprocess legs in a new process group and kill the whole group on timeout.
+- **Prevention**: Long-running benchmark lanes must prove hard timeout behavior before any multi-task Gemini run is considered publishable.
+
+## 2026-04-27: Auth Classifiers Must Not Match Authorization Task Text
+- **Phenomenon**: A governance benchmark row that solved successfully was marked infra-invalid as `auth_failed`.
+- **Root Cause**: The infra classifier matched the substring `auth` inside ordinary task/output text such as authorization.
+- **Decision**: Restrict auth infra detection to concrete login/OAuth/permission-denied signals.
+- **Prevention**: Infra-invalid classifiers must avoid broad substrings that can appear in benchmark domain language.
+
 ## 2026-04-26: JIT ML Needs Observation Before Prediction
 - **Phenomenon**: Full regression is growing, but jumping straight to ML test selection would train on sparse and noisy failure data.
 - **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.

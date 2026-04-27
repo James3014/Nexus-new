@@ -277,6 +277,59 @@ def test_compact_gateway_prompt_is_shorter(monkeypatch):
     assert source in compact
 
 
+def test_llm_candidate_prompt_can_include_tests(monkeypatch):
+    source = "def normalize_flag(text):\n    return text\n"
+    tests = "def test_normalize_flag():\n    assert normalize_flag(' YES ') == 'yes'\n"
+    full = _build_llm_candidate_prompt(
+        source_code=source,
+        task="Fix text normalization",
+        mutation_hint="baseline",
+        test_source=tests,
+    )
+    monkeypatch.setenv("NEXUS_GATEWAY_COMPACT_PROMPT", "1")
+    compact = _build_llm_candidate_prompt(
+        source_code=source,
+        task="Fix text normalization",
+        mutation_hint="baseline",
+        test_source=tests,
+    )
+
+    assert "[CURRENT TESTS]" in full
+    assert tests in full
+    assert "Tests:" in compact
+    assert tests in compact
+
+
+def test_hidden_verifier_mode_omits_initial_test_source(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def normalize(text):\n    return text\n", encoding="utf-8")
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text("def test_contract():\n    assert True\n", encoding="utf-8")
+    captured: dict[str, str] = {}
+
+    class FakeGenerator:
+        def generate(self, *, source_code, task, mutation_hint, seed, test_source=""):
+            captured["test_source"] = test_source
+            raise RuntimeError("stop")
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FakeGenerator())
+
+    cfg = SprintConfig(
+        task="fix hidden verifier",
+        target_file=str(target),
+        test_file=str(test_file),
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+    run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert captured["test_source"] == ""
+
+
 def test_llm_edit_protocol_replaces_unique_snippet():
     source = "def normalize(text):\n    return text\n"
     code, reason = _candidate_code_from_llm_output(
