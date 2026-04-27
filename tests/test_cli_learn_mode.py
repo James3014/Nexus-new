@@ -2,6 +2,7 @@ import json
 from click.testing import CliRunner
 from unittest.mock import MagicMock
 
+from nexus.research.learn_mode import LearnModeService
 from scripts.engine import nexus_cli
 from scripts.engine.nexus_cli import nexus
 
@@ -176,7 +177,7 @@ def test_learn_mode_ingest_converge_and_ask(tmp_path, monkeypatch):
             "nexus",
             "ask",
             "--topic",
-            "nexus pipeline",
+            "nexus",
             "--question",
             "What does Nexus learn mode do?",
             "--top-k",
@@ -260,6 +261,7 @@ def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypat
                 "citation_span": [0, 35],
                 "topic_tags": ["nexus", "learn"],
                 "created_at": "2026-04-14T00:00:00+00:00",
+                "topic_pack": "nexus learn mode",
             }
         )
         + "\n",
@@ -284,6 +286,178 @@ def test_learn_ask_returns_unknown_when_min_evidence_not_met(tmp_path, monkeypat
     payload = json.loads(ask.output)
     assert payload["status"] == "UNKNOWN"
     assert payload["reason"] == "insufficient_cited_claims"
+
+
+def test_learn_ask_strict_topic_no_drift_when_topic_has_claims(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+
+    claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
+    claims_path.parent.mkdir(parents=True, exist_ok=True)
+    claims = [
+        {
+            "claim": "Agent Sprite Forge creates agent sprite prompts for review.",
+            "source_url": "file:///tmp/agent-sprite-forge.md",
+            "citation_span": [0, 60],
+            "topic_tags": ["agent", "sprite", "forge", "prompts", "review"],
+            "created_at": "2026-04-14T00:00:00+00:00",
+            "topic_pack": "agent-sprite-forge",
+            "evidence_strength": "high",
+        },
+        {
+            "claim": "Hermes Agent owns unrelated review workflows.",
+            "source_url": "file:///tmp/hermes-agent.md",
+            "citation_span": [0, 45],
+            "topic_tags": ["hermes", "agent", "sprite", "prompts", "review", "workflow"],
+            "created_at": "2026-04-14T00:00:00+00:00",
+            "topic_pack": "hermes-agent",
+            "evidence_strength": "high",
+        },
+    ]
+    claims_path.write_text("\n".join(json.dumps(c) for c in claims) + "\n", encoding="utf-8")
+
+    for _ in range(5):
+        ask = runner.invoke(
+            nexus,
+            [
+                "nexus",
+                "ask",
+                "--topic",
+                "agent-sprite-forge",
+                "--question",
+                "agent sprite prompts review",
+                "--output-json",
+            ],
+        )
+        assert ask.exit_code == 0, ask.output
+        payload = json.loads(ask.output)
+        assert payload["topic_pack_selected"] == "agent-sprite-forge"
+        assert payload["routing_mode"] == "strict_topic"
+        assert payload["cross_pack_fallback_used"] is False
+        assert payload["citations"][0]["source_url"] == "file:///tmp/agent-sprite-forge.md"
+
+
+def test_learn_mode_service_strict_topic_keeps_requested_pack_for_hermes_question(tmp_path):
+    service = LearnModeService(tmp_path)
+    claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
+    claims = [
+        {
+            "claim": "Agent Sprite Forge creates reusable sprite prompts for agent review.",
+            "source_url": "file:///tmp/agent-sprite-forge.md",
+            "citation_span": [0, 68],
+            "topic_tags": ["agent", "sprite", "forge", "prompts", "review"],
+            "created_at": "2026-04-14T00:00:00+00:00",
+            "topic_pack": "agent-sprite-forge",
+            "evidence_strength": "high",
+        },
+        {
+            "claim": "Hermes Agent routing chooses workflow owners for review requests.",
+            "source_url": "file:///tmp/hermes-agent.md",
+            "citation_span": [0, 66],
+            "topic_tags": ["hermes", "agent", "routing", "workflow", "review"],
+            "created_at": "2026-04-14T00:00:00+00:00",
+            "topic_pack": "hermes-agent",
+            "evidence_strength": "high",
+        },
+    ]
+    claims_path.write_text("\n".join(json.dumps(c) for c in claims) + "\n", encoding="utf-8")
+
+    payload = service.ask(
+        topic="agent-sprite-forge",
+        question="how does hermes routing work?",
+    )
+
+    assert payload["topic_pack_selected"] == "agent-sprite-forge"
+    assert payload["routing_mode"] == "strict_topic"
+    assert payload["cross_pack_fallback_used"] is False
+    assert payload["topic_pack_candidates"] == ["agent-sprite-forge", "hermes-agent"]
+    assert all(c["source_url"] != "file:///tmp/hermes-agent.md" for c in payload["citations"])
+
+
+def test_learn_ask_strict_topic_returns_unknown_when_topic_empty(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+
+    claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
+    claims_path.parent.mkdir(parents=True, exist_ok=True)
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claim": "Hermes Agent owns unrelated review workflows.",
+                "source_url": "file:///tmp/hermes-agent.md",
+                "citation_span": [0, 45],
+                "topic_tags": ["hermes", "agent", "review"],
+                "created_at": "2026-04-14T00:00:00+00:00",
+                "topic_pack": "hermes-agent",
+                "evidence_strength": "high",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ask = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "ask",
+            "--topic",
+            "agent-sprite-forge",
+            "--question",
+            "hermes agent review",
+            "--output-json",
+        ],
+    )
+    assert ask.exit_code == 0, ask.output
+    payload = json.loads(ask.output)
+    assert payload["status"] == "UNKNOWN"
+    assert payload["reason"] == "topic_no_claims"
+    assert payload["topic_pack_selected"] == "agent-sprite-forge"
+    assert payload["routing_mode"] == "strict_topic"
+    assert payload["cross_pack_fallback_used"] is False
+    assert payload["topic_pack_candidates"] == ["hermes-agent"]
+
+
+def test_learn_ask_cross_pack_allowed_when_flag_enabled(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+
+    claims_path = tmp_path / ".nexus" / "knowledge" / "learn_claims.jsonl"
+    claims_path.parent.mkdir(parents=True, exist_ok=True)
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claim": "Hermes Agent owns hermes agent review workflows.",
+                "source_url": "file:///tmp/hermes-agent.md",
+                "citation_span": [0, 55],
+                "topic_tags": ["hermes", "agent", "review"],
+                "created_at": "2026-04-14T00:00:00+00:00",
+                "topic_pack": "hermes-agent",
+                "evidence_strength": "high",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ask = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "ask",
+            "--topic",
+            "agent-sprite-forge",
+            "--question",
+            "hermes agent review",
+            "--allow-cross-pack",
+            "--output-json",
+        ],
+    )
+    assert ask.exit_code == 0, ask.output
+    payload = json.loads(ask.output)
+    assert payload["topic_pack_selected"] == "hermes-agent"
+    assert payload["routing_mode"] == "cross_pack"
+    assert payload["cross_pack_fallback_used"] is True
 
 
 def test_learn_ask_returns_conflict_for_contradictory_claims(tmp_path, monkeypatch):
@@ -320,7 +494,7 @@ def test_learn_ask_returns_conflict_for_contradictory_claims(tmp_path, monkeypat
             "nexus",
             "ask",
             "--topic",
-            "repo scout",
+            "repo_scout",
             "--question",
             "Does repo scout support audio review?",
             "--output-json",

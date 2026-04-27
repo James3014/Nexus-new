@@ -22,6 +22,10 @@ from nexus.services.memory import MemoryService
 class AskService:
     def __init__(self, ctx: LearnContextProtocol):
         self.ctx = ctx
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.ctx, name)
+
     def _answer_questions(self, questions: list[dict[str, Any]], claims: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         answered, unresolved = [], []
         for q in questions:
@@ -98,6 +102,68 @@ class AskService:
         routed = [c for c in claims if str(c.get("topic_pack", "general")) == selected_pack]
         return selected_pack, (routed or claims)
 
+    @staticmethod
+    def _topic_pack_candidates(claims: list[dict[str, Any]]) -> list[str]:
+        return sorted({str(c.get("topic_pack", "general")) for c in claims})
+
+    @staticmethod
+    def _topic_pack_key(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+    @classmethod
+    def _topic_scoped_claims(cls, claims: list[dict[str, Any]], topic: str) -> list[dict[str, Any]]:
+        topic_key = cls._topic_pack_key(topic)
+        return [
+            c
+            for c in claims
+            if str(c.get("topic_pack", "general")) == topic
+            or cls._topic_pack_key(str(c.get("topic_pack", "general"))) == topic_key
+        ]
+
+    def _route_claims_for_topic(
+        self,
+        claims: list[dict[str, Any]],
+        topic: str,
+        question: str,
+        *,
+        allow_cross_pack: bool,
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        candidates = self._topic_pack_candidates(claims)
+        scoped_claims = self._topic_scoped_claims(claims, topic)
+        if scoped_claims:
+            return (
+                topic,
+                scoped_claims,
+                {
+                    "routing_mode": "strict_topic",
+                    "topic_pack_selected": topic,
+                    "topic_pack_candidates": candidates,
+                    "cross_pack_fallback_used": False,
+                },
+            )
+        if allow_cross_pack:
+            selected_pack, routed_claims = self._route_topic_pack(claims, topic, question)
+            return (
+                selected_pack,
+                routed_claims,
+                {
+                    "routing_mode": "cross_pack",
+                    "topic_pack_selected": selected_pack,
+                    "topic_pack_candidates": candidates,
+                    "cross_pack_fallback_used": True,
+                },
+            )
+        return (
+            topic,
+            [],
+            {
+                "routing_mode": "strict_topic",
+                "topic_pack_selected": topic,
+                "topic_pack_candidates": candidates,
+                "cross_pack_fallback_used": False,
+            },
+        )
+
     def ask(
         self,
         topic: str,
@@ -106,8 +172,15 @@ class AskService:
         min_evidence: int = 1,
         min_token_coverage: float | None = None,
         max_staleness_days: int | None = 180,
+        allow_cross_pack: bool = False,
     ) -> dict[str, Any]:
         claims = self.load_claims()
+        selected_pack, routed_claims, routing_meta = self._route_claims_for_topic(
+            claims,
+            topic,
+            question,
+            allow_cross_pack=allow_cross_pack,
+        )
         tokens = self._extract_tokens(question)
         if not tokens:
             closure = self._persist_learning_closure(
@@ -127,9 +200,39 @@ class AskService:
                 "question": question,
                 "reason": "empty_question",
                 "learning_closure": closure,
-                "relevance_scores": relevance_scores, "filtered_out_count": filtered_out_count}
+                "relevance_scores": [],
+                "filtered_out_count": 0,
+                **routing_meta,
+            }
 
-        selected_pack, routed_claims = self._route_topic_pack(claims, topic, question)
+        if not routed_claims:
+            closure = self._persist_learning_closure(
+                action="ask",
+                status="PARTIAL",
+                reason="topic_no_claims",
+                topic_or_source=topic,
+                evidence_paths=[str(self.ctx.claims_path)],
+                retrieval_hints=sorted(tokens),
+                metrics={
+                    "claims_count": 0,
+                    "coverage": 0.0,
+                    "pass_rate": 0.0,
+                    "citation_valid_ratio": 0.0,
+                    **routing_meta,
+                },
+            )
+            return {
+                "status": "UNKNOWN",
+                "answer": "UNKNOWN",
+                "citations": [],
+                "topic": topic,
+                "question": question,
+                "reason": "topic_no_claims",
+                "token_coverage": 0.0,
+                "learning_closure": closure,
+                **routing_meta,
+            }
+
         filtered_claims = [
             c for c in routed_claims if max_staleness_days is None or float(c.get("freshness_days", 0.0)) <= float(max_staleness_days)
         ]
@@ -275,9 +378,9 @@ class AskService:
                 "question": question,
                 "reason": "conflicting_cited_claims",
                 "token_coverage": round(token_coverage, 4),
-                "topic_pack_selected": selected_pack,
                 "conflicts": conflicts,
-                "learning_closure": closure}
+                "learning_closure": closure,
+                **routing_meta}
 
         if len(best) < max(1, min_evidence) or token_coverage < float(min_token_coverage):
             unknown_reason = "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage"
@@ -312,8 +415,8 @@ class AskService:
                 "question": question,
                 "reason": unknown_reason,
                 "token_coverage": round(token_coverage, 4),
-                "topic_pack_selected": selected_pack,
-                "learning_closure": closure}
+                "learning_closure": closure,
+                **routing_meta}
 
         lines = []
         citations = []
@@ -337,7 +440,7 @@ class AskService:
             "claims_used": len(best),
             "min_evidence_required": max(1, min_evidence),
             "token_coverage": round(token_coverage, 4),
-            "topic_pack_selected": selected_pack,
+            **routing_meta,
             "learning_closure": self._persist_learning_closure(
                 action="ask",
                 status="SUCCESS",

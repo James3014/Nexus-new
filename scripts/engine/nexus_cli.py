@@ -917,9 +917,10 @@ def learn_converge(
 @click.option("--min-evidence", default=1, type=int, show_default=True)
 @click.option("--min-token-coverage", default=None, type=float)
 @click.option("--max-staleness-days", default=180, type=int, show_default=True)
+@click.option("--allow-cross-pack", is_flag=True, help="Opt in to soft routing across topic packs when the requested topic has no claims.")
 @click.option("--evidence-file", default=".nexus/reports/learn/evidence_ask.json", show_default=True, type=click.Path())
 @click.option("--output-json", is_flag=True)
-def learn_ask(topic, question, top_k, min_evidence, min_token_coverage, max_staleness_days, evidence_file, output_json):
+def learn_ask(topic, question, top_k, min_evidence, min_token_coverage, max_staleness_days, allow_cross_pack, evidence_file, output_json):
     """❓ Ask using cited claims only. If no cited evidence, return UNKNOWN."""
     from nexus.research.learn_mode import LearnModeService
 
@@ -931,6 +932,7 @@ def learn_ask(topic, question, top_k, min_evidence, min_token_coverage, max_stal
         min_evidence=min_evidence,
         min_token_coverage=min_token_coverage,
         max_staleness_days=max_staleness_days,
+        allow_cross_pack=allow_cross_pack,
     )
 
     final_response = str(payload.get("answer", "UNKNOWN"))
