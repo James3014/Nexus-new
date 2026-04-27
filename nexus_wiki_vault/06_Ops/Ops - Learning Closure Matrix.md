@@ -581,6 +581,12 @@ version_scope:
 - **Decision**: Restrict auth infra detection to concrete login/OAuth/permission-denied signals.
 - **Prevention**: Infra-invalid classifiers must avoid broad substrings that can appear in benchmark domain language.
 
+## 2026-04-27: Nexus Value Claims Must Be Stratified
+- **Phenomenon**: GET 6x2 showed Gemini+Nexus improving semantic verified rate from 33.3% to 58.3%, but the broader 12x1 coverage sweep showed bare Gemini ahead at 50.0% vs 33.3%.
+- **Root Cause**: Nexus' current measured lift is concentrated in hidden-verifier trust/self-heal tasks; broad task mixes can hide or reverse that lift when context/hidden/governance rows are not yet tuned.
+- **Decision**: Public Nexus claims must be stated by task stratum: trust/self-heal is currently supported; all-task superiority is not supported yet.
+- **Prevention**: Every public benchmark report must include both a targeted value slice and a broader coverage sweep before turning numbers into product claims.
+
 ## 2026-04-26: JIT ML Needs Observation Before Prediction
 - **Phenomenon**: Full regression is growing, but jumping straight to ML test selection would train on sparse and noisy failure data.
 - **Root Cause**: JIT had per-run evidence but no durable observation log or coverage-gap summary.
