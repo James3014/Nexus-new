@@ -201,7 +201,7 @@ def render_markdown_report(
         )
 
     lines = [
-        "# Gemini 3 Flash + Nexus Benchmark Report",
+        f"# {label_with} Benchmark Report",
         "",
         f"- Date: {benchmark_date}",
         f"- Baseline: `{label_without}`",

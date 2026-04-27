@@ -118,6 +118,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
         benchmark_date="2026-04-27",
     )
 
+    assert "# nexus Benchmark Report" in out
     assert "Without Nexus scope: 2 unique tasks x 1 trials = 2 rows" in out
     assert "With Nexus scope: 2 unique tasks x 1 trials = 2 rows" in out
     assert "Usable rows | 2/2 | 2/2 | n/a" in out
