@@ -38,6 +38,9 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "changes.diff").exists()
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "progress.jsonl").exists()
     assert payload["artifacts"]["progress_log"].endswith("progress.jsonl")
+    assert payload["sandbox_mirror"]["strategy"] == "git_worktree"
+    assert payload["sandbox_mirror"]["diff_applied"] is True
+    assert payload["sandbox_mirror"]["untracked_overlay_count"] == 1
     assert payload["summary"]["logic_breaker_passed"] is True
     assert payload["summary"]["ghost_regression_passed"] is True
     assert payload["summary"]["security_verified_findings"] == 0
@@ -79,6 +82,28 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
             "skip_reason": "",
         }
     ]
+
+
+def test_ultra_review_sandbox_mirror_falls_back_to_copytree(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+    original_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["git", "worktree", "add"]:
+            return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="worktree unavailable")
+        return original_run(cmd, **kwargs)
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    assert payload["gate_passed"] is True
+    assert payload["sandbox_mirror"]["strategy"] == "copytree"
+    assert payload["sandbox_mirror"]["fallback_reason"] == "worktree unavailable"
 
 
 def test_ultra_review_maps_research_tests_and_security_observations(tmp_path):

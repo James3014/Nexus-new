@@ -73,7 +73,7 @@ class UltraReviewService:
 
         regression_map = self._derive_regression_candidate_map(diff_text)
         test_candidates = self._existing_regression_candidates(regression_map)
-        execution_root = self._prepare_execution_workspace(sandbox_path)
+        execution_root, mirror_metadata = self._prepare_execution_workspace(sandbox_path, diff_path=diff_path)
         security_sentry = self._run_security_sentry(
             diff_text=diff_text,
             execution_root=execution_root,
@@ -110,6 +110,7 @@ class UltraReviewService:
             "base_ref": base_ref,
             "project_root": str(self.project_root),
             "sandbox_path": str(sandbox_path),
+            "sandbox_mirror": mirror_metadata,
             "artifacts": {
                 "diff": str(diff_path),
                 "git_status": str(sandbox_path / "git_status.txt"),
@@ -171,8 +172,83 @@ class UltraReviewService:
         )
         return sandbox_path
 
-    def _prepare_execution_workspace(self, sandbox_path: Path) -> Path:
+    def _prepare_execution_workspace(self, sandbox_path: Path, *, diff_path: Path) -> tuple[Path, dict[str, Any]]:
         execution_root = sandbox_path / "worktree"
+        metadata = self._prepare_git_worktree_mirror(execution_root, diff_path=diff_path, sandbox_path=sandbox_path)
+        if metadata.get("strategy") == "git_worktree":
+            return execution_root, metadata
+
+        fallback_metadata = self._copy_execution_workspace(execution_root, sandbox_path)
+        fallback_metadata["fallback_reason"] = metadata.get("fallback_reason", "")
+        return execution_root, fallback_metadata
+
+    def _prepare_git_worktree_mirror(self, execution_root: Path, *, diff_path: Path, sandbox_path: Path) -> dict[str, Any]:
+        add_cmd = ["git", "worktree", "add", "--detach", str(execution_root), "HEAD"]
+        add = subprocess.run(add_cmd, cwd=self.project_root, capture_output=True, text=True, check=False)
+        if add.returncode != 0:
+            return {
+                "strategy": "copytree",
+                "fallback_reason": (add.stderr or add.stdout or "git worktree add failed")[-1000:],
+            }
+
+        apply_cmd = ["git", "apply", "--index", "--binary", str(diff_path)]
+        apply = subprocess.run(apply_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+        if apply.returncode != 0:
+            apply_cmd = ["git", "apply", "--binary", str(diff_path)]
+            apply = subprocess.run(apply_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+        if apply.returncode != 0:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(execution_root)],
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return {
+                "strategy": "copytree",
+                "diff_applied": False,
+                "fallback_reason": (apply.stderr or apply.stdout or "git apply failed")[-1000:],
+                "command": " ".join(add_cmd),
+            }
+
+        untracked_overlay_count = self._overlay_untracked_files(execution_root, sandbox_path=sandbox_path)
+        return {
+            "strategy": "git_worktree",
+            "diff_applied": True,
+            "command": " ".join(add_cmd),
+            "untracked_overlay_count": untracked_overlay_count,
+        }
+
+    def _overlay_untracked_files(self, execution_root: Path, *, sandbox_path: Path) -> int:
+        ls = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+            cwd=self.project_root,
+            capture_output=True,
+            text=False,
+            check=False,
+        )
+        if ls.returncode != 0:
+            return 0
+        count = 0
+        for raw in ls.stdout.split(b"\0"):
+            if not raw:
+                continue
+            rel = raw.decode("utf-8", errors="ignore")
+            source = self.project_root / rel
+            target = execution_root / rel
+            try:
+                if source.resolve().is_relative_to(sandbox_path.resolve()):
+                    continue
+            except OSError:
+                continue
+            if not source.is_file():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            count += 1
+        return count
+
+    def _copy_execution_workspace(self, execution_root: Path, sandbox_path: Path) -> dict[str, Any]:
         ignored_patterns = shutil.ignore_patterns(
             ".git",
             ".venv",
@@ -196,7 +272,7 @@ class UltraReviewService:
             return ignored
 
         shutil.copytree(self.project_root, execution_root, ignore=ignore)
-        return execution_root
+        return {"strategy": "copytree", "diff_applied": True}
 
     def _capture_diff(self, base_ref: str) -> str:
         return self._git(["diff", "--binary", base_ref])
