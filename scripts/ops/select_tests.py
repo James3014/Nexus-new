@@ -29,6 +29,7 @@ class ImpactRule:
     targets: tuple[str, ...]
     status: str
     risk: str = "medium"
+    risk_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class SelectionDetails:
     unmatched_paths: list[str]
     fallback_used: bool
     high_risk_escalated: bool
+    risk_reasons: list[str]
     retry_recommended: list[str]
 
 
@@ -79,7 +81,9 @@ def load_impact_rules(path: Path = DEFAULT_IMPACT_MAP) -> list[ImpactRule]:
         return []
 
     rules: list[ImpactRule] = []
-    row_pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*(?:\|\s*([^|]+?)\s*)?\|$")
+    row_pattern = re.compile(
+        r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*(?:\|\s*([^|]+?)\s*)?(?:\|\s*([^|]+?)\s*)?\|$"
+    )
     for line in path.read_text(encoding="utf-8").splitlines():
         match = row_pattern.match(line)
         if not match:
@@ -87,6 +91,7 @@ def load_impact_rules(path: Path = DEFAULT_IMPACT_MAP) -> list[ImpactRule]:
         parts = [(part or "").strip() for part in match.groups()]
         code_path, targets, status = parts[:3]
         risk = parts[3].lower() if len(parts) > 3 else "medium"
+        risk_reason = _normalize_path(parts[4].lower()) if len(parts) > 4 else ""
         if code_path in {"程式碼路徑", ":---"}:
             continue
         if status.lower() != "active":
@@ -100,6 +105,7 @@ def load_impact_rules(path: Path = DEFAULT_IMPACT_MAP) -> list[ImpactRule]:
                     targets=split_targets,
                     status=status,
                     risk=risk if risk in {"low", "medium", "high"} else "medium",
+                    risk_reason=risk_reason,
                 )
             )
     return rules
@@ -249,6 +255,7 @@ def select_target_details(
     normalized_paths = [_normalize_path(path) for path in changed_paths if path.strip()]
     unmatched_paths: list[str] = []
     high_risk = False
+    risk_reasons: list[str] = []
     for changed_path in normalized_paths:
         path_matched = False
         path_high_risk = False
@@ -271,6 +278,9 @@ def select_target_details(
             most_specific_len = max(len(rule.code_path) for rule in matching_rules)
             matched_rules = [rule for rule in matching_rules if len(rule.code_path) == most_specific_len]
             path_high_risk = any(rule.risk == "high" for rule in matched_rules)
+            for rule in matched_rules:
+                if rule.risk == "high" and rule.risk_reason and rule.risk_reason not in risk_reasons:
+                    risk_reasons.append(rule.risk_reason)
         mapped_targets, mapped_reasons = select_targets([changed_path], rules, ())
         for target in mapped_targets:
             if target not in selected:
@@ -311,6 +321,8 @@ def select_target_details(
     if "fallback" in sources:
         confidence = 0.4
         risk = "high"
+        if "fallback" not in risk_reasons:
+            risk_reasons.append("fallback")
     elif high_risk:
         confidence = 0.85
         risk = "high"
@@ -330,6 +342,7 @@ def select_target_details(
         unmatched_paths=unmatched_paths,
         fallback_used=needs_fallback,
         high_risk_escalated=high_risk,
+        risk_reasons=risk_reasons,
         retry_recommended=retry_recommended,
     )
 
@@ -394,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
                     "selected_count": len(targets),
                     "fallback_used": details.fallback_used,
                     "high_risk_escalated": details.high_risk_escalated,
+                    "risk_reasons": details.risk_reasons,
                     "unmatched_paths": details.unmatched_paths,
                     "retry_recommended": details.retry_recommended,
                     "impact_map": str(Path(args.impact_map)),

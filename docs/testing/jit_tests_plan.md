@@ -55,7 +55,7 @@ Selection now also reads `.nexus/reports/test_history.jsonl` when present.
 
 - Flaky targets are prioritized earlier.
 - Faster historical targets are prioritized before slower targets when other risk signals are equal.
-- High-risk escalation is read from the `風險` column in `docs/testing/test_impact_map.md`; high-risk rows receive the policy-gate safety target.
+- High-risk escalation is read from the `風險` column in `docs/testing/test_impact_map.md`; high-risk rows receive the policy-gate safety target and expose `risk_reasons` from the `風險原因` column.
 - `ci_gate.py --changed-only` writes changed-only run evidence back to test history.
 
 ## v3 Behavior
@@ -64,7 +64,7 @@ Changed-only CI now records richer evidence without changing the selector-only
 contract.
 
 - `ci_gate.py --changed-only` emits a JUnit XML report and aggregates `target_durations` into `.nexus/reports/test_history.jsonl`.
-- Selector JSON includes `selected_count`, `fallback_used`, `high_risk_escalated`, `unmatched_paths`, and `retry_recommended`.
+- Selector JSON includes `selected_count`, `fallback_used`, `high_risk_escalated`, `risk_reasons`, `unmatched_paths`, and `retry_recommended`.
 - Historical flaky targets are surfaced through `retry_recommended`; v3 recommends retry but does not automatically rerun.
 - Fallback and high-risk selection are explicit evidence fields, so skipped/unmatched coverage can be reviewed before benchmark interpretation.
 

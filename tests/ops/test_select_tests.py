@@ -15,10 +15,10 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
     impact_map.write_text(
         "\n".join(
             [
-                "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 |",
-                "| :--- | :--- | :--- | :--- |",
-                "| nexus/core | tests/core, tests/test_core_*.py | active | high |",
-                "| nexus/legacy | tests/legacy | retired | low |",
+                "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 | 風險原因 |",
+                "| :--- | :--- | :--- | :--- | :--- |",
+                "| nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |",
+                "| nexus/legacy | tests/legacy | retired | low | legacy |",
             ]
         ),
         encoding="utf-8",
@@ -32,6 +32,7 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
             targets=("tests/core", "tests/test_core_*.py"),
             status="active",
             risk="high",
+            risk_reason="core_contract",
         )
     ]
 
@@ -53,7 +54,7 @@ def test_select_targets_prefers_most_specific_prefix_and_deduplicates_targets():
 
 
 def test_select_targets_adds_fallback_for_unmapped_mixed_changes():
-    rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high")]
+    rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high", "core_contract")]
 
     targets, reasons = select_targets(
         ["nexus/core/state.py", "docs/testing/test_runbook.md"],
@@ -118,13 +119,14 @@ def test_select_target_details_merges_import_index_and_impact_map(tmp_path):
         ),
         encoding="utf-8",
     )
-    rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high")]
+    rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high", "core_contract")]
 
     details = select_target_details(["nexus/core/state.py"], rules, index_path=index_path, history_path=tmp_path / "missing.jsonl")
 
     assert details.targets == ["tests/core/test_state.py", "tests/core", "tests/services/test_policy_gate.py"]
     assert details.confidence == 0.85
     assert details.risk == "high"
+    assert details.risk_reasons == ["core_contract"]
     assert details.sources == ["import_index", "impact_map", "high_risk"]
     assert "nexus/core/state.py: import-index" in details.reasons
 
@@ -150,6 +152,7 @@ def test_select_target_details_handles_empty_changed_paths():
     assert details.targets == ["tests/smoke"]
     assert details.confidence == 0.4
     assert details.risk == "high"
+    assert details.risk_reasons == ["fallback"]
     assert details.sources == ["fallback"]
     assert details.fallback_used is True
 
@@ -188,12 +191,13 @@ def test_select_target_details_uses_history_and_high_risk_escalation(tmp_path):
         ),
         encoding="utf-8",
     )
-    rules = [ImpactRule("nexus/core", ("tests/core/slow.py", "tests/core/flaky.py"), "active", "high")]
+    rules = [ImpactRule("nexus/core", ("tests/core/slow.py", "tests/core/flaky.py"), "active", "high", "core_contract")]
 
     details = select_target_details(["nexus/core/state.py"], rules, history_path=history)
 
     assert details.targets[:2] == ["tests/core/flaky.py", "tests/core/slow.py"]
     assert details.risk == "high"
+    assert details.risk_reasons == ["core_contract"]
     assert "high_risk" in details.sources
     assert details.history["tests/core/flaky.py"]["flaky"] is True
     assert "tests/services/test_policy_gate.py" in details.targets
@@ -218,9 +222,9 @@ def test_select_target_details_reports_unmatched_paths_and_fallback(tmp_path):
 def test_main_json_includes_selection_metadata(tmp_path, capsys):
     impact_map = tmp_path / "test_impact_map.md"
     impact_map.write_text(
-        "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 |\n"
-        "| :--- | :--- | :--- | :--- |\n"
-        "| nexus/core | tests/core | active | high |\n",
+        "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 | 風險原因 |\n"
+        "| :--- | :--- | :--- | :--- | :--- |\n"
+        "| nexus/core | tests/core | active | high | core_contract |\n",
         encoding="utf-8",
     )
     index_path = tmp_path / "test_impact_index.json"
@@ -246,6 +250,7 @@ def test_main_json_includes_selection_metadata(tmp_path, capsys):
     assert payload["targets"] == ["tests/core/test_state.py", "tests/core", "tests/services/test_policy_gate.py"]
     assert payload["confidence"] == 0.85
     assert payload["risk"] == "high"
+    assert payload["risk_reasons"] == ["core_contract"]
     assert payload["sources"] == ["import_index", "impact_map", "high_risk"]
     assert payload["selected_count"] == 3
     assert payload["fallback_used"] is False

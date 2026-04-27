@@ -49,7 +49,7 @@ tests/core tests/services/test_policy_gate.py
 uv run python scripts/ops/select_tests.py --json nexus/core/state_validator.py
 ```
 
-JSON 會包含 `targets`、`reasons`、`confidence`、`risk`、`sources`、`selected_count`、`fallback_used`、`high_risk_escalated`、`unmatched_paths`、`retry_recommended`。
+JSON 會包含 `targets`、`reasons`、`confidence`、`risk`、`risk_reasons`、`sources`、`selected_count`、`fallback_used`、`high_risk_escalated`、`unmatched_paths`、`retry_recommended`。
 若 `.nexus/reports/test_history.jsonl` 存在，selector 也會使用歷史耗時與 flaky 訊號排序。
 
 CI gate 也提供相同 selector 的 changed-only lane：
@@ -83,7 +83,7 @@ uv run python scripts/ops/jit_coverage_gap.py
 
 High-risk escalation:
 
-`docs/testing/test_impact_map.md` 的 `風險` 欄位是 high-risk SSoT；`risk=high` 的 active row 會追加 policy-gate safety target。`ci_gate.py --strict --changed-paths ...` 也會讀 selector metadata 來決定是否觸發 Ultra Review。
+`docs/testing/test_impact_map.md` 的 `風險` 與 `風險原因` 欄位是 high-risk SSoT；`risk=high` 的 active row 會追加 policy-gate safety target，並輸出 `risk_reasons`，例如 `governance`、`security`、`core_contract`。`ci_gate.py --strict --changed-paths ...` 也會讀 selector metadata 來決定是否觸發 Ultra Review。
 
 Flaky retry recommendation:
 
