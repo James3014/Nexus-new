@@ -646,3 +646,9 @@ version_scope:
 - **Root Cause**: The report only captured final lane results, not stage-by-stage progress.
 - **Decision**: Write `progress.jsonl`, include progress events in the report, and expose a compact summary of security, logic, and ghost regression outcomes.
 - **Prevention**: Any gate with sandbox setup or subprocess execution should emit progress events before and after each long-running phase.
+
+## 2026-04-27: Optional Path Search Should Not Fail Repo Diagnosis
+- **Phenomenon**: A repo-diagnosis `rg` command returned exit code 2 because optional paths such as `.gitmodules` and root `Cargo.toml` were passed even though they do not exist in this workspace.
+- **Root Cause**: The search mixed mandatory files with optional discovery targets instead of first enumerating existing candidates.
+- **Decision**: Re-run diagnostics with bounded existing paths and separate Git/GitHub probes; no product code change is needed.
+- **Prevention**: For diagnostic searches, enumerate candidate files with `rg --files` or `find` first, then pass only existing paths to `rg`.
