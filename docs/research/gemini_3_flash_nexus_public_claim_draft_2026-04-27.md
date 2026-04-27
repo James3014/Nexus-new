@@ -1,88 +1,83 @@
 # Gemini 3 Flash + Nexus Public Claim Draft
 
-Status: draft, not publication-ready
+Status: public candidate, needs repeat-run confirmation
 
 ## Claim Boundary
 
-The current evidence proves that Gemini can wear Nexus and produce measured, auditable benchmark rows.
+Nexus is the battlesuit. Gemini remains the model doing the work; Nexus adds routing, scoped context, governance, verification, artifact evidence, self-heal, and closure telemetry.
 
-It does not yet prove solve-rate lift, because the latest 6x2 hard smoke was solved by both arms.
+This draft only covers `gemini-3-flash-preview`. It does not mix `gemini-3.1-pro-preview`.
 
-## Current Measured Evidence
+## Primary Claim Candidate
 
-Run source:
+Source:
 
-- `.nexus/reports/bench_gemini3flash_nexus_smoke_6x2/with_nexus_1777237537.jsonl`
-- `.nexus/reports/bench_gemini3flash_nexus_smoke_6x2/without_nexus_1777237537.jsonl`
-- `.nexus/reports/bench_gemini3flash_nexus_smoke_6x2/gemini_nexus_report_1777237537.md`
+- `.nexus/reports/bench_gemini3flash_value12x1_hidden_timeoutfix_full12/without_nexus_1777293163.jsonl`
+- `.nexus/reports/bench_gemini3flash_value12x1_hidden_timeoutfix_full12/with_nexus_1777293163.jsonl`
+- `.nexus/reports/bench_gemini3flash_value12x1_hidden_timeoutfix_full12/gemini_nexus_report_1777293163.md`
+
+Protocol:
+
+- Model: `gemini-3-flash-preview`
+- 12 unique hidden-verifier tasks
+- 1 trial
+- `hidden_verifier_mode=true`
+- `public claim gate=PASS`
 
 Result:
 
-| Metric | Gemini 3 Flash bare | Gemini 3 Flash + Nexus | Public interpretation |
-| --- | ---: | ---: | --- |
-| Semantic verified | 12/12 | 12/12 | no solve-rate lift claim |
-| Solve rate | 100% | 100% | benchmark too easy |
-| Avg wall time | 21.73s | 67.16s | Nexus costs +45.43s/task |
-| Avg tokens | 25,088 | 53,418 | Nexus costs +28,330 tokens/task |
-| Avg model calls | 1.00 | 1.83 | Nexus costs +0.83 calls/task |
-| Token source | measured | measured | cost data is usable |
-| Nexus wearing | n/a | 12/12 valid | treatment delivery verified |
+| Metric | Gemini 3 Flash bare | Gemini 3 Flash + Nexus |
+| --- | ---: | ---: |
+| Usable rows | 12/12 | 12/12 |
+| Infra invalid rows | 0 | 0 |
+| Solve rate | 25.0% | 100.0% |
+| Semantic verified | 25.0% | 100.0% |
+| Trust mismatch | 0.0% | 0.0% |
+| Avg wall time | 42.82s | 54.99s |
+| Avg model calls | 1.00 | 1.67 |
+| Token measured rate | 91.7% | 100.0% |
+| LLM self-heal rate | 0.0% | 66.7% |
+| Nexus wearing evidence | n/a | 12/12 |
+| Phase completion | n/a | 12/12 |
+| Claim verified | n/a | 12/12 |
 
-## What Nexus Value Is Already Demonstrated
+Allowed claim:
 
-The evidence supports these internal claims:
+> On a 12-task hidden-verifier engineering benchmark using `gemini-3-flash-preview`, Gemini 3 Flash + Nexus improved semantic verified rate from 25.0% to 100.0% (+75.0 percentage points) while keeping trust mismatch at 0.0%. Nexus provided valid wearing evidence, six-phase completion, and claim verification for all 12 treatment rows.
 
-- Gemini was actually invoked through Nexus in treatment rows.
-- Nexus context was delivered.
-- Five-pillar and six-phase evidence was present.
-- Token telemetry came from Gemini CLI stats rather than only estimates.
-- Bounded self-heal and rescue mechanisms are observable as separate report fields.
-- Report trust is auditable row by row.
+Required caveat:
 
-## What Cannot Be Publicly Claimed Yet
+> This is a 12-task x 1-trial public candidate. Before making a publication-grade claim, repeat the same protocol for 12x2 or 12x3 and publish the raw JSONL/evidence bundle.
 
-Do not claim:
+Not allowed:
 
-- "Nexus improves Gemini 3 Flash solve rate by X%" from the current hard smoke.
-- "Nexus is faster" from the current hard smoke.
-- "Nexus uses fewer tokens" from the current hard smoke.
+- Claiming Nexus always improves solve rate by 75 points.
+- Claiming Nexus is faster.
+- Claiming Nexus uses fewer model calls.
+- Mixing this result with `gemini-3.1-pro-preview`.
 
-Those statements are contradicted or unsupported by the current data.
+## Product Value Statement
 
-## Publication-Ready Claim Template
+Use:
 
-After running `scripts/bench/public_benchmark_nexus_value_v1.json`, fill this:
+> Nexus turns Gemini from a one-shot coding model invocation into a governed engineering loop. In the hidden-verifier benchmark, the lift came from self-heal, artifact verification, scoped governance, and machine-readable closure evidence.
 
-> On a frozen 12-task Nexus-value benchmark with 3 trials per task, Gemini 3 Flash + Nexus improved semantic verified rate from `<bare>%` to `<nexus>%` (`<delta>` percentage points), changed trust mismatch from `<bare>%` to `<nexus>%`, and achieved `<nexus_wearing>%` valid Nexus wearing evidence. The cost was `<wall_delta>` additional seconds, `<token_delta>` additional tokens, and `<call_delta>` additional model calls per task on average.
+Avoid:
 
-Required appendix:
+> Nexus is a separate agent that solves instead of Gemini.
 
-- Nexus git commit
-- model name
-- task manifest SHA-256
-- raw JSONL paths
-- markdown report path
-- excluded infra-invalid rows
-- rerun command
+Avoid:
 
-## Next Required Run
+> Nexus always beats Gemini on every task.
 
-Run the Nexus-value calibration first:
+## Publication Gate For Next Run
 
-```bash
-NEXUS_GEMINI_MODEL_NAME=gemini-3-flash-preview \
-NEXUS_DIRECT_GEMINI_MODEL=gemini-3-flash-preview \
-NEXUS_GATEWAY_PROMPT_TRANSPORT=stdin \
-NEXUS_GATEWAY_COMPACT_PROMPT=1 \
-NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL=1 \
-uv run python scripts/bench/capability_ab_runner.py \
-  --tasks-file scripts/bench/public_benchmark_nexus_value_v1.json \
-  --max-tasks 12 --difficulty hard --timeout-sec 180 --total-timeout-sec 2400 \
-  --force-flow hyper_sprint --with-nexus-runner subprocess \
-  --with-llm-mode all --without-mode gemini --force-learn-slo-ready \
-  --neutralize-history --disable-learning-loop --repeat-trials 2 \
-  --output-dir .nexus/reports/bench_gemini3flash_public_calibration_12x2 \
-  --markdown-report auto --progress-log
-```
+Before external publication:
 
-If bare remains above 90%, the benchmark is still too easy. If bare falls below 30%, the benchmark is too adversarial for a balanced product claim.
+- Run 12x2 or 12x3 with the same task IDs.
+- `NEXUS_VALUE_HIDDEN_VERIFIER=1` must be recorded as true.
+- `Public claim gate: PASS`.
+- Nexus wearing evidence at least 95%, preferred 100%.
+- Infra invalid rows reported separately and ideally zero.
+- Trust mismatch reported and not hidden.
+- Raw JSONL, evidence bundle, markdown report, command, model name, and quota/model fallback notes included in appendix.

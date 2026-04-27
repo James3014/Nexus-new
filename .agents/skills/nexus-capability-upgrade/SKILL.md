@@ -1,7 +1,7 @@
 ---
 name: nexus-capability-upgrade
 description: 用於系統化提升 Nexus 解題能力。聚焦「穿 Nexus vs 不穿 Nexus」可量化對比，透過固定 benchmark、A/B 評測、TDD 漸進調參，提升 solve rate 並維持 report/gate 信任一致性。
-version: 2026.04.23
+version: 2026.04.27
 ---
 
 # Nexus Capability Upgrade
@@ -20,6 +20,8 @@ version: 2026.04.23
 - 完成定義以 `semantic_status=VERIFIED` 為準，非 `status=SUCCESS`。
 - 每波只改一個能力面向；每波都要有 TDD 與 A/B 報告。
 - Fail-closed：trust mismatch 出現即視為退步。
+- Nexus 是戰甲，不是 agent：比較必須是同一模型 bare vs 同一模型穿 Nexus，Nexus 只提供上下文、治理、路由、驗收、自癒與 evidence trail。
+- 公開主張必須過 public claim gate：同題同 trial、token measured 足夠、Nexus wearing / 五支柱 / 六階段 / claim verified 達標，否則只能做內部診斷。
 
 ## Clean Code / Linus 原則檢核（每波必做）
 1. 切小：每波只做一個責任邊界，不跨 2 個以上子系統同時重構。
@@ -87,6 +89,59 @@ uv run python -c 'from nexus.app.research_flow_service import run_auto_flow; ...
 - 建議直接使用統一 runner 產生 A/B 資料：
 ```bash
 uv run scripts/bench/capability_ab_runner.py --max-tasks 6 --difficulty all --timeout-sec 30 --force-flow hyper_sprint
+```
+
+## 公開候選 A/B 流程（Gemini bare vs Gemini+Nexus）
+使用時機：
+- 使用者要知道「Nexus 強在哪、提升多少」。
+- 做完 Nexus 優化後，需要比較優化前後成績。
+- 需要產出可對外說明的數據與限制。
+
+原則：
+- 先跑前測 baseline，再改能力，再用同一題庫/同一模型/同一 timeout 重跑後測。
+- 若 Gemini 額度不足，只做靜態修復、unit tests、報告工具，不跑模型 benchmark。
+- 異常長耗時要止損：單題超過 600s 或超過設定 timeout 後仍有殘留程序，先修 runner/gateway timeout。
+- 不可只挑好看的 row；infra-invalid rows 必須分開列出。
+
+標準 smoke（6 題 x 2 trials）：
+```bash
+NEXUS_VALUE_HIDDEN_VERIFIER=1 \
+NEXUS_GEMINI_MODEL_NAME=gemini-3-flash-preview \
+NEXUS_DIRECT_GEMINI_MODEL=gemini-3-flash-preview \
+NEXUS_GATEWAY_PROMPT_TRANSPORT=stdin \
+NEXUS_GATEWAY_COMPACT_PROMPT=1 \
+NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL=1 \
+NEXUS_BENCH_GATEWAY_TIMEOUT_SEC=90 \
+uv run python scripts/bench/capability_ab_runner.py \
+  --tasks-file scripts/bench/public_benchmark_nexus_value_v1.json \
+  --task-id-filter nexus-value-gov-001,nexus-value-gov-002,nexus-value-evidence-001,nexus-value-evidence-002,nexus-value-trust-001,nexus-value-trust-002 \
+  --max-tasks 6 --difficulty hard --timeout-sec 120 --total-timeout-sec 2400 --stop-loss-sec 2400 \
+  --force-flow hyper_sprint --with-nexus-runner subprocess --with-llm-mode all --without-mode gemini \
+  --force-learn-slo-ready --neutralize-history --disable-learning-loop --repeat-trials 2 \
+  --output-dir .nexus/reports/bench_gemini3flash_get6x2_<tag> \
+  --markdown-report auto --progress-log
+```
+
+公開 gate 檢查：
+- markdown report 的 `Public claim gate` 必須是 `PASS`。
+- `hidden_verifier_mode` 必須是 `true`；若不是，該結果只能當容易模式 regression，不能當 Nexus 能力價值證據。
+- `Token public-safe claim` 必須是 `YES` 才能談 token/cost。
+- Nexus treatment 必須 `Formal treatment valid: N/N (100.0%)`。
+- 若 gate fail，結論改成「不可公開引用；列失敗原因與下一步修正」。
+
+後測比較格式：
+1. `Before`: 前測 raw JSONL + 指標。
+2. `Change`: 本波只改哪個能力邊界。
+3. `After`: 後測 raw JSONL + 指標。
+4. `Delta`: solve/semantic/trust/wall/tokens/model_calls/Nexus wearing。
+5. `Decision`: 保留、回滾、或再優化。
+
+公開候選說法只允許以下形狀：
+```text
+On a frozen <N>-task benchmark with <T> trials per task, using <same model>,
+Gemini + Nexus changed verified delivery from <bare>% to <nexus>%,
+changed average wall time by <x>%, changed measured tokens by <y>%,
+and preserved trust mismatch at <z>%. Nexus wearing evidence was valid for <n>/<n> rows.
 ```
 
 ## 執行流程（每一波都一樣）
