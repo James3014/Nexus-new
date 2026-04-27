@@ -31,6 +31,9 @@ perplexity_results.csv
 nexus_benchmark.csv
 nexus.log
 
+# Local external research snapshots
+docs/external/
+
 .worktrees/
 
 isolated_swarm/
