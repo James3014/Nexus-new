@@ -24,7 +24,7 @@ def test_gateway_uses_response_key_from_gemini_cli_json():
     fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
 
     gateway = BattlesuitGateway(project_root=".")
-    with patch("nexus.services.gateway.subprocess.run", return_value=fake_proc):
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout", return_value=fake_proc):
         data, raw_output = gateway.ask_structured(
             "Return pass JSON",
             "{}",
@@ -54,7 +54,7 @@ def test_gateway_reads_usage_metadata_tokens():
     fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
 
     gateway = BattlesuitGateway(project_root=".")
-    with patch("nexus.services.gateway.subprocess.run", return_value=fake_proc):
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout", return_value=fake_proc):
         data, _ = gateway.ask_structured(
             "Return pass JSON",
             "{}",
@@ -78,7 +78,7 @@ def test_gateway_ignores_hook_text_after_cli_json():
     fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
 
     gateway = BattlesuitGateway(project_root=".")
-    with patch("nexus.services.gateway.subprocess.run", return_value=fake_proc):
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout", return_value=fake_proc):
         data, _ = gateway.ask_structured(
             "Return pass JSON",
             "{}",
@@ -96,14 +96,14 @@ def test_gateway_sets_headless_trust_flags_and_neutral_cwd():
     fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
     captured = {}
 
-    def fake_run(*args, **kwargs):
-        captured["cmd"] = list(args[0])
+    def fake_run(command, **kwargs):
+        captured["cmd"] = list(command)
         captured["cwd"] = kwargs.get("cwd")
         captured["env"] = kwargs.get("env", {})
         return fake_proc
 
     gateway = BattlesuitGateway(project_root=".")
-    with patch("nexus.services.gateway.subprocess.run", side_effect=fake_run):
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout", side_effect=fake_run):
         data, _ = gateway.ask_structured(
             "Return pass JSON",
             "{}",
@@ -130,7 +130,7 @@ def test_gateway_timeout_returns_budget_telemetry(monkeypatch):
 
     monkeypatch.setenv("NEXUS_GATEWAY_TIMEOUT_SEC", "7")
     gateway = BattlesuitGateway(project_root=".")
-    with patch("nexus.services.gateway.subprocess.run", side_effect=subprocess.TimeoutExpired(["gemini"], 7)):
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout", side_effect=subprocess.TimeoutExpired(["gemini"], 7)):
         data, raw = gateway.ask_structured(
             "Return pass JSON",
             "{}",

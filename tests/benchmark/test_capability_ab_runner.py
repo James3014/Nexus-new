@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,12 +13,16 @@ from scripts.bench.capability_ab_runner import (
     _budget_exceeded,
     _classify_timeout_stage,
     _emit_progress,
+    _effective_total_timeout_sec,
     _extract_record,
     _extract_json_payload,
     _summarize_benchmark_rows,
     expand_task_trials,
     _force_learn_slo_ready,
     _history_policy_name,
+    _hidden_verifier_mode_enabled,
+    _ask_direct_gemini_flash_patch,
+    _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
     _materialize_fixture,
     _parse_direct_gemini_json,
@@ -115,6 +120,12 @@ def test_benchmark_gateway_timeout_has_short_default_and_override(monkeypatch):
     assert _benchmark_gateway_timeout_sec() == "12"
     monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "bad")
     assert _benchmark_gateway_timeout_sec() == "30"
+
+
+def test_benchmark_gateway_timeout_scales_with_task_budget():
+    assert _benchmark_gateway_timeout_for_task(10) == 30
+    assert _benchmark_gateway_timeout_for_task(120) == 100
+    assert _benchmark_gateway_timeout_for_task(180) == 120
 
 
 def test_parse_direct_gemini_json_marks_stats_tokens_measured():
@@ -333,6 +344,10 @@ def test_total_timeout_budget_helper():
     assert _budget_exceeded(0.0, 0) is False
     assert _remaining_leg_timeout(30, 0.0, 0) == 30
     assert _remaining_leg_timeout(30, 0.0, 1) == 1
+    assert _effective_total_timeout_sec(7200, 600) == 600
+    assert _effective_total_timeout_sec(0, 600) == 600
+    assert _effective_total_timeout_sec(300, 600) == 300
+    assert _effective_total_timeout_sec(7200, 0) == 7200
 
 
 def test_emit_progress_writes_json_to_stderr(capsys):
@@ -774,6 +789,13 @@ def test_history_policy_defaults_to_per_task_reset():
     assert _history_policy_name(neutralize_history=False, allow_learning_loop=True) == "shared_existing_history"
 
 
+def test_hidden_verifier_mode_reads_environment(monkeypatch):
+    monkeypatch.delenv("NEXUS_VALUE_HIDDEN_VERIFIER", raising=False)
+    assert _hidden_verifier_mode_enabled() is False
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    assert _hidden_verifier_mode_enabled() is True
+
+
 def test_assert_clean_worktree_fails_closed_on_dirty_status(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("scripts.bench.capability_ab_runner._git_status_porcelain", lambda _root: " M file.py")
     try:
@@ -923,6 +945,58 @@ def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeyp
     assert out["model_response_received"] is False
 
 
+def test_run_without_nexus_gemini_timeout_before_response_is_recorded(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="timeout-001",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix timeout",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_hidden_state",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        raise subprocess.TimeoutExpired(["gemini"], timeout_sec)
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=1,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert out["status"] == "FAILED"
+    assert out["baseline_gateway_error_category"] == "timeout"
+    assert out["infra_invalid_reason"] == "timeout_before_model_call"
+
+
+def test_direct_gemini_patch_uses_process_group_timeout(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured["timeout_sec"] = timeout_sec
+        raise subprocess.TimeoutExpired(cmd, timeout_sec)
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.shutil.which", lambda _name, **_kwargs: "/tmp/gemini")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.Path.exists", lambda _self: True)
+
+    out, raw = _ask_direct_gemini_flash_patch(prompt="fix", timeout_sec=7)
+
+    assert captured["timeout_sec"] == 7
+    assert out["error_category"] == "timeout"
+    assert raw == ""
+
+
 def test_authorization_task_text_is_not_auth_infra_invalid():
     row = {
         "baseline_raw_tail": "Refactor authorization helper while preserving deny-by-default behavior.",
@@ -1065,6 +1139,41 @@ def test_benchmark_rows_mark_zero_token_model_calls_unreliable():
     assert rows[1]["token_unreliable_reason"] == "estimated_tokens"
     assert summary["with_nexus"]["token_reliable_rate"] == 0.0
     assert summary["without_nexus"]["token_reliable_rate"] == 0.0
+
+
+def test_benchmark_rows_mark_unhelpful_local_fallback():
+    row = {
+        "mode": "with_nexus",
+        "status": "FAILED",
+        "semantic_completed": False,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 2.0,
+        "total_tokens": 108,
+        "model_calls": 1,
+        "token_capture_status": "estimated",
+        "gateway_error_category": "timeout",
+        "fallback_used": True,
+        "nexus_winner_source": "local",
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "hyper_executed",
+        "phase_a": "artifact_unverified",
+        "phase_c": "closure_written",
+    }
+
+    _annotate_benchmark_eligibility(row, provider="gemini", model_required=True, nexus_required=True)
+    summary = _summarize_benchmark_rows([row])
+
+    assert row["local_fallback_unhelpful"] is True
+    assert summary["with_nexus"]["local_fallback_unhelpful_rate"] == 1.0
 
 
 def test_benchmark_row_splits_model_tokens_from_local_rescue():

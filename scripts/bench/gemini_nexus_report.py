@@ -55,6 +55,26 @@ def _scope_summary(rows: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _infra_invalid_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if bool(row.get("run_eligible", True)):
+            continue
+        reason = str(row.get("infra_invalid_reason") or "unknown").strip() or "unknown"
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
+def _run_eligible_count(rows: list[dict[str, Any]]) -> int:
+    return sum(1 for row in rows if bool(row.get("run_eligible", True)))
+
+
+def _reasons_text(counts: dict[str, int]) -> str:
+    if not counts:
+        return "none"
+    return ", ".join(f"{reason}:{count}" for reason, count in sorted(counts.items()))
+
+
 def _public_token_claim_status(a: dict[str, Any], b: dict[str, Any], *, min_rate: float = 0.8) -> str:
     try:
         without_rate = float(a.get("token_measured_rate", 0.0) or 0.0)
@@ -62,6 +82,56 @@ def _public_token_claim_status(a: dict[str, Any], b: dict[str, Any], *, min_rate
     except (TypeError, ValueError):
         return "NO"
     return "YES" if without_rate >= min_rate and with_rate >= min_rate else "NO"
+
+
+def _task_trial_key(row: dict[str, Any]) -> tuple[str, str]:
+    return (str(row.get("task_id") or ""), str(row.get("trial_index") or "1"))
+
+
+def _multiset_counts(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
+    for row in rows:
+        key = _task_trial_key(row)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _public_claim_gate(
+    *,
+    rows_without: list[dict[str, Any]],
+    rows_with: list[dict[str, Any]],
+    summary_without: dict[str, Any],
+    summary_with: dict[str, Any],
+    formal: dict[str, Any],
+    min_token_rate: float = 0.8,
+    min_nexus_valid_rate: float = 1.0,
+) -> dict[str, Any]:
+    failures: list[str] = []
+    if not rows_without or not rows_with:
+        failures.append("missing_rows")
+    if _multiset_counts(rows_without) != _multiset_counts(rows_with):
+        failures.append("task_trial_mismatch")
+    try:
+        if float(summary_without.get("token_measured_rate", 0.0) or 0.0) < min_token_rate:
+            failures.append("without_token_measured_below_threshold")
+        if float(summary_with.get("token_measured_rate", 0.0) or 0.0) < min_token_rate:
+            failures.append("with_token_measured_below_threshold")
+        if float(formal.get("valid_rate", 0.0) or 0.0) < min_nexus_valid_rate:
+            failures.append("nexus_wearing_below_threshold")
+        if float(summary_with.get("gemini_uses_nexus_rate", 0.0) or 0.0) < min_nexus_valid_rate:
+            failures.append("gemini_uses_nexus_below_threshold")
+        if float(summary_with.get("nexus_usage_valid_rate", 0.0) or 0.0) < min_nexus_valid_rate:
+            failures.append("nexus_usage_valid_below_threshold")
+        if float(summary_with.get("phase_completion_rate", 0.0) or 0.0) < min_nexus_valid_rate:
+            failures.append("phase_completion_below_threshold")
+        if float(summary_with.get("claim_verified_rate", 0.0) or 0.0) < min_nexus_valid_rate:
+            failures.append("claim_verified_below_threshold")
+    except (TypeError, ValueError):
+        failures.append("metric_parse_error")
+    return {
+        "verdict": "PASS" if not failures else "FAIL",
+        "failures": failures,
+    }
 
 
 def render_markdown_report(
@@ -91,6 +161,44 @@ def render_markdown_report(
     without_scope = _scope_summary(rows_without)
     with_scope = _scope_summary(rows_with)
     token_public_safe = _public_token_claim_status(a, b)
+    infra_without = _infra_invalid_counts(rows_without)
+    infra_with = _infra_invalid_counts(rows_with)
+    eligible_without = _run_eligible_count(rows_without)
+    eligible_with = _run_eligible_count(rows_with)
+    public_gate = _public_claim_gate(
+        rows_without=rows_without,
+        rows_with=rows_with,
+        summary_without=a,
+        summary_with=b,
+        formal=formal,
+    )
+    gate_failures = public_gate["failures"]
+    solve_delta = float(delta["solve_rate_delta"])
+    if solve_delta > 0:
+        public_claim_text = (
+            f"On this fixed benchmark set, `{label_with}` improved solve rate from "
+            f"{_pct(a['solve_rate'])} to {_pct(b['solve_rate'])} "
+            f"({_pct(delta['solve_rate_delta'])} absolute) while keeping trust mismatch at "
+            f"{_pct(b['trust_mismatch_rate'])}."
+        )
+    elif solve_delta == 0:
+        public_claim_text = (
+            f"On this fixed benchmark set, `{label_with}` matched solve rate at "
+            f"{_pct(b['solve_rate'])} while providing Nexus wearing evidence for "
+            f"{formal['valid_count']}/{formal['total_runs']} rows and keeping trust mismatch at "
+            f"{_pct(b['trust_mismatch_rate'])}."
+        )
+    else:
+        public_claim_text = (
+            f"On this fixed benchmark set, `{label_with}` reduced solve rate from "
+            f"{_pct(a['solve_rate'])} to {_pct(b['solve_rate'])} "
+            f"({_pct(delta['solve_rate_delta'])} absolute); no positive solve-rate claim is allowed."
+        )
+    if public_gate["verdict"] != "PASS":
+        public_claim_text = (
+            "No public performance claim is allowed from this run because the public claim gate failed. "
+            f"Failures: {_reasons_text({reason: 1 for reason in gate_failures})}."
+        )
 
     lines = [
         "# Gemini 3 Flash + Nexus Benchmark Report",
@@ -107,6 +215,8 @@ def render_markdown_report(
         "",
         "| Metric | Without Nexus | With Nexus | Delta |",
         "| --- | ---: | ---: | ---: |",
+        f"| Usable rows | {eligible_without}/{without_scope['rows']} | {eligible_with}/{with_scope['rows']} | n/a |",
+        f"| Infra invalid rows | {without_scope['rows'] - eligible_without} | {with_scope['rows'] - eligible_with} | n/a |",
         f"| Solve rate | {_pct(a['solve_rate'])} | {_pct(b['solve_rate'])} | {_pct(delta['solve_rate_delta'])} |",
         f"| Semantic verified | {_pct(a['semantic_verified_rate'])} | {_pct(b['semantic_verified_rate'])} | {_pct(delta['semantic_verified_rate_delta'])} |",
         f"| Trust mismatch | {_pct(a['trust_mismatch_rate'])} | {_pct(b['trust_mismatch_rate'])} | {_pct(delta['trust_mismatch_rate_delta'])} |",
@@ -134,6 +244,15 @@ def render_markdown_report(
         f"| missing/unknown | {_count_text(token_without, 'missing')}/{_count_text(token_without, 'unknown')} | {_count_text(token_with, 'missing')}/{_count_text(token_with, 'unknown')} |",
         f"| not applicable local only | {_count_text(token_without, 'not_applicable_local_only')} | {_count_text(token_with, 'not_applicable_local_only')} |",
         "",
+        "## Run Validity",
+        "",
+        f"- Public claim gate: {public_gate['verdict']}",
+        f"- Public claim gate failures: {_reasons_text({reason: 1 for reason in gate_failures})}",
+        f"- Without Nexus usable rows: {eligible_without}/{without_scope['rows']}",
+        f"- With Nexus usable rows: {eligible_with}/{with_scope['rows']}",
+        f"- Without Nexus infra invalid reasons: {_reasons_text(infra_without)}",
+        f"- With Nexus infra invalid reasons: {_reasons_text(infra_with)}",
+        "",
         "## Nexus Wearing Evidence",
         "",
         f"- Formal treatment valid: {formal['valid_count']}/{formal['total_runs']} ({_pct(formal['valid_rate'])})",
@@ -148,12 +267,7 @@ def render_markdown_report(
         "",
         "## Public-Safe Claim",
         "",
-        (
-            f"On this fixed benchmark set, `{label_with}` improved solve rate from "
-            f"{_pct(a['solve_rate'])} to {_pct(b['solve_rate'])} "
-            f"({_pct(delta['solve_rate_delta'])} absolute) while keeping trust mismatch at "
-            f"{_pct(b['trust_mismatch_rate'])}."
-        ),
+        public_claim_text,
         "",
         "## Limits",
         "",

@@ -100,3 +100,33 @@ def compute_backoff(attempt: int) -> int:
         0,
     )
     assert "return 2 ** (attempt - 1)" in patched
+
+
+def test_apply_events_patch_makes_duplicate_ids_idempotent():
+    source = """
+def apply_events(events):
+    state = {'count': 0, 'seen': []}
+    for event in events:
+        state['count'] += int(event.get('delta', 0))
+        state['seen'].append(event.get('id'))
+    return state
+"""
+    patched = generate_local_candidate(source, "Fix idempotent handling of duplicate events", "local", 0)
+    ns = {}
+    exec(patched, ns)
+    assert ns["apply_events"]([{"id": "a", "delta": 2}, {"id": "a", "delta": 2}, {"id": "b", "delta": 3}]) == {
+        "count": 5,
+        "seen": ["a", "b"],
+    }
+
+
+def test_overall_status_patch_requires_phase_evidence():
+    source = """
+def overall_status(phases):
+    return 'pass' if all(p.get('status') == 'pass' for p in phases) else 'fail'
+"""
+    patched = generate_local_candidate(source, "Fix status aggregator missing evidence trust mismatch", "local", 0)
+    ns = {}
+    exec(patched, ns)
+    assert ns["overall_status"]([{"status": "pass", "evidence": "a"}]) == "pass"
+    assert ns["overall_status"]([{"status": "pass"}]) == "fail"

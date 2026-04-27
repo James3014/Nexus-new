@@ -413,6 +413,95 @@ def _patch_nightshift_audit_bridge(source: str) -> str:
         return source
 
 
+def _patch_phase_ready_contract(source: str) -> str:
+    """Patch phase readiness helpers to require canonical evidence fields."""
+    if "def phase_ready" not in source:
+        return source
+    if "phase.get('evidence')" in source or 'phase.get("evidence")' in source:
+        return source
+    fn_pattern = re.compile(
+        r"def phase_ready\((?P<arg>[^\)]*)\)\s*(?:->\s*[^:]+)?:\n(?P<body>(?:[ \t]+.*\n?)*)",
+        re.MULTILINE,
+    )
+    match = fn_pattern.search(source)
+    if not match:
+        return source
+    arg = match.group("arg").strip() or "phase"
+    replacement = (
+        f"def phase_ready({arg}):\n"
+        "    if phase.get('status') != 'pass':\n"
+        "        return False\n"
+        "    return bool(phase.get('evidence')) and 'reason' in phase\n"
+    )
+    new_source = fn_pattern.sub(replacement, source, count=1)
+    try:
+        compile(new_source, "<phase_ready_contract_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_apply_events_idempotent(source: str) -> str:
+    """Patch event reducers so duplicate event ids are applied once."""
+    if "def apply_events" not in source or "'seen'" not in source:
+        return source
+    if "seen_ids" in source:
+        return source
+    fn_pattern = re.compile(
+        r"def apply_events\((?P<arg>[^\)]*)\)\s*(?:->\s*[^:]+)?:\n(?P<body>(?:[ \t]+.*\n?)*)",
+        re.MULTILINE,
+    )
+    match = fn_pattern.search(source)
+    if not match:
+        return source
+    arg = match.group("arg").strip() or "events"
+    replacement = (
+        f"def apply_events({arg}):\n"
+        "    state = {'count': 0, 'seen': []}\n"
+        "    seen_ids = set()\n"
+        "    for event in events:\n"
+        "        event_id = event.get('id')\n"
+        "        if event_id in seen_ids:\n"
+        "            continue\n"
+        "        seen_ids.add(event_id)\n"
+        "        state['count'] += int(event.get('delta', 0))\n"
+        "        state['seen'].append(event_id)\n"
+        "    return state\n"
+    )
+    new_source = fn_pattern.sub(replacement, source, count=1)
+    try:
+        compile(new_source, "<apply_events_idempotent_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_overall_status_requires_evidence(source: str) -> str:
+    """Patch status aggregators so pass requires evidence on every phase."""
+    if "def overall_status" not in source:
+        return source
+    if "p.get('evidence')" in source or 'p.get("evidence")' in source:
+        return source
+    fn_pattern = re.compile(
+        r"def overall_status\((?P<arg>[^\)]*)\)\s*(?:->\s*[^:]+)?:\n(?P<body>(?:[ \t]+.*\n?)*)",
+        re.MULTILINE,
+    )
+    match = fn_pattern.search(source)
+    if not match:
+        return source
+    arg = match.group("arg").strip() or "phases"
+    replacement = (
+        f"def overall_status({arg}):\n"
+        "    return 'pass' if all(p.get('status') == 'pass' and p.get('evidence') for p in phases) else 'fail'\n"
+    )
+    new_source = fn_pattern.sub(replacement, source, count=1)
+    try:
+        compile(new_source, "<overall_status_evidence_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
 def generate_local_companion_edits(
     repo_root: Path,
     target_path: Path,
@@ -508,6 +597,14 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
     lowered = f"{task} {mutation_hint}".lower()
 
     # Function-signature driven patches for benchmark-like deterministic tasks.
+    patched = _patch_apply_events_idempotent(source)
+    if patched != source:
+        return patched
+
+    patched = _patch_overall_status_requires_evidence(source)
+    if patched != source:
+        return patched
+
     patched = _patch_normalize_flag(source)
     if patched != source:
         return patched
@@ -547,6 +644,10 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
 
     if any(keyword in lowered for keyword in ["nightshift", "stage1", "trigger reason", "persist"]):
         patched = _patch_nightshift_runner(source)
+        if patched != source: return patched
+
+    if any(keyword in lowered for keyword in ["phase", "evidence", "reason"]):
+        patched = _patch_phase_ready_contract(source)
         if patched != source: return patched
 
     if "parser" in lowered or "purity" in lowered or "refactor" in lowered:

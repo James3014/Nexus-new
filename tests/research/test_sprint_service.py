@@ -5,6 +5,7 @@ from nexus.research.sprint_service import (
     InPlaceSprintExecutor,
     SprintConfig,
     _build_llm_candidate_prompt,
+    _build_value_task_contract,
     _candidate_code_from_llm_output,
     run_hyper_sprint,
     write_sprint_report,
@@ -298,6 +299,24 @@ def test_llm_candidate_prompt_can_include_tests(monkeypatch):
     assert tests in full
     assert "Tests:" in compact
     assert tests in compact
+    assert "patch=<full updated target file>" in compact
+
+
+def test_value_task_contract_includes_artifact_and_override_rules():
+    artifact_contract = _build_value_task_contract(
+        source_code="def verified_claims(claims):\n    pass\n",
+        task="Fix artifact claim rollup",
+        test_source="assert verified_claims([{'id':'a','artifact':'x'}]) == ['a']",
+    )
+    override_contract = _build_value_task_contract(
+        source_code="def merge_limits(defaults, override):\n    pass\n",
+        task="Fix override handling",
+        test_source="assert merge_limits({'timeout': 10}, {'timeout': None}) == {'timeout': 10}",
+    )
+
+    assert "Use singular field 'artifact'" in artifact_contract
+    assert "return the claim ids" in artifact_contract
+    assert "preserve the existing default" in override_contract
 
 
 def test_hidden_verifier_mode_omits_initial_test_source(monkeypatch, tmp_path: Path):
@@ -338,6 +357,20 @@ def test_llm_edit_protocol_replaces_unique_snippet():
             "operation": "replace",
             "target_snippet": "return text",
             "replacement": "return text.strip().lower()",
+        },
+    )
+
+    assert reason == ""
+    assert code == "def normalize(text):\n    return text.strip().lower()\n"
+
+
+def test_llm_edit_protocol_accepts_full_patch_operation():
+    source = "def normalize(text):\n    return text\n"
+    code, reason = _candidate_code_from_llm_output(
+        source,
+        {
+            "operation": "full_patch",
+            "replacement": "def normalize(text):\n    return text.strip().lower()\n",
         },
     )
 
@@ -652,6 +685,109 @@ def test_llm_self_heal_repairs_failed_candidate(monkeypatch, tmp_path: Path):
     assert len(res.candidates) == 2
 
 
+def test_llm_self_heal_runs_before_local_guard_fallback(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def build():\n    return []\n", encoding="utf-8")
+    calls = {"llm": 0, "local": 0}
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            calls["llm"] += 1
+            if calls["llm"] == 1:
+                return "def build():\n    return []\n", {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "tokens_used": 10,
+                    "token_capture_status": "measured",
+                    "model_patch_generated": True,
+                }
+            assert "Previous candidate failed verification" in kwargs["task"]
+            return "def build():\n    items = ['artifact']\n    return items\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 20,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+            }
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *args, **kwargs):
+            calls["local"] += 1
+            return "def build():\n    return ['local']\n", {"source": "local"}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            score = 1.0 if "artifact" in kwargs["code"] else 0.0
+            return CandidateEval(seed=kwargs["seed"], score=score, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="add feature artifact", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.winner_source == "llm_self_heal"
+    assert calls == {"llm": 2, "local": 0}
+
+
+def test_contract_feature_allows_one_line_artifact_fix(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def verified_claims(claims):\n    return []\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "def verified_claims(claims):\n    return [claim['id'] for claim in claims if claim.get('artifact')]\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 10,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+            }
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(
+        task="Implement an evidence artifact claim rollup",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.winner_source == "llm"
+
+
 def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_path: Path):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
@@ -692,6 +828,60 @@ def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_
     assert res.status == "SUCCESS"
     assert calls["local"] == 2
     assert res.attempt_count == 2
+
+
+def test_local_contract_fallback_repairs_phase_evidence_fields(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def phase_ready(phase):\n    return phase.get('status') == 'pass'\n", encoding="utf-8")
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "\n".join(
+            [
+                "from demo import phase_ready",
+                "",
+                "def test_phase_contract():",
+                "    assert phase_ready({'status': 'pass', 'evidence': 'x.json', 'reason': ''}) is True",
+                "    assert phase_ready({'status': 'pass', 'reason': ''}) is False",
+                "    assert phase_ready({'status': 'fail', 'evidence': 'x.json', 'reason': 'missing'}) is False",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "def phase_ready(phase):\n    return phase.get('status') == 'pass'\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 10,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+            }
+
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+
+    cfg = SprintConfig(
+        task="Implement a phased report summary where each phase must include status, evidence path, and failure reason before verified.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.fallback_used is True
+    assert res.winner_source == "local"
 
 
 def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):

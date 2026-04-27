@@ -8,6 +8,8 @@ import re
 import tempfile
 import os
 import sys
+import signal
+import time
 
 from nexus.services.gemini_cli import (
     build_gemini_env,
@@ -19,6 +21,65 @@ from nexus.services.gemini_cli import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _run_cli_with_hard_timeout(
+    command: list[str],
+    *,
+    stdin_path: Path | None,
+    env: dict[str, str],
+    cwd: Path,
+    timeout_sec: int,
+) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory(prefix="nexus-gateway-") as tmp:
+        stdout_path = Path(tmp) / "stdout.txt"
+        stderr_path = Path(tmp) / "stderr.txt"
+        with stdout_path.open("w+", encoding="utf-8") as stdout_file, stderr_path.open("w+", encoding="utf-8") as stderr_file:
+            f_in = open(stdin_path, "rb") if stdin_path is not None else None
+            try:
+                proc = subprocess.Popen(
+                    command,
+                    stdin=f_in,
+                    stdout=stdout_file,
+                    stderr=stderr_file,
+                    text=True,
+                    env=env,
+                    cwd=cwd,
+                    start_new_session=True,
+                )
+                deadline = time.monotonic() + max(1, int(timeout_sec))
+                while True:
+                    returncode = proc.poll()
+                    if returncode is not None:
+                        stdout_file.flush()
+                        stderr_file.flush()
+                        return subprocess.CompletedProcess(
+                            command,
+                            returncode,
+                            stdout_path.read_text(encoding="utf-8", errors="replace"),
+                            stderr_path.read_text(encoding="utf-8", errors="replace"),
+                        )
+                    if time.monotonic() >= deadline:
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            pass
+                        stdout_file.flush()
+                        stderr_file.flush()
+                        raise subprocess.TimeoutExpired(
+                            command,
+                            timeout_sec,
+                            output=stdout_path.read_text(encoding="utf-8", errors="replace"),
+                            stderr=stderr_path.read_text(encoding="utf-8", errors="replace"),
+                        )
+                    time.sleep(0.1)
+            finally:
+                if f_in is not None:
+                    f_in.close()
 
 # 🛡️ Nexus v16 Battlesuit Gateway (De-LLM-ized Edition)
 # This module is strictly PASSIVE. It handles physical handoffs to the agent.
@@ -206,40 +267,24 @@ class BattlesuitGateway:
         
         for attempt in range(max_retries):
             try:
-                f_in = open(tmp_payload, "rb") if tmp_payload is not None else None
-                try:
-                    res = subprocess.run(
-                        invocation.command,
-                        stdin=f_in,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        env=invocation.env,
-                        cwd=invocation.cwd,
-                        timeout=dynamic_timeout
-                    )
-                finally:
-                    if f_in is not None:
-                        f_in.close()
+                res = _run_cli_with_hard_timeout(
+                    invocation.command,
+                    stdin_path=tmp_payload,
+                    env=invocation.env,
+                    cwd=invocation.cwd,
+                    timeout_sec=dynamic_timeout,
+                )
                 
                 # Retry with explicit node if gemini shim cannot find node runtime.
                 stderr_lower = (res.stderr or "").lower()
                 if res.returncode != 0 and invocation.command_with_node and "env: node: no such file or directory" in stderr_lower:
-                    f_in2 = open(tmp_payload, "rb") if tmp_payload is not None else None
-                    try:
-                        res = subprocess.run(
-                            invocation.command_with_node,
-                            stdin=f_in2,
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            env=invocation.env,
-                            cwd=invocation.cwd,
-                            timeout=dynamic_timeout
-                        )
-                    finally:
-                        if f_in2 is not None:
-                            f_in2.close()
+                    res = _run_cli_with_hard_timeout(
+                        invocation.command_with_node,
+                        stdin_path=tmp_payload,
+                        env=invocation.env,
+                        cwd=invocation.cwd,
+                        timeout_sec=dynamic_timeout,
+                    )
                     stderr_lower = (res.stderr or "").lower()
 
                 if "login" in stderr_lower:

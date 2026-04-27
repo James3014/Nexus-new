@@ -120,6 +120,8 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
 
     assert "Without Nexus scope: 2 unique tasks x 1 trials = 2 rows" in out
     assert "With Nexus scope: 2 unique tasks x 1 trials = 2 rows" in out
+    assert "Usable rows | 2/2 | 2/2 | n/a" in out
+    assert "Infra invalid rows | 0 | 0 | n/a" in out
     assert "Solve rate | 50.0% | 100.0% | 50.0%" in out
     assert "Cost-comparable rate | 100.0% | 50.0% | -50.0%" in out
     assert "Model token measured rate | 0.0% | 50.0% | 50.0%" in out
@@ -130,6 +132,9 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Token public-safe claim | NO | NO | n/a" in out
     assert "| measured | 2 | 1 |" in out
     assert "| estimated | 0 | 1 |" in out
+    assert "Without Nexus infra invalid reasons: none" in out
+    assert "Public claim gate: FAIL" in out
+    assert "with_token_measured_below_threshold" in out
     assert "Formal treatment valid: 2/2 (100.0%)" in out
     assert "Gemini uses Nexus rate: 100.0%" in out
     assert "Token/cost claims are not public-safe" in out
@@ -178,3 +183,199 @@ def test_render_markdown_report_marks_token_claim_unsafe_when_tokens_missing(tmp
 
     assert "1 unique tasks x 2 trials = 1 rows" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
+
+
+def test_render_markdown_report_surfaces_infra_invalid_rows(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "task_id": "a",
+                        "trial_index": 1,
+                        "semantic_status": "VERIFIED",
+                        "wall_duration_sec": 10,
+                        "model_calls": 1,
+                        "total_tokens": 100,
+                        "token_capture_status": "measured",
+                        "run_eligible": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "task_id": "b",
+                        "trial_index": 1,
+                        "semantic_status": "UNVERIFIED",
+                        "wall_duration_sec": 10,
+                        "model_calls": 1,
+                        "total_tokens": 0,
+                        "token_capture_status": "unknown",
+                        "run_eligible": False,
+                        "infra_invalid_reason": "parse_error",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 8,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "pillar_lancedb_active": True,
+                "pillar_memory_active": True,
+                "pillar_mempalace_active": True,
+                "pillar_belief_active": True,
+                "pillar_artifact_active": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "capability_claim_verified": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "Usable rows | 1/2 | 1/1 | n/a" in out
+    assert "Infra invalid rows | 1 | 0 | n/a" in out
+    assert "Public claim gate: FAIL" in out
+    assert "task_trial_mismatch" in out
+    assert "Without Nexus infra invalid reasons: parse_error:1" in out
+    assert "With Nexus infra invalid reasons: none" in out
+
+
+def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "UNVERIFIED",
+                "wall_duration_sec": 12,
+                "model_calls": 1,
+                "total_tokens": 120,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 9,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "pillar_lancedb_active": True,
+                "pillar_memory_active": True,
+                "pillar_mempalace_active": True,
+                "pillar_belief_active": True,
+                "pillar_artifact_active": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "capability_claim_verified": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "Public claim gate: PASS" in out
+    assert "Public claim gate failures: none" in out
+    assert "On this fixed benchmark set, `nexus` improved solve rate" in out
+
+
+def test_render_markdown_report_does_not_claim_lift_when_solve_rate_ties(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    bare = {
+        "task_id": "a",
+        "trial_index": 1,
+        "semantic_status": "VERIFIED",
+        "wall_duration_sec": 8,
+        "model_calls": 1,
+        "total_tokens": 100,
+        "token_capture_status": "measured",
+        "run_eligible": True,
+    }
+    nexus = {
+        **bare,
+        "wall_duration_sec": 9,
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "hyper_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+        "capability_claim_verified": True,
+    }
+    without.write_text(json.dumps(bare) + "\n", encoding="utf-8")
+    with_nexus.write_text(json.dumps(nexus) + "\n", encoding="utf-8")
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "Public claim gate: PASS" in out
+    assert "matched solve rate at 100.0%" in out
+    assert "improved solve rate from 100.0% to 100.0%" not in out

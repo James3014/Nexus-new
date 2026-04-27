@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -163,6 +164,18 @@ def _annotate_benchmark_eligibility(
         token_unreliable_reason = "local_only_rescue_not_model_comparable"
     row["token_reliable"] = token_unreliable_reason is None
     row["token_unreliable_reason"] = token_unreliable_reason
+    winner_source = str(row.get("nexus_winner_source") or "")
+    gateway_error_category = str(row.get("gateway_error_category") or "")
+    row["local_fallback_unhelpful"] = bool(
+        winner_source.startswith("local")
+        and model_calls > 0
+        and not bool(row.get("semantic_completed", False))
+        and (
+            total_tokens <= 512
+            or gateway_error_category in {"timeout", "parse_failure", "gateway_error"}
+            or bool(row.get("fallback_used", False))
+        )
+    )
     reason = _classify_infra_invalid_reason(row, model_required=model_required, nexus_required=nexus_required)
     row["infra_invalid_reason"] = reason
     row["run_eligible"] = reason is None
@@ -187,6 +200,7 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
         trust_mismatch = [row for row in eligible if bool(row.get("report_trust_mismatch", False))]
         first_pass = [row for row in eligible if int(row.get("attempt_count", 0) or 0) <= 1 and row.get("status") == "SUCCESS"]
         token_reliable = [row for row in eligible if bool(row.get("token_reliable", False))]
+        local_fallback_unhelpful = [row for row in eligible if bool(row.get("local_fallback_unhelpful", False))]
         summary[mode] = {
             "total_n": len(mode_rows),
             "eligible_n": len(eligible),
@@ -207,6 +221,7 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
                 }
             ),
             "avg_model_calls": _avg([float(row.get("model_calls", 0) or 0) for row in eligible]),
+            "local_fallback_unhelpful_rate": round(len(local_fallback_unhelpful) / len(eligible), 4) if eligible else None,
         }
     return summary
 
@@ -579,6 +594,14 @@ def _remaining_leg_timeout(default_timeout_sec: int, start_time: float, total_ti
     return max(1, min(default_timeout_sec, remaining))
 
 
+def _effective_total_timeout_sec(total_timeout_sec: int, stop_loss_sec: int) -> int:
+    if total_timeout_sec <= 0:
+        return max(0, stop_loss_sec)
+    if stop_loss_sec <= 0:
+        return total_timeout_sec
+    return min(total_timeout_sec, stop_loss_sec)
+
+
 def _install_total_timeout(total_timeout_sec: int):
     if total_timeout_sec <= 0:
         return None
@@ -898,25 +921,49 @@ def _run_process_group(
     env: dict[str, str],
     timeout_sec: int,
 ) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.Popen(
-        cmd,
-        cwd=cwd,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
-    try:
-        stdout, stderr = proc.communicate(timeout=timeout_sec)
-    except subprocess.TimeoutExpired as exc:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        stdout, stderr = proc.communicate()
-        raise subprocess.TimeoutExpired(cmd, timeout_sec, output=stdout, stderr=stderr) from exc
-    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    with tempfile.TemporaryDirectory(prefix="nexus-bench-proc-") as tmp:
+        stdout_path = Path(tmp) / "stdout.txt"
+        stderr_path = Path(tmp) / "stderr.txt"
+        with stdout_path.open("w+", encoding="utf-8") as stdout_file, stderr_path.open("w+", encoding="utf-8") as stderr_file:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                env=env,
+                text=True,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                start_new_session=True,
+            )
+            deadline = time.monotonic() + max(1, int(timeout_sec))
+            while True:
+                returncode = proc.poll()
+                if returncode is not None:
+                    stdout_file.flush()
+                    stderr_file.flush()
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        returncode,
+                        stdout_path.read_text(encoding="utf-8", errors="replace"),
+                        stderr_path.read_text(encoding="utf-8", errors="replace"),
+                    )
+                if time.monotonic() >= deadline:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    stdout_file.flush()
+                    stderr_file.flush()
+                    raise subprocess.TimeoutExpired(
+                        cmd,
+                        timeout_sec,
+                        output=stdout_path.read_text(encoding="utf-8", errors="replace"),
+                        stderr=stderr_path.read_text(encoding="utf-8", errors="replace"),
+                    )
+                time.sleep(0.1)
 
 
 def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
@@ -957,13 +1004,11 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
         transport="inline",
     )
     try:
-        res = subprocess.run(
+        res = _run_process_group(
             invocation.command,
             cwd=invocation.cwd,
             env=invocation.env,
-            text=True,
-            capture_output=True,
-            timeout=timeout_sec,
+            timeout_sec=timeout_sec,
         )
     except subprocess.TimeoutExpired as exc:
         return {"status": "FAIL", "error_category": "timeout", "tokens_used": 0, "model_name": model_name}, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
@@ -1038,7 +1083,9 @@ def run_with_nexus(
             env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
             env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
             env["NEXUS_GATEWAY_MAX_RETRIES"] = "1"
-            env["NEXUS_GATEWAY_TIMEOUT_SEC"] = _benchmark_gateway_timeout_sec()
+            env["NEXUS_GATEWAY_TIMEOUT_SEC"] = _benchmark_gateway_timeout_sec(
+                _benchmark_gateway_timeout_for_task(timeout_sec)
+            )
             env["NEXUS_LLM_CANDIDATE_CAP"] = "1"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
             env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
@@ -1096,13 +1143,14 @@ def run_without_nexus(
         model_name = ""
         model_patch_generated = False
         gateway_error_category = ""
+        out: dict[str, Any] = {}
         raw_tail = ""
         patch_changed = False
         patch_len = 0
         pytest_stdout_tail = ""
         pytest_stderr_tail = ""
         try:
-            hidden_verifier_mode = os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
+            hidden_verifier_mode = _hidden_verifier_mode_enabled()
             prompt_tests = "" if hidden_verifier_mode and task.fixture_kind.startswith("nexus_value_") else test_source
             prompt = (
                 "You are Gemini 3 Flash running without Nexus orchestration. "
@@ -1137,7 +1185,7 @@ def run_without_nexus(
             if patch_changed:
                 target_path.write_text(patch, encoding="utf-8")
                 cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
-                res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, timeout=timeout_sec)
+                res = _run_process_group(cmd, cwd=repo_root, env=os.environ.copy(), timeout_sec=timeout_sec)
                 pytest_stdout_tail = _tail_text(res.stdout, max_chars=1000)
                 pytest_stderr_tail = _tail_text(res.stderr, max_chars=1000)
                 status = "SUCCESS" if res.returncode == 0 else "FAILED"
@@ -1147,6 +1195,7 @@ def run_without_nexus(
                 err = "no_mutation_generated"
         except subprocess.TimeoutExpired:
             err = "test_timeout"
+            gateway_error_category = "timeout"
         except Exception as exc:  # noqa: BLE001
             err = f"gemini_error:{type(exc).__name__}"
         finally:
@@ -1216,7 +1265,7 @@ def run_without_nexus(
                 if patched != original:
                     target_path.write_text(patched, encoding="utf-8")
             cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
-            res = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, timeout=timeout_sec)
+            res = _run_process_group(cmd, cwd=repo_root, env=os.environ.copy(), timeout_sec=timeout_sec)
             status = "SUCCESS" if res.returncode == 0 else "FAILED"
         except Exception:
             status = "FAILED"
@@ -1369,6 +1418,10 @@ def _history_policy_name(*, neutralize_history: bool, allow_learning_loop: bool)
     return "per_task_reset"
 
 
+def _hidden_verifier_mode_enabled() -> bool:
+    return os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _report_model_label() -> str:
     model = str(
         os.environ.get("NEXUS_GEMINI_MODEL_NAME")
@@ -1386,6 +1439,11 @@ def _benchmark_gateway_timeout_sec(default_sec: int = 30) -> str:
         except ValueError:
             pass
     return str(max(5, int(default_sec)))
+
+
+def _benchmark_gateway_timeout_for_task(timeout_sec: int) -> int:
+    # Give Gemini enough room to answer while preserving subprocess budget for Nexus verification.
+    return min(120, max(30, int(timeout_sec) - 20))
 
 
 def _force_learn_slo_ready(repo_root: Path) -> None:
@@ -1434,6 +1492,12 @@ def main() -> int:
         type=int,
         default=0,
         help="Stop before starting another benchmark leg after this total wall-clock budget. 0 disables the budget.",
+    )
+    parser.add_argument(
+        "--stop-loss-sec",
+        type=int,
+        default=600,
+        help="Fail-fast wall-clock stop-loss for the whole benchmark run. 0 disables. Default: 600.",
     )
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "all"], default="all")
     parser.add_argument("--force-flow", choices=["auto", "baseline", "hyper_sprint"], default="auto")
@@ -1539,9 +1603,10 @@ def main() -> int:
         _reset_auto_flow_history(repo_root)
     run_start = time.time()
     timed_out = False
-    previous_timeout_handler = _install_total_timeout(int(args.total_timeout_sec))
+    effective_total_timeout_sec = _effective_total_timeout_sec(int(args.total_timeout_sec), int(args.stop_loss_sec))
+    previous_timeout_handler = _install_total_timeout(effective_total_timeout_sec)
     for task in tasks:
-        if _budget_exceeded(run_start, int(args.total_timeout_sec)):
+        if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
                 enabled=bool(args.progress_log),
@@ -1577,9 +1642,9 @@ def main() -> int:
                 task=task,
                 target_file=target_file,
                 test_file=test_file,
-                timeout_sec=_remaining_leg_timeout(int(args.timeout_sec), run_start, int(args.total_timeout_sec)),
+                timeout_sec=_remaining_leg_timeout(int(args.timeout_sec), run_start, effective_total_timeout_sec),
                 force_flow=flow,
-                runner_mode="subprocess" if int(args.total_timeout_sec) > 0 else args.with_nexus_runner,
+                runner_mode="subprocess" if effective_total_timeout_sec > 0 else args.with_nexus_runner,
                 with_llm_mode=args.with_llm_mode,
                 tuning_profile=args.tuning_profile,
                 cli_runner=shared_cli_runner,
@@ -1630,7 +1695,7 @@ def main() -> int:
     else:
         without_tasks = []
     for task in without_tasks:
-        if _budget_exceeded(run_start, int(args.total_timeout_sec)):
+        if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
                 enabled=bool(args.progress_log),
@@ -1663,7 +1728,7 @@ def main() -> int:
                 task=task,
                 target_file=target_file,
                 test_file=test_file,
-                timeout_sec=_remaining_leg_timeout(int(args.timeout_sec), run_start, int(args.total_timeout_sec)),
+                timeout_sec=_remaining_leg_timeout(int(args.timeout_sec), run_start, effective_total_timeout_sec),
                 force_flow=flow,
                 history_window=1,
                 history_fail_threshold=9999,
@@ -1709,9 +1774,11 @@ def main() -> int:
 
     _clear_total_timeout(previous_timeout_handler)
 
+    hidden_verifier_mode = _hidden_verifier_mode_enabled()
     for row in [*with_rows, *without_rows]:
         row["history_policy"] = history_policy
         row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
+        row["hidden_verifier_mode"] = hidden_verifier_mode
     benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
 
     with_path = out_dir / f"with_nexus_{ts}.jsonl"
@@ -1736,6 +1803,7 @@ def main() -> int:
                     "isolation_mode": args.isolation_mode,
                     "require_clean_worktree": bool(args.require_clean_worktree),
                     "history_policy": history_policy,
+                    "hidden_verifier_mode": hidden_verifier_mode,
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
                     "force_flow": args.force_flow,
@@ -1777,12 +1845,15 @@ def main() -> int:
                 "with_nexus_executed": len(with_rows),
                 "without_nexus_executed": len(without_rows),
                 "total_timeout_sec": int(args.total_timeout_sec),
+                "stop_loss_sec": int(args.stop_loss_sec),
+                "effective_total_timeout_sec": effective_total_timeout_sec,
                 "with_nexus_file": str(with_path),
                 "without_nexus_file": str(without_path),
                 "evidence_bundle_file": evidence_bundle_path,
                 "markdown_report_file": markdown_report_path,
                 "history_policy": history_policy,
                 "learn_slo_policy": "forced_ready" if args.force_learn_slo_ready else "repo_state",
+                "hidden_verifier_mode": hidden_verifier_mode,
                 "benchmark_summary": benchmark_summary,
             },
             ensure_ascii=False,
