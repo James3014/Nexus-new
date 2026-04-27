@@ -191,6 +191,17 @@ class UltraReviewService:
                 "fallback_reason": (add.stderr or add.stdout or "git worktree add failed")[-1000:],
             }
 
+        diff_has_content = bool(diff_path.read_text(encoding="utf-8").strip()) if diff_path.exists() else False
+        if not diff_has_content:
+            untracked_overlay_count = self._overlay_untracked_files(execution_root, sandbox_path=sandbox_path)
+            return {
+                "strategy": "git_worktree",
+                "diff_applied": True,
+                "command": " ".join(add_cmd),
+                "untracked_overlay_count": untracked_overlay_count,
+                "empty_diff": True,
+            }
+
         apply_cmd = ["git", "apply", "--index", "--binary", str(diff_path)]
         apply = subprocess.run(apply_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
         if apply.returncode != 0:

@@ -652,3 +652,9 @@ version_scope:
 - **Root Cause**: The search mixed mandatory files with optional discovery targets instead of first enumerating existing candidates.
 - **Decision**: Re-run diagnostics with bounded existing paths and separate Git/GitHub probes; no product code change is needed.
 - **Prevention**: For diagnostic searches, enumerate candidate files with `rg --files` or `find` first, then pass only existing paths to `rg`.
+
+## 2026-04-28: Worktree Mirrors Need Empty-Diff Fast Paths
+- **Phenomenon**: Strict changed-path validation passed changed-only tests and Ultra Review, but the Ultra Review sandbox mirror reported `copytree` fallback when the captured diff was empty.
+- **Root Cause**: `git apply` treats an empty patch as invalid, so the new worktree mirror path interpreted a clean diff as an apply failure.
+- **Decision**: Treat empty diff as a valid worktree mirror fast path, still overlaying allowed untracked files while avoiding copytree fallback.
+- **Prevention**: Sandbox mirror strategy checks must distinguish "no patch needed" from "patch failed" before falling back to slower full-copy behavior.

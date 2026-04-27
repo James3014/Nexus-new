@@ -106,6 +106,19 @@ def test_ultra_review_sandbox_mirror_falls_back_to_copytree(tmp_path, monkeypatc
     assert payload["sandbox_mirror"]["fallback_reason"] == "worktree unavailable"
 
 
+def test_ultra_review_worktree_mirror_keeps_empty_diff_fast_path(tmp_path):
+    _init_repo(tmp_path)
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    assert payload["gate_passed"] is True
+    assert payload["sandbox_mirror"]["strategy"] == "git_worktree"
+    assert payload["sandbox_mirror"]["empty_diff"] is True
+
+
 def test_ultra_review_maps_research_tests_and_security_observations(tmp_path):
     _init_repo(tmp_path)
     (tmp_path / "nexus" / "research").mkdir(parents=True)
