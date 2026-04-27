@@ -55,7 +55,7 @@ uv run python scripts/bench/capability_ab_runner.py \
   --tasks-file scripts/bench/public_benchmark_nexus_value_v1.json \
   --output-dir .nexus/reports/bench_gemini3flash_smoke_<tag> \
   --max-tasks 6 --repeat-trials 1 --timeout-sec 420 \
-  --total-timeout-sec 3600 --stop-loss-sec 3600 \
+  --total-timeout-sec 3600 --stop-loss-sec 3600 --per-task-stop-loss-sec 600 \
   --difficulty all --repo-kind-filter all --force-flow hyper_sprint \
   --with-nexus-runner subprocess --with-llm-mode all --without-mode gemini \
   --force-learn-slo-ready --neutralize-history --disable-learning-loop \
@@ -79,7 +79,7 @@ uv run python scripts/bench/capability_ab_runner.py \
   --tasks-file scripts/bench/public_benchmark_nexus_value_v1.json \
   --output-dir .nexus/reports/bench_gemini3flash_value12x2_<tag> \
   --max-tasks 12 --repeat-trials 2 --timeout-sec 420 \
-  --total-timeout-sec 7200 --stop-loss-sec 7200 \
+  --total-timeout-sec 7200 --stop-loss-sec 7200 --per-task-stop-loss-sec 600 \
   --difficulty all --repo-kind-filter all --force-flow hyper_sprint \
   --with-nexus-runner subprocess --with-llm-mode all --without-mode gemini \
   --force-learn-slo-ready --neutralize-history --disable-learning-loop \

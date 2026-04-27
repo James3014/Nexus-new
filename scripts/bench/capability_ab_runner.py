@@ -183,6 +183,24 @@ def _annotate_benchmark_eligibility(
     return row
 
 
+def _apply_per_task_stop_loss(row: dict[str, Any], limit_sec: int) -> bool:
+    if limit_sec <= 0:
+        return False
+    wall_duration = float(row.get("wall_duration_sec", 0.0) or 0.0)
+    if wall_duration <= float(limit_sec):
+        return False
+    row["runtime_classification"] = "task_stop_loss_exceeded"
+    row["timeout_scope"] = "benchmark_per_task_stop_loss"
+    row["timeout_stage"] = "wall_clock_exceeded"
+    row["timeout_sec"] = int(limit_sec)
+    row["retryable"] = True
+    row["infra_invalid_reason"] = "task_stop_loss_exceeded"
+    row["run_eligible"] = False
+    row["token_reliable"] = False
+    row["token_unreliable_reason"] = "task_stop_loss_exceeded"
+    return True
+
+
 def _avg(values: list[float]) -> float | None:
     if not values:
         return None
@@ -1324,6 +1342,34 @@ def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
     out.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
 
 
+def _render_partial_markdown_report(
+    *,
+    benchmark_date: str,
+    with_rows: list[dict[str, Any]],
+    without_rows: list[dict[str, Any]],
+    benchmark_summary: dict[str, dict[str, Any]],
+) -> str:
+    return "\n".join(
+        [
+            "# Gemini + Nexus Benchmark Partial Run",
+            "",
+            f"Date: {benchmark_date}",
+            "",
+            "Public claim gate: FAIL",
+            "",
+            "Reason: benchmark stopped before both arms produced comparable rows.",
+            "",
+            f"With Nexus rows: {len(with_rows)}",
+            f"Without Nexus rows: {len(without_rows)}",
+            "",
+            "```json",
+            json.dumps(benchmark_summary, ensure_ascii=False, indent=2, sort_keys=True),
+            "```",
+            "",
+        ]
+    )
+
+
 def _safe_artifact_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value)
 
@@ -1499,6 +1545,12 @@ def main() -> int:
         default=600,
         help="Fail-fast wall-clock stop-loss for the whole benchmark run. 0 disables. Default: 600.",
     )
+    parser.add_argument(
+        "--per-task-stop-loss-sec",
+        type=int,
+        default=600,
+        help="Mark a benchmark row infra-invalid and stop the run if one task exceeds this wall-clock budget. 0 disables. Default: 600.",
+    )
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "all"], default="all")
     parser.add_argument("--force-flow", choices=["auto", "baseline", "hyper_sprint"], default="auto")
     parser.add_argument("--with-nexus-runner", choices=["inprocess", "subprocess"], default="inprocess")
@@ -1653,6 +1705,7 @@ def main() -> int:
             )
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
+            task_stop_loss_exceeded = _apply_per_task_stop_loss(row, int(args.per_task_stop_loss_sec))
             if args.evidence_bundle:
                 row.update(
                     _write_trial_evidence(
@@ -1673,6 +1726,19 @@ def main() -> int:
                 elapsed_sec=time.time() - leg_start,
                 status=str(row.get("status", "")),
             )
+            if task_stop_loss_exceeded:
+                timed_out = True
+                _emit_progress(
+                    enabled=bool(args.progress_log),
+                    event="task_stop_loss",
+                    mode="with_nexus",
+                    task=task,
+                    target_file=target_file,
+                    test_file=test_file,
+                    elapsed_sec=float(row.get("wall_duration_sec", 0.0) or 0.0),
+                    status="INFRA_INVALID",
+                )
+                break
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -1736,6 +1802,7 @@ def main() -> int:
             )
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
+            task_stop_loss_exceeded = _apply_per_task_stop_loss(row, int(args.per_task_stop_loss_sec))
             if args.evidence_bundle:
                 row.update(
                     _write_trial_evidence(
@@ -1756,6 +1823,19 @@ def main() -> int:
                 elapsed_sec=time.time() - leg_start,
                 status=str(row.get("status", "")),
             )
+            if task_stop_loss_exceeded:
+                timed_out = True
+                _emit_progress(
+                    enabled=bool(args.progress_log),
+                    event="task_stop_loss",
+                    mode="without_nexus",
+                    task=task,
+                    target_file=target_file,
+                    test_file=test_file,
+                    elapsed_sec=float(row.get("wall_duration_sec", 0.0) or 0.0),
+                    status="INFRA_INVALID",
+                )
+                break
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -1820,16 +1900,22 @@ def main() -> int:
             if not markdown_report.is_absolute():
                 markdown_report = (repo_root / markdown_report).resolve()
         markdown_report.parent.mkdir(parents=True, exist_ok=True)
-        markdown_report.write_text(
-            render_markdown_report(
+        if with_rows and without_rows:
+            markdown_text = render_markdown_report(
                 without_path=str(without_path),
                 with_path=str(with_path),
                 label_without=f"{_report_model_label()}_bare",
                 label_with=f"{_report_model_label()}_nexus",
                 benchmark_date=datetime.now().date().isoformat(),
-            ),
-            encoding="utf-8",
-        )
+            )
+        else:
+            markdown_text = _render_partial_markdown_report(
+                benchmark_date=datetime.now().date().isoformat(),
+                with_rows=with_rows,
+                without_rows=without_rows,
+                benchmark_summary=benchmark_summary,
+            )
+        markdown_report.write_text(markdown_text, encoding="utf-8")
         markdown_report_path = str(markdown_report)
 
     print(

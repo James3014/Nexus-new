@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
     _annotate_benchmark_eligibility,
+    _apply_per_task_stop_loss,
     _benchmark_memory_db_path,
     _budget_exceeded,
     _classify_timeout_stage,
@@ -29,6 +30,7 @@ from scripts.bench.capability_ab_runner import (
     _read_preserved_target,
     _remaining_leg_timeout,
     _report_model_label,
+    _render_partial_markdown_report,
     _restore_preserved_target,
     _resolve_task_files,
     _run_process_group,
@@ -1081,6 +1083,50 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
     assert summary["without_nexus"]["infra_invalid_n"] == 1
     assert summary["without_nexus"]["solve_rate"] == 1.0
     assert summary["with_nexus"]["solve_rate"] == 0.0
+
+
+def test_per_task_stop_loss_marks_row_infra_invalid():
+    row = {
+        "mode": "with_nexus",
+        "status": "SUCCESS",
+        "wall_duration_sec": 601.0,
+        "run_eligible": True,
+        "infra_invalid_reason": None,
+        "token_reliable": True,
+    }
+
+    assert _apply_per_task_stop_loss(row, 600) is True
+
+    assert row["run_eligible"] is False
+    assert row["infra_invalid_reason"] == "task_stop_loss_exceeded"
+    assert row["runtime_classification"] == "task_stop_loss_exceeded"
+    assert row["timeout_scope"] == "benchmark_per_task_stop_loss"
+    assert row["timeout_stage"] == "wall_clock_exceeded"
+    assert row["timeout_sec"] == 600
+    assert row["token_reliable"] is False
+
+
+def test_per_task_stop_loss_allows_rows_within_budget():
+    row = {"wall_duration_sec": 600.0, "run_eligible": True}
+
+    assert _apply_per_task_stop_loss(row, 600) is False
+
+    assert row["run_eligible"] is True
+    assert "infra_invalid_reason" not in row
+
+
+def test_partial_markdown_report_marks_public_gate_fail():
+    text = _render_partial_markdown_report(
+        benchmark_date="2026-04-28",
+        with_rows=[{"mode": "with_nexus"}],
+        without_rows=[],
+        benchmark_summary={"with_nexus": {"eligible_n": 0}},
+    )
+
+    assert "Public claim gate: FAIL" in text
+    assert "With Nexus rows: 1" in text
+    assert "Without Nexus rows: 0" in text
+    assert '"eligible_n": 0' in text
 
 
 def test_benchmark_rows_mark_zero_token_model_calls_unreliable():
