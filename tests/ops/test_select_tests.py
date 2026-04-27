@@ -15,10 +15,10 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
     impact_map.write_text(
         "\n".join(
             [
-                "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 |",
-                "| :--- | :--- | :--- |",
-                "| nexus/core | tests/core, tests/test_core_*.py | active |",
-                "| nexus/legacy | tests/legacy | retired |",
+                "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 |",
+                "| :--- | :--- | :--- | :--- |",
+                "| nexus/core | tests/core, tests/test_core_*.py | active | high |",
+                "| nexus/legacy | tests/legacy | retired | low |",
             ]
         ),
         encoding="utf-8",
@@ -31,6 +31,7 @@ def test_load_impact_rules_reads_active_markdown_rows(tmp_path):
             code_path="nexus/core",
             targets=("tests/core", "tests/test_core_*.py"),
             status="active",
+            risk="high",
         )
     ]
 
@@ -52,7 +53,7 @@ def test_select_targets_prefers_most_specific_prefix_and_deduplicates_targets():
 
 
 def test_select_targets_adds_fallback_for_unmapped_mixed_changes():
-    rules = [ImpactRule("nexus/core", ("tests/core",), "active")]
+    rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high")]
 
     targets, reasons = select_targets(
         ["nexus/core/state.py", "docs/testing/test_runbook.md"],
@@ -117,7 +118,7 @@ def test_select_target_details_merges_import_index_and_impact_map(tmp_path):
         ),
         encoding="utf-8",
     )
-    rules = [ImpactRule("nexus/core", ("tests/core",), "active")]
+    rules = [ImpactRule("nexus/core", ("tests/core",), "active", "high")]
 
     details = select_target_details(["nexus/core/state.py"], rules, index_path=index_path, history_path=tmp_path / "missing.jsonl")
 
@@ -187,7 +188,7 @@ def test_select_target_details_uses_history_and_high_risk_escalation(tmp_path):
         ),
         encoding="utf-8",
     )
-    rules = [ImpactRule("nexus/core", ("tests/core/slow.py", "tests/core/flaky.py"), "active")]
+    rules = [ImpactRule("nexus/core", ("tests/core/slow.py", "tests/core/flaky.py"), "active", "high")]
 
     details = select_target_details(["nexus/core/state.py"], rules, history_path=history)
 
@@ -217,9 +218,9 @@ def test_select_target_details_reports_unmatched_paths_and_fallback(tmp_path):
 def test_main_json_includes_selection_metadata(tmp_path, capsys):
     impact_map = tmp_path / "test_impact_map.md"
     impact_map.write_text(
-        "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 |\n"
-        "| :--- | :--- | :--- |\n"
-        "| nexus/core | tests/core | active |\n",
+        "| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 |\n"
+        "| :--- | :--- | :--- | :--- |\n"
+        "| nexus/core | tests/core | active | high |\n",
         encoding="utf-8",
     )
     index_path = tmp_path / "test_impact_index.json"

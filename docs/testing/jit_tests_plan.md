@@ -55,7 +55,7 @@ Selection now also reads `.nexus/reports/test_history.jsonl` when present.
 
 - Flaky targets are prioritized earlier.
 - Faster historical targets are prioritized before slower targets when other risk signals are equal.
-- `nexus/core`, `nexus/security`, and `scripts/ops/ci_gate.py` changes are marked high risk and receive the policy-gate safety target.
+- High-risk escalation is read from the `風險` column in `docs/testing/test_impact_map.md`; high-risk rows receive the policy-gate safety target.
 - `ci_gate.py --changed-only` writes changed-only run evidence back to test history.
 
 ## v3 Behavior
@@ -94,7 +94,7 @@ Do not add ML until observation data proves it is useful.
 3. Add an explainable score before ML:
    - import index hit: +5
    - impact map hit: +3
-   - high-risk prefix: +2
+   - high-risk impact-map metadata: +2
    - historical failure rate: +2
    - flaky target: +1
    - missed-candidate recovery: +3

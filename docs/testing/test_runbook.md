@@ -83,11 +83,7 @@ uv run python scripts/ops/jit_coverage_gap.py
 
 High-risk escalation:
 
-- `nexus/core`
-- `nexus/security`
-- `scripts/ops/ci_gate.py`
-
-這些路徑會自動標記 `risk=high`，並追加 policy-gate safety target。
+`docs/testing/test_impact_map.md` 的 `風險` 欄位是 high-risk SSoT；`risk=high` 的 active row 會追加 policy-gate safety target。`ci_gate.py --strict --changed-paths ...` 也會讀 selector metadata 來決定是否觸發 Ultra Review。
 
 Flaky retry recommendation:
 

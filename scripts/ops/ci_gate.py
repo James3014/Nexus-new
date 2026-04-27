@@ -379,20 +379,11 @@ def run_changed_only_check(changed_paths: list[str]) -> bool:
     return success
 
 
-ULTRA_REVIEW_HIGH_RISK_PREFIXES = (
-    "nexus/engine/",
-    "scripts/engine/nexus_cli.py",
-    "scripts/ops/ci_gate.py",
-    "scripts/ops/ultra_gate.py",
-)
-
-
 def requires_ultra_review(changed_paths: list[str]) -> bool:
-    normalized = [str(path).replace("\\", "/").strip() for path in changed_paths]
-    return any(
-        any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in ULTRA_REVIEW_HIGH_RISK_PREFIXES)
-        for path in normalized
-    )
+    from scripts.ops.select_tests import load_impact_rules, select_target_details
+
+    details = select_target_details(changed_paths, load_impact_rules())
+    return bool(details.high_risk_escalated or details.risk == "high")
 
 
 def run_ultra_review_check() -> bool:

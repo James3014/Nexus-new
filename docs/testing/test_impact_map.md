@@ -1,26 +1,28 @@
 # 測試影響映射 (Impact Map)
-| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 |
-| :--- | :--- | :--- |
-| nexus/core | tests/core, tests/test_core_*.py | active |
-| nexus/services | tests/services, tests/test_services_*.py | active |
-| nexus/engine | tests/engine, tests/test_engine_*.py | active |
-| nexus/app | tests/app | active |
-| nexus/research | tests/research | active |
-| nexus/benchmark | tests/benchmark | active |
-| nexus/connectors | tests/connectors | active |
-| nexus/security | tests/security | active |
-| nexus/pilot_cli | tests/pilot_cli | active |
-| nexus/health | tests/health | active |
-| nexus_dag_workflow.py | tests/test_async_dag_workflow.py | active |
-| scripts/ops/ci_gate.py | tests/ops/test_ci_gate_report_trust_audit.py, tests/ops/test_ci_gate_closeout_contract.py, tests/ops/test_ci_gate_wiki_sync_block.py | active |
-| scripts/ops/__init__.py | tests/ops/test_anti_drift_gate.py, tests/ops/test_soul_artifact_vault.py | active |
-| scripts/ops/select_tests.py | tests/ops/test_select_tests.py | active |
-| scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active |
-| scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active |
-| scripts/ops | tests/ops | active |
-| scripts/bench | tests/benchmark | active |
-| tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active |
-| tests/ops/test_select_tests.py | tests/ops/test_select_tests.py | active |
+| 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 |
+| :--- | :--- | :--- | :--- |
+| nexus/core | tests/core, tests/test_core_*.py | active | high |
+| nexus/services | tests/services, tests/test_services_*.py | active | medium |
+| nexus/engine | tests/engine, tests/test_engine_*.py | active | high |
+| nexus/app | tests/app | active | medium |
+| nexus/research | tests/research | active | medium |
+| nexus/benchmark | tests/benchmark | active | medium |
+| nexus/connectors | tests/connectors | active | medium |
+| nexus/security | tests/security | active | high |
+| nexus/pilot_cli | tests/pilot_cli | active | medium |
+| nexus/health | tests/health | active | medium |
+| nexus_dag_workflow.py | tests/test_async_dag_workflow.py | active | medium |
+| scripts/engine/nexus_cli.py | tests/test_cli_learn_mode.py, tests/test_cli_commands.py | active | high |
+| scripts/ops/ci_gate.py | tests/ops/test_ci_gate_report_trust_audit.py, tests/ops/test_ci_gate_closeout_contract.py, tests/ops/test_ci_gate_wiki_sync_block.py | active | high |
+| scripts/ops/ultra_gate.py | tests/ops/test_ultra_gate.py | active | high |
+| scripts/ops/__init__.py | tests/ops/test_anti_drift_gate.py, tests/ops/test_soul_artifact_vault.py | active | medium |
+| scripts/ops/select_tests.py | tests/ops/test_select_tests.py | active | high |
+| scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active | medium |
+| scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium |
+| scripts/ops | tests/ops | active | medium |
+| scripts/bench | tests/benchmark | active | medium |
+| tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active | medium |
+| tests/ops/test_select_tests.py | tests/ops/test_select_tests.py | active | medium |
 ## Candidate Legacy Tests
 | 檔案 | 理由 |
 | :--- | :--- |

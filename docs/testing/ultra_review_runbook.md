@@ -46,6 +46,5 @@ uv run pytest -q tests/engine/test_ultra_review_service.py tests/ops/test_ultra_
 
 ## Future Work
 
-1. Replace the sandbox mirror copy with a cheaper worktree/sparse checkout strategy.
-2. Add background task tracking only after the execution contract is stable.
-3. Expand high-risk path rules from static prefixes to selector risk metadata.
+1. Add background task tracking only after the execution contract is stable.
+2. Feed selector risk metadata from observed JIT misses and full-run feedback.

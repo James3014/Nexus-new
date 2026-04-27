@@ -20,7 +20,6 @@ DEFAULT_IMPACT_MAP = ROOT / "docs" / "testing" / "test_impact_map.md"
 DEFAULT_IMPACT_INDEX = ROOT / ".nexus" / "test_impact_index.json"
 DEFAULT_TEST_HISTORY = ROOT / ".nexus" / "reports" / "test_history.jsonl"
 DEFAULT_FALLBACK_TARGETS = ("tests/core", "tests/services/test_policy_gate.py")
-HIGH_RISK_PREFIXES = ("nexus/core", "nexus/security", "scripts/ops/ci_gate.py")
 HIGH_RISK_TARGETS = ("tests/services/test_policy_gate.py",)
 
 
@@ -29,6 +28,7 @@ class ImpactRule:
     code_path: str
     targets: tuple[str, ...]
     status: str
+    risk: str = "medium"
 
 
 @dataclass(frozen=True)
@@ -79,12 +79,14 @@ def load_impact_rules(path: Path = DEFAULT_IMPACT_MAP) -> list[ImpactRule]:
         return []
 
     rules: list[ImpactRule] = []
-    row_pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$")
+    row_pattern = re.compile(r"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*(?:\|\s*([^|]+?)\s*)?\|$")
     for line in path.read_text(encoding="utf-8").splitlines():
         match = row_pattern.match(line)
         if not match:
             continue
-        code_path, targets, status = [part.strip() for part in match.groups()]
+        parts = [(part or "").strip() for part in match.groups()]
+        code_path, targets, status = parts[:3]
+        risk = parts[3].lower() if len(parts) > 3 else "medium"
         if code_path in {"程式碼路徑", ":---"}:
             continue
         if status.lower() != "active":
@@ -97,6 +99,7 @@ def load_impact_rules(path: Path = DEFAULT_IMPACT_MAP) -> list[ImpactRule]:
                     code_path=normalized_code_path,
                     targets=split_targets,
                     status=status,
+                    risk=risk if risk in {"low", "medium", "high"} else "medium",
                 )
             )
     return rules
@@ -245,13 +248,10 @@ def select_target_details(
 
     normalized_paths = [_normalize_path(path) for path in changed_paths if path.strip()]
     unmatched_paths: list[str] = []
-    high_risk = any(
-        changed_path == prefix or changed_path.startswith(f"{prefix}/")
-        for changed_path in normalized_paths
-        for prefix in HIGH_RISK_PREFIXES
-    )
+    high_risk = False
     for changed_path in normalized_paths:
         path_matched = False
+        path_high_risk = False
         index_targets = index.get(changed_path, [])
         if index_targets:
             for target in index_targets:
@@ -262,6 +262,15 @@ def select_target_details(
                 sources.append("import_index")
             path_matched = True
 
+        matching_rules = [
+            rule
+            for rule in rules
+            if changed_path == rule.code_path or changed_path.startswith(f"{rule.code_path}/")
+        ]
+        if matching_rules:
+            most_specific_len = max(len(rule.code_path) for rule in matching_rules)
+            matched_rules = [rule for rule in matching_rules if len(rule.code_path) == most_specific_len]
+            path_high_risk = any(rule.risk == "high" for rule in matched_rules)
         mapped_targets, mapped_reasons = select_targets([changed_path], rules, ())
         for target in mapped_targets:
             if target not in selected:
@@ -271,6 +280,8 @@ def select_target_details(
                 sources.append("impact_map")
             reasons.extend(mapped_reasons)
             path_matched = True
+            if path_high_risk:
+                high_risk = True
         elif not path_matched:
             unmatched_paths.append(changed_path)
             reasons.extend(mapped_reasons or [f"{changed_path}: fallback"])
