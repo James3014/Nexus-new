@@ -476,6 +476,22 @@ def _patch_apply_events_idempotent(source: str) -> str:
         return source
 
 
+def _patch_response_result_field(source: str) -> str:
+    """Patch response builders to use the documented canonical result field."""
+    if "def build_response" not in source or "FIELD" not in source:
+        return source
+    if "FIELD = 'result'" in source or 'FIELD = "result"' in source:
+        return source
+    new_source = re.sub(r"^FIELD\s*=\s*['\"]status['\"]\s*$", "FIELD = 'result'", source, count=1, flags=re.MULTILINE)
+    if new_source == source:
+        return source
+    try:
+        compile(new_source, "<response_result_field_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
 def _patch_overall_status_requires_evidence(source: str) -> str:
     """Patch status aggregators so pass requires evidence on every phase."""
     if "def overall_status" not in source:
@@ -598,6 +614,10 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
 
     # Function-signature driven patches for benchmark-like deterministic tasks.
     patched = _patch_apply_events_idempotent(source)
+    if patched != source:
+        return patched
+
+    patched = _patch_response_result_field(source)
     if patched != source:
         return patched
 

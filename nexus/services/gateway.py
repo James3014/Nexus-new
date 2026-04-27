@@ -219,7 +219,7 @@ class BattlesuitGateway:
         timeout_override = os.getenv("NEXUS_GATEWAY_TIMEOUT_SEC")
         if timeout_override:
             try:
-                dynamic_timeout = min(dynamic_timeout, max(5, int(timeout_override)))
+                dynamic_timeout = max(5, int(timeout_override))
             except ValueError:
                 pass
 

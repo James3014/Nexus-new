@@ -1443,7 +1443,7 @@ def _benchmark_gateway_timeout_sec(default_sec: int = 30) -> str:
 
 def _benchmark_gateway_timeout_for_task(timeout_sec: int) -> int:
     # Give Gemini enough room to answer while preserving subprocess budget for Nexus verification.
-    return min(120, max(30, int(timeout_sec) - 20))
+    return min(220, max(30, int(timeout_sec) - 30))
 
 
 def _force_learn_slo_ready(repo_root: Path) -> None:

@@ -143,3 +143,26 @@ def test_gateway_timeout_returns_budget_telemetry(monkeypatch):
     assert data["gateway_payload_chars"] > 0
     assert data["gateway_timeout_sec"] == 7
     assert raw == "TIMEOUT"
+
+
+def test_gateway_timeout_override_can_extend_budget(monkeypatch):
+    cli_stdout = json.dumps({"response": "{\"status\":\"PASS\",\"summary\":\"ok\"}"})
+    fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
+    captured = {}
+
+    def fake_run(_command, **kwargs):
+        captured["timeout_sec"] = kwargs.get("timeout_sec")
+        return fake_proc
+
+    monkeypatch.setenv("NEXUS_GATEWAY_TIMEOUT_SEC", "180")
+    gateway = BattlesuitGateway(project_root=".")
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout", side_effect=fake_run):
+        data, _ = gateway.ask_structured(
+            "Return pass JSON",
+            "{}",
+            output_schema={"status": "PASS | FAIL", "summary": "Short explanation"},
+        )
+
+    assert data["status"] == "PASS"
+    assert data["gateway_timeout_sec"] == 180
+    assert captured["timeout_sec"] == 180

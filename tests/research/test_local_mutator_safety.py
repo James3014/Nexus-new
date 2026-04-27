@@ -130,3 +130,20 @@ def overall_status(phases):
     exec(patched, ns)
     assert ns["overall_status"]([{"status": "pass", "evidence": "a"}]) == "pass"
     assert ns["overall_status"]([{"status": "pass"}]) == "fail"
+
+
+def test_response_result_field_patch_uses_canonical_docs_field():
+    source = """FIELD = 'status'
+
+def build_response(value):
+    return {FIELD: value}
+"""
+    patched = generate_local_candidate(
+        source,
+        "Sync code and docs after a renamed public field; infer the canonical field from contract text",
+        "local",
+        0,
+    )
+    ns = {}
+    exec(patched, ns)
+    assert ns["build_response"]("ok") == {"result": "ok"}

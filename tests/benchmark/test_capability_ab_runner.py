@@ -124,8 +124,9 @@ def test_benchmark_gateway_timeout_has_short_default_and_override(monkeypatch):
 
 def test_benchmark_gateway_timeout_scales_with_task_budget():
     assert _benchmark_gateway_timeout_for_task(10) == 30
-    assert _benchmark_gateway_timeout_for_task(120) == 100
-    assert _benchmark_gateway_timeout_for_task(180) == 120
+    assert _benchmark_gateway_timeout_for_task(120) == 90
+    assert _benchmark_gateway_timeout_for_task(180) == 150
+    assert _benchmark_gateway_timeout_for_task(300) == 220
 
 
 def test_parse_direct_gemini_json_marks_stats_tokens_measured():
