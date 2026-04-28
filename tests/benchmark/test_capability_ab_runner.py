@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -26,6 +27,7 @@ from scripts.bench.capability_ab_runner import (
     _ask_direct_gemini_flash_patch,
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
+    build_public_benchmark_preflight,
     _materialize_fixture,
     _nexus_task_desc,
     _parse_direct_gemini_json,
@@ -131,6 +133,114 @@ def test_benchmark_gateway_timeout_scales_with_task_budget():
     assert _benchmark_gateway_timeout_for_task(120) == 90
     assert _benchmark_gateway_timeout_for_task(180) == 150
     assert _benchmark_gateway_timeout_for_task(300) == 220
+
+
+def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix the hidden bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_hidden_governance",
+                        "rlm_challenge": "hidden_governance",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=2,
+        shuffle_seed=7,
+        without_mode="gemini",
+        with_llm_mode="all",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "PASS"
+    assert report["model_lock"]["same_model"] is True
+    assert report["task_manifest"]["selected_n"] == 1
+    assert report["task_manifest"]["expanded_n"] == 2
+    assert report["public_claim_requirements"]["hidden_verifier_mode"] is True
+
+
+def test_public_benchmark_preflight_fails_for_unlocked_model_and_no_hidden_verifier(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-demo",
+                "description": "demo",
+                "tasks": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("NEXUS_VALUE_HIDDEN_VERIFIER", raising=False)
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3.1-pro-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="all",
+        timeout_sec=300,
+        total_timeout_sec=0,
+        stop_loss_sec=0,
+        per_task_stop_loss_sec=900,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="",
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "FAIL"
+    assert "model_lock_mismatch" in report["failures"]
+    assert "hidden_verifier_disabled" in report["failures"]
+    assert "per_task_stop_loss_above_600" in report["failures"]
+    assert "manifest_tasks_empty" in report["failures"]
 
 
 def test_parse_direct_gemini_json_marks_stats_tokens_measured():

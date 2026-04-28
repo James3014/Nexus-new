@@ -43,6 +43,19 @@
           "target_file": {"type": "string"},
           "test_file": {"type": "string"},
           "fixture_kind": {"type": "string"},
+          "rlm_challenge": {
+            "enum": [
+              "multi_file",
+              "long_context",
+              "misleading_tests",
+              "second_round_diagnosis",
+              "hidden_governance",
+              "hidden_evidence",
+              "hidden_second_round",
+              "hidden_belief_budget",
+              "hidden_memory_contract"
+            ]
+          },
           "success_criteria": {"enum": ["all_target_tests_pass", "patch_and_tests_pass", "report_contract_verified"]},
           "mutation_required": {"type": "boolean"},
           "allowed_files": {"type": "array", "items": {"type": "string"}},

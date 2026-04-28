@@ -1841,6 +1841,162 @@ def assert_clean_worktree(repo_root: Path) -> None:
         raise RuntimeError("Benchmark requires a clean worktree; dirty entries:\n" + status)
 
 
+def _manifest_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+
+
+def _public_manifest_shape_failures(path: Path) -> list[str]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [f"manifest_parse_failed:{exc.__class__.__name__}"]
+
+    failures: list[str] = []
+    required_top = {"version", "frozen", "benchmark_id", "description", "tasks"}
+    missing_top = sorted(required_top - set(payload))
+    if missing_top:
+        failures.append("manifest_missing_top_fields:" + ",".join(missing_top))
+    if not isinstance(payload.get("tasks"), list) or not payload.get("tasks"):
+        failures.append("manifest_tasks_empty")
+        return failures
+
+    required_task = {
+        "id",
+        "category",
+        "difficulty",
+        "repo_kind",
+        "repo",
+        "repo_ref",
+        "task_desc",
+        "success_criteria",
+        "mutation_required",
+        "allowed_files",
+        "forbidden_files",
+        "setup_command",
+        "verification_command",
+    }
+    allowed_task = required_task | {"target_file", "test_file", "fixture_kind", "rlm_challenge"}
+    for index, task in enumerate(payload["tasks"], start=1):
+        if not isinstance(task, dict):
+            failures.append(f"manifest_task_{index}_not_object")
+            continue
+        missing = sorted(required_task - set(task))
+        if missing:
+            failures.append(f"manifest_task_{index}_missing:" + ",".join(missing))
+        unknown = sorted(set(task) - allowed_task)
+        if unknown:
+            failures.append(f"manifest_task_{index}_unknown:" + ",".join(unknown))
+    return failures
+
+
+def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Path) -> dict[str, Any]:
+    failures: list[str] = []
+    warnings: list[str] = []
+    tasks_path = Path(args.tasks_file)
+    if not tasks_path.is_absolute():
+        tasks_path = (repo_root / tasks_path).resolve()
+    if not tasks_path.exists():
+        failures.append("tasks_file_missing")
+        tasks: list[CapabilityTask] = []
+        selected_tasks: list[CapabilityTask] = []
+        expanded_tasks: list[CapabilityTask] = []
+        manifest_hash = ""
+    else:
+        failures.extend(_public_manifest_shape_failures(tasks_path))
+        tasks = filter_tasks_by_id(
+            filter_tasks_by_repo_kind(load_tasks(tasks_path), args.repo_kind_filter),
+            args.task_id_filter,
+        )
+        selected_tasks = select_tasks(tasks, difficulty=args.difficulty, max_tasks=args.max_tasks)
+        expanded_tasks = expand_task_trials(
+            selected_tasks,
+            repeat_trials=int(args.repeat_trials),
+            shuffle_seed=args.shuffle_seed,
+        )
+        manifest_hash = _manifest_sha256(tasks_path)
+        if not selected_tasks:
+            failures.append("no_tasks_selected")
+
+    env_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "").strip()
+    direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "").strip()
+    if not env_model:
+        failures.append("nexus_model_env_missing")
+    if args.without_mode == "gemini" and not direct_model:
+        failures.append("direct_model_env_missing")
+    if env_model and direct_model and env_model != direct_model:
+        failures.append("model_lock_mismatch")
+    if args.without_mode == "gemini" and args.with_llm_mode == "off":
+        warnings.append("with_nexus_llm_off_while_bare_uses_gemini")
+    if not _hidden_verifier_mode_enabled():
+        failures.append("hidden_verifier_disabled")
+    if int(args.timeout_sec) <= 0:
+        failures.append("timeout_sec_invalid")
+    if int(args.per_task_stop_loss_sec) <= 0:
+        failures.append("per_task_stop_loss_missing")
+    if int(args.per_task_stop_loss_sec) > 600:
+        failures.append("per_task_stop_loss_above_600")
+    effective_total = _effective_total_timeout_sec(int(args.total_timeout_sec), int(args.stop_loss_sec))
+    if effective_total <= 0:
+        warnings.append("total_timeout_disabled")
+
+    dirty_status = ""
+    try:
+        dirty_status = _git_status_porcelain(repo_root)
+    except Exception as exc:
+        warnings.append(f"git_status_unavailable:{exc.__class__.__name__}")
+    if dirty_status and bool(args.require_clean_worktree):
+        failures.append("worktree_dirty")
+    elif dirty_status:
+        warnings.append("worktree_dirty_recorded")
+
+    report = {
+        "schema": "nexus_public_benchmark_preflight_v1",
+        "status": "PASS" if not failures else "FAIL",
+        "failures": failures,
+        "warnings": warnings,
+        "run_identity": {
+            "nexus_git_commit": _git_commit(repo_root),
+            "cwd": str(repo_root),
+            "runner": "scripts/bench/capability_ab_runner.py",
+            "runner_command": " ".join(sys.argv),
+            "dirty_entries": dirty_status.splitlines() if dirty_status else [],
+        },
+        "model_lock": {
+            "env_model_name": env_model,
+            "direct_model_name": direct_model,
+            "same_model": bool(env_model and direct_model and env_model == direct_model),
+            "without_mode": args.without_mode,
+            "with_llm_mode": args.with_llm_mode,
+        },
+        "task_manifest": {
+            "path": str(tasks_path),
+            "sha256": manifest_hash,
+            "loaded_n": len(tasks),
+            "selected_n": len(selected_tasks),
+            "expanded_n": len(expanded_tasks),
+            "repeat_trials": int(args.repeat_trials),
+            "shuffle_seed": args.shuffle_seed,
+            "task_ids": [task.id for task in selected_tasks],
+        },
+        "timeouts": {
+            "timeout_sec": int(args.timeout_sec),
+            "total_timeout_sec": int(args.total_timeout_sec),
+            "effective_total_timeout_sec": effective_total,
+            "stop_loss_sec": int(args.stop_loss_sec),
+            "per_task_stop_loss_sec": int(args.per_task_stop_loss_sec),
+            "direct_gemini_timeout_sec": _direct_gemini_timeout_sec(int(args.timeout_sec)),
+        },
+        "public_claim_requirements": {
+            "hidden_verifier_mode": _hidden_verifier_mode_enabled(),
+            "eligibility_schema_required": True,
+            "evidence_bundle_required": bool(args.evidence_bundle),
+            "markdown_report_requested": bool(args.markdown_report),
+            "nexus_wearing_required": args.with_llm_mode in {"hard", "all"},
+        },
+    }
+    return report
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run capability A/B benchmark: with_nexus vs without_nexus.")
     parser.add_argument("--tasks-file", default="scripts/bench/capability_tasks_v1.json")
@@ -1922,6 +2078,11 @@ def main() -> int:
     parser.add_argument("--evidence-bundle", dest="evidence_bundle", action="store_true", default=True)
     parser.add_argument("--no-evidence-bundle", dest="evidence_bundle", action="store_false")
     parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Validate public benchmark inputs and write benchmark_preflight.json without invoking Gemini or Nexus.",
+    )
+    parser.add_argument(
         "--markdown-report",
         default="",
         help="Optional markdown report path. Use 'auto' to write gemini_nexus_report_<timestamp>.md in output-dir.",
@@ -1944,6 +2105,15 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     if args.require_clean_worktree:
         assert_clean_worktree(repo_root)
+    if args.preflight_only:
+        report = build_public_benchmark_preflight(args, repo_root=repo_root)
+        out_dir = (repo_root / args.output_dir).resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        report_path = out_dir / "benchmark_preflight.json"
+        report["report_path"] = str(report_path)
+        report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0 if report["status"] == "PASS" else 2
     filtered_tasks = filter_tasks_by_id(
         filter_tasks_by_repo_kind(load_tasks(args.tasks_file), args.repo_kind_filter),
         args.task_id_filter,
