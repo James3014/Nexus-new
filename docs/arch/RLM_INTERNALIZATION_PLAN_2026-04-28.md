@@ -73,6 +73,16 @@ Acceptance:
 - trace 可 JSONL append。
 - budget 可累計並判斷 exhausted。
 
+Status:
+
+- 2026-04-28 implemented.
+- Tests: `tests/contracts/test_rlm_contracts.py`.
+- Current scope: contracts only; no pipeline, CLI, research, nightshift, swarm, or benchmark behavior changed.
+
+Lesson:
+
+- Budget exhaustion semantics must be explicit. A limit is considered exhausted when usage reaches the limit, not only when usage exceeds it. Tests now lock this down before R-loop wiring.
+
 ## Phase 1: R-phase RecursiveRepairLoop
 
 目標：把 RLM loop 放進 Repair phase，不繞過 A gate。
