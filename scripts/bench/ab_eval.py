@@ -136,6 +136,110 @@ _NEXUS_PILLAR_KEYS = (
 _NEXUS_PHASE_KEYS = ("phase_p", "phase_x", "phase_d", "phase_r", "phase_a", "phase_c")
 
 
+_CAPABILITY_COVERAGE_SPEC: dict[str, dict[str, Any]] = {
+    "codeintel": {
+        "selected": lambda r: "codeintel" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("codeintel_impact_report_present")),
+        "invoked": lambda r: _is_true(r.get("codeintel_scan_report_present")) or _is_true(r.get("codeintel_impact_report_present")),
+        "evidence": lambda r: _is_true(r.get("codeintel_claim_bundle_present")) or bool(str(r.get("codeintel_impact_report_path", "")).strip()),
+        "gate": lambda r: _is_true(r.get("codeintel_impact_report_present")) and _is_true(r.get("codeintel_claim_bundle_present")),
+    },
+    "hyper": {
+        "selected": lambda r: str(r.get("route_recommended_flow", "")).strip() == "hyper_sprint"
+        or "hyper" in _csvish(r.get("capability_plan_selected"))
+        or _is_true(r.get("capability_hyper_used")),
+        "invoked": lambda r: _is_true(r.get("capability_hyper_used")) or str(r.get("phase_r", "")).strip() == "hyper_executed",
+        "evidence": lambda r: _as_int(r.get("attempt_count"), 0) > 0 or bool(str(r.get("strategy_path", "")).strip()),
+        "gate": lambda r: _is_true(r.get("capability_claim_verified")),
+    },
+    "self_heal": {
+        "selected": lambda r: "repair_loop" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("capability_self_heal_used")),
+        "invoked": lambda r: _is_true(r.get("capability_self_heal_used")),
+        "evidence": lambda r: _as_int(r.get("attempt_count"), 0) > 1 or _is_true(r.get("artifact_changed")),
+        "gate": lambda r: _is_solved(r) and _is_true(r.get("capability_claim_verified")),
+    },
+    "swarm": {
+        "selected": lambda r: "swarm" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("capability_swarm_used")),
+        "invoked": lambda r: _is_true(r.get("capability_swarm_used")),
+        "evidence": lambda r: _as_int(r.get("capability_swarm_evidence_count"), 0) > 0,
+        "gate": lambda r: _as_int(r.get("capability_swarm_evidence_count"), 0) > 0 and _is_true(r.get("capability_claim_verified")),
+    },
+    "drone": {
+        "selected": lambda r: "drone" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("capability_drone_used")),
+        "invoked": lambda r: _is_true(r.get("capability_drone_used")) or _as_int(r.get("capability_drone_invoked_count"), 0) > 0,
+        "evidence": lambda r: _as_int(r.get("capability_drone_invoked_count"), 0) > 0,
+        "gate": lambda r: _as_int(r.get("capability_drone_invoked_count"), 0) > 0 and _is_true(r.get("capability_claim_verified")),
+    },
+    "nightshift": {
+        "selected": lambda r: "nightshift" in _csvish(r.get("capability_plan_selected"))
+        or _is_true(r.get("capability_nightshift_recommended"))
+        or _is_true(r.get("guard_nightshift_recommended")),
+        "invoked": lambda r: _is_true(r.get("capability_nightshift_invoked")) or bool(str(r.get("capability_nightshift_report_path", "")).strip()),
+        "evidence": lambda r: bool(str(r.get("capability_nightshift_report_path", "")).strip()),
+        "gate": lambda r: _is_true(r.get("capability_nightshift_recovered")),
+    },
+    "autoreason": {
+        "selected": lambda r: "autoreason" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("autoreason_enabled")),
+        "invoked": lambda r: _is_true(r.get("autoreason_enabled")) or bool(str(r.get("autoreason_status", "")).strip()),
+        "evidence": lambda r: bool(str(r.get("autoreason_winner", "")).strip()) or _as_int(r.get("autoreason_judge_votes_count"), 0) > 0,
+        "gate": lambda r: bool(str(r.get("autoreason_winner", "")).strip()) and _is_true(r.get("capability_claim_verified")),
+    },
+    "ddtree": {
+        "selected": lambda r: _is_true(r.get("ddtree_enabled")) or "ddtree" in _csvish(r.get("capability_plan_selected")),
+        "invoked": lambda r: _is_true(r.get("ddtree_enabled")) and _is_true(r.get("ddtree_eligible")),
+        "evidence": lambda r: _as_int(r.get("ddtree_actual_saved_steps"), 0) > 0 or bool(str(r.get("ddtree_selected_candidate_ids", "")).strip()),
+        "gate": lambda r: _as_int(r.get("ddtree_actual_saved_steps"), 0) > 0 and _is_true(r.get("capability_claim_verified")),
+    },
+    "ultra_review": {
+        "selected": lambda r: _is_true(r.get("ultra_review_recommended")) or "ultra_review" in _csvish(r.get("capability_plan_selected")),
+        "invoked": lambda r: _is_true(r.get("ultra_review_invoked")),
+        "evidence": lambda r: bool(str(r.get("ultra_review_report_path", "")).strip()),
+        "gate": lambda r: _is_true(r.get("ultra_review_gate_passed")),
+    },
+    "rlm": {
+        "selected": lambda r: "rlm" in _csvish(r.get("capability_plan_selected")) or _is_true(r.get("rlm_trace_present")),
+        "invoked": lambda r: _is_true(r.get("rlm_trace_present")),
+        "evidence": lambda r: _as_int(r.get("rlm_iteration_count"), 0) > 0 or _as_float(r.get("rlm_trace_quality_score"), 0.0) > 0,
+        "gate": lambda r: _as_float(r.get("rlm_trace_quality_score"), 0.0) >= 60.0,
+    },
+}
+
+
+def _csvish(value: Any) -> set[str]:
+    if isinstance(value, list):
+        return {str(item).strip() for item in value if str(item).strip()}
+    if isinstance(value, tuple):
+        return {str(item).strip() for item in value if str(item).strip()}
+    text = str(value or "").strip()
+    if not text:
+        return set()
+    return {item.strip() for item in text.replace(";", ",").split(",") if item.strip()}
+
+
+def summarize_capability_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(rows)
+    matrix: dict[str, Any] = {}
+    for capability, spec in _CAPABILITY_COVERAGE_SPEC.items():
+        selected = sum(1 for row in rows if spec["selected"](row))
+        invoked = sum(1 for row in rows if spec["invoked"](row))
+        evidence = sum(1 for row in rows if spec["evidence"](row))
+        gate = sum(1 for row in rows if spec["gate"](row))
+        outcome = sum(1 for row in rows if spec["gate"](row) and _is_solved(row))
+        matrix[capability] = {
+            "selected_count": selected,
+            "selected_rate": round(selected / total, 4) if total else 0.0,
+            "invoked_count": invoked,
+            "invoked_rate": round(invoked / total, 4) if total else 0.0,
+            "evidence_count": evidence,
+            "evidence_rate": round(evidence / total, 4) if total else 0.0,
+            "gate_count": gate,
+            "gate_rate": round(gate / total, 4) if total else 0.0,
+            "outcome_count": outcome,
+            "outcome_rate": round(outcome / total, 4) if total else 0.0,
+            "public_safe": bool(total and selected and invoked == selected and evidence == selected and gate == selected),
+        }
+    return matrix
+
+
 def _task_id(row: dict[str, Any], index: int) -> str:
     value = row.get("task_id", row.get("id", f"row_{index + 1}"))
     return str(value)
@@ -621,6 +725,10 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         "a": {"label": label_a, "summary": summary_a},
         "b": {"label": label_b, "summary": summary_b},
         "delta": delta,
+        "capability_coverage": {
+            "a": summarize_capability_coverage(rows_a),
+            "b": summarize_capability_coverage(rows_b),
+        },
         "by_category": compare_grouped(rows_a, rows_b, field="category"),
         "by_repo_kind": compare_grouped(rows_a, rows_b, field="repo_kind"),
         "formal_treatment": formal_treatment,

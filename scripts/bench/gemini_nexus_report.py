@@ -86,6 +86,60 @@ def _reasons_text(counts: dict[str, int]) -> str:
     return ", ".join(f"{reason}:{count}" for reason, count in sorted(counts.items()))
 
 
+def _capability_coverage_rows(report: dict[str, Any]) -> list[str]:
+    coverage = ((report.get("capability_coverage") or {}).get("b") or {})
+    if not isinstance(coverage, dict) or not coverage:
+        return ["| none | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO |"]
+    rows: list[str] = []
+    for name in sorted(coverage):
+        item = coverage.get(name) or {}
+        rows.append(
+            "| "
+            + " | ".join(
+                [
+                    str(name),
+                    _pct(item.get("selected_rate")),
+                    _pct(item.get("invoked_rate")),
+                    _pct(item.get("evidence_rate")),
+                    _pct(item.get("gate_rate")),
+                    _pct(item.get("outcome_rate")),
+                    "YES" if item.get("public_safe") else "NO",
+                ]
+            )
+            + " |"
+        )
+    return rows
+
+
+def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
+    coverage = ((report.get("capability_coverage") or {}).get("b") or {})
+    failures: list[str] = []
+    public_safe: list[str] = []
+    if not isinstance(coverage, dict):
+        return {"verdict": "FAIL", "public_safe": [], "failures": ["coverage_missing"]}
+    for name, item in sorted(coverage.items()):
+        if not isinstance(item, dict):
+            failures.append(f"{name}:invalid_coverage")
+            continue
+        selected = float(item.get("selected_rate", 0.0) or 0.0)
+        if selected <= 0:
+            continue
+        if item.get("public_safe"):
+            public_safe.append(str(name))
+        else:
+            missing = [
+                layer
+                for layer in ("invoked", "evidence", "gate")
+                if float(item.get(f"{layer}_rate", 0.0) or 0.0) < selected
+            ]
+            failures.append(f"{name}:{'+'.join(missing) or 'not_public_safe'}")
+    return {
+        "verdict": "PASS" if not failures else "FAIL",
+        "public_safe": public_safe,
+        "failures": failures,
+    }
+
+
 def _public_token_claim_status(a: dict[str, Any], b: dict[str, Any], *, min_rate: float = 0.8) -> str:
     try:
         without_rate = float(a.get("token_measured_rate", 0.0) or 0.0)
@@ -241,6 +295,7 @@ def render_markdown_report(
         summary_with=b,
         formal=formal,
     )
+    capability_gate = _per_capability_public_gate(report)
     gate_failures = public_gate["failures"]
     solve_delta = float(eligible_solve_delta)
     if solve_delta > 0:
@@ -340,6 +395,12 @@ def render_markdown_report(
         f"| RLM trace present | {_pct(a['rlm_trace_present_rate'])} | {_pct(b['rlm_trace_present_rate'])} | {_pct(delta['rlm_trace_present_rate_delta'])} | recursive trace emitted |",
         f"| RLM trace quality | {_num(a['avg_rlm_trace_quality_score'])} | {_num(b['avg_rlm_trace_quality_score'])} | {_num(delta['avg_rlm_trace_quality_score_delta'])} | trace has submit/A-gate/evidence signal |",
         "",
+        "## Capability Coverage Matrix",
+        "",
+        "| Capability | Selected | Invoked | Evidence | Gate | Outcome | Public safe |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        *_capability_coverage_rows(report),
+        "",
         "## Capability Win Map",
         "",
         "| Task | Trial | Capability | Without Nexus | With Nexus |",
@@ -365,6 +426,9 @@ def render_markdown_report(
         "",
         f"- Public claim gate: {public_gate['verdict']}",
         f"- Public claim gate failures: {_reasons_text({reason: 1 for reason in gate_failures})}",
+        f"- Per-capability public gate: {capability_gate['verdict']}",
+        f"- Per-capability public-safe capabilities: {', '.join(capability_gate['public_safe']) if capability_gate['public_safe'] else 'none'}",
+        f"- Per-capability gate failures: {_reasons_text({reason: 1 for reason in capability_gate['failures']})}",
         f"- Without Nexus usable rows: {eligible_without}/{without_scope['rows']}",
         f"- With Nexus usable rows: {eligible_with}/{with_scope['rows']}",
         f"- Without Nexus infra invalid reasons: {_reasons_text(infra_without)}",

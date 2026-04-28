@@ -243,3 +243,23 @@ def test_capability_planner_selects_second_wave_platform_capabilities():
         "oracle_shadow",
         "stress_test",
     } <= selected
+
+
+def test_capability_planner_selects_msa_capabilities_from_explicit_task_type_words():
+    plan = CapabilityPlanner().plan(
+        task_desc="Cross-module refactor: align swarm ownership, drone handoff, and NightShift fallback.",
+        task_type="cross_module_refactor_swarm_drone_nightshift",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 45,
+                "adjusted_root_cause_confidence": 0.72,
+                "candidate_count": 1,
+                "is_cross_module_task": True,
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"swarm", "drone", "nightshift"} <= selected

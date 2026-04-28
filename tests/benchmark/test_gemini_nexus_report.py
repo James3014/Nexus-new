@@ -558,6 +558,12 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
     assert "| DDTree enabled | 0.0% | 100.0% | 100.0% |" in out
     assert "| Ultra Review invoked | 0.0% | 100.0% | 100.0% |" in out
     assert "| Capability plan trace | 0.0% | 100.0% | 100.0% |" in out
+    assert "## Capability Coverage Matrix" in out
+    assert "| autoreason | 100.0% | 100.0% |" in out
+    assert "| ddtree | 100.0% | 100.0% |" in out
+    assert "| ultra_review | 100.0% | 100.0% |" in out
+    assert "Per-capability public gate: FAIL" in out
+    assert "Per-capability gate failures:" in out
     assert "| Capability plan nodes | 0.00 | 12.00 | 12.00 |" in out
     assert "On this fixed benchmark set, `nexus` improved eligible solve rate" in out
 

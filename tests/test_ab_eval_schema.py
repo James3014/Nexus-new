@@ -198,12 +198,48 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["rlm_trace_present_rate_delta"] == 0.5
     assert report["b"]["summary"]["avg_rlm_trace_quality_score"] == 40.0
     assert report["delta"]["avg_rlm_trace_quality_score_delta"] == 40.0
+    coverage = report["capability_coverage"]["b"]
+    assert coverage["hyper"]["selected_rate"] == 0.5
+    assert coverage["hyper"]["invoked_rate"] == 0.5
+    assert coverage["swarm"]["evidence_rate"] == 0.0
+    assert coverage["drone"]["selected_rate"] == 0.0
+    assert coverage["nightshift"]["selected_rate"] == 0.5
+    assert coverage["nightshift"]["gate_rate"] == 0.0
+    assert coverage["autoreason"]["evidence_rate"] == 0.0
+    assert coverage["ddtree"]["invoked_rate"] == 0.5
+    assert coverage["ultra_review"]["gate_rate"] == 0.5
+    assert coverage["rlm"]["gate_rate"] == 0.5
+    assert coverage["ultra_review"]["public_safe"] is False
     assert report["rule_lifecycle"][0]["rule_id"] == "verified-delivery-governance"
     assert report["rule_lifecycle"][0]["recommended_state"] == "active"
     assert report["rule_lifecycle"][1]["rule_id"] == "rlm-trace"
     assert report["by_category"]["bugfix"]["solve_rate_delta"] == 1.0
     assert report["by_category"]["feature"]["patch_success_rate_delta"] == 1.0
     assert report["by_repo_kind"]["neutral_fixture"]["solve_rate_delta"] == 1.0
+
+
+def test_ab_eval_capability_coverage_counts_planned_msa_selection(tmp_path):
+    dataset_a = tmp_path / "a.jsonl"
+    dataset_b = tmp_path / "b.jsonl"
+    dataset_a.write_text('{"task_id":"a","semantic_status":"UNVERIFIED"}\n', encoding="utf-8")
+    dataset_b.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "semantic_status": "VERIFIED",
+                "capability_plan_selected": ["swarm", "drone", "nightshift"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = compare_datasets("without", load_runs(dataset_a), "with", load_runs(dataset_b))
+    coverage = report["capability_coverage"]["b"]
+    assert coverage["swarm"]["selected_rate"] == 1.0
+    assert coverage["drone"]["selected_rate"] == 1.0
+    assert coverage["nightshift"]["selected_rate"] == 1.0
+    assert coverage["swarm"]["public_safe"] is False
 
 
 def test_ab_eval_counts_trust_mismatch_rate(tmp_path):

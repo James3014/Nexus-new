@@ -69,6 +69,19 @@ incrementally.
 - Governance and trust tasks recommend Ultra Review without manual flags.
 - Gemini benchmark is only run after Nexus-only routing health passes.
 
+## 2026-04-29 P62 Learning Closure
+- P62 Nexus-only full-capability smoke must use both `--timeout-sec` and
+  `--per-task-stop-loss-sec`. The runner subprocess default can be 30s, which is
+  too low once the planner selects heavier MSA capabilities.
+- Capability coverage must distinguish `selected`, `invoked`, `evidence`,
+  `gate`, and `outcome`. A selected capability is not public-safe until invoked
+  evidence and gate evidence exist.
+- Current P62 smoke showed CodeIntel, Hyper, Autoreason, and Ultra Review as
+  public-safe. Swarm, Drone, and Nightshift were selected by planner signals but
+  did not produce invoked/evidence/gate receipts, so they remain migration debt.
+- DDTree was selected and gated only on the candidate-heavy row; public claims
+  about DDTree must be scoped to eligible candidate-pool tasks.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

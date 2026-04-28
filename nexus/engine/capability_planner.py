@@ -565,6 +565,9 @@ class CapabilityPlanner:
         repair_signal = any(token in task_lower for token in ("repair", "self-heal", "failing branch", "timeout", "flaky"))
         learning_signal = any(token in task_lower for token in ("learn", "citation", "slo", "kpi", "source", "claim"))
         multi_agent_signal = any(token in task_lower for token in ("multi-agent", "owner", "file lock", "worktree", "integrate"))
+        swarm_signal = "swarm" in task_lower
+        drone_signal = "drone" in task_lower
+        nightshift_signal = "nightshift" in task_lower
         ui_signal = any(token in task_lower for token in ("ui", "browser", "screen", "accessibility", "visual"))
         continuity_signal = any(token in task_lower for token in ("resume", "distill", "checkpoint", "metabolism"))
 
@@ -621,16 +624,16 @@ class CapabilityPlanner:
         if risk_score >= 30 or governance_signal or evidence_signal:
             enable("pregate", "risk_or_policy_precheck")
             enable("plan_quality_gate", "plan_review_required")
-        if cross_module and risk_score >= 70:
+        if swarm_signal or (cross_module and risk_score >= 70):
             enable("swarm", "cross_module_high_risk_review")
-        if "parallel" in task_lower or "split" in task_lower or (cross_module and candidate_count >= 2):
+        if drone_signal or "parallel" in task_lower or "split" in task_lower or (cross_module and candidate_count >= 2):
             enable("drone", "parallelizable_subtask_signal")
         if multi_agent_signal or (cross_module and risk_score >= 60):
             enable("file_lock", "multi_agent_write_boundary")
             enable("multi_agent", "coordinated_ownership_required")
         if "merge" in task_lower or "integrate" in task_lower or "integration" in task_lower:
             enable("integration_manager", "integration_or_merge_signal")
-        if risk_score >= 90 or "long" in task_lower or "nightshift" in governance_seed:
+        if risk_score >= 90 or "long" in task_lower or nightshift_signal or "nightshift" in governance_seed:
             enable("nightshift", "long_or_critical_risk")
         if ui_signal:
             enable("ui_validator", "ui_validation_signal")
