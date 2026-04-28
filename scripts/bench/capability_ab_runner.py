@@ -728,10 +728,18 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
             "is present, and `receipt.get('exit_code') == 0`. The field is named "
             "`exit_code`, not `replay_exit_code`. Return False otherwise."
         )
-    if task.fixture_kind in {"rlm_harder_v2_memory_contract", "rlm_harder_v2_belief_budget"}:
+    if task.fixture_kind == "rlm_harder_v2_memory_contract":
         desc += (
             "\n\nNexus Belief/Memory rule: prior fixes are relevant only when they share "
             "both task type and meaningful keyword overlap. Ignore unrelated same-type history."
+        )
+    if task.fixture_kind == "rlm_harder_v2_belief_budget":
+        desc += (
+            "\n\nNexus Belief budget rule: implement "
+            "`rlm_harder_v2_repair_budget(confidence, risk)` so low-confidence, "
+            "high-risk work returns `{'rounds': 3, 'needs_evidence': True}`. "
+            "High-confidence, low-risk work should stay fast with "
+            "`{'rounds': 1, 'needs_evidence': False}`."
         )
     return desc
 

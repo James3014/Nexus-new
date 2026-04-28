@@ -784,7 +784,8 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
 
     assert "Nexus MemPalace rule" in _nexus_task_desc(governance)
     assert "Nexus Belief/Memory rule" in _nexus_task_desc(memory)
-    assert "Nexus Belief/Memory rule" in _nexus_task_desc(belief)
+    assert "Nexus Belief budget rule" in _nexus_task_desc(belief)
+    assert "{'rounds': 3, 'needs_evidence': True}" in _nexus_task_desc(belief)
     assert "Nexus replay evidence rule" in _nexus_task_desc(replay)
     assert "`exit_code`, not `replay_exit_code`" in _nexus_task_desc(replay)
 

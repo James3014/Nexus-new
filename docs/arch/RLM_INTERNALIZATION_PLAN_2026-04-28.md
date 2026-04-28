@@ -604,3 +604,56 @@ Residual risk：
 1. 跑 8 題 x 2 trials，確認 +87.5 pp lift 是否穩定。
 2. 檢查 `capability_swarm_used` 來源，確認 Swarm=100% 不是過寬標記。
 3. 設計 Drone/Nightshift 專用 public-candidate 題，再納入 MSA 報告。
+
+## Phase 1 P21 8-task x2 Trials 初跑
+
+日期：2026-04-28
+
+指令摘要：
+
+- model：`gemini-3-flash-preview`
+- tasks：`scripts/bench/public_benchmark_rlm_harder_v2.json`
+- rows：16 bare + 16 Nexus
+- hidden verifier：on
+- RLM trace：on
+- stop-loss：600s per task
+- report：`.nexus/reports/bench_gemini3flash_rlm_v2_8task_2trials_c43d6ab1/gemini_nexus_report_1777349155.md`
+
+結果：
+
+- Nexus+RLM：14/16 solve，semantic verified 87.5%，trust mismatch 0%，RLM trace present 100%，avg wall time 90.47s。
+- Bare Gemini 3 Flash：14 eligible rows，4/14 eligible solve，eligible solve 28.6%，trust mismatch 0%，avg wall time 63.67s。
+- Public claim gate：FAIL，原因是 Nexus `rlm-harder-v2-belief-001` 兩個 trials 都未 verified，formal treatment valid 14/16。
+
+Failure lesson：
+
+- 單次 8/8 smoke 不能直接當公開級結果；2 trials 暴露 `belief-001` 是穩定弱點。
+- `belief-001` 的 Nexus prompt 只有通用 Belief/Memory rule，沒有把 `rlm_harder_v2_repair_budget(confidence, risk)` 的精確輸出 contract 下沉給模型。
+- 兩次失敗的 winner 都是 `local`，target diff 為空，表示此題沒有進入有效 LLM patch，而是落到無效 fallback。
+
+修正：
+
+- 將 `rlm_harder_v2_belief_budget` 從通用 Memory relevance rule 拆出，新增精確 Belief budget rule：
+  - 低信心高風險：`{'rounds': 3, 'needs_evidence': True}`
+  - 高信心低風險：`{'rounds': 1, 'needs_evidence': False}`
+
+產品化優先序採納：
+
+1. 證據與驗證框架。
+2. 任務路由與上下文注入。
+3. 治理、審計、回復機制。
+4. 自動化 benchmark 與持續優化迴圈。
+
+下一步：
+
+1. 單題重跑 `rlm-harder-v2-belief-001`，確認 Nexus 是否由 FAIL 轉 SUCCESS，且 bare 仍 FAIL。
+2. 若通過，重跑 8 題 x 2 trials 或至少 patch-in rerun evidence 後再做公開草稿。
+3. P22b 檢查 `capability_swarm_used` 來源，避免 Swarm=100% 是標記過寬。
+4. P23 新增 Drone/Nightshift 專用 public-candidate 題。
+
+單題修正驗證：
+
+- report：`.nexus/reports/bench_gemini3flash_rlm_v2_belief001_fix_c43d6ab1/gemini_nexus_report_1777351774.md`
+- Nexus：1/1 solve，semantic verified 100%，wall 57.61s。
+- Bare：0/1 solve，semantic verified 0%，wall 159.40s。
+- 結論：Belief budget contract 下沉有效，下一步可重跑完整 8 題 x 2 trials。
