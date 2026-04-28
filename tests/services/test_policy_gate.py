@@ -27,7 +27,7 @@ def test_policy_gate_blocks_low_health():
         assert decision.gated_score < 0
         
         # 驗證持久化
-        policy_file = repo_root / ".nexus" / "knowledge" / "policymemory.jsonl"
+        policy_file = repo_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
         assert policy_file.exists()
         print("\n✅ Policy Gate BLOCK Verified")
     finally:

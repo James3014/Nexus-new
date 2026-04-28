@@ -123,6 +123,35 @@ Status:
 Lesson:
 - RLM hardening should be measured as policy compliance and trace quality, not only solve rate. `SUBMIT` must remain a handoff to A gate, never a success claim.
 
+## P34: X-Phase Recursive Research Loop
+
+What:
+- Research auto-flow already emits RLM trace when `NEXUS_RLM_REPAIR_LOOP=1`.
+
+Why:
+- Benchmark product paths often enter through `research:auto-flow`, so RLM evidence must be visible there even when the lower pipeline repair loop is not the direct execution path.
+
+How:
+- Current bridge writes R/A trace events from research result and artifact verification.
+- Full recursive research remains future work: iterative hypotheses, evidence scoring, winner reason, and budgeted X-loop.
+
+Status:
+- 2026-04-28 P34a verified as trace bridge, not full recursive X-loop.
+- P34b remains: implement budgeted recursive research iterations with MemPalace/Belief/CapabilityGate per iteration.
+
+Lesson:
+- A trace bridge is enough for observability and benchmark evidence, but not enough to claim full RLM research recursion. Public reports should say `RLM trace present`, not `recursive research solved`.
+
+## Cross-Cutting Cleanup
+
+Status:
+- 2026-04-28 policy memory path standardized on `.nexus/knowledge/policy_memory.jsonl`.
+- 2026-04-28 Ask rerank duplicate repo-boost / drift-suppression pass removed.
+
+Lesson:
+- Path aliases such as `policy_memory.jsonl` versus `policymemory.jsonl` split learning evidence. Canonical storage paths should live in one helper and tests must assert the canonical name.
+- Rerank stages should be single-pass and ordered. Applying repo boost / drift suppression twice makes answer source weighting harder to explain and can hide topic-pack problems.
+
 ## Lesson
 
 - 跨 worktree 文件可能存在於 `/Users/jameschen/Workspace/nexus`，但主工作區是 `/Users/jameschen/.codex/worktrees/ad59/nexus`。執行前要用絕對路徑確認，避免把另一份工作區的計劃誤判為本 worktree 已落地。

@@ -38,8 +38,8 @@ class GateDecision:
 
 
 def load_policy_memory(repo_root: Path) -> Path:
-    """載入 .nexus/knowledge/policymemory.jsonl"""
-    policy_path = repo_root / ".nexus" / "knowledge" / "policymemory.jsonl"
+    """Return the canonical policy memory path."""
+    policy_path = repo_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
     policy_path.parent.mkdir(parents=True, exist_ok=True)
     return policy_path
 
@@ -101,7 +101,7 @@ def apply_policy_gate(
     elif any(s.severity == GateSeverity.ALERT for s in signals):
         decision = GateSeverity.ALERT
 
-    # 持久化到 policy memory (.nexus/knowledge/policymemory.jsonl)
+    # Persist to canonical policy memory.
     policy_record = {
         "timestamp": datetime.now(UTC).isoformat(),
         "route_id": route_id,

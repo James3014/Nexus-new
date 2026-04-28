@@ -259,24 +259,6 @@ class AskService:
                 )
                 scored.append((score, c, token_hits))
         
-        # R3: Repo-aware rerank
-        current_repo_name = self.ctx.project_root.name.lower()
-        def repo_boost(c):
-            s = c.get("source_url", "").lower()
-            return 1.2 if current_repo_name in s else 1.0
-        scored = [(s[0] * repo_boost(s[1]), s[1], s[2]) for s in scored]
-
-        
-        # R4-2: Drift suppression
-        for i, (score, claim, tokens) in enumerate(scored):
-            # Penalty for cross-repo mismatched terms
-            if claim.get("repo_scope") and claim["repo_scope"] != current_repo_name:
-                score *= 0.85 # Slight penalty for cross-repo
-                if claim.get("conflict_flag"): score *= 0.5 # Heavy penalty for flagged conflicts
-            scored[i] = (score, claim, tokens)
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-
         # Greedy coverage-first selector: prioritize claims that add new token coverage,
         # then break ties by base score.
         
