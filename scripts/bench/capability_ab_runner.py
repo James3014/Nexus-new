@@ -791,6 +791,13 @@ def _remaining_leg_timeout(default_timeout_sec: int, start_time: float, total_ti
     return max(1, min(default_timeout_sec, remaining))
 
 
+def _remaining_task_timeout(deadline_monotonic: float, fallback_timeout_sec: int) -> int:
+    remaining = int(deadline_monotonic - time.monotonic())
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired("benchmark_task_deadline", fallback_timeout_sec)
+    return max(1, min(int(fallback_timeout_sec), remaining))
+
+
 def _effective_total_timeout_sec(total_timeout_sec: int, stop_loss_sec: int) -> int:
     if total_timeout_sec <= 0:
         return max(0, stop_loss_sec)
@@ -1376,6 +1383,7 @@ def run_without_nexus(
         patch_len = 0
         pytest_stdout_tail = ""
         pytest_stderr_tail = ""
+        task_deadline = time.monotonic() + max(1, int(timeout_sec))
         try:
             hidden_verifier_mode = _hidden_verifier_mode_enabled()
             prompt_tests = "" if hidden_verifier_mode and (
@@ -1390,7 +1398,7 @@ def run_without_nexus(
                 f"[CURRENT TESTS]\n{prompt_tests}\n\n"
                 "Return the full updated file content in the patch field."
             )
-            out, raw = _ask_direct_gemini_flash_patch(prompt=prompt, timeout_sec=timeout_sec)
+            out, raw = _ask_direct_gemini_flash_patch(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
             model_calls = 1
             patch = raw
             raw_tail = _tail_text(raw, max_chars=1000)
@@ -1416,7 +1424,12 @@ def run_without_nexus(
             if patch_changed:
                 target_path.write_text(patch, encoding="utf-8")
                 cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
-                res = _run_process_group(cmd, cwd=repo_root, env=os.environ.copy(), timeout_sec=timeout_sec)
+                res = _run_process_group(
+                    cmd,
+                    cwd=repo_root,
+                    env=os.environ.copy(),
+                    timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec),
+                )
                 pytest_stdout_tail = _tail_text(res.stdout, max_chars=1000)
                 pytest_stderr_tail = _tail_text(res.stderr, max_chars=1000)
                 status = "SUCCESS" if res.returncode == 0 else "FAILED"

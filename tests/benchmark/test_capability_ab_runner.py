@@ -33,6 +33,7 @@ from scripts.bench.capability_ab_runner import (
     _parse_direct_gemini_json,
     _read_preserved_target,
     _remaining_leg_timeout,
+    _remaining_task_timeout,
     _report_model_label,
     _render_partial_markdown_report,
     _restore_preserved_target,
@@ -133,6 +134,23 @@ def test_benchmark_gateway_timeout_scales_with_task_budget():
     assert _benchmark_gateway_timeout_for_task(120) == 90
     assert _benchmark_gateway_timeout_for_task(180) == 150
     assert _benchmark_gateway_timeout_for_task(300) == 220
+
+
+def test_remaining_task_timeout_uses_shared_deadline(monkeypatch):
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.time.monotonic", lambda: 100.4)
+
+    assert _remaining_task_timeout(105.9, 300) == 5
+
+
+def test_remaining_task_timeout_raises_when_deadline_is_spent(monkeypatch):
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.time.monotonic", lambda: 106.0)
+
+    try:
+        _remaining_task_timeout(105.9, 300)
+    except subprocess.TimeoutExpired as exc:
+        assert exc.timeout == 300
+    else:
+        raise AssertionError("expected timeout")
 
 
 def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Path, monkeypatch):
