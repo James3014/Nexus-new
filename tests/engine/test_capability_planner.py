@@ -81,6 +81,52 @@ def test_default_capability_nodes_cover_core_space():
         assert nodes[name].phase_hooks
 
 
+def test_default_capability_nodes_cover_full_nexus_capability_registry():
+    nodes = default_capability_nodes()
+    expected = {
+        "direct_mode",
+        "memory",
+        "lancedb",
+        "belief",
+        "learn_mode",
+        "learn_scheduler",
+        "learn_phase_slo",
+        "research_route",
+        "research_control_plane",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_gate",
+        "acceptance_check",
+        "sandbox",
+        "benchmark",
+        "meta_opt",
+        "autonomic_router",
+        "pregate",
+        "forecast_gate",
+        "plan_quality_gate",
+        "xray",
+        "repair_loop",
+        "multi_agent",
+        "file_lock",
+        "integration_manager",
+        "ui_validator",
+        "stress_test",
+        "registry_sync",
+        "metabolism",
+        "oracle_shadow",
+        "federation",
+    }
+
+    assert expected <= set(nodes)
+    assert nodes["delivery_gate"].default_state == "required"
+    assert nodes["memory"].category == "memory"
+    assert nodes["autonomic_router"].maturity == "prototype"
+    assert nodes["oracle_shadow"].maturity == "experimental"
+    assert "gate_verdict" in nodes["delivery_gate"].evidence_outputs
+    assert "policy_verdict" in nodes["mempalace_gate"].evidence_outputs
+
+
 def test_capability_planner_maps_public_governance_task_to_review_and_reasoning():
     plan = CapabilityPlanner().plan(
         task_desc="Refactor a credential scrubber while preserving the governance boundary: never weaken secret redaction.",
@@ -122,3 +168,78 @@ def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
 
     assert {"autoreason", "ddtree"} <= set(repair_plan["selected_capabilities"])
     assert "autoreason" in set(trust_plan["selected_capabilities"])
+
+
+def test_capability_planner_selects_memory_belief_and_preflight_governance():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix a trust-sensitive regression with prior evidence and low confidence.",
+        task_type="bug",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 45,
+                "adjusted_root_cause_confidence": 0.52,
+                "candidate_count": 1,
+                "memory_hits": 2,
+                "findings_hits": 1,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        pillars={"lancedb": {"hits": 3}},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"memory", "lancedb", "belief", "pregate", "plan_quality_gate", "delivery_gate"} <= selected
+    assert "sandbox" not in selected
+
+
+def test_capability_planner_selects_sandbox_for_high_risk_governance():
+    plan = CapabilityPlanner().plan(
+        task_desc="Refactor credential scrubber without weakening secret redaction governance.",
+        task_type="bug",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 80, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"ultra_review", "sandbox", "pregate", "plan_quality_gate"} <= selected
+
+
+def test_capability_planner_selects_second_wave_platform_capabilities():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Run a baseline direct repair that must learn citation SLOs, coordinate multi-agent owner "
+            "file lock worktree integration, update registry skills, distill a resume checkpoint, "
+            "and produce a benchmark public report with oracle shadow stress coverage."
+        ),
+        task_type="platform_integration",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 65,
+                "adjusted_root_cause_confidence": 0.7,
+                "candidate_count": 1,
+                "is_cross_module_task": True,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {
+        "direct_mode",
+        "learn_mode",
+        "learn_phase_slo",
+        "research_route",
+        "multi_agent",
+        "file_lock",
+        "integration_manager",
+        "registry_sync",
+        "metabolism",
+        "benchmark",
+        "oracle_shadow",
+        "stress_test",
+    } <= selected
