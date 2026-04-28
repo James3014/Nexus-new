@@ -43,6 +43,39 @@ A report is public-safe only if both arms use the same recorded model, both arms
 
 If bare and Nexus both score 100%, do not claim solve-rate lift. In that case the report may only claim observability, governance, rescue evidence, and measured overhead.
 
+## Pre-Benchmark Gate: P1-P13
+
+What：P1-P13 是正式 Run Ladder 前的非模型檢查層，涵蓋 local readiness、model lock、manifest hash、hidden verifier、timeout、evidence bundle、markdown report、public claim gate、CodeIntel、RLM、JIT、MSA 與 token-source policy。
+
+Why：Public report 只接受同模型、可追溯、可重放、eligible 分母清楚的 benchmark。Quota、auth、CLI、timeout-before-model-call、Nexus wearing invalid、evidence missing 都必須先被框住，不能混入 solve-rate claim。
+
+How：先跑 Nexus benchmark preflight，再用同一組 manifest/timeout/trial 參數跑 runner dry validation：
+
+```bash
+NEXUS_VALUE_HIDDEN_VERIFIER=1 \
+uv run python scripts/ops/nexus_benchmark_preflight.py --output-json
+```
+
+```bash
+NEXUS_VALUE_HIDDEN_VERIFIER=1 \
+NEXUS_GEMINI_MODEL_NAME=gemini-3-flash-preview \
+NEXUS_DIRECT_GEMINI_MODEL=gemini-3-flash-preview \
+NEXUS_GATEWAY_PROMPT_TRANSPORT=stdin \
+NEXUS_GATEWAY_COMPACT_PROMPT=1 \
+NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL=1 \
+uv run python scripts/bench/capability_ab_runner.py \
+  --tasks-file scripts/bench/public_benchmark_nexus_value_v1.json \
+  --max-tasks 12 --difficulty hard --timeout-sec 180 --total-timeout-sec 3600 \
+  --stop-loss-sec 3600 --per-task-stop-loss-sec 600 \
+  --force-flow hyper_sprint --with-nexus-runner subprocess \
+  --with-llm-mode all --without-mode gemini --force-learn-slo-ready \
+  --neutralize-history --disable-learning-loop --repeat-trials 3 \
+  --output-dir .nexus/reports/bench_gemini3flash_public_candidate_12x3 \
+  --evidence-bundle --markdown-report auto --progress-log --preflight-only
+```
+
+`nexus_benchmark_preflight.py` must return `ready_for_benchmark=true` and the runner preflight must return `PASS` before the smoke or publication candidate run starts.
+
 ## Run Ladder
 
 Smoke:

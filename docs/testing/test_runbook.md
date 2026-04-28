@@ -76,10 +76,47 @@ uv run python scripts/ops/ci_gate.py --nightly
 Gemini benchmark 前的本地 readiness gate：
 
 ```bash
+NEXUS_VALUE_HIDDEN_VERIFIER=1 \
 uv run python scripts/ops/nexus_benchmark_preflight.py --output-json
 ```
 
 這條 lane 不呼叫 Gemini，也不消耗模型額度。它會檢查 CodeIntel impact evidence、RLM trace quality、JIT predictive promotion fail-closed boundary、public claim gate guardrails，並輸出 `.nexus/reports/benchmark_preflight_readiness.json`。只有 `ready_for_benchmark=true` 時，才適合啟動 Gemini bare vs Gemini+Nexus 正式 benchmark。
+
+### 1.2 P1-P13 Benchmark 前置流程
+
+What：P1-P13 是 Gemini benchmark 前的非模型檢查層，先確認本地 gate、benchmark preflight、public runner preflight 都過，再花 Gemini 額度。
+
+Why：正式 public-candidate run 應只驗證同模型 bare vs 同模型穿 Nexus 的能力差異，不應拿來 debug manifest、timeout、evidence bundle、markdown report、public claim gate 或工作區狀態。
+
+How：依序執行：
+
+```bash
+bash scripts/ops/test_changed.sh docs/testing/test_runbook.md docs/research/gemini_nexus_public_eval_protocol.md
+```
+
+```bash
+uv run python scripts/ops/nexus_benchmark_preflight.py --output-json
+```
+
+```bash
+NEXUS_VALUE_HIDDEN_VERIFIER=1 \
+NEXUS_GEMINI_MODEL_NAME=gemini-3-flash-preview \
+NEXUS_DIRECT_GEMINI_MODEL=gemini-3-flash-preview \
+NEXUS_GATEWAY_PROMPT_TRANSPORT=stdin \
+NEXUS_GATEWAY_COMPACT_PROMPT=1 \
+NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL=1 \
+uv run python scripts/bench/capability_ab_runner.py \
+  --tasks-file scripts/bench/public_benchmark_nexus_value_v1.json \
+  --max-tasks 12 --difficulty hard --timeout-sec 180 --total-timeout-sec 3600 \
+  --stop-loss-sec 3600 --per-task-stop-loss-sec 600 \
+  --force-flow hyper_sprint --with-nexus-runner subprocess \
+  --with-llm-mode all --without-mode gemini --force-learn-slo-ready \
+  --neutralize-history --disable-learning-loop --repeat-trials 3 \
+  --output-dir .nexus/reports/bench_gemini3flash_public_candidate_12x3 \
+  --evidence-bundle --markdown-report auto --progress-log --preflight-only
+```
+
+若需要產品發布級嚴格性，最後一條可加 `--require-clean-worktree`。本地開發工作區若有其他 agent 變更，先不要加，避免把工作區協作狀態誤判成 benchmark runner 缺陷。
 
 JIT observation:
 

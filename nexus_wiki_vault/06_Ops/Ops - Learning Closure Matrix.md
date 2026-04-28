@@ -664,3 +664,9 @@ version_scope:
 - **Root Cause**: The preflight wrapper guessed a convenience API shape instead of following the existing CodeIntel service contract.
 - **Decision**: Call `scan_codebase(index_path=...)` and pass `scan.index_path` into `analyze_impact(...)`; cover the path with a CLI regression test.
 - **Prevention**: Benchmark preflight tools must exercise the same production service contracts used by CodeIntel reports, not adapter-only assumptions.
+
+## 2026-04-28: Public Benchmark Preflight Must Enforce Hidden Verifier Env
+- **Phenomenon**: The runner `--preflight-only` failed with `hidden_verifier_disabled` after the local readiness gate had already marked P3 hidden verifier as required.
+- **Root Cause**: The local P1-P13 matrix recorded the requirement but did not check whether `NEXUS_VALUE_HIDDEN_VERIFIER=1` was actually enabled.
+- **Decision**: Make P3 fail-closed when hidden verifier is required but the environment flag is missing, and document the env var in both benchmark runbooks.
+- **Prevention**: Local readiness gates must validate required public-claim environment switches, not only describe them.

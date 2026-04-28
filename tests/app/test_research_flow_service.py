@@ -22,6 +22,10 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert "explain_payload" in out
     assert "route_features" in out
     assert "consensus" in out
+    assert "capability_stack" in out
+    assert out["capability_stack"]["selected_capabilities"] == ["hyper_sprint", "autoreason"]
+    assert out["capability_stack"]["acceleration_layers"] == []
+    assert out["capability_stack"]["governance_layers"] == ["ultra_review"]
     assert out["explain_payload"]["risk"] == "CRITICAL"
     assert out["route_features"]["risk_score"] >= 50
     assert out["consensus"]["winner"] in {"baseline", "hyper_sprint"}

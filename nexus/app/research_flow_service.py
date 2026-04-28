@@ -18,6 +18,7 @@ from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, _candidate_summaries
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
+from nexus.engine.capability_router import CapabilityRouter
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
@@ -535,6 +536,13 @@ def build_route(
         "confidence": round(adjusted_root_cause_confidence, 2),
         "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. TaskType: {task_type}."
     }
+    capability_stack = CapabilityRouter().route(
+        task_desc=task_desc,
+        task_type=task_type,
+        recommended_flow=recommended_flow,
+        route_features=route_features,
+        target_file=target_file,
+    ).to_dict()
 
     return {
         "should_research": should_research,
@@ -551,6 +559,7 @@ def build_route(
         "recommended_reason": recommended_reason,
         "explain_payload": explain,
         "route_features": route_features,
+        "capability_stack": capability_stack,
         "consensus": {
             "votes": consensus_votes,
             "reasons": vote_reasons,
