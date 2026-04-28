@@ -282,23 +282,33 @@ def _capability_evidence(
         for item in candidate_summaries
         if isinstance(item, dict) and _candidate_summary_has_swarm_evidence(item)
     )
+    swarm_consensus = "candidate_summary_evidence" if swarm_count > 0 else ""
     drone_crystals = learning_trace.get("drone_crystals", [])
     if not isinstance(drone_crystals, list):
         drone_crystals = []
+    drone_artifact_path = str(drone_crystals[0]) if drone_crystals else ""
     nightshift_report_path = str(learning_trace.get("nightshift_report_path") or result_report.get("nightshift_report_path") or "")
     nightshift_recovered = bool(
         learning_trace.get("nightshift_recovered", False)
         or result_report.get("nightshift_recovered", False)
     )
+    nightshift_failure_reason = ""
+    if nightshift_recommended and not nightshift_report_path:
+        nightshift_failure_reason = "recommended_without_report"
+    elif nightshift_report_path and not nightshift_recovered:
+        nightshift_failure_reason = "report_without_recovery"
     return {
         "swarm_evidence_count": swarm_count,
         "swarm_used": swarm_count > 0,
+        "swarm_consensus": swarm_consensus,
         "drone_invoked_count": len(drone_crystals),
         "drone_used": len(drone_crystals) > 0,
+        "drone_artifact_path": drone_artifact_path,
         "nightshift_recommended": bool(nightshift_recommended),
         "nightshift_invoked": bool(nightshift_report_path),
         "nightshift_recovered": nightshift_recovered,
         "nightshift_report_path": nightshift_report_path,
+        "nightshift_failure_reason": nightshift_failure_reason,
     }
 
 
@@ -1343,10 +1353,13 @@ def run_auto_flow(
             "nightshift_report_path": capability_evidence["nightshift_report_path"],
             "swarm_used": capability_evidence["swarm_used"],
             "swarm_evidence_count": capability_evidence["swarm_evidence_count"],
+            "swarm_consensus": capability_evidence["swarm_consensus"],
             "drone_used": capability_evidence["drone_used"],
             "drone_invoked_count": capability_evidence["drone_invoked_count"],
+            "drone_artifact_path": capability_evidence["drone_artifact_path"],
             "self_heal_used": self_heal_used,
             "claim_verified": artifact_verified,
+            "nightshift_failure_reason": capability_evidence["nightshift_failure_reason"],
             "ultra_review_recommended": ultra_review_evidence["recommended"],
             "ultra_review_invoked": ultra_review_evidence["invoked"],
             "ultra_review_gate_passed": ultra_review_evidence["gate_passed"],

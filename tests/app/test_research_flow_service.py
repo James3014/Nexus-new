@@ -157,7 +157,9 @@ def test_capability_evidence_requires_real_swarm_signal():
 
     assert with_swarm["swarm_used"] is True
     assert with_swarm["swarm_evidence_count"] == 1
+    assert with_swarm["swarm_consensus"] == "candidate_summary_evidence"
     assert with_swarm["nightshift_recommended"] is True
+    assert with_swarm["nightshift_failure_reason"] == "recommended_without_report"
 
 
 def test_capability_evidence_splits_nightshift_and_drone_signals():
@@ -176,6 +178,8 @@ def test_capability_evidence_splits_nightshift_and_drone_signals():
     assert out["nightshift_recovered"] is True
     assert out["drone_used"] is True
     assert out["drone_invoked_count"] == 2
+    assert out["drone_artifact_path"] == "d1_crystal.json"
+    assert out["nightshift_failure_reason"] == ""
 
 
 def test_ultra_review_gate_evidence_is_feature_flagged(tmp_path: Path, monkeypatch):

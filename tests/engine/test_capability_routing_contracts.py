@@ -147,6 +147,7 @@ def test_msa_receipts_explain_selected_but_unproven_capabilities():
                 "nightshift_recommended": True,
                 "nightshift_invoked": False,
                 "nightshift_recovered": False,
+                "nightshift_failure_reason": "recommended_without_report",
             },
         )
     }
@@ -156,7 +157,7 @@ def test_msa_receipts_explain_selected_but_unproven_capabilities():
     assert receipts["drone"].public_claim_safe is False
     assert receipts["drone"].failure_reason == "invoked_without_evidence"
     assert receipts["nightshift"].public_claim_safe is False
-    assert receipts["nightshift"].failure_reason == "recommended_without_invocation"
+    assert receipts["nightshift"].failure_reason == "recommended_without_report"
 
 
 def test_uninvoked_reasoning_receipt_does_not_treat_none_as_evidence():

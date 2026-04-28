@@ -164,6 +164,26 @@ incrementally.
   verified outcome. A globally verified task must not make selected-only
   capabilities look contributory.
 
+## 2026-04-29 P90-P97 Routing Health Result
+- P37 Nexus-only routing health ran 12 cross-module hard tasks with no Gemini:
+  - with Nexus: solve rate 100%, semantic verified 100%, trust mismatch 0%.
+  - service control: solve rate 100%, semantic verified 0%, trust mismatch 100%.
+  - average wall time: Nexus 20.44s, service control 18.40s.
+- Receipt-backed capability coverage:
+  - CodeIntel: 12/12 selected, invoked, evidence, gate, public-safe.
+  - Autoreason: 12/12 selected, invoked, evidence, gate, public-safe.
+  - DDTree: 2/12 selected and public-safe, scoped to eligible candidate-pool rows.
+  - Swarm: 4 selected, 0 invoked; all remain `selected_without_invocation`.
+  - Drone: 5 selected, 0 invoked; all remain `selected_without_invocation`.
+  - Nightshift: 5 selected, 0 invoked; all remain `selected_without_invocation`.
+  - Ultra Review: 12 selected, 0 invoked because dry gate was not enabled in this
+    routing-health command.
+- Interpretation:
+  - Nexus routing/reporting is now honest enough for benchmark preflight.
+  - Public claims may use CodeIntel, Autoreason, and eligible DDTree evidence.
+  - Public claims must not say Swarm, Drone, Nightshift, or Ultra Review improved
+    the result until executor receipts exist.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

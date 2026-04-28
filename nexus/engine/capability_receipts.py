@@ -231,7 +231,7 @@ def build_trace_receipts(
             report_path = _first_present(capabilities.get("nightshift_report_path"))
             refs = [report_path] if report_path else []
             if capabilities.get("nightshift_recommended") and not invoked:
-                failure_reason = "recommended_without_invocation"
+                failure_reason = str(capabilities.get("nightshift_failure_reason") or "recommended_without_invocation")
             else:
                 failure_reason = _selected_failure_reason(
                     selected=True,
