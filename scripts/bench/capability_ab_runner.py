@@ -984,6 +984,8 @@ def _extract_record(
     capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
     capability_plan = usage_trace.get("capability_plan", {}) if isinstance(usage_trace, dict) else {}
     capability_plan = capability_plan if isinstance(capability_plan, dict) else {}
+    capability_receipts = usage_trace.get("capability_receipts", []) if isinstance(usage_trace, dict) else []
+    capability_receipts = capability_receipts if isinstance(capability_receipts, list) else []
     capability_replan_trace = capability_plan.get("replan_trace", []) if isinstance(capability_plan, dict) else []
     capability_replan_trace = capability_replan_trace if isinstance(capability_replan_trace, list) else []
     ultra_review = usage_trace.get("ultra_review", {}) if isinstance(usage_trace, dict) else {}
@@ -1149,6 +1151,8 @@ def _extract_record(
         "capability_plan_required": list(capability_plan.get("required_capabilities", []) or []),
         "capability_plan_conditional": list(capability_plan.get("conditional_capabilities", []) or []),
         "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),
+        "capability_receipts": capability_receipts,
+        "capability_receipts_json": json.dumps(capability_receipts, ensure_ascii=False, sort_keys=True),
         "capability_plan_phases": [
             str(item.get("phase"))
             for item in capability_replan_trace

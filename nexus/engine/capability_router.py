@@ -23,7 +23,7 @@ class CapabilityDecision:
 
 
 class CapabilityRouter:
-    """Build an explainable Nexus capability stack without changing execution paths."""
+    """Compatibility facade that exposes the legacy capability_stack schema."""
 
     HIGH_RISK_PREFIXES = (
         "nexus/engine/",
@@ -43,57 +43,32 @@ class CapabilityRouter:
         route_features: dict[str, Any],
         target_file: str | None = None,
     ) -> CapabilityDecision:
-        selected = ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]
-        risk_score = int(route_features.get("risk_score", 0) or 0)
-        confidence = float(route_features.get("adjusted_root_cause_confidence", 1.0) or 1.0)
-        candidate_count = int(route_features.get("candidate_count", 1) or 1)
-        findings_hits = int(route_features.get("findings_hits", 0) or 0)
-        memory_hits = int(route_features.get("memory_hits", 0) or 0)
-        task_lower = (task_desc or "").lower()
-        is_cross_module = bool(route_features.get("is_cross_module_task", False))
-        has_hard_signal = bool(route_features.get("has_hard_signal", False))
-        repair_signal = any(token in task_lower for token in ("repair", "self-heal", "timeout", "flaky", "failing branch"))
-        evidence_signal = any(token in task_lower for token in ("evidence", "artifact", "claim", "semantic", "trust"))
-        governance_signal = any(
-            token in task_lower
-            for token in ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance")
+        from nexus.engine.capability_selector import CapabilitySelector
+
+        seed_stack = {"selected_capabilities": ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]}
+        if any(str(target_file or "").startswith(prefix) for prefix in self.HIGH_RISK_PREFIXES):
+            route_features = {**route_features, "has_hard_signal": True}
+        plan = CapabilitySelector().select(
+            task_desc=task_desc,
+            task_type=task_type,
+            route={
+                "recommended_flow": recommended_flow,
+                "route_features": route_features,
+                "capability_stack": seed_stack,
+            },
         )
-
-        autoreason_reasons: list[str] = []
-        if recommended_flow == "hyper_sprint":
-            autoreason_reasons.append("hyper_sprint_route")
-        if confidence < 0.75:
-            autoreason_reasons.append("low_confidence")
-        if findings_hits > 0 or memory_hits > 0:
-            autoreason_reasons.append("historical_signal")
-        if is_cross_module or any(token in task_lower for token in ("hard", "race", "deadlock", "timeout", "cross-module")):
-            autoreason_reasons.append("hard_or_cross_module")
-        if repair_signal or evidence_signal or governance_signal:
-            autoreason_reasons.append("semantic_control_signal")
-        autoreason_enabled = bool(autoreason_reasons)
-        if autoreason_enabled and "autoreason" not in selected:
+        planned = set(plan.selected_capabilities)
+        selected = ["hyper_sprint"] if "hyper" in planned else ["baseline"]
+        if "autoreason" in planned:
             selected.append("autoreason")
+        ddtree_enabled = "ddtree" in planned
+        ultra_enabled = "ultra_review" in planned
 
-        ddtree_reasons: list[str] = []
-        if autoreason_enabled and candidate_count >= 3:
-            ddtree_reasons.append("autoreason_candidate_budget")
-        if "token" in task_lower or "multi-round" in task_lower:
-            ddtree_reasons.append("high_token_or_multi_round")
-        if repair_signal:
-            ddtree_reasons.append("repair_candidate_pool")
-        ddtree_enabled = bool(ddtree_reasons)
-
-        target = target_file or ""
-        ultra_reasons: list[str] = []
-        if risk_score >= 70:
-            ultra_reasons.append("high_risk_score")
-        if is_cross_module or has_hard_signal:
-            ultra_reasons.append("cross_module_or_hard_signal")
-        if any(target.startswith(prefix) for prefix in self.HIGH_RISK_PREFIXES):
-            ultra_reasons.append("high_risk_path")
-        if governance_signal or evidence_signal:
-            ultra_reasons.append("governance_or_evidence_signal")
-        ultra_enabled = bool(ultra_reasons)
+        def _reasons(capability: str) -> list[str]:
+            for item in plan.decision_trace:
+                if item.get("capability") == capability:
+                    return list(item.get("reasons", []) or [])
+            return []
 
         explain = [
             {
@@ -104,21 +79,21 @@ class CapabilityRouter:
             },
             {
                 "capability": "autoreason",
-                "enabled": autoreason_enabled,
-                "reasons": autoreason_reasons,
-                "evidence": ["route_features"],
+                "enabled": "autoreason" in planned,
+                "reasons": _reasons("autoreason"),
+                "evidence": ["capability_plan.decision_trace"],
             },
             {
                 "capability": "ddtree",
                 "enabled": ddtree_enabled,
-                "reasons": ddtree_reasons,
-                "evidence": ["candidate_count", "task_desc"],
+                "reasons": _reasons("ddtree"),
+                "evidence": ["capability_plan.decision_trace"],
             },
             {
                 "capability": "ultra_review",
                 "enabled": ultra_enabled,
-                "reasons": ultra_reasons,
-                "evidence": ["risk_score", "target_file", "route_features"],
+                "reasons": _reasons("ultra_review"),
+                "evidence": ["capability_plan.decision_trace"],
             },
         ]
         return CapabilityDecision(
@@ -127,8 +102,8 @@ class CapabilityRouter:
             governance_layers=["ultra_review"] if ultra_enabled else [],
             explain_caps=explain,
             stop_policy={
-                "type": "a_streak" if autoreason_enabled else "budget",
-                "threshold": 2 if autoreason_enabled else 1,
+                "type": "a_streak" if "autoreason" in planned else "budget",
+                "threshold": 2 if "autoreason" in planned else 1,
                 "budget_guard": "fail_closed",
             },
         )

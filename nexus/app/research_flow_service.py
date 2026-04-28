@@ -18,8 +18,11 @@ from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, _candidate_summaries
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
+from nexus.engine.capability_executor_controls import build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_router import CapabilityRouter
+from nexus.engine.capability_selector import CapabilitySelector
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
@@ -736,21 +739,12 @@ def build_hyper_execution_profile(
 
 def build_route_executor_flags(*, task_desc: str, task_type: str, route: dict[str, Any]) -> dict[str, Any]:
     """Translate capability routing into SprintService executor controls."""
-    capability_stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
-    selected = {str(item) for item in capability_stack.get("selected_capabilities", []) or []}
-    acceleration = {str(item) for item in capability_stack.get("acceleration_layers", []) or []}
-    route_features = route.get("route_features", {}) if isinstance(route, dict) else {}
-    candidate_count = int(route_features.get("candidate_count", 1) or 1)
-    task_lower = f"{task_desc} {task_type}".lower()
-    repair_signal = any(token in task_lower for token in ("repair", "self-heal", "timeout", "flaky", "failing branch"))
-    evidence_signal = any(token in task_lower for token in ("evidence", "artifact", "claim", "semantic", "trust"))
-    governance_signal = any(token in task_lower for token in ("secret", "credential", "redact", "auth", "deny by default"))
-    enable_autoreason = "autoreason" in selected or repair_signal or evidence_signal or governance_signal
-    enable_ddtree = "ddtree" in acceleration or candidate_count >= 3 or repair_signal
+    plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=route)
+    controls = build_executor_controls(plan)
     return {
-        "enable_autoreason_executor": enable_autoreason,
-        "enable_ddtree_executor": enable_ddtree,
-        "ddtree_max_candidates": 2,
+        "enable_autoreason_executor": bool(controls["enable_autoreason_executor"]),
+        "enable_ddtree_executor": bool(controls["enable_ddtree_executor"]),
+        "ddtree_max_candidates": int(controls["ddtree_max_candidates"]),
     }
 
 
@@ -1369,14 +1363,26 @@ def run_auto_flow(
         "winner_source": winner_source,
         "usage_valid": bool(gemini_invoked and artifact_verified),
     }
-    nexus_usage_trace["capability_plan"] = CapabilityPlanner().plan(
+    capability_plan = CapabilityPlanner().plan(
         task_desc=task_desc,
         task_type=task_type,
         route=route,
         pillars=nexus_usage_trace["pillars"],
         codeintel=codeintel_evidence,
         phase_trace=nexus_usage_trace["phase_trace"],
-    ).to_dict()
+    )
+    nexus_usage_trace["capability_plan"] = capability_plan.to_dict()
+    nexus_usage_trace["capability_receipts"] = [
+        item.to_dict()
+        for item in build_trace_receipts(
+            plan=capability_plan,
+            capabilities=nexus_usage_trace["capabilities"],
+            autoreason=nexus_usage_trace["autoreason"],
+            ddtree=nexus_usage_trace["ddtree"],
+            ultra_review=nexus_usage_trace["ultra_review"],
+            codeintel=nexus_usage_trace["codeintel"],
+        )
+    ]
     recursive_research = _rlm_research_trace_enabled()
     if _rlm_trace_enabled() or recursive_research:
         if recursive_research:

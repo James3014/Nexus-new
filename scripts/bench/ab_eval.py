@@ -215,7 +215,78 @@ def _csvish(value: Any) -> set[str]:
     return {item.strip() for item in text.replace(";", ",").split(",") if item.strip()}
 
 
+def _row_capability_receipts(row: dict[str, Any]) -> list[dict[str, Any]]:
+    payload = row.get("capability_receipts")
+    if payload is None:
+        payload = row.get("capability_receipts_json")
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return []
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict) and str(item.get("name") or "").strip()]
+
+
+def _coverage_from_receipts(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not any(_row_capability_receipts(row) for row in rows):
+        return None
+    total = len(rows)
+    capabilities = sorted(
+        {
+            str(receipt.get("name"))
+            for row in rows
+            for receipt in _row_capability_receipts(row)
+            if str(receipt.get("name") or "").strip()
+        }
+    )
+    matrix: dict[str, Any] = {}
+    for capability in capabilities:
+        selected = invoked = evidence = gate = outcome = 0
+        for row in rows:
+            receipt = next(
+                (
+                    item
+                    for item in _row_capability_receipts(row)
+                    if str(item.get("name") or "") == capability
+                ),
+                {},
+            )
+            if _is_true(receipt.get("selected")):
+                selected += 1
+            if _is_true(receipt.get("invoked")):
+                invoked += 1
+            if _is_true(receipt.get("evidence_present")):
+                evidence += 1
+            if _is_true(receipt.get("gate_passed")):
+                gate += 1
+            if _is_true(receipt.get("outcome_contributed")):
+                outcome += 1
+        matrix[capability] = {
+            "selected_count": selected,
+            "selected_rate": round(selected / total, 4) if total else 0.0,
+            "invoked_count": invoked,
+            "invoked_rate": round(invoked / total, 4) if total else 0.0,
+            "evidence_count": evidence,
+            "evidence_rate": round(evidence / total, 4) if total else 0.0,
+            "gate_count": gate,
+            "gate_rate": round(gate / total, 4) if total else 0.0,
+            "outcome_count": outcome,
+            "outcome_rate": round(outcome / total, 4) if total else 0.0,
+            "public_safe": bool(total and selected and invoked == selected and evidence == selected and gate == selected),
+            "source": "capability_receipts",
+        }
+    return matrix
+
+
 def summarize_capability_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    receipt_matrix = _coverage_from_receipts(rows)
+    if receipt_matrix is not None:
+        return receipt_matrix
     total = len(rows)
     matrix: dict[str, Any] = {}
     for capability, spec in _CAPABILITY_COVERAGE_SPEC.items():

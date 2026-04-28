@@ -82,7 +82,93 @@ incrementally.
 - DDTree was selected and gated only on the candidate-heavy row; public claims
   about DDTree must be scoped to eligible candidate-pool tasks.
 
+## 2026-04-29 P63-P67 Foundation Update
+- Added typed routing seams so future changes do not add more ad-hoc keyword
+  branches:
+  - `CapabilitySignalSet` normalizes task, route, CodeIntel, Memory/LanceDB, and
+    skill candidate inputs.
+  - `CapabilityConstraints` keeps MemPalace, Artifact, and Claim fail-closed
+    constraints explicit.
+  - `CapabilityExecutionPlan` and executor controls convert selected
+    capabilities into execution-facing flags.
+  - `CapabilityReceipt` and `SkillReceipt` define the selected/invoked/evidence/
+    gate/outcome contract.
+- `CapabilityRouter` is now a compatibility facade over the selector/planner
+  path while preserving the legacy `capability_stack` schema.
+- `build_route_executor_flags()` now derives Autoreason/DDTree controls from the
+  selected plan instead of re-reading task keywords.
+- Selected-only capabilities remain non-public-safe until a receipt proves
+  invocation, evidence, and gate success.
+
+## 2026-04-29 P68-P70 Receipt Report Update
+- Benchmark coverage now prefers row-level `capability_receipts` /
+  `capability_receipts_json` when present. Legacy inferred coverage remains only
+  as a compatibility fallback for old reports.
+- `research:auto-flow` usage traces now emit `capability_receipts` derived from
+  the selected plan plus existing trace evidence.
+- Autoreason, DDTree, Ultra Review, CodeIntel, Swarm, Drone, and Nightshift now
+  have a shared selected/invoked/evidence/gate/outcome receipt projection.
+- Selected-only MSA capabilities stay visible as selected but remain
+  non-public-safe until executor evidence exists.
+
+## 2026-04-29 P71-P73 Public Claim Gate Split
+- Public benchmark reports now separate claim safety into four gates:
+  performance, wearing, capability-specific, and cost.
+- Capability-specific public claims require receipt-backed coverage
+  (`source=capability_receipts`). Legacy inferred coverage can still be displayed,
+  but it cannot pass the capability-specific public gate.
+- Solve-rate improvement text remains governed by the performance/wearing public
+  gate; capability value claims require the capability-specific gate.
+
+## 2026-04-29 P74-P80 MSA Receipt Contract
+- Swarm, Drone, and Nightshift now use the same receipt contract as CodeIntel,
+  Autoreason, DDTree, and Ultra Review:
+  - `selected`: planner chose the capability.
+  - `invoked`: an execution trace proves it actually ran.
+  - `evidence_present`: the executor produced a durable evidence reference.
+  - `gate_passed`: the evidence passed its capability-specific acceptance check.
+  - `failure_reason`: selected-only or partial execution remains visible and
+    non-public-safe.
+- Swarm evidence source is role finding / consensus evidence from candidate
+  summaries. A selected Swarm capability without role findings is not claimable.
+- Drone evidence source is delegated subtask artifacts or crystal count. A
+  selected Drone capability without delegated artifacts is not claimable.
+- Nightshift evidence source is report path plus recovered status. A
+  recommended-but-not-invoked Nightshift path is explicitly marked as
+  `recommended_without_invocation`.
+- This keeps MSA honest during the migration: the router may select a capability
+  aggressively, but public value claims require executor receipts.
+
+## 2026-04-29 P81-P88 Benchmark Readiness Gate
+- Gemini benchmarks must be run only after a Nexus-only routing smoke confirms:
+  1. capability plan is emitted,
+  2. capability receipts are emitted,
+  3. selected/invoked/evidence/gate rates are visible,
+  4. partial MSA capabilities have failure reasons,
+  5. capability-specific public gate is receipt-backed.
+- Trial/debug runs should use Nexus-only flows first. Gemini runs are reserved
+  for evidence-grade comparison after the route and receipt contract are stable.
+- If Autoreason or DDTree show no measurable execution contribution in
+  Nexus-only smoke, improve executor evidence before spending Gemini quota.
+- The target benchmark interpretation is:
+  - performance claim: solve-rate / verified-delivery delta,
+  - wearing claim: same model actually used Nexus context,
+  - capability claim: receipt-backed capability contribution,
+  - cost claim: wall time / token / model-call tradeoff.
+
+## 2026-04-29 P89 Receipt Hygiene Lesson
+- A Nexus-only smoke exposed that missing executor fields can accidentally look
+  like evidence if `None` is stringified. Receipt refs must drop null/empty
+  values before `evidence_present` is computed.
+- `outcome_contributed` must mean the capability's own gate contributed to a
+  verified outcome. A globally verified task must not make selected-only
+  capabilities look contributory.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.
 - Planner is not yet the execution SSOT; it is the migration target.
+- Benchmark/report layers consume `CapabilityReceipt` when available, but the
+  old inference path remains for historical report compatibility.
+- RLM still needs executor-level receipts before recursive loop claims can
+  produce capability-specific public claims.

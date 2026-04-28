@@ -242,6 +242,45 @@ def test_ab_eval_capability_coverage_counts_planned_msa_selection(tmp_path):
     assert coverage["swarm"]["public_safe"] is False
 
 
+def test_ab_eval_prefers_capability_receipts_over_legacy_inference(tmp_path):
+    dataset_a = tmp_path / "a.jsonl"
+    dataset_b = tmp_path / "b.jsonl"
+    dataset_a.write_text('{"task_id":"a","semantic_status":"UNVERIFIED"}\n', encoding="utf-8")
+    dataset_b.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "semantic_status": "VERIFIED",
+                "capability_plan_selected": ["swarm"],
+                "capability_swarm_used": True,
+                "capability_swarm_evidence_count": 3,
+                "capability_claim_verified": True,
+                "capability_receipts": [
+                    {
+                        "name": "swarm",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = compare_datasets("without", load_runs(dataset_a), "with", load_runs(dataset_b))
+    coverage = report["capability_coverage"]["b"]
+    assert coverage["swarm"]["source"] == "capability_receipts"
+    assert coverage["swarm"]["selected_rate"] == 1.0
+    assert coverage["swarm"]["invoked_rate"] == 0.0
+    assert coverage["swarm"]["evidence_rate"] == 0.0
+    assert coverage["swarm"]["gate_rate"] == 0.0
+    assert coverage["swarm"]["public_safe"] is False
+
+
 def test_ab_eval_counts_trust_mismatch_rate(tmp_path):
     dataset_a = tmp_path / "trust_a.json"
     dataset_b = tmp_path / "trust_b.json"

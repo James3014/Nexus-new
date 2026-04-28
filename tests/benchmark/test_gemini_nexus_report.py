@@ -568,6 +568,82 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
     assert "On this fixed benchmark set, `nexus` improved eligible solve rate" in out
 
 
+def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "UNVERIFIED",
+                "wall_duration_sec": 12,
+                "model_calls": 1,
+                "total_tokens": 120,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 9,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "pillar_lancedb_active": True,
+                "pillar_memory_active": True,
+                "pillar_mempalace_active": True,
+                "pillar_belief_active": True,
+                "pillar_artifact_active": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "capability_claim_verified": True,
+                "capability_receipts": [
+                    {
+                        "name": "autoreason",
+                        "selected": True,
+                        "invoked": True,
+                        "evidence_present": True,
+                        "gate_passed": True,
+                        "outcome_contributed": True,
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "Performance claim gate: PASS" in out
+    assert "Wearing claim gate: PASS" in out
+    assert "Capability-specific claim gate: PASS" in out
+    assert "Cost claim gate: PASS" in out
+    assert "Per-capability public-safe capabilities: autoreason" in out
+
+
 def test_render_markdown_report_does_not_claim_lift_when_solve_rate_ties(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"

@@ -124,6 +124,9 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
         selected = float(item.get("selected_rate", 0.0) or 0.0)
         if selected <= 0:
             continue
+        if item.get("source") != "capability_receipts":
+            failures.append(f"{name}:receipt_source_missing")
+            continue
         if item.get("public_safe"):
             public_safe.append(str(name))
         else:
@@ -137,6 +140,50 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
         "verdict": "PASS" if not failures else "FAIL",
         "public_safe": public_safe,
         "failures": failures,
+    }
+
+
+def _claim_gate_breakdown(
+    *,
+    public_gate: dict[str, Any],
+    capability_gate: dict[str, Any],
+    token_public_safe: str,
+) -> dict[str, dict[str, Any]]:
+    failures = set(public_gate.get("failures", []) or [])
+    performance_failures = sorted(
+        reason
+        for reason in failures
+        if reason in {"parallel_smoke", "missing_rows", "task_trial_mismatch", "metric_parse_error"}
+    )
+    wearing_failures = sorted(
+        reason
+        for reason in failures
+        if reason
+        in {
+            "nexus_wearing_below_threshold",
+            "gemini_uses_nexus_below_threshold",
+            "nexus_usage_valid_below_threshold",
+            "phase_completion_below_threshold",
+            "claim_verified_below_threshold",
+            "rlm_submit_without_a_gate",
+            "rlm_success_without_verified_trace",
+            "rlm_trace_quality_below_threshold",
+            "rlm_x_loop_budget_missing",
+        }
+    )
+    cost_failures = sorted(
+        reason
+        for reason in failures
+        if reason in {"without_token_measured_below_threshold", "with_token_measured_below_threshold"}
+    )
+    if token_public_safe != "YES" and not cost_failures:
+        cost_failures.append("token_public_safe_below_threshold")
+    capability_failures = list(capability_gate.get("failures", []) or [])
+    return {
+        "performance": {"verdict": "PASS" if not performance_failures else "FAIL", "failures": performance_failures},
+        "wearing": {"verdict": "PASS" if not wearing_failures else "FAIL", "failures": wearing_failures},
+        "capability": {"verdict": str(capability_gate.get("verdict") or "FAIL"), "failures": capability_failures},
+        "cost": {"verdict": "PASS" if not cost_failures else "FAIL", "failures": cost_failures},
     }
 
 
@@ -296,6 +343,11 @@ def render_markdown_report(
         formal=formal,
     )
     capability_gate = _per_capability_public_gate(report)
+    claim_gates = _claim_gate_breakdown(
+        public_gate=public_gate,
+        capability_gate=capability_gate,
+        token_public_safe=token_public_safe,
+    )
     gate_failures = public_gate["failures"]
     solve_delta = float(eligible_solve_delta)
     if solve_delta > 0:
@@ -426,6 +478,14 @@ def render_markdown_report(
         "",
         f"- Public claim gate: {public_gate['verdict']}",
         f"- Public claim gate failures: {_reasons_text({reason: 1 for reason in gate_failures})}",
+        f"- Performance claim gate: {claim_gates['performance']['verdict']}",
+        f"- Performance claim gate failures: {_reasons_text({reason: 1 for reason in claim_gates['performance']['failures']})}",
+        f"- Wearing claim gate: {claim_gates['wearing']['verdict']}",
+        f"- Wearing claim gate failures: {_reasons_text({reason: 1 for reason in claim_gates['wearing']['failures']})}",
+        f"- Capability-specific claim gate: {claim_gates['capability']['verdict']}",
+        f"- Capability-specific claim gate failures: {_reasons_text({reason: 1 for reason in claim_gates['capability']['failures']})}",
+        f"- Cost claim gate: {claim_gates['cost']['verdict']}",
+        f"- Cost claim gate failures: {_reasons_text({reason: 1 for reason in claim_gates['cost']['failures']})}",
         f"- Per-capability public gate: {capability_gate['verdict']}",
         f"- Per-capability public-safe capabilities: {', '.join(capability_gate['public_safe']) if capability_gate['public_safe'] else 'none'}",
         f"- Per-capability gate failures: {_reasons_text({reason: 1 for reason in capability_gate['failures']})}",

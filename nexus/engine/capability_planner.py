@@ -1,70 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
-
-PHASES = ("S", "P", "X", "D", "R", "A", "C")
-
-
-@dataclass(frozen=True)
-class CapabilityNode:
-    name: str
-    phase_hooks: tuple[str, ...]
-    default_state: str = "optional"
-    category: str = "execution"
-    maturity: str = "planned"
-    dependencies: tuple[str, ...] = ()
-    parallelizable_with: tuple[str, ...] = ()
-    cost: int = 1
-    benefit: int = 1
-    risk_reduction: int = 0
-    evidence_outputs: tuple[str, ...] = ()
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "phase_hooks": list(self.phase_hooks),
-            "default_state": self.default_state,
-            "category": self.category,
-            "maturity": self.maturity,
-            "dependencies": list(self.dependencies),
-            "parallelizable_with": list(self.parallelizable_with),
-            "cost": self.cost,
-            "benefit": self.benefit,
-            "risk_reduction": self.risk_reduction,
-            "evidence_outputs": list(self.evidence_outputs),
-        }
-
-
-@dataclass(frozen=True)
-class CapabilityPlan:
-    schema_version: str
-    selected_capabilities: list[str]
-    required_capabilities: list[str]
-    optional_capabilities: list[str]
-    conditional_capabilities: list[str]
-    forbidden_capabilities: list[str]
-    constraints: list[str]
-    decision_trace: list[dict[str, Any]]
-    replan_trace: list[dict[str, Any]]
-    score: int
-    planner_mode: str = "dry_run"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "planner_mode": self.planner_mode,
-            "selected_capabilities": self.selected_capabilities,
-            "required_capabilities": self.required_capabilities,
-            "optional_capabilities": self.optional_capabilities,
-            "conditional_capabilities": self.conditional_capabilities,
-            "forbidden_capabilities": self.forbidden_capabilities,
-            "constraints": self.constraints,
-            "decision_trace": self.decision_trace,
-            "replan_trace": self.replan_trace,
-            "score": self.score,
-        }
+from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, PHASES
+from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
 
 
 def default_capability_nodes() -> dict[str, CapabilityNode]:
@@ -544,39 +483,21 @@ class CapabilityPlanner:
         codeintel = codeintel or {}
         phase_trace = phase_trace or {}
         budget = budget or {}
-        route_features = route.get("route_features", {}) if isinstance(route, dict) else {}
-        capability_stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
-        selected_seed = set(capability_stack.get("selected_capabilities", []) or [])
-        acceleration_seed = set(capability_stack.get("acceleration_layers", []) or [])
-        governance_seed = set(capability_stack.get("governance_layers", []) or [])
-        risk_score = int(route_features.get("risk_score", 0) or 0)
-        confidence = float(route_features.get("adjusted_root_cause_confidence", 1.0) or 1.0)
-        candidate_count = int(route_features.get("candidate_count", 1) or 1)
-        memory_hits = int(route_features.get("memory_hits", 0) or 0)
-        findings_hits = int(route_features.get("findings_hits", 0) or 0)
-        cross_module = bool(route_features.get("is_cross_module_task", False))
-        hard_signal = bool(route_features.get("has_hard_signal", False))
-        task_lower = f"{task_desc} {task_type}".lower()
-        governance_signal = any(
-            token in task_lower
-            for token in ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance")
+        signals = build_capability_signals(
+            task_desc=task_desc,
+            task_type=task_type,
+            route=route,
+            pillars=pillars,
+            codeintel=codeintel,
         )
-        evidence_signal = any(token in task_lower for token in ("evidence", "artifact", "claim", "semantic", "trust"))
-        repair_signal = any(token in task_lower for token in ("repair", "self-heal", "failing branch", "timeout", "flaky"))
-        learning_signal = any(token in task_lower for token in ("learn", "citation", "slo", "kpi", "source", "claim"))
-        multi_agent_signal = any(token in task_lower for token in ("multi-agent", "owner", "file lock", "worktree", "integrate"))
-        swarm_signal = "swarm" in task_lower
-        drone_signal = "drone" in task_lower
-        nightshift_signal = "nightshift" in task_lower
-        ui_signal = any(token in task_lower for token in ("ui", "browser", "screen", "accessibility", "visual"))
-        continuity_signal = any(token in task_lower for token in ("resume", "distill", "checkpoint", "metabolism"))
+        constraint_model = build_capability_constraints(budget)
 
         states: dict[str, str] = {
             name: ("required" if node.default_state == "required" else "optional")
             for name, node in self.nodes.items()
         }
         reasons: dict[str, list[str]] = {name: [] for name in self.nodes}
-        constraints = ["mempalace_fail_closed", "artifact_evidence_required", "claim_fail_closed"]
+        constraints = list(constraint_model.hard_constraints)
 
         for required in ("mempalace_gate", "artifact_gate", "claim_gate"):
             reasons[required].append("governance_hard_constraint")
@@ -589,79 +510,80 @@ class CapabilityPlanner:
             states[name] = "conditional"
             reasons[name].append(reason)
 
-        if "hyper_sprint" in selected_seed or route.get("recommended_flow") == "hyper_sprint":
+        if "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint":
             enable("hyper", "route_selected_hyper")
-        if route.get("recommended_flow") == "baseline":
+        if signals.recommended_flow == "baseline":
             enable("direct_mode", "baseline_execution_path")
         if (
-            "autoreason" in selected_seed
-            or confidence < 0.75
-            or candidate_count >= 2
-            or memory_hits
-            or findings_hits
-            or repair_signal
-            or evidence_signal
+            "autoreason" in signals.selected_seed
+            or signals.confidence < 0.75
+            or signals.candidate_count >= 2
+            or signals.memory_hits
+            or signals.findings_hits
+            or signals.repair_signal
+            or signals.evidence_signal
+            or signals.governance_signal
         ):
             enable("autoreason", "low_confidence_or_multi_candidate_or_history")
-        if confidence < 0.8:
+        if signals.confidence < 0.8:
             enable("belief", "confidence_control_needed")
-        if memory_hits or findings_hits:
+        if signals.memory_hits or signals.findings_hits:
             enable("memory", "prior_lesson_or_findings_available")
-        if int((pillars.get("lancedb", {}) or {}).get("hits", 0) or 0):
+        if signals.lancedb_hits:
             enable("lancedb", "semantic_memory_hits_available")
-        if "ddtree" in acceleration_seed or candidate_count >= 3 or repair_signal:
+        if "ddtree" in signals.acceleration_seed or signals.candidate_count >= 3 or signals.repair_signal:
             enable("ddtree", "candidate_space_pruning")
-        if "ultra_review" in governance_seed or risk_score >= 70 or hard_signal or governance_signal:
+        if "ultra_review" in signals.governance_seed or signals.risk_score >= 70 or signals.hard_signal or signals.governance_signal:
             enable("ultra_review", "high_risk_or_governance_route")
             enable("sandbox", "high_risk_isolated_execution")
-        if cross_module or codeintel.get("impact_report_present") or risk_score >= 30:
+        if signals.cross_module or signals.codeintel_impact_present or signals.risk_score >= 30:
             enable("codeintel", "impact_or_blast_radius_needed")
-        if route.get("should_research") or not int((pillars.get("lancedb", {}) or {}).get("hits", 0) or 0):
+        if signals.should_research or not signals.lancedb_hits:
             enable("research", "context_or_retrieval_gap")
-        if learning_signal:
+        if signals.learning_signal:
             enable("learn_mode", "claim_or_citation_learning_signal")
             enable("learn_phase_slo", "learn_phase_policy_needed")
-        if risk_score >= 30 or governance_signal or evidence_signal:
+        if signals.risk_score >= 30 or signals.governance_signal or signals.evidence_signal:
             enable("pregate", "risk_or_policy_precheck")
             enable("plan_quality_gate", "plan_review_required")
-        if swarm_signal or (cross_module and risk_score >= 70):
+        if signals.swarm_signal or (signals.cross_module and signals.risk_score >= 70):
             enable("swarm", "cross_module_high_risk_review")
-        if drone_signal or "parallel" in task_lower or "split" in task_lower or (cross_module and candidate_count >= 2):
+        if signals.drone_signal or (signals.cross_module and signals.candidate_count >= 2):
             enable("drone", "parallelizable_subtask_signal")
-        if multi_agent_signal or (cross_module and risk_score >= 60):
+        if signals.multi_agent_signal or (signals.cross_module and signals.risk_score >= 60):
             enable("file_lock", "multi_agent_write_boundary")
             enable("multi_agent", "coordinated_ownership_required")
+        task_lower = f"{task_desc} {task_type}".lower()
         if "merge" in task_lower or "integrate" in task_lower or "integration" in task_lower:
             enable("integration_manager", "integration_or_merge_signal")
-        if risk_score >= 90 or "long" in task_lower or nightshift_signal or "nightshift" in governance_seed:
+        if signals.risk_score >= 90 or "long" in task_lower or signals.nightshift_signal or "nightshift" in signals.governance_seed:
             enable("nightshift", "long_or_critical_risk")
-        if ui_signal:
+        if signals.ui_signal:
             enable("ui_validator", "ui_validation_signal")
-        if continuity_signal:
+        if signals.continuity_signal:
             enable("metabolism", "continuity_or_resume_signal")
-        if "benchmark" in task_lower or "public report" in task_lower:
+        if signals.benchmark_signal:
             enable("benchmark", "evaluation_or_public_report_signal")
-        if "meta-opt" in task_lower or "autotune" in task_lower:
+        if signals.meta_opt_signal:
             enable("meta_opt", "optimization_signal")
-        if "registry" in task_lower or "skill" in task_lower:
+        if signals.registry_signal:
             enable("registry_sync", "platform_registry_signal")
-        if "oracle" in task_lower or "shadow" in task_lower:
+        if signals.oracle_signal:
             enable("oracle_shadow", "shadow_promotion_signal")
-        if "federation" in task_lower or "tenant" in task_lower:
+        if signals.federation_signal:
             enable("federation", "federated_learning_signal")
-        if "stress" in task_lower or "recursion" in task_lower:
+        if signals.stress_signal:
             enable("stress_test", "stress_or_recursion_signal")
 
-        max_cost = int(budget.get("max_cost", 999) or 999)
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         total_cost = sum(self.nodes[name].cost for name in selected)
         forbidden: list[str] = []
-        if total_cost > max_cost:
+        if total_cost > constraint_model.max_cost:
             for name in sorted(
                 [item for item in selected if states[item] == "conditional"],
                 key=lambda item: (self.nodes[item].benefit + self.nodes[item].risk_reduction - self.nodes[item].cost, self.nodes[item].cost),
             ):
-                if total_cost <= max_cost:
+                if total_cost <= constraint_model.max_cost:
                     break
                 states[name] = "forbidden"
                 forbidden.append(name)
@@ -686,7 +608,12 @@ class CapabilityPlanner:
                 }
             )
 
-        replan_trace = self._build_replan_trace(states=states, phase_trace=phase_trace, risk_score=risk_score, confidence=confidence)
+        replan_trace = self._build_replan_trace(
+            states=states,
+            phase_trace=phase_trace,
+            risk_score=signals.risk_score,
+            confidence=signals.confidence,
+        )
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",
@@ -700,6 +627,7 @@ class CapabilityPlanner:
             decision_trace=decision_trace,
             replan_trace=replan_trace,
             score=score,
+            signal_snapshot=signals.to_dict(),
         )
 
     def _build_replan_trace(
