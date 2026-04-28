@@ -242,26 +242,26 @@ def render_markdown_report(
         formal=formal,
     )
     gate_failures = public_gate["failures"]
-    solve_delta = float(delta["solve_rate_delta"])
+    solve_delta = float(eligible_solve_delta)
     if solve_delta > 0:
         public_claim_text = (
-            f"On this fixed benchmark set, `{label_with}` improved solve rate from "
-            f"{_pct(a['solve_rate'])} to {_pct(b['solve_rate'])} "
-            f"({_pct(delta['solve_rate_delta'])} absolute) while keeping trust mismatch at "
+            f"On this fixed benchmark set, `{label_with}` improved eligible solve rate from "
+            f"{_pct(eligible_solve_without)} to {_pct(eligible_solve_with)} "
+            f"({_pct(eligible_solve_delta)} absolute) while keeping trust mismatch at "
             f"{_pct(b['trust_mismatch_rate'])}."
         )
     elif solve_delta == 0:
         public_claim_text = (
-            f"On this fixed benchmark set, `{label_with}` matched solve rate at "
-            f"{_pct(b['solve_rate'])} while providing Nexus wearing evidence for "
+            f"On this fixed benchmark set, `{label_with}` matched eligible solve rate at "
+            f"{_pct(eligible_solve_with)} while providing Nexus wearing evidence for "
             f"{formal['valid_count']}/{formal['total_runs']} rows and keeping trust mismatch at "
             f"{_pct(b['trust_mismatch_rate'])}."
         )
     else:
         public_claim_text = (
-            f"On this fixed benchmark set, `{label_with}` reduced solve rate from "
-            f"{_pct(a['solve_rate'])} to {_pct(b['solve_rate'])} "
-            f"({_pct(delta['solve_rate_delta'])} absolute); no positive solve-rate claim is allowed."
+            f"On this fixed benchmark set, `{label_with}` reduced eligible solve rate from "
+            f"{_pct(eligible_solve_without)} to {_pct(eligible_solve_with)} "
+            f"({_pct(eligible_solve_delta)} absolute); no positive solve-rate claim is allowed."
         )
     if public_gate["verdict"] != "PASS":
         public_claim_text = (

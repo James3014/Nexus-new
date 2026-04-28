@@ -538,7 +538,7 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
     assert "Public claim gate: PASS" in out
     assert "Public claim gate failures: none" in out
     assert "| RLM trace quality | 0.00 | 90.00 | 90.00 |" in out
-    assert "On this fixed benchmark set, `nexus` improved solve rate" in out
+    assert "On this fixed benchmark set, `nexus` improved eligible solve rate" in out
 
 
 def test_render_markdown_report_does_not_claim_lift_when_solve_rate_ties(tmp_path):
@@ -585,5 +585,5 @@ def test_render_markdown_report_does_not_claim_lift_when_solve_rate_ties(tmp_pat
     )
 
     assert "Public claim gate: PASS" in out
-    assert "matched solve rate at 100.0%" in out
-    assert "improved solve rate from 100.0% to 100.0%" not in out
+    assert "matched eligible solve rate at 100.0%" in out
+    assert "improved eligible solve rate from 100.0% to 100.0%" not in out
