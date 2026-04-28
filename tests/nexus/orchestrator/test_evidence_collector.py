@@ -27,6 +27,7 @@ def test_run_check(task, tmp_path):
 def test_verify_gate_pass(task, tmp_path):
     collector = EvidenceCollector(reports_dir=str(tmp_path))
     task.add_evidence(Evidence(command="pytest -q tests/nexus/orchestrator", exit_code=0, output_summary="3 passed"))
+    task.add_evidence(Evidence(command="nexus code:impact --files file1.py", exit_code=0, output_summary="impact ok"))
     
     with patch("subprocess.run") as mock_run:
         # Delivery gate passes

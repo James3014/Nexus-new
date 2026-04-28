@@ -97,6 +97,12 @@ How:
 - 接 `delivery-gate` 與 closeout guard。
 - 加 e2e：`code:scan -> code:impact -> patch evidence -> delivery gate`。
 
+Status:
+- 2026-04-28 P32a implemented: code-change tasks require `code-impact` evidence at pre-gate even when the task did not explicitly list it.
+
+Lesson:
+- Existing fixtures with placeholder `file1.py` become real code-change tasks once code-impact is fail-closed. Tests that are not about code changes should use docs paths; code-change pass tests must include `nexus code:impact` evidence.
+
 ## Lesson
 
 - 跨 worktree 文件可能存在於 `/Users/jameschen/Workspace/nexus`，但主工作區是 `/Users/jameschen/.codex/worktrees/ad59/nexus`。執行前要用絕對路徑確認，避免把另一份工作區的計劃誤判為本 worktree 已落地。

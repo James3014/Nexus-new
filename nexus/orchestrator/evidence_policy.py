@@ -6,16 +6,28 @@ from nexus.orchestrator.task_contract import EvidenceRequirement
 from nexus.orchestrator.task_contract import Task
 
 
+def task_requires_code_impact(task: Task) -> bool:
+    code_suffixes = (".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java")
+    return any(str(path).endswith(code_suffixes) for path in task.allowed_files)
+
+
 def missing_pre_gate_requirements(task: Task) -> list[str | EvidenceRequirement]:
     deferred = {
         EvidenceRequirement.ACCEPTANCE_CHECK,
         EvidenceRequirement.DELIVERY_GATE,
     }
-    return [
+    missing = [
         requirement
         for requirement in task.missing_evidence_requirements()
         if requirement not in deferred
     ]
+    if (
+        task_requires_code_impact(task)
+        and EvidenceRequirement.CODE_IMPACT not in missing
+        and not any(evidence.satisfies(EvidenceRequirement.CODE_IMPACT) for evidence in task.evidence_list)
+    ):
+        missing.append(EvidenceRequirement.CODE_IMPACT)
+    return missing
 
 
 def pytest_artifacts(task: Task) -> list[str]:
