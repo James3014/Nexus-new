@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_IMPACT_MAP = ROOT / "docs" / "testing" / "test_impact_map.md"
 DEFAULT_IMPACT_INDEX = ROOT / ".nexus" / "test_impact_index.json"
+DEFAULT_IMPACT_STATS = ROOT / ".nexus" / "test_impact_stats.json"
 DEFAULT_TEST_HISTORY = ROOT / ".nexus" / "reports" / "test_history.jsonl"
 DEFAULT_FALLBACK_TARGETS = ("tests/core", "tests/services/test_policy_gate.py")
 HIGH_RISK_TARGETS = ("tests/services/test_policy_gate.py",)
@@ -45,6 +46,7 @@ class SelectionDetails:
     high_risk_escalated: bool
     risk_reasons: list[str]
     retry_recommended: list[str]
+    target_scores: dict[str, dict]
 
 
 def _normalize_path(value: str) -> str:
@@ -181,6 +183,17 @@ def load_test_history(path: Path = DEFAULT_TEST_HISTORY) -> dict[str, dict]:
     return stats
 
 
+def load_impact_stats(path: Path = DEFAULT_IMPACT_STATS) -> dict[str, dict[str, dict]]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    mappings = payload.get("mappings", {}) if isinstance(payload, dict) else {}
+    return mappings if isinstance(mappings, dict) else {}
+
+
 def _sort_targets_by_history(targets: list[str], history: dict[str, dict]) -> list[str]:
     def key(item: tuple[int, str]) -> tuple[int, int, float, float, int]:
         index, target = item
@@ -193,6 +206,25 @@ def _sort_targets_by_history(targets: list[str], history: dict[str, dict]) -> li
         return (0, flaky_rank, failure_rate, avg_duration, index)
 
     return [target for _, target in sorted(enumerate(targets), key=key)]
+
+
+def _predictive_scores(changed_paths: list[str], targets: list[str], impact_stats: dict[str, dict[str, dict]]) -> dict[str, dict]:
+    scores: dict[str, dict] = {}
+    for target in targets:
+        score = 0.0
+        reasons: list[str] = []
+        for path in changed_paths:
+            meta = impact_stats.get(path, {}).get(target, {})
+            if not isinstance(meta, dict):
+                continue
+            score += float(meta.get("score", 0.0) or 0.0)
+            reason_meta = meta.get("score_reasons", {})
+            if isinstance(reason_meta, dict):
+                for key, value in reason_meta.items():
+                    if value:
+                        reasons.append(f"{path}:{key}={value}")
+        scores[target] = {"score": round(score, 4), "score_reasons": reasons}
+    return scores
 
 
 def select_targets(
@@ -244,12 +276,15 @@ def select_target_details(
     fallback_targets: tuple[str, ...] = DEFAULT_FALLBACK_TARGETS,
     *,
     index_path: Path = DEFAULT_IMPACT_INDEX,
+    stats_path: Path = DEFAULT_IMPACT_STATS,
     history_path: Path = DEFAULT_TEST_HISTORY,
+    ranking: str = "static",
 ) -> SelectionDetails:
     selected: list[str] = []
     reasons: list[str] = []
     sources: list[str] = []
     index = load_impact_index(index_path)
+    impact_stats = load_impact_stats(stats_path)
     history = load_test_history(history_path)
 
     normalized_paths = [_normalize_path(path) for path in changed_paths if path.strip()]
@@ -315,6 +350,9 @@ def select_target_details(
         reasons.append("high-risk escalation")
 
     expanded = _sort_targets_by_history(_expand_existing_targets(selected), history)
+    target_scores = _predictive_scores(normalized_paths, expanded, impact_stats)
+    if ranking == "predictive" and any(meta["score"] for meta in target_scores.values()):
+        expanded = sorted(expanded, key=lambda target: (-float(target_scores.get(target, {}).get("score", 0.0)), expanded.index(target)))
     retry_recommended = [
         target for target in expanded if bool(history.get(target, {}).get("flaky", False))
     ]
@@ -344,6 +382,7 @@ def select_target_details(
         high_risk_escalated=high_risk,
         risk_reasons=risk_reasons,
         retry_recommended=retry_recommended,
+        target_scores={target: target_scores.get(target, {"score": 0.0, "score_reasons": []}) for target in expanded},
     )
 
 
@@ -377,6 +416,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=str(DEFAULT_TEST_HISTORY),
         help="JSONL test history path used for duration/flaky ranking.",
     )
+    parser.add_argument(
+        "--impact-stats",
+        default=str(DEFAULT_IMPACT_STATS),
+        help="JSON impact stats path used for predictive ranking.",
+    )
+    parser.add_argument(
+        "--ranking",
+        choices=("static", "predictive"),
+        default="static",
+        help="Ranking strategy. Default remains static.",
+    )
     return parser.parse_args(argv)
 
 
@@ -389,7 +439,9 @@ def main(argv: list[str] | None = None) -> int:
         rules,
         fallback or DEFAULT_FALLBACK_TARGETS,
         index_path=Path(args.impact_index),
+        stats_path=Path(args.impact_stats),
         history_path=Path(args.test_history),
+        ranking=args.ranking,
     )
     targets, reasons = details.targets, details.reasons
 
@@ -410,8 +462,11 @@ def main(argv: list[str] | None = None) -> int:
                     "risk_reasons": details.risk_reasons,
                     "unmatched_paths": details.unmatched_paths,
                     "retry_recommended": details.retry_recommended,
+                    "ranking": args.ranking,
+                    "target_scores": details.target_scores,
                     "impact_map": str(Path(args.impact_map)),
                     "impact_index": str(Path(args.impact_index)),
+                    "impact_stats": str(Path(args.impact_stats)),
                     "test_history": str(Path(args.test_history)),
                     "rules_loaded": len(rules),
                 },

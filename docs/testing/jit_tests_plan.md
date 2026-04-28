@@ -94,10 +94,10 @@ This matrix is the stored implementation boundary as of 2026-04-28.
 | Benchmark eligibility schema | done | `scripts/bench/capability_ab_runner.py` annotates `provider`, `model_name`, `run_eligible`, `infra_invalid_reason`, `invocation_started`, `model_response_received`, and `nexus_bootstrap_completed`; benchmark summaries expose `eligible_n` and `infra_invalid_n`. | Keep in all Gemini vs Nexus reports. |
 | Changed-only flaky auto retry v0 | planned | v3 already emits `retry_recommended`; no `retry_attempts`, `retry_targets`, or `retry_success` gate behavior yet. | Implement only after more history confirms flaky labels are reliable. |
 | JIT evidence report file | done | `ci_gate.py --changed-only` writes `.nexus/reports/changed_only_selection.json` and appends `.nexus/reports/jit_observation.jsonl`. | Keep latest report path visible in CI logs. |
-| Path-target correlation index | planned | Import index exists as `.nexus/test_impact_index.json`; historical correlation stats `.nexus/test_impact_stats.json` is not implemented. | Add after nightly feedback can label misses. |
+| Path-target correlation index | done, opt-in | `scripts/ops/jit_feedback.py` builds `.nexus/test_impact_stats.json` from changed-only observations and nightly missed-candidate evidence. | Keep collecting data; do not switch selector defaults yet. |
 | Coverage gap report | done | `scripts/ops/jit_coverage_gap.py` writes `.nexus/reports/jit_coverage_gap.json`. | Use report to curate impact-map rows, not auto-edit them. |
-| Predictive ranking v0 | planned | Selector still uses static ordering plus history sorting; no `--ranking static|predictive`, target `score`, or `score_reasons` yet. | Add explainable scoring before ML. |
-| Nightly feedback loop | planned | Nightly records full-run history, but does not yet mark changed-only misses as `missed_candidate`. | Add before correlation/predictive ranking. |
+| Predictive ranking v0 | done, opt-in | `select_tests.py` supports `--ranking static|predictive`; JSON includes `target_scores` with score reasons, default remains `static`. | Use predictive only for analysis until miss-rate evidence is stable. |
+| Nightly feedback loop | done, offline | `scripts/ops/jit_feedback.py` back-propagates full-run failures not selected by changed-only into `.nexus/reports/jit_missed_candidates.json`. | Wire into nightly after report schema is observed in real runs. |
 
 ## v4 Stored Backlog
 
@@ -164,8 +164,8 @@ Required content:
 Do not add ML until observation data proves it is useful.
 
 1. Collect at least 2-4 weeks of changed-only and full-regression observations.
-2. Add nightly feedback that marks full-run failures not selected by changed-only as `missed_candidate`.
-3. Add an explainable score before ML:
+2. Offline nightly feedback can mark full-run failures not selected by changed-only as `missed_candidate`.
+3. The selector can expose an explainable score before ML:
    - import index hit: +5
    - impact map hit: +3
    - high-risk impact-map metadata: +2
@@ -173,7 +173,7 @@ Do not add ML until observation data proves it is useful.
    - flaky target: +1
    - missed-candidate recovery: +3
    - duration penalty for slow generic targets
-4. Add `--ranking static|predictive`, keep `static` as default.
+4. `--ranking static|predictive` exists; keep `static` as default.
 5. Only switch default after miss rate and saved runtime are both acceptable.
 
 ## v5 Stored Backlog
@@ -204,6 +204,7 @@ Acceptance:
 
 - Selector JSON shows score breakdown for each target.
 - Sorting stays explainable.
+- Predictive ranking is opt-in and does not change default CI behavior.
 
 ### Coverage Gap Report
 
@@ -237,7 +238,7 @@ score = import_hit*5 + impact_map_hit*3 + failure_rate*2 + flaky*1.5 + high_risk
 
 Acceptance:
 
-- Selector JSON includes `score` and `score_reasons`.
+- Selector JSON includes `target_scores` with `score` and `score_reasons`.
 - CLI supports `--ranking static|predictive`.
 - Default remains `static` until history proves predictive ranking is safe.
 
@@ -253,7 +254,11 @@ Rules:
 
 ## Next Wiring Order
 
-1. Add nightly feedback that can detect `missed_candidate` from full-run failures.
-2. Expand impact-map coverage from observed fallback/unmatched paths.
+1. Wire `scripts/ops/jit_feedback.py` into nightly reporting after two or more real history samples confirm the schema.
+2. Expand impact-map coverage from observed fallback/unmatched paths and missed candidates.
 3. Add optional flaky auto-retry after retry recommendation data is stable.
-4. Add predictive ranking only after enough `.nexus/reports/jit_observation.jsonl` and full-run feedback exists.
+4. Evaluate predictive ranking with saved-runtime and miss-rate reports before considering a default change.
+
+Lesson:
+
+- Predictive selection must be an analysis lane before it becomes a gate lane. The safe default is still deterministic static selection; `.nexus/test_impact_stats.json` is evidence for review and tuning, not an automatic product claim.

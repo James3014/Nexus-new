@@ -213,12 +213,13 @@ How:
 
 Status:
 - 2026-04-28 P37a considered complete as observation/data-feedback foundation.
-- Remaining P37b: add nightly `missed_candidate` back-propagation.
-- Remaining P37c: add `.nexus/test_impact_stats.json` with score breakdown per target.
-- Remaining P37d: add `--ranking static|predictive`, defaulting to `static`.
+- 2026-04-28 P37b implemented offline nightly `missed_candidate` back-propagation in `scripts/ops/jit_feedback.py`.
+- 2026-04-28 P37c implemented `.nexus/test_impact_stats.json` generation with per-target score inputs.
+- 2026-04-28 P37d implemented selector `--ranking static|predictive`; default remains `static`.
 
 Lesson:
 - JIT must stay explainable before it becomes predictive. The first product promise is not "ML-selected tests"; it is "we can explain why these tests were selected and where fallback risk remains."
+- Predictive ranking is currently an opt-in analysis lane. It is not a public speed or quality claim until nightly miss-rate and saved-runtime evidence are available.
 
 ## P38: Public Report Readiness
 
@@ -266,7 +267,7 @@ How:
 | P33 RLM repair hardening | Feature-flagged R-loop with CapabilityGate/MemPalace/Belief | Yes for RLM value claim | Rollout policy defines allowed task classes and CI requirements |
 | P34 X research recursion | Trace bridge only | Yes if claiming recursive research value | Budgeted recursive X-loop implemented and tested |
 | P35/P36 benchmark lifecycle | Rule lifecycle + skill workflow implemented | No by itself | Reports include lifecycle recommendations and stable denominators |
-| P37 JIT feedback | Observation foundation implemented | No, unless claiming benchmark speed/value lift | Missed-candidate backprop + explainable stats before predictive ranking |
+| P37 JIT feedback | Observation, missed-candidate backprop, stats, and opt-in predictive ranking implemented | No, unless claiming benchmark speed/value lift | Keep static default; wire feedback into nightly and validate miss-rate before default predictive ranking |
 | P38 public report | Candidate-ready only | Yes | 12x3 same-model run, bilingual bundle, public claim gate PASS, trend report |
 
 Lesson:
