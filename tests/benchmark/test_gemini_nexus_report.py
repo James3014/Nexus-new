@@ -416,6 +416,8 @@ def test_render_markdown_report_surfaces_infra_invalid_rows(tmp_path):
                 "phase_a": "artifact_verified",
                 "phase_c": "closure_written",
                 "capability_claim_verified": True,
+                "rlm_trace_present": True,
+                "rlm_trace_quality_score": 90,
             }
         )
         + "\n",
@@ -484,6 +486,8 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
                 "phase_a": "artifact_verified",
                 "phase_c": "closure_written",
                 "capability_claim_verified": True,
+                "rlm_trace_present": True,
+                "rlm_trace_quality_score": 90,
             }
         )
         + "\n",
@@ -500,6 +504,7 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
 
     assert "Public claim gate: PASS" in out
     assert "Public claim gate failures: none" in out
+    assert "| RLM trace quality | 0.00 | 90.00 | 90.00 |" in out
     assert "On this fixed benchmark set, `nexus` improved solve rate" in out
 
 

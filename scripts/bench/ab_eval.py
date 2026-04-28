@@ -333,6 +333,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_model_tokens = sum(_as_float(row.get("model_total_tokens"), 0.0) for row in rows)
     total_model_calls = sum(_as_int(row.get("model_calls"), 0) for row in rows)
     total_attempts = sum(_as_int(row.get("attempt_count"), 0) for row in rows)
+    total_rlm_trace_quality = sum(_as_float(row.get("rlm_trace_quality_score"), 0.0) for row in rows)
     token_observable = sum(
         1
         for row in rows
@@ -366,6 +367,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_model_total_tokens": round(total_model_tokens / total, 2),
         "avg_model_calls": round(total_model_calls / total, 2),
         "avg_attempt_count": round(total_attempts / total, 2),
+        "avg_rlm_trace_quality_score": round(total_rlm_trace_quality / total, 2),
         "token_observable_rate": round(token_observable / total, 4),
         "token_measured_rate": round(token_measured / total, 4),
         "token_estimated_rate": round(token_estimated / total, 4),
@@ -501,6 +503,10 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         "avg_attempt_count_delta": round(summary_b["avg_attempt_count"] - summary_a["avg_attempt_count"], 2),
         "rlm_trace_present_rate_delta": round(
             summary_b["rlm_trace_present_rate"] - summary_a["rlm_trace_present_rate"], 4
+        ),
+        "avg_rlm_trace_quality_score_delta": round(
+            summary_b["avg_rlm_trace_quality_score"] - summary_a["avg_rlm_trace_quality_score"],
+            2,
         ),
         "token_observable_rate_delta": round(
             summary_b["token_observable_rate"] - summary_a["token_observable_rate"], 4

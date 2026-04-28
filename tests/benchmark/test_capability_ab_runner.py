@@ -638,6 +638,10 @@ def test_extract_record_maps_semantic_fields():
                 "scan_report_present": True,
                 "impact_report_present": True,
                 "claim_bundle_present": True,
+                "scan_report_path": ".nexus/reports/codeintel/scan.json",
+                "impact_report_path": ".nexus/reports/codeintel/impact.json",
+                "risk_score": 35,
+                "impacted_files_count": 3,
             },
             "jit": {
                 "ranking_mode": "static",
@@ -703,6 +707,10 @@ def test_extract_record_maps_semantic_fields():
     assert out["codeintel_scan_report_present"] is True
     assert out["codeintel_impact_report_present"] is True
     assert out["codeintel_claim_bundle_present"] is True
+    assert out["codeintel_scan_report_path"] == ".nexus/reports/codeintel/scan.json"
+    assert out["codeintel_impact_report_path"] == ".nexus/reports/codeintel/impact.json"
+    assert out["codeintel_risk_score"] == 35
+    assert out["codeintel_impacted_files_count"] == 3
     assert out["jit_ranking_mode"] == "static"
     assert out["jit_promotion_verdict"] == "HOLD"
     assert out["jit_predictive_saved_runtime_sec"] == 12.5

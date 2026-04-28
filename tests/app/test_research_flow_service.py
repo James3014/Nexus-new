@@ -27,6 +27,23 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert out["consensus"]["winner"] in {"baseline", "hyper_sprint"}
 
 
+def test_codeintel_context_is_injected_into_task_text():
+    text = research_flow_service._task_with_codeintel_context(
+        "Fix parser",
+        {
+            "impact_report_present": True,
+            "impact_report_path": ".nexus/reports/codeintel/impact.json",
+            "risk_score": 42,
+            "impacted_files_count": 3,
+            "risk_reason": ["reverse_import_impact"],
+        },
+    )
+
+    assert "[Nexus CodeIntel]" in text
+    assert "impact_report" in text
+    assert "risk_score: 42" in text
+
+
 def test_build_hyper_execution_profile_boosts_hard_bug():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix flaky websocket timeout race with deadlock symptoms",
@@ -406,6 +423,12 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
     assert trace["phase_trace"]["P"] == "route_built"
     assert trace["phase_trace"]["A"] == "artifact_verified"
     assert trace["capabilities"]["claim_verified"] is True
+    assert trace["codeintel"]["scan_report_present"] is True
+    assert trace["codeintel"]["impact_report_present"] is True
+    assert trace["codeintel"]["claim_bundle_present"] is True
+    assert Path(trace["codeintel"]["scan_report_path"]).exists()
+    assert Path(trace["codeintel"]["impact_report_path"]).exists()
+    assert trace["codeintel"]["impacted_files_count"] >= 1
     assert payload["timing"]["cli_elapsed_sec"] >= 0
     for phase in ["P", "X", "D", "R", "A", "C"]:
         assert phase in payload["timing"]["phase_wall_sec"]
@@ -512,6 +535,10 @@ def test_run_auto_flow_writes_recursive_research_x_trace_when_enabled(tmp_path: 
     assert events[0]["stop_reason"] == "candidate_selected"
     assert trace["rlm_loop_phase"] == "X"
     assert trace["rlm_x_loop_budget_observed"] is True
+    assert trace["rlm_x_loop_budget_summary"]["iterations_observed"] == 1
+    assert trace["rlm_x_loop_budget_summary"]["model_calls"] == 0
+    assert trace["rlm_x_loop_budget_summary"]["phase_wall_sec"] >= 0
+    assert trace["rlm_x_loop_budget_summary"]["exhausted"] is False
 
 
 def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification(tmp_path: Path, monkeypatch):

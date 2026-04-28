@@ -275,6 +275,9 @@ Status:
 - 2026-04-28 P38b-pre verified against `public_benchmark_rlm_harder_v2.json`: 8 tasks x 2 trials, same Gemini 3 Flash model lock, hidden verifier enabled, per-task stop-loss 600s, evidence bundle and markdown report requested.
 - 2026-04-28 P38schema added benchmark fields for RLM trace quality, CodeIntel scan/impact claim-bundle presence, and JIT promotion status.
 - 2026-04-28 P38rlm-gate added public-claim protection for RLM submit traces: submit must lead to A-gate verified/audit evidence, and recursive X-loop claims require budget evidence.
+- 2026-04-28 P39a added RLM X-loop budget summary with iteration, model-call, token, phase-wall, and exhaustion fields.
+- 2026-04-28 P39b added RLM trace quality rollup to A/B summaries and public markdown reports.
+- 2026-04-28 P39c injected CodeIntel scan/impact evidence into research auto-flow payload and LLM task context.
 - Remaining P38b: run 12 tasks x 3 trials for Gemini 3 Flash bare vs Gemini 3 Flash + Nexus after the worktree is clean.
 - Remaining P38c: produce Chinese and English public report bundles.
 - Remaining P38d: add weekly trend report for verified delivery, trust mismatch, wall time, model calls, and cost per verified success.

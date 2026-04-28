@@ -187,7 +187,7 @@ def _public_claim_gate(
             failures.append("rlm_submit_without_a_gate")
         if str(row.get("status") or row.get("semantic_status") or "") == "SUCCESS" and submit_count > 0 and verified_count <= 0:
             failures.append("rlm_success_without_verified_trace")
-        if trace_quality and trace_quality < 60:
+        if trace_quality < 60:
             failures.append("rlm_trace_quality_below_threshold")
         if bool(row.get("rlm_loop_phase") == "X") and not bool(row.get("rlm_x_loop_budget_observed", False)):
             failures.append("rlm_x_loop_budget_missing")
@@ -302,6 +302,7 @@ def render_markdown_report(
         f"| Verification rescue rate | {_pct(a['verification_rescue_rate'])} | {_pct(b['verification_rescue_rate'])} | {_pct(delta['verification_rescue_rate_delta'])} |",
         f"| LLM self-heal rate | {_pct(a['llm_self_heal_rate'])} | {_pct(b['llm_self_heal_rate'])} | {_pct(delta['llm_self_heal_rate_delta'])} |",
         f"| RLM trace present | {_pct(a['rlm_trace_present_rate'])} | {_pct(b['rlm_trace_present_rate'])} | {_pct(delta['rlm_trace_present_rate_delta'])} |",
+        f"| RLM trace quality | {_num(a['avg_rlm_trace_quality_score'])} | {_num(b['avg_rlm_trace_quality_score'])} | {_num(delta['avg_rlm_trace_quality_score_delta'])} |",
         f"| Token public-safe claim | {token_public_safe} | {token_public_safe} | n/a |",
         "",
         "## Five-Pillar Contribution",
@@ -327,6 +328,7 @@ def render_markdown_report(
         f"| Nightshift invoked | {_pct(a['nightshift_invoked_rate'])} | {_pct(b['nightshift_invoked_rate'])} | {_pct(delta['nightshift_invoked_rate_delta'])} | nightshift report evidence exists |",
         f"| Nightshift recovered | {_pct(a['nightshift_recovery_rate'])} | {_pct(b['nightshift_recovery_rate'])} | {_pct(delta['nightshift_recovery_rate_delta'])} | nightshift recovery verified |",
         f"| RLM trace present | {_pct(a['rlm_trace_present_rate'])} | {_pct(b['rlm_trace_present_rate'])} | {_pct(delta['rlm_trace_present_rate_delta'])} | recursive trace emitted |",
+        f"| RLM trace quality | {_num(a['avg_rlm_trace_quality_score'])} | {_num(b['avg_rlm_trace_quality_score'])} | {_num(delta['avg_rlm_trace_quality_score_delta'])} | trace has submit/A-gate/evidence signal |",
         "",
         "## Capability Win Map",
         "",

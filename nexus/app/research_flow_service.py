@@ -18,6 +18,7 @@ from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, _candidate_summaries
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
+from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,94 @@ def _write_research_rlm_trace(
         )
     )
     return str(trace_path)
+
+
+def _rlm_x_loop_budget_summary(
+    *,
+    result: dict[str, Any],
+    phase_wall_sec: dict[str, float],
+    candidate_count: int,
+) -> dict[str, Any]:
+    report = result.get("report", {}) if isinstance(result.get("report"), dict) else {}
+    model_calls = int(report.get("model_calls", 0) or 0)
+    total_tokens = int(report.get("total_tokens", 0) or 0)
+    phase_x_wall = float(phase_wall_sec.get("X", 0.0) or 0.0)
+    return {
+        "schema": "nexus_rlm_x_budget_summary_v1",
+        "iterations_observed": max(1, int(candidate_count or 1)),
+        "model_calls": model_calls,
+        "total_tokens": total_tokens,
+        "phase_wall_sec": round(phase_x_wall, 4),
+        "exhausted": False,
+        "sources": ["research_auto_flow", "phase_wall_sec", "result_report"],
+    }
+
+
+def _rel_path_for_report(repo_root: Path, path_text: str) -> str:
+    path = Path(path_text)
+    try:
+        return str(path.resolve().relative_to(repo_root.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: str) -> dict[str, Any]:
+    slug = _safe_trace_slug(task_desc)
+    report_dir = repo_root / ".nexus" / "reports" / "codeintel"
+    graph_path = report_dir / f"{slug}_code_graph.json"
+    scan_report_path = report_dir / f"{slug}_scan.json"
+    impact_report_path = report_dir / f"{slug}_impact.json"
+    changed_file = _rel_path_for_report(repo_root, target_file)
+    try:
+        scan = scan_codebase(repo_root, index_path=graph_path).to_dict()
+        scan["report_path"] = str(scan_report_path)
+        scan_report_path.parent.mkdir(parents=True, exist_ok=True)
+        scan_report_path.write_text(json.dumps(scan, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        impact = analyze_impact(repo_root, [changed_file], index_path=graph_path).to_dict()
+        impact["report_path"] = str(impact_report_path)
+        evidence_paths = list(impact.get("evidence_paths", []) or [])
+        for path in (str(scan_report_path), str(impact_report_path)):
+            if path not in evidence_paths:
+                evidence_paths.append(path)
+        impact["evidence_paths"] = evidence_paths
+        impact_report_path.write_text(json.dumps(impact, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        return {
+            "gate_mode": "scan_impact_required",
+            "scan_report_present": True,
+            "impact_report_present": True,
+            "claim_bundle_present": True,
+            "scan_report_path": str(scan_report_path),
+            "impact_report_path": str(impact_report_path),
+            "graph_index_path": str(graph_path),
+            "nodes_count": int(scan.get("nodes_count", 0) or 0),
+            "edges_count": int(scan.get("edges_count", 0) or 0),
+            "risk_score": int(impact.get("risk_score", 0) or 0),
+            "risk_reason": list(impact.get("risk_reason", []) or []),
+            "impacted_files_count": len(list(impact.get("impacted_files", []) or [])),
+            "impacted_symbols_count": len(list(impact.get("impacted_symbols", []) or [])),
+        }
+    except Exception as exc:
+        return {
+            "gate_mode": "scan_impact_required",
+            "scan_report_present": False,
+            "impact_report_present": False,
+            "claim_bundle_present": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _task_with_codeintel_context(task_desc: str, codeintel: dict[str, Any]) -> str:
+    if not codeintel.get("impact_report_present"):
+        return task_desc
+    risk_reasons = ", ".join(str(item) for item in codeintel.get("risk_reason", []) or []) or "none"
+    return (
+        f"{task_desc}\n\n"
+        "[Nexus CodeIntel]\n"
+        f"- impact_report: {codeintel.get('impact_report_path', '')}\n"
+        f"- risk_score: {codeintel.get('risk_score', 0)}\n"
+        f"- impacted_files_count: {codeintel.get('impacted_files_count', 0)}\n"
+        f"- risk_reason: {risk_reasons}"
+    )
 
 
 def _candidate_summary_has_swarm_evidence(summary: dict[str, Any]) -> bool:
@@ -697,6 +786,8 @@ def run_auto_flow(
     normalized_success_criteria = (success_criteria or "all_target_tests_pass").strip()
     verification_only_allowed = normalized_success_criteria == "all_target_tests_pass"
     mutation_required = normalized_success_criteria in {"artifact_changed_and_tests_pass", "mutation_required"}
+    codeintel_evidence = _build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task_desc)
+    task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
 
     def _generate_baseline_patch(trial: int = 0) -> tuple[str, str]:
         """R4: Enhanced baseline generation with LLM fast-fallback and conservative local paths."""
@@ -710,11 +801,11 @@ def run_auto_flow(
             prior_fixes = svc.ask(topic="bug-fixes", question=task_desc, top_k=5)
             if prior_fixes.get("citations"):
                 prior_context = "\n".join([c["claim"] for c in prior_fixes["citations"][:3]])
-                task_desc_for_llm = f"{task_desc}\n\n[Prior Art]\n{prior_context}"
+                task_desc_for_llm = f"{task_desc_with_codeintel}\n\n[Prior Art]\n{prior_context}"
             else:
-                task_desc_for_llm = task_desc
+                task_desc_for_llm = task_desc_with_codeintel
         except Exception:
-            task_desc_for_llm = task_desc
+            task_desc_for_llm = task_desc_with_codeintel
         
         if llm_baseline and task_type in ["feature", "refactor"]:
             try:
@@ -894,7 +985,7 @@ def run_auto_flow(
                 min(stage1_timeout_sec, dynamic_timeout),
             )
         cfg = SprintConfig(
-            task=task_desc,
+            task=task_desc_with_codeintel if llm_mode else task_desc,
             target_file=target_file,
             test_file=test_file,
             candidate_count=execution_profile["effective_candidate_count"],
@@ -1165,6 +1256,7 @@ def run_auto_flow(
             "claim_verified": artifact_verified,
         },
         "phase_wall_sec": phase_wall_sec,
+        "codeintel": codeintel_evidence,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),
         "nexus_rescued": nexus_rescued,
         "winner_source": winner_source,
@@ -1175,6 +1267,11 @@ def run_auto_flow(
         if recursive_research:
             nexus_usage_trace["rlm_loop_phase"] = "X"
             nexus_usage_trace["rlm_x_loop_budget_observed"] = True
+            nexus_usage_trace["rlm_x_loop_budget_summary"] = _rlm_x_loop_budget_summary(
+                result=result,
+                phase_wall_sec=phase_wall_sec,
+                candidate_count=candidate_count,
+            )
             nexus_usage_trace["rlm_required_gates"] = [
                 "rlm_trace_present",
                 "submit_not_success",
