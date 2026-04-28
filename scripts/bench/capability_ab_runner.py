@@ -351,6 +351,11 @@ def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, st
     test_path = case_dir / "test_target.py"
 
     fixture = task.fixture_kind.strip()
+    if fixture.startswith("rlm_harder_"):
+        target_code, test_code = _rlm_harder_fixture_sources(fixture)
+        target_path.write_text(target_code, encoding="utf-8")
+        test_path.write_text(test_code, encoding="utf-8")
+        return str(target_path), str(test_path)
     if fixture.startswith("nexus_value_"):
         target_code, test_code = _nexus_value_fixture_sources(fixture)
         target_path.write_text(target_code, encoding="utf-8")
@@ -543,6 +548,59 @@ def _nexus_value_fixture_sources(fixture_kind: str) -> tuple[str, str]:
         target_code, test_code = fixtures[fixture_kind]
     except KeyError as exc:
         raise ValueError(f"unknown_nexus_value_fixture:{fixture_kind}") from exc
+    return target_code, _portable_fixture_test_import(test_code)
+
+
+def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str]:
+    fixtures: dict[str, tuple[str, str]] = {
+        "rlm_harder_multifile_contract": (
+            "CANONICAL_FIELD = 'status'\n\n"
+            "def rlm_harder_build_payload(value, meta=None):\n"
+            "    payload = {CANONICAL_FIELD: value}\n"
+            "    if meta:\n"
+            "        payload['meta'] = meta\n"
+            "    return payload\n",
+            "from target import rlm_harder_build_payload\n\n"
+            "def test_uses_result_field_and_preserves_meta():\n"
+            "    assert rlm_harder_build_payload('ok', {'source': 'contract'}) == {'result': 'ok', 'meta': {'source': 'contract'}}\n",
+        ),
+        "rlm_harder_long_context_config": (
+            "def rlm_harder_parse_config(data):\n"
+            "    strict = bool(data.get('strict', False))\n"
+            "    retries = int(data.get('retries', 0))\n"
+            "    return {'strict': strict, 'retries': retries}\n",
+            "from target import rlm_harder_parse_config\n\n"
+            "def test_defaults_follow_current_contract_not_legacy_examples():\n"
+            "    assert rlm_harder_parse_config({}) == {'strict': True, 'retries': 3}\n"
+            "    assert rlm_harder_parse_config({'strict': False, 'retries': 0}) == {'strict': False, 'retries': 0}\n",
+        ),
+        "rlm_harder_misleading_trust": (
+            "def rlm_harder_overall_status(phases):\n"
+            "    if all(phase.get('status') == 'pass' for phase in phases):\n"
+            "        return 'pass'\n"
+            "    return 'fail'\n",
+            "from target import rlm_harder_overall_status\n\n"
+            "def test_passing_status_without_artifacts_is_not_verified():\n"
+            "    assert rlm_harder_overall_status([{'status': 'pass', 'artifact': 'a'}, {'status': 'pass', 'artifact': 'b'}]) == 'pass'\n"
+            "    assert rlm_harder_overall_status([{'status': 'pass'}, {'status': 'pass', 'artifact': 'b'}]) == 'fail'\n",
+        ),
+        "rlm_harder_second_round_invariant": (
+            "def rlm_harder_merge_limits(defaults, override):\n"
+            "    result = defaults\n"
+            "    result.update(override or {})\n"
+            "    return result\n",
+            "from target import rlm_harder_merge_limits\n\n"
+            "def test_second_round_must_preserve_inputs_and_ignore_none():\n"
+            "    defaults = {'timeout': 10, 'retries': 2}\n"
+            "    merged = rlm_harder_merge_limits(defaults, {'timeout': None, 'jitter': 1})\n"
+            "    assert merged == {'timeout': 10, 'retries': 2, 'jitter': 1}\n"
+            "    assert defaults == {'timeout': 10, 'retries': 2}\n",
+        ),
+    }
+    try:
+        target_code, test_code = fixtures[fixture_kind]
+    except KeyError as exc:
+        raise ValueError(f"unknown_rlm_harder_fixture:{fixture_kind}") from exc
     return target_code, _portable_fixture_test_import(test_code)
 
 

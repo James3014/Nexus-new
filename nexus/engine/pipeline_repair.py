@@ -574,6 +574,12 @@ class PipelineRepairMixin:
             ctx.state.retry_count = max(ctx.state.retry_count, repair_attempts - 1)
             ctx.state.current_phase = "R"
             logger.info(f"🛠️ [Pipeline] Repair Attempt {repair_attempts}/{max_retries}")
+            if rlm_loop is not None and not rlm_loop.prepare_iteration(
+                project_root=Path(getattr(self.engine, "project_root", Path.cwd())),
+                ctx=ctx,
+                iteration=repair_attempts,
+            ):
+                break
 
             # Step 1: Repair
             r_out = self._execute_single_repair(ctx, tracer, repair_attempts)

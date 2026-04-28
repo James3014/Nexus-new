@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from nexus.contracts import RLMBudget, RLMBudgetState, RLMTraceEvent, RLMTraceWriter
+from nexus.core.belief_engine import BeliefEngine
+from nexus.governance.capability_gate import CapabilityGate
+from nexus.services.mem_palace import MemPalace
 
 
 def recursive_repair_enabled(ctx: Any) -> bool:
@@ -70,8 +73,74 @@ class RecursiveRepairLoop:
                 delta_hypothesis=str(result.get("no_change_reason", "") or ""),
                 confidence=confidence,
                 allowed_tools=[str(tool) for tool in allowed_tools],
+                policy_reason=str(metadata.get("rlm_policy_reason", "") or ""),
                 stop_reason=stop_reason,
                 artifact_refs=list(result.get("artifact_refs", []) or []),
+            )
+        )
+
+    def prepare_iteration(self, *, project_root: Path, ctx: Any, iteration: int) -> bool:
+        metadata = getattr(getattr(ctx, "state", None), "metadata", {}) or {}
+        action = f"repair iteration {iteration}: {getattr(ctx, 'task_desc', '')}"
+        try:
+            allowed_tools = CapabilityGate().get_tools("R")
+        except Exception:
+            allowed_tools = []
+
+        try:
+            confidence = BeliefEngine(project_root / ".nexus" / "belief_state.json").assess_confidence(
+                self.task_id,
+                action,
+            )
+        except Exception:
+            confidence = float(metadata.get("belief_confidence", 0.7) or 0.7)
+        confidence = max(0.0, min(1.0, float(confidence)))
+
+        policy_reason = ""
+        if confidence < float(metadata.get("rlm_low_confidence_threshold", 0.35) or 0.35):
+            write_tools = {"multi_replace_file_content", "replace_file_content", "safe_patch", "write_to_file"}
+            allowed_tools = [tool for tool in allowed_tools if tool not in write_tools]
+            policy_reason = "low_belief_confidence"
+
+        try:
+            palace_ok = MemPalace(str(project_root)).audit_action("R", action)
+        except Exception:
+            palace_ok = True
+        metadata["rlm_allowed_tools"] = [str(tool) for tool in allowed_tools]
+        metadata["belief_confidence"] = confidence
+        metadata["rlm_policy_reason"] = policy_reason
+        if not palace_ok:
+            metadata["rlm_policy_blocked"] = True
+            metadata["rlm_policy_blocked_reason"] = "mempalace_action_denied"
+            self.record_policy_blocked(
+                iteration=iteration,
+                allowed_tools=metadata["rlm_allowed_tools"],
+                confidence=confidence,
+                blocked_reason="mempalace_action_denied",
+            )
+            return False
+        return True
+
+    def record_policy_blocked(
+        self,
+        *,
+        iteration: int,
+        allowed_tools: list[str],
+        confidence: float,
+        blocked_reason: str,
+    ) -> None:
+        self.writer.append(
+            RLMTraceEvent(
+                task_id=self.task_id,
+                phase="R",
+                iteration_id=f"policy-{iteration}",
+                action_type="policy",
+                observation="iteration blocked before repair",
+                confidence=confidence,
+                allowed_tools=allowed_tools,
+                blocked_reason=blocked_reason,
+                policy_reason=blocked_reason,
+                stop_reason="policy_blocked",
             )
         )
 

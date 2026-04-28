@@ -109,3 +109,68 @@ def test_recursive_repair_budget_exhaustion_fails_closed(tmp_path: Path):
     assert ctx.state.metadata["rlm_budget_exhausted"] is True
     assert ctx.state.metadata["rlm_budget_exhausted_reasons"] == ["max_iterations"]
     engine._execute_single_repair.assert_called_once()
+
+
+def test_recursive_repair_policy_records_gate_and_low_belief(tmp_path: Path, monkeypatch):
+    class FakeGate:
+        def get_tools(self, phase):
+            assert phase == "R"
+            return ["read_file", "write_to_file", "safe_patch"]
+
+    class FakePalace:
+        def __init__(self, project_root):
+            self.project_root = project_root
+
+        def audit_action(self, phase, action):
+            assert phase == "R"
+            assert "repair iteration 1" in action
+            return True
+
+    class FakeBelief:
+        def __init__(self, state_file):
+            self.state_file = state_file
+
+        def assess_confidence(self, task_id, assumption):
+            assert task_id == "rlm submit handoff"
+            assert "repair with recursive trace" in assumption
+            return 0.2
+
+    monkeypatch.setattr("nexus.engine.recursive_repair_loop.CapabilityGate", FakeGate)
+    monkeypatch.setattr("nexus.engine.recursive_repair_loop.MemPalace", FakePalace)
+    monkeypatch.setattr("nexus.engine.recursive_repair_loop.BeliefEngine", FakeBelief)
+    engine = DummyRepairEngine(tmp_path)
+    engine._execute_single_repair = MagicMock(return_value=_approved_repair())
+    engine._evaluate_audit_result = MagicMock(
+        return_value={"audit_success": True, "status": "APPROVED", "phantom_reason": None}
+    )
+    ctx = _ctx(enabled=True)
+
+    assert engine._repair_audit_loop(ctx, DummyTracer()) is True
+
+    events = _trace_events(tmp_path)
+    assert events[0]["allowed_tools"] == ["read_file"]
+    assert events[0]["policy_reason"] == "low_belief_confidence"
+    assert events[0]["confidence"] == 0.2
+    assert ctx.state.metadata["rlm_policy_reason"] == "low_belief_confidence"
+
+
+def test_recursive_repair_policy_block_fails_closed_before_repair(tmp_path: Path, monkeypatch):
+    class FakePalace:
+        def __init__(self, project_root):
+            self.project_root = project_root
+
+        def audit_action(self, phase, action):
+            return False
+
+    monkeypatch.setattr("nexus.engine.recursive_repair_loop.MemPalace", FakePalace)
+    engine = DummyRepairEngine(tmp_path)
+    engine._execute_single_repair = MagicMock(return_value=_approved_repair())
+    ctx = _ctx(enabled=True)
+
+    assert engine._repair_audit_loop(ctx, DummyTracer()) is False
+
+    events = _trace_events(tmp_path)
+    assert events[0]["action_type"] == "policy"
+    assert events[0]["stop_reason"] == "policy_blocked"
+    assert ctx.state.metadata["rlm_policy_blocked"] is True
+    engine._execute_single_repair.assert_not_called()

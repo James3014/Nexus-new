@@ -212,3 +212,26 @@ Failure lesson：
 1. 把 Phase 3 的 CapabilityGate/MemPalace/Belief per-iteration policy 接入 `RecursiveRepairLoop`。
 2. 讓 harder manifest 有專屬 fixture source，而不是暫時重用 `nexus_value_*` fixture。
 3. 跑 Gemini 3 Flash：bare vs Nexus current vs Nexus + RLM flag 的 4 題 smoke。
+
+## Phase 1 P6-P7 實作紀錄
+
+日期：2026-04-28
+
+狀態：
+
+- P6 `rlm_harder_*` manifest 改用專屬 fixture source，不再落回 generic hard backoff 或重用 `nexus_value_*` 題。
+- P7 每個 R iteration 前接入 `CapabilityGate`、`MemPalace.audit_action()`、`BeliefEngine.assess_confidence()`。
+- 低信心時會縮小 write/patch 類工具集，並在 trace 中寫入 `policy_reason=low_belief_confidence`。
+- MemPalace 阻斷時會在 repair 前 fail-closed，寫入 `stop_reason=policy_blocked`，不執行 `_execute_single_repair`。
+
+Failure lesson：
+
+- `rlm_harder_*` fixture 若沒有明確 source，runner 會默默 fallback 到 generic hard fixture；這會讓 benchmark 看似可跑但無法測 RLM 目標能力。
+- policy 資訊只寫 metadata 不夠，必須進入 trace event，否則後續 benchmark 無法證明 Nexus 是因治理內迴圈而改善。
+- per-iteration policy 預設只在 RLM flag 開啟後運作，避免改變既有 repair loop 行為。
+
+下一步：
+
+1. 跑 Gemini 3 Flash 4 題 smoke：bare vs Nexus current vs Nexus + RLM flag。
+2. 若 RLM flag 有提升，擴大到 8-12 題；若沒有提升，先讀 trace 找 budget/policy/fixture 的瓶頸。
+3. 將 P6/P7 的 trace 指標納入中文公開報告：allowed tools、policy block、belief confidence、budget exhausted。
