@@ -837,6 +837,85 @@ def _extract_token_info_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return extract_token_info(payload)
 
 
+def _summarize_rlm_trace(trace_path: str) -> dict[str, Any]:
+    path_text = str(trace_path or "").strip()
+    empty = {
+        "rlm_iteration_count": 0,
+        "rlm_submit_count": 0,
+        "rlm_verified_count": 0,
+        "rlm_audit_rejected_count": 0,
+        "rlm_policy_block_count": 0,
+        "rlm_budget_exhausted_trace": False,
+        "rlm_allowed_tools_count": 0,
+        "rlm_avg_confidence": None,
+        "rlm_evidence_density": 0.0,
+        "rlm_stop_reasons": [],
+        "rlm_trace_quality_score": 0,
+    }
+    if not path_text:
+        return empty
+    path = Path(path_text).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        return empty | {"rlm_stop_reasons": ["trace_missing"]}
+
+    events: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    if not events:
+        return empty | {"rlm_stop_reasons": ["trace_empty"]}
+
+    stop_reasons = [str(event.get("stop_reason") or "") for event in events if event.get("stop_reason")]
+    confidence_values = [
+        float(event.get("confidence"))
+        for event in events
+        if isinstance(event.get("confidence"), int | float)
+    ]
+    allowed_tools = {
+        str(tool)
+        for event in events
+        for tool in (event.get("allowed_tools") or [])
+        if str(tool).strip()
+    }
+    submit_count = sum(1 for event in events if event.get("action_type") == "submit" or event.get("stop_reason") == "submit")
+    verified_count = sum(1 for event in events if event.get("stop_reason") == "verified")
+    audit_rejected_count = sum(1 for event in events if event.get("stop_reason") == "audit_rejected")
+    policy_block_count = sum(
+        1
+        for event in events
+        if event.get("stop_reason") == "policy_blocked" or bool(event.get("blocked_reason"))
+    )
+    evidence_events = sum(1 for event in events if event.get("artifact_refs"))
+    budget_exhausted = any(reason == "budget_exhausted" for reason in stop_reasons)
+    quality_score = 25
+    quality_score += 20 if submit_count else 0
+    quality_score += 20 if verified_count or audit_rejected_count else 0
+    quality_score += 15 if evidence_events else 0
+    quality_score += 10 if allowed_tools or policy_block_count else 0
+    quality_score += 10 if not budget_exhausted else 0
+    return {
+        "rlm_iteration_count": len(events),
+        "rlm_submit_count": submit_count,
+        "rlm_verified_count": verified_count,
+        "rlm_audit_rejected_count": audit_rejected_count,
+        "rlm_policy_block_count": policy_block_count,
+        "rlm_budget_exhausted_trace": budget_exhausted,
+        "rlm_allowed_tools_count": len(allowed_tools),
+        "rlm_avg_confidence": _avg(confidence_values),
+        "rlm_evidence_density": round(evidence_events / len(events), 4),
+        "rlm_stop_reasons": sorted(set(stop_reasons)),
+        "rlm_trace_quality_score": min(100, quality_score),
+    }
+
+
 def _emit_progress(
     *,
     enabled: bool,
@@ -901,6 +980,10 @@ def _extract_record(
     phase_trace = phase_trace if isinstance(phase_trace, dict) else {}
     capabilities = usage_trace.get("capabilities", {}) if isinstance(usage_trace, dict) else {}
     capabilities = capabilities if isinstance(capabilities, dict) else {}
+    codeintel = usage_trace.get("codeintel", payload.get("codeintel", {})) if isinstance(payload, dict) else {}
+    codeintel = codeintel if isinstance(codeintel, dict) else {}
+    jit = usage_trace.get("jit", payload.get("jit", {})) if isinstance(payload, dict) else {}
+    jit = jit if isinstance(jit, dict) else {}
     baseline_trace = payload.get("baseline_trace", {}) if isinstance(payload, dict) else {}
     baseline_trace = baseline_trace if isinstance(baseline_trace, dict) else {}
     learn_phase_slo = payload.get("learn_phase_slo", {}) if isinstance(payload, dict) else {}
@@ -914,6 +997,8 @@ def _extract_record(
         str(report.get("token_capture_status", "unknown") or "unknown"),
         total_tokens,
     )
+    rlm_trace_path = str(usage_trace.get("rlm_trace_path") or "")
+    rlm_trace_summary = _summarize_rlm_trace(rlm_trace_path)
     semantic_status = payload.get("semantic_status")
     semantic_completed = bool(
         payload.get("status") == "SUCCESS"
@@ -1039,11 +1124,23 @@ def _extract_record(
         "capability_swarm_evidence_count": int(capabilities.get("swarm_evidence_count", 0) or 0),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
         "capability_drone_invoked_count": int(capabilities.get("drone_invoked_count", 0) or 0),
-        "rlm_trace_path": str(usage_trace.get("rlm_trace_path") or ""),
-        "rlm_trace_present": bool(str(usage_trace.get("rlm_trace_path") or "").strip()),
+        "codeintel_gate_mode": str(codeintel.get("gate_mode") or ""),
+        "codeintel_scan_report_present": bool(codeintel.get("scan_report_present", False)),
+        "codeintel_impact_report_present": bool(codeintel.get("impact_report_present", False)),
+        "codeintel_claim_bundle_present": bool(codeintel.get("claim_bundle_present", False)),
+        "jit_ranking_mode": str(jit.get("ranking_mode") or "static"),
+        "jit_promotion_verdict": str(jit.get("promotion_verdict") or ""),
+        "jit_static_default_unchanged": bool(jit.get("static_default_unchanged", True)),
+        "jit_miss_rate": jit.get("miss_rate"),
+        "jit_fallback_run_rate": jit.get("fallback_run_rate"),
+        "jit_unmatched_path_rate": jit.get("unmatched_path_rate"),
+        "jit_predictive_saved_runtime_sec": jit.get("predictive_saved_runtime_sec"),
+        "rlm_trace_path": rlm_trace_path,
+        "rlm_trace_present": bool(rlm_trace_path.strip()),
         "rlm_policy_reason": str(usage_trace.get("rlm_policy_reason") or ""),
         "rlm_budget_exhausted": bool(usage_trace.get("rlm_budget_exhausted", False)),
     }
+    row.update(rlm_trace_summary)
     return _annotate_benchmark_eligibility(
         row,
         provider="gemini" if model_name or model_calls > 0 or mode == "with_nexus" else "local",

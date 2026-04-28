@@ -19,6 +19,7 @@ from scripts.bench.capability_ab_runner import (
     _effective_total_timeout_sec,
     _extract_record,
     _extract_json_payload,
+    _summarize_rlm_trace,
     _summarize_benchmark_rows,
     expand_task_trials,
     _force_learn_slo_ready,
@@ -632,6 +633,21 @@ def test_extract_record_maps_semantic_fields():
                 "drone_used": True,
                 "drone_invoked_count": 1,
             },
+            "codeintel": {
+                "gate_mode": "scan_impact_required",
+                "scan_report_present": True,
+                "impact_report_present": True,
+                "claim_bundle_present": True,
+            },
+            "jit": {
+                "ranking_mode": "static",
+                "promotion_verdict": "HOLD",
+                "static_default_unchanged": True,
+                "miss_rate": 0.0,
+                "fallback_run_rate": 0.1,
+                "unmatched_path_rate": 0.0,
+                "predictive_saved_runtime_sec": 12.5,
+            },
         },
         "timing": {"cli_elapsed_sec": 2.4, "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5}},
         "result": {
@@ -684,9 +700,80 @@ def test_extract_record_maps_semantic_fields():
     assert out["capability_nightshift_invoked"] is True
     assert out["capability_nightshift_recovered"] is False
     assert out["capability_nightshift_report_path"] == ".nexus/reports/nightshift/run.json"
+    assert out["codeintel_scan_report_present"] is True
+    assert out["codeintel_impact_report_present"] is True
+    assert out["codeintel_claim_bundle_present"] is True
+    assert out["jit_ranking_mode"] == "static"
+    assert out["jit_promotion_verdict"] == "HOLD"
+    assert out["jit_predictive_saved_runtime_sec"] == 12.5
     assert out["semantic_completed"] is False
     assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
     assert out["nexus_phases_observed"] == ["P", "X", "D", "R", "A", "C"]
+
+
+def test_extract_record_summarizes_rlm_trace_quality(tmp_path: Path):
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "task_id": "t",
+                        "phase": "R",
+                        "iteration_id": "r-1",
+                        "action_type": "submit",
+                        "stop_reason": "submit",
+                        "confidence": 0.75,
+                        "allowed_tools": ["read_file", "safe_patch"],
+                        "artifact_refs": ["patch.diff"],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "task_id": "t",
+                        "phase": "A",
+                        "iteration_id": "a-1",
+                        "action_type": "audit",
+                        "stop_reason": "verified",
+                        "confidence": 1.0,
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    task = CapabilityTask(
+        id="rlm-001",
+        difficulty="hard",
+        task_type="bug",
+        task_desc="Fix with RLM",
+        target_file="a.py",
+        test_file="tests/test_a.py",
+        success_criteria="patch_and_tests_pass",
+    )
+    payload = {
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "nexus_usage_trace": {"rlm_trace_path": str(trace_path)},
+    }
+
+    out = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=1.0)
+
+    assert out["rlm_trace_present"] is True
+    assert out["rlm_iteration_count"] == 2
+    assert out["rlm_submit_count"] == 1
+    assert out["rlm_verified_count"] == 1
+    assert out["rlm_allowed_tools_count"] == 2
+    assert out["rlm_avg_confidence"] == 0.875
+    assert out["rlm_evidence_density"] == 0.5
+    assert out["rlm_trace_quality_score"] == 100
+
+
+def test_summarize_rlm_trace_marks_missing_trace():
+    summary = _summarize_rlm_trace("/tmp/nexus/missing-rlm-trace.jsonl")
+
+    assert summary["rlm_iteration_count"] == 0
+    assert summary["rlm_stop_reasons"] == ["trace_missing"]
 
 
 def test_extract_record_treats_patch_and_tests_pass_as_mutation_required():

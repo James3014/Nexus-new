@@ -430,6 +430,20 @@ def run_ultra_review_check() -> bool:
     return True
 
 
+def run_jit_promotion_report() -> bool:
+    print("\n📈 [CI-Gate] Building JIT predictive promotion report...")
+    try:
+        from scripts.ops.jit_promotion import DEFAULT_OUTPUT, main as jit_promotion_main
+
+        exit_code = jit_promotion_main([])
+        report = json.loads(DEFAULT_OUTPUT.read_text(encoding="utf-8")) if DEFAULT_OUTPUT.exists() else {}
+        print(f"📈 [CI-Gate] JIT predictive promotion verdict: {report.get('verdict', 'UNKNOWN')}")
+        return exit_code == 0
+    except Exception as exc:
+        print(f"❌ [CI-Gate] JIT predictive promotion report failed: {exc}")
+        return False
+
+
 def record_test_history(
     mode: str,
     command: str,
@@ -738,12 +752,16 @@ def main():
     parser.add_argument("--auto-heal", action="store_true", help="Launch autonomous repair loop on failure")
     parser.add_argument("--changed-only", nargs="*", help="Run only pytest targets affected by changed paths")
     parser.add_argument("--changed-paths", nargs="*", default=[], help="Changed paths used by strict JIT preflight")
+    parser.add_argument("--jit-promotion-report", action="store_true", help="Generate warn-only JIT predictive promotion report")
     parser.add_argument("--nightly", action="store_true", help="Run full L3 regression and append test history")
     args = parser.parse_args()
 
     changed_only = getattr(args, "changed_only", None)
     if changed_only is not None:
-        sys.exit(0 if run_changed_only_check(changed_only) else 1)
+        changed_ok = run_changed_only_check(changed_only)
+        if args.jit_promotion_report:
+            changed_ok = run_jit_promotion_report() and changed_ok
+        sys.exit(0 if changed_ok else 1)
 
     if getattr(args, "nightly", False):
         sys.exit(0 if run_nightly_full_check() else 1)
@@ -761,6 +779,8 @@ def main():
     if args.strict:
         changed_paths = getattr(args, "changed_paths", [])
         if not run_changed_only_check(changed_paths):
+            sys.exit(1)
+        if args.jit_promotion_report and not run_jit_promotion_report():
             sys.exit(1)
         if requires_ultra_review(changed_paths) and not run_ultra_review_check():
             sys.exit(1)

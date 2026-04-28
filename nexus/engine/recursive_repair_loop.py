@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -8,12 +7,22 @@ from typing import Any
 from nexus.contracts import RLMBudget, RLMBudgetState, RLMTraceEvent, RLMTraceWriter
 from nexus.core.belief_engine import BeliefEngine
 from nexus.governance.capability_gate import CapabilityGate
+from nexus.engine.rlm_rollout_policy import decide_rlm_rollout_for_context
 from nexus.services.mem_palace import MemPalace
 
 
 def recursive_repair_enabled(ctx: Any) -> bool:
-    metadata = getattr(getattr(ctx, "state", None), "metadata", {}) or {}
-    return bool(metadata.get("rlm_recursive_repair_enabled")) or os.getenv("NEXUS_RLM_REPAIR_LOOP") == "1"
+    decision = decide_rlm_rollout_for_context(ctx)
+    state = getattr(ctx, "state", None)
+    metadata = getattr(state, "metadata", None)
+    if not isinstance(metadata, dict):
+        metadata = {}
+        if state is not None:
+            state.metadata = metadata
+    metadata["rlm_rollout_mode"] = decision.mode.value
+    metadata["rlm_rollout_reason"] = decision.reason
+    metadata["rlm_required_gates"] = decision.required_gates
+    return decision.repair_loop_enabled
 
 
 def _task_slug(task_id: str) -> str:

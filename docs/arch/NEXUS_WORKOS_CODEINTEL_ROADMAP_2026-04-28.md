@@ -131,7 +131,14 @@ How:
 
 Status:
 - 2026-04-28 verified by `tests/engine/test_recursive_repair_loop.py`.
-- Still not default-on production; the missing production step is rollout policy: which task classes may enable the flag, and what CI gate requires when RLM is used.
+- 2026-04-28 P33b added rollout policy for disabled / trace-only / repair-loop / research-loop-candidate modes.
+- Still not default-on production; the remaining production step is enforcing the required gates in CI and benchmark reports.
+
+Upgrade ladder:
+1. P33c: make RLM reports fail closed when required gates are missing: `rlm_trace_present`, `submit_not_success`, `ac_gate_verified`.
+2. P33d: add trace-quality scoring: iteration count, submit count, verified count, policy block count, evidence density, and budget exhaustion.
+3. P33e: compare `Nexus RLM-off` vs `Nexus RLM-on` on harder tasks before claiming RLM lift.
+4. P33f: keep live delivery disabled unless metadata explicitly allows it.
 
 Lesson:
 - RLM hardening should be measured as policy compliance and trace quality, not only solve rate. `SUBMIT` must remain a handoff to A gate, never a success claim.
@@ -151,6 +158,12 @@ How:
 Status:
 - 2026-04-28 P34a verified as trace bridge, not full recursive X-loop.
 - P34b remains: implement budgeted recursive research iterations with MemPalace/Belief/CapabilityGate per iteration.
+
+Upgrade ladder:
+1. P34b: implement a governed `RecursiveResearchLoop` behind an explicit flag.
+2. P34c: emit multi-event X traces: candidate generated, evidence scored, candidate rejected, winner selected, budget exhausted.
+3. P34d: connect X trace to Learn/Ask learning closure without duplicate writeback.
+4. P34e: require X-loop budget evidence before public reports may claim recursive research.
 
 Lesson:
 - A trace bridge is enough for observability and benchmark evidence, but not enough to claim full RLM research recursion. Public reports should say `RLM trace present`, not `recursive research solved`.
@@ -220,6 +233,17 @@ Status:
 - 2026-04-28 P37b implemented offline nightly `missed_candidate` back-propagation in `scripts/ops/jit_feedback.py`.
 - 2026-04-28 P37c implemented `.nexus/test_impact_stats.json` generation with per-target score inputs.
 - 2026-04-28 P37d implemented selector `--ranking static|predictive`; default remains `static`.
+- 2026-04-28 P37e implemented `scripts/ops/jit_promotion.py` and `ci_gate.py --jit-promotion-report`; promotion remains warn-only and default ranking remains `static`.
+
+Upgrade ladder:
+1. P37e: generate a promotion report that compares predictive ranking against static using miss-rate, fallback-rate, unmatched paths, nightly full-run count, and saved-runtime estimate.
+2. P37f: keep predictive ranking as warn-only until the promotion report says `PROMOTE_CANDIDATE`.
+3. P37g: add a trial lane in CI that runs predictive selection as analysis while static remains authoritative.
+4. P37h: only after 2-4 weeks of clean observation, consider switching selected low-risk paths from static to predictive.
+
+Meta-style target:
+- Nexus JIT should converge toward affected tests + dependency graph + historical co-failure + flaky/duration cost + nightly miss calibration.
+- Nexus should not claim Meta-scale JIT until it has distributed execution, large historical data, and measured recall against full regression.
 
 Lesson:
 - JIT must stay explainable before it becomes predictive. The first product promise is not "ML-selected tests"; it is "we can explain why these tests were selected and where fallback risk remains."
@@ -248,6 +272,7 @@ Status:
 - 2026-04-28 P38a documented as report readiness gate.
 - 2026-04-28 P38b-pre implemented: `capability_ab_runner.py --preflight-only` validates public benchmark inputs without invoking Gemini or Nexus.
 - 2026-04-28 P38b-pre verified against `public_benchmark_rlm_harder_v2.json`: 8 tasks x 2 trials, same Gemini 3 Flash model lock, hidden verifier enabled, per-task stop-loss 600s, evidence bundle and markdown report requested.
+- 2026-04-28 P38schema added benchmark fields for RLM trace quality, CodeIntel scan/impact claim-bundle presence, and JIT promotion status.
 - Remaining P38b: run 12 tasks x 3 trials for Gemini 3 Flash bare vs Gemini 3 Flash + Nexus after the worktree is clean.
 - Remaining P38c: produce Chinese and English public report bundles.
 - Remaining P38d: add weekly trend report for verified delivery, trust mismatch, wall time, model calls, and cost per verified success.

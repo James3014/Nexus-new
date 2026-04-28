@@ -45,6 +45,39 @@ def _ctx(*, enabled: bool = False, budget: dict[str, int] | None = None) -> Magi
     return ctx
 
 
+def test_recursive_repair_env_flag_respects_rollout_policy_for_low_risk_task(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_RLM_REPAIR_LOOP", "1")
+    engine = DummyRepairEngine(tmp_path)
+    engine._execute_single_repair = MagicMock(return_value=_approved_repair())
+    engine._evaluate_audit_result = MagicMock(
+        return_value={"audit_success": True, "status": "APPROVED", "phantom_reason": None}
+    )
+    ctx = _ctx()
+    ctx.task_type = "docs"
+    ctx.task_desc = "update wording"
+
+    assert engine._repair_audit_loop(ctx, DummyTracer()) is True
+
+    assert ctx.state.metadata["rlm_rollout_mode"] == "trace_only"
+    assert not (tmp_path / ".nexus" / "reports" / "rlm_trace").exists()
+
+
+def test_recursive_repair_rollout_policy_blocks_live_delivery_without_approval(tmp_path: Path):
+    engine = DummyRepairEngine(tmp_path)
+    engine._execute_single_repair = MagicMock(return_value=_approved_repair())
+    engine._evaluate_audit_result = MagicMock(
+        return_value={"audit_success": True, "status": "APPROVED", "phantom_reason": None}
+    )
+    ctx = _ctx(enabled=True)
+    ctx.state.metadata["delivery_profile"] = "live_api"
+
+    assert engine._repair_audit_loop(ctx, DummyTracer()) is True
+
+    assert ctx.state.metadata["rlm_rollout_mode"] == "disabled"
+    assert ctx.state.metadata["rlm_rollout_reason"] == "live_delivery_requires_explicit_approval"
+    assert not (tmp_path / ".nexus" / "reports" / "rlm_trace").exists()
+
+
 def _approved_repair() -> dict[str, object]:
     return {
         "status": "APPROVED",
