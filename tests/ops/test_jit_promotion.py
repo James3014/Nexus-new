@@ -34,6 +34,9 @@ def test_build_promotion_report_promotes_when_evidence_is_clean():
     assert report["miss_rate"] == 0.0
     assert report["predictive_saved_runtime_sec"] == 4.5
     assert report["stats_target_count"] == 1
+    assert report["trial_lane_allowed"] is True
+    assert report["default_switch_allowed"] is False
+    assert report["default_switch_reason"] == "requires_sustained_observation_window"
 
 
 def test_build_promotion_report_holds_on_missed_candidate():

@@ -2,7 +2,39 @@ from __future__ import annotations
 
 import json
 
-from scripts.bench.gemini_nexus_report import render_markdown_report
+from scripts.bench.gemini_nexus_report import _public_claim_gate, render_markdown_report
+
+
+def test_public_claim_gate_rejects_rlm_submit_without_a_gate():
+    gate = _public_claim_gate(
+        rows_without=[{"task_id": "a", "trial_index": 1, "token_measured": True}],
+        rows_with=[
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "rlm_trace_present": True,
+                "rlm_submit_count": 1,
+                "rlm_verified_count": 0,
+                "rlm_audit_rejected_count": 0,
+                "rlm_trace_quality_score": 45,
+                "status": "SUCCESS",
+                "capability_claim_verified": True,
+            }
+        ],
+        summary_without={"token_measured_rate": 1.0},
+        summary_with={
+            "token_measured_rate": 1.0,
+            "gemini_uses_nexus_rate": 1.0,
+            "nexus_usage_valid_rate": 1.0,
+            "phase_completion_rate": 1.0,
+            "claim_verified_rate": 1.0,
+        },
+        formal={"valid_rate": 1.0},
+    )
+
+    assert gate["verdict"] == "FAIL"
+    assert "rlm_submit_without_a_gate" in gate["failures"]
+    assert "rlm_trace_quality_below_threshold" in gate["failures"]
 
 
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):

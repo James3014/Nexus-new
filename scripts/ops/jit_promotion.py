@@ -105,6 +105,9 @@ def build_promotion_report(
     return {
         "schema": "nexus_jit_predictive_promotion_v1",
         "verdict": verdict,
+        "trial_lane_allowed": verdict == "PROMOTE_CANDIDATE",
+        "default_switch_allowed": False,
+        "default_switch_reason": "requires_sustained_observation_window",
         "criteria": criteria,
         "thresholds": {
             "min_observations": min_observations,

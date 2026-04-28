@@ -757,9 +757,9 @@ def main():
     args = parser.parse_args()
 
     changed_only = getattr(args, "changed_only", None)
-    if changed_only is not None:
+    if isinstance(changed_only, list):
         changed_ok = run_changed_only_check(changed_only)
-        if args.jit_promotion_report:
+        if getattr(args, "jit_promotion_report", False):
             changed_ok = run_jit_promotion_report() and changed_ok
         sys.exit(0 if changed_ok else 1)
 
@@ -780,7 +780,7 @@ def main():
         changed_paths = getattr(args, "changed_paths", [])
         if not run_changed_only_check(changed_paths):
             sys.exit(1)
-        if args.jit_promotion_report and not run_jit_promotion_report():
+        if getattr(args, "jit_promotion_report", False) and not run_jit_promotion_report():
             sys.exit(1)
         if requires_ultra_review(changed_paths) and not run_ultra_review_check():
             sys.exit(1)

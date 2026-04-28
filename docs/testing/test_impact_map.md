@@ -17,6 +17,7 @@
 | scripts/ops/ultra_gate.py | tests/ops/test_ultra_gate.py | active | high | governance |
 | scripts/ops/__init__.py | tests/ops/test_anti_drift_gate.py, tests/ops/test_soul_artifact_vault.py | active | medium | compatibility |
 | scripts/ops/select_tests.py | tests/ops/test_select_tests.py | active | high | jit_selector |
+| scripts/ops/jit_promotion.py | tests/ops/test_jit_promotion.py | active | medium | jit_promotion |
 | scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active | medium | jit_index |
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium | jit_entrypoint |
 | scripts/ops | tests/ops | active | medium | ops_tooling |

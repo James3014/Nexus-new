@@ -177,9 +177,23 @@ def _public_claim_gate(
             failures.append("claim_verified_below_threshold")
     except (TypeError, ValueError):
         failures.append("metric_parse_error")
+    rlm_rows = [row for row in rows_with if row.get("rlm_trace_present")]
+    for row in rlm_rows:
+        submit_count = int(row.get("rlm_submit_count", 0) or 0)
+        verified_count = int(row.get("rlm_verified_count", 0) or 0)
+        audit_rejected_count = int(row.get("rlm_audit_rejected_count", 0) or 0)
+        trace_quality = int(row.get("rlm_trace_quality_score", 0) or 0)
+        if submit_count > 0 and verified_count + audit_rejected_count <= 0:
+            failures.append("rlm_submit_without_a_gate")
+        if str(row.get("status") or row.get("semantic_status") or "") == "SUCCESS" and submit_count > 0 and verified_count <= 0:
+            failures.append("rlm_success_without_verified_trace")
+        if trace_quality and trace_quality < 60:
+            failures.append("rlm_trace_quality_below_threshold")
+        if bool(row.get("rlm_loop_phase") == "X") and not bool(row.get("rlm_x_loop_budget_observed", False)):
+            failures.append("rlm_x_loop_budget_missing")
     return {
         "verdict": "PASS" if not failures else "FAIL",
-        "failures": failures,
+        "failures": sorted(set(failures)),
     }
 
 

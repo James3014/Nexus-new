@@ -97,6 +97,7 @@ This matrix is the stored implementation boundary as of 2026-04-28.
 | Path-target correlation index | done, opt-in | `scripts/ops/jit_feedback.py` builds `.nexus/test_impact_stats.json` from changed-only observations and nightly missed-candidate evidence. | Keep collecting data; do not switch selector defaults yet. |
 | Coverage gap report | done | `scripts/ops/jit_coverage_gap.py` writes `.nexus/reports/jit_coverage_gap.json`. | Use report to curate impact-map rows, not auto-edit them. |
 | Predictive ranking v0 | done, opt-in | `select_tests.py` supports `--ranking static|predictive`; JSON includes `target_scores` with score reasons, default remains `static`. | Use predictive only for analysis until miss-rate evidence is stable. |
+| Predictive promotion boundary | done, guarded | `scripts/ops/jit_promotion.py` emits `trial_lane_allowed` and always keeps `default_switch_allowed=false`. | `PROMOTE_CANDIDATE` permits trial-lane analysis only; CI default requires a separate sustained observation window. |
 | Nightly feedback loop | done, offline | `scripts/ops/jit_feedback.py` back-propagates full-run failures not selected by changed-only into `.nexus/reports/jit_missed_candidates.json`. | Wire into nightly after report schema is observed in real runs. |
 
 ## v4 Stored Backlog
@@ -174,6 +175,7 @@ Do not add ML until observation data proves it is useful.
    - missed-candidate recovery: +3
    - duration penalty for slow generic targets
 4. `--ranking static|predictive` exists; keep `static` as default.
+5. `PROMOTE_CANDIDATE` means predictive can run as a trial lane, not as the authoritative CI default.
 5. Only switch default after miss rate and saved runtime are both acceptable.
 
 ## v5 Stored Backlog
@@ -258,6 +260,7 @@ Rules:
 2. Expand impact-map coverage from observed fallback/unmatched paths and missed candidates.
 3. Add optional flaky auto-retry after retry recommendation data is stable.
 4. Evaluate predictive ranking with saved-runtime and miss-rate reports before considering a default change.
+5. Require sustained observation before any default switch; the promotion report deliberately keeps `default_switch_allowed=false`.
 
 Lesson:
 

@@ -97,6 +97,10 @@ def _rlm_trace_enabled() -> bool:
     return os.getenv("NEXUS_RLM_REPAIR_LOOP") == "1"
 
 
+def _rlm_research_trace_enabled() -> bool:
+    return os.getenv("NEXUS_RLM_RESEARCH_LOOP") == "1"
+
+
 def _safe_trace_slug(text: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", (text or "").strip().lower()).strip("-")
     return slug[:80] or "research-auto-flow"
@@ -109,6 +113,7 @@ def _write_research_rlm_trace(
     result: dict[str, Any],
     nexus_usage_trace: dict[str, Any],
     artifact_summary: dict[str, Any],
+    recursive_research: bool = False,
 ) -> str:
     trace_path = repo_root / ".nexus" / "reports" / "rlm_trace" / f"{_safe_trace_slug(task_desc)}.jsonl"
     writer = RLMTraceWriter(trace_path)
@@ -116,11 +121,29 @@ def _write_research_rlm_trace(
     report = result.get("report", {}) if isinstance(result.get("report"), dict) else {}
     confidence = float(((nexus_usage_trace.get("pillars", {}) or {}).get("belief", {}) or {}).get("confidence", 0.0) or 0.0)
     confidence = max(0.0, min(1.0, confidence))
+    parent_iteration_id = ""
+    if recursive_research:
+        parent_iteration_id = "x-1"
+        writer.append(
+            RLMTraceEvent(
+                task_id=task_id,
+                phase="X",
+                iteration_id="x-1",
+                action_type="research_candidate",
+                observation=str(report.get("winner_source") or result.get("status", "")),
+                confidence=confidence,
+                allowed_tools=["research:auto-flow", "code:impact", "learn:ask"],
+                policy_reason="recursive_research_candidate",
+                stop_reason="candidate_selected",
+                artifact_refs=[str(report.get("report_file", ""))] if report.get("report_file") else [],
+            )
+        )
     writer.append(
         RLMTraceEvent(
             task_id=task_id,
             phase="R",
             iteration_id="r-1",
+            parent_iteration_id=parent_iteration_id,
             action_type="research_auto_flow",
             observation=str(result.get("status", "")),
             confidence=confidence,
@@ -1147,13 +1170,31 @@ def run_auto_flow(
         "winner_source": winner_source,
         "usage_valid": bool(gemini_invoked and artifact_verified),
     }
-    if _rlm_trace_enabled():
+    recursive_research = _rlm_research_trace_enabled()
+    if _rlm_trace_enabled() or recursive_research:
+        if recursive_research:
+            nexus_usage_trace["rlm_loop_phase"] = "X"
+            nexus_usage_trace["rlm_x_loop_budget_observed"] = True
+            nexus_usage_trace["rlm_required_gates"] = [
+                "rlm_trace_present",
+                "submit_not_success",
+                "ac_gate_verified",
+                "x_loop_budget_observed",
+            ]
+        else:
+            nexus_usage_trace["rlm_loop_phase"] = "R"
+            nexus_usage_trace["rlm_required_gates"] = [
+                "rlm_trace_present",
+                "submit_not_success",
+                "ac_gate_verified",
+            ]
         nexus_usage_trace["rlm_trace_path"] = _write_research_rlm_trace(
             repo_root=repo_root,
             task_desc=task_desc,
             result=result,
             nexus_usage_trace=nexus_usage_trace,
             artifact_summary={**artifact_summary, "tests_passed": tests_passed},
+            recursive_research=recursive_research,
         )
 
     payload = {

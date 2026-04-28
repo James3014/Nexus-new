@@ -1139,6 +1139,9 @@ def _extract_record(
         "rlm_trace_present": bool(rlm_trace_path.strip()),
         "rlm_policy_reason": str(usage_trace.get("rlm_policy_reason") or ""),
         "rlm_budget_exhausted": bool(usage_trace.get("rlm_budget_exhausted", False)),
+        "rlm_loop_phase": str(usage_trace.get("rlm_loop_phase") or ""),
+        "rlm_x_loop_budget_observed": bool(usage_trace.get("rlm_x_loop_budget_observed", False)),
+        "rlm_required_gates": list(usage_trace.get("rlm_required_gates", []) or []),
     }
     row.update(rlm_trace_summary)
     return _annotate_benchmark_eligibility(

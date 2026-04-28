@@ -754,7 +754,12 @@ def test_extract_record_summarizes_rlm_trace_quality(tmp_path: Path):
     payload = {
         "status": "SUCCESS",
         "semantic_status": "VERIFIED",
-        "nexus_usage_trace": {"rlm_trace_path": str(trace_path)},
+        "nexus_usage_trace": {
+            "rlm_trace_path": str(trace_path),
+            "rlm_loop_phase": "X",
+            "rlm_x_loop_budget_observed": True,
+            "rlm_required_gates": ["rlm_trace_present", "x_loop_budget_observed"],
+        },
     }
 
     out = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=1.0)
@@ -767,6 +772,9 @@ def test_extract_record_summarizes_rlm_trace_quality(tmp_path: Path):
     assert out["rlm_avg_confidence"] == 0.875
     assert out["rlm_evidence_density"] == 0.5
     assert out["rlm_trace_quality_score"] == 100
+    assert out["rlm_loop_phase"] == "X"
+    assert out["rlm_x_loop_budget_observed"] is True
+    assert out["rlm_required_gates"] == ["rlm_trace_present", "x_loop_budget_observed"]
 
 
 def test_summarize_rlm_trace_marks_missing_trace():

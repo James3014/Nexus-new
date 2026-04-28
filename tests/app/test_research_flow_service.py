@@ -468,6 +468,52 @@ def test_run_auto_flow_writes_rlm_trace_when_enabled(tmp_path: Path, monkeypatch
     assert events[1]["stop_reason"] in {"verified", "audit_rejected"}
 
 
+def test_run_auto_flow_writes_recursive_research_x_trace_when_enabled(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("def identity(value):\n    return value\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text(
+        "from target import identity\n\n"
+        "def test_identity():\n"
+        "    assert identity(3) == 3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_RLM_RESEARCH_LOOP", "1")
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="RLM research loop smoke",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="research",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=99.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="baseline",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+    )
+
+    trace = payload["nexus_usage_trace"]
+    trace_path = Path(trace["rlm_trace_path"])
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["phase"] for event in events] == ["X", "R", "A"]
+    assert events[0]["action_type"] == "research_candidate"
+    assert events[0]["stop_reason"] == "candidate_selected"
+    assert trace["rlm_loop_phase"] == "X"
+    assert trace["rlm_x_loop_budget_observed"] is True
+
+
 def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")

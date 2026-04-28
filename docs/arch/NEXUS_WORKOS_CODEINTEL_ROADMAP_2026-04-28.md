@@ -234,6 +234,7 @@ Status:
 - 2026-04-28 P37c implemented `.nexus/test_impact_stats.json` generation with per-target score inputs.
 - 2026-04-28 P37d implemented selector `--ranking static|predictive`; default remains `static`.
 - 2026-04-28 P37e implemented `scripts/ops/jit_promotion.py` and `ci_gate.py --jit-promotion-report`; promotion remains warn-only and default ranking remains `static`.
+- 2026-04-28 P37f clarified promotion boundary: `PROMOTE_CANDIDATE` can enter trial lane only; default switch stays blocked until a sustained observation window passes.
 
 Upgrade ladder:
 1. P37e: generate a promotion report that compares predictive ranking against static using miss-rate, fallback-rate, unmatched paths, nightly full-run count, and saved-runtime estimate.
@@ -273,6 +274,7 @@ Status:
 - 2026-04-28 P38b-pre implemented: `capability_ab_runner.py --preflight-only` validates public benchmark inputs without invoking Gemini or Nexus.
 - 2026-04-28 P38b-pre verified against `public_benchmark_rlm_harder_v2.json`: 8 tasks x 2 trials, same Gemini 3 Flash model lock, hidden verifier enabled, per-task stop-loss 600s, evidence bundle and markdown report requested.
 - 2026-04-28 P38schema added benchmark fields for RLM trace quality, CodeIntel scan/impact claim-bundle presence, and JIT promotion status.
+- 2026-04-28 P38rlm-gate added public-claim protection for RLM submit traces: submit must lead to A-gate verified/audit evidence, and recursive X-loop claims require budget evidence.
 - Remaining P38b: run 12 tasks x 3 trials for Gemini 3 Flash bare vs Gemini 3 Flash + Nexus after the worktree is clean.
 - Remaining P38c: produce Chinese and English public report bundles.
 - Remaining P38d: add weekly trend report for verified delivery, trust mismatch, wall time, model calls, and cost per verified success.
