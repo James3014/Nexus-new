@@ -190,6 +190,12 @@ class CapabilityPlanner:
         cross_module = bool(route_features.get("is_cross_module_task", False))
         hard_signal = bool(route_features.get("has_hard_signal", False))
         task_lower = f"{task_desc} {task_type}".lower()
+        governance_signal = any(
+            token in task_lower
+            for token in ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance")
+        )
+        evidence_signal = any(token in task_lower for token in ("evidence", "artifact", "claim", "semantic", "trust"))
+        repair_signal = any(token in task_lower for token in ("repair", "self-heal", "failing branch", "timeout", "flaky"))
 
         states: dict[str, str] = {
             name: ("required" if node.default_state == "required" else "optional")
@@ -209,11 +215,19 @@ class CapabilityPlanner:
 
         if "hyper_sprint" in selected_seed or route.get("recommended_flow") == "hyper_sprint":
             enable("hyper", "route_selected_hyper")
-        if "autoreason" in selected_seed or confidence < 0.75 or candidate_count >= 2 or memory_hits or findings_hits:
+        if (
+            "autoreason" in selected_seed
+            or confidence < 0.75
+            or candidate_count >= 2
+            or memory_hits
+            or findings_hits
+            or repair_signal
+            or evidence_signal
+        ):
             enable("autoreason", "low_confidence_or_multi_candidate_or_history")
-        if "ddtree" in acceleration_seed or candidate_count >= 3:
+        if "ddtree" in acceleration_seed or candidate_count >= 3 or repair_signal:
             enable("ddtree", "candidate_space_pruning")
-        if "ultra_review" in governance_seed or risk_score >= 70 or hard_signal:
+        if "ultra_review" in governance_seed or risk_score >= 70 or hard_signal or governance_signal:
             enable("ultra_review", "high_risk_or_governance_route")
         if cross_module or codeintel.get("impact_report_present") or risk_score >= 30:
             enable("codeintel", "impact_or_blast_radius_needed")

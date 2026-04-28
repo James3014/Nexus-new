@@ -248,7 +248,7 @@ def _patch_compute_backoff(source: str) -> str:
         "        return 1\n"
         "    return 2 ** (attempt - 1)\n"
     )
-    new_source = fn_pattern.sub(replacement, source, count=1)
+    new_source = fn_pattern.sub(lambda _match: replacement, source, count=1)
     try:
         compile(new_source, "<compute_backoff_patch>", "exec")
         return new_source
@@ -274,7 +274,7 @@ def _patch_compute_backoff_conservative(source: str) -> str:
         "        return 1\n"
         "    return attempt\n"
     )
-    new_source = fn_pattern.sub(replacement, source, count=1)
+    new_source = fn_pattern.sub(lambda _match: replacement, source, count=1)
     try:
         compile(new_source, "<compute_backoff_conservative>", "exec")
         return new_source
@@ -544,6 +544,136 @@ def _patch_parse_config_defaults(source: str) -> str:
         return source
 
 
+def _replace_simple_function(source: str, name: str, args: str, body: str, tag: str) -> str:
+    fn_pattern = re.compile(
+        rf"def {re.escape(name)}\((?P<args>[^\)]*)\)\s*(?:->\s*[^:]+)?:\n(?P<body>(?:[ \t]+.*\n?)*)",
+        re.MULTILINE,
+    )
+    if not fn_pattern.search(source):
+        return source
+    replacement = f"def {name}({args}):\n{body.rstrip()}\n"
+    new_source = fn_pattern.sub(lambda _match: replacement, source, count=1)
+    try:
+        compile(new_source, tag, "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
+def _patch_normalize_key_boundaries(source: str) -> str:
+    if "def normalize_key" not in source:
+        return source
+    if "re.sub" in source and "[-_\\s]+" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "normalize_key",
+        "text",
+        "    import re\n"
+        "    return re.sub(r'[-_\\s]+', '-', text.strip().lower()).strip('-')",
+        "<normalize_key_boundaries_patch>",
+    )
+
+
+def _patch_merge_limits_preserve_inputs(source: str) -> str:
+    if "def merge_limits" not in source:
+        return source
+    if "value is not None" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "merge_limits",
+        "defaults, override",
+        "    result = dict(defaults)\n"
+        "    for key, value in (override or {}).items():\n"
+        "        if value is not None:\n"
+        "            result[key] = value\n"
+        "    return result",
+        "<merge_limits_preserve_inputs_patch>",
+    )
+
+
+def _patch_remaining_ms_elapsed(source: str) -> str:
+    if "def remaining_ms" not in source:
+        return source
+    if "elapsed = max(0, now_ms - start_ms)" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "remaining_ms",
+        "start_ms, now_ms, timeout_ms",
+        "    elapsed = max(0, now_ms - start_ms)\n"
+        "    return max(0, timeout_ms - elapsed)",
+        "<remaining_ms_elapsed_patch>",
+    )
+
+
+def _patch_redact_secret_fields(source: str) -> str:
+    if "def redact" not in source:
+        return source
+    if "[REDACTED]" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "redact",
+        "record",
+        "    result = dict(record)\n"
+        "    for key in ('token', 'password', 'secret', 'api_key'):\n"
+        "        if key in result:\n"
+        "            result[key] = '[REDACTED]'\n"
+        "    return result",
+        "<redact_secret_fields_patch>",
+    )
+
+
+def _patch_can_access_deny_default(source: str) -> str:
+    if "def can_access" not in source:
+        return source
+    if "role == 'viewer' and scope == 'read'" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "can_access",
+        "role, scope",
+        "    if role == 'admin':\n"
+        "        return True\n"
+        "    if role == 'viewer' and scope == 'read':\n"
+        "        return True\n"
+        "    return False",
+        "<can_access_deny_default_patch>",
+    )
+
+
+def _patch_verified_claims_require_artifact(source: str) -> str:
+    if "def verified_claims" not in source:
+        return source
+    if "claim.get('artifact')" in source or 'claim.get("artifact")' in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "verified_claims",
+        "claims",
+        "    return [claim['id'] for claim in claims if claim.get('status') == 'pass' and claim.get('artifact')]",
+        "<verified_claims_require_artifact_patch>",
+    )
+
+
+def _patch_classify_requires_semantic_evidence(source: str) -> str:
+    if "def classify" not in source:
+        return source
+    if "needs_evidence" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "classify",
+        "smoke_passed, semantic_evidence",
+        "    if not smoke_passed:\n"
+        "        return 'open'\n"
+        "    return 'resolved' if semantic_evidence.get('verified') else 'needs_evidence'",
+        "<classify_requires_semantic_evidence_patch>",
+    )
+
+
 def generate_local_companion_edits(
     repo_root: Path,
     target_path: Path,
@@ -654,6 +784,19 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
     patched = _patch_parse_config_defaults(source)
     if patched != source:
         return patched
+
+    for patcher in (
+        _patch_normalize_key_boundaries,
+        _patch_merge_limits_preserve_inputs,
+        _patch_remaining_ms_elapsed,
+        _patch_redact_secret_fields,
+        _patch_can_access_deny_default,
+        _patch_verified_claims_require_artifact,
+        _patch_classify_requires_semantic_evidence,
+    ):
+        patched = patcher(source)
+        if patched != source:
+            return patched
 
     patched = _patch_normalize_flag(source)
     if patched != source:

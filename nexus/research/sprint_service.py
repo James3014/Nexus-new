@@ -32,6 +32,9 @@ class SprintConfig:
     stage1_max_parallel: int = 1
     stage1_timeout_sec: int = 20
     llm_mode: bool = False
+    enable_autoreason_executor: bool | None = None
+    enable_ddtree_executor: bool | None = None
+    ddtree_max_candidates: int = 2
 
 
 @dataclass
@@ -336,20 +339,26 @@ def _candidate_payloads(items: list[CandidateEval]) -> list[dict[str, Any]]:
     ]
 
 
+def _resolve_executor_flag(value: bool | None, env_name: str) -> bool:
+    if value is not None:
+        return bool(value)
+    return os.environ.get(env_name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _select_candidate_with_routing_layers(
     candidates: list[CandidateEval],
     *,
     task: str,
     learning_trace: dict[str, Any],
+    enable_autoreason_executor: bool | None = None,
+    enable_ddtree_executor: bool | None = None,
+    ddtree_max_candidates: int = 2,
 ) -> tuple[CandidateEval, list[CandidateEval]]:
     active = list(candidates)
-    ddtree_enabled = os.environ.get("NEXUS_DDTREE_EXECUTOR", "").strip().lower() in {"1", "true", "yes", "on"}
-    autoreason_enabled = os.environ.get("NEXUS_AUTOREASON_EXECUTOR", "").strip().lower() in {"1", "true", "yes", "on"}
+    ddtree_enabled = _resolve_executor_flag(enable_ddtree_executor, "NEXUS_DDTREE_EXECUTOR")
+    autoreason_enabled = _resolve_executor_flag(enable_autoreason_executor, "NEXUS_AUTOREASON_EXECUTOR")
     if ddtree_enabled:
-        try:
-            max_candidates = int(os.environ.get("NEXUS_DDTREE_MAX_CANDIDATES", "2") or "2")
-        except ValueError:
-            max_candidates = 2
+        max_candidates = max(1, int(ddtree_max_candidates or 2))
         ddtree = DDTreeAdapter().plan(
             _candidate_payloads(active),
             task_desc=task,
@@ -638,6 +647,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         )
 
     candidates: list[CandidateEval] = []
+    routing_autoreason_enabled = _resolve_executor_flag(config.enable_autoreason_executor, "NEXUS_AUTOREASON_EXECUTOR")
+    routing_ddtree_enabled = _resolve_executor_flag(config.enable_ddtree_executor, "NEXUS_DDTREE_EXECUTOR")
+    routing_min_pool = 1
+    if routing_ddtree_enabled and config.candidate_count > config.ddtree_max_candidates:
+        routing_min_pool = min(config.candidate_count, config.ddtree_max_candidates + 1)
+    elif routing_autoreason_enabled and config.candidate_count > 1:
+        routing_min_pool = 2
     model_calls = 0
     model_names: set[str] = set()
     model_patch_generated = False
@@ -1075,7 +1091,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             error_codes.append("quota")
         if not ev_recorded:
             candidates.append(ev)
-        if config.safe_mode and ev.score >= 1.0:
+        if config.safe_mode and ev.score >= 1.0 and len(candidates) >= routing_min_pool:
             break
 
         if config.safe_mode:
@@ -1133,6 +1149,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         candidates,
         task=config.task,
         learning_trace=learning_trace,
+        enable_autoreason_executor=config.enable_autoreason_executor,
+        enable_ddtree_executor=config.enable_ddtree_executor,
+        ddtree_max_candidates=config.ddtree_max_candidates,
     )
     candidates = routed_candidates
     if best.score < 1.0:

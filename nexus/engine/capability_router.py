@@ -52,6 +52,12 @@ class CapabilityRouter:
         task_lower = (task_desc or "").lower()
         is_cross_module = bool(route_features.get("is_cross_module_task", False))
         has_hard_signal = bool(route_features.get("has_hard_signal", False))
+        repair_signal = any(token in task_lower for token in ("repair", "self-heal", "timeout", "flaky", "failing branch"))
+        evidence_signal = any(token in task_lower for token in ("evidence", "artifact", "claim", "semantic", "trust"))
+        governance_signal = any(
+            token in task_lower
+            for token in ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance")
+        )
 
         autoreason_reasons: list[str] = []
         if recommended_flow == "hyper_sprint":
@@ -62,6 +68,8 @@ class CapabilityRouter:
             autoreason_reasons.append("historical_signal")
         if is_cross_module or any(token in task_lower for token in ("hard", "race", "deadlock", "timeout", "cross-module")):
             autoreason_reasons.append("hard_or_cross_module")
+        if repair_signal or evidence_signal or governance_signal:
+            autoreason_reasons.append("semantic_control_signal")
         autoreason_enabled = bool(autoreason_reasons)
         if autoreason_enabled and "autoreason" not in selected:
             selected.append("autoreason")
@@ -71,6 +79,8 @@ class CapabilityRouter:
             ddtree_reasons.append("autoreason_candidate_budget")
         if "token" in task_lower or "multi-round" in task_lower:
             ddtree_reasons.append("high_token_or_multi_round")
+        if repair_signal:
+            ddtree_reasons.append("repair_candidate_pool")
         ddtree_enabled = bool(ddtree_reasons)
 
         target = target_file or ""
@@ -81,6 +91,8 @@ class CapabilityRouter:
             ultra_reasons.append("cross_module_or_hard_signal")
         if any(target.startswith(prefix) for prefix in self.HIGH_RISK_PREFIXES):
             ultra_reasons.append("high_risk_path")
+        if governance_signal or evidence_signal:
+            ultra_reasons.append("governance_or_evidence_signal")
         ultra_enabled = bool(ultra_reasons)
 
         explain = [

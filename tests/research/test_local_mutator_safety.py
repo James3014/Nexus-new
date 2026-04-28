@@ -164,3 +164,97 @@ def parse_config(data):
     exec(patched, ns)
     assert ns["parse_config"]({}) == {"strict": True, "retries": 3}
     assert ns["parse_config"]({"strict": False, "retries": 0}) == {"strict": False, "retries": 0}
+
+
+@pytest.mark.parametrize(
+    ("source", "task", "function_name", "cases"),
+    [
+        (
+            "def normalize_key(text):\n    return text.strip().lower().replace(' ', '-')\n",
+            "Fix unicode-free normalization, empty input, and repeated separators.",
+            "normalize_key",
+            [
+                (("  User   Name  ",), "user-name"),
+                (("",), ""),
+                (("API__Token",), "api-token"),
+            ],
+        ),
+        (
+            "def merge_limits(defaults, override):\n    result = defaults\n    result.update(override or {})\n    return result\n",
+            "Repair implementation after first patch breaks an invariant.",
+            "merge_limits",
+            [
+                (
+                    ({"timeout": 10, "retries": 2}, {"timeout": None, "jitter": 1}),
+                    {"timeout": 10, "retries": 2, "jitter": 1},
+                ),
+            ],
+        ),
+        (
+            "def remaining_ms(start_ms, now_ms, timeout_ms):\n    return timeout_ms - now_ms - start_ms\n",
+            "Repair flaky-looking timeout calculation without deleting assertions.",
+            "remaining_ms",
+            [
+                ((100, 125, 50), 25),
+                ((100, 200, 50), 0),
+                ((100, 90, 50), 50),
+            ],
+        ),
+        (
+            "def redact(record):\n    return dict(record)\n",
+            "Refactor credential scrubber while preserving secret redaction.",
+            "redact",
+            [
+                (
+                    ({"user": "ada", "token": "abc", "password": "pw", "note": "ok"},),
+                    {"user": "ada", "token": "[REDACTED]", "password": "[REDACTED]", "note": "ok"},
+                ),
+            ],
+        ),
+        (
+            "def can_access(role, scope):\n    if role == 'admin':\n        return True\n    return scope == 'read'\n",
+            "Refactor authorization helper while preserving deny by default.",
+            "can_access",
+            [
+                (("admin", "write"), True),
+                (("viewer", "read"), True),
+                (("viewer", "write"), False),
+                (("unknown", "read"), False),
+                (("viewer", None), False),
+            ],
+        ),
+        (
+            "def verified_claims(claims):\n    return [claim['id'] for claim in claims if claim.get('status') == 'pass']\n",
+            "Implement evidence rollup that rejects claims without artifact references.",
+            "verified_claims",
+            [
+                (
+                    (
+                        [
+                            {"id": "a", "status": "pass", "artifact": "reports/a.json"},
+                            {"id": "b", "status": "pass"},
+                            {"id": "c", "status": "fail", "artifact": "reports/c.json"},
+                        ],
+                    ),
+                    ["a"],
+                ),
+            ],
+        ),
+        (
+            "def classify(smoke_passed, semantic_evidence):\n    return 'resolved' if smoke_passed else 'open'\n",
+            "Fix incident classifier that over-trusts a passing smoke test.",
+            "classify",
+            [
+                ((True, {"verified": True}), "resolved"),
+                ((True, {"verified": False}), "needs_evidence"),
+                ((False, {"verified": True}), "open"),
+            ],
+        ),
+    ],
+)
+def test_public_candidate_local_self_heal_patches(source, task, function_name, cases):
+    patched = generate_local_candidate(source, task, "local", 0)
+    ns = {}
+    exec(patched, ns)
+    for args, expected in cases:
+        assert ns[function_name](*args) == expected

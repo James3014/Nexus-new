@@ -734,6 +734,26 @@ def build_hyper_execution_profile(
     }
 
 
+def build_route_executor_flags(*, task_desc: str, task_type: str, route: dict[str, Any]) -> dict[str, Any]:
+    """Translate capability routing into SprintService executor controls."""
+    capability_stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
+    selected = {str(item) for item in capability_stack.get("selected_capabilities", []) or []}
+    acceleration = {str(item) for item in capability_stack.get("acceleration_layers", []) or []}
+    route_features = route.get("route_features", {}) if isinstance(route, dict) else {}
+    candidate_count = int(route_features.get("candidate_count", 1) or 1)
+    task_lower = f"{task_desc} {task_type}".lower()
+    repair_signal = any(token in task_lower for token in ("repair", "self-heal", "timeout", "flaky", "failing branch"))
+    evidence_signal = any(token in task_lower for token in ("evidence", "artifact", "claim", "semantic", "trust"))
+    governance_signal = any(token in task_lower for token in ("secret", "credential", "redact", "auth", "deny by default"))
+    enable_autoreason = "autoreason" in selected or repair_signal or evidence_signal or governance_signal
+    enable_ddtree = "ddtree" in acceleration or candidate_count >= 3 or repair_signal
+    return {
+        "enable_autoreason_executor": enable_autoreason,
+        "enable_ddtree_executor": enable_ddtree,
+        "ddtree_max_candidates": 2,
+    }
+
+
 def _write_output_file(repo_root: Path, path: Path, payload: dict) -> Path:
     out = path if path.is_absolute() else (repo_root / path).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1053,17 +1073,22 @@ def run_auto_flow(
                 min_dynamic_stage1_timeout,
                 min(stage1_timeout_sec, dynamic_timeout),
             )
+        executor_flags = build_route_executor_flags(task_desc=task_desc, task_type=task_type, route=route)
         cfg = SprintConfig(
             task=task_desc_with_codeintel if llm_mode else task_desc,
             target_file=target_file,
             test_file=test_file,
-            candidate_count=execution_profile["effective_candidate_count"],
+            candidate_count=max(
+                execution_profile["effective_candidate_count"],
+                3 if executor_flags["enable_ddtree_executor"] else 1,
+            ),
             max_rounds=execution_profile["effective_max_rounds"],
             timeout_sec=timeout_sec,
             safe_mode=True,
             stage1_max_parallel=execution_profile["effective_stage1_max_parallel"],
             stage1_timeout_sec=effective_stage1_timeout,
             llm_mode=llm_mode,
+            **executor_flags,
         )
         res = run_hyper_sprint(repo_root=repo_root, config=cfg)
         ok = res.status == "SUCCESS" and bool(res.patch)

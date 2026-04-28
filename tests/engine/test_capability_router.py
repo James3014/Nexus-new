@@ -52,3 +52,23 @@ def test_capability_router_keeps_simple_doc_fix_light():
     assert payload["governance_layers"] == []
     assert payload["stop_policy"]["type"] == "budget"
 
+
+def test_capability_router_maps_governance_and_repair_semantics():
+    governance = CapabilityRouter().route(
+        task_desc="Refactor credential scrubber while preserving secret redaction.",
+        task_type="public_refactor",
+        recommended_flow="baseline",
+        route_features={"risk_score": 10, "candidate_count": 1},
+        target_file="target.py",
+    ).to_dict()
+    repair = CapabilityRouter().route(
+        task_desc="Repair a flaky-looking timeout calculation without deleting assertions.",
+        task_type="public_test_repair",
+        recommended_flow="baseline",
+        route_features={"risk_score": 10, "candidate_count": 1},
+        target_file="target.py",
+    ).to_dict()
+
+    assert "autoreason" in governance["selected_capabilities"]
+    assert governance["governance_layers"] == ["ultra_review"]
+    assert repair["acceleration_layers"] == ["ddtree"]

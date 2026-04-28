@@ -79,3 +79,46 @@ def test_default_capability_nodes_cover_core_space():
     ):
         assert name in nodes
         assert nodes[name].phase_hooks
+
+
+def test_capability_planner_maps_public_governance_task_to_review_and_reasoning():
+    plan = CapabilityPlanner().plan(
+        task_desc="Refactor a credential scrubber while preserving the governance boundary: never weaken secret redaction.",
+        task_type="public_refactor",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+        codeintel={"impact_report_present": True},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"codeintel", "research", "ultra_review", "mempalace_gate", "artifact_gate", "claim_gate"} <= selected
+
+
+def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
+    repair_plan = CapabilityPlanner().plan(
+        task_desc="Repair a flaky-looking timeout calculation without deleting assertions.",
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+    ).to_dict()
+    trust_plan = CapabilityPlanner().plan(
+        task_desc="Fix an incident classifier that over-trusts a passing smoke test without semantic evidence.",
+        task_type="public_ops_research",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+    ).to_dict()
+
+    assert {"autoreason", "ddtree"} <= set(repair_plan["selected_capabilities"])
+    assert "autoreason" in set(trust_plan["selected_capabilities"])

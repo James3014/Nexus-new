@@ -46,6 +46,77 @@ def test_select_candidate_with_routing_layers_uses_autoreason_and_ddtree(monkeyp
     assert learning_trace["autoreason"]["winner"] == "llm:2"
 
 
+def test_select_candidate_with_routing_layers_uses_config_flags_without_env(monkeypatch):
+    monkeypatch.delenv("NEXUS_AUTOREASON_EXECUTOR", raising=False)
+    monkeypatch.delenv("NEXUS_DDTREE_EXECUTOR", raising=False)
+    learning_trace = {}
+    candidates = [
+        CandidateEval(seed=1, score=0.2, source="local", hint="weak"),
+        CandidateEval(seed=2, score=0.8, source="llm", hint="better", stdout="pytest passed"),
+        CandidateEval(seed=3, score=0.5, source="local", hint="middle"),
+    ]
+
+    best, active = _select_candidate_with_routing_layers(
+        candidates,
+        task="repair timeout",
+        learning_trace=learning_trace,
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        ddtree_max_candidates=2,
+    )
+
+    assert best.seed == 2
+    assert [item.seed for item in active] == [2, 3]
+    assert learning_trace["ddtree"]["enabled"] is True
+    assert learning_trace["autoreason"]["enabled"] is True
+
+
+def test_run_hyper_sprint_collects_pool_when_route_enables_ddtree(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeGenerator:
+        source = "local"
+
+        def generate(self, *_args, seed=0, **_kwargs):
+            return f"print({seed})\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            seed = kwargs["seed"]
+            return CandidateEval(
+                seed=seed,
+                score=1.0,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+                stdout="pytest passed" if seed == 2 else "",
+            )
+
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(
+        task="repair timeout",
+        target_file="demo.py",
+        candidate_count=3,
+        llm_mode=False,
+        safe_mode=True,
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        ddtree_max_candidates=2,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.attempt_count == 2
+    assert res.learning_trace["ddtree"]["eligible"] is True
+    assert res.learning_trace["ddtree"]["actual_saved_steps"] == 1
+    assert res.learning_trace["autoreason"]["enabled"] is True
+
+
 def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")

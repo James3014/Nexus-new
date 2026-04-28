@@ -24,11 +24,32 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert "consensus" in out
     assert "capability_stack" in out
     assert out["capability_stack"]["selected_capabilities"] == ["hyper_sprint", "autoreason"]
-    assert out["capability_stack"]["acceleration_layers"] == []
+    assert out["capability_stack"]["acceleration_layers"] == ["ddtree"]
     assert out["capability_stack"]["governance_layers"] == ["ultra_review"]
     assert out["explain_payload"]["risk"] == "CRITICAL"
     assert out["route_features"]["risk_score"] >= 50
     assert out["consensus"]["winner"] in {"baseline", "hyper_sprint"}
+
+
+def test_route_executor_flags_enable_dynamic_controls_for_repair_and_governance():
+    route = {
+        "capability_stack": {"selected_capabilities": ["baseline"], "acceleration_layers": []},
+        "route_features": {"candidate_count": 1},
+    }
+    repair = research_flow_service.build_route_executor_flags(
+        task_desc="Repair a flaky-looking timeout calculation without deleting assertions.",
+        task_type="public_test_repair",
+        route=route,
+    )
+    governance = research_flow_service.build_route_executor_flags(
+        task_desc="Refactor credential scrubber while preserving secret redaction.",
+        task_type="public_refactor",
+        route=route,
+    )
+
+    assert repair["enable_autoreason_executor"] is True
+    assert repair["enable_ddtree_executor"] is True
+    assert governance["enable_autoreason_executor"] is True
 
 
 def test_codeintel_context_is_injected_into_task_text():
@@ -157,7 +178,9 @@ def test_capability_evidence_splits_nightshift_and_drone_signals():
     assert out["drone_invoked_count"] == 2
 
 
-def test_ultra_review_gate_evidence_is_feature_flagged(tmp_path: Path):
+def test_ultra_review_gate_evidence_is_feature_flagged(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("NEXUS_ULTRA_REVIEW_DRY_GATE", raising=False)
+
     out = research_flow_service._ultra_review_gate_evidence(
         repo_root=tmp_path,
         task_desc="fix risky orchestrator bug",
