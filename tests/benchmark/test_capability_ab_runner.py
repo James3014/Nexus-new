@@ -639,6 +639,30 @@ def test_extract_record_maps_semantic_fields():
                 "governance_layers": ["ultra_review"],
                 "stop_policy": {"type": "a_streak", "threshold": 2},
             },
+            "autoreason": {
+                "enabled": True,
+                "status": "SUCCESS",
+                "winner": "candidate-2",
+                "stop_reason": "a_streak_met",
+                "judge_votes": [{"judge": "evidence"}, {"judge": "specificity"}],
+                "borda_scores": {"candidate-1": 2, "candidate-2": 4},
+            },
+            "ddtree": {
+                "enabled": True,
+                "eligible": True,
+                "selected_candidate_ids": ["candidate-2"],
+                "estimated_saved_steps": 2,
+                "actual_saved_steps": 2,
+                "reason": "deterministic_score_pruning",
+            },
+            "ultra_review": {
+                "recommended": True,
+                "invoked": True,
+                "gate_passed": True,
+                "report_path": ".nexus/reports/ultra_review/route_gate_report.json",
+                "reason": "dry_gate_passed",
+                "failures": [],
+            },
             "codeintel": {
                 "gate_mode": "scan_impact_required",
                 "scan_report_present": True,
@@ -714,6 +738,23 @@ def test_extract_record_maps_semantic_fields():
     assert out["capability_stack_acceleration_layers"] == ["ddtree"]
     assert out["capability_stack_governance_layers"] == ["ultra_review"]
     assert out["capability_stack_stop_policy_type"] == "a_streak"
+    assert out["autoreason_enabled"] is True
+    assert out["autoreason_status"] == "SUCCESS"
+    assert out["autoreason_winner"] == "candidate-2"
+    assert out["autoreason_stop_reason"] == "a_streak_met"
+    assert out["autoreason_judge_votes_count"] == 2
+    assert out["autoreason_borda_scores"] == {"candidate-1": 2, "candidate-2": 4}
+    assert out["ddtree_enabled"] is True
+    assert out["ddtree_eligible"] is True
+    assert out["ddtree_selected_candidate_ids"] == ["candidate-2"]
+    assert out["ddtree_actual_saved_steps"] == 2
+    assert out["ddtree_reason"] == "deterministic_score_pruning"
+    assert out["ultra_review_recommended"] is True
+    assert out["ultra_review_invoked"] is True
+    assert out["ultra_review_gate_passed"] is True
+    assert out["ultra_review_report_path"] == ".nexus/reports/ultra_review/route_gate_report.json"
+    assert out["ultra_review_reason"] == "dry_gate_passed"
+    assert out["ultra_review_failures"] == []
     assert out["codeintel_scan_report_present"] is True
     assert out["codeintel_impact_report_present"] is True
     assert out["codeintel_claim_bundle_present"] is True

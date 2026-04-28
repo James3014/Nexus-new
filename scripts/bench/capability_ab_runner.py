@@ -982,6 +982,12 @@ def _extract_record(
     capabilities = capabilities if isinstance(capabilities, dict) else {}
     capability_stack = usage_trace.get("capability_stack", {}) if isinstance(usage_trace, dict) else {}
     capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
+    ultra_review = usage_trace.get("ultra_review", {}) if isinstance(usage_trace, dict) else {}
+    ultra_review = ultra_review if isinstance(ultra_review, dict) else {}
+    autoreason = usage_trace.get("autoreason", {}) if isinstance(usage_trace, dict) else {}
+    autoreason = autoreason if isinstance(autoreason, dict) else {}
+    ddtree = usage_trace.get("ddtree", {}) if isinstance(usage_trace, dict) else {}
+    ddtree = ddtree if isinstance(ddtree, dict) else {}
     codeintel = usage_trace.get("codeintel", payload.get("codeintel", {})) if isinstance(payload, dict) else {}
     codeintel = codeintel if isinstance(codeintel, dict) else {}
     jit = usage_trace.get("jit", payload.get("jit", {})) if isinstance(payload, dict) else {}
@@ -1130,6 +1136,24 @@ def _extract_record(
         "capability_stack_acceleration_layers": list(capability_stack.get("acceleration_layers", []) or []),
         "capability_stack_governance_layers": list(capability_stack.get("governance_layers", []) or []),
         "capability_stack_stop_policy_type": str((capability_stack.get("stop_policy", {}) or {}).get("type") or ""),
+        "autoreason_enabled": bool(autoreason.get("enabled", False)),
+        "autoreason_status": str(autoreason.get("status") or ""),
+        "autoreason_winner": str(autoreason.get("winner") or ""),
+        "autoreason_stop_reason": str(autoreason.get("stop_reason") or ""),
+        "autoreason_judge_votes_count": len(autoreason.get("judge_votes", []) or []),
+        "autoreason_borda_scores": autoreason.get("borda_scores", {}),
+        "ddtree_enabled": bool(ddtree.get("enabled", False)),
+        "ddtree_eligible": bool(ddtree.get("eligible", False)),
+        "ddtree_selected_candidate_ids": list(ddtree.get("selected_candidate_ids", []) or []),
+        "ddtree_estimated_saved_steps": int(ddtree.get("estimated_saved_steps", 0) or 0),
+        "ddtree_actual_saved_steps": int(ddtree.get("actual_saved_steps", 0) or 0),
+        "ddtree_reason": str(ddtree.get("reason") or ""),
+        "ultra_review_recommended": bool(ultra_review.get("recommended", False)),
+        "ultra_review_invoked": bool(ultra_review.get("invoked", False)),
+        "ultra_review_gate_passed": ultra_review.get("gate_passed"),
+        "ultra_review_report_path": str(ultra_review.get("report_path") or ""),
+        "ultra_review_reason": str(ultra_review.get("reason") or ""),
+        "ultra_review_failures": list(ultra_review.get("failures", []) or []),
         "codeintel_gate_mode": str(codeintel.get("gate_mode") or ""),
         "codeintel_scan_report_present": bool(codeintel.get("scan_report_present", False)),
         "codeintel_impact_report_present": bool(codeintel.get("impact_report_present", False)),

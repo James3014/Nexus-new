@@ -1334,6 +1334,8 @@ def run_auto_flow(
         },
         "phase_wall_sec": phase_wall_sec,
         "capability_stack": route.get("capability_stack", {}),
+        "autoreason": hyper_learning_trace.get("autoreason", {}) if isinstance(hyper_learning_trace, dict) else {},
+        "ddtree": hyper_learning_trace.get("ddtree", {}) if isinstance(hyper_learning_trace, dict) else {},
         "ultra_review": ultra_review_evidence,
         "codeintel": codeintel_evidence,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),

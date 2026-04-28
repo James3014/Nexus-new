@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from nexus.core.outcome_schema import SprintOutcome
+from nexus.engine.autoreason_service import AutoreasonService
+from nexus.engine.ddtree_adapter import DDTreeAdapter
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
@@ -316,6 +318,62 @@ def _candidate_summaries(items: list[CandidateEval], *, max_text: int = 1200) ->
             }
         )
     return summaries
+
+
+def _candidate_id(item: CandidateEval) -> str:
+    return f"{item.source}:{item.seed}"
+
+
+def _candidate_payloads(items: list[CandidateEval]) -> list[dict[str, Any]]:
+    return [
+        {
+            "candidate_id": _candidate_id(item),
+            "summary": item.hint,
+            "score": item.score,
+            "evidence_refs": [item.stdout[-400:]] if item.stdout else [],
+        }
+        for item in items
+    ]
+
+
+def _select_candidate_with_routing_layers(
+    candidates: list[CandidateEval],
+    *,
+    task: str,
+    learning_trace: dict[str, Any],
+) -> tuple[CandidateEval, list[CandidateEval]]:
+    active = list(candidates)
+    ddtree_enabled = os.environ.get("NEXUS_DDTREE_EXECUTOR", "").strip().lower() in {"1", "true", "yes", "on"}
+    autoreason_enabled = os.environ.get("NEXUS_AUTOREASON_EXECUTOR", "").strip().lower() in {"1", "true", "yes", "on"}
+    if ddtree_enabled:
+        try:
+            max_candidates = int(os.environ.get("NEXUS_DDTREE_MAX_CANDIDATES", "2") or "2")
+        except ValueError:
+            max_candidates = 2
+        ddtree = DDTreeAdapter().plan(
+            _candidate_payloads(active),
+            task_desc=task,
+            enabled=True,
+            max_candidates=max_candidates,
+        )
+        learning_trace["ddtree"] = ddtree
+        selected_ids = set(ddtree.get("selected_candidate_ids", []) or [])
+        if selected_ids:
+            active = [item for item in active if _candidate_id(item) in selected_ids] or active
+    else:
+        learning_trace["ddtree"] = {"enabled": False, "eligible": len(active) > 2, "reason": "feature_flag_disabled"}
+
+    if autoreason_enabled:
+        autoreason = AutoreasonService().run(_candidate_payloads(active), task_desc=task)
+        autoreason["enabled"] = True
+        learning_trace["autoreason"] = autoreason
+        winner = str(autoreason.get("winner") or "")
+        for item in active:
+            if _candidate_id(item) == winner:
+                return item, active
+    else:
+        learning_trace["autoreason"] = {"enabled": False, "status": "DISABLED", "reason": "feature_flag_disabled"}
+    return max(active, key=lambda c: c.score), active
 
 
 class LocalCandidateGenerator:
@@ -1071,7 +1129,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             pytest_cmd=pytest_cmd,
         )
 
-    best = max(candidates, key=lambda c: c.score)
+    best, routed_candidates = _select_candidate_with_routing_layers(
+        candidates,
+        task=config.task,
+        learning_trace=learning_trace,
+    )
+    candidates = routed_candidates
     if best.score < 1.0:
         final_codes = sorted(set(error_codes + [SprintOutcome.STAGE1_FAILED.value]))
         rejection_summary = _build_rejection_summary(candidates, final_codes)

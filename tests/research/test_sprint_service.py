@@ -7,6 +7,7 @@ from nexus.research.sprint_service import (
     _build_llm_candidate_prompt,
     _build_value_task_contract,
     _candidate_code_from_llm_output,
+    _select_candidate_with_routing_layers,
     run_hyper_sprint,
     write_sprint_report,
 )
@@ -19,6 +20,30 @@ def _write_ready_learn_slo(tmp_path: Path) -> None:
         '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
         encoding="utf-8",
     )
+
+
+def test_select_candidate_with_routing_layers_uses_autoreason_and_ddtree(monkeypatch):
+    monkeypatch.setenv("NEXUS_AUTOREASON_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_DDTREE_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_DDTREE_MAX_CANDIDATES", "2")
+    learning_trace = {}
+    candidates = [
+        CandidateEval(seed=1, score=0.2, source="local", hint="weak"),
+        CandidateEval(seed=2, score=0.8, source="llm", hint="better", stdout="pytest passed"),
+        CandidateEval(seed=3, score=0.5, source="local", hint="middle"),
+    ]
+
+    best, active = _select_candidate_with_routing_layers(
+        candidates,
+        task="fix hard bug",
+        learning_trace=learning_trace,
+    )
+
+    assert best.seed == 2
+    assert [item.seed for item in active] == [2, 3]
+    assert learning_trace["ddtree"]["actual_saved_steps"] == 1
+    assert learning_trace["autoreason"]["enabled"] is True
+    assert learning_trace["autoreason"]["winner"] == "llm:2"
 
 
 def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):

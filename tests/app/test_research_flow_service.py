@@ -671,6 +671,66 @@ def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verificati
     assert trace["capabilities"]["claim_verified"] is True
 
 
+def test_hyper_learning_trace_exposes_autoreason_and_ddtree(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="VALUE = 2\n",
+            winner_source="llm",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=2,
+            model_calls=1,
+            model_name="gemini-3-flash-preview",
+            model_patch_generated=True,
+            fallback_used=False,
+            total_tokens=1234,
+            token_capture_status="measured",
+            learning_trace={
+                "mempalace_verified": True,
+                "autoreason": {"enabled": True, "winner": "llm:2", "status": "SUCCESS"},
+                "ddtree": {"enabled": True, "actual_saved_steps": 1, "selected_candidate_ids": ["llm:2"]},
+            },
+            candidates=[],
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix hard candidate selection",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="bug",
+        candidate_count=3,
+        root_cause_confidence=1.0,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        success_criteria="artifact_changed_and_tests_pass",
+    )
+
+    trace = payload["nexus_usage_trace"]
+    assert trace["autoreason"]["winner"] == "llm:2"
+    assert trace["ddtree"]["actual_saved_steps"] == 1
+
+
 def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text("def normalize_flag(text):\n    return text\n", encoding="utf-8")
