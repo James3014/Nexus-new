@@ -13,7 +13,8 @@ Run a fixed, repeatable optimization loop for Nexus:
 2. Run the same model bare.
 3. Run the same model wearing Nexus.
 4. Compare verified delivery, trust mismatch, wall time, tokens, model calls, Nexus wearing, and public gate.
-5. Decide whether the change should be kept, reverted, light-routed, or promoted.
+5. Emit rule lifecycle recommendations.
+6. Decide whether the change should be kept, reverted, light-routed, or promoted.
 
 ## Why
 
@@ -69,7 +70,37 @@ uv run python scripts/bench/capability_ab_runner.py \
 - Nexus wearing validity.
 - Five pillars and six phases.
 - MSA flags with evidence-backed Swarm/Drone/Nightshift fields.
+- RLM trace present rate when RLM is enabled.
+- Rule lifecycle recommendations: `active`, `light`, `deprecated`, `removed_candidate`.
 - Public claim gate verdict.
+
+### Before / After Optimization
+
+When measuring a Nexus change, run the same benchmark twice:
+
+1. Before change: current committed Nexus.
+2. After change: candidate Nexus.
+3. Same model, same task manifest, same trials, same timeout policy.
+4. Compare `rule_lifecycle`, verified delivery, trust mismatch, wall time, and cost per verified success.
+
+Do not claim an optimization improved Nexus if the task set, model, eligibility, or verifier changed between runs.
+
+### RLM On / Off
+
+When validating RLM specifically, compare:
+
+1. Bare model.
+2. Model wearing Nexus with RLM off.
+3. Model wearing Nexus with `NEXUS_RLM_REPAIR_LOOP=1`.
+
+RLM value should be reported as:
+
+- `rlm_trace_present_rate`
+- second-round repair wins
+- budget exhaustion rate
+- time to verified
+- trust mismatch change
+- cost delta
 
 ### Decision Rules
 

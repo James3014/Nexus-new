@@ -152,6 +152,43 @@ Lesson:
 - Path aliases such as `policy_memory.jsonl` versus `policymemory.jsonl` split learning evidence. Canonical storage paths should live in one helper and tests must assert the canonical name.
 - Rerank stages should be single-pass and ordered. Applying repo boost / drift suppression twice makes answer source weighting harder to explain and can hide topic-pack problems.
 
+## P35: Self-Updating Meta-Framework
+
+What:
+- Benchmark comparison now emits rule lifecycle recommendations.
+
+Why:
+- Nexus needs to learn which governance rules still earn their cost as models improve.
+
+How:
+- `scripts/bench/ab_eval.py` converts A/B deltas into `RuleLifecycleEvidence`.
+- Current rules: `verified-delivery-governance`, `rlm-trace`.
+- Recommendation remains conservative and explainable: `active | light | deprecated | removed_candidate`.
+
+Status:
+- 2026-04-28 P35a implemented in benchmark evaluation output.
+
+Lesson:
+- Rule lifecycle must start as advice, not automatic deletion. Public benchmark output can recommend demotion, but production rule changes still need review.
+
+## P36: Benchmark Skill Formalization
+
+What:
+- Continuous optimization skill now requires before/after comparisons, RLM on/off comparisons, and rule lifecycle output.
+
+Why:
+- Future Nexus optimization needs repeatable evidence, not one-off benchmark stories.
+
+How:
+- Skill requires stable model/task/verifier/eligibility across runs.
+- RLM-specific runs must compare bare, Nexus RLM-off, and Nexus RLM-on.
+
+Status:
+- 2026-04-28 P36a implemented in `.agents/skills/nexus-benchmark-continuous-optimization/SKILL.md`.
+
+Lesson:
+- Benchmark workflows are part of the product. If the skill does not force stable denominators and model identity, reports can drift into marketing instead of evidence.
+
 ## Lesson
 
 - 跨 worktree 文件可能存在於 `/Users/jameschen/Workspace/nexus`，但主工作區是 `/Users/jameschen/.codex/worktrees/ad59/nexus`。執行前要用絕對路徑確認，避免把另一份工作區的計劃誤判為本 worktree 已落地。

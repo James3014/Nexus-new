@@ -8,6 +8,8 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from nexus.contracts import RuleLifecycleEvidence, recommend_rule_state
+
 
 def _as_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -434,6 +436,39 @@ def compare_grouped(rows_a: list[dict[str, Any]], rows_b: list[dict[str, Any]], 
     return out
 
 
+def _rule_lifecycle(summary_a: dict[str, Any], summary_b: dict[str, Any], delta: dict[str, Any]) -> list[dict[str, Any]]:
+    sample_size = min(_as_int(summary_a.get("total_runs")), _as_int(summary_b.get("total_runs")))
+    cost_delta_pct = 0.0
+    baseline_duration = _as_float(summary_a.get("avg_wall_duration_sec"))
+    if baseline_duration > 0:
+        cost_delta_pct = round((_as_float(delta.get("avg_wall_duration_sec_delta")) / baseline_duration) * 100.0, 2)
+    rules = [
+        RuleLifecycleEvidence(
+            rule_id="verified-delivery-governance",
+            sample_size=sample_size,
+            verified_lift_pp=round(_as_float(delta.get("semantic_verified_rate_delta")) * 100.0, 2),
+            trust_mismatch_delta_pp=round(_as_float(delta.get("trust_mismatch_rate_delta")) * 100.0, 2),
+            cost_delta_pct=cost_delta_pct,
+            rationale="semantic verified lift vs bare treatment",
+        ),
+        RuleLifecycleEvidence(
+            rule_id="rlm-trace",
+            sample_size=sample_size,
+            verified_lift_pp=round(_as_float(delta.get("rlm_trace_present_rate_delta")) * 100.0, 2),
+            trust_mismatch_delta_pp=round(_as_float(delta.get("trust_mismatch_rate_delta")) * 100.0, 2),
+            cost_delta_pct=cost_delta_pct,
+            rationale="RLM trace observability lift",
+        ),
+    ]
+    return [
+        {
+            **rule.to_dict(),
+            "recommended_state": recommend_rule_state(rule).value,
+        }
+        for rule in rules
+    ]
+
+
 def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, rows_b: list[dict[str, Any]]) -> dict[str, Any]:
     summary_a = summarize_runs(rows_a)
     summary_b = summarize_runs(rows_b)
@@ -538,6 +573,7 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         "by_category": compare_grouped(rows_a, rows_b, field="category"),
         "by_repo_kind": compare_grouped(rows_a, rows_b, field="repo_kind"),
         "formal_treatment": formal_treatment,
+        "rule_lifecycle": _rule_lifecycle(summary_a, summary_b, delta),
     }
 
 

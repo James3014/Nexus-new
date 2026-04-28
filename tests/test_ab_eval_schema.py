@@ -85,6 +85,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "capability_nightshift_invoked": True,
                         "capability_nightshift_recovered": False,
                         "artifact_verification_only": True,
+                        "rlm_trace_present": True,
                     }
                 ),
                 json.dumps(
@@ -166,6 +167,10 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["nightshift_recommended_rate_delta"] == 0.5
     assert report["delta"]["nightshift_invoked_rate_delta"] == 0.5
     assert report["delta"]["nightshift_recovery_rate_delta"] == 0.0
+    assert report["delta"]["rlm_trace_present_rate_delta"] == 0.5
+    assert report["rule_lifecycle"][0]["rule_id"] == "verified-delivery-governance"
+    assert report["rule_lifecycle"][0]["recommended_state"] == "active"
+    assert report["rule_lifecycle"][1]["rule_id"] == "rlm-trace"
     assert report["by_category"]["bugfix"]["solve_rate_delta"] == 1.0
     assert report["by_category"]["feature"]["patch_success_rate_delta"] == 1.0
     assert report["by_repo_kind"]["neutral_fixture"]["solve_rate_delta"] == 1.0
