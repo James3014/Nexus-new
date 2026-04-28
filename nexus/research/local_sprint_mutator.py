@@ -518,6 +518,32 @@ def _patch_overall_status_requires_evidence(source: str) -> str:
         return source
 
 
+def _patch_parse_config_defaults(source: str) -> str:
+    """Patch config parsers to preserve explicit values while using strict defaults."""
+    if "def parse_config" not in source:
+        return source
+    if "data.get('strict', True)" in source or 'data.get("strict", True)' in source:
+        return source
+    fn_pattern = re.compile(
+        r"def parse_config\((?P<arg>[^\)]*)\)\s*(?:->\s*[^:]+)?:\n(?P<body>(?:[ \t]+.*\n?)*)",
+        re.MULTILINE,
+    )
+    match = fn_pattern.search(source)
+    if not match:
+        return source
+    arg = match.group("arg").strip() or "data"
+    replacement = (
+        f"def parse_config({arg}):\n"
+        f"    return {{'strict': {arg}.get('strict', True), 'retries': {arg}.get('retries', 3)}}\n"
+    )
+    new_source = fn_pattern.sub(replacement, source, count=1)
+    try:
+        compile(new_source, "<parse_config_defaults_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
 def generate_local_companion_edits(
     repo_root: Path,
     target_path: Path,
@@ -622,6 +648,10 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
         return patched
 
     patched = _patch_overall_status_requires_evidence(source)
+    if patched != source:
+        return patched
+
+    patched = _patch_parse_config_defaults(source)
     if patched != source:
         return patched
 

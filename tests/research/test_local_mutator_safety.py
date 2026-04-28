@@ -147,3 +147,20 @@ def build_response(value):
     ns = {}
     exec(patched, ns)
     assert ns["build_response"]("ok") == {"result": "ok"}
+
+
+def test_parse_config_defaults_patch_preserves_explicit_values():
+    source = """
+def parse_config(data):
+    return {'strict': bool(data.get('strict', False)), 'retries': data.get('retries', 0)}
+"""
+    patched = generate_local_candidate(
+        source,
+        "Sync configuration docs and strict parser defaults where history-like examples conflict with the new canonical behavior.",
+        "local",
+        0,
+    )
+    ns = {}
+    exec(patched, ns)
+    assert ns["parse_config"]({}) == {"strict": True, "retries": 3}
+    assert ns["parse_config"]({"strict": False, "retries": 0}) == {"strict": False, "retries": 0}
