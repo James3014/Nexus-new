@@ -34,6 +34,27 @@ def test_run_completion_gate_for_task_rejects_missing_required_config(
     assert note == "completion_gate_missing"
 
 
+def test_run_completion_gate_for_task_passes_delivery_profile_and_approval(tmp_path: Path) -> None:
+    artifact = tmp_path / "live.json"
+    artifact.write_text("{}", encoding="utf-8")
+    task = {
+        "id": "gate.live",
+        "completion_gate": {
+            "task_level": "feature",
+            "delivery_profile": "live_browser",
+            "verify_commands": ["/bin/echo ok-1", "/bin/echo ok-2"],
+            "artifact_paths": [str(artifact)],
+            "human_approval_refs": ["approved-by:james"],
+            "output_dir": str(tmp_path / "delivery"),
+        },
+    }
+
+    passed, note = run_completion_gate_for_task(task, {"require_completion_gate": False}, tmp_path)
+
+    assert passed is True
+    assert note == "verified"
+
+
 def test_execute_single_task_does_not_mark_done_when_completion_gate_fails(
     monkeypatch,
 ) -> None:

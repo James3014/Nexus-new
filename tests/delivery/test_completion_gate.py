@@ -4,6 +4,7 @@ import sys
 from nexus.delivery.gate import evaluate_completion
 from nexus.delivery.models import CompletionRequest
 from nexus.delivery.models import CompletionStatus
+from nexus.delivery.models import DeliveryProfile
 from nexus.delivery.models import TaskLevel
 
 
@@ -87,3 +88,49 @@ def test_completion_gate_requires_artifact_before_delivery_ready(
 
     assert result.status == CompletionStatus.VERIFIED
     assert result.missing_artifacts == [missing_artifact]
+
+
+def test_completion_gate_blocks_live_profile_without_human_approval(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "live.json"
+    artifact.write_text("{}", encoding="utf-8")
+    request = CompletionRequest(
+        task_name="live-without-approval",
+        task_level=TaskLevel.FEATURE,
+        delivery_profile=DeliveryProfile.LIVE_API,
+        verification_commands=[f"{sys.executable} -c \"print('ok')\""],
+        artifact_paths=[artifact],
+        cwd=tmp_path,
+    )
+
+    result = evaluate_completion(request)
+
+    assert result.gate_passed is False
+    assert result.status == CompletionStatus.PARTIALLY_VERIFIED
+    assert result.policy_failures == ["live_delivery_requires_human_approval"]
+
+
+def test_completion_gate_allows_live_profile_with_approval_and_artifact(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "live.json"
+    artifact.write_text("{}", encoding="utf-8")
+    request = CompletionRequest(
+        task_name="live-with-approval",
+        task_level=TaskLevel.FEATURE,
+        delivery_profile=DeliveryProfile.LIVE_BROWSER,
+        verification_commands=[
+            f"{sys.executable} -c \"print('ok-1')\"",
+            f"{sys.executable} -c \"print('ok-2')\"",
+        ],
+        artifact_paths=[artifact],
+        human_approval_refs=["approved-by:james"],
+        cwd=tmp_path,
+    )
+
+    result = evaluate_completion(request)
+
+    assert result.gate_passed is True
+    assert result.delivery_profile == DeliveryProfile.LIVE_BROWSER
+    assert result.policy_failures == []

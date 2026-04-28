@@ -16,6 +16,12 @@ class TaskLevel(str, Enum):
     DELIVERY = "delivery"
 
 
+class DeliveryProfile(str, Enum):
+    MOCK_ONLY = "mock_only"
+    LIVE_BROWSER = "live_browser"
+    LIVE_API = "live_api"
+
+
 class CompletionStatus(str, Enum):
     IMPLEMENTED = "implemented"
     PARTIALLY_VERIFIED = "partially_verified"
@@ -34,8 +40,10 @@ class VerificationRecord(BaseModel):
 class CompletionRequest(BaseModel):
     task_name: str
     task_level: TaskLevel
+    delivery_profile: DeliveryProfile = DeliveryProfile.MOCK_ONLY
     verification_commands: list[str] = Field(default_factory=list)
     artifact_paths: list[Path] = Field(default_factory=list)
+    human_approval_refs: list[str] = Field(default_factory=list)
     cwd: Path
 
 
@@ -48,6 +56,8 @@ class CompletionResult(BaseModel):
     verification_records: list[VerificationRecord] = Field(default_factory=list)
     existing_artifacts: list[Path] = Field(default_factory=list)
     missing_artifacts: list[Path] = Field(default_factory=list)
+    delivery_profile: DeliveryProfile = DeliveryProfile.MOCK_ONLY
+    policy_failures: list[str] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property

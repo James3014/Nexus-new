@@ -47,6 +47,13 @@ How:
 - 先在 orchestrator task layer 落地，不改 CLI 與 delivery runtime。
 - 下一刀接到 `nexus/delivery/models.py`、`nexus/delivery/gate.py`、`scripts/ops/closeout_guard.py`，讓 closeout 與 completion gate 也使用同一份 contract。
 
+Status:
+- 2026-04-28 P30a implemented in orchestrator task contract.
+- 2026-04-28 P30b implemented in delivery completion gate, task runner pass-through, and closeout guard.
+
+Lesson:
+- `delivery_profile=live_*` is an extra governance requirement, not a shortcut around existing task-level verification floors. Live delivery must satisfy both the normal command/artifact contract and live evidence / human approval policy.
+
 ## P31: Native CodeIntel Convergence
 
 What:

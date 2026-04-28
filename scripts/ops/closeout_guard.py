@@ -52,13 +52,27 @@ def validate_contract(contract_path: Path, *, require_head_match: bool = True) -
 
     expected_sha = str(data.get("commit_sha") or "").strip()
     current_sha = _git_head_short(contract_path.parent)
+    consulted_agents = data.get("consulted_agents", [])
+    delivery_profile = str(data.get("delivery_profile", "mock_only") or "mock_only")
+    proposal_required = bool(data.get("proposal_required", False))
+    proposal_ref = str(data.get("proposal_ref", "") or "").strip()
+    adr_checked = bool(data.get("adr_checked", False))
+    human_approval = bool(data.get("human_approval", False)) or bool(str(data.get("human_approval_ref", "") or "").strip())
+    live_evidence = data.get("live_evidence_paths", [])
 
     checks = {
         "linter_ok": data.get("linter_exit_code") == 0,
         "ci_gate_ok": data.get("ci_gate_exit_code") == 0,
         "tests_ok": data.get("required_tests_passed") is True,
         "commit_ok": bool(expected_sha) if not require_head_match else (bool(current_sha) and current_sha == expected_sha),
-        "files_ok": isinstance(data.get("changed_files"), list) and len(data.get("changed_files")) > 0
+        "files_ok": isinstance(data.get("changed_files"), list) and len(data.get("changed_files")) > 0,
+        "consulted_agents_ok": isinstance(consulted_agents, list) and len(consulted_agents) <= 2,
+        "delivery_profile_ok": delivery_profile in {"mock_only", "live_browser", "live_api"},
+        "proposal_ok": (not proposal_required) or (bool(proposal_ref) and adr_checked),
+        "live_evidence_ok": (
+            delivery_profile == "mock_only"
+            or (human_approval and isinstance(live_evidence, list) and len(live_evidence) > 0)
+        ),
     }
     
     all_ok = all(checks.values())

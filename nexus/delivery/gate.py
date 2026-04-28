@@ -7,6 +7,7 @@ from nexus.delivery.contract import contract_for_level
 from nexus.delivery.models import CompletionRequest
 from nexus.delivery.models import CompletionResult
 from nexus.delivery.models import CompletionStatus
+from nexus.delivery.models import DeliveryProfile
 from nexus.delivery.models import TaskLevel
 from nexus.delivery.models import VerificationRecord
 
@@ -51,10 +52,21 @@ def evaluate_completion(request: CompletionRequest) -> CompletionResult:
     meets_command_floor = len(records) >= contract.min_verification_commands
     meets_artifact_floor = len(existing_artifacts) >= contract.required_artifacts
     has_substance = len(quality_failures) == 0
+    policy_failures = []
+
+    if request.delivery_profile in {DeliveryProfile.LIVE_API, DeliveryProfile.LIVE_BROWSER}:
+        has_human_approval = bool(request.human_approval_refs) or any(
+            "human-approval" in record.command.lower() and record.passed
+            for record in records
+        )
+        if not has_human_approval:
+            policy_failures.append("live_delivery_requires_human_approval")
+        if not existing_artifacts:
+            policy_failures.append("live_delivery_requires_artifact_evidence")
 
     if not records or passed_commands == 0:
         status = CompletionStatus.IMPLEMENTED
-    elif not meets_command_floor or not all_commands_passed or not has_substance:
+    elif not meets_command_floor or not all_commands_passed or not has_substance or policy_failures:
         status = CompletionStatus.PARTIALLY_VERIFIED
     elif request.task_level == TaskLevel.DELIVERY and meets_artifact_floor:
         status = CompletionStatus.DELIVERY_READY
@@ -82,4 +94,6 @@ def evaluate_completion(request: CompletionRequest) -> CompletionResult:
         verification_records=records,
         existing_artifacts=existing_artifacts,
         missing_artifacts=missing_artifacts,
+        delivery_profile=request.delivery_profile,
+        policy_failures=policy_failures,
     )

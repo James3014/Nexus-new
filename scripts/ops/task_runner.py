@@ -186,12 +186,15 @@ def run_completion_gate_for_task(
         Path(path)
         for path in gate_cfg.get("artifact_paths", task.get("evidence_paths", []))
     ]
+    human_approval_refs = list(gate_cfg.get("human_approval_refs", []))
     output_dir = Path(gate_cfg.get("output_dir", ROOT / "logs" / "delivery"))
     request = CompletionRequest(
         task_name=task["id"],
         task_level=task_level,
+        delivery_profile=gate_cfg.get("delivery_profile", "mock_only"),
         verification_commands=verify_commands,
         artifact_paths=artifact_paths,
+        human_approval_refs=human_approval_refs,
         cwd=Path(cwd) if cwd else ROOT,
     )
     result = evaluate_completion(request)

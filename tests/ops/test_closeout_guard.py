@@ -118,6 +118,76 @@ def test_guard_fail_with_empty_changed_files(tmp_path):
     assert output["ok"] is False
     assert output["checks"]["files_ok"] is False
 
+
+def test_guard_fail_with_too_many_consulted_agents(tmp_path):
+    contract_file = tmp_path / "fail_contract.json"
+    data = {
+        "linter_exit_code": 0,
+        "ci_gate_exit_code": 0,
+        "required_tests_passed": True,
+        "commit_sha": "abc123def456",
+        "changed_files": ["file1.py"],
+        "consulted_agents": ["a", "b", "c"],
+    }
+    contract_file.write_text(json.dumps(data))
+
+    result = subprocess.run(
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file), "--no-require-head-match"],
+        capture_output=True,
+        text=True
+    )
+    output = json.loads(result.stdout)
+    assert result.returncode != 0
+    assert output["checks"]["consulted_agents_ok"] is False
+
+
+def test_guard_fail_with_proposal_required_but_missing_adr(tmp_path):
+    contract_file = tmp_path / "fail_contract.json"
+    data = {
+        "linter_exit_code": 0,
+        "ci_gate_exit_code": 0,
+        "required_tests_passed": True,
+        "commit_sha": "abc123def456",
+        "changed_files": ["file1.py"],
+        "proposal_required": True,
+        "proposal_ref": "docs/proposals/p1.md",
+        "adr_checked": False,
+    }
+    contract_file.write_text(json.dumps(data))
+
+    result = subprocess.run(
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file), "--no-require-head-match"],
+        capture_output=True,
+        text=True
+    )
+    output = json.loads(result.stdout)
+    assert result.returncode != 0
+    assert output["checks"]["proposal_ok"] is False
+
+
+def test_guard_fail_with_live_profile_without_live_evidence(tmp_path):
+    contract_file = tmp_path / "fail_contract.json"
+    data = {
+        "linter_exit_code": 0,
+        "ci_gate_exit_code": 0,
+        "required_tests_passed": True,
+        "commit_sha": "abc123def456",
+        "changed_files": ["file1.py"],
+        "delivery_profile": "live_api",
+        "human_approval": True,
+        "live_evidence_paths": [],
+    }
+    contract_file.write_text(json.dumps(data))
+
+    result = subprocess.run(
+        [sys.executable, str(GUARD_SCRIPT), "--contract", str(contract_file), "--no-require-head-match"],
+        capture_output=True,
+        text=True
+    )
+    output = json.loads(result.stdout)
+    assert result.returncode != 0
+    assert output["checks"]["live_evidence_ok"] is False
+
 def test_guard_fail_missing_contract():
     result = subprocess.run(
         [sys.executable, str(GUARD_SCRIPT), "--contract", "non_existent_contract.json", "--no-require-head-match"],
