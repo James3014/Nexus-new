@@ -633,6 +633,12 @@ def test_extract_record_maps_semantic_fields():
                 "drone_used": True,
                 "drone_invoked_count": 1,
             },
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+                "governance_layers": ["ultra_review"],
+                "stop_policy": {"type": "a_streak", "threshold": 2},
+            },
             "codeintel": {
                 "gate_mode": "scan_impact_required",
                 "scan_report_present": True,
@@ -704,6 +710,10 @@ def test_extract_record_maps_semantic_fields():
     assert out["capability_nightshift_invoked"] is True
     assert out["capability_nightshift_recovered"] is False
     assert out["capability_nightshift_report_path"] == ".nexus/reports/nightshift/run.json"
+    assert out["capability_stack_selected"] == ["hyper_sprint", "autoreason"]
+    assert out["capability_stack_acceleration_layers"] == ["ddtree"]
+    assert out["capability_stack_governance_layers"] == ["ultra_review"]
+    assert out["capability_stack_stop_policy_type"] == "a_streak"
     assert out["codeintel_scan_report_present"] is True
     assert out["codeintel_impact_report_present"] is True
     assert out["codeintel_claim_bundle_present"] is True

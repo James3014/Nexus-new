@@ -1265,6 +1265,7 @@ def run_auto_flow(
             "claim_verified": artifact_verified,
         },
         "phase_wall_sec": phase_wall_sec,
+        "capability_stack": route.get("capability_stack", {}),
         "codeintel": codeintel_evidence,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),
         "nexus_rescued": nexus_rescued,

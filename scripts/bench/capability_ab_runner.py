@@ -980,6 +980,8 @@ def _extract_record(
     phase_trace = phase_trace if isinstance(phase_trace, dict) else {}
     capabilities = usage_trace.get("capabilities", {}) if isinstance(usage_trace, dict) else {}
     capabilities = capabilities if isinstance(capabilities, dict) else {}
+    capability_stack = usage_trace.get("capability_stack", {}) if isinstance(usage_trace, dict) else {}
+    capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
     codeintel = usage_trace.get("codeintel", payload.get("codeintel", {})) if isinstance(payload, dict) else {}
     codeintel = codeintel if isinstance(codeintel, dict) else {}
     jit = usage_trace.get("jit", payload.get("jit", {})) if isinstance(payload, dict) else {}
@@ -1124,6 +1126,10 @@ def _extract_record(
         "capability_swarm_evidence_count": int(capabilities.get("swarm_evidence_count", 0) or 0),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
         "capability_drone_invoked_count": int(capabilities.get("drone_invoked_count", 0) or 0),
+        "capability_stack_selected": list(capability_stack.get("selected_capabilities", []) or []),
+        "capability_stack_acceleration_layers": list(capability_stack.get("acceleration_layers", []) or []),
+        "capability_stack_governance_layers": list(capability_stack.get("governance_layers", []) or []),
+        "capability_stack_stop_policy_type": str((capability_stack.get("stop_policy", {}) or {}).get("type") or ""),
         "codeintel_gate_mode": str(codeintel.get("gate_mode") or ""),
         "codeintel_scan_report_present": bool(codeintel.get("scan_report_present", False)),
         "codeintel_impact_report_present": bool(codeintel.get("impact_report_present", False)),

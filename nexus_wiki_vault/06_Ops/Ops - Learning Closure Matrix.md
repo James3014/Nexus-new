@@ -670,3 +670,9 @@ version_scope:
 - **Root Cause**: The local P1-P13 matrix recorded the requirement but did not check whether `NEXUS_VALUE_HIDDEN_VERIFIER=1` was actually enabled.
 - **Decision**: Make P3 fail-closed when hidden verifier is required but the environment flag is missing, and document the env var in both benchmark runbooks.
 - **Prevention**: Local readiness gates must validate required public-claim environment switches, not only describe them.
+
+## 2026-04-28: Capability Router Tests Must Match Stack Thresholds
+- **Phenomenon**: Initial route tests expected DDTree for `candidate_count=2` and no Ultra Review for a low-confidence flaky timeout task, then a targeted pytest command used a non-existent node id and ran zero tests.
+- **Root Cause**: The test expectation drifted from the declared router policy: DDTree starts at larger candidate budgets, while flaky timeout plus low confidence is a governance candidate.
+- **Decision**: Keep the safer route policy, fix the expectations, and verify with the exact discovered pytest node id.
+- **Prevention**: Capability-stack tests must assert documented thresholds, and targeted pytest commands must be discovered with `rg "def test_"` before being used as proof.
