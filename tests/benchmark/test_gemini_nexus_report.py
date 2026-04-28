@@ -73,6 +73,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "phase_c": "closure_written",
                         "capability_claim_verified": True,
                         "capability_self_heal_used": False,
+                        "rlm_trace_present": True,
                     }
                 ),
                 json.dumps(
@@ -130,6 +131,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Guard fallback rate | 0.0% | 50.0% | 50.0%" in out
     assert "Verification rescue rate | 0.0% | 50.0% | 50.0%" in out
     assert "LLM self-heal rate | 0.0% | 50.0% | 50.0%" in out
+    assert "RLM trace present | 0.0% | 50.0% | 50.0%" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
     assert "| measured | 2 | 1 |" in out
     assert "| estimated | 0 | 1 |" in out

@@ -51,3 +51,27 @@ def test_rlm_harder_manifest_uses_dedicated_fixtures(tmp_path: Path):
         assert "spec_from_file_location" in test_source
 
     assert len(signatures) == len(tasks)
+
+
+def test_rlm_harder_v2_manifest_uses_hidden_verifier_challenges(tmp_path: Path):
+    path = Path("scripts/bench/public_benchmark_rlm_harder_v2.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    tasks = payload["tasks"]
+
+    assert payload["benchmark_id"] == "nexus-public-rlm-harder-v2"
+    assert payload["frozen"] is True
+    assert len(tasks) == 4
+    assert {task["rlm_challenge"] for task in tasks} == {
+        "hidden_governance",
+        "hidden_evidence",
+        "hidden_second_round",
+        "hidden_memory_contract",
+    }
+    assert all(task["fixture_kind"].startswith("rlm_harder_v2_") for task in tasks)
+
+    for task in load_tasks(path):
+        target, test = _materialize_fixture(tmp_path, task)
+        target_source = Path(target).read_text(encoding="utf-8")
+        test_source = Path(test).read_text(encoding="utf-8")
+        assert "rlm_harder_v2" in target_source
+        assert "spec_from_file_location" in test_source

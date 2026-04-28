@@ -233,6 +233,7 @@ def render_markdown_report(
         f"| Guard fallback rate | {_pct(a['guard_fallback_rate'])} | {_pct(b['guard_fallback_rate'])} | {_pct(delta['guard_fallback_rate_delta'])} |",
         f"| Verification rescue rate | {_pct(a['verification_rescue_rate'])} | {_pct(b['verification_rescue_rate'])} | {_pct(delta['verification_rescue_rate_delta'])} |",
         f"| LLM self-heal rate | {_pct(a['llm_self_heal_rate'])} | {_pct(b['llm_self_heal_rate'])} | {_pct(delta['llm_self_heal_rate_delta'])} |",
+        f"| RLM trace present | {_pct(a['rlm_trace_present_rate'])} | {_pct(b['rlm_trace_present_rate'])} | {_pct(delta['rlm_trace_present_rate_delta'])} |",
         f"| Token public-safe claim | {token_public_safe} | {token_public_safe} | n/a |",
         "",
         "## Token Telemetry",

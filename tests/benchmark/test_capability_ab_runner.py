@@ -907,6 +907,50 @@ def test_run_without_nexus_hidden_verifier_omits_tests_from_prompt(tmp_path: Pat
     assert out["baseline_patch_changed"] is False
 
 
+def test_run_without_nexus_hidden_verifier_omits_rlm_harder_tests(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="rlm-v2-hidden-001",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix hidden RLM task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="rlm_harder_v2_evidence_gap",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        assert "test_requires_artifact_reference" not in prompt
+        original = Path(target_file).read_text(encoding="utf-8")
+        return (
+            {
+                "patch": original,
+                "tokens_used": 123,
+                "token_capture_status": "measured",
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": True,
+            },
+            "",
+        )
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert out["baseline_patch_changed"] is False
+
+
 def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="easy-quota",

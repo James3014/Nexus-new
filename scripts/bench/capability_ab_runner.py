@@ -596,6 +596,49 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str]:
             "    assert merged == {'timeout': 10, 'retries': 2, 'jitter': 1}\n"
             "    assert defaults == {'timeout': 10, 'retries': 2}\n",
         ),
+        "rlm_harder_v2_governance_guard": (
+            "def rlm_harder_v2_filter_action(action):\n"
+            "    return {'allowed': True, 'reason': 'ok'}\n",
+            "from target import rlm_harder_v2_filter_action\n\n"
+            "def test_blocks_shell_and_delete_actions():\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'read_file'}) == {'allowed': True, 'reason': 'ok'}\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'run_command', 'cmd': 'rm -rf .nexus'}) == {'allowed': False, 'reason': 'governance_block'}\n",
+        ),
+        "rlm_harder_v2_evidence_gap": (
+            "def rlm_harder_v2_verified_claims(claims):\n"
+            "    return [claim['id'] for claim in claims if claim.get('status') == 'pass']\n",
+            "from target import rlm_harder_v2_verified_claims\n\n"
+            "def test_requires_artifact_reference():\n"
+            "    claims = [\n"
+            "        {'id': 'a', 'status': 'pass', 'artifact': 'reports/a.json'},\n"
+            "        {'id': 'b', 'status': 'pass'},\n"
+            "        {'id': 'c', 'status': 'fail', 'artifact': 'reports/c.json'},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_verified_claims(claims) == ['a']\n",
+        ),
+        "rlm_harder_v2_second_round": (
+            "def rlm_harder_v2_merge_settings(defaults, override):\n"
+            "    out = defaults\n"
+            "    out.update(override or {})\n"
+            "    return out\n",
+            "from target import rlm_harder_v2_merge_settings\n\n"
+            "def test_preserves_inputs_and_ignores_none_values():\n"
+            "    defaults = {'timeout': 10, 'retries': 2}\n"
+            "    merged = rlm_harder_v2_merge_settings(defaults, {'timeout': None, 'jitter': 1})\n"
+            "    assert merged == {'timeout': 10, 'retries': 2, 'jitter': 1}\n"
+            "    assert defaults == {'timeout': 10, 'retries': 2}\n",
+        ),
+        "rlm_harder_v2_memory_contract": (
+            "def rlm_harder_v2_select_memory_hits(items, task_type, keywords):\n"
+            "    return [item for item in items if item.get('task_type') == task_type]\n",
+            "from target import rlm_harder_v2_select_memory_hits\n\n"
+            "def test_requires_type_and_keyword_overlap():\n"
+            "    items = [\n"
+            "        {'id': 'old-bug', 'task_type': 'bug', 'keywords': ['invoice', 'rounding']},\n"
+            "        {'id': 'target', 'task_type': 'bug', 'keywords': ['websocket', 'timeout']},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_select_memory_hits(items, 'bug', ['websocket', 'timeout']) == [items[1]]\n",
+        ),
     }
     try:
         target_code, test_code = fixtures[fixture_kind]
@@ -904,6 +947,10 @@ def _extract_record(
         "capability_nightshift_recommended": bool(capabilities.get("nightshift_recommended", False)),
         "capability_swarm_used": bool(capabilities.get("swarm_used", False)),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
+        "rlm_trace_path": str(usage_trace.get("rlm_trace_path") or ""),
+        "rlm_trace_present": bool(str(usage_trace.get("rlm_trace_path") or "").strip()),
+        "rlm_policy_reason": str(usage_trace.get("rlm_policy_reason") or ""),
+        "rlm_budget_exhausted": bool(usage_trace.get("rlm_budget_exhausted", False)),
     }
     return _annotate_benchmark_eligibility(
         row,
@@ -1227,7 +1274,9 @@ def run_without_nexus(
         pytest_stderr_tail = ""
         try:
             hidden_verifier_mode = _hidden_verifier_mode_enabled()
-            prompt_tests = "" if hidden_verifier_mode and task.fixture_kind.startswith("nexus_value_") else test_source
+            prompt_tests = "" if hidden_verifier_mode and (
+                task.fixture_kind.startswith("nexus_value_") or task.fixture_kind.startswith("rlm_harder_")
+            ) else test_source
             prompt = (
                 "You are Gemini 3 Flash running without Nexus orchestration. "
                 "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "

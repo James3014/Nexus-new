@@ -221,6 +221,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "verification_only_rate": 0.0,
             "mutation_required_rate": 0.0,
             "mutation_success_rate": 0.0,
+            "rlm_trace_present_rate": 0.0,
         }
 
     solved = sum(1 for row in rows if _is_solved(row))
@@ -389,6 +390,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "verification_only_rate": _rate(rows, lambda r: _is_true(r.get("artifact_verification_only"))),
         "mutation_required_rate": _rate(rows, lambda r: _is_true(r.get("mutation_required"))),
         "mutation_success_rate": _rate(mutation_required_rows, lambda r: _is_solved(r) and _is_true(r.get("artifact_changed"))),
+        "rlm_trace_present_rate": _rate(rows, lambda r: _is_true(r.get("rlm_trace_present"))),
     }
 
 
@@ -446,6 +448,9 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "avg_model_calls_delta": round(summary_b["avg_model_calls"] - summary_a["avg_model_calls"], 2),
         "avg_attempt_count_delta": round(summary_b["avg_attempt_count"] - summary_a["avg_attempt_count"], 2),
+        "rlm_trace_present_rate_delta": round(
+            summary_b["rlm_trace_present_rate"] - summary_a["rlm_trace_present_rate"], 4
+        ),
         "token_observable_rate_delta": round(
             summary_b["token_observable_rate"] - summary_a["token_observable_rate"], 4
         ),
