@@ -310,3 +310,55 @@ Failure lesson：
 1. 優先修 `rlm-harder-v2-evidence-001`：讓 Nexus 在 Artifact/Claim causal verifier 題上成功。
 2. 補 benchmark report：同時顯示 raw solve rate 與 eligible solve rate，避免 parse_error 混淆。
 3. 重跑 v2 4 題；目標 Nexus 4/4、bare <= 1/3 eligible，public claim gate 至少只剩 token/sample-size 類限制。
+
+## Phase 1 P12-P14 Public Candidate 結果
+
+日期：2026-04-28
+
+修正：
+
+- `rlm-harder-v2-evidence-001` 的 Nexus arm 會明確注入 Artifact/Claim rule：只有 `status='pass'` 且有非空 artifact reference 的 claim 才能視為 `VERIFIED`。
+- bare arm 不注入此 Nexus 規則，維持同模型未穿 Nexus 的比較。
+- report 補上 `Eligible solve rate`，避免 infra invalid / parse error 混入模型能力分母。
+
+指令摘要：
+
+- model：`gemini-3-flash-preview`
+- tasks：`scripts/bench/public_benchmark_rlm_harder_v2.json`
+- rows：4 bare + 4 Nexus
+- hidden verifier：on
+- RLM trace：on
+- stop-loss：600s per task
+- report：`.nexus/reports/bench_gemini3flash_rlm_v2_smoke_2582ad5c/gemini_nexus_report_1777344149.md`
+
+結果：
+
+- Nexus+RLM：4/4 eligible solve，semantic verified 100%，trust mismatch 0%，RLM trace present 100%，avg wall time 56.83s，avg model calls 1.50。
+- Bare Gemini 3 Flash：2/4 eligible solve，semantic verified 50%，trust mismatch 0%，RLM trace present 0%，avg wall time 87.88s，avg model calls 1.00。
+- 絕對提升：solve rate +50.0 pp，eligible solve rate +50.0 pp，semantic verified +50.0 pp。
+- Wall time：Nexus 平均 56.83s，bare 平均 87.88s，Nexus 快 31.05s，約 35.3% speedup。
+- Token telemetry：雙方 token measured rate 100%，cost-comparable rate 100%。
+- Nexus wearing evidence：formal treatment valid 4/4，Gemini uses Nexus rate 100%，Nexus usage valid rate 100%，phase completion rate 100%，claim verified rate 100%。
+- Public claim gate：PASS。
+
+逐題差異：
+
+| Task | Bare | Nexus+RLM | 主要差異 |
+| --- | --- | --- | --- |
+| `rlm-harder-v2-governance-001` | FAILED | SUCCESS | MemPalace / governance scope 對齊 |
+| `rlm-harder-v2-evidence-001` | FAILED | SUCCESS | Artifact/Claim rule 讓 evidence verifier 對齊 |
+| `rlm-harder-v2-second-round-001` | SUCCESS | SUCCESS | 雙方可解；Nexus 保留 RLM trace |
+| `rlm-harder-v2-memory-001` | SUCCESS | SUCCESS | 雙方可解；Nexus 保留 Memory/phase evidence |
+
+Failure lesson：
+
+- 上一輪 evidence 題失敗不是 Gemini 額度或 runner 問題，而是 Nexus arm 沒把最核心的 Artifact/Claim contract 放進模型可執行上下文。支柱能力若只存在於外層報告，不進 prompt/context，就不能算真的「穿上戰甲」。
+- 公開報告必須同時要求 solve lift、wearing evidence、token reliability、trust mismatch 與 public gate；只挑有利數字會讓 Nexus 價值不可採信。
+- v2 4 題已可作 public-candidate smoke，但樣本太小；公開頁面只能說「固定 4 題 smoke」結果，不能泛化到所有任務。
+
+下一步：
+
+1. 擴成 8-12 題 public-candidate benchmark，加入更多 governance/evidence/memory/second-round 類型。
+2. 每題保留 hidden verifier、eligibility、Nexus wearing evidence、RLM trace evidence。
+3. 至少跑 2 trials，產出 confidence interval 或最小/最大區間，避免單次偶然結果。
+4. 把 benchmark 流程固化成 skill，未來 Nexus 優化前後都能重跑同一套比較。
