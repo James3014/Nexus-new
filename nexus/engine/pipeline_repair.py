@@ -11,6 +11,7 @@ from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_comman
 from nexus.delivery.phantom_guard import detect_inconclusive_success
 from nexus.core.skill_outcomes import build_outcome_event, append_skill_outcome_event
 from nexus.learning.cycle_analyzer import analyze_cycle
+from nexus.engine.recursive_repair_loop import RecursiveRepairLoop, recursive_repair_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -555,6 +556,15 @@ class PipelineRepairMixin:
         repair_attempts = 0
         success = False
         max_retries = getattr(self.engine, 'max_retries', 3)
+        rlm_loop = None
+        if recursive_repair_enabled(ctx):
+            rlm_loop = RecursiveRepairLoop.from_context(
+                project_root=getattr(self.engine, "project_root", Path.cwd()),
+                ctx=ctx,
+                max_iterations=max_retries,
+            )
+            ctx.state.metadata["rlm_recursive_repair_enabled"] = True
+            ctx.state.metadata["rlm_recursive_trace_path"] = str(rlm_loop.trace_path)
 
         while repair_attempts < max_retries:
             if self._check_external_interrupt(ctx):
@@ -567,6 +577,13 @@ class PipelineRepairMixin:
 
             # Step 1: Repair
             r_out = self._execute_single_repair(ctx, tracer, repair_attempts)
+            if rlm_loop is not None:
+                rlm_loop.record_repair(
+                    iteration=repair_attempts,
+                    status=r_out["status"],
+                    result=r_out["result"],
+                    metadata=ctx.state.metadata,
+                )
 
             # Step 2: Audit
             eval_ctx = AuditEvalContext(
@@ -578,9 +595,19 @@ class PipelineRepairMixin:
                 current_skill_id=r_out["current_skill_id"]
             )
             a_out = self._evaluate_audit_result(ctx, eval_ctx)
+            if rlm_loop is not None:
+                rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
+                budget_state = rlm_loop.consume_iteration()
+                ctx.state.metadata["rlm_budget_state"] = budget_state.to_dict()
 
             if a_out["audit_success"]:
                 success = True
+                break
+
+            if rlm_loop is not None and rlm_loop.state.exhausted:
+                ctx.state.metadata["rlm_budget_exhausted"] = True
+                ctx.state.metadata["rlm_budget_exhausted_reasons"] = rlm_loop.state.exhausted_reasons
+                rlm_loop.record_budget_exhausted(iteration=repair_attempts)
                 break
 
             # Step 3: Handle Failure

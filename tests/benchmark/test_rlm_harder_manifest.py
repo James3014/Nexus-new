@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from scripts.bench.capability_ab_runner import load_tasks
+
+
+def test_rlm_harder_manifest_targets_recursive_reasoning_gaps():
+    path = Path("scripts/bench/public_benchmark_rlm_harder_v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    tasks = payload["tasks"]
+
+    assert payload["frozen"] is True
+    assert payload["benchmark_id"] == "nexus-public-rlm-harder-v1"
+    assert len(tasks) == 4
+    assert {task["category"] for task in tasks} == {
+        "docs_code_sync",
+        "feature",
+        "ops_research",
+        "test_repair",
+    }
+    assert {task["rlm_challenge"] for task in tasks} == {
+        "multi_file",
+        "long_context",
+        "misleading_tests",
+        "second_round_diagnosis",
+    }
+    assert all(task["repo_kind"] == "neutral_fixture" for task in tasks)
+    assert all(task["success_criteria"] == "patch_and_tests_pass" for task in tasks)
+    assert all(task["mutation_required"] is True for task in tasks)
+    assert all(task["fixture_kind"].startswith("nexus_value_") for task in tasks)
+
+    loaded = load_tasks(path)
+    assert [task.id for task in loaded] == [task["id"] for task in tasks]
+    assert all(len(task.manifest_hash) == 64 for task in loaded)

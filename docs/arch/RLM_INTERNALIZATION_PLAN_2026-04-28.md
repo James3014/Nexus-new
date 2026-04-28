@@ -187,3 +187,28 @@ Acceptance:
 2. 補 tests/contracts。
 3. 新增 RLM harder benchmark manifest，但先不跑大模型。
 4. Phase 1 只做 R-loop feature flag，不接 X。
+
+## Phase 1 P1-P5 實作紀錄
+
+日期：2026-04-28
+
+狀態：
+
+- P1 `RecursiveRepairLoop` 已接入 R/A loop，預設關閉，只在 `rlm_recursive_repair_enabled` metadata 或 `NEXUS_RLM_REPAIR_LOOP=1` 時啟用。
+- P2 trace 寫入 `.nexus/reports/rlm_trace/<task>.jsonl`，每輪記錄 R submit/repair 與 A audit 結果。
+- P3 `SUBMIT` 只代表 R phase 移交 A gate；成功仍由 A/C gate 決定。
+- P4 budget exhausted 會 fail-closed，並寫入 `rlm_budget_state`、`rlm_budget_exhausted`、`rlm_budget_exhausted_reasons`。
+- P5 新增 `scripts/bench/public_benchmark_rlm_harder_v1.json`，以既有 public category 搭配 `rlm_challenge` 覆蓋 multi-file、long-context、misleading-tests、second-round-diagnosis 四類 harder smoke。
+
+Failure lesson：
+
+- 先跑 regression 時，trace 檔不存在與 manifest 不存在是正確紅燈；這確認了測試真的鎖到新增能力，而不是只測既有 pipeline。
+- RLM 內核最容易把 `submit` 誤判成成功，所以 trace 必須明確保留 `submit` 與 `verified/audit_rejected` 的差異。
+- budget 應在 A gate 後消耗並檢查；若在 R 前直接 fail，容易遮蔽 A gate 的 rejection evidence。
+- public manifest 的 `category` 必須沿用既有 enum；新增 RLM 細分類應放在 `rlm_challenge`，避免 freeze/report tooling 解析失敗。
+
+下一步：
+
+1. 把 Phase 3 的 CapabilityGate/MemPalace/Belief per-iteration policy 接入 `RecursiveRepairLoop`。
+2. 讓 harder manifest 有專屬 fixture source，而不是暫時重用 `nexus_value_*` fixture。
+3. 跑 Gemini 3 Flash：bare vs Nexus current vs Nexus + RLM flag 的 4 題 smoke。
