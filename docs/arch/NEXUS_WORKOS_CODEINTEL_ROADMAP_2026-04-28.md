@@ -78,12 +78,14 @@ How:
 Status:
 - 2026-04-28 P31a implemented: native `code:impact` service and CLI.
 - 2026-04-28 P31b implemented: native `code:scan` graph builder and CLI.
+- 2026-04-28 P31c implemented: native `code:context` service and CLI.
 - Current scope: Python module/import graph only; no watch/index daemon, no external runtime.
 
 Lesson:
 - CodeIntel should start with a small, deterministic stdlib path. A conservative import-impact result is more useful for gates than a broad opaque graph that cannot be explained or tested.
 - Impact scanning must exclude generated sandboxes and local caches such as `.nexus`, `.git`, `.venv`, and `.codex`; otherwise stale review worktrees inflate blast radius and make the evidence unusable.
 - Scan output should be a deterministic graph index plus a small scan report. Keep indexing local and explainable before adding watch mode or richer symbol extraction.
+- Context output is currently module/import context. It is ready for gate evidence, but not yet a full symbol-level IDE index.
 
 ## P32: CodeIntel Gate / Multi-Agent 接線
 
@@ -102,10 +104,13 @@ How:
 Status:
 - 2026-04-28 P32a implemented: code-change tasks require `code-impact` evidence at pre-gate even when the task did not explicitly list it.
 - 2026-04-28 P32b implemented: `code:impact` emits `report_path` and includes the report in `evidence_paths`, making it easier for gates and closeout bundles to cite the same artifact.
+- 2026-04-28 P32c implemented: pre-gate accepts code-impact only when a readable `codeintel-v1` report artifact is present.
+- 2026-04-28 P32c e2e verified: real CodeIntel impact report can satisfy `verify_gate`.
 
 Lesson:
 - Existing fixtures with placeholder `file1.py` become real code-change tasks once code-impact is fail-closed. Tests that are not about code changes should use docs paths; code-change pass tests must include `nexus code:impact` evidence.
 - CodeIntel evidence must include the generated report path, not just changed source files. Otherwise a task can claim impact analysis happened without a reusable artifact.
+- CLI spelling varies between click command words (`code impact`) and product wording (`code:impact`). Evidence inference accepts both forms.
 
 ## P33: RLM Production Hardening
 
@@ -242,6 +247,49 @@ Status:
 
 Lesson:
 - A public Nexus claim must not be "Nexus always wins." The durable claim is narrower and stronger: "same model wearing Nexus delivers more verifiable, auditable outcomes on governance/evidence-heavy tasks under this fixed benchmark."
+
+## Benchmark / Launch Readiness Matrix
+
+What:
+- Separate engineering gate readiness from public benchmark readiness.
+
+Why:
+- Some improvements harden delivery evidence but do not alter Gemini's solving behavior. Rerunning Gemini is expensive and should be reserved for claims about model performance or Nexus treatment behavior.
+
+How:
+
+| Area | Current status | Gemini benchmark required? | Launch standard |
+| :--- | :--- | :--- | :--- |
+| P30 Work OS gates | Contract + delivery/closeout gate implemented | No | Unit/e2e gates pass; live claims require live evidence + human approval |
+| P31 CodeIntel scan/impact/context | Python module/import graph implemented | No, unless injected into Gemini prompt/context or claimed as solve-rate lift | CLI stable, reports reusable, no external deps |
+| P32 CodeIntel gate | Code-change pre-gate requires readable `codeintel-v1` report | No for gate claim; yes for "improves Gemini" claim | E2E `code:scan -> code:impact -> verify_gate` pass |
+| P33 RLM repair hardening | Feature-flagged R-loop with CapabilityGate/MemPalace/Belief | Yes for RLM value claim | Rollout policy defines allowed task classes and CI requirements |
+| P34 X research recursion | Trace bridge only | Yes if claiming recursive research value | Budgeted recursive X-loop implemented and tested |
+| P35/P36 benchmark lifecycle | Rule lifecycle + skill workflow implemented | No by itself | Reports include lifecycle recommendations and stable denominators |
+| P37 JIT feedback | Observation foundation implemented | No, unless claiming benchmark speed/value lift | Missed-candidate backprop + explainable stats before predictive ranking |
+| P38 public report | Candidate-ready only | Yes | 12x3 same-model run, bilingual bundle, public claim gate PASS, trend report |
+
+Lesson:
+- "上線" has layers: gate-hardening can ship with unit/e2e proof; public value claims require same-model benchmark evidence; self-optimizing JIT requires multi-week observation before changing defaults.
+
+## Long-Run Execution Order
+
+What:
+- Long Gemini and multi-week observation work is intentionally last.
+
+Why:
+- It is wasteful to spend Gemini quota or wait for observation windows before the local gates, CodeIntel artifacts, and benchmark interpretation rules are stable.
+
+How:
+1. Finish local gate-hardening first: P31/P32 context + report artifact + verify_gate e2e.
+2. Run affected tests and targeted CI locally.
+3. Only then run Gemini benchmarks:
+   - RLM value claim: bare vs Nexus RLM-off vs Nexus RLM-on.
+   - Public Nexus claim: Gemini 3 Flash bare vs Gemini 3 Flash + Nexus, 12x3.
+4. Let JIT collect observation for 2-4 weeks before switching predictive ranking defaults.
+
+Lesson:
+- Expensive evidence should verify a stable product path, not debug a moving implementation.
 
 ## Lesson
 

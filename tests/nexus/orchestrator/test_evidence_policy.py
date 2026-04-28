@@ -1,5 +1,7 @@
 from nexus.orchestrator.evidence_policy import build_temp_evidence_payload
+from nexus.orchestrator.evidence_policy import code_impact_report_paths
 from nexus.orchestrator.evidence_policy import derive_claim_bundle
+from nexus.orchestrator.evidence_policy import has_code_impact_report
 from nexus.orchestrator.evidence_policy import missing_pre_gate_requirements
 from nexus.orchestrator.evidence_policy import task_requires_code_impact
 from nexus.orchestrator.task_contract import Evidence
@@ -76,6 +78,30 @@ def test_code_change_requires_code_impact_before_delivery_gate():
     assert missing_pre_gate_requirements(task) == [EvidenceRequirement.CODE_IMPACT]
 
     task.add_evidence(Evidence(command="nexus code:impact --files nexus/orchestrator/task_contract.py", exit_code=0, output_summary="impact ok"))
+    assert missing_pre_gate_requirements(task) == [EvidenceRequirement.CODE_IMPACT]
+
+
+def test_code_change_accepts_code_impact_report_artifact(tmp_path):
+    report = tmp_path / "impact.json"
+    report.write_text('{"schema_version":"codeintel-v1"}', encoding="utf-8")
+    task = Task(
+        task_id="TASK-001",
+        owner="Agent-1",
+        allowed_files=["nexus/orchestrator/task_contract.py"],
+        done_criteria=["tests pass"],
+        evidence_requirements=["pytest"],
+    )
+    task.add_evidence(Evidence(command="pytest -q tests/nexus/orchestrator", exit_code=0, output_summary="3 passed"))
+    task.add_evidence(
+        Evidence(
+            command=f"nexus code impact --files nexus/orchestrator/task_contract.py --report-file {report}",
+            exit_code=0,
+            output_summary="impact ok",
+        )
+    )
+
+    assert code_impact_report_paths(task) == [str(report)]
+    assert has_code_impact_report(task) is True
     assert missing_pre_gate_requirements(task) == []
 
 

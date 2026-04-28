@@ -70,6 +70,9 @@ def build_graph(root: str | Path) -> dict[str, Any]:
                 for module in module_names
                 if module == imported or module.startswith(f"{imported}.") or imported.startswith(f"{module}.")
             ]
+            if len(matched) > 1:
+                max_depth = max(module.count(".") for module in matched)
+                matched = [module for module in matched if module.count(".") == max_depth]
             for target in sorted(matched):
                 if target != source:
                     edges.append({"from": source, "to": target, "type": "imports"})

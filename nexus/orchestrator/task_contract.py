@@ -73,7 +73,7 @@ def normalize_requirement(
         return EvidenceRequirement.ACCEPTANCE_CHECK
     if "delivery-gate" in text:
         return EvidenceRequirement.DELIVERY_GATE
-    if "code-impact" in text or "code:impact" in text:
+    if "code-impact" in text or "code:impact" in text or "code impact" in text:
         return EvidenceRequirement.CODE_IMPACT
     if "human-approval" in text or "human approval" in text:
         return EvidenceRequirement.HUMAN_APPROVAL
@@ -86,7 +86,7 @@ def infer_evidence_kind(command: str) -> EvidenceKind:
         return EvidenceKind.DELIVERY_GATE
     if "acceptance-check" in text:
         return EvidenceKind.ACCEPTANCE_CHECK
-    if "code-impact" in text or "code:impact" in text:
+    if "code-impact" in text or "code:impact" in text or "code impact" in text:
         return EvidenceKind.CODE_IMPACT
     if "human-approval" in text or "human approval" in text:
         return EvidenceKind.HUMAN_APPROVAL

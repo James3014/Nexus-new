@@ -32,3 +32,18 @@ class CodeScanResult:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class CodeContextResult:
+    symbol: str
+    callers: list[str] = field(default_factory=list)
+    callees: list[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
+    related_tests: list[str] = field(default_factory=list)
+    found: bool = False
+    reason: str = ""
+    schema_version: str = CODEINTEL_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)

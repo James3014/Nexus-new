@@ -193,6 +193,28 @@ def code_scan(output_json: bool, index_path: str | None, report_file: str | None
         click.echo(f"Index: {result['index_path']}")
         click.echo(f"Report: {out_path}")
 
+
+@code_group.command(name="context")
+@click.option("--symbol", required=True, help="Module or symbol name to inspect.")
+@click.option("--index-path", type=click.Path(), default=None, help="Optional graph index path.")
+@click.option("--output-json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option("--report-file", type=click.Path(), default=None, help="Optional context report path.")
+def code_context(symbol: str, index_path: str | None, output_json: bool, report_file: str | None):
+    """Inspect callers, callees, files, and related tests for a symbol."""
+    from nexus.services.codeintel import context_for_symbol
+
+    result = context_for_symbol(repo_root, symbol, index_path=index_path).to_dict()
+    out_path = Path(report_file) if report_file else repo_root / ".nexus" / "reports" / "codeintel" / "context.json"
+    out_path = out_path if out_path.is_absolute() else repo_root / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        status_text = "found" if result["found"] else f"missing:{result['reason']}"
+        click.echo(f"Code context: {symbol} {status_text}")
+        click.echo(f"Report: {out_path}")
+
 def _render_hallucination_unverified(reason: str) -> None:
     click.echo("\n## 🧠 幻覺指數標註 (Hallucination Index)")
     click.echo("**總分**: N/A (UNVERIFIED)  ")

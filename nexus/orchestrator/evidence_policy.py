@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import shlex
+from pathlib import Path
 from typing import Any
 
 from nexus.orchestrator.task_contract import EvidenceRequirement
@@ -9,6 +12,37 @@ from nexus.orchestrator.task_contract import Task
 def task_requires_code_impact(task: Task) -> bool:
     code_suffixes = (".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java")
     return any(str(path).endswith(code_suffixes) for path in task.allowed_files)
+
+
+def code_impact_report_paths(task: Task) -> list[str]:
+    paths: list[str] = []
+    for evidence in task.evidence_list:
+        if not evidence.satisfies(EvidenceRequirement.CODE_IMPACT):
+            continue
+        if evidence.artifact_path:
+            paths.append(evidence.artifact_path)
+        try:
+            parts = shlex.split(evidence.command)
+        except ValueError:
+            parts = evidence.command.split()
+        for index, part in enumerate(parts):
+            if part == "--report-file" and index + 1 < len(parts):
+                paths.append(parts[index + 1])
+    return paths
+
+
+def has_code_impact_report(task: Task) -> bool:
+    for report_path in code_impact_report_paths(task):
+        path = Path(report_path)
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("schema_version") == "codeintel-v1":
+            return True
+    return False
 
 
 def missing_pre_gate_requirements(task: Task) -> list[str | EvidenceRequirement]:
@@ -24,7 +58,7 @@ def missing_pre_gate_requirements(task: Task) -> list[str | EvidenceRequirement]
     if (
         task_requires_code_impact(task)
         and EvidenceRequirement.CODE_IMPACT not in missing
-        and not any(evidence.satisfies(EvidenceRequirement.CODE_IMPACT) for evidence in task.evidence_list)
+        and not has_code_impact_report(task)
     ):
         missing.append(EvidenceRequirement.CODE_IMPACT)
     return missing
