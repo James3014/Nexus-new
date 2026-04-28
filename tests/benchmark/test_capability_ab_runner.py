@@ -26,6 +26,7 @@ from scripts.bench.capability_ab_runner import (
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
     _materialize_fixture,
+    _nexus_task_desc,
     _parse_direct_gemini_json,
     _read_preserved_target,
     _remaining_leg_timeout,
@@ -737,6 +738,43 @@ def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypa
     assert "Belief: when evidence is incomplete" in task_desc
     assert "Nexus Artifact/Claim rule" in task_desc
     assert "artifact" in task_desc
+
+
+def test_nexus_task_desc_adds_pillar_specific_rules():
+    governance = CapabilityTask(
+        id="gov",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix scope enforcement.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_governance_guard",
+    )
+    memory = CapabilityTask(
+        id="memory",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix memory relevance.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_memory_contract",
+    )
+    belief = CapabilityTask(
+        id="belief",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix belief budget.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_belief_budget",
+    )
+
+    assert "Nexus MemPalace rule" in _nexus_task_desc(governance)
+    assert "Nexus Belief/Memory rule" in _nexus_task_desc(memory)
+    assert "Nexus Belief/Memory rule" in _nexus_task_desc(belief)
 
 
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):

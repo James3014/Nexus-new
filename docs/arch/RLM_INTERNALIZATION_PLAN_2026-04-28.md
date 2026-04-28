@@ -406,3 +406,38 @@ Failure lesson：
 1. 擴充 v2 題庫到 8-12 題，讓 MemPalace、Artifact/Claim、Belief 各至少有 2 題可歸因勝出。
 2. 再跑 2 trials，確認 Capability Win Map 是否穩定。
 3. 後續再做 MSA/Swarm/Nightshift trace 統一，將 `capability_swarm_used`、`capability_drone_used`、`capability_nightshift_recommended` 對齊同一個 report section。
+
+## Phase 1 P17 題庫擴充
+
+日期：2026-04-28
+
+目標：
+
+- 將 `public_benchmark_rlm_harder_v2` 從 4 題擴到 8 題。
+- 讓 MemPalace、Artifact/Claim、Belief/Memory 各至少有 2 題可歸因，避免公開報告只靠單一案例說明支柱價值。
+
+新增題型：
+
+- `rlm-harder-v2-governance-002`：MemPalace scope enforcement，未核准 mutation 必須阻擋，read-only 仍允許。
+- `rlm-harder-v2-evidence-002`：Artifact/Claim replay receipt，verified claim 必須有 replay command 且 exit code 為 0。
+- `rlm-harder-v2-belief-001`：Belief budget，低信心高風險時必須要求更多 evidence rounds。
+- `rlm-harder-v2-second-round-002`：second-round repair 對照題，增加 RLM/self-heal 題量。
+
+修正：
+
+- P16 的專屬 prompt hook 原本使用不存在的 fixture kind：
+  - `rlm_harder_v2_governance_scope`
+  - `rlm_harder_v2_memory_relevance`
+- 已改為覆蓋實際 fixture kind：
+  - `rlm_harder_v2_governance_guard`
+  - `rlm_harder_v2_governance_scope`
+  - `rlm_harder_v2_memory_contract`
+  - `rlm_harder_v2_belief_budget`
+
+驗收目標：
+
+- manifest schema 測試確認 v2 有 8 題。
+- hidden governance >= 2。
+- hidden evidence >= 2。
+- hidden memory/belief 合計 >= 2。
+- 所有 v2 fixture 都能 materialize 並帶 portable hidden verifier import。

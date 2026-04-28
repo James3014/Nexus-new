@@ -60,13 +60,21 @@ def test_rlm_harder_v2_manifest_uses_hidden_verifier_challenges(tmp_path: Path):
 
     assert payload["benchmark_id"] == "nexus-public-rlm-harder-v2"
     assert payload["frozen"] is True
-    assert len(tasks) == 4
+    assert len(tasks) == 8
     assert {task["rlm_challenge"] for task in tasks} == {
         "hidden_governance",
         "hidden_evidence",
         "hidden_second_round",
         "hidden_memory_contract",
+        "hidden_belief_budget",
     }
+    challenge_counts: dict[str, int] = {}
+    for task in tasks:
+        challenge = task["rlm_challenge"]
+        challenge_counts[challenge] = challenge_counts.get(challenge, 0) + 1
+    assert challenge_counts["hidden_governance"] >= 2
+    assert challenge_counts["hidden_evidence"] >= 2
+    assert challenge_counts["hidden_memory_contract"] + challenge_counts["hidden_belief_budget"] >= 2
     assert all(task["fixture_kind"].startswith("rlm_harder_v2_") for task in tasks)
 
     for task in load_tasks(path):

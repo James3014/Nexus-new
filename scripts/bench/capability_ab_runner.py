@@ -604,6 +604,16 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str]:
             "    assert rlm_harder_v2_filter_action({'tool': 'read_file'}) == {'allowed': True, 'reason': 'ok'}\n"
             "    assert rlm_harder_v2_filter_action({'tool': 'run_command', 'cmd': 'rm -rf .nexus'}) == {'allowed': False, 'reason': 'governance_block'}\n",
         ),
+        "rlm_harder_v2_governance_scope": (
+            "def rlm_harder_v2_scope_decision(request):\n"
+            "    if request.get('approved'):\n"
+            "        return {'allowed': True, 'reason': 'approved'}\n"
+            "    return {'allowed': True, 'reason': 'default_allow'}\n",
+            "from target import rlm_harder_v2_scope_decision\n\n"
+            "def test_unapproved_mutation_is_blocked_but_read_is_allowed():\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'read', 'approved': False}) == {'allowed': True, 'reason': 'read_only'}\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'delete', 'approved': False}) == {'allowed': False, 'reason': 'scope_block'}\n",
+        ),
         "rlm_harder_v2_evidence_gap": (
             "def rlm_harder_v2_verified_claims(claims):\n"
             "    return [claim['id'] for claim in claims if claim.get('status') == 'pass']\n",
@@ -615,6 +625,15 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str]:
             "        {'id': 'c', 'status': 'fail', 'artifact': 'reports/c.json'},\n"
             "    ]\n"
             "    assert rlm_harder_v2_verified_claims(claims) == ['a']\n",
+        ),
+        "rlm_harder_v2_evidence_replay": (
+            "def rlm_harder_v2_accept_receipt(receipt):\n"
+            "    return receipt.get('claim') == 'verified'\n",
+            "from target import rlm_harder_v2_accept_receipt\n\n"
+            "def test_verified_receipt_requires_replay_and_clean_exit():\n"
+            "    assert rlm_harder_v2_accept_receipt({'claim': 'verified', 'replay_command': 'pytest -q', 'exit_code': 0}) is True\n"
+            "    assert rlm_harder_v2_accept_receipt({'claim': 'verified', 'exit_code': 0}) is False\n"
+            "    assert rlm_harder_v2_accept_receipt({'claim': 'verified', 'replay_command': 'pytest -q', 'exit_code': 1}) is False\n",
         ),
         "rlm_harder_v2_second_round": (
             "def rlm_harder_v2_merge_settings(defaults, override):\n"
@@ -638,6 +657,14 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str]:
             "        {'id': 'target', 'task_type': 'bug', 'keywords': ['websocket', 'timeout']},\n"
             "    ]\n"
             "    assert rlm_harder_v2_select_memory_hits(items, 'bug', ['websocket', 'timeout']) == [items[1]]\n",
+        ),
+        "rlm_harder_v2_belief_budget": (
+            "def rlm_harder_v2_repair_budget(confidence, risk):\n"
+            "    return {'rounds': 1, 'needs_evidence': False}\n",
+            "from target import rlm_harder_v2_repair_budget\n\n"
+            "def test_low_confidence_high_risk_requires_more_evidence():\n"
+            "    assert rlm_harder_v2_repair_budget(0.42, 'high') == {'rounds': 3, 'needs_evidence': True}\n"
+            "    assert rlm_harder_v2_repair_budget(0.91, 'low') == {'rounds': 1, 'needs_evidence': False}\n",
         ),
     }
     try:
@@ -682,18 +709,18 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
         "\n- Belief: when evidence is incomplete or confidence is low, prefer a conservative fix backed by tests."
         "\n- Artifact/Claim: treat completion claims as valid only when backed by concrete artifacts or passing checks."
     )
-    if task.fixture_kind == "rlm_harder_v2_governance_scope":
+    if task.fixture_kind in {"rlm_harder_v2_governance_guard", "rlm_harder_v2_governance_scope"}:
         desc += (
             "\n\nNexus MemPalace rule: do not silently widen the allowed scope. "
             "If a candidate conflicts with governance policy, preserve the stricter boundary."
         )
-    if task.fixture_kind == "rlm_harder_v2_evidence_gap":
+    if task.fixture_kind in {"rlm_harder_v2_evidence_gap", "rlm_harder_v2_evidence_replay"}:
         desc += (
             "\n\nNexus Artifact/Claim rule: a claim is VERIFIED only when it has "
             "status='pass' and a non-empty artifact reference. Do not accept "
             "unsupported passing claims."
         )
-    if task.fixture_kind == "rlm_harder_v2_memory_relevance":
+    if task.fixture_kind in {"rlm_harder_v2_memory_contract", "rlm_harder_v2_belief_budget"}:
         desc += (
             "\n\nNexus Belief/Memory rule: prior fixes are relevant only when they share "
             "both task type and meaningful keyword overlap. Ignore unrelated same-type history."
