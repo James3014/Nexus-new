@@ -732,6 +732,9 @@ def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypa
     )
 
     task_desc = captured["args"][captured["args"].index("--task-desc") + 1]
+    assert "Nexus wearing contract" in task_desc
+    assert "MemPalace: keep the solution inside the task scope" in task_desc
+    assert "Belief: when evidence is incomplete" in task_desc
     assert "Nexus Artifact/Claim rule" in task_desc
     assert "artifact" in task_desc
 

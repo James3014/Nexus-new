@@ -676,11 +676,27 @@ def _task_uses_materialized_fixture(task: CapabilityTask, *, materialize_missing
 
 def _nexus_task_desc(task: CapabilityTask) -> str:
     desc = task.task_desc
+    desc += (
+        "\n\nNexus wearing contract:"
+        "\n- MemPalace: keep the solution inside the task scope and enforce explicit governance constraints."
+        "\n- Belief: when evidence is incomplete or confidence is low, prefer a conservative fix backed by tests."
+        "\n- Artifact/Claim: treat completion claims as valid only when backed by concrete artifacts or passing checks."
+    )
+    if task.fixture_kind == "rlm_harder_v2_governance_scope":
+        desc += (
+            "\n\nNexus MemPalace rule: do not silently widen the allowed scope. "
+            "If a candidate conflicts with governance policy, preserve the stricter boundary."
+        )
     if task.fixture_kind == "rlm_harder_v2_evidence_gap":
         desc += (
             "\n\nNexus Artifact/Claim rule: a claim is VERIFIED only when it has "
             "status='pass' and a non-empty artifact reference. Do not accept "
             "unsupported passing claims."
+        )
+    if task.fixture_kind == "rlm_harder_v2_memory_relevance":
+        desc += (
+            "\n\nNexus Belief/Memory rule: prior fixes are relevant only when they share "
+            "both task type and meaningful keyword overlap. Ignore unrelated same-type history."
         )
     return desc
 

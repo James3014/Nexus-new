@@ -132,6 +132,12 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Verification rescue rate | 0.0% | 50.0% | 50.0%" in out
     assert "LLM self-heal rate | 0.0% | 50.0% | 50.0%" in out
     assert "RLM trace present | 0.0% | 50.0% | 50.0%" in out
+    assert "## Five-Pillar Contribution" in out
+    assert "MemPalace | 0.0% | 100.0% | 100.0%" in out
+    assert "Belief | 0.0% | 100.0% | 100.0%" in out
+    assert "Artifact / Claim | 0.0% | 100.0% | 100.0%" in out
+    assert "Claim verified | 0.0% | 100.0% | 100.0%" in out
+    assert "## Capability Win Map" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
     assert "| measured | 2 | 1 |" in out
     assert "| estimated | 0 | 1 |" in out
@@ -141,6 +147,120 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Formal treatment valid: 2/2 (100.0%)" in out
     assert "Gemini uses Nexus rate: 100.0%" in out
     assert "Token/cost claims are not public-safe" in out
+
+
+def test_render_markdown_report_maps_task_wins_to_capabilities(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "task_id": "rlm-harder-v2-governance-001",
+                        "trial_index": 1,
+                        "semantic_status": "UNVERIFIED",
+                        "status": "FAILED",
+                        "wall_duration_sec": 20,
+                        "model_calls": 1,
+                        "total_tokens": 100,
+                        "token_capture_status": "measured",
+                        "run_eligible": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "task_id": "rlm-harder-v2-evidence-001",
+                        "trial_index": 1,
+                        "semantic_status": "UNVERIFIED",
+                        "status": "FAILED",
+                        "wall_duration_sec": 30,
+                        "model_calls": 1,
+                        "total_tokens": 100,
+                        "token_capture_status": "measured",
+                        "run_eligible": True,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "task_id": "rlm-harder-v2-governance-001",
+                        "trial_index": 1,
+                        "semantic_status": "VERIFIED",
+                        "status": "SUCCESS",
+                        "wall_duration_sec": 10,
+                        "model_calls": 1,
+                        "total_tokens": 100,
+                        "token_capture_status": "measured",
+                        "run_eligible": True,
+                        "gemini_uses_nexus": True,
+                        "nexus_context_delivered": True,
+                        "nexus_usage_valid": True,
+                        "pillar_lancedb_active": True,
+                        "pillar_memory_active": True,
+                        "pillar_mempalace_active": True,
+                        "pillar_belief_active": True,
+                        "pillar_artifact_active": True,
+                        "phase_p": "route_built",
+                        "phase_x": "retrieval_checked",
+                        "phase_d": "guard_decision",
+                        "phase_r": "hyper_executed",
+                        "phase_a": "artifact_verified",
+                        "phase_c": "closure_written",
+                        "capability_claim_verified": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "task_id": "rlm-harder-v2-evidence-001",
+                        "trial_index": 1,
+                        "semantic_status": "VERIFIED",
+                        "status": "SUCCESS",
+                        "wall_duration_sec": 12,
+                        "model_calls": 1,
+                        "total_tokens": 100,
+                        "token_capture_status": "measured",
+                        "run_eligible": True,
+                        "gemini_uses_nexus": True,
+                        "nexus_context_delivered": True,
+                        "nexus_usage_valid": True,
+                        "pillar_lancedb_active": True,
+                        "pillar_memory_active": True,
+                        "pillar_mempalace_active": True,
+                        "pillar_belief_active": True,
+                        "pillar_artifact_active": True,
+                        "phase_p": "route_built",
+                        "phase_x": "retrieval_checked",
+                        "phase_d": "guard_decision",
+                        "phase_r": "hyper_executed",
+                        "phase_a": "artifact_verified",
+                        "phase_c": "closure_written",
+                        "capability_claim_verified": True,
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "| rlm-harder-v2-governance-001 | 1 | MemPalace / governance | UNVERIFIED | VERIFIED |" in out
+    assert "| rlm-harder-v2-evidence-001 | 1 | Artifact / Claim | UNVERIFIED | VERIFIED |" in out
 
 
 def test_render_markdown_report_marks_token_claim_unsafe_when_tokens_missing(tmp_path):

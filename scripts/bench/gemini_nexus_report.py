@@ -95,6 +95,44 @@ def _public_token_claim_status(a: dict[str, Any], b: dict[str, Any], *, min_rate
     return "YES" if without_rate >= min_rate and with_rate >= min_rate else "NO"
 
 
+def _capability_label(row: dict[str, Any]) -> str:
+    text = " ".join(
+        str(row.get(key) or "")
+        for key in ("task_id", "category", "task_type", "fixture_kind", "task_desc", "success_criteria")
+    ).lower()
+    if any(token in text for token in ("governance", "scope", "mempalace", "policy")):
+        return "MemPalace / governance"
+    if any(token in text for token in ("evidence", "artifact", "claim", "verify", "verification")):
+        return "Artifact / Claim"
+    if any(token in text for token in ("belief", "confidence", "memory", "prior", "history")):
+        return "Belief / Memory"
+    if any(token in text for token in ("second", "round", "repair", "self-heal", "self_heal")):
+        return "RLM / self-heal"
+    return "General"
+
+
+def _pillar_win_rows(
+    rows_without: list[dict[str, Any]],
+    rows_with: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    without_by_key = {_task_trial_key(row): row for row in rows_without}
+    wins: list[dict[str, str]] = []
+    for row in rows_with:
+        key = _task_trial_key(row)
+        baseline = without_by_key.get(key, {})
+        if _is_verified(row) and not _is_verified(baseline):
+            wins.append(
+                {
+                    "task_id": str(row.get("task_id") or key[0]),
+                    "trial": str(row.get("trial_index") or key[1]),
+                    "capability": _capability_label(row),
+                    "without": str(baseline.get("semantic_status") or baseline.get("status") or "UNKNOWN"),
+                    "with": str(row.get("semantic_status") or row.get("status") or "UNKNOWN"),
+                }
+            )
+    return wins
+
+
 def _task_trial_key(row: dict[str, Any]) -> tuple[str, str]:
     return (str(row.get("task_id") or ""), str(row.get("trial_index") or "1"))
 
@@ -179,6 +217,7 @@ def render_markdown_report(
     eligible_solve_without = _eligible_solve_rate(rows_without)
     eligible_solve_with = _eligible_solve_rate(rows_with)
     eligible_solve_delta = eligible_solve_with - eligible_solve_without
+    pillar_wins = _pillar_win_rows(rows_without, rows_with)
     public_gate = _public_claim_gate(
         rows_without=rows_without,
         rows_with=rows_with,
@@ -250,6 +289,29 @@ def render_markdown_report(
         f"| LLM self-heal rate | {_pct(a['llm_self_heal_rate'])} | {_pct(b['llm_self_heal_rate'])} | {_pct(delta['llm_self_heal_rate_delta'])} |",
         f"| RLM trace present | {_pct(a['rlm_trace_present_rate'])} | {_pct(b['rlm_trace_present_rate'])} | {_pct(delta['rlm_trace_present_rate_delta'])} |",
         f"| Token public-safe claim | {token_public_safe} | {token_public_safe} | n/a |",
+        "",
+        "## Five-Pillar Contribution",
+        "",
+        "| Pillar | Without Nexus | With Nexus | Delta | Evidence signal |",
+        "| --- | ---: | ---: | ---: | --- |",
+        f"| LanceDB | {_pct(a['pillar_lancedb_active_rate'])} | {_pct(b['pillar_lancedb_active_rate'])} | {_pct(b['pillar_lancedb_active_rate'] - a['pillar_lancedb_active_rate'])} | tactical retrieval active |",
+        f"| Memory | {_pct(a['pillar_memory_active_rate'])} | {_pct(b['pillar_memory_active_rate'])} | {_pct(b['pillar_memory_active_rate'] - a['pillar_memory_active_rate'])} | prior lessons/hits active |",
+        f"| MemPalace | {_pct(a['pillar_mempalace_active_rate'])} | {_pct(b['pillar_mempalace_active_rate'])} | {_pct(b['pillar_mempalace_active_rate'] - a['pillar_mempalace_active_rate'])} | governance boundary active |",
+        f"| Belief | {_pct(a['pillar_belief_active_rate'])} | {_pct(b['pillar_belief_active_rate'])} | {_pct(b['pillar_belief_active_rate'] - a['pillar_belief_active_rate'])} | confidence/budget signal active |",
+        f"| Artifact / Claim | {_pct(a['pillar_artifact_active_rate'])} | {_pct(b['pillar_artifact_active_rate'])} | {_pct(b['pillar_artifact_active_rate'] - a['pillar_artifact_active_rate'])} | artifact checks + claim verification |",
+        f"| Claim verified | {_pct(a['claim_verified_rate'])} | {_pct(b['claim_verified_rate'])} | {_pct(delta['claim_verified_rate_delta'])} | A/C acceptance evidence |",
+        "",
+        "## Capability Win Map",
+        "",
+        "| Task | Trial | Capability | Without Nexus | With Nexus |",
+        "| --- | ---: | --- | --- | --- |",
+        *(
+            [
+                f"| {row['task_id']} | {row['trial']} | {row['capability']} | {row['without']} | {row['with']} |"
+                for row in pillar_wins
+            ]
+            or ["| none | n/a | n/a | n/a | n/a |"]
+        ),
         "",
         "## Token Telemetry",
         "",

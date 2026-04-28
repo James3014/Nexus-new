@@ -362,3 +362,47 @@ Failure lesson：
 2. 每題保留 hidden verifier、eligibility、Nexus wearing evidence、RLM trace evidence。
 3. 至少跑 2 trials，產出 confidence interval 或最小/最大區間，避免單次偶然結果。
 4. 把 benchmark 流程固化成 skill，未來 Nexus 優化前後都能重跑同一套比較。
+
+## Phase 1 P15-P16 五支柱切入
+
+日期：2026-04-28
+
+目標：
+
+- 先處理最會影響公開說明可信度的三個支柱：Artifact/Claim、MemPalace、Belief。
+- 暫緩 MSA/Swarm/Nightshift 統一 trace，避免一次跨太多子系統。
+
+修正：
+
+- Gemini+Nexus benchmark arm 現在會注入 `Nexus wearing contract`：
+  - MemPalace：解法必須守住任務 scope 與 governance constraints。
+  - Belief：證據不足或信心低時，採保守且測試支撐的修復。
+  - Artifact/Claim：完成斷言必須由 artifact 或 passing checks 支撐。
+- 針對 v2 fixture 補更明確的支柱規約：
+  - governance 題補 MemPalace scope rule。
+  - evidence 題補 Artifact/Claim verified rule。
+  - memory 題補 Belief/Memory relevance rule。
+- Markdown report 新增：
+  - `Five-Pillar Contribution`：顯示 LanceDB、Memory、MemPalace、Belief、Artifact/Claim 的 active rate。
+  - `Capability Win Map`：列出 bare 失敗但 Nexus 成功的題，並歸因到 MemPalace / Artifact / Belief / RLM 類別。
+
+驗證：
+
+- `uv run pytest -q tests/benchmark/test_gemini_nexus_report.py tests/benchmark/test_capability_ab_runner.py -q`：63 passed。
+- `uv run python -m py_compile scripts/bench/gemini_nexus_report.py scripts/bench/capability_ab_runner.py`：pass。
+- 已用既有 Gemini 3 Flash v2 smoke JSONL 重新產生 report，確認新增章節可呈現：
+  - `Five-Pillar Contribution`
+  - `Capability Win Map`
+  - governance win -> MemPalace / governance
+  - evidence win -> Artifact / Claim
+
+Failure lesson：
+
+- 只說「五支柱都有 active」不夠；公開報告必須把哪個支柱讓哪題勝出列出來，否則使用者仍看不出 Nexus 價值。
+- 支柱規約不能只在外層治理存在；Gemini 穿 Nexus 時，規約也必須進入模型可執行上下文。
+
+下一步：
+
+1. 擴充 v2 題庫到 8-12 題，讓 MemPalace、Artifact/Claim、Belief 各至少有 2 題可歸因勝出。
+2. 再跑 2 trials，確認 Capability Win Map 是否穩定。
+3. 後續再做 MSA/Swarm/Nightshift trace 統一，將 `capability_swarm_used`、`capability_drone_used`、`capability_nightshift_recommended` 對齊同一個 report section。
