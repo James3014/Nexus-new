@@ -488,6 +488,10 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
     assert Path(trace["codeintel"]["scan_report_path"]).exists()
     assert Path(trace["codeintel"]["impact_report_path"]).exists()
     assert trace["codeintel"]["impacted_files_count"] >= 1
+    assert trace["capability_plan"]["schema_version"] == "nexus_capability_plan_v1"
+    assert trace["capability_plan"]["planner_mode"] == "dry_run"
+    assert {"mempalace_gate", "artifact_gate", "claim_gate"} <= set(trace["capability_plan"]["required_capabilities"])
+    assert any(item["phase"] == "A" for item in trace["capability_plan"]["replan_trace"])
     assert payload["timing"]["cli_elapsed_sec"] >= 0
     for phase in ["P", "X", "D", "R", "A", "C"]:
         assert phase in payload["timing"]["phase_wall_sec"]

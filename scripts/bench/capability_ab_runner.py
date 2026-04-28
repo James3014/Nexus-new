@@ -982,6 +982,10 @@ def _extract_record(
     capabilities = capabilities if isinstance(capabilities, dict) else {}
     capability_stack = usage_trace.get("capability_stack", {}) if isinstance(usage_trace, dict) else {}
     capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
+    capability_plan = usage_trace.get("capability_plan", {}) if isinstance(usage_trace, dict) else {}
+    capability_plan = capability_plan if isinstance(capability_plan, dict) else {}
+    capability_replan_trace = capability_plan.get("replan_trace", []) if isinstance(capability_plan, dict) else []
+    capability_replan_trace = capability_replan_trace if isinstance(capability_replan_trace, list) else []
     ultra_review = usage_trace.get("ultra_review", {}) if isinstance(usage_trace, dict) else {}
     ultra_review = ultra_review if isinstance(ultra_review, dict) else {}
     autoreason = usage_trace.get("autoreason", {}) if isinstance(usage_trace, dict) else {}
@@ -1136,6 +1140,20 @@ def _extract_record(
         "capability_stack_acceleration_layers": list(capability_stack.get("acceleration_layers", []) or []),
         "capability_stack_governance_layers": list(capability_stack.get("governance_layers", []) or []),
         "capability_stack_stop_policy_type": str((capability_stack.get("stop_policy", {}) or {}).get("type") or ""),
+        "capability_plan_trace_present": bool(capability_plan.get("decision_trace")),
+        "capability_plan_schema_version": str(capability_plan.get("schema_version") or ""),
+        "capability_plan_mode": str(capability_plan.get("planner_mode") or ""),
+        "capability_plan_score": int(capability_plan.get("score", 0) or 0),
+        "capability_plan_node_count": len(capability_plan.get("decision_trace", []) or []),
+        "capability_plan_selected": list(capability_plan.get("selected_capabilities", []) or []),
+        "capability_plan_required": list(capability_plan.get("required_capabilities", []) or []),
+        "capability_plan_conditional": list(capability_plan.get("conditional_capabilities", []) or []),
+        "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),
+        "capability_plan_phases": [
+            str(item.get("phase"))
+            for item in capability_replan_trace
+            if isinstance(item, dict) and str(item.get("active_capabilities") or "").strip()
+        ],
         "autoreason_enabled": bool(autoreason.get("enabled", False)),
         "autoreason_status": str(autoreason.get("status") or ""),
         "autoreason_winner": str(autoreason.get("winner") or ""),

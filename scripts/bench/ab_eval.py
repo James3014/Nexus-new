@@ -29,6 +29,10 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _mean(values: list[float]) -> float:
+    return statistics.mean(values) if values else 0.0
+
+
 def _load_csv(path: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -230,6 +234,9 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "ultra_review_recommended_rate": 0.0,
             "ultra_review_invoked_rate": 0.0,
             "ultra_review_gate_passed_rate": 0.0,
+            "capability_plan_trace_present_rate": 0.0,
+            "avg_capability_plan_node_count": 0.0,
+            "avg_capability_plan_score": 0.0,
             "patch_success_count": 0,
             "patch_success_rate": 0.0,
             "verification_only_rate": 0.0,
@@ -417,6 +424,9 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "ultra_review_recommended_rate": _rate(rows, lambda r: _is_true(r.get("ultra_review_recommended"))),
         "ultra_review_invoked_rate": _rate(rows, lambda r: _is_true(r.get("ultra_review_invoked"))),
         "ultra_review_gate_passed_rate": _rate(rows, lambda r: _is_true(r.get("ultra_review_gate_passed"))),
+        "capability_plan_trace_present_rate": _rate(rows, lambda r: _is_true(r.get("capability_plan_trace_present"))),
+        "avg_capability_plan_node_count": round(_mean([_as_float(r.get("capability_plan_node_count")) for r in rows]), 4),
+        "avg_capability_plan_score": round(_mean([_as_float(r.get("capability_plan_score")) for r in rows]), 4),
         "patch_success_count": patch_success,
         "patch_success_rate": round(patch_success / total, 4),
         "verification_only_rate": _rate(rows, lambda r: _is_true(r.get("artifact_verification_only"))),
@@ -585,6 +595,15 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "ultra_review_gate_passed_rate_delta": round(
             summary_b["ultra_review_gate_passed_rate"] - summary_a["ultra_review_gate_passed_rate"], 4
+        ),
+        "capability_plan_trace_present_rate_delta": round(
+            summary_b["capability_plan_trace_present_rate"] - summary_a["capability_plan_trace_present_rate"], 4
+        ),
+        "avg_capability_plan_node_count_delta": round(
+            summary_b["avg_capability_plan_node_count"] - summary_a["avg_capability_plan_node_count"], 4
+        ),
+        "avg_capability_plan_score_delta": round(
+            summary_b["avg_capability_plan_score"] - summary_a["avg_capability_plan_score"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),

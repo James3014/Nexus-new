@@ -18,6 +18,7 @@ from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, _candidate_summaries
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
+from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_router import CapabilityRouter
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
@@ -1343,6 +1344,14 @@ def run_auto_flow(
         "winner_source": winner_source,
         "usage_valid": bool(gemini_invoked and artifact_verified),
     }
+    nexus_usage_trace["capability_plan"] = CapabilityPlanner().plan(
+        task_desc=task_desc,
+        task_type=task_type,
+        route=route,
+        pillars=nexus_usage_trace["pillars"],
+        codeintel=codeintel_evidence,
+        phase_trace=nexus_usage_trace["phase_trace"],
+    ).to_dict()
     recursive_research = _rlm_research_trace_enabled()
     if _rlm_trace_enabled() or recursive_research:
         if recursive_research:

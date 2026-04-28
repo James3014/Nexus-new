@@ -719,6 +719,17 @@ def test_extract_record_maps_semantic_fields():
                 "unmatched_path_rate": 0.0,
                 "predictive_saved_runtime_sec": 12.5,
             },
+            "capability_plan": {
+                "schema_version": "nexus_capability_plan_v1",
+                "planner_mode": "dry_run",
+                "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "hyper", "autoreason"],
+                "required_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate"],
+                "conditional_capabilities": ["hyper", "autoreason"],
+                "forbidden_capabilities": [],
+                "decision_trace": [{"capability": "hyper", "state": "conditional"}],
+                "replan_trace": [{"phase": "P", "active_capabilities": ["hyper"]}, {"phase": "A", "active_capabilities": ["claim_gate"]}],
+                "score": 18,
+            },
         },
         "timing": {"cli_elapsed_sec": 2.4, "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5}},
         "result": {
@@ -802,6 +813,14 @@ def test_extract_record_maps_semantic_fields():
     assert out["jit_ranking_mode"] == "static"
     assert out["jit_promotion_verdict"] == "HOLD"
     assert out["jit_predictive_saved_runtime_sec"] == 12.5
+    assert out["capability_plan_trace_present"] is True
+    assert out["capability_plan_schema_version"] == "nexus_capability_plan_v1"
+    assert out["capability_plan_mode"] == "dry_run"
+    assert out["capability_plan_score"] == 18
+    assert out["capability_plan_node_count"] == 1
+    assert out["capability_plan_required"] == ["mempalace_gate", "artifact_gate", "claim_gate"]
+    assert out["capability_plan_conditional"] == ["hyper", "autoreason"]
+    assert out["capability_plan_phases"] == ["P", "A"]
     assert out["semantic_completed"] is False
     assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
     assert out["nexus_phases_observed"] == ["P", "X", "D", "R", "A", "C"]

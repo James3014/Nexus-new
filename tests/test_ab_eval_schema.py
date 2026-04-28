@@ -90,6 +90,9 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "ultra_review_recommended": True,
                         "ultra_review_invoked": True,
                         "ultra_review_gate_passed": True,
+                        "capability_plan_trace_present": True,
+                        "capability_plan_node_count": 12,
+                        "capability_plan_score": 24,
                         "artifact_verification_only": True,
                         "rlm_trace_present": True,
                         "rlm_trace_quality_score": 80,
@@ -163,6 +166,9 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["b"]["summary"]["ultra_review_recommended_rate"] == 0.5
     assert report["b"]["summary"]["ultra_review_invoked_rate"] == 0.5
     assert report["b"]["summary"]["ultra_review_gate_passed_rate"] == 0.5
+    assert report["b"]["summary"]["capability_plan_trace_present_rate"] == 0.5
+    assert report["b"]["summary"]["avg_capability_plan_node_count"] == 6.0
+    assert report["b"]["summary"]["avg_capability_plan_score"] == 12.0
     assert report["b"]["summary"]["patch_success_count"] == 1
     assert report["b"]["summary"]["patch_success_rate"] == 0.5
     assert report["b"]["summary"]["verification_only_rate"] == 0.5
@@ -186,6 +192,9 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["ultra_review_recommended_rate_delta"] == 0.5
     assert report["delta"]["ultra_review_invoked_rate_delta"] == 0.5
     assert report["delta"]["ultra_review_gate_passed_rate_delta"] == 0.5
+    assert report["delta"]["capability_plan_trace_present_rate_delta"] == 0.5
+    assert report["delta"]["avg_capability_plan_node_count_delta"] == 6.0
+    assert report["delta"]["avg_capability_plan_score_delta"] == 12.0
     assert report["delta"]["rlm_trace_present_rate_delta"] == 0.5
     assert report["b"]["summary"]["avg_rlm_trace_quality_score"] == 40.0
     assert report["delta"]["avg_rlm_trace_quality_score_delta"] == 40.0

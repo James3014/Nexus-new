@@ -454,6 +454,9 @@ def test_render_markdown_report_surfaces_infra_invalid_rows(tmp_path):
                 "ddtree_eligible": True,
                 "ultra_review_recommended": True,
                 "ultra_review_invoked": True,
+                "capability_plan_trace_present": True,
+                "capability_plan_node_count": 12,
+                "capability_plan_score": 24,
                 "rlm_trace_present": True,
                 "rlm_trace_quality_score": 90,
             }
@@ -529,6 +532,9 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
                 "ddtree_eligible": True,
                 "ultra_review_recommended": True,
                 "ultra_review_invoked": True,
+                "capability_plan_trace_present": True,
+                "capability_plan_node_count": 12,
+                "capability_plan_score": 24,
                 "rlm_trace_present": True,
                 "rlm_trace_quality_score": 90,
             }
@@ -551,6 +557,8 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
     assert "| Autoreason | 0.0% | 100.0% | 100.0% |" in out
     assert "| DDTree enabled | 0.0% | 100.0% | 100.0% |" in out
     assert "| Ultra Review invoked | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Capability plan trace | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Capability plan nodes | 0.00 | 12.00 | 12.00 |" in out
     assert "On this fixed benchmark set, `nexus` improved eligible solve rate" in out
 
 
