@@ -28,6 +28,7 @@ from scripts.bench.capability_ab_runner import (
     _ask_direct_gemini_flash_patch,
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
+    _build_parallel_smoke_rows,
     build_public_benchmark_preflight,
     _materialize_fixture,
     _nexus_task_desc,
@@ -531,6 +532,42 @@ def test_write_evidence_bundle_v2_fails_gate_when_models_differ(tmp_path: Path):
     assert payload["model_lock"]["same_model"] is False
     assert payload["public_claim_gate"]["verdict"] == "FAIL"
     assert "model_mismatch" in payload["public_claim_gate"]["failures"]
+
+
+def test_write_evidence_bundle_fails_gate_for_parallel_smoke(tmp_path: Path):
+    task = CapabilityTask(
+        id="smoke-001",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="smoke",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+    )
+    with_rows, without_rows = _build_parallel_smoke_rows([task], model_name="gemini-3-flash-preview")
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    write_jsonl(with_path, with_rows)
+    write_jsonl(without_path, without_rows)
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[*with_rows, *without_rows],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "runner_command": "run --parallel-arms smoke-only",
+            "parallel_arms": "smoke-only",
+        },
+    )
+
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    assert with_rows[0]["run_eligible"] is False
+    assert with_rows[0]["infra_invalid_reason"] == "parallel_smoke"
+    assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert "parallel_smoke" in payload["public_claim_gate"]["failures"]
 
 
 def test_total_timeout_budget_helper():

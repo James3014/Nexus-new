@@ -1705,6 +1705,43 @@ def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
     out.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
 
 
+def _build_parallel_smoke_rows(tasks: list[CapabilityTask], *, model_name: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows_by_mode: dict[str, list[dict[str, Any]]] = {"with_nexus": [], "without_nexus": []}
+    for task in tasks:
+        for mode in ("with_nexus", "without_nexus"):
+            rows_by_mode[mode].append(
+                {
+                    "mode": mode,
+                    "task_id": task.id,
+                    "trial_index": task.trial_index,
+                    "category": task.category,
+                    "repo_kind": task.repo_kind,
+                    "repo": task.repo,
+                    "repo_ref": task.repo_ref,
+                    "manifest_hash": task.manifest_hash,
+                    "difficulty": task.difficulty,
+                    "task_type": task.task_type,
+                    "task_desc": task.task_desc,
+                    "status": "SMOKE_ONLY",
+                    "semantic_status": "UNVERIFIED",
+                    "semantic_completed": False,
+                    "run_eligible": False,
+                    "infra_invalid_reason": "parallel_smoke",
+                    "invocation_started": False,
+                    "model_response_received": False,
+                    "provider": "gemini",
+                    "model_name": model_name,
+                    "model_calls": 0,
+                    "total_tokens": 0,
+                    "token_capture_status": "not_applicable_smoke_only",
+                    "token_measured": False,
+                    "parallel_arms_mode": "smoke-only",
+                    "execution_mode": "parallel_smoke",
+                }
+            )
+    return rows_by_mode["with_nexus"], rows_by_mode["without_nexus"]
+
+
 def _render_partial_markdown_report(
     *,
     benchmark_date: str,
@@ -1829,6 +1866,8 @@ def write_evidence_bundle(
     with_models = _model_names(with_rows)
     without_models = _model_names(without_rows)
     gate_failures = []
+    if config.get("parallel_arms") == "smoke-only":
+        gate_failures.append("parallel_smoke")
     if len(with_models) != 1 or len(without_models) != 1 or with_models != without_models:
         gate_failures.append("model_mismatch")
     if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
@@ -2142,6 +2181,8 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "evidence_bundle_required": bool(args.evidence_bundle),
             "markdown_report_requested": bool(args.markdown_report),
             "nexus_wearing_required": args.with_llm_mode in {"hard", "all"},
+            "parallel_arms": getattr(args, "parallel_arms", "off"),
+            "public_claim_allowed": getattr(args, "parallel_arms", "off") == "off",
         },
     }
     return report
@@ -2233,6 +2274,12 @@ def main() -> int:
         help="Validate public benchmark inputs and write benchmark_preflight.json without invoking Gemini or Nexus.",
     )
     parser.add_argument(
+        "--parallel-arms",
+        choices=["off", "smoke-only"],
+        default="off",
+        help="Smoke-only wiring check for future parallel arms. Does not invoke Gemini/Nexus and is never public-claim eligible.",
+    )
+    parser.add_argument(
         "--markdown-report",
         default="",
         help="Optional markdown report path. Use 'auto' to write gemini_nexus_report_<timestamp>.md in output-dir.",
@@ -2285,6 +2332,87 @@ def main() -> int:
         neutralize_history=bool(args.neutralize_history),
         allow_learning_loop=bool(args.allow_learning_loop),
     )
+    if args.parallel_arms == "smoke-only":
+        model_name = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "gemini")
+        with_rows, without_rows = _build_parallel_smoke_rows(tasks, model_name=model_name)
+        hidden_verifier_mode = _hidden_verifier_mode_enabled()
+        for row in [*with_rows, *without_rows]:
+            row["history_policy"] = history_policy
+            row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
+            row["hidden_verifier_mode"] = hidden_verifier_mode
+        benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
+        with_path = out_dir / f"with_nexus_{ts}.jsonl"
+        without_path = out_dir / f"without_nexus_{ts}.jsonl"
+        write_jsonl(with_path, with_rows)
+        write_jsonl(without_path, without_rows)
+        evidence_bundle_path = ""
+        if args.evidence_bundle:
+            evidence_bundle_path = str(
+                write_evidence_bundle(
+                    out_dir=out_dir,
+                    with_path=with_path,
+                    without_path=without_path,
+                    rows=[*with_rows, *without_rows],
+                    config={
+                        "tasks_file": args.tasks_file,
+                        "tasks_manifest_hash": selected_tasks[0].manifest_hash if selected_tasks else "",
+                        "unique_tasks_requested": len(selected_tasks),
+                        "repeat_trials": max(1, int(args.repeat_trials)),
+                        "shuffle_seed": args.shuffle_seed,
+                        "repo_kind_filter": args.repo_kind_filter,
+                        "isolation_mode": args.isolation_mode,
+                        "require_clean_worktree": bool(args.require_clean_worktree),
+                        "history_policy": history_policy,
+                        "hidden_verifier_mode": hidden_verifier_mode,
+                        "without_mode": args.without_mode,
+                        "with_llm_mode": args.with_llm_mode,
+                        "force_flow": args.force_flow,
+                        "parallel_arms": args.parallel_arms,
+                        "runner_command": " ".join(sys.argv),
+                        "timeout_sec": int(args.timeout_sec),
+                        "total_timeout_sec": int(args.total_timeout_sec),
+                        "effective_total_timeout_sec": 0,
+                        "stop_loss_sec": int(args.stop_loss_sec),
+                        "per_task_stop_loss_sec": int(args.per_task_stop_loss_sec),
+                    },
+                )
+            )
+        markdown_report_path = ""
+        if args.markdown_report:
+            markdown_report = out_dir / f"gemini_nexus_report_{ts}.md" if args.markdown_report == "auto" else Path(args.markdown_report)
+            if not markdown_report.is_absolute():
+                markdown_report = (repo_root / markdown_report).resolve()
+            markdown_report.parent.mkdir(parents=True, exist_ok=True)
+            markdown_report.write_text(
+                render_markdown_report(
+                    without_path=str(without_path),
+                    with_path=str(with_path),
+                    label_without=f"{_report_model_label()}_bare",
+                    label_with=f"{_report_model_label()}_nexus",
+                    benchmark_date=datetime.now().date().isoformat(),
+                ),
+                encoding="utf-8",
+            )
+            markdown_report_path = str(markdown_report)
+        print(
+            json.dumps(
+                {
+                    "status": "SMOKE_ONLY",
+                    "parallel_arms": args.parallel_arms,
+                    "tasks_requested": len(tasks),
+                    "unique_tasks_requested": len(selected_tasks),
+                    "with_nexus_executed": 0,
+                    "without_nexus_executed": 0,
+                    "with_nexus_file": str(with_path),
+                    "without_nexus_file": str(without_path),
+                    "evidence_bundle_file": evidence_bundle_path,
+                    "markdown_report_file": markdown_report_path,
+                    "benchmark_summary": benchmark_summary,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
     if args.neutralize_history:
         _reset_auto_flow_history(repo_root)
     run_start = time.monotonic()
@@ -2517,6 +2645,7 @@ def main() -> int:
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
                     "force_flow": args.force_flow,
+                    "parallel_arms": args.parallel_arms,
                     "runner_command": " ".join(sys.argv),
                     "timeout_sec": int(args.timeout_sec),
                     "total_timeout_sec": int(args.total_timeout_sec),

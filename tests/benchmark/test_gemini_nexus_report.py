@@ -37,6 +37,39 @@ def test_public_claim_gate_rejects_rlm_submit_without_a_gate():
     assert "rlm_trace_quality_below_threshold" in gate["failures"]
 
 
+def test_public_claim_gate_rejects_parallel_smoke_rows():
+    gate = _public_claim_gate(
+        rows_without=[
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "token_measured": False,
+                "parallel_arms_mode": "smoke-only",
+            }
+        ],
+        rows_with=[
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "token_measured": False,
+                "parallel_arms_mode": "smoke-only",
+            }
+        ],
+        summary_without={"token_measured_rate": 1.0},
+        summary_with={
+            "token_measured_rate": 1.0,
+            "gemini_uses_nexus_rate": 1.0,
+            "nexus_usage_valid_rate": 1.0,
+            "phase_completion_rate": 1.0,
+            "claim_verified_rate": 1.0,
+        },
+        formal={"valid_rate": 1.0},
+    )
+
+    assert gate["verdict"] == "FAIL"
+    assert "parallel_smoke" in gate["failures"]
+
+
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"

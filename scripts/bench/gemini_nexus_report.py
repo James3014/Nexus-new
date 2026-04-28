@@ -156,6 +156,8 @@ def _public_claim_gate(
     min_nexus_valid_rate: float = 1.0,
 ) -> dict[str, Any]:
     failures: list[str] = []
+    if any(str(row.get("parallel_arms_mode") or "") == "smoke-only" for row in [*rows_without, *rows_with]):
+        failures.append("parallel_smoke")
     if not rows_without or not rows_with:
         failures.append("missing_rows")
     if _multiset_counts(rows_without) != _multiset_counts(rows_with):
