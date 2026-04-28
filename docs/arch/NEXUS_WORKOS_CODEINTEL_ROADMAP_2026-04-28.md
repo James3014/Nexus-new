@@ -103,6 +103,26 @@ Status:
 Lesson:
 - Existing fixtures with placeholder `file1.py` become real code-change tasks once code-impact is fail-closed. Tests that are not about code changes should use docs paths; code-change pass tests must include `nexus code:impact` evidence.
 
+## P33: RLM Production Hardening
+
+What:
+- RLM repair loop remains feature-flagged, but each iteration is already governed by CapabilityGate, MemPalace, and Belief.
+
+Why:
+- This keeps RLM as a Nexus-governed inner loop instead of a free-running agent.
+
+How:
+- `RecursiveRepairLoop.prepare_iteration()` computes allowed tools, belief confidence, MemPalace audit, and policy block trace before repair execution.
+- Low belief confidence removes write tools.
+- MemPalace denial records `policy_blocked` and fails closed before repair.
+
+Status:
+- 2026-04-28 verified by `tests/engine/test_recursive_repair_loop.py`.
+- Still not default-on production; the missing production step is rollout policy: which task classes may enable the flag, and what CI gate requires when RLM is used.
+
+Lesson:
+- RLM hardening should be measured as policy compliance and trace quality, not only solve rate. `SUBMIT` must remain a handoff to A gate, never a success claim.
+
 ## Lesson
 
 - 跨 worktree 文件可能存在於 `/Users/jameschen/Workspace/nexus`，但主工作區是 `/Users/jameschen/.codex/worktrees/ad59/nexus`。執行前要用絕對路徑確認，避免把另一份工作區的計劃誤判為本 worktree 已落地。
