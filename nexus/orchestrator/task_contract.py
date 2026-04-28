@@ -42,6 +42,7 @@ class EvidenceKind(str, Enum):
     PYTEST = "pytest"
     ACCEPTANCE_CHECK = "acceptance-check"
     DELIVERY_GATE = "delivery-gate"
+    CODE_SCAN = "code-scan"
     CODE_IMPACT = "code-impact"
     HUMAN_APPROVAL = "human-approval"
     OTHER = "other"
@@ -51,6 +52,7 @@ class EvidenceRequirement(str, Enum):
     PYTEST = "pytest"
     ACCEPTANCE_CHECK = "acceptance-check"
     DELIVERY_GATE = "delivery-gate"
+    CODE_SCAN = "code-scan"
     CODE_IMPACT = "code-impact"
     HUMAN_APPROVAL = "human-approval"
 
@@ -73,6 +75,8 @@ def normalize_requirement(
         return EvidenceRequirement.ACCEPTANCE_CHECK
     if "delivery-gate" in text:
         return EvidenceRequirement.DELIVERY_GATE
+    if "code-scan" in text or "code:scan" in text or "code scan" in text:
+        return EvidenceRequirement.CODE_SCAN
     if "code-impact" in text or "code:impact" in text or "code impact" in text:
         return EvidenceRequirement.CODE_IMPACT
     if "human-approval" in text or "human approval" in text:
@@ -86,6 +90,8 @@ def infer_evidence_kind(command: str) -> EvidenceKind:
         return EvidenceKind.DELIVERY_GATE
     if "acceptance-check" in text:
         return EvidenceKind.ACCEPTANCE_CHECK
+    if "code-scan" in text or "code:scan" in text or "code scan" in text:
+        return EvidenceKind.CODE_SCAN
     if "code-impact" in text or "code:impact" in text or "code impact" in text:
         return EvidenceKind.CODE_IMPACT
     if "human-approval" in text or "human approval" in text:
@@ -116,6 +122,8 @@ class Evidence(BaseModel):
                 return self.kind in {EvidenceKind.ACCEPTANCE_CHECK, EvidenceKind.DELIVERY_GATE}
             if normalized == EvidenceRequirement.DELIVERY_GATE:
                 return self.kind == EvidenceKind.DELIVERY_GATE
+            if normalized == EvidenceRequirement.CODE_SCAN:
+                return self.kind == EvidenceKind.CODE_SCAN
             if normalized == EvidenceRequirement.CODE_IMPACT:
                 return self.kind == EvidenceKind.CODE_IMPACT
             if normalized == EvidenceRequirement.HUMAN_APPROVAL:

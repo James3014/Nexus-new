@@ -107,12 +107,14 @@ Status:
 - 2026-04-28 P32c implemented: pre-gate accepts code-impact only when a readable `codeintel-v1` report artifact is present.
 - 2026-04-28 P32c e2e verified: real CodeIntel impact report can satisfy `verify_gate`.
 - 2026-04-28 P32d implemented: `code:impact --index-path` can consume the deterministic graph emitted by `code:scan`, so the product path is now `scan -> impact` instead of two unrelated commands.
+- 2026-04-28 P32e implemented: code-change pre-gate and claim bundles now require both readable `code-scan` and `code-impact` `codeintel-v1` reports. Evidence bundles expose `codeintel_artifacts.scan_reports`, `impact_reports`, and validity flags.
 
 Lesson:
 - Existing fixtures with placeholder `file1.py` become real code-change tasks once code-impact is fail-closed. Tests that are not about code changes should use docs paths; code-change pass tests must include `nexus code:impact` evidence.
 - CodeIntel evidence must include the generated report path, not just changed source files. Otherwise a task can claim impact analysis happened without a reusable artifact.
 - CLI spelling varies between click command words (`code impact`) and product wording (`code:impact`). Evidence inference accepts both forms.
 - CodeIntel scan indexes should be reusable evidence, not a side artifact. Impact reports now record `scan_index_used` and cite the index path so downstream gates can audit the full chain.
+- Claim derivation must use full claim requirements, while pre-gate may defer A/C-only requirements. Otherwise a task can be safe to enter delivery-gate but still not safe to claim `VERIFIED`.
 
 ## P33: RLM Production Hardening
 
