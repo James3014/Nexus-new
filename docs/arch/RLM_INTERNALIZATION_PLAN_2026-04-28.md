@@ -546,3 +546,61 @@ Failure lesson：
 Lesson：
 
 - 支柱 prompt 不能一味疊加；不同 Artifact/Claim 子型別需要互斥、精準的 contract，否則會讓模型在相近欄位間漂移。
+
+## Phase 1 P20 8-task Smoke 修正後結果
+
+日期：2026-04-28
+
+指令摘要：
+
+- model：`gemini-3-flash-preview`
+- tasks：`scripts/bench/public_benchmark_rlm_harder_v2.json`
+- rows：8 bare + 8 Nexus
+- hidden verifier：on
+- RLM trace：on
+- stop-loss：600s per task
+- report：`.nexus/reports/bench_gemini3flash_rlm_v2_8task_smoke_22775006/gemini_nexus_report_1777347126.md`
+
+結果：
+
+- Nexus+RLM：8/8 solve，semantic verified 100%，trust mismatch 0%，RLM trace present 100%，avg wall time 58.96s。
+- Bare Gemini 3 Flash：1/8 solve，semantic verified 12.5%，trust mismatch 0%，avg wall time 122.73s。
+- 絕對提升：solve rate +87.5 pp，semantic verified +87.5 pp。
+- Wall time：Nexus 平均快 63.77s，約 52.0% speedup。
+- Token measured：Nexus 100%，bare 87.5%，仍高於 public token threshold。
+- Public claim gate：PASS。
+
+Capability Win Map：
+
+- MemPalace / governance：
+  - `rlm-harder-v2-governance-001`
+  - `rlm-harder-v2-governance-002`
+- Artifact / Claim：
+  - `rlm-harder-v2-evidence-001`
+  - `rlm-harder-v2-evidence-002`
+- Belief / Memory：
+  - `rlm-harder-v2-belief-001`
+  - `rlm-harder-v2-memory-001`
+- RLM / self-heal：
+  - `rlm-harder-v2-second-round-002`
+
+MSA / Orchestration:
+
+- Hyper：0% -> 100%。
+- Self-heal：0% -> 50%。
+- Swarm：0% -> 100%。
+- Drone：0% -> 0%。
+- Nightshift recommended：0% -> 0%。
+- RLM trace present：0% -> 100%。
+
+Residual risk：
+
+- 這仍是 8 題 x 1 trial smoke，不是最終公開級 claim。
+- Swarm 100% 需要下一步檢查是否為真參與或 row 標記過寬。
+- Drone/Nightshift 沒被這組題觸發；需要另設專門 orchestration 題。
+
+下一步：
+
+1. 跑 8 題 x 2 trials，確認 +87.5 pp lift 是否穩定。
+2. 檢查 `capability_swarm_used` 來源，確認 Swarm=100% 不是過寬標記。
+3. 設計 Drone/Nightshift 專用 public-candidate 題，再納入 MSA 報告。
