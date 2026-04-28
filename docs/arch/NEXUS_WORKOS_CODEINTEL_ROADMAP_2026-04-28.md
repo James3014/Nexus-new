@@ -254,6 +254,7 @@ Lesson:
 - A public Nexus claim must not be "Nexus always wins." The durable claim is narrower and stronger: "same model wearing Nexus delivers more verifiable, auditable outcomes on governance/evidence-heavy tasks under this fixed benchmark."
 - Dry preflight should treat missing git status as a warning unless `--require-clean-worktree` is requested. This keeps fixture/unit tests portable while still allowing strict production runs to fail closed.
 - Direct Gemini bare mode has multiple internal stages, so per-task timeout must be enforced as a shared deadline, not as separate full budgets for model call and pytest. Otherwise rows can be marked infra-invalid only after wasting quota and wall time.
+- Benchmark elapsed-time and timeout budgets must use monotonic time. Wall-clock time can jump during long local runs and corrupt stop-loss, partial-timeout, and public report numbers.
 
 ## Benchmark / Launch Readiness Matrix
 

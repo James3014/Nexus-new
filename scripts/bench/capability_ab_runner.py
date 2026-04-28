@@ -781,13 +781,13 @@ def _restore_preserved_target(target_file: str, original: str | None) -> None:
 
 
 def _budget_exceeded(start_time: float, total_timeout_sec: int) -> bool:
-    return total_timeout_sec > 0 and (time.time() - start_time) >= total_timeout_sec
+    return total_timeout_sec > 0 and (time.monotonic() - start_time) >= total_timeout_sec
 
 
 def _remaining_leg_timeout(default_timeout_sec: int, start_time: float, total_timeout_sec: int) -> int:
     if total_timeout_sec <= 0:
         return default_timeout_sec
-    remaining = int(total_timeout_sec - (time.time() - start_time))
+    remaining = int(total_timeout_sec - (time.monotonic() - start_time))
     return max(1, min(default_timeout_sec, remaining))
 
 
@@ -1302,7 +1302,8 @@ def run_with_nexus(
     if effective_force_flow:
         args.extend(["--force-flow", effective_force_flow])
 
-    start = time.time()
+    start_wall = time.time()
+    start = time.monotonic()
     env_prev = os.environ.get("NEXUS_CAPABILITY_TUNING_FILE")
     if tuning_profile:
         os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = str(
@@ -1311,7 +1312,7 @@ def run_with_nexus(
     if runner_mode == "subprocess":
         cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
         env = os.environ.copy()
-        env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start).resolve())
+        env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start_wall).resolve())
         env["NEXUS_MEMORY_AUTO_INIT"] = "0"
         if llm_enabled:
             env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
@@ -1337,7 +1338,7 @@ def run_with_nexus(
             os.environ.pop("NEXUS_CAPABILITY_TUNING_FILE", None)
         else:
             os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = env_prev
-    wall = time.time() - start
+    wall = time.monotonic() - start
 
     payload = _extract_json_payload(output)
     if not payload:
@@ -1368,7 +1369,7 @@ def run_without_nexus(
         test_path = Path(test_file)
         original = target_path.read_text(encoding="utf-8")
         test_source = test_path.read_text(encoding="utf-8")
-        start = time.time()
+        start = time.monotonic()
         status = "FAILED"
         err = ""
         model_calls = 0
@@ -1383,7 +1384,7 @@ def run_without_nexus(
         patch_len = 0
         pytest_stdout_tail = ""
         pytest_stderr_tail = ""
-        task_deadline = time.monotonic() + max(1, int(timeout_sec))
+        task_deadline = start + max(1, int(timeout_sec))
         try:
             hidden_verifier_mode = _hidden_verifier_mode_enabled()
             prompt_tests = "" if hidden_verifier_mode and (
@@ -1445,7 +1446,7 @@ def run_without_nexus(
         finally:
             if status != "SUCCESS":
                 target_path.write_text(original, encoding="utf-8")
-        wall = time.time() - start
+        wall = time.monotonic() - start
         payload = {
             "result": {
                 "status": status,
@@ -1500,7 +1501,7 @@ def run_without_nexus(
     if mode == "bare":
         target_path = Path(target_file)
         original = target_path.read_text(encoding="utf-8")
-        start = time.time()
+        start = time.monotonic()
         status = "FAILED"
         try:
             # Bare baseline: no hyper search; for hard tasks we intentionally do verification-only.
@@ -1517,7 +1518,7 @@ def run_without_nexus(
             # keep the same post-condition as service path: preserve best patch only on success
             if status != "SUCCESS":
                 target_path.write_text(original, encoding="utf-8")
-        wall = time.time() - start
+        wall = time.monotonic() - start
         payload = {
             "result": {
                 "status": status,
@@ -1534,7 +1535,7 @@ def run_without_nexus(
         }
         return _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
 
-    start = time.time()
+    start = time.monotonic()
     payload, _ = run_auto_flow(
         repo_root=repo_root,
         task_desc=task.task_desc,
@@ -1558,7 +1559,7 @@ def run_without_nexus(
         report_file=f".nexus/reports/research/ab_{task.id}_without.json",
         output_file=None,
     )
-    wall = time.time() - start
+    wall = time.monotonic() - start
     return _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
 
 
@@ -2150,7 +2151,7 @@ def main() -> int:
     )
     if args.neutralize_history:
         _reset_auto_flow_history(repo_root)
-    run_start = time.time()
+    run_start = time.monotonic()
     timed_out = False
     effective_total_timeout_sec = _effective_total_timeout_sec(int(args.total_timeout_sec), int(args.stop_loss_sec))
     previous_timeout_handler = _install_total_timeout(effective_total_timeout_sec)
@@ -2162,7 +2163,7 @@ def main() -> int:
                 event="total_timeout",
                 mode="with_nexus",
                 task=task,
-                elapsed_sec=time.time() - run_start,
+                elapsed_sec=time.monotonic() - run_start,
                 status="SKIPPED",
             )
             break
@@ -2176,7 +2177,7 @@ def main() -> int:
         materialized_task = _task_uses_materialized_fixture(task, materialize_missing=bool(args.materialize_missing))
         original_target = _read_preserved_target(target_file, materialize_missing=materialized_task)
         try:
-            leg_start = time.time()
+            leg_start = time.monotonic()
             _emit_progress(
                 enabled=bool(args.progress_log),
                 event="task_start",
@@ -2220,7 +2221,7 @@ def main() -> int:
                 task=task,
                 target_file=target_file,
                 test_file=test_file,
-                elapsed_sec=time.time() - leg_start,
+                elapsed_sec=time.monotonic() - leg_start,
                 status=str(row.get("status", "")),
             )
             if task_stop_loss_exceeded:
@@ -2243,7 +2244,7 @@ def main() -> int:
                 task=task,
                 target_file=target_file,
                 test_file=test_file,
-                elapsed_sec=time.time() - run_start,
+                elapsed_sec=time.monotonic() - run_start,
                 status="INTERRUPTED",
             )
             break
@@ -2263,7 +2264,7 @@ def main() -> int:
                 event="total_timeout",
                 mode="without_nexus",
                 task=task,
-                elapsed_sec=time.time() - run_start,
+                elapsed_sec=time.monotonic() - run_start,
                 status="SKIPPED",
             )
             break
@@ -2274,7 +2275,7 @@ def main() -> int:
         materialized_task = _task_uses_materialized_fixture(task, materialize_missing=bool(args.materialize_missing))
         original_target = _read_preserved_target(target_file, materialize_missing=materialized_task)
         try:
-            leg_start = time.time()
+            leg_start = time.monotonic()
             _emit_progress(
                 enabled=bool(args.progress_log),
                 event="task_start",
@@ -2315,7 +2316,7 @@ def main() -> int:
                 task=task,
                 target_file=target_file,
                 test_file=test_file,
-                elapsed_sec=time.time() - leg_start,
+                elapsed_sec=time.monotonic() - leg_start,
                 status=str(row.get("status", "")),
             )
             if task_stop_loss_exceeded:
@@ -2338,7 +2339,7 @@ def main() -> int:
                 task=task,
                 target_file=target_file,
                 test_file=test_file,
-                elapsed_sec=time.time() - run_start,
+                elapsed_sec=time.monotonic() - run_start,
                 status="INTERRUPTED",
             )
             break
