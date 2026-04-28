@@ -75,6 +75,14 @@ How:
 - 借鏡 SocratiCode 的 CLI/status/UX 產品化模式。
 - 不引入外部專案，不接外部服務；只把 repo 內既有原型收斂成內建 service。
 
+Status:
+- 2026-04-28 P31a implemented: native `code:impact` service and CLI.
+- Current scope: Python import reverse-impact only; no full symbol graph, no watch/index daemon, no external runtime.
+
+Lesson:
+- CodeIntel should start with a small, deterministic stdlib path. A conservative import-impact result is more useful for gates than a broad opaque graph that cannot be explained or tested.
+- Impact scanning must exclude generated sandboxes and local caches such as `.nexus`, `.git`, `.venv`, and `.codex`; otherwise stale review worktrees inflate blast radius and make the evidence unusable.
+
 ## P32: CodeIntel Gate / Multi-Agent 接線
 
 What:

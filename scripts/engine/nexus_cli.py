@@ -140,6 +140,33 @@ def status(as_json):
     else:
         subprocess.run([sys.executable, str(repo_root / "scripts/ops/enterprise_audit_v22.py")], check=True)
 
+
+@nexus_group.group(name="code")
+def code_group():
+    """🔎 Native Nexus code intelligence."""
+    pass
+
+
+@code_group.command(name="impact")
+@click.option("--files", "files_text", required=True, help="Comma-separated changed files.")
+@click.option("--output-json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option("--report-file", type=click.Path(), default=None, help="Optional report path.")
+def code_impact(files_text: str, output_json: bool, report_file: str | None):
+    """Analyze changed-file impact with Nexus native CodeIntel."""
+    from nexus.services.codeintel import analyze_impact
+
+    changed_files = [item.strip() for item in files_text.split(",") if item.strip()]
+    result = analyze_impact(repo_root, changed_files).to_dict()
+    out_path = Path(report_file) if report_file else repo_root / ".nexus" / "reports" / "codeintel" / "impact.json"
+    out_path = out_path if out_path.is_absolute() else repo_root / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        click.echo(f"Code impact: {len(result['impacted_files'])} impacted files, risk={result['risk_score']}")
+        click.echo(f"Report: {out_path}")
+
 def _render_hallucination_unverified(reason: str) -> None:
     click.echo("\n## 🧠 幻覺指數標註 (Hallucination Index)")
     click.echo("**總分**: N/A (UNVERIFIED)  ")
