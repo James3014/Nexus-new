@@ -714,11 +714,19 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
             "\n\nNexus MemPalace rule: do not silently widen the allowed scope. "
             "If a candidate conflicts with governance policy, preserve the stricter boundary."
         )
-    if task.fixture_kind in {"rlm_harder_v2_evidence_gap", "rlm_harder_v2_evidence_replay"}:
+    if task.fixture_kind == "rlm_harder_v2_evidence_gap":
         desc += (
             "\n\nNexus Artifact/Claim rule: a claim is VERIFIED only when it has "
             "status='pass' and a non-empty artifact reference. Do not accept "
             "unsupported passing claims."
+        )
+    if task.fixture_kind == "rlm_harder_v2_evidence_replay":
+        desc += (
+            "\n\nNexus replay evidence rule: implement "
+            "`rlm_harder_v2_accept_receipt(receipt)` so it returns True only when "
+            "`receipt.get('claim') == 'verified'`, `receipt.get('replay_command')` "
+            "is present, and `receipt.get('exit_code') == 0`. The field is named "
+            "`exit_code`, not `replay_exit_code`. Return False otherwise."
         )
     if task.fixture_kind in {"rlm_harder_v2_memory_contract", "rlm_harder_v2_belief_budget"}:
         desc += (

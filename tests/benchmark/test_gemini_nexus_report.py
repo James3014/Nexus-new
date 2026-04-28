@@ -180,7 +180,7 @@ def test_render_markdown_report_maps_task_wins_to_capabilities(tmp_path):
                 ),
                 json.dumps(
                     {
-                        "task_id": "rlm-harder-v2-evidence-001",
+                        "task_id": "rlm-harder-v2-belief-001",
                         "trial_index": 1,
                         "semantic_status": "UNVERIFIED",
                         "status": "FAILED",
@@ -229,7 +229,7 @@ def test_render_markdown_report_maps_task_wins_to_capabilities(tmp_path):
                 ),
                 json.dumps(
                     {
-                        "task_id": "rlm-harder-v2-evidence-001",
+                        "task_id": "rlm-harder-v2-belief-001",
                         "trial_index": 1,
                         "semantic_status": "VERIFIED",
                         "status": "SUCCESS",
@@ -270,7 +270,7 @@ def test_render_markdown_report_maps_task_wins_to_capabilities(tmp_path):
     )
 
     assert "| rlm-harder-v2-governance-001 | 1 | MemPalace / governance | UNVERIFIED | VERIFIED |" in out
-    assert "| rlm-harder-v2-evidence-001 | 1 | Artifact / Claim | UNVERIFIED | VERIFIED |" in out
+    assert "| rlm-harder-v2-belief-001 | 1 | Belief / Memory | UNVERIFIED | VERIFIED |" in out
 
 
 def test_render_markdown_report_marks_token_claim_unsafe_when_tokens_missing(tmp_path):

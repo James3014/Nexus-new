@@ -482,3 +482,67 @@ Failure lesson：
 1. 用既有 8 題 v2 benchmark 跑 Gemini 3 Flash 1 trial smoke。
 2. 若 MSA section 顯示 Swarm/Drone/Nightshift 皆 0%，先判斷是題型未觸發還是能力未接線。
 3. 後續再設計專門觸發 Swarm/Drone/Nightshift 的 public-candidate 題，不要硬把所有題都升級成 orchestration 題。
+
+## Phase 1 P20 8-task Smoke 初跑
+
+日期：2026-04-28
+
+指令摘要：
+
+- model：`gemini-3-flash-preview`
+- tasks：`scripts/bench/public_benchmark_rlm_harder_v2.json`
+- rows：8 bare + 8 Nexus
+- hidden verifier：on
+- RLM trace：on
+- stop-loss：600s per task
+- report：`.nexus/reports/bench_gemini3flash_rlm_v2_8task_smoke_93d7182a/gemini_nexus_report_1777345811.md`
+
+結果：
+
+- Nexus+RLM：7/8 solve，semantic verified 87.5%，trust mismatch 0%，RLM trace present 100%，avg wall time 66.90s。
+- Bare Gemini 3 Flash：3/8 solve，semantic verified 37.5%，trust mismatch 0%，avg wall time 23.18s。
+- 絕對提升：solve rate +50.0 pp，semantic verified +50.0 pp。
+- Public claim gate：FAIL，原因是 Nexus `rlm-harder-v2-evidence-002` 未通過，導致 formal treatment valid 7/8。
+
+觀察：
+
+- Capability Win Map 覆蓋：
+  - `governance-001`：MemPalace / governance
+  - `evidence-001`：Artifact / Claim
+  - `governance-002`：MemPalace / governance
+  - `belief-001`：Belief / Memory
+- MSA section 顯示 Hyper 100%，Self-heal 50%，Swarm 100%，Drone 0%，Nightshift 0%，RLM trace 100%。
+
+Failure lesson：
+
+- `evidence-002` 的 task desc 說 clean replay exit code，但 hidden verifier 欄位實際叫 `exit_code`；Gemini bare 已誤用 `replay_exit_code`。Nexus prompt 必須把 field contract 寫清楚，否則 Artifact/Claim 規則仍會因欄位歧義失效。
+- Capability Win Map 不能只掃完整 task desc；通用 wearing contract 會讓 Belief 題含有 Artifact/Claim 字樣，造成錯誤歸因。歸因規則要優先看 task id / fixture kind 的強訊號。
+
+修正：
+
+- `rlm_harder_v2_evidence_replay` 會注入 replay evidence rule：必須有 `replay_command` 且 `exit_code == 0`，欄位名不是 `replay_exit_code`。
+- Capability Win Map 將 Belief/Memory 歸因優先於 Artifact/Claim，避免通用 wearing contract 污染分類。
+
+下一步：
+
+1. 只重跑 `rlm-harder-v2-evidence-002` smoke，確認 Nexus 是否由 FAIL 變 SUCCESS，且 bare 仍 FAIL。
+2. 若單題通過，再重跑 8 題 x 1 trial，目標 public claim gate PASS。
+3. gate PASS 後再跑 8 題 x 2 trials。
+
+單題修正驗證：
+
+- 第一次修正只補 `exit_code` 欄位說明仍失敗；trace 顯示 A gate 擋下 `tests_failed`，target diff 為空。
+- 根因：`evidence_replay` 同時收到通用 Artifact/Claim rule（`status='pass'` + artifact）與 replay receipt rule，語義混雜。
+- 第二次修正將 `evidence_replay` 從通用 Artifact/Claim rule 拆出，改成精確函式契約：
+  - `receipt.get('claim') == 'verified'`
+  - `receipt.get('replay_command')` present
+  - `receipt.get('exit_code') == 0`
+  - 明確禁止誤用 `replay_exit_code`
+- 單題 rerun：
+  - report：`.nexus/reports/bench_gemini3flash_rlm_v2_evidence002_fix2_93d7182a/gemini_nexus_report_1777346952.md`
+  - Nexus：1/1 solve，semantic verified 100%，wall 51.23s。
+  - Bare：0/1 solve，semantic verified 0%，wall 29.36s。
+
+Lesson：
+
+- 支柱 prompt 不能一味疊加；不同 Artifact/Claim 子型別需要互斥、精準的 contract，否則會讓模型在相近欄位間漂移。

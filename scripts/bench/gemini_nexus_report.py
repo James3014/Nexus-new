@@ -100,12 +100,12 @@ def _capability_label(row: dict[str, Any]) -> str:
         str(row.get(key) or "")
         for key in ("task_id", "category", "task_type", "fixture_kind", "task_desc", "success_criteria")
     ).lower()
+    if any(token in text for token in ("belief", "confidence", "memory", "prior", "history")):
+        return "Belief / Memory"
     if any(token in text for token in ("governance", "scope", "mempalace", "policy")):
         return "MemPalace / governance"
     if any(token in text for token in ("evidence", "artifact", "claim", "verify", "verification")):
         return "Artifact / Claim"
-    if any(token in text for token in ("belief", "confidence", "memory", "prior", "history")):
-        return "Belief / Memory"
     if any(token in text for token in ("second", "round", "repair", "self-heal", "self_heal")):
         return "RLM / self-heal"
     return "General"

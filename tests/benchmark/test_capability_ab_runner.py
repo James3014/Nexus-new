@@ -771,10 +771,22 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
         success_criteria="patch_and_tests_pass",
         fixture_kind="rlm_harder_v2_belief_budget",
     )
+    replay = CapabilityTask(
+        id="replay",
+        difficulty="hard",
+        task_type="public_feature",
+        task_desc="Fix replay evidence.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_evidence_replay",
+    )
 
     assert "Nexus MemPalace rule" in _nexus_task_desc(governance)
     assert "Nexus Belief/Memory rule" in _nexus_task_desc(memory)
     assert "Nexus Belief/Memory rule" in _nexus_task_desc(belief)
+    assert "Nexus replay evidence rule" in _nexus_task_desc(replay)
+    assert "`exit_code`, not `replay_exit_code`" in _nexus_task_desc(replay)
 
 
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):
