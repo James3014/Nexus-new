@@ -189,6 +189,56 @@ Status:
 Lesson:
 - Benchmark workflows are part of the product. If the skill does not force stable denominators and model identity, reports can drift into marketing instead of evidence.
 
+## P37: JIT v5 Data Feedback
+
+What:
+- JIT has moved past static mapping into observation mode, but not ML mode.
+
+Why:
+- Full test growth requires affected-test selection, but missed tests are more dangerous than slow tests. Nexus should collect explainable evidence before predictive ranking.
+
+How:
+- Current selector emits confidence, risk, sources, unmatched paths, fallback usage, high-risk escalation, risk reasons, retry recommendations, and history stats.
+- Current CI writes changed-only selection evidence and JIT observations.
+- Coverage gap report identifies fallback-heavy or high-risk gaps.
+
+Status:
+- 2026-04-28 P37a considered complete as observation/data-feedback foundation.
+- Remaining P37b: add nightly `missed_candidate` back-propagation.
+- Remaining P37c: add `.nexus/test_impact_stats.json` with score breakdown per target.
+- Remaining P37d: add `--ranking static|predictive`, defaulting to `static`.
+
+Lesson:
+- JIT must stay explainable before it becomes predictive. The first product promise is not "ML-selected tests"; it is "we can explain why these tests were selected and where fallback risk remains."
+
+## P38: Public Report Readiness
+
+What:
+- Public reporting is now close to candidate-ready, but production-grade claims still require repeated trials and stable evidence bundles.
+
+Why:
+- Nexus value should be sold as verified delivery, governance, evidence, cost-aware routing, and traceability. A single benchmark run is not enough for public product claims.
+
+How:
+- Required publication gate:
+  - same model in both arms
+  - eligible denominator excludes infra invalid rows
+  - public claim gate PASS
+  - raw JSONL + evidence bundle + markdown report
+  - Nexus wearing evidence
+  - rule lifecycle recommendations
+  - RLM trace present when RLM is enabled
+  - limitation section with sample size and timeout policy
+
+Status:
+- 2026-04-28 P38a documented as report readiness gate.
+- Remaining P38b: run 12 tasks x 3 trials for Gemini 3 Flash bare vs Gemini 3 Flash + Nexus.
+- Remaining P38c: produce Chinese and English public report bundles.
+- Remaining P38d: add weekly trend report for verified delivery, trust mismatch, wall time, model calls, and cost per verified success.
+
+Lesson:
+- A public Nexus claim must not be "Nexus always wins." The durable claim is narrower and stronger: "same model wearing Nexus delivers more verifiable, auditable outcomes on governance/evidence-heavy tasks under this fixed benchmark."
+
 ## Lesson
 
 - 跨 worktree 文件可能存在於 `/Users/jameschen/Workspace/nexus`，但主工作區是 `/Users/jameschen/.codex/worktrees/ad59/nexus`。執行前要用絕對路徑確認，避免把另一份工作區的計劃誤判為本 worktree 已落地。
