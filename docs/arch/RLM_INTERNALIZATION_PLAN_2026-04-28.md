@@ -267,3 +267,46 @@ Failure lesson：
 1. 做 RLM harder v2 fixtures：可見測試較容易、hidden verifier 專門檢查 evidence/governance/second-round invariant。
 2. 在 report 中新增 `rlm_trace_present`、`rlm_policy_reason`、`rlm_budget_exhausted` 欄位，讓 RLM 是否真的發揮可以量化。
 3. 重新跑 4 題 smoke；只有當 bare < Nexus 或 Nexus 在 trust/evidence 指標勝出時，才擴到 8-12 題。
+
+## Phase 1 P9-P11 Smoke 結果
+
+日期：2026-04-28
+
+指令摘要：
+
+- model：`gemini-3-flash-preview`
+- tasks：`scripts/bench/public_benchmark_rlm_harder_v2.json`
+- rows：4 bare + 4 Nexus
+- hidden verifier：on，且對 `rlm_harder_*` 題隱藏 test source
+- RLM trace：on
+- stop-loss：600s per task
+- report：`.nexus/reports/bench_gemini3flash_rlm_v2_smoke_e8874749/gemini_nexus_report_1777342816.md`
+
+結果：
+
+- Nexus+RLM：4 eligible，3/4 solve，semantic verified 75%，trust mismatch 0%，RLM trace present 100%，avg wall time 131.78s。
+- Bare Gemini 3 Flash：3 eligible + 1 infra invalid parse_error，1/3 eligible solve。報告整體顯示 solve rate 25%，eligible 摘要顯示 33.3%。
+- 絕對提升：報告列 solve rate +50.0 個百分點；以 eligible 摘要看是 33.3% -> 75%。
+- 成功差異：
+  - governance：Nexus 成功，bare 失敗。
+  - second-round：雙方成功。
+  - memory relevance：Nexus 成功，bare infra invalid/parse_error。
+  - evidence：雙方失敗，這是 Nexus 弱點。
+
+Public claim gate：
+
+- FAIL。
+- 原因：with/without token measured rate 只有 75%，Nexus formal treatment valid 3/4，claim verified 3/4，evidence 題失敗。
+- 結論：這是「內部方向性證據」，不是公開宣稱材料。
+
+Failure lesson：
+
+- v2 hidden verifier 成功拉開差距，但 evidence 題暴露 Nexus 仍沒有把 Artifact/Claim 因果修復成穩定優勢。
+- Public claim 不能只看 solve lift；`nexus_usage_valid`、`claim_verified`、token measured、infra eligibility 都必須過 gate。
+- 下一輪要先修 evidence 題，否則 Nexus 的最成熟支柱反而在公開報告中成為扣分點。
+
+下一步：
+
+1. 優先修 `rlm-harder-v2-evidence-001`：讓 Nexus 在 Artifact/Claim causal verifier 題上成功。
+2. 補 benchmark report：同時顯示 raw solve rate 與 eligible solve rate，避免 parse_error 混淆。
+3. 重跑 v2 4 題；目標 Nexus 4/4、bare <= 1/3 eligible，public claim gate 至少只剩 token/sample-size 類限制。
