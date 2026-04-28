@@ -235,3 +235,35 @@ Failure lesson：
 1. 跑 Gemini 3 Flash 4 題 smoke：bare vs Nexus current vs Nexus + RLM flag。
 2. 若 RLM flag 有提升，擴大到 8-12 題；若沒有提升，先讀 trace 找 budget/policy/fixture 的瓶頸。
 3. 將 P6/P7 的 trace 指標納入中文公開報告：allowed tools、policy block、belief confidence、budget exhausted。
+
+## Phase 1 P8 Smoke 結果
+
+日期：2026-04-28
+
+指令摘要：
+
+- model：`gemini-3-flash-preview`
+- tasks：`scripts/bench/public_benchmark_rlm_harder_v1.json`
+- rows：4 bare + 4 Nexus
+- hidden verifier：on
+- stop-loss：600s per task
+- report：`.nexus/reports/bench_gemini3flash_rlm_smoke_f7d3d97b/gemini_nexus_report_1777341506.md`
+
+結果：
+
+- Nexus+RLM：4/4 solve，semantic verified 100%，trust mismatch 0%，avg wall time 78.46s，avg model calls 1.75。
+- Bare Gemini 3 Flash：4/4 solve，semantic verified 100%，trust mismatch 0%，avg wall time 27.42s，avg model calls 1.0。
+- Nexus wearing evidence：4/4 valid，`gemini_uses_nexus=true`、`nexus_context_delivered=true`。
+- 結論：這組 smoke 只能證明「Gemini 確實穿 Nexus 且可完成」，不能證明 Nexus 勝出；題目仍太容易，bare 也能一次完成。
+
+Failure lesson：
+
+- 如果 bare 也 100%，不能硬寫公開價值宣稱；應回頭強化題目，使它測到 Nexus 真正優勢：治理硬阻斷、證據缺口、二輪修復、長期記憶與 hidden verifier。
+- 原先 `RecursiveRepairLoop` 只接 Pipeline repair path；benchmark 實際走 `research:auto-flow`，所以需要 RLM trace bridge 才能在產品路徑看見 RLM 證據。
+- 下一輪公開候選 benchmark 必須同時比較 solve rate 與「失敗分類品質」：bare 若通過可見測試但缺 evidence，應由 hidden verifier 判失敗。
+
+下一步：
+
+1. 做 RLM harder v2 fixtures：可見測試較容易、hidden verifier 專門檢查 evidence/governance/second-round invariant。
+2. 在 report 中新增 `rlm_trace_present`、`rlm_policy_reason`、`rlm_budget_exhausted` 欄位，讓 RLM 是否真的發揮可以量化。
+3. 重新跑 4 題 smoke；只有當 bare < Nexus 或 Nexus 在 trust/evidence 指標勝出時，才擴到 8-12 題。

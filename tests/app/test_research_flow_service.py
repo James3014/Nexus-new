@@ -355,6 +355,63 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
         assert phase in payload["timing"]["phase_wall_sec"]
 
 
+def test_run_auto_flow_writes_rlm_trace_when_enabled(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text(
+        "def compute_backoff(attempt: int) -> int:\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text(
+        "import importlib.util\n"
+        "from pathlib import Path\n\n"
+        "_TARGET_PATH = Path(__file__).resolve().parent / 'target.py'\n"
+        "_SPEC = importlib.util.spec_from_file_location('bench_target', _TARGET_PATH)\n"
+        "_MOD = importlib.util.module_from_spec(_SPEC)\n"
+        "assert _SPEC is not None and _SPEC.loader is not None\n"
+        "_SPEC.loader.exec_module(_MOD)\n\n"
+        "def test_compute_backoff_hard():\n"
+        "    assert _MOD.compute_backoff(1) == 1\n"
+        "    assert _MOD.compute_backoff(2) == 1\n"
+        "    assert _MOD.compute_backoff(3) == 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_RLM_REPAIR_LOOP", "1")
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="RLM trace bridge smoke",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=99.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="baseline",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+    )
+
+    trace_path = Path(payload["nexus_usage_trace"]["rlm_trace_path"])
+    assert trace_path.exists()
+    events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["phase"] for event in events] == ["R", "A"]
+    assert events[0]["action_type"] == "research_auto_flow"
+    assert events[0]["stop_reason"] == "submit"
+    assert events[1]["stop_reason"] in {"verified", "audit_rejected"}
+
+
 def test_cross_module_hyper_failure_can_rescue_with_original_artifact_verification(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")

@@ -17,6 +17,7 @@ from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, _candidate_summaries
+from nexus.contracts import RLMTraceEvent, RLMTraceWriter
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,58 @@ def _extract_keywords(text: str, *, limit: int = 12) -> list[str]:
         if len(out) >= limit:
             break
     return out
+
+
+def _rlm_trace_enabled() -> bool:
+    return os.getenv("NEXUS_RLM_REPAIR_LOOP") == "1"
+
+
+def _safe_trace_slug(text: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", (text or "").strip().lower()).strip("-")
+    return slug[:80] or "research-auto-flow"
+
+
+def _write_research_rlm_trace(
+    *,
+    repo_root: Path,
+    task_desc: str,
+    result: dict[str, Any],
+    nexus_usage_trace: dict[str, Any],
+    artifact_summary: dict[str, Any],
+) -> str:
+    trace_path = repo_root / ".nexus" / "reports" / "rlm_trace" / f"{_safe_trace_slug(task_desc)}.jsonl"
+    writer = RLMTraceWriter(trace_path)
+    task_id = _safe_trace_slug(task_desc)
+    report = result.get("report", {}) if isinstance(result.get("report"), dict) else {}
+    confidence = float(((nexus_usage_trace.get("pillars", {}) or {}).get("belief", {}) or {}).get("confidence", 0.0) or 0.0)
+    confidence = max(0.0, min(1.0, confidence))
+    writer.append(
+        RLMTraceEvent(
+            task_id=task_id,
+            phase="R",
+            iteration_id="r-1",
+            action_type="research_auto_flow",
+            observation=str(result.get("status", "")),
+            confidence=confidence,
+            allowed_tools=["research:auto-flow", "hyper_sprint" if nexus_usage_trace.get("capabilities", {}).get("hyper_used") else "baseline"],
+            policy_reason="research_auto_flow_bridge",
+            stop_reason="submit",
+            artifact_refs=[str(report.get("winner_source", ""))] if report.get("winner_source") else [],
+        )
+    )
+    writer.append(
+        RLMTraceEvent(
+            task_id=task_id,
+            phase="A",
+            iteration_id="a-1",
+            parent_iteration_id="r-1",
+            action_type="audit",
+            observation="verified" if artifact_summary.get("tests_passed") else "unverified",
+            blocked_reason="" if artifact_summary.get("tests_passed") else "tests_failed",
+            stop_reason="verified" if artifact_summary.get("tests_passed") else "audit_rejected",
+        )
+    )
+    return str(trace_path)
 
 
 def _load_history_memory_signal(repo_root: Path, *, task_desc: str, task_type: str) -> dict[str, Any]:
@@ -1021,6 +1074,14 @@ def run_auto_flow(
         "winner_source": winner_source,
         "usage_valid": bool(gemini_invoked and artifact_verified),
     }
+    if _rlm_trace_enabled():
+        nexus_usage_trace["rlm_trace_path"] = _write_research_rlm_trace(
+            repo_root=repo_root,
+            task_desc=task_desc,
+            result=result,
+            nexus_usage_trace=nexus_usage_trace,
+            artifact_summary={**artifact_summary, "tests_passed": tests_passed},
+        )
 
     payload = {
         "schema_version": "1.0",
