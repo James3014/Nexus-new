@@ -658,3 +658,9 @@ version_scope:
 - **Root Cause**: `git apply` treats an empty patch as invalid, so the new worktree mirror path interpreted a clean diff as an apply failure.
 - **Decision**: Treat empty diff as a valid worktree mirror fast path, still overlaying allowed untracked files while avoiding copytree fallback.
 - **Prevention**: Sandbox mirror strategy checks must distinguish "no patch needed" from "patch failed" before falling back to slower full-copy behavior.
+
+## 2026-04-28: Benchmark Preflight Must Call CodeIntel Contracts Directly
+- **Phenomenon**: The first benchmark readiness preflight test failed because the new script called `scan_codebase(output_path=...)`, but the service contract is `scan_codebase(index_path=...)`.
+- **Root Cause**: The preflight wrapper guessed a convenience API shape instead of following the existing CodeIntel service contract.
+- **Decision**: Call `scan_codebase(index_path=...)` and pass `scan.index_path` into `analyze_impact(...)`; cover the path with a CLI regression test.
+- **Prevention**: Benchmark preflight tools must exercise the same production service contracts used by CodeIntel reports, not adapter-only assumptions.

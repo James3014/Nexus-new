@@ -73,6 +73,14 @@ Nightly lane 執行 L3 全量回歸，並追加 `.nexus/reports/test_history.jso
 uv run python scripts/ops/ci_gate.py --nightly
 ```
 
+Gemini benchmark 前的本地 readiness gate：
+
+```bash
+uv run python scripts/ops/nexus_benchmark_preflight.py --output-json
+```
+
+這條 lane 不呼叫 Gemini，也不消耗模型額度。它會檢查 CodeIntel impact evidence、RLM trace quality、JIT predictive promotion fail-closed boundary、public claim gate guardrails，並輸出 `.nexus/reports/benchmark_preflight_readiness.json`。只有 `ready_for_benchmark=true` 時，才適合啟動 Gemini bare vs Gemini+Nexus 正式 benchmark。
+
 JIT observation:
 
 ```bash
