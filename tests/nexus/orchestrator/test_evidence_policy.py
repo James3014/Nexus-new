@@ -3,6 +3,7 @@ from nexus.orchestrator.evidence_policy import derive_claim_bundle
 from nexus.orchestrator.evidence_policy import missing_pre_gate_requirements
 from nexus.orchestrator.task_contract import Evidence
 from nexus.orchestrator.task_contract import EvidenceRequirement
+from nexus.orchestrator.task_contract import DeliveryProfile
 from nexus.orchestrator.task_contract import Task
 
 
@@ -44,3 +45,17 @@ def test_derive_claim_bundle_stays_unverified_when_requirements_missing():
     assert bundle["claim_state"] == "UNVERIFIED"
     assert bundle["confidence_level"] == "LOW"
     assert bundle["unmet_evidence_requirements"] == [EvidenceRequirement.ACCEPTANCE_CHECK]
+
+
+def test_live_delivery_profile_human_approval_is_pre_gate_requirement():
+    task = Task(
+        task_id="TASK-001",
+        owner="Agent-1",
+        delivery_profile=DeliveryProfile.LIVE_BROWSER,
+        allowed_files=["file1.py"],
+        done_criteria=["tests pass"],
+        evidence_requirements=["pytest"],
+    )
+    task.add_evidence(Evidence(command="pytest -q tests/unit", exit_code=0, output_summary="3 passed"))
+
+    assert missing_pre_gate_requirements(task) == [EvidenceRequirement.HUMAN_APPROVAL]

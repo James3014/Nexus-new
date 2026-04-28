@@ -6,6 +6,11 @@ import pytest
 
 from nexus.contracts.rlm_budget import RLMBudget, RLMBudgetState
 from nexus.contracts.rlm_trace import RLMTraceEvent, RLMTraceWriter
+from nexus.contracts.rule_lifecycle import (
+    RuleLifecycleEvidence,
+    RuleLifecycleState,
+    recommend_rule_state,
+)
 
 
 def test_rlm_trace_event_round_trips_with_policy_fields():
@@ -75,3 +80,34 @@ def test_rlm_budget_tracks_consumption_and_exhaustion():
 def test_rlm_budget_rejects_negative_limits():
     with pytest.raises(ValueError, match="must be >= 0"):
         RLMBudget(max_iterations=-1)
+
+
+def test_rule_lifecycle_keeps_rule_active_until_sample_is_large_enough():
+    evidence = RuleLifecycleEvidence(rule_id="mem-palace-live-gate", sample_size=2, verified_lift_pp=0)
+
+    assert recommend_rule_state(evidence) == RuleLifecycleState.ACTIVE
+
+
+def test_rule_lifecycle_can_recommend_light_or_removed_candidate():
+    light = RuleLifecycleEvidence(rule_id="context-prefetch", sample_size=6, verified_lift_pp=2.0)
+    removable = RuleLifecycleEvidence(
+        rule_id="heavy-rerank",
+        sample_size=6,
+        verified_lift_pp=0.2,
+        cost_delta_pct=18.0,
+    )
+
+    assert recommend_rule_state(light) == RuleLifecycleState.LIGHT
+    assert recommend_rule_state(removable) == RuleLifecycleState.REMOVED_CANDIDATE
+
+
+def test_rule_lifecycle_keeps_rule_active_when_trust_regresses():
+    evidence = RuleLifecycleEvidence(
+        rule_id="claim-gate",
+        sample_size=8,
+        verified_lift_pp=0.0,
+        trust_mismatch_delta_pp=3.0,
+        cost_delta_pct=20.0,
+    )
+
+    assert recommend_rule_state(evidence) == RuleLifecycleState.ACTIVE

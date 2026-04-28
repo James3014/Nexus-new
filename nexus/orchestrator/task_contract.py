@@ -42,6 +42,8 @@ class EvidenceKind(str, Enum):
     PYTEST = "pytest"
     ACCEPTANCE_CHECK = "acceptance-check"
     DELIVERY_GATE = "delivery-gate"
+    CODE_IMPACT = "code-impact"
+    HUMAN_APPROVAL = "human-approval"
     OTHER = "other"
 
 
@@ -49,6 +51,14 @@ class EvidenceRequirement(str, Enum):
     PYTEST = "pytest"
     ACCEPTANCE_CHECK = "acceptance-check"
     DELIVERY_GATE = "delivery-gate"
+    CODE_IMPACT = "code-impact"
+    HUMAN_APPROVAL = "human-approval"
+
+
+class DeliveryProfile(str, Enum):
+    MOCK_ONLY = "mock_only"
+    LIVE_BROWSER = "live_browser"
+    LIVE_API = "live_api"
 
 
 def normalize_requirement(
@@ -63,6 +73,10 @@ def normalize_requirement(
         return EvidenceRequirement.ACCEPTANCE_CHECK
     if "delivery-gate" in text:
         return EvidenceRequirement.DELIVERY_GATE
+    if "code-impact" in text or "code:impact" in text:
+        return EvidenceRequirement.CODE_IMPACT
+    if "human-approval" in text or "human approval" in text:
+        return EvidenceRequirement.HUMAN_APPROVAL
     return text
 
 
@@ -72,6 +86,10 @@ def infer_evidence_kind(command: str) -> EvidenceKind:
         return EvidenceKind.DELIVERY_GATE
     if "acceptance-check" in text:
         return EvidenceKind.ACCEPTANCE_CHECK
+    if "code-impact" in text or "code:impact" in text:
+        return EvidenceKind.CODE_IMPACT
+    if "human-approval" in text or "human approval" in text:
+        return EvidenceKind.HUMAN_APPROVAL
     if "pytest" in text:
         return EvidenceKind.PYTEST
     return EvidenceKind.OTHER
@@ -98,6 +116,10 @@ class Evidence(BaseModel):
                 return self.kind in {EvidenceKind.ACCEPTANCE_CHECK, EvidenceKind.DELIVERY_GATE}
             if normalized == EvidenceRequirement.DELIVERY_GATE:
                 return self.kind == EvidenceKind.DELIVERY_GATE
+            if normalized == EvidenceRequirement.CODE_IMPACT:
+                return self.kind == EvidenceKind.CODE_IMPACT
+            if normalized == EvidenceRequirement.HUMAN_APPROVAL:
+                return self.kind == EvidenceKind.HUMAN_APPROVAL
         return str(normalized) in self.command.lower()
 
 class Task(BaseModel):
@@ -114,6 +136,25 @@ class Task(BaseModel):
     branch_name: Optional[str] = None
     last_commit: Optional[str] = None
     working_dir: Optional[str] = None
+    consulted_agents: List[str] = Field(default_factory=list)
+    delivery_profile: DeliveryProfile = DeliveryProfile.MOCK_ONLY
+    requires_proposal: bool = False
+    proposal_ref: Optional[str] = None
+
+    @field_validator("consulted_agents")
+    @classmethod
+    def check_consulted_agents_limit(cls, v: List[str]) -> List[str]:
+        if len(v) > 2:
+            raise ValueError("consulted_agents must contain at most 2 agents")
+        return v
+
+    @model_validator(mode="after")
+    def check_workos_contract(self):
+        if self.owner in self.consulted_agents:
+            raise ValueError("owner cannot also be a consulted agent")
+        if self.requires_proposal and not (self.proposal_ref or "").strip():
+            raise ValueError("proposal_ref is required when requires_proposal is true")
+        return self
 
     @field_validator("current_status")
     @classmethod
@@ -141,6 +182,12 @@ class Task(BaseModel):
         for requirement in self.normalized_evidence_requirements:
             if not any(evidence.satisfies(requirement) for evidence in self.evidence_list):
                 missing.append(requirement)
+        if (
+            self.delivery_profile in {DeliveryProfile.LIVE_API, DeliveryProfile.LIVE_BROWSER}
+            and EvidenceRequirement.HUMAN_APPROVAL not in missing
+            and not any(evidence.satisfies(EvidenceRequirement.HUMAN_APPROVAL) for evidence in self.evidence_list)
+        ):
+            missing.append(EvidenceRequirement.HUMAN_APPROVAL)
         return missing
 
     def is_done_ready(self) -> bool:
