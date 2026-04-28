@@ -674,6 +674,17 @@ def _task_uses_materialized_fixture(task: CapabilityTask, *, materialize_missing
     return materialize_missing
 
 
+def _nexus_task_desc(task: CapabilityTask) -> str:
+    desc = task.task_desc
+    if task.fixture_kind == "rlm_harder_v2_evidence_gap":
+        desc += (
+            "\n\nNexus Artifact/Claim rule: a claim is VERIFIED only when it has "
+            "status='pass' and a non-empty artifact reference. Do not accept "
+            "unsupported passing claims."
+        )
+    return desc
+
+
 def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_missing: bool) -> tuple[str, str]:
     if task.repo_kind == "external" and materialize_missing:
         raise NotImplementedError(
@@ -1165,7 +1176,7 @@ def run_with_nexus(
         "nexus",
         "research:auto-flow",
         "--task-desc",
-        task.task_desc,
+        _nexus_task_desc(task),
         "--target-file",
         target_file,
         "--test-file",

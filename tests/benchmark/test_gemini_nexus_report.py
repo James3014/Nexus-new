@@ -266,6 +266,7 @@ def test_render_markdown_report_surfaces_infra_invalid_rows(tmp_path):
 
     assert "Usable rows | 1/2 | 1/1 | n/a" in out
     assert "Infra invalid rows | 1 | 0 | n/a" in out
+    assert "Eligible solve rate | 100.0% | 100.0% | 0.0%" in out
     assert "Public claim gate: FAIL" in out
     assert "task_trial_mismatch" in out
     assert "Without Nexus infra invalid reasons: parse_error:1" in out

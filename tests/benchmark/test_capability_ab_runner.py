@@ -696,6 +696,46 @@ def test_run_with_nexus_enables_llm_mode_for_hard_tasks(tmp_path: Path, monkeypa
     assert out["semantic_status"] == "VERIFIED"
 
 
+def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="rlm-harder-v2-evidence-001",
+        difficulty="hard",
+        task_type="public_feature",
+        task_desc="Fix claim verification so only fully supported successful claims are accepted.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="rlm_harder_v2_evidence_gap",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {"args": []}
+
+    class _InvokeRes:
+        output = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"total_tokens":10,"token_capture_status":"measured"}}}'
+
+    def fake_invoke(_self, _cli, args, **_kwargs):
+        captured["args"] = list(args)
+        return _InvokeRes()
+
+    monkeypatch.setattr("click.testing.CliRunner.invoke", fake_invoke)
+
+    run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="inprocess",
+        with_llm_mode="all",
+    )
+
+    task_desc = captured["args"][captured["args"].index("--task-desc") + 1]
+    assert "Nexus Artifact/Claim rule" in task_desc
+    assert "artifact" in task_desc
+
+
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-001",

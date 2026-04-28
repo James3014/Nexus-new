@@ -69,6 +69,17 @@ def _run_eligible_count(rows: list[dict[str, Any]]) -> int:
     return sum(1 for row in rows if bool(row.get("run_eligible", True)))
 
 
+def _is_verified(row: dict[str, Any]) -> bool:
+    return str(row.get("semantic_status", "")).strip().upper() == "VERIFIED"
+
+
+def _eligible_solve_rate(rows: list[dict[str, Any]]) -> float:
+    eligible = [row for row in rows if bool(row.get("run_eligible", True))]
+    if not eligible:
+        return 0.0
+    return sum(1 for row in eligible if _is_verified(row)) / len(eligible)
+
+
 def _reasons_text(counts: dict[str, int]) -> str:
     if not counts:
         return "none"
@@ -165,6 +176,9 @@ def render_markdown_report(
     infra_with = _infra_invalid_counts(rows_with)
     eligible_without = _run_eligible_count(rows_without)
     eligible_with = _run_eligible_count(rows_with)
+    eligible_solve_without = _eligible_solve_rate(rows_without)
+    eligible_solve_with = _eligible_solve_rate(rows_with)
+    eligible_solve_delta = eligible_solve_with - eligible_solve_without
     public_gate = _public_claim_gate(
         rows_without=rows_without,
         rows_with=rows_with,
@@ -218,6 +232,7 @@ def render_markdown_report(
         f"| Usable rows | {eligible_without}/{without_scope['rows']} | {eligible_with}/{with_scope['rows']} | n/a |",
         f"| Infra invalid rows | {without_scope['rows'] - eligible_without} | {with_scope['rows'] - eligible_with} | n/a |",
         f"| Solve rate | {_pct(a['solve_rate'])} | {_pct(b['solve_rate'])} | {_pct(delta['solve_rate_delta'])} |",
+        f"| Eligible solve rate | {_pct(eligible_solve_without)} | {_pct(eligible_solve_with)} | {_pct(eligible_solve_delta)} |",
         f"| Semantic verified | {_pct(a['semantic_verified_rate'])} | {_pct(b['semantic_verified_rate'])} | {_pct(delta['semantic_verified_rate_delta'])} |",
         f"| Trust mismatch | {_pct(a['trust_mismatch_rate'])} | {_pct(b['trust_mismatch_rate'])} | {_pct(delta['trust_mismatch_rate_delta'])} |",
         f"| Avg wall time | {_num(a['avg_wall_duration_sec'])}s | {_num(b['avg_wall_duration_sec'])}s | {_num(wall_delta)}s |",
