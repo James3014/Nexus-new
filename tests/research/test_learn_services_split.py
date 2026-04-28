@@ -58,6 +58,26 @@ def test_delegation_to_subservices(tmp_path, monkeypatch):
     assert res["status"] == "SUCCESS"
 
 
+def test_learning_closure_writeback_can_be_disabled(tmp_path, monkeypatch):
+    svc = LearnModeService(tmp_path)
+    monkeypatch.setenv("NEXUS_LEARN_CLOSURE_WRITEBACK", "0")
+
+    out = svc._persist_learning_closure(
+        action="ask",
+        status="PARTIAL",
+        reason="benchmark_read_only",
+        topic_or_source="nexus",
+        evidence_paths=[],
+        retrieval_hints=[],
+        metrics={},
+    )
+
+    assert out["writeback_disabled"] is True
+    assert out["memory_written"] is False
+    assert out["policy_memory_synced"] is False
+    assert not svc.closure_log.exists()
+
+
 def test_ingest_fail_closed_on_contract_violation(tmp_path, monkeypatch):
     svc = LearnModeService(tmp_path)
 

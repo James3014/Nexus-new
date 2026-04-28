@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -383,6 +384,10 @@ class LearnModeService:
             "policy_memory_synced": False,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        if os.environ.get("NEXUS_LEARN_CLOSURE_WRITEBACK", "").strip().lower() in {"0", "false", "no", "off"}:
+            closure["writeback_disabled"] = True
+            closure["reason"] = f"{reason} | writeback_disabled"
+            return closure
         task_id = f"learn-{action}-{int(time.time())}"
         try:
             card = FindingsCard(

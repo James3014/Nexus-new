@@ -130,13 +130,21 @@ class FindingsMemoryStore:
 
         # 🚀 [v24.0 Evolution] Trigger Vector Indexing if repository is available
         lancedb_synced = False
-        try:
-            from nexus.services.memory_repository import MemoryRepository
-            repo = MemoryRepository(self.project_root / ".nexus" / "memory" / "memory_index.lancedb")
-            repo.semantic_dedup_ingest("findings_cards", payload)
-            lancedb_synced = True
-        except Exception:
-            pass
+        sync_enabled = os.environ.get("NEXUS_FINDINGS_LANCEDB_SYNC", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+        if sync_enabled:
+            try:
+                from nexus.services.memory_repository import MemoryRepository
+                db_path = os.environ.get("NEXUS_MEMORY_DB_PATH")
+                repo = MemoryRepository(Path(db_path) if db_path else self.project_root / ".nexus" / "memory" / "memory_index.lancedb")
+                repo.semantic_dedup_ingest("findings_cards", payload)
+                lancedb_synced = True
+            except Exception:
+                pass
         
         card.extra["lancedb_synced"] = lancedb_synced
         payload["extra"]["lancedb_synced"] = lancedb_synced

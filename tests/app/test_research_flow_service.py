@@ -157,6 +157,61 @@ def test_capability_evidence_splits_nightshift_and_drone_signals():
     assert out["drone_invoked_count"] == 2
 
 
+def test_ultra_review_gate_evidence_is_feature_flagged(tmp_path: Path):
+    out = research_flow_service._ultra_review_gate_evidence(
+        repo_root=tmp_path,
+        task_desc="fix risky orchestrator bug",
+        capability_stack={"governance_layers": ["ultra_review"]},
+    )
+
+    assert out["recommended"] is True
+    assert out["invoked"] is False
+    assert out["gate_passed"] is None
+    assert out["reason"] == "feature_flag_disabled"
+
+
+def test_ultra_review_gate_evidence_runs_dry_gate_when_enabled(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DRY_GATE", "1")
+
+    class _Service:
+        def __init__(self, repo_root):
+            self.repo_root = repo_root
+
+        def run(self, **kwargs):
+            return {
+                "schema_version": "ultra-review.v1",
+                "gate_passed": True,
+                "mode": "dry-run",
+                "sandbox_path": str(tmp_path / "sandbox"),
+                "artifacts": {"diff": str(tmp_path / "diff"), "git_status": str(tmp_path / "status")},
+                "diff": {"changed_files": []},
+                "verification": {"reproduction_required": True},
+                "ghost_regression": {"passed": True},
+                "logic_breaker": {"passed": True},
+                "security_sentry": {"passed": True},
+                "fleet": [
+                    {"lane": "security_sentry"},
+                    {"lane": "logic_breaker"},
+                    {"lane": "ghost_regression"},
+                ],
+                "findings": [],
+            }
+
+    monkeypatch.setattr("nexus.engine.ultra_review_service.UltraReviewService", _Service)
+    monkeypatch.setattr("scripts.ops.ultra_gate.evaluate_report", lambda payload, check_artifacts=False: (True, []))
+
+    out = research_flow_service._ultra_review_gate_evidence(
+        repo_root=tmp_path,
+        task_desc="fix risky orchestrator bug",
+        capability_stack={"governance_layers": ["ultra_review"]},
+    )
+
+    assert out["recommended"] is True
+    assert out["invoked"] is True
+    assert out["gate_passed"] is True
+    assert out["reason"] == "dry_gate_passed"
+
+
 def test_build_hyper_execution_profile_keeps_light_for_simple_task():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix typo in markdown title",

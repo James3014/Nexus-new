@@ -41,6 +41,8 @@ def test_build_preflight_report_passes_without_gemini(tmp_path, monkeypatch):
     assert checks["rlm_trace_quality"]["evidence"]["rlm_trace_quality_score"] >= 60
     assert checks["jit_promotion_boundary"]["evidence"]["default_switch_allowed"] is False
     assert checks["public_claim_gate"]["evidence"]["fail_gate"]["verdict"] == "FAIL"
+    assert checks["memory_bootstrap_fail_open"]["passed"] is True
+    assert checks["memory_bootstrap_fail_open"]["evidence"]["auto_init"] == "0"
     contracts = {item["id"]: item for item in report["benchmark_contract_matrix"]}
     assert list(contracts) == [f"P{index}" for index in range(1, 14)]
     assert contracts["P2"]["status"] == "deferred_smoke"

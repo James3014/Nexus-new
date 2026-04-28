@@ -1164,6 +1164,8 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     )
 
     assert captured["env"]["NEXUS_MEMORY_AUTO_INIT"] == "0"
+    assert captured["env"]["NEXUS_FINDINGS_LANCEDB_SYNC"] == "0"
+    assert captured["env"]["NEXUS_LEARN_CLOSURE_WRITEBACK"] == "0"
     assert captured["env"]["NEXUS_GEMINI_MODEL_NAME"] == "gemini-3.1-pro-preview"
     assert captured["env"]["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] == "1"
     assert captured["env"]["NEXUS_GATEWAY_MAX_RETRIES"] == "1"

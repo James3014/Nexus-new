@@ -1424,6 +1424,8 @@ def run_with_nexus(
         env = os.environ.copy()
         env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start_wall).resolve())
         env["NEXUS_MEMORY_AUTO_INIT"] = "0"
+        env["NEXUS_FINDINGS_LANCEDB_SYNC"] = "0"
+        env["NEXUS_LEARN_CLOSURE_WRITEBACK"] = "0"
         if llm_enabled:
             env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
             env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"

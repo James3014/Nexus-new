@@ -298,6 +298,65 @@ def _capability_evidence(
     }
 
 
+def _ultra_review_gate_evidence(
+    *,
+    repo_root: Path,
+    task_desc: str,
+    capability_stack: dict[str, Any],
+) -> dict[str, Any]:
+    governance_layers = capability_stack.get("governance_layers", [])
+    if not isinstance(governance_layers, list):
+        governance_layers = []
+    recommended = "ultra_review" in {str(item) for item in governance_layers}
+    if not recommended:
+        return {
+            "recommended": False,
+            "invoked": False,
+            "gate_passed": None,
+            "report_path": "",
+            "failures": [],
+            "reason": "not_recommended",
+        }
+    if os.environ.get("NEXUS_ULTRA_REVIEW_DRY_GATE", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return {
+            "recommended": True,
+            "invoked": False,
+            "gate_passed": None,
+            "report_path": "",
+            "failures": [],
+            "reason": "feature_flag_disabled",
+        }
+    report_path = repo_root / ".nexus" / "reports" / "ultra_review" / "route_gate_report.json"
+    try:
+        from nexus.engine.ultra_review_service import UltraReviewService
+        from scripts.ops.ultra_gate import evaluate_report
+
+        payload = UltraReviewService(repo_root).run(
+            dry_run=True,
+            task=task_desc,
+            report_path=report_path,
+            sandbox_root=repo_root / ".nexus" / "reports" / "ultra_review" / "route_gate_sandboxes",
+        )
+        gate_passed, failures = evaluate_report(payload, check_artifacts=True)
+        return {
+            "recommended": True,
+            "invoked": True,
+            "gate_passed": bool(gate_passed),
+            "report_path": str(report_path),
+            "failures": [str(item) for item in failures],
+            "reason": "dry_gate_passed" if gate_passed else "dry_gate_failed",
+        }
+    except Exception as exc:
+        return {
+            "recommended": True,
+            "invoked": True,
+            "gate_passed": False,
+            "report_path": str(report_path),
+            "failures": [f"{type(exc).__name__}: {exc}"],
+            "reason": "dry_gate_error",
+        }
+
+
 def _nexus_tier(route_features: dict[str, Any], *, force_flow: str | None) -> dict[str, Any]:
     risk_score = int(route_features.get("risk_score", 0) or 0)
     high_risk = bool(
@@ -1220,6 +1279,11 @@ def run_auto_flow(
         learning_trace=hyper_learning_trace,
         nightshift_recommended=nightshift_recommended,
     )
+    ultra_review_evidence = _ultra_review_gate_evidence(
+        repo_root=repo_root,
+        task_desc=task_desc,
+        capability_stack=route.get("capability_stack", {}),
+    )
     phase_wall_sec["A"] = round(time.time() - phase_started_at, 4)
     nexus_usage_trace = {
         "gemini_uses_nexus": bool(gemini_invoked),
@@ -1263,9 +1327,14 @@ def run_auto_flow(
             "drone_invoked_count": capability_evidence["drone_invoked_count"],
             "self_heal_used": self_heal_used,
             "claim_verified": artifact_verified,
+            "ultra_review_recommended": ultra_review_evidence["recommended"],
+            "ultra_review_invoked": ultra_review_evidence["invoked"],
+            "ultra_review_gate_passed": ultra_review_evidence["gate_passed"],
+            "ultra_review_report_path": ultra_review_evidence["report_path"],
         },
         "phase_wall_sec": phase_wall_sec,
         "capability_stack": route.get("capability_stack", {}),
+        "ultra_review": ultra_review_evidence,
         "codeintel": codeintel_evidence,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),
         "nexus_rescued": nexus_rescued,

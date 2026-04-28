@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -218,6 +219,50 @@ def _check_public_claim_gate() -> ReadinessCheck:
         passed=passed,
         reason="" if passed else "public_claim_gate_not_enforced",
         evidence={"pass_gate": pass_gate, "fail_gate": fail_gate},
+    )
+
+
+def _check_memory_bootstrap(repo_root: Path, threshold_sec: float = 5.0) -> ReadinessCheck:
+    previous = {
+        "NEXUS_MEMORY_AUTO_INIT": os.environ.get("NEXUS_MEMORY_AUTO_INIT"),
+        "NEXUS_MEMORY_DB_PATH": os.environ.get("NEXUS_MEMORY_DB_PATH"),
+    }
+    with tempfile.TemporaryDirectory(prefix="nexus-memory-preflight-") as temp_dir:
+        os.environ["NEXUS_MEMORY_AUTO_INIT"] = "0"
+        os.environ["NEXUS_MEMORY_DB_PATH"] = str(Path(temp_dir) / "memory.lancedb")
+        start = time.monotonic()
+        try:
+            from nexus.services.memory import MemoryService
+
+            memory = MemoryService(str(repo_root))
+            elapsed = time.monotonic() - start
+            status = str(getattr(memory, "bootstrap_status", "unknown"))
+            db_path = str(getattr(memory, "db_path", ""))
+            error = ""
+        except Exception as exc:
+            elapsed = time.monotonic() - start
+            status = "error"
+            db_path = ""
+            error = str(exc)
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+    passed = status != "error" and elapsed <= threshold_sec
+    return ReadinessCheck(
+        name="memory_bootstrap_fail_open",
+        passed=passed,
+        reason="" if passed else "memory_bootstrap_slow_or_error",
+        evidence={
+            "bootstrap_status": status,
+            "elapsed_sec": round(elapsed, 4),
+            "threshold_sec": threshold_sec,
+            "db_path": db_path,
+            "error": error,
+            "auto_init": "0",
+        },
     )
 
 
@@ -506,6 +551,7 @@ def build_preflight_report(
         _check_rlm_trace_quality(),
         _check_jit_promotion_boundary(),
         _check_public_claim_gate(),
+        _check_memory_bootstrap(repo_root),
     ]
     contract_matrix = _build_contract_matrix(
         checks=checks,
