@@ -78,6 +78,9 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "capability_claim_verified": True,
                         "capability_hyper_used": True,
                         "capability_self_heal_used": True,
+                        "capability_swarm_used": True,
+                        "capability_drone_used": False,
+                        "capability_nightshift_recommended": True,
                         "artifact_verification_only": True,
                     }
                 ),
@@ -135,6 +138,11 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["b"]["summary"]["gemini_patch_pass_rate"] == 0.0
     assert report["b"]["summary"]["phase_completion_rate"] == 0.5
     assert report["b"]["summary"]["claim_verified_rate"] == 0.5
+    assert report["b"]["summary"]["hyper_used_rate"] == 0.5
+    assert report["b"]["summary"]["self_heal_used_rate"] == 0.5
+    assert report["b"]["summary"]["swarm_used_rate"] == 0.5
+    assert report["b"]["summary"]["drone_used_rate"] == 0.0
+    assert report["b"]["summary"]["nightshift_recommended_rate"] == 0.5
     assert report["b"]["summary"]["patch_success_count"] == 1
     assert report["b"]["summary"]["patch_success_rate"] == 0.5
     assert report["b"]["summary"]["verification_only_rate"] == 0.5
@@ -146,6 +154,9 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["cost_comparable_rate_delta"] == 0.0
     assert report["delta"]["model_token_measured_rate_delta"] == 0.5
     assert report["delta"]["local_rescue_rate_delta"] == 0.5
+    assert report["delta"]["swarm_used_rate_delta"] == 0.5
+    assert report["delta"]["drone_used_rate_delta"] == 0.0
+    assert report["delta"]["nightshift_recommended_rate_delta"] == 0.5
     assert report["by_category"]["bugfix"]["solve_rate_delta"] == 1.0
     assert report["by_category"]["feature"]["patch_success_rate_delta"] == 1.0
     assert report["by_repo_kind"]["neutral_fixture"]["solve_rate_delta"] == 1.0

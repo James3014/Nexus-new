@@ -216,6 +216,9 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "claim_verified_rate": 0.0,
             "hyper_used_rate": 0.0,
             "self_heal_used_rate": 0.0,
+            "swarm_used_rate": 0.0,
+            "drone_used_rate": 0.0,
+            "nightshift_recommended_rate": 0.0,
             "patch_success_count": 0,
             "patch_success_rate": 0.0,
             "verification_only_rate": 0.0,
@@ -385,6 +388,13 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "claim_verified_rate": _rate(rows, lambda r: _is_true(r.get("capability_claim_verified"))),
         "hyper_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_hyper_used"))),
         "self_heal_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_self_heal_used"))),
+        "swarm_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_swarm_used"))),
+        "drone_used_rate": _rate(rows, lambda r: _is_true(r.get("capability_drone_used"))),
+        "nightshift_recommended_rate": _rate(
+            rows,
+            lambda r: _is_true(r.get("capability_nightshift_recommended"))
+            or _is_true(r.get("guard_nightshift_recommended")),
+        ),
         "patch_success_count": patch_success,
         "patch_success_rate": round(patch_success / total, 4),
         "verification_only_rate": _rate(rows, lambda r: _is_true(r.get("artifact_verification_only"))),
@@ -489,6 +499,13 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "llm_self_heal_rate_delta": round(
             summary_b["llm_self_heal_rate"] - summary_a["llm_self_heal_rate"], 4
+        ),
+        "hyper_used_rate_delta": round(summary_b["hyper_used_rate"] - summary_a["hyper_used_rate"], 4),
+        "self_heal_used_rate_delta": round(summary_b["self_heal_used_rate"] - summary_a["self_heal_used_rate"], 4),
+        "swarm_used_rate_delta": round(summary_b["swarm_used_rate"] - summary_a["swarm_used_rate"], 4),
+        "drone_used_rate_delta": round(summary_b["drone_used_rate"] - summary_a["drone_used_rate"], 4),
+        "nightshift_recommended_rate_delta": round(
+            summary_b["nightshift_recommended_rate"] - summary_a["nightshift_recommended_rate"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),

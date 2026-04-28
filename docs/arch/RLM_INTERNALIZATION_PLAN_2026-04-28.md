@@ -441,3 +441,44 @@ Failure lesson：
 - hidden evidence >= 2。
 - hidden memory/belief 合計 >= 2。
 - 所有 v2 fixture 都能 materialize 並帶 portable hidden verifier import。
+
+## Phase 1 P19 MSA / Swarm / Nightshift Trace Section
+
+日期：2026-04-28
+
+目標：
+
+- 將 MSA / orchestration 能力納入同一份 Gemini vs Gemini+Nexus benchmark report。
+- 先做 report contract，不改 Swarm、Drone、Nightshift runner 行為。
+
+新增指標：
+
+- `swarm_used_rate`：由 `capability_swarm_used` 統計。
+- `drone_used_rate`：由 `capability_drone_used` 統計。
+- `nightshift_recommended_rate`：由 `capability_nightshift_recommended` 或 `guard_nightshift_recommended` 統計。
+- 對應 delta：
+  - `swarm_used_rate_delta`
+  - `drone_used_rate_delta`
+  - `nightshift_recommended_rate_delta`
+
+報告新增章節：
+
+- `MSA / Orchestration Trace`
+- 與 Hyper、Self-heal、RLM trace 放在同一表格：
+  - Hyper
+  - Self-heal
+  - Swarm
+  - Drone
+  - Nightshift recommended
+  - RLM trace present
+
+Failure lesson：
+
+- 只把 `capability_swarm_used`、`capability_drone_used`、`capability_nightshift_recommended` 寫進 row 不夠；公開報告若沒有統一 section，使用者仍看不出 MSA 是否真的參與。
+- P19 應先做可觀測合約，不急著改實際 orchestration runner，避免把報告面與執行面風險混在一起。
+
+下一步：
+
+1. 用既有 8 題 v2 benchmark 跑 Gemini 3 Flash 1 trial smoke。
+2. 若 MSA section 顯示 Swarm/Drone/Nightshift 皆 0%，先判斷是題型未觸發還是能力未接線。
+3. 後續再設計專門觸發 Swarm/Drone/Nightshift 的 public-candidate 題，不要硬把所有題都升級成 orchestration 題。
