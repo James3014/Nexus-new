@@ -149,14 +149,15 @@ def code_group():
 
 @code_group.command(name="impact")
 @click.option("--files", "files_text", required=True, help="Comma-separated changed files.")
+@click.option("--index-path", type=click.Path(), default=None, help="Optional graph index from nexus code scan.")
 @click.option("--output-json", is_flag=True, help="Emit machine-readable JSON.")
 @click.option("--report-file", type=click.Path(), default=None, help="Optional report path.")
-def code_impact(files_text: str, output_json: bool, report_file: str | None):
+def code_impact(files_text: str, index_path: str | None, output_json: bool, report_file: str | None):
     """Analyze changed-file impact with Nexus native CodeIntel."""
     from nexus.services.codeintel import analyze_impact
 
     changed_files = [item.strip() for item in files_text.split(",") if item.strip()]
-    result = analyze_impact(repo_root, changed_files).to_dict()
+    result = analyze_impact(repo_root, changed_files, index_path=index_path).to_dict()
     out_path = Path(report_file) if report_file else repo_root / ".nexus" / "reports" / "codeintel" / "impact.json"
     out_path = out_path if out_path.is_absolute() else repo_root / out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)

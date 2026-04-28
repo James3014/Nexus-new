@@ -39,6 +39,43 @@ def test_code_impact_cli_outputs_json_and_report(monkeypatch, tmp_path: Path):
     assert json.loads(report.read_text(encoding="utf-8")) == payload
 
 
+def test_code_impact_cli_consumes_scan_index(monkeypatch, tmp_path: Path):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "core.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (package / "consumer.py").write_text("import pkg.core\n", encoding="utf-8")
+    index = tmp_path / "graph.json"
+
+    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
+    runner = CliRunner()
+    scan = runner.invoke(
+        cli_mod.nexus,
+        ["nexus", "code", "scan", "--index-path", str(index), "--output-json"],
+    )
+    assert scan.exit_code == 0, scan.output
+
+    res = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "code",
+            "impact",
+            "--files",
+            "pkg/core.py",
+            "--index-path",
+            str(index),
+            "--output-json",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["impacted_files"] == ["pkg/consumer.py", "pkg/core.py"]
+    assert "scan_index_used" in payload["risk_reason"]
+    assert str(index) in payload["evidence_paths"]
+
+
 def test_code_scan_cli_outputs_json_report_and_index(monkeypatch, tmp_path: Path):
     package = tmp_path / "pkg"
     package.mkdir()
