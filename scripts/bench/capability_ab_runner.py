@@ -714,6 +714,14 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
             "\n\nNexus MemPalace rule: do not silently widen the allowed scope. "
             "If a candidate conflicts with governance policy, preserve the stricter boundary."
         )
+    if task.fixture_kind == "rlm_harder_v2_governance_scope":
+        desc += (
+            "\n\nNexus scope enforcement rule: implement "
+            "`rlm_harder_v2_scope_decision(request)` so unapproved read-only requests "
+            "return `{'allowed': True, 'reason': 'read_only'}`, unapproved mutating "
+            "requests such as delete return `{'allowed': False, 'reason': 'scope_block'}`, "
+            "and approved requests return `{'allowed': True, 'reason': 'approved'}`."
+        )
     if task.fixture_kind == "rlm_harder_v2_evidence_gap":
         desc += (
             "\n\nNexus Artifact/Claim rule: a claim is VERIFIED only when it has "
@@ -991,6 +999,8 @@ def _extract_record(
         "verification_only_allowed": bool(success_criteria_payload.get("verification_only_allowed", task.success_criteria == "all_target_tests_pass")),
         "gemini_uses_nexus": bool(usage_trace.get("gemini_uses_nexus", False)),
         "nexus_context_delivered": bool(usage_trace.get("nexus_context_delivered", False)),
+        "nexus_tier": str(usage_trace.get("nexus_tier") or ""),
+        "nexus_tier_reason": str(usage_trace.get("nexus_tier_reason") or ""),
         "nexus_usage_valid": bool(usage_trace.get("usage_valid", False)),
         "gemini_patch_status": usage_trace.get("gemini_patch_status"),
         "nexus_rescued": bool(usage_trace.get("nexus_rescued", False)),
@@ -1015,8 +1025,13 @@ def _extract_record(
         "capability_self_heal_used": bool(capabilities.get("self_heal_used", False)),
         "capability_claim_verified": bool(capabilities.get("claim_verified", False)),
         "capability_nightshift_recommended": bool(capabilities.get("nightshift_recommended", False)),
+        "capability_nightshift_invoked": bool(capabilities.get("nightshift_invoked", False)),
+        "capability_nightshift_recovered": bool(capabilities.get("nightshift_recovered", False)),
+        "capability_nightshift_report_path": str(capabilities.get("nightshift_report_path") or ""),
         "capability_swarm_used": bool(capabilities.get("swarm_used", False)),
+        "capability_swarm_evidence_count": int(capabilities.get("swarm_evidence_count", 0) or 0),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
+        "capability_drone_invoked_count": int(capabilities.get("drone_invoked_count", 0) or 0),
         "rlm_trace_path": str(usage_trace.get("rlm_trace_path") or ""),
         "rlm_trace_present": bool(str(usage_trace.get("rlm_trace_path") or "").strip()),
         "rlm_policy_reason": str(usage_trace.get("rlm_policy_reason") or ""),
@@ -1107,6 +1122,17 @@ def _with_nexus_timeout_payload(*, timeout_sec: int, exc: subprocess.TimeoutExpi
     }
 
 
+def _direct_gemini_timeout_sec(timeout_sec: int) -> int:
+    cap_raw = os.environ.get("NEXUS_DIRECT_GEMINI_TIMEOUT_SEC", "180")
+    try:
+        cap = int(cap_raw)
+    except ValueError:
+        cap = 180
+    if cap <= 0:
+        return max(1, int(timeout_sec))
+    return max(1, min(int(timeout_sec), cap))
+
+
 def _run_process_group(
     cmd: list[str],
     *,
@@ -1123,6 +1149,7 @@ def _run_process_group(
                 cwd=cwd,
                 env=env,
                 text=True,
+                stdin=subprocess.DEVNULL,
                 stdout=stdout_file,
                 stderr=stderr_file,
                 start_new_session=True,
@@ -1197,14 +1224,21 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
         transport="inline",
     )
     try:
+        effective_timeout_sec = _direct_gemini_timeout_sec(timeout_sec)
         res = _run_process_group(
             invocation.command,
             cwd=invocation.cwd,
             env=invocation.env,
-            timeout_sec=timeout_sec,
+            timeout_sec=effective_timeout_sec,
         )
     except subprocess.TimeoutExpired as exc:
-        return {"status": "FAIL", "error_category": "timeout", "tokens_used": 0, "model_name": model_name}, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
+        return {
+            "status": "FAIL",
+            "error_category": "timeout",
+            "tokens_used": 0,
+            "model_name": model_name,
+            "timeout_sec": int(getattr(exc, "timeout", timeout_sec) or timeout_sec),
+        }, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
     if res.returncode != 0:
         return {"status": "FAIL", "error_category": "cli_error", "tokens_used": 0, "model_name": model_name}, _tail_text(res.stderr or res.stdout)
     try:
@@ -1365,6 +1399,8 @@ def run_without_nexus(
                     model_calls = 0
                 patch = str(out.get("patch") or "")
                 gateway_error_category = str(out.get("error_category", "") or "")
+                if gateway_error_category == "timeout":
+                    model_calls = 0
                 model_name = str(out.get("model_name", "") or "")
                 model_patch_generated = bool(out.get("model_patch_generated", False))
                 try:
@@ -1559,6 +1595,30 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _git_commit(cwd: Path) -> str:
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        return ""
+    return res.stdout.strip() if res.returncode == 0 else ""
+
+
+def _rate_for(rows: list[dict[str, Any]], key: str) -> float:
+    if not rows:
+        return 0.0
+    return round(sum(1 for row in rows if bool(row.get(key, False))) / len(rows), 4)
+
+
+def _model_names(rows: list[dict[str, Any]]) -> set[str]:
+    return {str(row.get("model_name") or "").strip() for row in rows if str(row.get("model_name") or "").strip()}
+
+
 def _write_trial_evidence(
     *,
     evidence_root: Path,
@@ -1612,9 +1672,53 @@ def write_evidence_bundle(
                 path = Path(str(value))
                 if path.exists():
                     artifact_files.append({"path": str(path), "sha256": _sha256_file(path)})
+    with_rows = [row for row in rows if str(row.get("mode")) == "with_nexus"]
+    without_rows = [row for row in rows if str(row.get("mode")) == "without_nexus"]
+    eligible_with = [row for row in with_rows if bool(row.get("run_eligible", True))]
+    eligible_without = [row for row in without_rows if bool(row.get("run_eligible", True))]
+    with_models = _model_names(with_rows)
+    without_models = _model_names(without_rows)
+    gate_failures = []
+    if len(with_models) != 1 or len(without_models) != 1 or with_models != without_models:
+        gate_failures.append("model_mismatch")
+    if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
+        gate_failures.append("manifest_missing")
+    if not config.get("runner_command"):
+        gate_failures.append("runner_command_missing")
     payload = {
-        "schema": "nexus_public_benchmark_evidence_bundle_v1",
+        "schema": "nexus_public_benchmark_evidence_bundle_v2",
         "created_at_unix": int(time.time()),
+        "run_identity": {
+            "nexus_git_commit": _git_commit(Path.cwd()),
+            "runner": "scripts/bench/capability_ab_runner.py",
+            "runner_command": str(config.get("runner_command") or ""),
+            "cwd": str(Path.cwd()),
+        },
+        "model_lock": {
+            "without_model_name": next(iter(without_models), ""),
+            "with_model_name": next(iter(with_models), ""),
+            "same_model": bool(with_models and without_models and with_models == without_models),
+            "env_model_name": str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or ""),
+            "direct_model_name": str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or ""),
+            "prompt_transport": str(os.environ.get("NEXUS_GATEWAY_PROMPT_TRANSPORT") or ""),
+            "compact_prompt": os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"},
+        },
+        "task_manifest": {
+            "path": str(config.get("tasks_file") or ""),
+            "sha256": str(config.get("tasks_manifest_hash") or ""),
+            "unique_tasks_requested": int(config.get("unique_tasks_requested", 0) or 0),
+            "repeat_trials": int(config.get("repeat_trials", 1) or 1),
+            "shuffle_seed": config.get("shuffle_seed"),
+        },
+        "timeouts": {
+            "timeout_sec": int(config.get("timeout_sec", 0) or 0),
+            "total_timeout_sec": int(config.get("total_timeout_sec", 0) or 0),
+            "effective_total_timeout_sec": int(config.get("effective_total_timeout_sec", 0) or 0),
+            "stop_loss_sec": int(config.get("stop_loss_sec", 0) or 0),
+            "per_task_stop_loss_sec": int(config.get("per_task_stop_loss_sec", 0) or 0),
+            "gateway_timeout_sec_policy": str(os.environ.get("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC") or ""),
+            "direct_gemini_timeout_sec": _direct_gemini_timeout_sec(int(config.get("timeout_sec", 0) or 0)),
+        },
         "config": config,
         "raw_files": {
             "with_nexus": {"path": str(with_path), "sha256": _sha256_file(with_path)},
@@ -1622,6 +1726,39 @@ def write_evidence_bundle(
         },
         "artifact_files": artifact_files,
         "row_count": len(rows),
+        "row_counts": {
+            "with_nexus": len(with_rows),
+            "without_nexus": len(without_rows),
+            "total": len(rows),
+            "eligible_with_nexus": len(eligible_with),
+            "eligible_without_nexus": len(eligible_without),
+            "infra_invalid_with_nexus": len(with_rows) - len(eligible_with),
+            "infra_invalid_without_nexus": len(without_rows) - len(eligible_without),
+        },
+        "telemetry_completeness": {
+            "token_measured_rate_without": _rate_for(without_rows, "token_measured"),
+            "token_measured_rate_with": _rate_for(with_rows, "token_measured"),
+            "gateway_stats_source_rate_without": _rate_for(without_rows, "gateway_stats_present"),
+            "gateway_stats_source_rate_with": _rate_for(with_rows, "gateway_stats_present"),
+        },
+        "nexus_wearing": {
+            "valid_rate": _rate_for(with_rows, "nexus_wearing_valid"),
+            "gemini_uses_nexus_rate": _rate_for(with_rows, "gemini_uses_nexus"),
+            "nexus_context_delivered_rate": _rate_for(with_rows, "nexus_context_delivered"),
+            "nexus_usage_valid_rate": _rate_for(with_rows, "nexus_usage_valid"),
+            "claim_verified_rate": _rate_for(with_rows, "capability_claim_verified"),
+        },
+        "public_claim_gate": {
+            "verdict": "PASS" if not gate_failures else "FAIL",
+            "failures": gate_failures,
+            "checks": {
+                "same_model": bool(with_models and without_models and with_models == without_models),
+                "runner_command_present": bool(config.get("runner_command")),
+                "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
+                "raw_file_hashes_present": True,
+                "artifact_hash_count": len(artifact_files),
+            },
+        },
     }
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return bundle_path
@@ -1904,7 +2041,6 @@ def main() -> int:
                 status=str(row.get("status", "")),
             )
             if task_stop_loss_exceeded:
-                timed_out = True
                 _emit_progress(
                     enabled=bool(args.progress_log),
                     event="task_stop_loss",
@@ -1915,7 +2051,6 @@ def main() -> int:
                     elapsed_sec=float(row.get("wall_duration_sec", 0.0) or 0.0),
                     status="INFRA_INVALID",
                 )
-                break
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -2001,7 +2136,6 @@ def main() -> int:
                 status=str(row.get("status", "")),
             )
             if task_stop_loss_exceeded:
-                timed_out = True
                 _emit_progress(
                     enabled=bool(args.progress_log),
                     event="task_stop_loss",
@@ -2012,7 +2146,6 @@ def main() -> int:
                     elapsed_sec=float(row.get("wall_duration_sec", 0.0) or 0.0),
                     status="INFRA_INVALID",
                 )
-                break
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -2064,6 +2197,12 @@ def main() -> int:
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
                     "force_flow": args.force_flow,
+                    "runner_command": " ".join(sys.argv),
+                    "timeout_sec": int(args.timeout_sec),
+                    "total_timeout_sec": int(args.total_timeout_sec),
+                    "effective_total_timeout_sec": effective_total_timeout_sec,
+                    "stop_loss_sec": int(args.stop_loss_sec),
+                    "per_task_stop_loss_sec": int(args.per_task_stop_loss_sec),
                 },
             )
         )

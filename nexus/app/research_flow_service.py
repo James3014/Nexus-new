@@ -145,6 +145,63 @@ def _write_research_rlm_trace(
     return str(trace_path)
 
 
+def _candidate_summary_has_swarm_evidence(summary: dict[str, Any]) -> bool:
+    hint = str(summary.get("hint") or "").lower()
+    source = str(summary.get("source") or "").lower()
+    return source == "swarm" or ("create:" in hint and "sync:" in hint and "test:" in hint)
+
+
+def _capability_evidence(
+    *,
+    result_report: dict[str, Any],
+    learning_trace: dict[str, Any],
+    nightshift_recommended: bool,
+) -> dict[str, Any]:
+    candidate_summaries = result_report.get("candidate_summaries", [])
+    if not isinstance(candidate_summaries, list):
+        candidate_summaries = []
+    swarm_count = sum(
+        1
+        for item in candidate_summaries
+        if isinstance(item, dict) and _candidate_summary_has_swarm_evidence(item)
+    )
+    drone_crystals = learning_trace.get("drone_crystals", [])
+    if not isinstance(drone_crystals, list):
+        drone_crystals = []
+    nightshift_report_path = str(learning_trace.get("nightshift_report_path") or result_report.get("nightshift_report_path") or "")
+    nightshift_recovered = bool(
+        learning_trace.get("nightshift_recovered", False)
+        or result_report.get("nightshift_recovered", False)
+    )
+    return {
+        "swarm_evidence_count": swarm_count,
+        "swarm_used": swarm_count > 0,
+        "drone_invoked_count": len(drone_crystals),
+        "drone_used": len(drone_crystals) > 0,
+        "nightshift_recommended": bool(nightshift_recommended),
+        "nightshift_invoked": bool(nightshift_report_path),
+        "nightshift_recovered": nightshift_recovered,
+        "nightshift_report_path": nightshift_report_path,
+    }
+
+
+def _nexus_tier(route_features: dict[str, Any], *, force_flow: str | None) -> dict[str, Any]:
+    risk_score = int(route_features.get("risk_score", 0) or 0)
+    high_risk = bool(
+        risk_score >= 50
+        or route_features.get("has_hard_signal")
+        or route_features.get("is_cross_module_task")
+        or force_flow == "hyper_sprint"
+    )
+    if high_risk:
+        reason = "high_risk_or_forced_hyper"
+        tier = "full"
+    else:
+        reason = "low_risk_light_governance"
+        tier = "light"
+    return {"tier": tier, "reason": reason, "risk_score": risk_score}
+
+
 def _load_history_memory_signal(repo_root: Path, *, task_desc: str, task_type: str) -> dict[str, Any]:
     history_path = (repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
     if not history_path.exists():
@@ -562,6 +619,10 @@ def run_auto_flow(
     tuned_baseline_fast_sec = max(0.0, float(parsed_knobs.baseline_fast_sec or baseline_fast_sec))
     skip_baseline_probe_for_hard = bool(parsed_knobs.skip_baseline_probe_for_hard)
     chosen_flow = force_flow or route["recommended_flow"]
+    tier_decision = _nexus_tier(
+        route.get("route_features", {}) if isinstance(route, dict) else {},
+        force_flow=force_flow,
+    )
     learn_phase_slo = read_phase_slo_summary_fast(repo_root)
     phase_wall_sec["X"] = round(time.time() - phase_started_at, 4)
     phase_started_at = time.time()
@@ -1031,10 +1092,17 @@ def run_auto_flow(
         or any("self_heal" in str(code) for code in result_report.get("error_codes", []))
     )
     mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False))
+    capability_evidence = _capability_evidence(
+        result_report=result_report,
+        learning_trace=hyper_learning_trace,
+        nightshift_recommended=nightshift_recommended,
+    )
     phase_wall_sec["A"] = round(time.time() - phase_started_at, 4)
     nexus_usage_trace = {
         "gemini_uses_nexus": bool(gemini_invoked),
         "nexus_context_delivered": True,
+        "nexus_tier": tier_decision["tier"],
+        "nexus_tier_reason": tier_decision["reason"],
         "pillars": {
             "lancedb": {"active": True, "hits": int(route.get("findings_hits", 0) or 0)},
             "memory": {"active": True, "hits": int((route.get("route_features", {}) or {}).get("memory_hits", 0) or 0)},
@@ -1062,9 +1130,14 @@ def run_auto_flow(
         "capabilities": {
             "research_used": bool(hyper_used),
             "hyper_used": bool(hyper_used),
-            "nightshift_recommended": bool(nightshift_recommended),
-            "swarm_used": bool(result_report.get("winner_source") not in {None, "", "local"} and hyper_used),
-            "drone_used": False,
+            "nightshift_recommended": capability_evidence["nightshift_recommended"],
+            "nightshift_invoked": capability_evidence["nightshift_invoked"],
+            "nightshift_recovered": capability_evidence["nightshift_recovered"],
+            "nightshift_report_path": capability_evidence["nightshift_report_path"],
+            "swarm_used": capability_evidence["swarm_used"],
+            "swarm_evidence_count": capability_evidence["swarm_evidence_count"],
+            "drone_used": capability_evidence["drone_used"],
+            "drone_invoked_count": capability_evidence["drone_invoked_count"],
             "self_heal_used": self_heal_used,
             "claim_verified": artifact_verified,
         },

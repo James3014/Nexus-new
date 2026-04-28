@@ -202,6 +202,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "nexus_usage_valid_rate": 0.0,
             "gemini_uses_nexus_rate": 0.0,
             "nexus_rescue_rate": 0.0,
+            "nexus_full_tier_rate": 0.0,
             "local_rescue_rate": 0.0,
             "guard_fallback_rate": 0.0,
             "verification_rescue_rate": 0.0,
@@ -219,6 +220,8 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "swarm_used_rate": 0.0,
             "drone_used_rate": 0.0,
             "nightshift_recommended_rate": 0.0,
+            "nightshift_invoked_rate": 0.0,
+            "nightshift_recovery_rate": 0.0,
             "patch_success_count": 0,
             "patch_success_rate": 0.0,
             "verification_only_rate": 0.0,
@@ -378,6 +381,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "nexus_usage_valid_rate": _rate(rows, lambda r: _is_true(r.get("nexus_usage_valid"))),
         "gemini_uses_nexus_rate": _rate(rows, lambda r: _is_true(r.get("gemini_uses_nexus"))),
         "nexus_rescue_rate": _rate(rows, lambda r: _is_true(r.get("nexus_rescued"))),
+        "nexus_full_tier_rate": _rate(rows, lambda r: str(r.get("nexus_tier", "")).lower() == "full"),
         "gemini_patch_pass_rate": _rate(rows, lambda r: str(r.get("gemini_patch_status", "")).lower() == "passed"),
         "pillar_lancedb_active_rate": _rate(rows, lambda r: _is_true(r.get("pillar_lancedb_active"))),
         "pillar_memory_active_rate": _rate(rows, lambda r: _is_true(r.get("pillar_memory_active"))),
@@ -395,6 +399,8 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             lambda r: _is_true(r.get("capability_nightshift_recommended"))
             or _is_true(r.get("guard_nightshift_recommended")),
         ),
+        "nightshift_invoked_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_invoked"))),
+        "nightshift_recovery_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_recovered"))),
         "patch_success_count": patch_success,
         "patch_success_rate": round(patch_success / total, 4),
         "verification_only_rate": _rate(rows, lambda r: _is_true(r.get("artifact_verification_only"))),
@@ -507,8 +513,15 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         "nightshift_recommended_rate_delta": round(
             summary_b["nightshift_recommended_rate"] - summary_a["nightshift_recommended_rate"], 4
         ),
+        "nightshift_invoked_rate_delta": round(
+            summary_b["nightshift_invoked_rate"] - summary_a["nightshift_invoked_rate"], 4
+        ),
+        "nightshift_recovery_rate_delta": round(
+            summary_b["nightshift_recovery_rate"] - summary_a["nightshift_recovery_rate"], 4
+        ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),
+        "nexus_full_tier_rate_delta": round(summary_b["nexus_full_tier_rate"] - summary_a["nexus_full_tier_rate"], 4),
         "gemini_uses_nexus_rate_delta": round(summary_b["gemini_uses_nexus_rate"] - summary_a["gemini_uses_nexus_rate"], 4),
         "nexus_rescue_rate_delta": round(summary_b["nexus_rescue_rate"] - summary_a["nexus_rescue_rate"], 4),
         "gemini_patch_pass_rate_delta": round(summary_b["gemini_patch_pass_rate"] - summary_a["gemini_patch_pass_rate"], 4),

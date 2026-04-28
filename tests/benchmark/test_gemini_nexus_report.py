@@ -77,6 +77,8 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "capability_swarm_used": True,
                         "capability_drone_used": False,
                         "capability_nightshift_recommended": True,
+                        "capability_nightshift_invoked": True,
+                        "capability_nightshift_recovered": False,
                         "rlm_trace_present": True,
                     }
                 ),
@@ -147,6 +149,8 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Swarm | 0.0% | 50.0% | 50.0%" in out
     assert "Drone | 0.0% | 0.0% | 0.0%" in out
     assert "Nightshift recommended | 0.0% | 50.0% | 50.0%" in out
+    assert "Nightshift invoked | 0.0% | 50.0% | 50.0%" in out
+    assert "Nightshift recovered | 0.0% | 0.0% | 0.0%" in out
     assert "## Capability Win Map" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
     assert "| measured | 2 | 1 |" in out

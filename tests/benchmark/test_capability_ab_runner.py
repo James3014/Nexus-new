@@ -13,6 +13,7 @@ from scripts.bench.capability_ab_runner import (
     _benchmark_memory_db_path,
     _budget_exceeded,
     _classify_timeout_stage,
+    _direct_gemini_timeout_sec,
     _emit_progress,
     _effective_total_timeout_sec,
     _extract_record,
@@ -313,7 +314,21 @@ def test_preserve_target_helpers_restore_real_task_file(tmp_path: Path):
 
 
 def test_write_trial_evidence_and_bundle(tmp_path: Path):
-    row = {"mode": "with_nexus", "task_id": "task/1", "trial_index": 2, "status": "SUCCESS"}
+    row = {
+        "mode": "with_nexus",
+        "task_id": "task/1",
+        "trial_index": 2,
+        "status": "SUCCESS",
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "token_measured": True,
+        "gateway_stats_present": True,
+        "nexus_wearing_valid": True,
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "capability_claim_verified": True,
+    }
     evidence = _write_trial_evidence(
         evidence_root=tmp_path / "evidence",
         row=row,
@@ -329,18 +344,64 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     with_path = tmp_path / "with.jsonl"
     without_path = tmp_path / "without.jsonl"
     write_jsonl(with_path, [row])
-    write_jsonl(without_path, [])
+    without_row = {
+        "mode": "without_nexus",
+        "task_id": "task/1",
+        "trial_index": 2,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "token_measured": True,
+        "gateway_stats_present": True,
+    }
+    write_jsonl(without_path, [without_row])
     bundle = write_evidence_bundle(
         out_dir=tmp_path,
         with_path=with_path,
         without_path=without_path,
-        rows=[row],
-        config={"repeat_trials": 1},
+        rows=[row, without_row],
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 1,
+            "runner_command": "capability_ab_runner.py --tasks-file tasks.json",
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+        },
     )
     payload = json.loads(bundle.read_text(encoding="utf-8"))
-    assert payload["schema"] == "nexus_public_benchmark_evidence_bundle_v1"
+    assert payload["schema"] == "nexus_public_benchmark_evidence_bundle_v2"
     assert payload["raw_files"]["with_nexus"]["sha256"]
     assert len(payload["artifact_files"]) == 2
+    assert payload["model_lock"]["same_model"] is True
+    assert payload["row_counts"]["with_nexus"] == 1
+    assert payload["row_counts"]["without_nexus"] == 1
+    assert payload["nexus_wearing"]["valid_rate"] == 1.0
+    assert payload["public_claim_gate"]["verdict"] == "PASS"
+
+
+def test_write_evidence_bundle_v2_fails_gate_when_models_differ(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_row = {"mode": "with_nexus", "model_name": "gemini-3-flash-preview"}
+    without_row = {"mode": "without_nexus", "model_name": "gemini-3.1-pro-preview"}
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [without_row])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row, without_row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "abc", "runner_command": "run"},
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    assert payload["model_lock"]["same_model"] is False
+    assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert "model_mismatch" in payload["public_claim_gate"]["failures"]
 
 
 def test_total_timeout_budget_helper():
@@ -415,6 +476,8 @@ def test_extract_record_maps_semantic_fields():
             "gemini_uses_nexus": True,
             "nexus_context_delivered": True,
             "usage_valid": True,
+            "nexus_tier": "full",
+            "nexus_tier_reason": "high_risk_or_forced_hyper",
             "gemini_patch_status": "failed",
             "nexus_rescued": True,
             "winner_source": "nexus_rescue",
@@ -427,7 +490,20 @@ def test_extract_record_maps_semantic_fields():
             },
             "phase_trace": {"P": "route_built", "X": "retrieval_checked", "D": "guard_decision", "R": "hyper_executed", "A": "artifact_verified", "C": "closure_written"},
             "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5},
-            "capabilities": {"research_used": True, "hyper_used": True, "self_heal_used": True, "claim_verified": True, "nightshift_recommended": False, "swarm_used": False, "drone_used": False},
+            "capabilities": {
+                "research_used": True,
+                "hyper_used": True,
+                "self_heal_used": True,
+                "claim_verified": True,
+                "nightshift_recommended": False,
+                "nightshift_invoked": True,
+                "nightshift_recovered": False,
+                "nightshift_report_path": ".nexus/reports/nightshift/run.json",
+                "swarm_used": True,
+                "swarm_evidence_count": 2,
+                "drone_used": True,
+                "drone_invoked_count": 1,
+            },
         },
         "timing": {"cli_elapsed_sec": 2.4, "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5}},
         "result": {
@@ -463,6 +539,8 @@ def test_extract_record_maps_semantic_fields():
     assert out["mutation_required"] is True
     assert out["verification_only_allowed"] is False
     assert out["gemini_uses_nexus"] is True
+    assert out["nexus_tier"] == "full"
+    assert out["nexus_tier_reason"] == "high_risk_or_forced_hyper"
     assert out["nexus_usage_valid"] is True
     assert out["nexus_rescued"] is True
     assert out["pillar_mempalace_verified"] is True
@@ -471,6 +549,13 @@ def test_extract_record_maps_semantic_fields():
     assert out["phase_wall_r_sec"] == 1.1
     assert out["capability_hyper_used"] is True
     assert out["capability_claim_verified"] is True
+    assert out["capability_swarm_used"] is True
+    assert out["capability_swarm_evidence_count"] == 2
+    assert out["capability_drone_used"] is True
+    assert out["capability_drone_invoked_count"] == 1
+    assert out["capability_nightshift_invoked"] is True
+    assert out["capability_nightshift_recovered"] is False
+    assert out["capability_nightshift_report_path"] == ".nexus/reports/nightshift/run.json"
     assert out["semantic_completed"] is False
     assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
     assert out["nexus_phases_observed"] == ["P", "X", "D", "R", "A", "C"]
@@ -751,6 +836,16 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
         success_criteria="patch_and_tests_pass",
         fixture_kind="rlm_harder_v2_governance_guard",
     )
+    scope = CapabilityTask(
+        id="scope",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix scope enforcement.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_governance_scope",
+    )
     memory = CapabilityTask(
         id="memory",
         difficulty="hard",
@@ -783,6 +878,8 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
     )
 
     assert "Nexus MemPalace rule" in _nexus_task_desc(governance)
+    assert "Nexus scope enforcement rule" in _nexus_task_desc(scope)
+    assert "{'allowed': False, 'reason': 'scope_block'}" in _nexus_task_desc(scope)
     assert "Nexus Belief/Memory rule" in _nexus_task_desc(memory)
     assert "Nexus Belief budget rule" in _nexus_task_desc(belief)
     assert "{'rounds': 3, 'needs_evidence': True}" in _nexus_task_desc(belief)
@@ -1136,6 +1233,55 @@ def test_direct_gemini_patch_uses_process_group_timeout(monkeypatch):
     assert captured["timeout_sec"] == 7
     assert out["error_category"] == "timeout"
     assert raw == ""
+
+
+def test_direct_gemini_timeout_cap_defaults_to_180(monkeypatch):
+    monkeypatch.delenv("NEXUS_DIRECT_GEMINI_TIMEOUT_SEC", raising=False)
+    assert _direct_gemini_timeout_sec(420) == 180
+    assert _direct_gemini_timeout_sec(60) == 60
+
+
+def test_direct_gemini_returned_timeout_is_infra_invalid(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="timeout-return-001",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix timeout",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_hidden_state",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        return (
+            {
+                "status": "FAIL",
+                "error_category": "timeout",
+                "tokens_used": 0,
+                "model_name": "gemini-3-flash-preview",
+            },
+            "",
+        )
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert out["baseline_gateway_error_category"] == "timeout"
+    assert out["model_calls"] == 0
+    assert out["run_eligible"] is False
+    assert out["infra_invalid_reason"] == "timeout_before_model_call"
 
 
 def test_authorization_task_text_is_not_auth_infra_invalid():

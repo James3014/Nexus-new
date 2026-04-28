@@ -60,6 +60,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "model_token_capture_status": "measured",
                         "rescue_cost_status": "local_only",
                         "attempt_count": 2,
+                        "nexus_tier": "full",
                         "gemini_uses_nexus": True,
                         "nexus_usage_valid": True,
                         "nexus_rescued": True,
@@ -81,6 +82,8 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "capability_swarm_used": True,
                         "capability_drone_used": False,
                         "capability_nightshift_recommended": True,
+                        "capability_nightshift_invoked": True,
+                        "capability_nightshift_recovered": False,
                         "artifact_verification_only": True,
                     }
                 ),
@@ -133,6 +136,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["b"]["summary"]["local_rescue_rate"] == 0.5
     assert report["a"]["summary"]["avg_total_tokens_measured_only"] == 300.0
     assert report["b"]["summary"]["nexus_usage_valid_rate"] == 0.5
+    assert report["b"]["summary"]["nexus_full_tier_rate"] == 0.5
     assert report["b"]["summary"]["gemini_uses_nexus_rate"] == 0.5
     assert report["b"]["summary"]["nexus_rescue_rate"] == 0.5
     assert report["b"]["summary"]["gemini_patch_pass_rate"] == 0.0
@@ -143,12 +147,15 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["b"]["summary"]["swarm_used_rate"] == 0.5
     assert report["b"]["summary"]["drone_used_rate"] == 0.0
     assert report["b"]["summary"]["nightshift_recommended_rate"] == 0.5
+    assert report["b"]["summary"]["nightshift_invoked_rate"] == 0.5
+    assert report["b"]["summary"]["nightshift_recovery_rate"] == 0.0
     assert report["b"]["summary"]["patch_success_count"] == 1
     assert report["b"]["summary"]["patch_success_rate"] == 0.5
     assert report["b"]["summary"]["verification_only_rate"] == 0.5
     assert report["b"]["summary"]["mutation_required_rate"] == 0.5
     assert report["b"]["summary"]["mutation_success_rate"] == 1.0
     assert report["delta"]["nexus_usage_valid_rate_delta"] == 0.5
+    assert report["delta"]["nexus_full_tier_rate_delta"] == 0.5
     assert report["delta"]["patch_success_rate_delta"] == 0.5
     assert report["delta"]["verification_only_rate_delta"] == 0.5
     assert report["delta"]["cost_comparable_rate_delta"] == 0.0
@@ -157,6 +164,8 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["swarm_used_rate_delta"] == 0.5
     assert report["delta"]["drone_used_rate_delta"] == 0.0
     assert report["delta"]["nightshift_recommended_rate_delta"] == 0.5
+    assert report["delta"]["nightshift_invoked_rate_delta"] == 0.5
+    assert report["delta"]["nightshift_recovery_rate_delta"] == 0.0
     assert report["by_category"]["bugfix"]["solve_rate_delta"] == 1.0
     assert report["by_category"]["feature"]["patch_success_rate_delta"] == 1.0
     assert report["by_repo_kind"]["neutral_fixture"]["solve_rate_delta"] == 1.0

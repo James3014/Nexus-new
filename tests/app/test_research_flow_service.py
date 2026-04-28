@@ -80,6 +80,62 @@ def test_build_hyper_execution_profile_prefers_direct_hyper_for_cross_module():
     assert profile["prefer_direct_hyper"] is True
 
 
+def test_nexus_tier_marks_low_risk_as_light_and_high_risk_as_full():
+    light = research_flow_service._nexus_tier({"risk_score": 20}, force_flow=None)
+    full = research_flow_service._nexus_tier({"risk_score": 65}, force_flow=None)
+    forced = research_flow_service._nexus_tier({"risk_score": 10}, force_flow="hyper_sprint")
+
+    assert light == {"tier": "light", "reason": "low_risk_light_governance", "risk_score": 20}
+    assert full["tier"] == "full"
+    assert forced["tier"] == "full"
+
+
+def test_capability_evidence_requires_real_swarm_signal():
+    out = research_flow_service._capability_evidence(
+        result_report={
+            "winner_source": "llm",
+            "candidate_summaries": [{"source": "llm", "hint": "plain candidate"}],
+        },
+        learning_trace={},
+        nightshift_recommended=False,
+    )
+
+    assert out["swarm_used"] is False
+    assert out["swarm_evidence_count"] == 0
+
+    with_swarm = research_flow_service._capability_evidence(
+        result_report={
+            "candidate_summaries": [
+                {"source": "llm", "hint": "patch | create:0.10s sync:0.20s test:0.30s"}
+            ],
+        },
+        learning_trace={},
+        nightshift_recommended=True,
+    )
+
+    assert with_swarm["swarm_used"] is True
+    assert with_swarm["swarm_evidence_count"] == 1
+    assert with_swarm["nightshift_recommended"] is True
+
+
+def test_capability_evidence_splits_nightshift_and_drone_signals():
+    out = research_flow_service._capability_evidence(
+        result_report={},
+        learning_trace={
+            "nightshift_report_path": ".nexus/reports/nightshift/run.json",
+            "nightshift_recovered": True,
+            "drone_crystals": ["d1_crystal.json", "d2_crystal.json"],
+        },
+        nightshift_recommended=True,
+    )
+
+    assert out["nightshift_recommended"] is True
+    assert out["nightshift_invoked"] is True
+    assert out["nightshift_recovered"] is True
+    assert out["drone_used"] is True
+    assert out["drone_invoked_count"] == 2
+
+
 def test_build_hyper_execution_profile_keeps_light_for_simple_task():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix typo in markdown title",
