@@ -1405,6 +1405,10 @@ def run_with_nexus(
     cli_runner: CliRunner | None = None,
     history_window: int = 1,
     history_fail_threshold: int = 9999,
+    enable_autoreason_executor: bool = False,
+    enable_ddtree_executor: bool = False,
+    enable_ultra_review_dry_gate: bool = False,
+    llm_candidate_cap: int = 1,
 ) -> dict[str, Any]:
     args = [
         "nexus",
@@ -1457,7 +1461,13 @@ def run_with_nexus(
             env["NEXUS_GATEWAY_TIMEOUT_SEC"] = _benchmark_gateway_timeout_sec(
                 _benchmark_gateway_timeout_for_task(timeout_sec)
             )
-            env["NEXUS_LLM_CANDIDATE_CAP"] = "1"
+            env["NEXUS_LLM_CANDIDATE_CAP"] = str(max(1, int(llm_candidate_cap)))
+            if enable_autoreason_executor:
+                env["NEXUS_AUTOREASON_EXECUTOR"] = "1"
+            if enable_ddtree_executor:
+                env["NEXUS_DDTREE_EXECUTOR"] = "1"
+            if enable_ultra_review_dry_gate:
+                env["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
             env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
         try:
@@ -2216,6 +2226,27 @@ def main() -> int:
     parser.add_argument("--force-flow", choices=["auto", "baseline", "hyper_sprint"], default="auto")
     parser.add_argument("--with-nexus-runner", choices=["inprocess", "subprocess"], default="inprocess")
     parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
+    parser.add_argument(
+        "--enable-autoreason-executor",
+        action="store_true",
+        help="Enable the feature-flagged Autoreason candidate judge for the Nexus treatment arm.",
+    )
+    parser.add_argument(
+        "--enable-ddtree-executor",
+        action="store_true",
+        help="Enable the feature-flagged DDTree candidate pruning layer for the Nexus treatment arm.",
+    )
+    parser.add_argument(
+        "--enable-ultra-review-dry-gate",
+        action="store_true",
+        help="Enable the feature-flagged Ultra Review dry gate for recommended high-risk Nexus treatment rows.",
+    )
+    parser.add_argument(
+        "--llm-candidate-cap",
+        type=int,
+        default=1,
+        help="Maximum LLM candidate count for the Nexus treatment arm. Use 3+ to make DDTree eligible.",
+    )
     parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
     parser.add_argument("--llm-safe-probe", action="store_true")
     parser.add_argument("--without-mode", choices=["service", "bare", "gemini"], default="bare")
@@ -2464,6 +2495,10 @@ def main() -> int:
                 cli_runner=shared_cli_runner,
                 history_window=1,
                 history_fail_threshold=9999,
+                enable_autoreason_executor=bool(args.enable_autoreason_executor),
+                enable_ddtree_executor=bool(args.enable_ddtree_executor),
+                enable_ultra_review_dry_gate=bool(args.enable_ultra_review_dry_gate),
+                llm_candidate_cap=int(args.llm_candidate_cap),
             )
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
@@ -2644,6 +2679,10 @@ def main() -> int:
                     "hidden_verifier_mode": hidden_verifier_mode,
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
+                    "enable_autoreason_executor": bool(args.enable_autoreason_executor),
+                    "enable_ddtree_executor": bool(args.enable_ddtree_executor),
+                    "enable_ultra_review_dry_gate": bool(args.enable_ultra_review_dry_gate),
+                    "llm_candidate_cap": int(args.llm_candidate_cap),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
                     "runner_command": " ".join(sys.argv),

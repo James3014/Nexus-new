@@ -224,6 +224,12 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "nightshift_recommended_rate": 0.0,
             "nightshift_invoked_rate": 0.0,
             "nightshift_recovery_rate": 0.0,
+            "autoreason_enabled_rate": 0.0,
+            "ddtree_enabled_rate": 0.0,
+            "ddtree_eligible_rate": 0.0,
+            "ultra_review_recommended_rate": 0.0,
+            "ultra_review_invoked_rate": 0.0,
+            "ultra_review_gate_passed_rate": 0.0,
             "patch_success_count": 0,
             "patch_success_rate": 0.0,
             "verification_only_rate": 0.0,
@@ -405,6 +411,12 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "nightshift_invoked_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_invoked"))),
         "nightshift_recovery_rate": _rate(rows, lambda r: _is_true(r.get("capability_nightshift_recovered"))),
+        "autoreason_enabled_rate": _rate(rows, lambda r: _is_true(r.get("autoreason_enabled"))),
+        "ddtree_enabled_rate": _rate(rows, lambda r: _is_true(r.get("ddtree_enabled"))),
+        "ddtree_eligible_rate": _rate(rows, lambda r: _is_true(r.get("ddtree_eligible"))),
+        "ultra_review_recommended_rate": _rate(rows, lambda r: _is_true(r.get("ultra_review_recommended"))),
+        "ultra_review_invoked_rate": _rate(rows, lambda r: _is_true(r.get("ultra_review_invoked"))),
+        "ultra_review_gate_passed_rate": _rate(rows, lambda r: _is_true(r.get("ultra_review_gate_passed"))),
         "patch_success_count": patch_success,
         "patch_success_rate": round(patch_success / total, 4),
         "verification_only_rate": _rate(rows, lambda r: _is_true(r.get("artifact_verification_only"))),
@@ -559,6 +571,20 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "nightshift_recovery_rate_delta": round(
             summary_b["nightshift_recovery_rate"] - summary_a["nightshift_recovery_rate"], 4
+        ),
+        "autoreason_enabled_rate_delta": round(
+            summary_b["autoreason_enabled_rate"] - summary_a["autoreason_enabled_rate"], 4
+        ),
+        "ddtree_enabled_rate_delta": round(summary_b["ddtree_enabled_rate"] - summary_a["ddtree_enabled_rate"], 4),
+        "ddtree_eligible_rate_delta": round(summary_b["ddtree_eligible_rate"] - summary_a["ddtree_eligible_rate"], 4),
+        "ultra_review_recommended_rate_delta": round(
+            summary_b["ultra_review_recommended_rate"] - summary_a["ultra_review_recommended_rate"], 4
+        ),
+        "ultra_review_invoked_rate_delta": round(
+            summary_b["ultra_review_invoked_rate"] - summary_a["ultra_review_invoked_rate"], 4
+        ),
+        "ultra_review_gate_passed_rate_delta": round(
+            summary_b["ultra_review_gate_passed_rate"] - summary_a["ultra_review_gate_passed_rate"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),

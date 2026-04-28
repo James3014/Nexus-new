@@ -84,6 +84,12 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "capability_nightshift_recommended": True,
                         "capability_nightshift_invoked": True,
                         "capability_nightshift_recovered": False,
+                        "autoreason_enabled": True,
+                        "ddtree_enabled": True,
+                        "ddtree_eligible": True,
+                        "ultra_review_recommended": True,
+                        "ultra_review_invoked": True,
+                        "ultra_review_gate_passed": True,
                         "artifact_verification_only": True,
                         "rlm_trace_present": True,
                         "rlm_trace_quality_score": 80,
@@ -151,6 +157,12 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["b"]["summary"]["nightshift_recommended_rate"] == 0.5
     assert report["b"]["summary"]["nightshift_invoked_rate"] == 0.5
     assert report["b"]["summary"]["nightshift_recovery_rate"] == 0.0
+    assert report["b"]["summary"]["autoreason_enabled_rate"] == 0.5
+    assert report["b"]["summary"]["ddtree_enabled_rate"] == 0.5
+    assert report["b"]["summary"]["ddtree_eligible_rate"] == 0.5
+    assert report["b"]["summary"]["ultra_review_recommended_rate"] == 0.5
+    assert report["b"]["summary"]["ultra_review_invoked_rate"] == 0.5
+    assert report["b"]["summary"]["ultra_review_gate_passed_rate"] == 0.5
     assert report["b"]["summary"]["patch_success_count"] == 1
     assert report["b"]["summary"]["patch_success_rate"] == 0.5
     assert report["b"]["summary"]["verification_only_rate"] == 0.5
@@ -168,6 +180,12 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["nightshift_recommended_rate_delta"] == 0.5
     assert report["delta"]["nightshift_invoked_rate_delta"] == 0.5
     assert report["delta"]["nightshift_recovery_rate_delta"] == 0.0
+    assert report["delta"]["autoreason_enabled_rate_delta"] == 0.5
+    assert report["delta"]["ddtree_enabled_rate_delta"] == 0.5
+    assert report["delta"]["ddtree_eligible_rate_delta"] == 0.5
+    assert report["delta"]["ultra_review_recommended_rate_delta"] == 0.5
+    assert report["delta"]["ultra_review_invoked_rate_delta"] == 0.5
+    assert report["delta"]["ultra_review_gate_passed_rate_delta"] == 0.5
     assert report["delta"]["rlm_trace_present_rate_delta"] == 0.5
     assert report["b"]["summary"]["avg_rlm_trace_quality_score"] == 40.0
     assert report["delta"]["avg_rlm_trace_quality_score_delta"] == 40.0
