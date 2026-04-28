@@ -1,49 +1,21 @@
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
+from nexus.services.codeintel.graph_builder import imports_for, iter_python_files, module_name
 from nexus.services.codeintel.models import CodeImpactResult
 
 
 def _module_name(root: Path, path: Path) -> str:
-    rel = path.relative_to(root).with_suffix("")
-    parts = list(rel.parts)
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    return ".".join(parts)
+    return module_name(root, path)
 
 
 def _imports_for(path: Path) -> set[str]:
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (SyntaxError, UnicodeDecodeError):
-        return set()
-    imports: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imports.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imports.add(node.module)
-    return imports
+    return imports_for(path)
 
 
 def _iter_python_files(root: Path) -> list[Path]:
-    ignored = {
-        ".codex",
-        ".git",
-        ".mypy_cache",
-        ".nexus",
-        ".pytest_cache",
-        ".venv",
-        "__pycache__",
-    }
-    files: list[Path] = []
-    for path in root.rglob("*.py"):
-        if ignored.intersection(path.relative_to(root).parts):
-            continue
-        files.append(path)
-    return files
+    return iter_python_files(root)
 
 
 def analyze_impact(root: str | Path, changed_files: list[str]) -> CodeImpactResult:

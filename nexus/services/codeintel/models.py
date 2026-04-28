@@ -14,6 +14,20 @@ class CodeImpactResult:
     risk_score: int = 0
     risk_reason: list[str] = field(default_factory=list)
     evidence_paths: list[str] = field(default_factory=list)
+    report_path: str = ""
+    schema_version: str = CODEINTEL_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class CodeScanResult:
+    nodes_count: int
+    edges_count: int
+    languages: list[str] = field(default_factory=list)
+    index_path: str = ""
+    generated_at: str = ""
     schema_version: str = CODEINTEL_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, object]:

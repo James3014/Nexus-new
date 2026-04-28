@@ -160,11 +160,37 @@ def code_impact(files_text: str, output_json: bool, report_file: str | None):
     out_path = Path(report_file) if report_file else repo_root / ".nexus" / "reports" / "codeintel" / "impact.json"
     out_path = out_path if out_path.is_absolute() else repo_root / out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    result["report_path"] = str(out_path)
+    evidence_paths = list(result.get("evidence_paths", []) or [])
+    if str(out_path) not in evidence_paths:
+        evidence_paths.append(str(out_path))
+    result["evidence_paths"] = evidence_paths
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     if output_json:
         click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         click.echo(f"Code impact: {len(result['impacted_files'])} impacted files, risk={result['risk_score']}")
+        click.echo(f"Report: {out_path}")
+
+
+@code_group.command(name="scan")
+@click.option("--output-json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option("--index-path", type=click.Path(), default=None, help="Optional graph index path.")
+@click.option("--report-file", type=click.Path(), default=None, help="Optional scan report path.")
+def code_scan(output_json: bool, index_path: str | None, report_file: str | None):
+    """Build a deterministic Nexus native CodeIntel graph index."""
+    from nexus.services.codeintel import scan_codebase
+
+    result = scan_codebase(repo_root, index_path=index_path).to_dict()
+    out_path = Path(report_file) if report_file else repo_root / ".nexus" / "reports" / "codeintel" / "scan.json"
+    out_path = out_path if out_path.is_absolute() else repo_root / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    if output_json:
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        click.echo(f"Code scan: {result['nodes_count']} nodes, {result['edges_count']} edges")
+        click.echo(f"Index: {result['index_path']}")
         click.echo(f"Report: {out_path}")
 
 def _render_hallucination_unverified(reason: str) -> None:

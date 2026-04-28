@@ -77,11 +77,13 @@ How:
 
 Status:
 - 2026-04-28 P31a implemented: native `code:impact` service and CLI.
-- Current scope: Python import reverse-impact only; no full symbol graph, no watch/index daemon, no external runtime.
+- 2026-04-28 P31b implemented: native `code:scan` graph builder and CLI.
+- Current scope: Python module/import graph only; no watch/index daemon, no external runtime.
 
 Lesson:
 - CodeIntel should start with a small, deterministic stdlib path. A conservative import-impact result is more useful for gates than a broad opaque graph that cannot be explained or tested.
 - Impact scanning must exclude generated sandboxes and local caches such as `.nexus`, `.git`, `.venv`, and `.codex`; otherwise stale review worktrees inflate blast radius and make the evidence unusable.
+- Scan output should be a deterministic graph index plus a small scan report. Keep indexing local and explainable before adding watch mode or richer symbol extraction.
 
 ## P32: CodeIntel Gate / Multi-Agent 接線
 
@@ -99,9 +101,11 @@ How:
 
 Status:
 - 2026-04-28 P32a implemented: code-change tasks require `code-impact` evidence at pre-gate even when the task did not explicitly list it.
+- 2026-04-28 P32b implemented: `code:impact` emits `report_path` and includes the report in `evidence_paths`, making it easier for gates and closeout bundles to cite the same artifact.
 
 Lesson:
 - Existing fixtures with placeholder `file1.py` become real code-change tasks once code-impact is fail-closed. Tests that are not about code changes should use docs paths; code-change pass tests must include `nexus code:impact` evidence.
+- CodeIntel evidence must include the generated report path, not just changed source files. Otherwise a task can claim impact analysis happened without a reusable artifact.
 
 ## P33: RLM Production Hardening
 
