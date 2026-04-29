@@ -107,6 +107,13 @@ def build_capability_signals(
         oracle_signal="oracle" in task_lower or "shadow" in task_lower,
         federation_signal="federation" in task_lower or "tenant" in task_lower,
         stress_signal="stress" in task_lower or "recursion" in task_lower,
+        acceptance_signal=_contains_any(task_lower, ("acceptance", "closeout", "public claim", "handoff", "delivery receipt")),
+        forecast_signal=_contains_any(task_lower, ("forecast", "predict", "preflight risk", "risk forecast")),
+        xray_signal=_contains_any(task_lower, ("xray", "deep scan", "dependency graph", "unknown codebase", "blast radius")),
+        research_control_signal=_contains_any(
+            task_lower,
+            ("research control", "auto-flow", "experiment", "optimizer", "rollback", "semantic status"),
+        ),
         skill_candidates=skill_signals.top_skill_ids,
         skill_confidence=skill_signals.skill_confidence,
     )

@@ -167,7 +167,7 @@ def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
         pillars={"lancedb": {"hits": 0}},
     ).to_dict()
 
-    assert {"autoreason", "ddtree"} <= set(repair_plan["selected_capabilities"])
+    assert {"autoreason", "ddtree", "repair_loop"} <= set(repair_plan["selected_capabilities"])
     assert "autoreason" in set(trust_plan["selected_capabilities"])
 
 
@@ -206,7 +206,7 @@ def test_capability_planner_selects_sandbox_for_high_risk_governance():
     ).to_dict()
 
     selected = set(plan["selected_capabilities"])
-    assert {"ultra_review", "sandbox", "pregate", "plan_quality_gate"} <= selected
+    assert {"ultra_review", "sandbox", "pregate", "plan_quality_gate", "forecast_gate"} <= selected
 
 
 def test_capability_planner_selects_second_wave_platform_capabilities():
@@ -244,6 +244,30 @@ def test_capability_planner_selects_second_wave_platform_capabilities():
         "oracle_shadow",
         "stress_test",
     } <= selected
+
+
+def test_capability_planner_selects_acceptance_xray_forecast_and_research_control_gap_capabilities():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Run research:auto-flow experiment with rollback and semantic status, "
+            "then produce an acceptance closeout public claim after xray deep scan "
+            "of dependency graph blast radius and forecast preflight risk."
+        ),
+        task_type="platform_route_diagnostic",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 82,
+                "adjusted_root_cause_confidence": 0.55,
+                "candidate_count": 2,
+                "is_cross_module_task": True,
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"acceptance_check", "forecast_gate", "xray", "research_control_plane"} <= selected
 
 
 def test_capability_planner_selects_msa_capabilities_from_explicit_task_type_words():

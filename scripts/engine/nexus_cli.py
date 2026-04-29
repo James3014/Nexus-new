@@ -1582,7 +1582,8 @@ def delegate(task_name, report_file, output_json):
 @click.option("--findings-query")
 @click.option("--output-json", is_flag=True)
 @click.option("--explain-route", is_flag=True)
-def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json, explain_route):
+@click.option("--route-decision-report", type=click.Path(path_type=Path))
+def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json, explain_route, route_decision_report):
     """🧠 Strategy Routing Layer: Decide whether to research and in what mode."""
     out = research_flow_service.build_route(repo_root=repo_root, 
         task_desc=task_desc,
@@ -1591,9 +1592,29 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
         root_cause_confidence=root_cause_confidence,
         findings_query=findings_query,
     )
+    if route_decision_report:
+        from nexus.engine.capability_planner import CapabilityPlanner
+        from nexus.engine.route_decision_adapter import build_route_decision, write_route_decision_report
+
+        plan = CapabilityPlanner().plan(task_desc=task_desc, task_type=task_type, route=out)
+        report_path = route_decision_report
+        if not report_path.is_absolute():
+            report_path = repo_root / report_path
+        decision = build_route_decision(
+            task_id=f"research-route-{int(time.time())}",
+            task_desc=task_desc,
+            task_type=task_type,
+            recommended_flow=out["recommended_flow"],
+            plan=plan,
+            stop_policy=out["capability_stack"].get("stop_policy", {}),
+        )
+        written = write_route_decision_report(report_path, decision)
+        out["route_decision_report"] = str(written)
     if explain_route:
         click.echo("--- ROUTE EXPLANATION ---")
         click.echo(json.dumps(out["explain_payload"], indent=2))
+        if route_decision_report:
+            click.echo(f"Route Decision Report: {out['route_decision_report']}")
         return
 
     if output_json:

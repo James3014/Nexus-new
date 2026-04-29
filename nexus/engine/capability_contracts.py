@@ -64,6 +64,10 @@ class CapabilitySignalSet:
     oracle_signal: bool = False
     federation_signal: bool = False
     stress_signal: bool = False
+    acceptance_signal: bool = False
+    forecast_signal: bool = False
+    xray_signal: bool = False
+    research_control_signal: bool = False
     skill_candidates: tuple[str, ...] = ()
     skill_confidence: float = 0.0
 

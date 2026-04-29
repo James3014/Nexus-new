@@ -512,6 +512,7 @@ class CapabilityPlanner:
             states[name] = "conditional"
             reasons[name].append(reason)
 
+        task_lower = f"{task_desc} {task_type}".lower()
         if "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint":
             enable("hyper", "route_selected_hyper")
         if signals.recommended_flow == "baseline":
@@ -535,6 +536,8 @@ class CapabilityPlanner:
             enable("lancedb", "semantic_memory_hits_available")
         if "ddtree" in signals.acceleration_seed or signals.candidate_count >= 3 or signals.repair_signal:
             enable("ddtree", "candidate_space_pruning")
+        if signals.repair_signal:
+            enable("repair_loop", "repair_or_self_heal_signal")
         if "ultra_review" in signals.governance_seed or signals.risk_score >= 70 or signals.hard_signal or signals.governance_signal:
             enable("ultra_review", "high_risk_or_governance_route")
             enable("sandbox", "high_risk_isolated_execution")
@@ -548,6 +551,14 @@ class CapabilityPlanner:
         if signals.risk_score >= 30 or signals.governance_signal or signals.evidence_signal:
             enable("pregate", "risk_or_policy_precheck")
             enable("plan_quality_gate", "plan_review_required")
+        if signals.acceptance_signal or signals.benchmark_signal or signals.evidence_signal:
+            enable("acceptance_check", "acceptance_or_public_claim_signal")
+        if signals.forecast_signal or signals.risk_score >= 80 or signals.confidence < 0.6:
+            enable("forecast_gate", "forecast_or_high_uncertainty_signal")
+        if signals.xray_signal or (signals.cross_module and signals.risk_score >= 60):
+            enable("xray", "deep_scan_or_dependency_signal")
+        if signals.research_control_signal or "research:auto-flow" in task_lower:
+            enable("research_control_plane", "research_control_or_experiment_signal")
         if signals.swarm_signal or (signals.cross_module and signals.risk_score >= 70):
             enable("swarm", "cross_module_high_risk_review")
         if signals.drone_signal or (signals.cross_module and signals.candidate_count >= 2):
@@ -555,7 +566,6 @@ class CapabilityPlanner:
         if signals.multi_agent_signal or (signals.cross_module and signals.risk_score >= 60):
             enable("file_lock", "multi_agent_write_boundary")
             enable("multi_agent", "coordinated_ownership_required")
-        task_lower = f"{task_desc} {task_type}".lower()
         if "merge" in task_lower or "integrate" in task_lower or "integration" in task_lower:
             enable("integration_manager", "integration_or_merge_signal")
         if signals.risk_score >= 90 or "long" in task_lower or signals.nightshift_signal or "nightshift" in signals.governance_seed:

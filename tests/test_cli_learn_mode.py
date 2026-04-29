@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from click.testing import CliRunner
 from unittest.mock import MagicMock
 
@@ -722,6 +723,7 @@ def test_learn_ask_unknown_writes_benchmark_candidate(tmp_path, monkeypatch):
 def test_learn_refresh_plan_marks_due_sources(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+    fresh_timestamp = datetime.now(timezone.utc).isoformat()
 
     sources_path = tmp_path / ".nexus" / "knowledge" / "learn_sources.jsonl"
     sources_path.parent.mkdir(parents=True, exist_ok=True)
@@ -741,16 +743,16 @@ def test_learn_refresh_plan_marks_due_sources(tmp_path, monkeypatch):
                     }
                 ),
                 json.dumps(
-                    {
-                        "topic": "repo-scout",
-                        "source": "repo:BingJyun/repo-scout-skill",
-                        "source_file": "",
-                        "refresh_after_days": 14,
-                        "priority": "medium",
-                        "last_ingested_at": "2026-04-15T00:00:00+00:00",
-                        "last_refreshed_at": "2026-04-15T00:00:00+00:00",
-                        "last_claim_count": 50,
-                    }
+                        {
+                            "topic": "repo-scout",
+                            "source": "repo:BingJyun/repo-scout-skill",
+                            "source_file": "",
+                            "refresh_after_days": 14,
+                            "priority": "medium",
+                            "last_ingested_at": fresh_timestamp,
+                            "last_refreshed_at": fresh_timestamp,
+                            "last_claim_count": 50,
+                        }
                 ),
             ]
         )

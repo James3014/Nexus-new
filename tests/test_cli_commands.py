@@ -642,6 +642,39 @@ def test_research_route_recommended_flow_hyper_for_risky_task(tmp_path, monkeypa
     assert data["should_research"] is True
 
 
+def test_research_route_writes_route_decision_report_when_requested(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
+    report = tmp_path / ".nexus" / "reports" / "routes" / "route.json"
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "research:route",
+            "--task-desc",
+            "fix flaky websocket timeout with xray dependency graph",
+            "--task-type",
+            "bug",
+            "--candidate-count",
+            "2",
+            "--root-cause-confidence",
+            "0.55",
+            "--route-decision-report",
+            str(report),
+            "--output-json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert data["route_decision_report"] == str(report)
+    assert payload["schema_version"] == "nexus_route_decision_v1"
+    assert payload["decision_source"] == "capability_planner"
+    assert "xray" in payload["selected_capabilities"]
+    assert payload["signal_snapshot"]["pillar_signals"]["Claim"]["active"] is True
+
+
 def test_research_auto_flow_baseline(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)

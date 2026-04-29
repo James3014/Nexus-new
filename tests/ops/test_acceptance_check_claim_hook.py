@@ -88,12 +88,14 @@ def test_acceptance_check_allows_cold_start_in_dev_policy(monkeypatch):
 
     runner = CliRunner()
     with runner.isolated_filesystem():
-        Path(".nexus/reports").mkdir(parents=True, exist_ok=True)
+        acceptance_dir = Path.cwd() / ".nexus" / "reports"
+        acceptance_dir.mkdir(parents=True, exist_ok=True)
         Path(".nexus/reports/acceptance_check.json").write_text(
             json.dumps({"status": "UNVERIFIED_COLD_START", "gate_passed": False}),
             encoding="utf-8",
         )
         Path(".nexus/reports/acceptance_check.md").write_text("# check", encoding="utf-8")
+        monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", Path.cwd())
         result = runner.invoke(nexus, ["nexus", "acceptance-check"])
 
     assert result.exit_code == 0

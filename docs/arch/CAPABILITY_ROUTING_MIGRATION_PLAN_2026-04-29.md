@@ -308,3 +308,19 @@ incrementally.
   - Wire route decision reports as a parallel diagnostic artifact first.
   - Only after reports/gates consume `RouteDecision` should execution migrate
     away from the compact legacy `capability_stack`.
+
+## 2026-04-29 P3-P6 Route Diagnostic Lesson
+- Failure lesson:
+  - New planner rules must define shared text state before capability branches.
+    Adding `research_control_plane` before `task_lower` existed caused a broad
+    `UnboundLocalError` across planner and CLI route tests.
+  - Changed-only surfaced two unrelated unstable tests: acceptance cold-start
+    wrote fixtures in the isolated cwd while the CLI read `repo_root`, and learn
+    refresh due-date fixtures crossed the 2026-04-29 calendar boundary.
+- Fix:
+  - Added opt-in `research:route --route-decision-report` diagnostic output.
+  - Added `pillar_signals` summary to `RouteDecision.signal_snapshot`.
+  - Added planner rules for `repair_loop`, `acceptance_check`,
+    `forecast_gate`, `xray`, and `research_control_plane`.
+  - Kept `learn_scheduler` and `autonomic_router` reserved until scheduler
+    freshness signals and planner-SSOT migration are clearer.
