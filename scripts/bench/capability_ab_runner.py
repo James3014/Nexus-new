@@ -974,6 +974,10 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
             "\n\nNexus replay evidence rule: trust receipts only when the claim, "
             "replay command, and execution result all agree. Similar-looking fields "
             "must not bypass the contract."
+            "\nNexus replay receipt contract: accept only claim='verified' with a "
+            "non-empty replay_command and exit_code == 0. Reject missing "
+            "replay_command, nonzero exit_code, replay_exit_code aliases, and "
+            "partial claims."
         )
     if task.fixture_kind == "rlm_harder_v2_memory_contract":
         desc += (
@@ -1812,6 +1816,10 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
     if task.fixture_kind == "rlm_harder_v2_governance_scope":
         guidance.append(
             "For scope decisions, approved mutations return reason approved, read-only inspection returns reason read_only, and unapproved mutating or unknown actions return reason scope_block."
+        )
+    if task.fixture_kind == "rlm_harder_v2_evidence_replay":
+        guidance.append(
+            "For replay receipts, accept only claim='verified' with a non-empty replay_command and exit_code == 0; reject missing replay_command, nonzero exit_code, replay_exit_code aliases, and partial claims."
         )
     if task.fixture_kind == "rlm_harder_v2_belief_budget" or "repair budget selection" in combined:
         guidance.append(

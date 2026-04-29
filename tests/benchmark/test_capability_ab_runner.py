@@ -1427,6 +1427,26 @@ def test_nexus_codex_hidden_verifier_guidance_names_governance_contracts():
     assert "reason scope_block" in _nexus_codex_hidden_verifier_guidance(scope_task, "def rlm_harder_v2_scope_decision(request): pass")
 
 
+def test_nexus_codex_hidden_verifier_guidance_names_replay_contract():
+    task = CapabilityTask(
+        id="replay",
+        category="feature",
+        difficulty="hard",
+        task_type="public_feature",
+        task_desc="Fix replay evidence receipts.",
+        target_file="target.py",
+        test_file="test_target.py",
+        fixture_kind="rlm_harder_v2_evidence_replay",
+        success_criteria="patch_and_tests_pass",
+    )
+
+    guidance = _nexus_codex_hidden_verifier_guidance(task, "def rlm_harder_v2_accept_receipt(receipt): pass")
+
+    assert "non-empty replay_command" in guidance
+    assert "exit_code == 0" in guidance
+    assert "replay_exit_code aliases" in guidance
+
+
 def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="rlm-harder-v2-evidence-001",
@@ -1530,7 +1550,9 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
     assert "Nexus Belief budget rule" in _nexus_task_desc(belief)
     assert "{'rounds': 3, 'needs_evidence': True}" not in _nexus_task_desc(belief)
     assert "Nexus replay evidence rule" in _nexus_task_desc(replay)
-    assert "`exit_code`, not `replay_exit_code`" not in _nexus_task_desc(replay)
+    assert "non-empty replay_command" in _nexus_task_desc(replay)
+    assert "exit_code == 0" in _nexus_task_desc(replay)
+    assert "replay_exit_code aliases" in _nexus_task_desc(replay)
 
 
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):
