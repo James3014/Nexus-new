@@ -1632,6 +1632,24 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
             click.secho("⚠️ [Advisor] Low confidence detected. Codex Audit recommended.", fg="yellow", bold=True)
 
 
+@nexus_group.command(name="capability:coverage-gap")
+@click.option("--report-file", default=".nexus/reports/capability_coverage_gap.json", show_default=True, type=click.Path(path_type=Path))
+@click.option("--output-json", is_flag=True)
+def capability_coverage_gap(report_file, output_json):
+    """📊 Emit capability routing coverage gaps without invoking models."""
+    from nexus.engine.capability_coverage_gap import build_capability_coverage_gap_report, write_capability_coverage_gap_report
+
+    report_path = report_file if report_file.is_absolute() else repo_root / report_file
+    payload = build_capability_coverage_gap_report()
+    write_capability_coverage_gap_report(report_path)
+    payload["report_path"] = str(report_path)
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"Capability coverage gap report: {report_path}")
+        click.echo(f"Unruled: {payload['unruled_count']} Reserved: {payload['reserved_count']} Pending executors: {payload['pending_executor_count']}")
+
+
 @nexus_group.command(name="research:report")
 @click.option("--input", "input_dir", default=".nexus/reports/research", type=click.Path(exists=True))
 @click.option("--rolling", type=int, default=7)

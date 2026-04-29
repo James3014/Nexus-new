@@ -228,6 +228,32 @@ incrementally.
     accurate yet; they remain `selected_without_invocation` until executor
     receipts are connected.
 
+## 2026-04-29 P7-P10 Route Decision Benchmark Readiness
+- Benchmark rows now carry `route_decision` diagnostics from the same
+  `CapabilityPlanner` path used by `research:auto-flow`. This makes public
+  reports able to show selected, required, conditional, pending, forbidden, and
+  pillar-active routing evidence instead of only legacy preset names.
+- Added a capability coverage gap report so every registered capability is
+  either ruled, reserved, or executor-pending. P8 caught that this check must be
+  automated: a capability can otherwise exist in the registry without a routing
+  migration status.
+- P9 Nexus-only route diagnostics covered three lanes:
+  - high-risk ability work selected CodeIntel, Research, Hyper, Ultra Review,
+    Autoreason, DDTree, and MSA capabilities with Swarm/Drone/Nightshift marked
+    pending.
+  - governance/public-claim work selected evidence, MemPalace, Artifact, Claim,
+    Research, Hyper, Autoreason, and learning gates.
+  - low-risk documentation work stayed on baseline/direct mode while preserving
+    mandatory delivery, MemPalace, Artifact, and Claim gates.
+- P10 Gemini 3 Flash public benchmark preflight passed with hidden verifier,
+  evidence bundle, and same-model lock enabled. The only warning was dirty
+  worktree state, so formal Gemini runs must happen after commit or in a clean
+  worktree.
+- Changed-only L2 selected benchmark ops loop tests for this edit set. The
+  integration smoke started a nested benchmark subprocess and was stopped after
+  becoming quiet; use focused unit tests plus an explicit benchmark smoke for
+  this path instead of letting changed-only own long benchmark execution.
+
 ## 2026-04-29 P54-P58 Pending Executor Result
 - Planner now exposes `pending_capabilities` for beta collaboration abilities
   that can be recommended but do not yet have production executor receipts in

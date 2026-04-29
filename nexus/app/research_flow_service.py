@@ -23,6 +23,7 @@ from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_router import CapabilityRouter
 from nexus.engine.capability_selector import CapabilitySelector
+from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
@@ -1636,6 +1637,14 @@ def run_auto_flow(
         phase_trace=nexus_usage_trace["phase_trace"],
     )
     nexus_usage_trace["capability_plan"] = capability_plan.to_dict()
+    nexus_usage_trace["route_decision"] = build_route_decision(
+        task_id=task_id or _safe_trace_slug(task_desc),
+        task_desc=task_desc,
+        task_type=task_type,
+        recommended_flow=str(route.get("recommended_flow") or ""),
+        plan=capability_plan,
+        stop_policy=(route.get("capability_stack", {}) or {}).get("stop_policy", {}),
+    ).to_dict()
     nexus_usage_trace["capability_receipts"] = [
         item.to_dict()
         for item in build_trace_receipts(

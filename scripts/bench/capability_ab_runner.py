@@ -32,6 +32,8 @@ from nexus.app.research_flow_service import (
     build_route_executor_flags,
     run_auto_flow,
 )
+from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.services.gemini_cli import (
     build_gemini_cli_invocation,
@@ -1246,6 +1248,8 @@ def _extract_record(
     capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
     capability_plan = usage_trace.get("capability_plan", {}) if isinstance(usage_trace, dict) else {}
     capability_plan = capability_plan if isinstance(capability_plan, dict) else {}
+    route_decision = usage_trace.get("route_decision", {}) if isinstance(usage_trace, dict) else {}
+    route_decision = route_decision if isinstance(route_decision, dict) else {}
     capability_receipts = usage_trace.get("capability_receipts", []) if isinstance(usage_trace, dict) else []
     capability_receipts = capability_receipts if isinstance(capability_receipts, list) else []
     capability_replan_trace = capability_plan.get("replan_trace", []) if isinstance(capability_plan, dict) else []
@@ -1419,6 +1423,18 @@ def _extract_record(
         "capability_plan_selected": list(capability_plan.get("selected_capabilities", []) or []),
         "capability_plan_required": list(capability_plan.get("required_capabilities", []) or []),
         "capability_plan_conditional": list(capability_plan.get("conditional_capabilities", []) or []),
+        "route_decision_schema_version": str(route_decision.get("schema_version") or ""),
+        "route_decision_report_path": str(usage_trace.get("route_decision_report_path") or ""),
+        "route_decision_selected_count": len(route_decision.get("selected_capabilities", []) or []),
+        "route_decision_required_count": len(route_decision.get("required_capabilities", []) or []),
+        "route_decision_conditional_count": len(route_decision.get("conditional_capabilities", []) or []),
+        "route_decision_pending": list(route_decision.get("pending_capabilities", []) or []),
+        "route_decision_forbidden": list(route_decision.get("forbidden_capabilities", []) or []),
+        "route_decision_pillars_active": [
+            str(name)
+            for name, data in ((route_decision.get("signal_snapshot", {}) or {}).get("pillar_signals", {}) or {}).items()
+            if isinstance(data, dict) and bool(data.get("active", False))
+        ],
         "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),
         "capability_receipts": capability_receipts,
         "capability_receipts_json": json.dumps(capability_receipts, ensure_ascii=False, sort_keys=True),
@@ -2024,6 +2040,23 @@ def _run_with_nexus_codex(
         "nexus_rescued": False,
         "winner_source": "codex_wearing_nexus",
     }
+    capability_plan = CapabilityPlanner().plan(
+        task_desc=task.task_desc,
+        task_type=task.task_type,
+        route=route,
+        pillars=usage_trace["pillars"],
+        codeintel=codeintel,
+        phase_trace=usage_trace["phase_trace"],
+    )
+    usage_trace["capability_plan"] = capability_plan.to_dict()
+    usage_trace["route_decision"] = build_route_decision(
+        task_id=task.id,
+        task_desc=task.task_desc,
+        task_type=task.task_type,
+        recommended_flow=str(route.get("recommended_flow") or ""),
+        plan=capability_plan,
+        stop_policy=(route.get("capability_stack", {}) or {}).get("stop_policy", {}),
+    ).to_dict()
     payload = {
         "result": {
             "status": status,

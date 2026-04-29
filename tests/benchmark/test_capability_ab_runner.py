@@ -848,6 +848,21 @@ def test_extract_record_maps_semantic_fields():
                 "replan_trace": [{"phase": "P", "active_capabilities": ["hyper"]}, {"phase": "A", "active_capabilities": ["claim_gate"]}],
                 "score": 18,
             },
+            "route_decision": {
+                "schema_version": "nexus_route_decision_v1",
+                "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "hyper", "autoreason"],
+                "required_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate"],
+                "conditional_capabilities": ["hyper", "autoreason"],
+                "pending_capabilities": ["swarm"],
+                "forbidden_capabilities": [],
+                "signal_snapshot": {
+                    "pillar_signals": {
+                        "MemPalace": {"active": True},
+                        "Artifact": {"active": True},
+                        "Claim": {"active": True},
+                    }
+                },
+            },
         },
         "timing": {"cli_elapsed_sec": 2.4, "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5}},
         "result": {
@@ -945,6 +960,12 @@ def test_extract_record_maps_semantic_fields():
     assert out["capability_plan_required"] == ["mempalace_gate", "artifact_gate", "claim_gate"]
     assert out["capability_plan_conditional"] == ["hyper", "autoreason"]
     assert out["capability_plan_phases"] == ["P", "A"]
+    assert out["route_decision_schema_version"] == "nexus_route_decision_v1"
+    assert out["route_decision_selected_count"] == 5
+    assert out["route_decision_required_count"] == 3
+    assert out["route_decision_conditional_count"] == 2
+    assert out["route_decision_pending"] == ["swarm"]
+    assert out["route_decision_pillars_active"] == ["MemPalace", "Artifact", "Claim"]
     assert out["semantic_completed"] is False
     assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
     assert out["nexus_phases_observed"] == ["P", "X", "D", "R", "A", "C"]
