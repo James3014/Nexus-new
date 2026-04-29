@@ -290,3 +290,21 @@ incrementally.
   old inference path remains for historical report compatibility.
 - RLM still needs executor-level receipts before recursive loop claims can
   produce capability-specific public claims.
+
+## 2026-04-29 P2 RouteDecision Adapter Lesson
+- Failure lesson:
+  - Do not expose full capability state by adding new fields to the legacy
+    `capability_stack` facade. That stack is a compatibility output for old
+    execution/report paths; adding full composition there risks benchmark drift
+    and downstream schema surprise.
+  - Full required/conditional/optional/pending/forbidden state belongs in the
+    `RouteDecision` contract, produced from `CapabilityPlan` by an adapter.
+- Fix:
+  - Added `route_decision_adapter.build_route_decision(...)`.
+  - It converts `CapabilityPlan` plus executor controls into
+    `RouteDecision(schema_version=nexus_route_decision_v1)`.
+  - Legacy `CapabilityRouter` keeps its old compact output.
+- Next:
+  - Wire route decision reports as a parallel diagnostic artifact first.
+  - Only after reports/gates consume `RouteDecision` should execution migrate
+    away from the compact legacy `capability_stack`.

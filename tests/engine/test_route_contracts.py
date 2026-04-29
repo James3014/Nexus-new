@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_contracts import RouteDecision, RouteExperiment
+from nexus.engine.route_decision_adapter import build_route_decision
 
 
 def test_route_decision_preserves_composable_capability_state():
@@ -38,6 +40,53 @@ def test_route_decision_preserves_composable_capability_state():
         "gate_passed",
         "outcome_contributed",
     ]
+
+
+def test_route_decision_adapter_preserves_full_capability_space():
+    plan = CapabilityPlanner().plan(
+        task_desc="Cross-module refactor: align swarm, drone, and nightshift fallback.",
+        task_type="cross_module_refactor_swarm_drone_nightshift",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 92,
+                "adjusted_root_cause_confidence": 0.42,
+                "candidate_count": 4,
+                "memory_hits": 2,
+                "findings_hits": 1,
+                "is_cross_module_task": True,
+                "has_hard_signal": True,
+            },
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+    )
+    decision = build_route_decision(
+        task_id="task-cross-module",
+        task_desc="Cross-module refactor: align swarm, drone, and nightshift fallback.",
+        task_type="cross_module_refactor_swarm_drone_nightshift",
+        recommended_flow="hyper_sprint",
+        plan=plan,
+    ).to_dict()
+
+    assert decision["decision_source"] == "capability_planner"
+    assert {"research_route", "delivery_gate", "mempalace_gate", "artifact_gate", "claim_gate"} <= set(
+        decision["required_capabilities"]
+    )
+    assert {"autoreason", "ddtree", "ultra_review", "swarm", "drone", "nightshift"} <= set(
+        decision["conditional_capabilities"]
+    )
+    assert {"swarm", "drone", "nightshift"} <= set(decision["pending_capabilities"])
+    assert "ddtree" in decision["acceleration_layers"]
+    assert "ultra_review" in decision["governance_layers"]
+    assert decision["executor_controls"]["enable_autoreason_executor"] is True
+    assert decision["fallback_policy"] == "fail_closed"
+    assert decision["public_claim_scope"] == "receipt_backed"
+    assert any(item["capability"] == "codeintel" for item in decision["decision_trace"])
 
 
 def test_route_experiment_requires_fixed_eval_and_rollback_context():
