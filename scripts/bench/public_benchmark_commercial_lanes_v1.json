@@ -1,0 +1,88 @@
+{
+  "version": "2026-04-29",
+  "frozen": true,
+  "benchmark_id": "nexus-public-commercial-lanes-v1",
+  "description": "Commercial-style Nexus benchmark lane plan. Each lane references frozen public-candidate task manifests and must be reported separately.",
+  "models_allowed": [
+    "gemini-3-flash-preview",
+    "gemini-3.1-pro-preview"
+  ],
+  "rules": {
+    "same_model_bare_vs_nexus": true,
+    "hidden_verifier_required": true,
+    "infra_invalid_excluded_from_denominator": true,
+    "no_cross_model_headline": true,
+    "nexus_is_battlesuit_not_agent": true
+  },
+  "lanes": [
+    {
+      "id": "capability_lift",
+      "name": "Capability lift",
+      "what": "Measure whether the same model solves more hidden-verifier tasks when wearing Nexus.",
+      "primary_metrics": [
+        "eligible_solve_rate",
+        "semantic_verified_rate",
+        "hidden_verifier_pass_rate",
+        "first_pass_rate",
+        "self_heal_wins",
+        "rlm_second_round_wins"
+      ],
+      "task_refs": [
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-hidden-001"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-hidden-002"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-repair-001"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-repair-002"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-context-001"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-context-002"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-memory-001"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-belief-001"}
+      ]
+    },
+    {
+      "id": "governed_delivery",
+      "name": "Governed delivery",
+      "what": "Measure whether Nexus turns model output into verified, auditable, low-trust-mismatch delivery.",
+      "primary_metrics": [
+        "verified_delivery_rate",
+        "trust_mismatch_rate",
+        "public_claim_gate_pass_rate",
+        "evidence_bundle_completeness",
+        "five_pillar_coverage",
+        "six_phase_trace_coverage"
+      ],
+      "task_refs": [
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-gov-001"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-gov-002"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-evidence-001"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-evidence-002"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-trust-001"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-trust-002"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-governance-001"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-governance-002"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-evidence-001"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-evidence-002"}
+      ]
+    },
+    {
+      "id": "cost_efficiency",
+      "name": "Cost efficiency",
+      "what": "Measure whether Nexus chooses the right amount of armor for each risk level.",
+      "primary_metrics": [
+        "wall_time_per_verified_delivery",
+        "tokens_per_verified_delivery",
+        "model_calls_per_verified_delivery",
+        "capability_stack_size",
+        "timeout_rate",
+        "route_promotion_decision"
+      ],
+      "task_refs": [
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-repair-001"},
+        {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-repair-002"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-second-round-001"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-second-round-002"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-belief-001"},
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-memory-001"}
+      ]
+    }
+  ]
+}
