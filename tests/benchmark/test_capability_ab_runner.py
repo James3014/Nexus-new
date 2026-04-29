@@ -1321,6 +1321,18 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert out["nexus_wearing_valid"] is True
     assert out["codeintel_scan_report_present"] is True
     assert any(item["name"] == "codeintel" and item["public_claim_safe"] for item in out["capability_receipts"])
+    receipts = {item["name"]: item for item in out["capability_receipts"]}
+    assert receipts["autoreason"]["invoked"] is False
+    assert receipts["autoreason"]["public_claim_safe"] is False
+    assert receipts["autoreason"]["failure_reason"] == "selected_without_invocation"
+    assert receipts["ddtree"]["invoked"] is False
+    assert receipts["ddtree"]["public_claim_safe"] is False
+    assert receipts["ddtree"]["failure_reason"] == "selected_without_invocation"
+    assert receipts["ultra_review"]["invoked"] is False
+    assert receipts["ultra_review"]["public_claim_safe"] is False
+    assert receipts["ultra_review"]["failure_reason"] == "direct_codex_no_ultra_review_report"
+    assert out["ultra_review_invoked"] is False
+    assert out["ultra_review_gate_passed"] is False
     assert out["capability_receipts_json"]
     assert out["gateway_stats_present"] is True
     assert out["gateway_token_source"] == "codex_stdout"

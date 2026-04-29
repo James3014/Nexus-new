@@ -339,6 +339,22 @@ incrementally.
   - Legacy inferred coverage for receipt-required capabilities is marked
     `legacy_untrusted`, so it cannot pass the capability-specific public gate.
 
+## 2026-04-29 P22-P24 Direct Codex Receipt Lesson
+- Direct Codex-with-Nexus is a prompt/context wearing path, not the same as
+  running every Nexus executor. Prompt-delivered executor flags must not become
+  invocation receipts.
+- In the direct Codex path:
+  - Autoreason is `PROMPT_ONLY` unless a real judge result with winner/evidence
+    exists.
+  - DDTree remains diagnostic unless a real pruning executor reports
+    `actual_saved_steps>0`.
+  - Ultra Review remains not invoked unless a dry/live review report path exists.
+- Public reports must prefer `capability_receipts` over legacy booleans. Legacy
+  fields like `ultra_review_invoked=true` cannot override an incomplete receipt.
+- This keeps Codex self-benchmark useful for route/value tuning while preventing
+  capability-specific public claims from overstating which Nexus abilities
+  actually executed.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

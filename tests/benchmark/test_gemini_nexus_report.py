@@ -487,6 +487,7 @@ def test_render_markdown_report_surfaces_infra_invalid_rows(tmp_path):
                 "token_capture_status": "measured",
                 "run_eligible": True,
                 "gemini_uses_nexus": True,
+                "model_uses_nexus": True,
                 "nexus_context_delivered": True,
                 "nexus_usage_valid": True,
                 "pillar_lancedb_active": True,
@@ -565,6 +566,7 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
                 "token_capture_status": "measured",
                 "run_eligible": True,
                 "gemini_uses_nexus": True,
+                "model_uses_nexus": True,
                 "nexus_context_delivered": True,
                 "nexus_usage_valid": True,
                 "pillar_lancedb_active": True,
@@ -741,6 +743,11 @@ def test_render_markdown_report_explains_selected_only_capability_receipts(tmp_p
                 "gemini_uses_nexus": True,
                 "nexus_context_delivered": True,
                 "nexus_usage_valid": True,
+                "pillar_lancedb_active": True,
+                "pillar_memory_active": True,
+                "pillar_mempalace_active": True,
+                "pillar_belief_active": True,
+                "pillar_artifact_active": True,
                 "phase_p": "route_built",
                 "phase_x": "retrieval_checked",
                 "phase_d": "guard_decision",
@@ -787,6 +794,88 @@ def test_render_markdown_report_explains_selected_only_capability_receipts(tmp_p
     assert "artifact_gate:invoked+evidence+gate" not in out
     assert "| swarm | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO | capability_receipts | selected_without_invocation:1 |" in out
     assert "| swarm | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
+
+
+def test_render_markdown_report_prefers_incomplete_receipts_over_legacy_capability_flags(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "UNVERIFIED",
+                "status": "FAILED",
+                "wall_duration_sec": 10,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 12,
+                "model_calls": 1,
+                "total_tokens": 90,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "model_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "pillar_lancedb_active": True,
+                "pillar_memory_active": True,
+                "pillar_mempalace_active": True,
+                "pillar_belief_active": True,
+                "pillar_artifact_active": True,
+                "phase_p": "route_built",
+                "phase_x": "context_delivered",
+                "phase_d": "governance_delivered",
+                "phase_r": "patch_generated",
+                "phase_a": "artifact_verified",
+                "phase_c": "row_written",
+                "capability_claim_verified": True,
+                "ultra_review_invoked": True,
+                "ultra_review_gate_passed": True,
+                "ultra_review_report_path": "",
+                "capability_receipts": [
+                    {
+                        "name": "ultra_review",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                        "failure_reason": "direct_codex_no_ultra_review_report",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="gpt-5.5_bare",
+        label_with="gpt-5.5_nexus",
+        benchmark_date="2026-04-29",
+    )
+
+    assert "Public claim gate: PASS" in out
+    assert "Capability-specific claim gate: FAIL" in out
+    assert "ultra_review:invoked+evidence+gate:1" in out
+    assert "Per-capability public-safe capabilities: none" in out
+    assert "| ultra_review | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO | capability_receipts | direct_codex_no_ultra_review_report:1 |" in out
 
 
 def test_render_markdown_report_marks_unplanned_capability_evidence(tmp_path):
