@@ -441,6 +441,27 @@ incrementally.
     stop-loss threshold. If larger tasks still show CodeIntel as dominant, add
     cached graph reuse before expanding to full public-candidate runs.
 
+## 2026-04-30 P44 Flash Smoke Route Lesson
+- Failure lesson:
+  - A Flash smoke exposed an old benchmark shortcut: `with_llm_mode=all`
+    silently forced `--force-flow hyper_sprint` when no explicit flow was set.
+    That makes the test measure a legacy preset instead of the new capability
+    router's decision.
+  - Easy/medium tasks whose route recommendation was `baseline` were therefore
+    upgraded to hyper, increasing wall time and hiding whether the intelligent
+    route was actually correct.
+- Fix:
+  - Removed the implicit `with_llm_mode=all -> hyper_sprint` override. The
+    runner now preserves auto routing unless a caller explicitly passes
+    `--force-flow`.
+- Evidence:
+  - The regression test now asserts that LLM-enabled Nexus runs keep
+    `--llm-mode` but do not add `--force-flow` when no force flow is requested.
+- Next:
+  - Re-run Flash smoke before P45. Public benchmark expansion is blocked until
+    row-level evidence shows the selected flow matches the route decision and
+    Nexus delivery remains valid.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

@@ -2234,8 +2234,6 @@ def run_with_nexus(
     if llm_enabled:
         args.append("--llm-mode")
     effective_force_flow = force_flow
-    if llm_enabled and with_llm_mode == "all" and effective_force_flow is None:
-        effective_force_flow = "hyper_sprint"
     if effective_force_flow:
         args.extend(["--force-flow", effective_force_flow])
 

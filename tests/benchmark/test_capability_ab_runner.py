@@ -2261,7 +2261,7 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
     assert receipt_by_name["ultra_review"]["public_claim_safe"] is True
 
 
-def test_run_with_nexus_llm_all_forces_hyper_flow(tmp_path: Path, monkeypatch):
+def test_run_with_nexus_llm_all_keeps_auto_route_when_force_flow_is_unset(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-001",
         difficulty="medium",
@@ -2296,8 +2296,8 @@ def test_run_with_nexus_llm_all_forces_hyper_flow(tmp_path: Path, monkeypatch):
         with_llm_mode="all",
     )
 
-    assert "--force-flow" in captured["cmd"]
-    assert captured["cmd"][captured["cmd"].index("--force-flow") + 1] == "hyper_sprint"
+    assert "--llm-mode" in captured["cmd"]
+    assert "--force-flow" not in captured["cmd"]
 
 
 def test_history_policy_defaults_to_per_task_reset():
