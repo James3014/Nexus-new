@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scripts.bench.commercial_lane_tasks import build_lane_tasks
 from scripts.bench.capability_ab_runner import load_tasks
 
 
@@ -33,3 +34,16 @@ def test_commercial_lanes_reference_existing_public_tasks():
     ]
 
     assert not missing
+
+
+def test_commercial_lane_compiler_outputs_runner_tasks_file():
+    payload = build_lane_tasks(lane="governed_delivery")
+
+    assert payload["benchmark_id"].endswith(":governed_delivery")
+    assert payload["frozen"] is True
+    assert payload["tasks"]
+    assert {task["commercial_lane"] for task in payload["tasks"]} == {"governed_delivery"}
+    assert {task["id"] for task in payload["tasks"]} >= {
+        "nexus-value-gov-001",
+        "rlm-harder-v2-governance-001",
+    }
