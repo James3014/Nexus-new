@@ -34,6 +34,36 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert out["should_research"] is True
 
 
+def test_build_route_public_contract_exact_keys(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Fix flaky timeout",
+        task_type="bug",
+        candidate_count=2,
+        root_cause_confidence=0.4,
+        findings_query=None,
+    )
+
+    assert set(out) == {
+        "should_research",
+        "mode",
+        "reason",
+        "rounds",
+        "stable_wins",
+        "findings_hits",
+        "prior_fix_hits",
+        "historical_hints",
+        "adjusted_root_cause_confidence",
+        "require_codex_audit",
+        "recommended_flow",
+        "recommended_reason",
+        "explain_payload",
+        "route_features",
+        "capability_stack",
+        "consensus",
+    }
+
+
 def test_compose_capability_plan_preserves_legacy_stack_shape():
     out = research_flow_service.compose_capability_plan(
         task_desc="Fix flaky timeout with evidence and governance risk",
@@ -123,6 +153,50 @@ def test_decide_flow_preserves_core_route_cases(tmp_path: Path):
     assert (hard_bug["recommended_flow"], hard_bug["recommended_reason"]) == ("hyper_sprint", "complex_bug_prefer_hyper")
     assert feature["recommended_flow"] == "baseline"
     assert refactor["recommended_flow"] == "baseline"
+
+
+def test_decide_flow_payload_schema_keys(tmp_path: Path):
+    signals = research_flow_service._collect_route_signals(
+        repo_root=tmp_path,
+        task_desc="Fix flaky websocket timeout",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.4,
+        findings_query="",
+    )
+    payload = research_flow_service._decide_flow(
+        task_desc="Fix flaky websocket timeout",
+        task_type="bug",
+        candidate_count=1,
+        target_file="demo.py",
+        signals=signals,
+    )
+
+    assert set(payload) == {
+        "should_research",
+        "mode",
+        "reason",
+        "recommended_flow",
+        "recommended_reason",
+        "risk_score",
+        "route_features",
+        "explain_payload",
+        "consensus",
+    }
+    assert set(payload["route_features"]) == {
+        "task_type",
+        "has_hard_signal",
+        "has_commercial_signal",
+        "is_cross_module_task",
+        "is_doc_fix",
+        "candidate_count",
+        "findings_hits",
+        "memory_hits",
+        "adjusted_root_cause_confidence",
+        "risk_score",
+    }
+    assert set(payload["consensus"]) == {"votes", "reasons", "winner"}
+    assert set(payload["explain_payload"]["history"]) == {"findings_hits", "memory_hits", "hints_count"}
 
 
 def test_route_executor_flags_enable_dynamic_controls_for_repair_and_governance():

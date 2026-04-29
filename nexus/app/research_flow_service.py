@@ -9,7 +9,7 @@ import difflib
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypedDict
 from dataclasses import dataclass
 import click
 
@@ -33,6 +33,64 @@ class ParsedTuningKnobs:
     stage1_parallel_boost: int = 0
     baseline_fast_sec: float = 0.0
     skip_baseline_probe_for_hard: bool = False
+
+
+class RouteSignals(TypedDict):
+    findings_hits: int
+    memory_hits: int
+    historical_hints: list[str]
+    adjusted_root_cause_confidence: float
+    decision: Any
+    is_doc_fix: bool
+    is_cross_module_task: bool
+    has_commercial_signal: bool
+    has_hard_signal: bool
+
+
+class RouteHistoryPayload(TypedDict):
+    findings_hits: int
+    memory_hits: int
+    hints_count: int
+
+
+class RouteExplainPayload(TypedDict):
+    task_type: str
+    risk: str
+    files: list[str]
+    history: RouteHistoryPayload
+    confidence: float
+    reasoning: str
+
+
+class RouteFeatures(TypedDict):
+    task_type: str
+    has_hard_signal: bool
+    has_commercial_signal: bool
+    is_cross_module_task: bool
+    is_doc_fix: bool
+    candidate_count: int
+    findings_hits: int
+    memory_hits: int
+    adjusted_root_cause_confidence: float
+    risk_score: int
+
+
+class RouteConsensusPayload(TypedDict):
+    votes: dict[str, int]
+    reasons: list[str]
+    winner: str
+
+
+class RouteDecisionPayload(TypedDict):
+    should_research: bool
+    mode: str
+    reason: str
+    recommended_flow: str
+    recommended_reason: str
+    risk_score: int
+    route_features: RouteFeatures
+    explain_payload: RouteExplainPayload
+    consensus: RouteConsensusPayload
 
 
 def _parse_tuning_knobs(payload: dict[str, Any] | None) -> ParsedTuningKnobs:
@@ -550,7 +608,7 @@ def _collect_route_signals(
     root_cause_confidence: float,
     findings_query: str | None,
     target_file: str | None = None,
-) -> dict[str, Any]:
+) -> RouteSignals:
     findings_hits = 0
     memory_hits = 0
     historical_hints = []
@@ -622,16 +680,16 @@ def _decide_flow(
     task_type: str,
     candidate_count: int,
     target_file: str | None,
-    signals: dict[str, Any],
-) -> dict[str, Any]:
-    findings_hits = int(signals["findings_hits"])
-    memory_hits = int(signals["memory_hits"])
-    adjusted_root_cause_confidence = float(signals["adjusted_root_cause_confidence"])
+    signals: RouteSignals,
+) -> RouteDecisionPayload:
+    findings_hits = signals["findings_hits"]
+    memory_hits = signals["memory_hits"]
+    adjusted_root_cause_confidence = signals["adjusted_root_cause_confidence"]
     decision = signals["decision"]
-    is_doc_fix = bool(signals["is_doc_fix"])
-    is_cross_module_task = bool(signals["is_cross_module_task"])
-    has_commercial_signal = bool(signals["has_commercial_signal"])
-    has_hard_signal = bool(signals["has_hard_signal"])
+    is_doc_fix = signals["is_doc_fix"]
+    is_cross_module_task = signals["is_cross_module_task"]
+    has_commercial_signal = signals["has_commercial_signal"]
+    has_hard_signal = signals["has_hard_signal"]
 
     if is_doc_fix:
         recommended_flow = "baseline"
@@ -772,10 +830,10 @@ def build_route(
         target_file=target_file,
         signals=signals,
     )
-    findings_hits = int(signals["findings_hits"])
-    memory_hits = int(signals["memory_hits"])
+    findings_hits = signals["findings_hits"]
+    memory_hits = signals["memory_hits"]
     historical_hints = signals["historical_hints"]
-    adjusted_root_cause_confidence = float(signals["adjusted_root_cause_confidence"])
+    adjusted_root_cause_confidence = signals["adjusted_root_cause_confidence"]
     decision = signals["decision"]
     route_features = decision_payload["route_features"]
     recommended_flow = decision_payload["recommended_flow"]
