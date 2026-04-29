@@ -1523,8 +1523,9 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
     )
 
     assert "Nexus MemPalace rule" in _nexus_task_desc(governance)
+    assert "reason governance_block" in _nexus_task_desc(governance)
     assert "Nexus scope enforcement rule" in _nexus_task_desc(scope)
-    assert "{'allowed': False, 'reason': 'scope_block'}" not in _nexus_task_desc(scope)
+    assert "reason scope_block" in _nexus_task_desc(scope)
     assert "Nexus Belief/Memory rule" in _nexus_task_desc(memory)
     assert "Nexus Belief budget rule" in _nexus_task_desc(belief)
     assert "{'rounds': 3, 'needs_evidence': True}" not in _nexus_task_desc(belief)
