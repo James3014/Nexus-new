@@ -508,8 +508,12 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
             "def test_accepts_verified_receipt_with_replay():\n"
             "    receipt = {'claim': 'verified', 'replay_command': 'pytest -q', 'exit_code': 0}\n"
             "    assert rlm_harder_v2_accept_receipt(receipt) is True\n"
+            "\n"
+            "def test_verified_receipt_requires_replay_and_clean_exit():\n"
+            "    assert rlm_harder_v2_accept_receipt({'claim': 'verified', 'exit_code': 0}) is False\n"
+            "    assert rlm_harder_v2_accept_receipt({'claim': 'verified', 'replay_command': 'pytest -q', 'exit_code': 1}) is False\n"
         )
-        hidden = test_code + (
+        hidden = visible + (
             "\n"
             "def test_rejects_near_miss_receipt_fields():\n"
             "    assert rlm_harder_v2_accept_receipt({'claim': 'verified', 'replay_command': 'pytest -q', 'replay_exit_code': 0}) is False\n"

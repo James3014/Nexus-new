@@ -703,3 +703,4 @@ Failure lesson：
 - `rlm-harder-v2-governance-001` 的可見測試只檢查 read-only allow，初始 target 已可通過，導致修復型 `research:auto-flow` 缺少 repair signal；hidden verifier 才要求 block forbidden path，會把 benchmark 題型問題誤判成 Nexus 沒發揮。
 - hidden verifier 題仍需在 visible test 放一個代表性失敗案例，hidden test 則保留額外泛化案例；這樣才同時滿足「可修復」與「可驗證泛化」。
 - `rlm-harder-v2-second-round-001` 也有同型缺陷：visible 只測 plain override，初始 target 會過；代表性 invariant（不得 mutate defaults、None 不覆寫）必須進 visible，hidden 再保留 copy-not-alias 泛化檢查。
+- `rlm-harder-v2-evidence-002` 同樣不能只在 visible 測 valid receipt；缺少 replay command、非 0 exit code 這類 fail-closed 代表案例必須進 visible，hidden 再保留 near-miss 欄位名稱檢查。
