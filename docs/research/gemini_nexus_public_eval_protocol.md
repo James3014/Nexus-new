@@ -1,19 +1,19 @@
-# Gemini + Nexus Public Evaluation Protocol
+# Model + Nexus Public Evaluation Protocol
 
 Version: 2026-04-27
 
 ## Goal
 
-Produce externally explainable evidence for the difference between `Gemini 3 Flash` running bare and the same model wearing Nexus as a battlesuit. The comparison must answer what improved, how much it improved, and what it cost in wall time, model calls, and tokens.
+Produce externally explainable evidence for the difference between a model running bare and the same model wearing Nexus as a battlesuit. The comparison must answer what improved, how much it improved, and what it cost in wall time, model calls, and tokens.
 
 ## Arms
 
 | Arm | Meaning | Requirement |
 | --- | --- | --- |
-| Bare | Gemini CLI edits the task target directly without Nexus orchestration | `model_calls > 0`, model name recorded, token capture recorded |
-| Nexus | Gemini CLI is invoked through Nexus research/battlesuit flow | `gemini_uses_nexus=true`, `nexus_context_delivered=true`, five pillars active, six phases present |
+| Bare | The model CLI edits the task target directly without Nexus orchestration | `model_calls > 0`, model name recorded, token capture recorded |
+| Nexus | The model CLI is invoked through Nexus research/battlesuit flow | `model_uses_nexus=true`, `nexus_context_delivered=true`, five pillars active, six phases present |
 
-Nexus is not the agent under test. Gemini is the agent. Nexus is the operating layer Gemini wears.
+Nexus is not the agent under test. The model is the agent. Nexus is the operating layer the model wears.
 
 ## Model Lock
 
@@ -33,7 +33,7 @@ The Nexus-value set is the primary publication candidate. The older hard set is 
 
 ## Required Metrics
 
-Public tables must include solve rate, semantic verified rate, first-pass rate, trust mismatch rate, patch success rate, mutation success rate, average wall time, average model calls, average total tokens, token measured rate, gateway stats source rate, Gemini uses Nexus rate, Nexus context delivered rate, phase completion rate, claim verified rate, Nexus rescue rate, local rescue rate, guard fallback rate, verification rescue rate, and LLM self-heal rate.
+Public tables must include solve rate, semantic verified rate, first-pass rate, trust mismatch rate, patch success rate, mutation success rate, average wall time, average model calls, average total tokens, token measured rate, gateway stats source rate, model uses Nexus rate, Nexus context delivered rate, phase completion rate, claim verified rate, Nexus rescue rate, local rescue rate, guard fallback rate, verification rescue rate, and LLM self-heal rate.
 
 Do not collapse rescue types. Guard fallback, verification rescue, local rescue, and LLM self-heal have different meanings and costs.
 

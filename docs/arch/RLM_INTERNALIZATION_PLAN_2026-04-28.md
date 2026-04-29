@@ -657,3 +657,27 @@ Failure lesson：
 - Nexus：1/1 solve，semantic verified 100%，wall 57.61s。
 - Bare：0/1 solve，semantic verified 0%，wall 159.40s。
 - 結論：Belief budget contract 下沉有效，下一步可重跑完整 8 題 x 2 trials。
+
+## 2026-04-29 P12 Codex 5.5 Nexus Route Stabilization
+
+驗證：
+
+- report：`.nexus/reports/bench_codex55_nexus_capability_8x2_p12/gemini_nexus_report_1777455740.md`
+- same-model arms：`gpt-5.5` bare vs `gpt-5.5` wearing Nexus。
+- hidden verifier：enabled。
+- history policy：per-task reset。
+- Nexus：16/16 solve，semantic verified 100%，trust mismatch 0%，avg wall time 65.50s，avg tokens 8539.56。
+- Bare：8/16 solve，semantic verified 50%，trust mismatch 0%，avg wall time 9.28s，avg tokens 12699.06。
+- 差異：verified delivery +50 個百分點；Nexus token 約少 32.8%，但 wall time 較高。
+
+Failure lesson：
+
+- Belief budget 的 hidden contract 不能只用「低信心高風險」可見測試推論；Nexus prompt 必須明確下沉不確定信心與中高風險的 evidence rule。
+- Prompt 壓縮要保留決策語義：route/profile 應給 summary，不應把完整 capability stack JSON 直接塞進模型上下文。
+- 公開 benchmark 欄位應用 `model_uses_nexus` 作為模型中立主欄位，`gemini_uses_nexus` 只能保留相容。
+
+下一步：
+
+1. 將 8x2 報告整理成中文 public-candidate 草稿，但宣稱範圍限定為 Codex 5.5 lane。
+2. 等 Gemini 額度穩定後，用同一套 runner 跑 `gemini-3-flash-preview` 與 `gemini-3.1-pro-preview`，不可混用 denominator。
+3. 補足 `model_uses_nexus` 在 preflight/ops 報告的 alias，逐步淘汰 Gemini-only 命名。

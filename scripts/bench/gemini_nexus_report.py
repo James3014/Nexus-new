@@ -178,6 +178,7 @@ def _claim_gate_breakdown(
         if reason
         in {
             "nexus_wearing_below_threshold",
+            "model_uses_nexus_below_threshold",
             "gemini_uses_nexus_below_threshold",
             "nexus_usage_valid_below_threshold",
             "phase_completion_below_threshold",
@@ -287,8 +288,8 @@ def _public_claim_gate(
             failures.append("with_token_measured_below_threshold")
         if float(formal.get("valid_rate", 0.0) or 0.0) < min_nexus_valid_rate:
             failures.append("nexus_wearing_below_threshold")
-        if float(summary_with.get("gemini_uses_nexus_rate", 0.0) or 0.0) < min_nexus_valid_rate:
-            failures.append("gemini_uses_nexus_below_threshold")
+        if float(summary_with.get("model_uses_nexus_rate", summary_with.get("gemini_uses_nexus_rate", 0.0)) or 0.0) < min_nexus_valid_rate:
+            failures.append("model_uses_nexus_below_threshold")
         if float(summary_with.get("nexus_usage_valid_rate", 0.0) or 0.0) < min_nexus_valid_rate:
             failures.append("nexus_usage_valid_below_threshold")
         if float(summary_with.get("phase_completion_rate", 0.0) or 0.0) < min_nexus_valid_rate:
@@ -514,7 +515,7 @@ def render_markdown_report(
         "## Nexus Wearing Evidence",
         "",
         f"- Formal treatment valid: {formal['valid_count']}/{formal['total_runs']} ({_pct(formal['valid_rate'])})",
-        f"- Model uses Nexus rate: {_pct(b['gemini_uses_nexus_rate'])}",
+        f"- Model uses Nexus rate: {_pct(b.get('model_uses_nexus_rate', b['gemini_uses_nexus_rate']))}",
         f"- Nexus usage valid rate: {_pct(b['nexus_usage_valid_rate'])}",
         f"- Phase completion rate: {_pct(b['phase_completion_rate'])}",
         f"- Claim verified rate: {_pct(b['claim_verified_rate'])}",

@@ -148,6 +148,7 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["a"]["summary"]["avg_total_tokens_measured_only"] == 300.0
     assert report["b"]["summary"]["nexus_usage_valid_rate"] == 0.5
     assert report["b"]["summary"]["nexus_full_tier_rate"] == 0.5
+    assert report["b"]["summary"]["model_uses_nexus_rate"] == 0.5
     assert report["b"]["summary"]["gemini_uses_nexus_rate"] == 0.5
     assert report["b"]["summary"]["nexus_rescue_rate"] == 0.5
     assert report["b"]["summary"]["gemini_patch_pass_rate"] == 0.0
@@ -373,6 +374,7 @@ def test_ab_eval_reports_formal_nexus_treatment_validity(tmp_path):
                     "task_id": "valid",
                     "semantic_status": "VERIFIED",
                     "model_calls": 1,
+                    "model_uses_nexus": True,
                     "gemini_uses_nexus": True,
                     "nexus_context_delivered": True,
                     "nexus_usage_valid": True,
@@ -393,6 +395,7 @@ def test_ab_eval_reports_formal_nexus_treatment_validity(tmp_path):
                     "task_id": "invalid",
                     "semantic_status": "VERIFIED",
                     "model_calls": 0,
+                    "model_uses_nexus": False,
                     "gemini_uses_nexus": False,
                     "nexus_context_delivered": False,
                     "nexus_usage_valid": False,
@@ -412,7 +415,8 @@ def test_ab_eval_reports_formal_nexus_treatment_validity(tmp_path):
     assert formal["invalid_count"] == 1
     assert formal["invalid_task_ids"] == ["invalid"]
     assert "model_calls_zero" in formal["invalid_rows"][0]["issues"]
-    assert "gemini_uses_nexus_false" in formal["invalid_rows"][0]["issues"]
+    assert "model_uses_nexus_false" in formal["invalid_rows"][0]["issues"]
+    assert "gemini_uses_nexus_false" not in formal["invalid_rows"][0]["issues"]
     assert "nexus_context_not_delivered" in formal["invalid_rows"][0]["issues"]
     assert "nexus_usage_invalid" in formal["invalid_rows"][0]["issues"]
     assert "claim_not_verified" in formal["invalid_rows"][0]["issues"]

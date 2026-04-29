@@ -24,6 +24,7 @@ def test_public_claim_gate_rejects_rlm_submit_without_a_gate():
         summary_without={"token_measured_rate": 1.0},
         summary_with={
             "token_measured_rate": 1.0,
+            "model_uses_nexus_rate": 1.0,
             "gemini_uses_nexus_rate": 1.0,
             "nexus_usage_valid_rate": 1.0,
             "phase_completion_rate": 1.0,
@@ -58,6 +59,7 @@ def test_public_claim_gate_rejects_parallel_smoke_rows():
         summary_without={"token_measured_rate": 1.0},
         summary_with={
             "token_measured_rate": 1.0,
+            "model_uses_nexus_rate": 1.0,
             "gemini_uses_nexus_rate": 1.0,
             "nexus_usage_valid_rate": 1.0,
             "phase_completion_rate": 1.0,

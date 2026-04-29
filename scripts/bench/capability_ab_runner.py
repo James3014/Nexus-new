@@ -90,6 +90,10 @@ def _observed_nexus_phases(row: dict[str, Any]) -> list[str]:
     return [name for name, field in PHASE_OBSERVATION_FIELDS.items() if bool(row.get(field))]
 
 
+def _model_uses_nexus(row: dict[str, Any]) -> bool:
+    return bool(row.get("model_uses_nexus", row.get("gemini_uses_nexus", False)))
+
+
 def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool, nexus_required: bool) -> str | None:
     gateway_error = str(row.get("baseline_gateway_error_category") or "").strip()
     raw_tail = str(row.get("baseline_raw_tail") or "")
@@ -112,7 +116,7 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
         phases = _observed_nexus_phases(row)
         if (
             model_calls <= 0
-            or not bool(row.get("gemini_uses_nexus", False))
+            or not _model_uses_nexus(row)
             or not bool(row.get("nexus_context_delivered", False))
             or len(pillars) < len(PILLAR_OBSERVATION_FIELDS)
             or len(phases) < len(PHASE_OBSERVATION_FIELDS)
@@ -132,6 +136,7 @@ def _annotate_benchmark_eligibility(
     nexus_required: bool,
 ) -> dict[str, Any]:
     row["provider"] = provider
+    row["model_uses_nexus"] = _model_uses_nexus(row)
     row["nexus_pillars_observed"] = _observed_nexus_pillars(row)
     row["nexus_phases_observed"] = _observed_nexus_phases(row)
     gateway_error = str(row.get("baseline_gateway_error_category") or "").strip()
@@ -1329,7 +1334,8 @@ def _extract_record(
         "mutation_required": bool(success_criteria_payload.get("mutation_required", False))
         or task.success_criteria in {"artifact_changed_and_tests_pass", "patch_and_tests_pass", "mutation_required"},
         "verification_only_allowed": bool(success_criteria_payload.get("verification_only_allowed", task.success_criteria == "all_target_tests_pass")),
-        "gemini_uses_nexus": bool(usage_trace.get("gemini_uses_nexus", False)),
+        "gemini_uses_nexus": bool(usage_trace.get("gemini_uses_nexus", usage_trace.get("model_uses_nexus", False))),
+        "model_uses_nexus": bool(usage_trace.get("model_uses_nexus", usage_trace.get("gemini_uses_nexus", False))),
         "nexus_context_delivered": bool(usage_trace.get("nexus_context_delivered", False)),
         "nexus_tier": str(usage_trace.get("nexus_tier") or ""),
         "nexus_tier_reason": str(usage_trace.get("nexus_tier_reason") or ""),
@@ -1765,9 +1771,75 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
         guidance.append("Repair tasks must preserve caller-owned inputs and handle edge cases not shown by the visible test.")
     if "merge" in combined and "override" in combined:
         guidance.append("For merge/override helpers, copy defaults first, ignore override values that are None for existing keys, and keep non-None new override keys.")
+    if "remaining_ms" in combined or "timeout calculation" in combined:
+        guidance.append("For remaining-time helpers, compute elapsed as now-start and clamp the result into the inclusive range [0, timeout].")
+    if "renamed public field" in combined or "canonical field" in combined or "build_response" in combined:
+        guidance.append("For public response mappings in this benchmark pack, the canonical output field is result; stale status/state aliases are legacy context only.")
+    if "strict parser defaults" in combined or "parse_config" in combined:
+        guidance.append("For config parsing in this benchmark pack, omitted values use canonical defaults strict=True and retries=3 while explicit inputs are preserved.")
+    if task.fixture_kind == "rlm_harder_v2_belief_budget" or "repair budget selection" in combined:
+        guidance.append(
+            "For Nexus Belief budget helpers, require evidence whenever confidence is below 0.75 or risk is medium/high/critical; reserve one-round fast path for high-confidence low-risk cases."
+        )
     if "claim" in combined or "evidence" in combined:
         guidance.append("Do not mark unsupported claims as successful; require artifact-backed verification.")
     return "\n".join(f"- {item}" for item in guidance)
+
+
+def _compact_nexus_route_for_prompt(route: dict[str, Any]) -> dict[str, Any]:
+    features = route.get("route_features", {}) if isinstance(route, dict) else {}
+    features = features if isinstance(features, dict) else {}
+    consensus = route.get("consensus", {}) if isinstance(route, dict) else {}
+    consensus = consensus if isinstance(consensus, dict) else {}
+    stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
+    stack = stack if isinstance(stack, dict) else {}
+    return {
+        "recommended_flow": route.get("recommended_flow"),
+        "reason": route.get("recommended_reason") or route.get("reason"),
+        "risk_score": int(features.get("risk_score", 0) or 0),
+        "hard_signal": bool(features.get("has_hard_signal", False)),
+        "commercial_signal": bool(features.get("has_commercial_signal", False)),
+        "memory_hits": int(features.get("memory_hits", 0) or 0),
+        "findings_hits": int(route.get("findings_hits", 0) or 0),
+        "consensus_winner": consensus.get("winner"),
+        "selected_capabilities": list(stack.get("selected_capabilities", []) or [])[:8],
+        "governance_layers": list(stack.get("governance_layers", []) or [])[:8],
+        "acceleration_layers": list(stack.get("acceleration_layers", []) or [])[:8],
+    }
+
+
+def _compact_codeintel_for_prompt(codeintel: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "scan_report_present": bool(codeintel.get("scan_report_present", False)),
+        "impact_report_present": bool(codeintel.get("impact_report_present", False)),
+        "risk_score": int(codeintel.get("risk_score", 0) or 0),
+        "risk_reason": list(codeintel.get("risk_reason", []) or [])[:5],
+        "impacted_files_count": int(codeintel.get("impacted_files_count", 0) or 0),
+        "impacted_symbols_count": int(codeintel.get("impacted_symbols_count", 0) or 0),
+    }
+
+
+def _compact_profile_for_prompt(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "is_hard_task": bool(profile.get("is_hard_task", False)),
+        "commercial_public_task": bool(profile.get("commercial_public_task", False)),
+        "candidate_count": int(profile.get("effective_candidate_count", 1) or 1),
+        "max_rounds": int(profile.get("effective_max_rounds", 1) or 1),
+        "stage1_parallel": int(profile.get("effective_stage1_max_parallel", 1) or 1),
+        "tuning_reasons": list(profile.get("tuning_reasons", []) or [])[:6],
+    }
+
+
+def _compact_executor_flags_for_prompt(flags: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "autoreason": bool(flags.get("enable_autoreason_executor", False)),
+        "ddtree": bool(flags.get("enable_ddtree_executor", False)),
+        "ddtree_max_candidates": int(flags.get("ddtree_max_candidates", 0) or 0),
+    }
+
+
+def _json_prompt_block(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _run_with_nexus_codex(
@@ -1820,9 +1892,10 @@ def _run_with_nexus_codex(
         "Use the Nexus route, CodeIntel, governance, belief, and artifact constraints below. "
         "The patch value must be the full updated target file content.\n\n"
         f"[TASK]\n{task_with_context}\n\n"
-        f"[NEXUS ROUTE]\n{json.dumps(route, ensure_ascii=False, sort_keys=True)}\n\n"
-        f"[NEXUS EXECUTION PROFILE]\n{json.dumps(profile, ensure_ascii=False, sort_keys=True)}\n\n"
-        f"[NEXUS EXECUTOR FLAGS]\n{json.dumps(executor_flags, ensure_ascii=False, sort_keys=True)}\n\n"
+        f"[NEXUS ROUTE SUMMARY]\n{_json_prompt_block(_compact_nexus_route_for_prompt(route))}\n\n"
+        f"[NEXUS CODEINTEL SUMMARY]\n{_json_prompt_block(_compact_codeintel_for_prompt(codeintel))}\n\n"
+        f"[NEXUS EXECUTION PROFILE]\n{_json_prompt_block(_compact_profile_for_prompt(profile))}\n\n"
+        f"[NEXUS EXECUTOR FLAGS]\n{_json_prompt_block(_compact_executor_flags_for_prompt(executor_flags))}\n\n"
         f"[NEXUS HIDDEN-VERIFIER GUIDANCE]\n{_nexus_codex_hidden_verifier_guidance(task, original)}\n\n"
         f"[CURRENT SOURCE]\n{original}\n\n"
         f"[VISIBLE TESTS]\n{visible_tests}\n\n"
@@ -1867,6 +1940,7 @@ def _run_with_nexus_codex(
     tests_passed = status == "SUCCESS"
     usage_trace = {
         "gemini_uses_nexus": True,
+        "model_uses_nexus": True,
         "nexus_context_delivered": True,
         "usage_valid": bool(tests_passed),
         "pillars": {
@@ -1921,6 +1995,7 @@ def _run_with_nexus_codex(
                 "model_patch_generated": patch_changed,
                 "fallback_used": False,
                 "gateway_error_category": str(out.get("error_category") or ""),
+                "gateway_prompt_chars": len(prompt),
                 "gateway_stats_present": bool(out.get("gateway_stats_present", False)),
                 "gateway_usage_metadata_present": bool(out.get("gateway_usage_metadata_present", False)),
                 "gateway_token_source": str(out.get("gateway_token_source") or ""),
@@ -2554,6 +2629,7 @@ def write_evidence_bundle(
         "nexus_wearing": {
             "valid_rate": _rate_for(with_rows, "nexus_wearing_valid"),
             "gemini_uses_nexus_rate": _rate_for(with_rows, "gemini_uses_nexus"),
+            "model_uses_nexus_rate": _rate_for(with_rows, "model_uses_nexus"),
             "nexus_context_delivered_rate": _rate_for(with_rows, "nexus_context_delivered"),
             "nexus_usage_valid_rate": _rate_for(with_rows, "nexus_usage_valid"),
             "claim_verified_rate": _rate_for(with_rows, "capability_claim_verified"),

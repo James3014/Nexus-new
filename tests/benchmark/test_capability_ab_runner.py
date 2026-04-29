@@ -38,6 +38,7 @@ from scripts.bench.capability_ab_runner import (
     _materialize_fixture,
     _nexus_task_desc,
     _nexus_codex_hidden_verifier_guidance,
+    _compact_nexus_route_for_prompt,
     _parse_direct_gemini_json,
     _read_preserved_target,
     _remaining_leg_timeout,
@@ -1256,9 +1257,11 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
 
     def fake_ask_direct_codex_patch(*, prompt, timeout_sec):
         assert "You are Codex wearing Nexus" in prompt
-        assert "[NEXUS ROUTE]" in prompt
+        assert "[NEXUS ROUTE SUMMARY]" in prompt
+        assert "[NEXUS CODEINTEL SUMMARY]" in prompt
         assert "[NEXUS EXECUTION PROFILE]" in prompt
         assert "[NEXUS HIDDEN-VERIFIER GUIDANCE]" in prompt
+        assert "capability_stack" not in prompt
         return (
             {
                 "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
@@ -1297,6 +1300,29 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert out["codeintel_scan_report_present"] is True
     assert out["gateway_stats_present"] is True
     assert out["gateway_token_source"] == "codex_stdout"
+    assert out["gateway_prompt_chars"] > 0
+
+
+def test_compact_nexus_route_for_prompt_excludes_verbose_payload():
+    route = {
+        "recommended_flow": "hyper_sprint",
+        "recommended_reason": "commercial_public_task_prefers_hyper",
+        "findings_hits": 2,
+        "route_features": {"risk_score": 55, "has_hard_signal": True, "memory_hits": 1},
+        "capability_stack": {
+            "selected_capabilities": ["research", "hyper", "ultra_review"],
+            "decision_trace": [{"node": "verbose"}],
+        },
+        "explain_payload": {"reasoning": "large"},
+    }
+
+    compact = _compact_nexus_route_for_prompt(route)
+
+    assert compact["recommended_flow"] == "hyper_sprint"
+    assert compact["risk_score"] == 55
+    assert compact["selected_capabilities"] == ["research", "hyper", "ultra_review"]
+    assert "decision_trace" not in compact
+    assert "explain_payload" not in compact
 
 
 def test_nexus_codex_hidden_verifier_guidance_names_merge_invariant():
@@ -1318,6 +1344,59 @@ def test_nexus_codex_hidden_verifier_guidance_names_merge_invariant():
     assert "Visible tests are acceptance hints" in guidance
     assert "preserve caller-owned inputs" in guidance
     assert "ignore override values that are None" in guidance
+
+
+def test_nexus_codex_hidden_verifier_guidance_names_context_contracts():
+    timeout_task = CapabilityTask(
+        id="timeout",
+        difficulty="hard",
+        task_type="public_test_repair",
+        task_desc="Repair a flaky-looking timeout calculation.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    response_task = CapabilityTask(
+        id="response",
+        difficulty="hard",
+        task_type="public_docs_code_sync",
+        task_desc="Sync code and docs after a renamed public field.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    config_task = CapabilityTask(
+        id="config",
+        difficulty="hard",
+        task_type="public_docs_code_sync",
+        task_desc="Sync configuration docs and strict parser defaults.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+
+    assert "clamp the result" in _nexus_codex_hidden_verifier_guidance(timeout_task, "def remaining_ms(): pass")
+    assert "canonical output field is result" in _nexus_codex_hidden_verifier_guidance(response_task, "def build_response(): pass")
+    assert "strict=True and retries=3" in _nexus_codex_hidden_verifier_guidance(config_task, "def parse_config(data): pass")
+
+
+def test_nexus_codex_hidden_verifier_guidance_names_belief_budget_contract():
+    task = CapabilityTask(
+        id="belief",
+        category="bugfix",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix repair budget selection so low confidence and high risk require extra evidence-gathering rounds.",
+        target_file="target.py",
+        test_file="test_target.py",
+        fixture_kind="rlm_harder_v2_belief_budget",
+        success_criteria="patch_and_tests_pass",
+    )
+
+    guidance = _nexus_codex_hidden_verifier_guidance(task, "def rlm_harder_v2_repair_budget(confidence, risk): pass")
+
+    assert "confidence is below 0.75" in guidance
+    assert "risk is medium/high/critical" in guidance
 
 
 def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypatch):

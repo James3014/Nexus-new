@@ -126,6 +126,10 @@ def _is_true(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
+def _model_uses_nexus(row: dict[str, Any]) -> bool:
+    return _is_true(row.get("model_uses_nexus", row.get("gemini_uses_nexus")))
+
+
 _NEXUS_PILLAR_KEYS = (
     "pillar_lancedb_active",
     "pillar_memory_active",
@@ -323,8 +327,10 @@ def _task_id(row: dict[str, Any], index: int) -> str:
 
 def _formal_nexus_issues(row: dict[str, Any]) -> list[str]:
     issues: list[str] = []
-    if not _is_true(row.get("gemini_uses_nexus")):
-        issues.append("gemini_uses_nexus_false")
+    if not _model_uses_nexus(row):
+        issues.append("model_uses_nexus_false")
+        if "model_uses_nexus" not in row:
+            issues.append("gemini_uses_nexus_false")
     if _as_int(row.get("model_calls"), 0) <= 0:
         issues.append("model_calls_zero")
     if not _is_true(row.get("nexus_context_delivered")):
@@ -386,6 +392,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "token_measured_rate": 0.0,
             "trust_mismatch_rate": 0.0,
             "nexus_usage_valid_rate": 0.0,
+            "model_uses_nexus_rate": 0.0,
             "gemini_uses_nexus_rate": 0.0,
             "nexus_rescue_rate": 0.0,
             "nexus_full_tier_rate": 0.0,
@@ -576,6 +583,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "gateway_usage_metadata_source_rate": round(len(gateway_usage_source_rows) / total, 4),
         "trust_mismatch_rate": round(trust_mismatch / total, 4),
         "nexus_usage_valid_rate": _rate(rows, lambda r: _is_true(r.get("nexus_usage_valid"))),
+        "model_uses_nexus_rate": _rate(rows, _model_uses_nexus),
         "gemini_uses_nexus_rate": _rate(rows, lambda r: _is_true(r.get("gemini_uses_nexus"))),
         "nexus_rescue_rate": _rate(rows, lambda r: _is_true(r.get("nexus_rescued"))),
         "nexus_full_tier_rate": _rate(rows, lambda r: str(r.get("nexus_tier", "")).lower() == "full"),
@@ -788,6 +796,7 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),
         "nexus_full_tier_rate_delta": round(summary_b["nexus_full_tier_rate"] - summary_a["nexus_full_tier_rate"], 4),
+        "model_uses_nexus_rate_delta": round(summary_b["model_uses_nexus_rate"] - summary_a["model_uses_nexus_rate"], 4),
         "gemini_uses_nexus_rate_delta": round(summary_b["gemini_uses_nexus_rate"] - summary_a["gemini_uses_nexus_rate"], 4),
         "nexus_rescue_rate_delta": round(summary_b["nexus_rescue_rate"] - summary_a["nexus_rescue_rate"], 4),
         "gemini_patch_pass_rate_delta": round(summary_b["gemini_patch_pass_rate"] - summary_a["gemini_patch_pass_rate"], 4),
