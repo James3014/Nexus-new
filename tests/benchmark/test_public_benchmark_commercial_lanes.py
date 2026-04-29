@@ -76,4 +76,4 @@ def test_commercial_lanes_cover_public_capability_targets_without_running_models
 
     missing = PUBLIC_CAPABILITY_TARGETS - covered
 
-    assert missing == {"research", "nightshift", "swarm", "drone", "ultra_review", "autoreason", "ddtree"}
+    assert missing == set()

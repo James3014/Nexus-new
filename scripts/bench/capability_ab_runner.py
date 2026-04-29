@@ -427,6 +427,13 @@ def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuff
                     trial_index=trial_index,
                     fixture_kind=task.fixture_kind,
                     hidden_test_file=task.hidden_test_file,
+                    expected_capabilities=task.expected_capabilities,
+                    capability_activation_contract=task.capability_activation_contract,
+                    hidden_oracle_kind=task.hidden_oracle_kind,
+                    cost_budget=task.cost_budget,
+                    token_budget=task.token_budget,
+                    wall_time_budget_sec=task.wall_time_budget_sec,
+                    public_claim_allowed_metrics=task.public_claim_allowed_metrics,
                 )
             )
     if shuffle_seed is not None:
@@ -650,6 +657,148 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
             "def test_uncertain_or_high_risk_paths_require_evidence():\n"
             "    assert rlm_harder_v2_repair_budget(0.74, 'medium')['needs_evidence'] is True\n"
             "    assert rlm_harder_v2_repair_budget(0.95, 'high')['needs_evidence'] is True\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_autoreason_judge":
+        visible = (
+            "from target import rlm_harder_v2_choose_candidate\n\n"
+            "def test_selects_supported_highest_score_candidate():\n"
+            "    candidates = [\n"
+            "        {'id': 'a', 'score': 0.4, 'evidence_refs': ['a.json']},\n"
+            "        {'id': 'b', 'score': 0.9, 'evidence_refs': ['b.json']},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_choose_candidate(candidates) == 'b'\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_high_score_without_evidence_and_failed_status():\n"
+            "    candidates = [\n"
+            "        {'id': 'unsupported', 'score': 0.99, 'evidence_refs': []},\n"
+            "        {'id': 'failed', 'score': 0.95, 'status': 'fail', 'evidence_refs': ['fail.json']},\n"
+            "        {'id': 'winner', 'score': 0.7, 'status': 'pass', 'evidence_refs': ['winner.json']},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_choose_candidate(candidates) == 'winner'\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_ddtree_pruning":
+        visible = (
+            "from target import rlm_harder_v2_prune_candidates\n\n"
+            "def test_prunes_to_budget_by_score():\n"
+            "    candidates = [\n"
+            "        {'id': 'a', 'score': 0.2, 'risk': 1},\n"
+            "        {'id': 'b', 'score': 0.9, 'risk': 1},\n"
+            "        {'id': 'c', 'score': 0.6, 'risk': 1},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_prune_candidates(candidates, 2) == ['b', 'c']\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_preserves_high_risk_boundary_even_when_score_is_lower():\n"
+            "    candidates = [\n"
+            "        {'id': 'safe-high-score', 'score': 0.95, 'risk': 1},\n"
+            "        {'id': 'risky-required', 'score': 0.5, 'risk': 9},\n"
+            "        {'id': 'middle', 'score': 0.7, 'risk': 2},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_prune_candidates(candidates, 2) == ['risky-required', 'safe-high-score']\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_ultra_review_report":
+        visible = (
+            "from target import rlm_harder_v2_accept_ultra_report\n\n"
+            "def test_accepts_report_with_sandbox_and_gate():\n"
+            "    report = {'sandbox_id': 's1', 'gate_passed': True, 'verified_findings': []}\n"
+            "    assert rlm_harder_v2_accept_ultra_report(report) is True\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_verified_findings_require_repro_command_and_failed_negative_run():\n"
+            "    assert rlm_harder_v2_accept_ultra_report({'sandbox_id': 's1', 'gate_passed': True, 'verified_findings': [{'id': 'bug'}]}) is False\n"
+            "    assert rlm_harder_v2_accept_ultra_report({'sandbox_id': 's1', 'gate_passed': True, 'verified_findings': [{'id': 'bug', 'repro_command': 'pytest -q test_bug.py', 'negative_exit_code': 1}]}) is True\n"
+            "    assert rlm_harder_v2_accept_ultra_report({'sandbox_id': 's1', 'gate_passed': False, 'verified_findings': []}) is False\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_research_citation":
+        visible = (
+            "from target import rlm_harder_v2_choose_research_claim\n\n"
+            "def test_selects_cited_claim_for_topic():\n"
+            "    claims = [\n"
+            "        {'id': 'a', 'topic': 'routing', 'citation': 'docs/routing.md', 'supported': True},\n"
+            "        {'id': 'b', 'topic': 'routing', 'supported': False},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_choose_research_claim(claims, 'routing') == 'a'\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_uncited_or_wrong_topic_claims():\n"
+            "    claims = [\n"
+            "        {'id': 'uncited', 'topic': 'routing', 'supported': True},\n"
+            "        {'id': 'wrong-topic', 'topic': 'memory', 'citation': 'docs/memory.md', 'supported': True},\n"
+            "        {'id': 'target', 'topic': 'routing', 'citation': 'docs/routing.md', 'supported': True},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_choose_research_claim(claims, 'routing') == 'target'\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_lancedb_retrieval":
+        visible = (
+            "from target import rlm_harder_v2_select_vector_hits\n\n"
+            "def test_selects_scored_hits_for_topic_pack():\n"
+            "    hits = [\n"
+            "        {'id': 'a', 'score': 0.8, 'topic_pack': 'nexus', 'source_id': 'claim-a'},\n"
+            "        {'id': 'b', 'score': 0.4, 'topic_pack': 'nexus', 'source_id': 'claim-b'},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_select_vector_hits(hits, 'nexus', 0.7) == ['a']\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_missing_source_and_cross_pack_hits():\n"
+            "    hits = [\n"
+            "        {'id': 'missing-source', 'score': 0.95, 'topic_pack': 'nexus'},\n"
+            "        {'id': 'wrong-pack', 'score': 0.9, 'topic_pack': 'other', 'source_id': 'claim-x'},\n"
+            "        {'id': 'target', 'score': 0.75, 'topic_pack': 'nexus', 'source_id': 'claim-t'},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_select_vector_hits(hits, 'nexus', 0.7) == ['target']\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_swarm_consensus":
+        visible = (
+            "from target import rlm_harder_v2_accept_swarm_report\n\n"
+            "def test_accepts_consensus_with_two_roles():\n"
+            "    report = {'consensus': 'pass', 'findings': [{'role': 'logic', 'evidence': 'a'}, {'role': 'security', 'evidence': 'b'}]}\n"
+            "    assert rlm_harder_v2_accept_swarm_report(report) is True\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_single_role_or_missing_evidence():\n"
+            "    assert rlm_harder_v2_accept_swarm_report({'consensus': 'pass', 'findings': [{'role': 'logic', 'evidence': 'a'}, {'role': 'logic', 'evidence': 'b'}]}) is False\n"
+            "    assert rlm_harder_v2_accept_swarm_report({'consensus': 'pass', 'findings': [{'role': 'logic'}, {'role': 'security', 'evidence': 'b'}]}) is False\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_drone_artifacts":
+        visible = (
+            "from target import rlm_harder_v2_accept_drone_artifacts\n\n"
+            "def test_accepts_completed_drone_artifacts():\n"
+            "    artifacts = [{'owner': 'a', 'path': 'reports/a.json'}, {'owner': 'b', 'path': 'reports/b.json'}]\n"
+            "    assert rlm_harder_v2_accept_drone_artifacts(artifacts, expected_count=2) is True\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_missing_owner_path_or_count_mismatch():\n"
+            "    assert rlm_harder_v2_accept_drone_artifacts([{'owner': 'a', 'path': 'reports/a.json'}], expected_count=2) is False\n"
+            "    assert rlm_harder_v2_accept_drone_artifacts([{'owner': 'a'}, {'owner': 'b', 'path': 'reports/b.json'}], expected_count=2) is False\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_nightshift_recovery":
+        visible = (
+            "from target import rlm_harder_v2_accept_nightshift\n\n"
+            "def test_accepts_invoked_recovered_report():\n"
+            "    report = {'recommended': True, 'invoked': True, 'recovered': True, 'report_path': 'reports/nightshift.json'}\n"
+            "    assert rlm_harder_v2_accept_nightshift(report) is True\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_recommended_without_invocation_or_report():\n"
+            "    assert rlm_harder_v2_accept_nightshift({'recommended': True, 'invoked': False, 'recovered': False, 'report_path': ''}) is False\n"
+            "    assert rlm_harder_v2_accept_nightshift({'recommended': True, 'invoked': True, 'recovered': True}) is False\n"
         )
         return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
     return _split_fixture_tests(test_code)
@@ -970,6 +1119,74 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str, str]:
             "def test_low_confidence_high_risk_requires_more_evidence():\n"
             "    assert rlm_harder_v2_repair_budget(0.42, 'high') == {'rounds': 3, 'needs_evidence': True}\n"
             "    assert rlm_harder_v2_repair_budget(0.91, 'low') == {'rounds': 1, 'needs_evidence': False}\n",
+        ),
+        "rlm_harder_v2_autoreason_judge": (
+            "def rlm_harder_v2_choose_candidate(candidates):\n"
+            "    return max(candidates, key=lambda item: item.get('score', 0)).get('id')\n",
+            "from target import rlm_harder_v2_choose_candidate\n\n"
+            "def test_selects_supported_highest_score_candidate():\n"
+            "    candidates = [{'id': 'a', 'score': 0.4, 'evidence_refs': ['a.json']}, {'id': 'b', 'score': 0.9, 'evidence_refs': ['b.json']}]\n"
+            "    assert rlm_harder_v2_choose_candidate(candidates) == 'b'\n",
+        ),
+        "rlm_harder_v2_ddtree_pruning": (
+            "def rlm_harder_v2_prune_candidates(candidates, max_candidates):\n"
+            "    ordered = sorted(candidates, key=lambda item: item.get('score', 0), reverse=True)\n"
+            "    return [item.get('id') for item in ordered[:max_candidates]]\n",
+            "from target import rlm_harder_v2_prune_candidates\n\n"
+            "def test_prunes_to_budget_by_score():\n"
+            "    candidates = [{'id': 'a', 'score': 0.2, 'risk': 1}, {'id': 'b', 'score': 0.9, 'risk': 1}, {'id': 'c', 'score': 0.6, 'risk': 1}]\n"
+            "    assert rlm_harder_v2_prune_candidates(candidates, 2) == ['b', 'c']\n",
+        ),
+        "rlm_harder_v2_ultra_review_report": (
+            "def rlm_harder_v2_accept_ultra_report(report):\n"
+            "    return bool(report.get('sandbox_id') and report.get('gate_passed'))\n",
+            "from target import rlm_harder_v2_accept_ultra_report\n\n"
+            "def test_accepts_report_with_sandbox_and_gate():\n"
+            "    report = {'sandbox_id': 's1', 'gate_passed': True, 'verified_findings': []}\n"
+            "    assert rlm_harder_v2_accept_ultra_report(report) is True\n",
+        ),
+        "rlm_harder_v2_research_citation": (
+            "def rlm_harder_v2_choose_research_claim(claims, topic):\n"
+            "    for claim in claims:\n"
+            "        if claim.get('topic') == topic and claim.get('supported'):\n"
+            "            return claim.get('id')\n"
+            "    return None\n",
+            "from target import rlm_harder_v2_choose_research_claim\n\n"
+            "def test_selects_cited_claim_for_topic():\n"
+            "    claims = [{'id': 'a', 'topic': 'routing', 'citation': 'docs/routing.md', 'supported': True}]\n"
+            "    assert rlm_harder_v2_choose_research_claim(claims, 'routing') == 'a'\n",
+        ),
+        "rlm_harder_v2_lancedb_retrieval": (
+            "def rlm_harder_v2_select_vector_hits(hits, topic_pack, min_score):\n"
+            "    return [hit.get('id') for hit in hits if hit.get('score', 0) >= min_score and hit.get('topic_pack') == topic_pack]\n",
+            "from target import rlm_harder_v2_select_vector_hits\n\n"
+            "def test_selects_scored_hits_for_topic_pack():\n"
+            "    hits = [{'id': 'a', 'score': 0.8, 'topic_pack': 'nexus', 'source_id': 'claim-a'}]\n"
+            "    assert rlm_harder_v2_select_vector_hits(hits, 'nexus', 0.7) == ['a']\n",
+        ),
+        "rlm_harder_v2_swarm_consensus": (
+            "def rlm_harder_v2_accept_swarm_report(report):\n"
+            "    return report.get('consensus') == 'pass' and len(report.get('findings', [])) >= 2\n",
+            "from target import rlm_harder_v2_accept_swarm_report\n\n"
+            "def test_accepts_consensus_with_two_roles():\n"
+            "    report = {'consensus': 'pass', 'findings': [{'role': 'logic', 'evidence': 'a'}, {'role': 'security', 'evidence': 'b'}]}\n"
+            "    assert rlm_harder_v2_accept_swarm_report(report) is True\n",
+        ),
+        "rlm_harder_v2_drone_artifacts": (
+            "def rlm_harder_v2_accept_drone_artifacts(artifacts, expected_count):\n"
+            "    return len(artifacts) == expected_count and all(item.get('path') for item in artifacts)\n",
+            "from target import rlm_harder_v2_accept_drone_artifacts\n\n"
+            "def test_accepts_completed_drone_artifacts():\n"
+            "    artifacts = [{'owner': 'a', 'path': 'reports/a.json'}, {'owner': 'b', 'path': 'reports/b.json'}]\n"
+            "    assert rlm_harder_v2_accept_drone_artifacts(artifacts, expected_count=2) is True\n",
+        ),
+        "rlm_harder_v2_nightshift_recovery": (
+            "def rlm_harder_v2_accept_nightshift(report):\n"
+            "    return bool(report.get('recommended') and report.get('invoked') and report.get('recovered'))\n",
+            "from target import rlm_harder_v2_accept_nightshift\n\n"
+            "def test_accepts_invoked_recovered_report():\n"
+            "    report = {'recommended': True, 'invoked': True, 'recovered': True, 'report_path': 'reports/nightshift.json'}\n"
+            "    assert rlm_harder_v2_accept_nightshift(report) is True\n",
         ),
     }
     try:

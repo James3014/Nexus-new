@@ -47,6 +47,37 @@ def test_cross_module_capability_tasks_schema():
     assert buckets == {"swarm": 4, "drone": 4, "nightshift": 4}
 
 
+def test_public_route_oracle_manifest_targets_uncovered_route_capabilities():
+    path = Path("scripts/bench/public_benchmark_route_oracles_v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    tasks = payload["tasks"]
+
+    assert payload["frozen"] is True
+    assert payload["benchmark_id"] == "nexus-public-route-oracles-v1"
+    assert len(tasks) == 8
+    assert {task["fixture_kind"] for task in tasks} == {
+        "rlm_harder_v2_autoreason_judge",
+        "rlm_harder_v2_ddtree_pruning",
+        "rlm_harder_v2_ultra_review_report",
+        "rlm_harder_v2_research_citation",
+        "rlm_harder_v2_lancedb_retrieval",
+        "rlm_harder_v2_swarm_consensus",
+        "rlm_harder_v2_drone_artifacts",
+        "rlm_harder_v2_nightshift_recovery",
+    }
+    assert {tuple(task["expected_capabilities"]) for task in tasks} == {
+        ("autoreason",),
+        ("ddtree",),
+        ("ultra_review",),
+        ("research",),
+        ("lancedb",),
+        ("swarm",),
+        ("drone",),
+        ("nightshift",),
+    }
+    assert all(task["hidden_oracle_kind"] == "trace_receipt" for task in tasks)
+
+
 def test_public_benchmark_pilot_manifest_distribution():
     path = Path("scripts/bench/public_benchmark_pilot_v1.json")
     payload = json.loads(path.read_text(encoding="utf-8"))

@@ -666,6 +666,7 @@ def test_public_candidate_fixtures_have_distinct_visible_and_hidden_tests(tmp_pa
     manifest_paths = [
         "scripts/bench/public_benchmark_nexus_value_v1.json",
         "scripts/bench/public_benchmark_rlm_harder_v2.json",
+        "scripts/bench/public_benchmark_route_oracles_v1.json",
     ]
     tasks = [
         task
@@ -682,6 +683,25 @@ def test_public_candidate_fixtures_have_distinct_visible_and_hidden_tests(tmp_pa
             not_split.append(task.fixture_kind)
 
     assert not not_split
+
+
+def test_route_oracle_fixtures_have_hidden_capability_conditions(tmp_path: Path):
+    tasks = load_tasks("scripts/bench/public_benchmark_route_oracles_v1.json")
+
+    by_fixture: dict[str, str] = {}
+    for task in tasks:
+        _target, visible_test = _materialize_fixture(tmp_path / task.id, task)
+        hidden_source = Path(_hidden_test_for_visible_test(visible_test)).read_text(encoding="utf-8")
+        by_fixture[task.fixture_kind] = hidden_source
+
+    assert "unsupported" in by_fixture["rlm_harder_v2_autoreason_judge"]
+    assert "risky-required" in by_fixture["rlm_harder_v2_ddtree_pruning"]
+    assert "negative_exit_code" in by_fixture["rlm_harder_v2_ultra_review_report"]
+    assert "wrong-topic" in by_fixture["rlm_harder_v2_research_citation"]
+    assert "missing-source" in by_fixture["rlm_harder_v2_lancedb_retrieval"]
+    assert "single_role" in by_fixture["rlm_harder_v2_swarm_consensus"]
+    assert "count_mismatch" in by_fixture["rlm_harder_v2_drone_artifacts"]
+    assert "recommended_without_invocation" in by_fixture["rlm_harder_v2_nightshift_recovery"]
 
 
 def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
@@ -1483,12 +1503,26 @@ def test_expand_task_trials_preserves_fixture_kind():
         success_criteria="patch_and_tests_pass",
         repo_kind="neutral_fixture",
         fixture_kind="nexus_value_hidden_state",
+        expected_capabilities=("claim_gate", "delivery_gate"),
+        capability_activation_contract="required",
+        hidden_oracle_kind="pytest_hidden",
+        cost_budget={"max_model_calls": 3},
+        token_budget=123,
+        wall_time_budget_sec=45.0,
+        public_claim_allowed_metrics=("verified_delivery_rate",),
     )
 
     expanded = expand_task_trials([task], repeat_trials=2, shuffle_seed=None)
 
     assert [item.trial_index for item in expanded] == [1, 2]
     assert {item.fixture_kind for item in expanded} == {"nexus_value_hidden_state"}
+    assert {item.expected_capabilities for item in expanded} == {("claim_gate", "delivery_gate")}
+    assert {item.capability_activation_contract for item in expanded} == {"required"}
+    assert {item.hidden_oracle_kind for item in expanded} == {"pytest_hidden"}
+    assert {item.cost_budget["max_model_calls"] for item in expanded if item.cost_budget} == {3}
+    assert {item.token_budget for item in expanded} == {123}
+    assert {item.wall_time_budget_sec for item in expanded} == {45.0}
+    assert {item.public_claim_allowed_metrics for item in expanded} == {("verified_delivery_rate",)}
 
 
 def test_run_without_nexus_bare_mode_returns_record(tmp_path: Path):

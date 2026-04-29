@@ -34,6 +34,11 @@
         {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-repair-002"},
         {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-context-001"},
         {"manifest": "scripts/bench/public_benchmark_nexus_value_v1.json", "task_id": "nexus-value-context-002"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-autoreason-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-ddtree-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-ultra-review-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-research-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-lancedb-001"},
         {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-memory-001"},
         {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-belief-001"}
       ]
@@ -60,7 +65,10 @@
         {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-governance-001"},
         {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-governance-002"},
         {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-evidence-001"},
-        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-evidence-002"}
+        {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-evidence-002"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-swarm-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-drone-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-nightshift-001"}
       ]
     },
     {
