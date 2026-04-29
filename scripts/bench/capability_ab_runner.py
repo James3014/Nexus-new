@@ -1777,6 +1777,14 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
         guidance.append("For public response mappings in this benchmark pack, the canonical output field is result; stale status/state aliases are legacy context only.")
     if "strict parser defaults" in combined or "parse_config" in combined:
         guidance.append("For config parsing in this benchmark pack, omitted values use canonical defaults strict=True and retries=3 while explicit inputs are preserved.")
+    if task.fixture_kind == "rlm_harder_v2_governance_guard":
+        guidance.append(
+            "For governance action filters, allow read-only tools with reason ok; block destructive or forbidden-path operations such as rm -rf .nexus with reason governance_block."
+        )
+    if task.fixture_kind == "rlm_harder_v2_governance_scope":
+        guidance.append(
+            "For scope decisions, approved mutations return reason approved, read-only inspection returns reason read_only, and unapproved mutating or unknown actions return reason scope_block."
+        )
     if task.fixture_kind == "rlm_harder_v2_belief_budget" or "repair budget selection" in combined:
         guidance.append(
             "For Nexus Belief budget helpers, require evidence whenever confidence is below 0.75 or risk is medium/high/critical; reserve one-round fast path for high-confidence low-risk cases."

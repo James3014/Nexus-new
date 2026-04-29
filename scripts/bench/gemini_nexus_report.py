@@ -359,6 +359,8 @@ def _public_claim_gate(
             failures.append("phase_completion_below_threshold")
         if float(summary_with.get("claim_verified_rate", 0.0) or 0.0) < min_nexus_valid_rate:
             failures.append("claim_verified_below_threshold")
+        if float(summary_with.get("trust_mismatch_rate", 0.0) or 0.0) > 0.0:
+            failures.append("with_trust_mismatch_above_zero")
     except (TypeError, ValueError):
         failures.append("metric_parse_error")
     rlm_rows = [row for row in rows_with if row.get("rlm_trace_present")]

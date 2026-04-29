@@ -1399,6 +1399,34 @@ def test_nexus_codex_hidden_verifier_guidance_names_belief_budget_contract():
     assert "risk is medium/high/critical" in guidance
 
 
+def test_nexus_codex_hidden_verifier_guidance_names_governance_contracts():
+    guard_task = CapabilityTask(
+        id="guard",
+        category="ops_research",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Tighten an action filter so unsafe operations are rejected while ordinary read-only work remains allowed.",
+        target_file="target.py",
+        test_file="test_target.py",
+        fixture_kind="rlm_harder_v2_governance_guard",
+        success_criteria="patch_and_tests_pass",
+    )
+    scope_task = CapabilityTask(
+        id="scope",
+        category="ops_research",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix scope enforcement so unapproved mutating operations are blocked while read-only inspection remains allowed.",
+        target_file="target.py",
+        test_file="test_target.py",
+        fixture_kind="rlm_harder_v2_governance_scope",
+        success_criteria="patch_and_tests_pass",
+    )
+
+    assert "reason governance_block" in _nexus_codex_hidden_verifier_guidance(guard_task, "def rlm_harder_v2_filter_action(action): pass")
+    assert "reason scope_block" in _nexus_codex_hidden_verifier_guidance(scope_task, "def rlm_harder_v2_scope_decision(request): pass")
+
+
 def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="rlm-harder-v2-evidence-001",

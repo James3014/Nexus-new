@@ -681,3 +681,19 @@ Failure lesson：
 1. 將 8x2 報告整理成中文 public-candidate 草稿，但宣稱範圍限定為 Codex 5.5 lane。
 2. 等 Gemini 額度穩定後，用同一套 runner 跑 `gemini-3-flash-preview` 與 `gemini-3.1-pro-preview`，不可混用 denominator。
 3. 補足 `model_uses_nexus` 在 preflight/ops 報告的 alias，逐步淘汰 Gemini-only 命名。
+
+## 2026-04-29 Gemini 3 Flash Smoke Gate Lesson
+
+Failure lesson：
+
+- Gemini 3 Flash smoke 不能在 `trust_mismatch_rate > 0` 時進入 8 題或公開報告；public claim gate 必須 fail-closed。
+- Governance hidden-verifier 題不只要求「拒絕危險操作」，也要求穩定 reason contract：
+  - forbidden/destructive action：`governance_block`
+  - unapproved mutating or unknown action：`scope_block`
+- 能力真觸發表必須區分 `selected_only` 與 `observed_unplanned`；後者代表能力證據存在，但新路由沒有正確記錄 selection。
+
+修正：
+
+- `gemini_nexus_report.py` 在 treatment trust mismatch 非 0 時阻擋 public claim。
+- `capability_ab_runner.py` 將 governance guard/scope hidden contract 下沉到 Nexus prompt guidance。
+- Capability Activation Details 新增 `observed_unplanned` 狀態，避免把 self-heal 類未記錄 selection 的證據誤標為未觸發。

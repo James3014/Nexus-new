@@ -72,6 +72,27 @@ def test_public_claim_gate_rejects_parallel_smoke_rows():
     assert "parallel_smoke" in gate["failures"]
 
 
+def test_public_claim_gate_rejects_treatment_trust_mismatch():
+    gate = _public_claim_gate(
+        rows_without=[{"task_id": "a", "trial_index": 1, "token_measured": True}],
+        rows_with=[{"task_id": "a", "trial_index": 1, "token_measured": True}],
+        summary_without={"token_measured_rate": 1.0},
+        summary_with={
+            "token_measured_rate": 1.0,
+            "model_uses_nexus_rate": 1.0,
+            "gemini_uses_nexus_rate": 1.0,
+            "nexus_usage_valid_rate": 1.0,
+            "phase_completion_rate": 1.0,
+            "claim_verified_rate": 1.0,
+            "trust_mismatch_rate": 0.1,
+        },
+        formal={"valid_rate": 1.0},
+    )
+
+    assert gate["verdict"] == "FAIL"
+    assert "with_trust_mismatch_above_zero" in gate["failures"]
+
+
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"
