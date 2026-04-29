@@ -97,6 +97,7 @@ def compute_tuning(
         "stage1_parallel_boost": int(prev_knobs.get("stage1_parallel_boost", 0) or 0),
         "baseline_fast_sec": 0.0,
         "skip_baseline_probe_for_hard": bool(prev_knobs.get("skip_baseline_probe_for_hard", False)),
+        "route_experiment_decision": "quarantine",
     }
     reasons: list[str] = []
 
@@ -107,6 +108,7 @@ def compute_tuning(
         knobs["stage1_parallel_boost"] = min(0, int(knobs.get("stage1_parallel_boost", 0) or 0))
         knobs["baseline_fast_sec"] = 0.0
         knobs["skip_baseline_probe_for_hard"] = False
+        knobs["route_experiment_decision"] = "discard"
     else:
         # Solve-rate hysteresis:
         # below 0.92 => expand search; above 0.97 => release expansion; otherwise hold.
@@ -147,6 +149,9 @@ def compute_tuning(
         elif attempt_overhead <= 0.03 and with_solve >= 0.95:
             reasons.append("attempt_overhead_low_keep_search_depth")
 
+        if with_solve >= 0.97 and with_semantic >= 0.97:
+            knobs["route_experiment_decision"] = "promote" if wall_overhead <= 0.8 and attempt_overhead <= 0.08 else "quarantine"
+
     return {
         "status": "SUCCESS",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -164,6 +169,18 @@ def compute_tuning(
             "attempt_overhead": attempt_overhead,
         },
         "knobs": knobs,
+        "route_experiment": {
+            "schema_version": "nexus_route_experiment_v1",
+            "promotion_decision": knobs["route_experiment_decision"],
+            "promotion_gate": {
+                "trust_mismatch_rate": with_trust_mismatch,
+                "semantic_verified_rate": with_semantic,
+                "solve_rate": with_solve,
+                "wall_overhead_sec": wall_overhead,
+                "attempt_overhead": attempt_overhead,
+            },
+            "rollback_policy": "restore_previous_tuning_on_trust_mismatch_or_verified_drop",
+        },
         "reasons": reasons or ["no_change"],
     }
 

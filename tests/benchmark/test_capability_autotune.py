@@ -88,6 +88,49 @@ def test_compute_tuning_reduces_search_depth_when_attempt_overhead_high():
     assert "attempt_overhead_high_reduce_search_depth" in out["reasons"]
 
 
+def test_compute_tuning_emits_route_experiment_promotion_gate():
+    payload = {
+        "a": {
+            "summary": {
+                "solve_rate": 1.0,
+                "semantic_verified_rate": 1.0,
+                "trust_mismatch_rate": 0.0,
+                "avg_wall_duration_sec": 1.0,
+                "avg_attempt_count": 1.0,
+            }
+        },
+        "b": {"summary": {"avg_wall_duration_sec": 0.4, "avg_attempt_count": 1.0}},
+    }
+
+    out = compute_tuning(payload)
+
+    assert out["knobs"]["route_experiment_decision"] == "promote"
+    assert out["route_experiment"]["schema_version"] == "nexus_route_experiment_v1"
+    assert out["route_experiment"]["promotion_decision"] == "promote"
+    assert out["route_experiment"]["promotion_gate"]["trust_mismatch_rate"] == 0.0
+
+
+def test_compute_tuning_discards_route_experiment_on_trust_mismatch():
+    payload = {
+        "a": {
+            "summary": {
+                "solve_rate": 1.0,
+                "semantic_verified_rate": 1.0,
+                "trust_mismatch_rate": 0.2,
+                "avg_wall_duration_sec": 1.0,
+                "avg_attempt_count": 1.0,
+            }
+        },
+        "b": {"summary": {"avg_wall_duration_sec": 0.4, "avg_attempt_count": 1.0}},
+    }
+
+    out = compute_tuning(payload)
+
+    assert out["knobs"]["route_experiment_decision"] == "discard"
+    assert out["route_experiment"]["promotion_decision"] == "discard"
+    assert "trust_mismatch_detected_keep_conservative" in out["reasons"]
+
+
 def test_cli_apply_writes_tuning_and_backup(tmp_path: Path):
     eval_file = tmp_path / "ab_eval.json"
     eval_file.write_text(

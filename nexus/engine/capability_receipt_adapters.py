@@ -84,14 +84,18 @@ class AutoreasonReceiptAdapter:
     name = "autoreason"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        refs = [payload.get("winner")] + [str(item) for item in (payload.get("judge_votes", []) or [])]
+        winner = payload.get("winner") or payload.get("winner_id")
+        refs = [winner] + [str(item) for item in (payload.get("judge_votes", []) or payload.get("judge_scores", []) or [])]
+        for key in ("incumbent_id", "stop_reason"):
+            if payload.get(key):
+                refs.append(f"{key}:{payload.get(key)}")
         clean_refs = [
             str(item).strip()
             for item in refs
             if item is not None and str(item).strip() and str(item).strip() != "None"
         ]
         invoked = bool(payload.get("enabled") or payload.get("status"))
-        gate_passed = bool(payload.get("winner") and claim_verified)
+        gate_passed = bool(winner and claim_verified)
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -115,9 +119,11 @@ class DDTreeReceiptAdapter:
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         refs = [str(item) for item in (payload.get("selected_candidate_ids", []) or [])]
         saved_steps = as_int(payload.get("actual_saved_steps", 0))
+        candidate_count = as_int(payload.get("candidate_count", 0))
+        max_candidates = as_int(payload.get("max_candidates", 0))
         if saved_steps > 0:
             refs.append(f"saved_steps:{saved_steps}")
-        invoked = bool(payload.get("enabled") and payload.get("eligible"))
+        invoked = bool(payload.get("enabled") and payload.get("eligible") and (candidate_count == 0 or max_candidates == 0 or candidate_count > max_candidates))
         gate_passed = bool(saved_steps > 0 and claim_verified)
         return merge_capability_receipt(
             name=self.name,

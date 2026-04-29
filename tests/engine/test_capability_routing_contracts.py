@@ -184,6 +184,85 @@ def test_uninvoked_reasoning_receipt_does_not_treat_none_as_evidence():
     assert receipts["ultra_review"].outcome_contributed is False
 
 
+def test_autoreason_receipt_requires_winner_and_exposes_tournament_context():
+    plan = {
+        "selected_capabilities": ["autoreason"],
+    }
+
+    no_winner = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            autoreason={"enabled": True, "judge_scores": [{"candidate": "b", "score": 0.4}]},
+        )
+    }
+    with_winner = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            autoreason={
+                "enabled": True,
+                "winner_id": "candidate-b",
+                "incumbent_id": "candidate-a",
+                "judge_scores": [{"candidate": "candidate-b", "score": 0.8}],
+                "stop_reason": "a_streak_converged",
+            },
+        )
+    }
+
+    assert no_winner["autoreason"].public_claim_safe is False
+    assert no_winner["autoreason"].failure_reason == "evidence_without_gate_pass"
+    assert with_winner["autoreason"].public_claim_safe is True
+    assert "candidate-b" in with_winner["autoreason"].evidence_refs
+    assert "incumbent_id:candidate-a" in with_winner["autoreason"].evidence_refs
+    assert "stop_reason:a_streak_converged" in with_winner["autoreason"].evidence_refs
+
+
+def test_ddtree_receipt_requires_real_candidate_pruning():
+    plan = {
+        "selected_capabilities": ["ddtree"],
+    }
+
+    not_pruned = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            ddtree={
+                "enabled": True,
+                "eligible": True,
+                "candidate_count": 2,
+                "max_candidates": 2,
+                "selected_candidate_ids": ["candidate-a"],
+                "actual_saved_steps": 0,
+            },
+        )
+    }
+    pruned = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            ddtree={
+                "enabled": True,
+                "eligible": True,
+                "candidate_count": 4,
+                "max_candidates": 2,
+                "selected_candidate_ids": ["candidate-a", "candidate-b"],
+                "actual_saved_steps": 2,
+            },
+        )
+    }
+
+    assert not_pruned["ddtree"].invoked is False
+    assert not_pruned["ddtree"].public_claim_safe is False
+    assert pruned["ddtree"].invoked is True
+    assert pruned["ddtree"].public_claim_safe is True
+    assert "saved_steps:2" in pruned["ddtree"].evidence_refs
+
+
 def test_msa_receipts_become_public_safe_with_executor_evidence():
     plan = {
         "selected_capabilities": ["swarm", "drone", "nightshift"],

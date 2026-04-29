@@ -149,6 +149,76 @@ class CapabilityReceipt:
 
 
 @dataclass(frozen=True)
+class RouteDecision:
+    schema_version: str
+    task_id: str
+    task_type: str
+    task_desc_hash: str
+    recommended_flow: str
+    decision_source: str
+    signal_snapshot: dict[str, Any]
+    selected_capabilities: tuple[str, ...]
+    required_capabilities: tuple[str, ...] = ()
+    conditional_capabilities: tuple[str, ...] = ()
+    pending_capabilities: tuple[str, ...] = ()
+    forbidden_capabilities: tuple[str, ...] = ()
+    acceleration_layers: tuple[str, ...] = ()
+    governance_layers: tuple[str, ...] = ()
+    executor_controls: dict[str, Any] = field(default_factory=dict)
+    constraints: tuple[str, ...] = ()
+    decision_trace: tuple[dict[str, Any], ...] = ()
+    stop_policy: dict[str, Any] = field(default_factory=dict)
+    receipt_requirements: tuple[str, ...] = ()
+    public_claim_scope: str = "receipt_backed"
+    fallback_policy: str = "fail_closed"
+    tuning_snapshot: dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self) | {
+            "selected_capabilities": list(self.selected_capabilities),
+            "required_capabilities": list(self.required_capabilities),
+            "conditional_capabilities": list(self.conditional_capabilities),
+            "pending_capabilities": list(self.pending_capabilities),
+            "forbidden_capabilities": list(self.forbidden_capabilities),
+            "acceleration_layers": list(self.acceleration_layers),
+            "governance_layers": list(self.governance_layers),
+            "constraints": list(self.constraints),
+            "decision_trace": list(self.decision_trace),
+            "receipt_requirements": list(self.receipt_requirements),
+        }
+
+
+@dataclass(frozen=True)
+class RouteExperiment:
+    schema_version: str
+    experiment_id: str
+    baseline_route_decision_id: str
+    candidate_route_decision_id: str
+    variant_source: str
+    modifiable_scope: tuple[str, ...]
+    fixed_eval_manifest: str
+    seed: int
+    sample_count: int
+    metrics: dict[str, Any] = field(default_factory=dict)
+    capability_receipts: tuple[dict[str, Any], ...] = ()
+    winner: str = ""
+    elimination_matrix: tuple[dict[str, Any], ...] = ()
+    rollback_plan: dict[str, Any] = field(default_factory=dict)
+    promotion_decision: str = "quarantine"
+    public_claim_gate: dict[str, Any] = field(default_factory=dict)
+    failure_lessons: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self) | {
+            "modifiable_scope": list(self.modifiable_scope),
+            "capability_receipts": list(self.capability_receipts),
+            "elimination_matrix": list(self.elimination_matrix),
+            "failure_lessons": list(self.failure_lessons),
+        }
+
+
+@dataclass(frozen=True)
 class SkillSignalSet:
     top_skill_ids: tuple[str, ...] = ()
     skill_confidence: float = 0.0
