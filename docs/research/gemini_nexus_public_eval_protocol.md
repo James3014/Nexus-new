@@ -179,6 +179,8 @@ Failure lessons:
 - `--skip-llm-baseline` must not let Nexus silently solve with the local baseline path when the run is intended to test a model wearing Nexus. The treatment arm must either invoke the model or explicitly force a Nexus execution flow that is labeled non-public.
 - Per-task reports must be task-scoped. Shared route-gate reports can make later tasks overwrite earlier evidence and inflate receipt confidence.
 - Public manifests need explicit `expected_capabilities`; otherwise a task can pass hidden verification while leaving CodeIntel, Research, Hyper, Nightshift, Swarm, Drone, Ultra Review, Autoreason, DDTree, and gate capabilities unmeasured.
+- Commercial lane compilation must use the checked-in `scripts/bench/commercial_lane_tasks.py` entrypoint. Ad hoc helper names are process drift, not benchmark evidence.
+- Sandbox or `uv` cache permission failures are infra-invalid preflight events. They must be retried under the approved runtime context and must not be counted as route, model, or Nexus capability failures.
 
 COE action items:
 
