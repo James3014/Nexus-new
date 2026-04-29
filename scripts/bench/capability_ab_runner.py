@@ -2233,6 +2233,7 @@ def run_with_nexus(
         )
     if llm_enabled:
         args.append("--llm-mode")
+        args.append("--llm-baseline")
     effective_force_flow = force_flow
     if effective_force_flow:
         args.extend(["--force-flow", effective_force_flow])

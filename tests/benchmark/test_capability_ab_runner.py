@@ -2297,6 +2297,7 @@ def test_run_with_nexus_llm_all_keeps_auto_route_when_force_flow_is_unset(tmp_pa
     )
 
     assert "--llm-mode" in captured["cmd"]
+    assert "--llm-baseline" in captured["cmd"]
     assert "--force-flow" not in captured["cmd"]
 
 

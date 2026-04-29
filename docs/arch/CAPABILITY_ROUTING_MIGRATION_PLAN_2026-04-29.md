@@ -462,6 +462,33 @@ incrementally.
     row-level evidence shows the selected flow matches the route decision and
     Nexus delivery remains valid.
 
+## 2026-04-30 P44b Nexus-Wearing Baseline Lesson
+- Failure lesson:
+  - Preserving auto routing fixed the old hyper preset problem, but it exposed
+    a second benchmark contract issue: baseline lanes could solve locally with
+    `model_calls=0`, making the run fast but invalid for a "Gemini wearing
+    Nexus" comparison.
+  - LLM baseline fallback originally dropped metadata when Gemini returned a
+    structurally invalid patch. That hid real model invocation and made rows
+    look like Nexus had not called Gemini.
+- Fix:
+  - Benchmark LLM treatment runs now pass `--llm-baseline` while still
+    preserving auto route selection.
+  - Baseline generation now preserves LLM metadata on fallback, including
+    model calls, model name, token status, and gateway category.
+  - MemPalace is marked active for LLM baseline paths, so five-pillar
+    observation does not depend on Hyper-only learning trace.
+- Evidence:
+  - Targeted tests pass and the route/app/codeintel slice passed with
+    `166 passed`.
+  - Flash smoke remains blocked for public expansion because medium/hard rows
+    revealed baseline LLM quality and timeout issues. That is a capability
+    problem to fix, not infra evidence to hide.
+- Next:
+  - Add a conservative escalation rule: when an LLM baseline attempt fails
+    tests or times out on medium/hard tasks, re-plan into Hyper/Autoreason
+    within the same Nexus run. Do not globally force Hyper for all LLM tasks.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

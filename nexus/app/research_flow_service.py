@@ -16,7 +16,7 @@ import click
 from nexus.engine.policies.research_policy import ResearchPolicy
 from nexus.research.findings_memory import FindingsMemoryStore
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
-from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, _candidate_summaries
+from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCandidateGenerator, LLMCandidateError, _candidate_summaries
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
 from nexus.engine.capability_executor_controls import build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
@@ -1135,10 +1135,46 @@ def run_auto_flow(
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
     timing_breakdown_sec["context_pack_sec"] = round(time.time() - context_started_at, 4)
 
-    def _generate_baseline_patch(trial: int = 0) -> tuple[str, str]:
+    def _baseline_report_from_meta(source: str, meta: dict[str, Any]) -> dict[str, Any]:
+        model_calls = int(meta.get("model_calls", 0) or 0)
+        total_tokens = int(meta.get("tokens_used", meta.get("total_tokens", 0)) or 0)
+        return {
+            "source": source,
+            "attempt_count": 1,
+            "model_calls": model_calls,
+            "model_name": str(meta.get("model_name", "") or ""),
+            "model_patch_generated": bool(meta.get("model_patch_generated", model_calls > 0)),
+            "fallback_used": bool(meta.get("fallback_used", False)),
+            "total_tokens": total_tokens,
+            "token_capture_status": str(meta.get("token_capture_status", "not_applicable_local_only") or "unknown"),
+            "gateway_stats_present": bool(meta.get("gateway_stats_present", False)),
+            "gateway_usage_metadata_present": bool(meta.get("gateway_usage_metadata_present", False)),
+            "gateway_token_source": str(meta.get("gateway_token_source", "missing") or "missing"),
+            "gateway_error_category": str(meta.get("gateway_error_category", "") or ""),
+            "gateway_prompt_chars": int(meta.get("gateway_prompt_chars", 0) or 0),
+            "gateway_payload_chars": int(meta.get("gateway_payload_chars", 0) or 0),
+            "gateway_total_chars": int(meta.get("gateway_total_chars", 0) or 0),
+            "gateway_timeout_sec": int(meta.get("gateway_timeout_sec", 0) or 0),
+        }
+
+    def _local_baseline_meta(*, fallback_reason: str | None = None) -> dict[str, Any]:
+        meta = {
+            "source": "local",
+            "model_calls": 0,
+            "tokens_used": 0,
+            "token_capture_status": "not_applicable_local_only",
+            "model_patch_generated": False,
+        }
+        if fallback_reason:
+            meta["fallback_used"] = True
+            meta["gateway_error_category"] = fallback_reason
+        return meta
+
+    def _generate_baseline_patch(trial: int = 0) -> tuple[str, str, dict[str, Any]]:
         """R4: Enhanced baseline generation with LLM fast-fallback and conservative local paths."""
         source_label = "local"
         fallback_reason = None
+        fallback_meta: dict[str, Any] | None = None
         
         # [NEW: X-2] Prior-Art from Claims
         try:
@@ -1153,7 +1189,7 @@ def run_auto_flow(
         except Exception:
             task_desc_for_llm = task_desc_with_codeintel
         
-        if llm_baseline and task_type in ["feature", "refactor"]:
+        if llm_baseline:
             try:
                 # Use a very short timeout for baseline assistance to avoid blocking
                 gen = LLMCandidateGenerator(repo_root, safe_mode=True)
@@ -1161,9 +1197,17 @@ def run_auto_flow(
                 # For now, we trust internal model_chain but monitor for rapid failure
                 patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
                 if patched and patched != original_code:
-                    return patched, "llm_assisted"
+                    return patched, "llm_assisted", meta
                 else:
                     fallback_reason = "llm_generation_empty_fallback_local"
+                    fallback_meta = dict(meta)
+                    fallback_meta["fallback_used"] = True
+                    fallback_meta["gateway_error_category"] = fallback_reason
+            except LLMCandidateError as e:
+                fallback_reason = f"llm_error_{str(e).lower()}_fallback_local"
+                fallback_meta = dict(e.metadata)
+                fallback_meta["fallback_used"] = True
+                fallback_meta["gateway_error_category"] = str(e)
             except Exception as e:
                 err_str = str(e).lower()
                 if "timeout" in err_str:
@@ -1193,17 +1237,18 @@ def run_auto_flow(
         if fallback_reason:
             label = f"{source_label}({fallback_reason})"
             
-        return patched, label
+        return patched, label, fallback_meta or _local_baseline_meta(fallback_reason=fallback_reason)
 
     def _run_baseline_apply() -> dict:
         start = time.time()
         ok = False
         err = ""
         source = "local"
+        generation_meta = _local_baseline_meta()
         companion_edits: dict[Path, str] = {}
         restored_files: dict[Path, str | None] = {}
         try:
-            patched, source = _generate_baseline_patch()
+            patched, source, generation_meta = _generate_baseline_patch()
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
@@ -1236,13 +1281,7 @@ def run_auto_flow(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.time() - start, 4),
             "error": err,
-            "report": {
-                "source": source,
-                "attempt_count": 1,
-                "model_calls": 0,
-                "total_tokens": 0,
-                "token_capture_status": "not_applicable_local_only",
-            },
+            "report": _baseline_report_from_meta(source, generation_meta),
         }
 
     def _run_baseline_probe() -> dict:
@@ -1251,10 +1290,11 @@ def run_auto_flow(
         ok = False
         err = ""
         source = "local"
+        generation_meta = _local_baseline_meta()
         patched = original_code
         restored_files: dict[Path, str | None] = {}
         try:
-            patched, source = _generate_baseline_patch()
+            patched, source, generation_meta = _generate_baseline_patch()
             if patched == original_code:
                 err = "no_mutation_generated"
             else:
@@ -1285,13 +1325,7 @@ def run_auto_flow(
             "status": "SUCCESS" if ok else "FAILED",
             "elapsed_sec": round(time.time() - start, 4),
             "error": err,
-            "report": {
-                "source": source,
-                "attempt_count": 1,
-                "model_calls": 0,
-                "total_tokens": 0,
-                "token_capture_status": "not_applicable_local_only",
-            },
+            "report": _baseline_report_from_meta(source, generation_meta),
             "_patch": patched if ok else None,
         }
 
@@ -1574,6 +1608,7 @@ def run_auto_flow(
         or any("self_heal" in str(code) for code in result_report.get("error_codes", []))
     )
     mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False))
+    mempalace_active = bool(hyper_learning_trace or gemini_invoked)
     capability_evidence = _capability_evidence(
         result_report=result_report,
         learning_trace=hyper_learning_trace,
@@ -1594,7 +1629,7 @@ def run_auto_flow(
         "pillars": {
             "lancedb": {"active": True, "hits": int(route.get("findings_hits", 0) or 0)},
             "memory": {"active": True, "hits": int((route.get("route_features", {}) or {}).get("memory_hits", 0) or 0)},
-            "mempalace": {"active": bool(hyper_learning_trace), "verified": mempalace_verified},
+            "mempalace": {"active": mempalace_active, "verified": mempalace_verified},
             "belief": {
                 "active": True,
                 "confidence": float(execution_profile.get("belief_confidence", 1.0) or 1.0),
