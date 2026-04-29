@@ -1128,6 +1128,41 @@ def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
     assert calls["swarm"] == 0
 
 
+def test_local_mode_can_opt_into_swarm_executor(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    calls = {"inplace": 0, "swarm": 0}
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeInPlaceExecutor:
+        def __init__(self, *_args, **_kwargs):
+            calls["inplace"] += 1
+
+    class FakeSwarmExecutor:
+        def __init__(self, *_args, **_kwargs):
+            calls["swarm"] += 1
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeInPlaceExecutor)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeSwarmExecutor)
+
+    cfg = SprintConfig(task="fix bug", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    assert res.status == "SUCCESS"
+    assert calls["swarm"] == 1
+    assert calls["inplace"] == 0
+
+
 def test_inplace_executor_rejects_no_change_candidate(tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")

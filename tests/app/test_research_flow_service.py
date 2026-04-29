@@ -198,6 +198,90 @@ def test_capability_evidence_splits_nightshift_and_drone_signals():
     assert out["nightshift_failure_reason"] == ""
 
 
+def test_write_msa_receipt_reports_persists_swarm_and_drone_artifacts(tmp_path: Path):
+    evidence = {
+        "swarm_report": {
+            "schema_version": "nexus_swarm_receipt_v1",
+            "evidence_count": 2,
+            "consensus": "candidate_summary_evidence",
+            "evidence_refs": ["candidate_summary:0", "candidate_summary:1"],
+        },
+        "drone_report": {
+            "schema_version": "nexus_drone_receipt_v1",
+            "artifact_count": 1,
+            "artifact_paths": [".nexus/reports/drones/d1_crystal.json"],
+        },
+    }
+
+    out = research_flow_service._write_msa_receipt_reports(tmp_path, task_id="xmod-hard-001", evidence=evidence)
+
+    swarm_path = Path(out["swarm_report_path"])
+    drone_path = Path(out["drone_report_path"])
+    assert swarm_path.exists()
+    assert drone_path.exists()
+    assert json.loads(swarm_path.read_text(encoding="utf-8"))["schema_version"] == "nexus_swarm_receipt_v1"
+    assert json.loads(drone_path.read_text(encoding="utf-8"))["artifact_count"] == 1
+
+
+def test_run_auto_flow_exposes_swarm_report_in_usage_trace(tmp_path: Path, monkeypatch):
+    target = tmp_path / "demo.py"
+    test_file = tmp_path / "test_demo.py"
+    target.write_text("def value():\n    return 1\n", encoding="utf-8")
+    test_file.write_text("from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8")
+
+    def fake_hyper(*, repo_root, config):
+        from nexus.research.sprint_service import SprintResult
+
+        return SprintResult(
+            status="SUCCESS",
+            reason="ok",
+            target_file="demo.py",
+            winner_source="local",
+            final_score=1.0,
+            elapsed_sec=0.1,
+            attempt_count=1,
+            model_calls=0,
+            quota_backoffs=0,
+            test_timeouts=0,
+            learning_trace={"mempalace_verified": True, "learn_phase_bridge": True},
+            candidates=[],
+            pytest_cmd=[],
+            patch="def value():\n    return 2\n",
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix cross-module swarm issue",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        task_type="cross_module_refactor_swarm",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-123",
+    )
+
+    capabilities = payload["nexus_usage_trace"]["capabilities"]
+    assert capabilities["swarm_report"]["schema_version"] == "nexus_swarm_receipt_v1"
+    assert capabilities["drone_report"]["schema_version"] == "nexus_drone_receipt_v1"
+    assert capabilities["nightshift_report"]["schema_version"] == "nexus_nightshift_receipt_v1"
+
+
 def test_ultra_review_gate_evidence_is_feature_flagged(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("NEXUS_ULTRA_REVIEW_DRY_GATE", raising=False)
 

@@ -166,6 +166,8 @@ class SwarmReceiptAdapter:
         evidence_count = as_int(report.get("evidence_count", payload.get("swarm_evidence_count", 0)))
         invoked = bool(payload.get("swarm_used", False))
         refs = [str(item) for item in report.get("evidence_refs", []) or [] if str(item).strip()]
+        if report.get("report_path"):
+            refs.append(f"report:{report.get('report_path')}")
         if evidence_count > 0:
             refs.append(f"role_findings:{evidence_count}")
         consensus = report.get("consensus") or payload.get("swarm_consensus")
@@ -197,6 +199,8 @@ class DroneReceiptAdapter:
         invoked_count = as_int(report.get("artifact_count", payload.get("drone_invoked_count", 0)))
         invoked = bool(payload.get("drone_used", False) or invoked_count > 0)
         refs = [f"artifact:{item}" for item in report.get("artifact_paths", []) or [] if str(item).strip()]
+        if report.get("report_path"):
+            refs.append(f"report:{report.get('report_path')}")
         if invoked_count > 0:
             refs.append(f"subtask_artifact:{invoked_count}")
         if payload.get("drone_artifact_path"):

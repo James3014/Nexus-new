@@ -336,6 +336,32 @@ def _capability_evidence(
     }
 
 
+def _write_msa_receipt_reports(repo_root: Path, *, task_id: str | None, evidence: dict[str, Any]) -> dict[str, Any]:
+    slug = _safe_trace_slug(task_id or "task")
+    report_root = repo_root / ".nexus" / "reports"
+    updated = dict(evidence)
+
+    swarm_report = dict(updated.get("swarm_report") or {})
+    if int(swarm_report.get("evidence_count", 0) or 0) > 0:
+        path = report_root / "swarm" / f"{slug}_receipt.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        swarm_report["report_path"] = str(path)
+        path.write_text(json.dumps(swarm_report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        updated["swarm_report"] = swarm_report
+        updated["swarm_report_path"] = str(path)
+
+    drone_report = dict(updated.get("drone_report") or {})
+    if int(drone_report.get("artifact_count", 0) or 0) > 0:
+        path = report_root / "drone" / f"{slug}_receipt.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        drone_report["report_path"] = str(path)
+        path.write_text(json.dumps(drone_report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        updated["drone_report"] = drone_report
+        updated["drone_report_path"] = str(path)
+
+    return updated
+
+
 def _ultra_review_gate_evidence(
     *,
     repo_root: Path,
@@ -815,6 +841,7 @@ def run_auto_flow(
     report_file: str,
     output_file: Path | None,
     success_criteria: str = "all_target_tests_pass",
+    task_id: str | None = None,
 ):
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
 
@@ -1333,6 +1360,7 @@ def run_auto_flow(
         learning_trace=hyper_learning_trace,
         nightshift_recommended=nightshift_recommended,
     )
+    capability_evidence = _write_msa_receipt_reports(repo_root, task_id=task_id, evidence=capability_evidence)
     ultra_review_evidence = _ultra_review_gate_evidence(
         repo_root=repo_root,
         task_desc=task_desc,
@@ -1378,12 +1406,17 @@ def run_auto_flow(
             "swarm_used": capability_evidence["swarm_used"],
             "swarm_evidence_count": capability_evidence["swarm_evidence_count"],
             "swarm_consensus": capability_evidence["swarm_consensus"],
+            "swarm_report": capability_evidence["swarm_report"],
+            "swarm_report_path": capability_evidence.get("swarm_report_path", ""),
             "drone_used": capability_evidence["drone_used"],
             "drone_invoked_count": capability_evidence["drone_invoked_count"],
             "drone_artifact_path": capability_evidence["drone_artifact_path"],
+            "drone_report": capability_evidence["drone_report"],
+            "drone_report_path": capability_evidence.get("drone_report_path", ""),
             "self_heal_used": self_heal_used,
             "claim_verified": artifact_verified,
             "nightshift_failure_reason": capability_evidence["nightshift_failure_reason"],
+            "nightshift_report": capability_evidence["nightshift_report"],
             "ultra_review_recommended": ultra_review_evidence["recommended"],
             "ultra_review_invoked": ultra_review_evidence["invoked"],
             "ultra_review_gate_passed": ultra_review_evidence["gate_passed"],

@@ -203,6 +203,7 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
                     "evidence_count": 2,
                     "consensus": "pass",
                     "evidence_refs": ["candidate_summary:0", "candidate_summary:1"],
+                    "report_path": ".nexus/reports/swarm/x_receipt.json",
                 },
                 "drone_used": True,
                 "drone_invoked_count": 2,
@@ -211,6 +212,7 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
                     "schema_version": "nexus_drone_receipt_v1",
                     "artifact_count": 2,
                     "artifact_paths": [".nexus/reports/drones/a.json", ".nexus/reports/drones/b.json"],
+                    "report_path": ".nexus/reports/drone/x_receipt.json",
                 },
                 "nightshift_recommended": True,
                 "nightshift_invoked": True,
@@ -229,9 +231,11 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
     }
 
     assert receipts["swarm"].public_claim_safe is True
+    assert "report:.nexus/reports/swarm/x_receipt.json" in receipts["swarm"].evidence_refs
     assert "candidate_summary:0" in receipts["swarm"].evidence_refs
     assert "role_findings:2" in receipts["swarm"].evidence_refs
     assert receipts["drone"].public_claim_safe is True
+    assert "report:.nexus/reports/drone/x_receipt.json" in receipts["drone"].evidence_refs
     assert "artifact:.nexus/reports/drones/a.json" in receipts["drone"].evidence_refs
     assert "subtask_artifact:2" in receipts["drone"].evidence_refs
     assert receipts["nightshift"].public_claim_safe is True

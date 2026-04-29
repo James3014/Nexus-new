@@ -1681,6 +1681,7 @@ def research_report_cmd(input_dir, rolling, output):
 @click.option("--output-json", is_flag=True)
 @click.option("--explain-route", is_flag=True)
 @click.option("--output-file", type=click.Path(path_type=Path, dir_okay=False), default=None, help="Optional explicit JSON output file.")
+@click.option("--task-id", default=None, help="Optional stable task id for capability receipt artifacts.")
 def research_auto_flow(
     task_desc,
     target_file,
@@ -1705,6 +1706,7 @@ def research_auto_flow(
     output_json,
     explain_route,
     output_file,
+    task_id,
 ):
     if explain_route:
         out = research_flow_service.build_route(repo_root=repo_root, 
@@ -1741,6 +1743,7 @@ def research_auto_flow(
         force_flow=force_flow,
         report_file=report_file,
         output_file=output_file,
+        task_id=task_id,
     )
     result_payload = payload.get("result", {})
     io_payload = payload.get("io", {})

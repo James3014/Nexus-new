@@ -1299,6 +1299,51 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     assert out["fallback_used"] is False
 
 
+def test_run_with_nexus_can_enable_local_swarm_executor_without_llm(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="swarm-hard",
+        difficulty="hard",
+        task_type="cross_module_refactor_swarm",
+        task_desc="Exercise swarm executor",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":0}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["cmd"] = _cmd
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setenv("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file="target.py",
+        test_file="test_target.py",
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="off",
+    )
+
+    assert "--task-id" in captured["cmd"]
+    assert "swarm-hard" in captured["cmd"]
+    assert "target.py" in captured["cmd"]
+    assert "test_target.py" in captured["cmd"]
+    assert captured["env"]["NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR"] == "1"
+    assert "NEXUS_FORCE_INPLACE_EXECUTOR" not in captured["env"]
+    assert out["semantic_status"] == "VERIFIED"
+
+
 def test_run_with_nexus_can_enable_routing_layer_executors(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-routing",

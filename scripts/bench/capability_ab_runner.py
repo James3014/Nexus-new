@@ -1246,6 +1246,16 @@ def _tail_text(value: Any, *, max_chars: int = 2000) -> str:
     return text[-max_chars:]
 
 
+def _repo_relative_path(repo_root: Path, path_text: str) -> str:
+    path = Path(path_text)
+    if not path.is_absolute():
+        return path_text
+    try:
+        return str(path.resolve().relative_to(repo_root.resolve()))
+    except ValueError:
+        return path_text
+
+
 def _classify_timeout_stage(stdout_tail: str, stderr_tail: str) -> str:
     combined = f"{stdout_tail}\n{stderr_tail}".lower()
     if "gateway" in combined or "gemini" in combined or "model_calls" in combined or "llm" in combined:
@@ -1444,17 +1454,22 @@ def run_with_nexus(
     enable_ultra_review_dry_gate: bool = False,
     llm_candidate_cap: int = 1,
 ) -> dict[str, Any]:
+    enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+    target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
+    test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file
     args = [
         "nexus",
         "research:auto-flow",
         "--task-desc",
         _nexus_task_desc(task),
         "--target-file",
-        target_file,
+        target_file_arg,
         "--test-file",
-        test_file,
+        test_file_arg,
         "--task-type",
         task.task_type,
+        "--task-id",
+        task.id,
         "--success-criteria",
         task.success_criteria,
         "--history-window",
@@ -1503,6 +1518,9 @@ def run_with_nexus(
             if enable_ddtree_executor:
                 env["NEXUS_DDTREE_EXECUTOR"] = "1"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
+        if enable_swarm_bench_executor:
+            env["NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR"] = "1"
+        else:
             env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
         try:
             res = _run_process_group(cmd, cwd=repo_root, env=env, timeout_sec=timeout_sec)

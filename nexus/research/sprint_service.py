@@ -629,7 +629,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     local_generator = LocalCandidateGenerator()
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
     force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
-    if llm_mode_effective and not force_inplace_executor:
+    enable_local_swarm_executor = os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+    if (llm_mode_effective or enable_local_swarm_executor) and not force_inplace_executor:
         executor = SprintExecutor(
             repo_root,
             scope_files=scope_files,
