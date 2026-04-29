@@ -514,7 +514,7 @@ def render_markdown_report(
         "## Nexus Wearing Evidence",
         "",
         f"- Formal treatment valid: {formal['valid_count']}/{formal['total_runs']} ({_pct(formal['valid_rate'])})",
-        f"- Gemini uses Nexus rate: {_pct(b['gemini_uses_nexus_rate'])}",
+        f"- Model uses Nexus rate: {_pct(b['gemini_uses_nexus_rate'])}",
         f"- Nexus usage valid rate: {_pct(b['nexus_usage_valid_rate'])}",
         f"- Phase completion rate: {_pct(b['phase_completion_rate'])}",
         f"- Claim verified rate: {_pct(b['claim_verified_rate'])}",

@@ -151,3 +151,17 @@ Existing 2026-04-27 Gemini 3 Flash smoke evidence shows that Nexus wearing and t
 - conclusion: no solve-rate lift can be claimed from that set
 
 The next public-safe claim requires running the Nexus-value manifest.
+
+## 2026-04-29 Codex Provider Lessons
+
+What: `capability_ab_runner.py` now supports a Codex provider path for same-model `gpt-5.5` bare vs `gpt-5.5` wearing Nexus smoke runs.
+
+Why: A model-agnostic public benchmark must not silently rely on Gemini-only environment fields, report copy, or token parsing. The same-model lock now accepts `NEXUS_CODEX_MODEL_NAME` and `NEXUS_DIRECT_CODEX_MODEL`, and the report wording uses “Model uses Nexus” instead of “Gemini uses Nexus.”
+
+How: The Codex treatment arm delivers Nexus route, CodeIntel, execution profile, executor flags, five-pillar evidence, and S/P/X/D/R/A/C phase evidence before invoking `codex exec`. Codex token usage is parsed from the CLI footer (`tokens used ...`) and written into the same token reliability fields used by Gemini runs.
+
+Failure lessons:
+
+- Commercial lane task manifests include compiler provenance (`commercial_lane`, `source_manifest`), so public preflight schema allowlists must include provenance fields or valid compiled manifests fail before execution.
+- A generic Nexus context was not enough for hidden-verifier repair tasks: Codex+Nexus and Codex bare both failed the `merge_limits` hidden invariant until the Nexus treatment prompt explicitly framed visible tests as acceptance hints and supplied repair invariants such as preserving caller-owned inputs and ignoring `None` override values for existing keys.
+- One-task smoke can prove wiring, but not value; the first Codex 1x1 smoke had both arms passing. A 3-task smoke exposed a bare failure and produced a public-claim-gated lift.

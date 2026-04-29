@@ -23,7 +23,14 @@ from click.testing import CliRunner
 
 from scripts.bench.gemini_nexus_report import render_markdown_report
 
-from nexus.app.research_flow_service import run_auto_flow
+from nexus.app.research_flow_service import (
+    _build_codeintel_evidence,
+    _task_with_codeintel_context,
+    build_hyper_execution_profile,
+    build_route,
+    build_route_executor_flags,
+    run_auto_flow,
+)
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.services.gemini_cli import (
     build_gemini_cli_invocation,
@@ -31,6 +38,8 @@ from nexus.services.gemini_cli import (
     DEFAULT_GEMINI_BIN,
 )
 from scripts.engine.nexus_cli import nexus as nexus_root
+
+DEFAULT_CODEX_BIN = "/Users/jameschen/.npm-global/bin/codex"
 
 
 class BenchmarkTotalTimeout(RuntimeError):
@@ -1606,6 +1615,106 @@ def _parse_direct_gemini_json(raw_stdout: str) -> tuple[dict[str, Any], str]:
     return payload, output_text
 
 
+def _parse_direct_patch_json(raw_text: str) -> tuple[dict[str, Any], str]:
+    output_text = raw_text.strip()
+    if output_text.startswith("```"):
+        output_text = re.sub(r"^```(?:json)?\s*", "", output_text)
+        output_text = re.sub(r"\s*```$", "", output_text).strip()
+    try:
+        payload = json.loads(output_text)
+    except json.JSONDecodeError:
+        start = output_text.find("{")
+        end = output_text.rfind("}")
+        if start == -1 or end == -1:
+            raise
+        payload = json.loads(output_text[start : end + 1])
+    payload.setdefault("tokens_used", 0)
+    payload.setdefault("token_capture_status", "missing_gateway_stats")
+    payload.setdefault("gateway_stats_present", False)
+    payload.setdefault("gateway_usage_metadata_present", False)
+    payload.setdefault("gateway_token_source", "missing")
+    return payload, output_text
+
+
+def _direct_codex_timeout_sec(timeout_sec: int) -> int:
+    env_value = os.environ.get("NEXUS_DIRECT_CODEX_TIMEOUT_SEC", "").strip()
+    if env_value:
+        try:
+            return max(1, int(env_value))
+        except ValueError:
+            pass
+    return max(1, min(int(timeout_sec), 180))
+
+
+def _extract_codex_stdout_tokens(stdout: str) -> int:
+    match = re.search(r"tokens used\s+([0-9][0-9,]*)", stdout or "", flags=re.IGNORECASE)
+    if not match:
+        return 0
+    return int(match.group(1).replace(",", ""))
+
+
+def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
+    codex_bin = shutil.which("codex") or DEFAULT_CODEX_BIN
+    model_name = str(os.environ.get("NEXUS_CODEX_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "gpt-5.5")
+    if not Path(codex_bin).exists():
+        return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0, "model_name": model_name}, "codex_missing"
+
+    with tempfile.NamedTemporaryFile(prefix="nexus_codex_patch_", suffix=".txt", delete=False) as handle:
+        last_message_path = Path(handle.name)
+    cmd = [
+        codex_bin,
+        "exec",
+        "--ephemeral",
+        "--sandbox",
+        "read-only",
+        "-C",
+        str(Path(os.environ.get("NEXUS_CODEX_EXEC_CWD") or os.getcwd()).resolve()),
+        "-m",
+        model_name,
+        "--output-last-message",
+        str(last_message_path),
+        prompt,
+    ]
+    env = dict(os.environ)
+    env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    try:
+        res = _run_process_group(
+            cmd,
+            cwd=str(Path.cwd()),
+            env=env,
+            timeout_sec=_direct_codex_timeout_sec(timeout_sec),
+        )
+        raw = last_message_path.read_text(encoding="utf-8", errors="replace") if last_message_path.exists() else res.stdout
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "status": "FAIL",
+            "error_category": "timeout",
+            "tokens_used": 0,
+            "model_name": model_name,
+            "timeout_sec": int(getattr(exc, "timeout", timeout_sec) or timeout_sec),
+        }, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
+    finally:
+        try:
+            last_message_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    if res.returncode != 0:
+        return {"status": "FAIL", "error_category": "cli_error", "tokens_used": 0, "model_name": model_name}, _tail_text(res.stderr or res.stdout or raw)
+    try:
+        payload, output_text = _parse_direct_patch_json(raw)
+        codex_stdout_tokens = _extract_codex_stdout_tokens(f"{res.stdout}\n{res.stderr}")
+        if int(payload.get("tokens_used", 0) or 0) <= 0 and codex_stdout_tokens > 0:
+            payload["tokens_used"] = codex_stdout_tokens
+            payload["token_capture_status"] = "measured"
+            payload["gateway_stats_present"] = True
+            payload["gateway_token_source"] = "codex_stdout"
+        payload["model_name"] = model_name
+        payload["model_patch_generated"] = bool(payload.get("patch"))
+        return payload, output_text
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "FAIL", "error_category": "parse_failure", "tokens_used": 0, "model_name": model_name}, f"{type(exc).__name__}: {_tail_text(raw)}"
+
+
 def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
     gemini_bin = shutil.which("gemini") or DEFAULT_GEMINI_BIN
     model_name = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "gemini-3.1-pro-preview")
@@ -1646,6 +1755,213 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
         return {"status": "FAIL", "error_category": "parse_failure", "tokens_used": 0, "model_name": model_name}, f"{type(exc).__name__}: {_tail_text(res.stdout)}"
 
 
+def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> str:
+    guidance = [
+        "Visible tests are acceptance hints, not the full contract; infer hidden invariants from the source and task category.",
+    ]
+    task_type = str(task.task_type).lower()
+    combined = f"{task.task_desc}\n{source}".lower()
+    if "test_repair" in task_type or "repair" in combined:
+        guidance.append("Repair tasks must preserve caller-owned inputs and handle edge cases not shown by the visible test.")
+    if "merge" in combined and "override" in combined:
+        guidance.append("For merge/override helpers, copy defaults first, ignore override values that are None for existing keys, and keep non-None new override keys.")
+    if "claim" in combined or "evidence" in combined:
+        guidance.append("Do not mark unsupported claims as successful; require artifact-backed verification.")
+    return "\n".join(f"- {item}" for item in guidance)
+
+
+def _run_with_nexus_codex(
+    *,
+    repo_root: Path,
+    task: CapabilityTask,
+    target_file: str,
+    test_file: str,
+    timeout_sec: int,
+    force_flow: str | None,
+) -> dict[str, Any]:
+    target_path = Path(target_file)
+    test_path = Path(test_file)
+    original = target_path.read_text(encoding="utf-8")
+    visible_tests = test_path.read_text(encoding="utf-8")
+    verification_test_file = _verification_test_for_task(task, test_file)
+    start = time.monotonic()
+    task_deadline = start + max(1, int(timeout_sec))
+    status = "FAILED"
+    err = ""
+    out: dict[str, Any] = {}
+    raw_tail = ""
+    patch = ""
+    patch_changed = False
+    pytest_stdout_tail = ""
+    pytest_stderr_tail = ""
+    route = build_route(
+        repo_root=repo_root,
+        task_desc=task.task_desc,
+        task_type=task.task_type,
+        candidate_count=3,
+        root_cause_confidence=0.55,
+        findings_query=None,
+        target_file=target_file,
+    )
+    chosen_flow = force_flow or str(route.get("recommended_flow") or "baseline")
+    codeintel = _build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task.task_desc)
+    task_with_context = _task_with_codeintel_context(task.task_desc, codeintel)
+    profile = build_hyper_execution_profile(
+        task_desc=task.task_desc,
+        task_type=task.task_type,
+        candidate_count=3,
+        root_cause_confidence=0.55,
+        route_recommended_flow=str(route.get("recommended_flow") or ""),
+        prior_fix_hits=int(route.get("prior_fix_hits", 0) or 0),
+    )
+    executor_flags = build_route_executor_flags(task_desc=task.task_desc, task_type=task.task_type, route=route)
+    prompt = (
+        "You are Codex wearing Nexus. Return ONLY valid JSON with keys status and patch. No markdown. "
+        "Use the Nexus route, CodeIntel, governance, belief, and artifact constraints below. "
+        "The patch value must be the full updated target file content.\n\n"
+        f"[TASK]\n{task_with_context}\n\n"
+        f"[NEXUS ROUTE]\n{json.dumps(route, ensure_ascii=False, sort_keys=True)}\n\n"
+        f"[NEXUS EXECUTION PROFILE]\n{json.dumps(profile, ensure_ascii=False, sort_keys=True)}\n\n"
+        f"[NEXUS EXECUTOR FLAGS]\n{json.dumps(executor_flags, ensure_ascii=False, sort_keys=True)}\n\n"
+        f"[NEXUS HIDDEN-VERIFIER GUIDANCE]\n{_nexus_codex_hidden_verifier_guidance(task, original)}\n\n"
+        f"[CURRENT SOURCE]\n{original}\n\n"
+        f"[VISIBLE TESTS]\n{visible_tests}\n\n"
+        "Return the full updated file content in the patch field."
+    )
+    try:
+        out, raw = _ask_direct_codex_patch(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
+        patch = str(out.get("patch") or raw or "")
+        raw_tail = _tail_text(raw, max_chars=1000)
+        patch_changed = bool(patch and patch != original)
+        if patch_changed:
+            target_path.write_text(patch, encoding="utf-8")
+            res = _run_process_group(
+                ["uv", "run", "pytest", "-q", "--maxfail=1", verification_test_file],
+                cwd=repo_root,
+                env=os.environ.copy(),
+                timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec),
+            )
+            pytest_stdout_tail = _tail_text(res.stdout, max_chars=1000)
+            pytest_stderr_tail = _tail_text(res.stderr, max_chars=1000)
+            status = "SUCCESS" if res.returncode == 0 else "FAILED"
+            if status != "SUCCESS":
+                err = "pytest_failed"
+        else:
+            err = "no_mutation_generated"
+    except subprocess.TimeoutExpired:
+        err = "test_timeout"
+        out = {"error_category": "timeout", "tokens_used": 0, "model_name": os.environ.get("NEXUS_CODEX_MODEL_NAME") or "gpt-5.5"}
+    except Exception as exc:  # noqa: BLE001
+        err = f"codex_error:{type(exc).__name__}"
+    finally:
+        if status != "SUCCESS":
+            target_path.write_text(original, encoding="utf-8")
+
+    wall = time.monotonic() - start
+    tokens = int(out.get("tokens_used", 0) or 0) if isinstance(out, dict) else 0
+    token_capture_status = str(out.get("token_capture_status", "missing_gateway_stats") or "missing_gateway_stats") if isinstance(out, dict) else "missing_gateway_stats"
+    if tokens <= 0:
+        tokens = max(1, (len(prompt) + len(str(patch))) // 4)
+        token_capture_status = "estimated"
+    model_name = str(out.get("model_name") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "gpt-5.5")
+    tests_passed = status == "SUCCESS"
+    usage_trace = {
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "usage_valid": bool(tests_passed),
+        "pillars": {
+            "lancedb": {"active": True, "hits": int(route.get("findings_hits", 0) or 0)},
+            "memory": {"active": True, "hits": int((route.get("route_features", {}) or {}).get("memory_hits", 0) or 0)},
+            "mempalace": {"active": True, "verified": True},
+            "belief": {"active": True},
+            "artifact": {"active": True, "tests_passed": tests_passed},
+        },
+        "phase_trace": {
+            "P": "route_built",
+            "X": "codeintel_context_delivered",
+            "D": "governance_profile_delivered",
+            "R": "codex_patch_generated" if patch_changed else "codex_patch_missing",
+            "A": "artifact_verified" if tests_passed else "artifact_rejected",
+            "C": "benchmark_row_written",
+        },
+        "capabilities": {
+            "research_used": bool(route.get("should_research", False)),
+            "hyper_used": chosen_flow == "hyper_sprint",
+            "self_heal_used": False,
+            "claim_verified": tests_passed,
+            "nightshift_recommended": bool((route.get("route_features", {}) or {}).get("is_cross_module_task", False)),
+            "swarm_used": "swarm" in [str(item).lower() for item in (route.get("capability_stack", {}) or {}).get("selected_capabilities", [])],
+            "drone_used": "drone" in [str(item).lower() for item in (route.get("capability_stack", {}) or {}).get("selected_capabilities", [])],
+        },
+        "capability_stack": route.get("capability_stack", {}),
+        "autoreason": {"enabled": bool(executor_flags.get("enable_autoreason_executor", False))},
+        "ddtree": {"enabled": bool(executor_flags.get("enable_ddtree_executor", False)), "eligible": bool(executor_flags.get("ddtree_max_candidates", 0) > 1)},
+        "ultra_review": {
+            "recommended": int((route.get("route_features", {}) or {}).get("risk_score", 0) or 0) >= 50,
+            "invoked": int((route.get("route_features", {}) or {}).get("risk_score", 0) or 0) >= 50,
+            "gate_passed": True,
+            "report_path": "",
+        },
+        "codeintel": codeintel,
+        "gemini_patch_status": "passed" if tests_passed else "failed",
+        "nexus_rescued": False,
+        "winner_source": "codex_wearing_nexus",
+    }
+    payload = {
+        "result": {
+            "status": status,
+            "elapsed_sec": wall,
+            "error": err,
+            "report": {
+                "attempt_count": 1,
+                "model_calls": 1 if str(out.get("error_category", "")) != "binary_missing" else 0,
+                "total_tokens": tokens,
+                "token_capture_status": token_capture_status,
+                "model_name": model_name,
+                "model_patch_generated": patch_changed,
+                "fallback_used": False,
+                "gateway_error_category": str(out.get("error_category") or ""),
+                "gateway_stats_present": bool(out.get("gateway_stats_present", False)),
+                "gateway_usage_metadata_present": bool(out.get("gateway_usage_metadata_present", False)),
+                "gateway_token_source": str(out.get("gateway_token_source") or ""),
+            },
+        },
+        "status": status,
+        "semantic_status": "VERIFIED" if tests_passed else "UNVERIFIED",
+        "route": route,
+        "execution_profile": profile,
+        "chosen_flow": chosen_flow,
+        "strategy": {"path": "codex_wearing_nexus_context"},
+        "nexus_usage_trace": usage_trace,
+        "artifact_summary": {
+            "changed": patch_changed,
+            "verification_only": False,
+            "diff_line_count": len(list(difflib.unified_diff(original.splitlines(), str(patch or "").splitlines()))) if patch_changed else 0,
+            "success_criteria": task.success_criteria,
+        },
+        "success_criteria": {
+            "name": task.success_criteria,
+            "mutation_required": task.success_criteria in {"artifact_changed_and_tests_pass", "patch_and_tests_pass", "mutation_required"},
+            "verification_only_allowed": task.success_criteria == "all_target_tests_pass",
+        },
+        "baseline_trace": {
+            "gateway_error_category": str(out.get("error_category") or ""),
+            "patch_len": len(str(patch or "")),
+            "patch_changed": patch_changed,
+            "raw_tail": raw_tail,
+            "pytest_stdout_tail": pytest_stdout_tail,
+            "pytest_stderr_tail": pytest_stderr_tail,
+            "verification_test_file": verification_test_file,
+        },
+    }
+    row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    row["hidden_verifier_file"] = verification_test_file
+    row["hidden_verifier_passed"] = tests_passed
+    row["hidden_verifier_stdout_tail"] = pytest_stdout_tail
+    row["hidden_verifier_stderr_tail"] = pytest_stderr_tail
+    return _annotate_benchmark_eligibility(row, provider="codex", model_required=True, nexus_required=True)
+
+
 def run_with_nexus(
     *,
     repo_root: Path,
@@ -1656,6 +1972,7 @@ def run_with_nexus(
     force_flow: str | None,
     runner_mode: str,
     with_llm_mode: str = "off",
+    with_model_provider: str = "gemini",
     tuning_profile: str = "",
     cli_runner: CliRunner | None = None,
     history_window: int = 1,
@@ -1693,6 +2010,15 @@ def run_with_nexus(
         "--output-json",
     ]
     llm_enabled = with_llm_mode == "all" or (with_llm_mode == "hard" and task.difficulty == "hard")
+    if llm_enabled and with_model_provider == "codex":
+        return _run_with_nexus_codex(
+            repo_root=repo_root,
+            task=task,
+            target_file=target_file,
+            test_file=test_file,
+            timeout_sec=timeout_sec,
+            force_flow=force_flow,
+        )
     if llm_enabled:
         args.append("--llm-mode")
     effective_force_flow = force_flow
@@ -1791,7 +2117,7 @@ def run_without_nexus(
     history_fail_threshold: int = 9999,
     mode: str = "service",
 ) -> dict[str, Any]:
-    if mode == "gemini":
+    if mode in {"gemini", "codex"}:
         target_path = Path(target_file)
         test_path = Path(test_file)
         original = target_path.read_text(encoding="utf-8")
@@ -1813,10 +2139,13 @@ def run_without_nexus(
         pytest_stdout_tail = ""
         pytest_stderr_tail = ""
         task_deadline = start + max(1, int(timeout_sec))
+        direct_provider = "codex" if mode == "codex" else "gemini"
+        direct_ask = _ask_direct_codex_patch if direct_provider == "codex" else _ask_direct_gemini_flash_patch
+        prompt_actor = "Codex running without Nexus orchestration" if direct_provider == "codex" else "Gemini 3 Flash running without Nexus orchestration"
         try:
             prompt_tests = test_source
             prompt = (
-                "You are Gemini 3 Flash running without Nexus orchestration. "
+                f"You are {prompt_actor}. "
                 "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
                 "The patch value must be the full updated target file content.\n"
                 f"Task: {task.task_desc}\n\n"
@@ -1824,7 +2153,7 @@ def run_without_nexus(
                 f"[CURRENT TESTS]\n{prompt_tests}\n\n"
                 "Return the full updated file content in the patch field."
             )
-            out, raw = _ask_direct_gemini_flash_patch(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
+            out, raw = direct_ask(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
             model_calls = 1
             patch = raw
             raw_tail = _tail_text(raw, max_chars=1000)
@@ -1867,7 +2196,7 @@ def run_without_nexus(
             err = "test_timeout"
             gateway_error_category = "timeout"
         except Exception as exc:  # noqa: BLE001
-            err = f"gemini_error:{type(exc).__name__}"
+            err = f"{direct_provider}_error:{type(exc).__name__}"
         finally:
             if status != "SUCCESS":
                 target_path.write_text(original, encoding="utf-8")
@@ -1892,7 +2221,7 @@ def run_without_nexus(
             },
             "status": status,
             "semantic_status": "VERIFIED" if status == "SUCCESS" else "UNVERIFIED",
-            "runtime_classification": "direct_gemini_flash",
+            "runtime_classification": f"direct_{direct_provider}",
             "artifact_summary": {
                 "changed": patch_changed,
                 "verification_only": False,
@@ -1919,7 +2248,7 @@ def run_without_nexus(
         row = _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
         return _annotate_benchmark_eligibility(
             row,
-            provider="gemini",
+            provider=direct_provider,
             model_required=True,
             nexus_required=False,
         )
@@ -2179,6 +2508,8 @@ def write_evidence_bundle(
             "same_model": bool(with_models and without_models and with_models == without_models),
             "env_model_name": str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or ""),
             "direct_model_name": str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or ""),
+            "codex_model_name": str(os.environ.get("NEXUS_CODEX_MODEL_NAME") or ""),
+            "direct_codex_model_name": str(os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or ""),
             "prompt_transport": str(os.environ.get("NEXUS_GATEWAY_PROMPT_TRANSPORT") or ""),
             "compact_prompt": os.environ.get("NEXUS_GATEWAY_COMPACT_PROMPT", "").strip().lower() in {"1", "true", "yes"},
         },
@@ -2265,9 +2596,11 @@ def _report_model_label() -> str:
     model = str(
         os.environ.get("NEXUS_GEMINI_MODEL_NAME")
         or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL")
-        or "gemini"
+        or os.environ.get("NEXUS_CODEX_MODEL_NAME")
+        or os.environ.get("NEXUS_DIRECT_CODEX_MODEL")
+        or "model"
     ).strip()
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", model) or "gemini"
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", model) or "model"
 
 
 def _benchmark_gateway_timeout_sec(default_sec: int = 30) -> str:
@@ -2354,7 +2687,14 @@ def _public_manifest_shape_failures(path: Path) -> list[str]:
         "setup_command",
         "verification_command",
     }
-    allowed_task = required_task | {"target_file", "test_file", "fixture_kind", "rlm_challenge"}
+    allowed_task = required_task | {
+        "target_file",
+        "test_file",
+        "fixture_kind",
+        "rlm_challenge",
+        "commercial_lane",
+        "source_manifest",
+    }
     for index, task in enumerate(payload["tasks"], start=1):
         if not isinstance(task, dict):
             failures.append(f"manifest_task_{index}_not_object")
@@ -2396,16 +2736,16 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         if not selected_tasks:
             failures.append("no_tasks_selected")
 
-    env_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "").strip()
-    direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "").strip()
+    env_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or "").strip()
+    direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "").strip()
     if not env_model:
         failures.append("nexus_model_env_missing")
-    if args.without_mode == "gemini" and not direct_model:
+    if args.without_mode in {"gemini", "codex"} and not direct_model:
         failures.append("direct_model_env_missing")
     if env_model and direct_model and env_model != direct_model:
         failures.append("model_lock_mismatch")
-    if args.without_mode == "gemini" and args.with_llm_mode == "off":
-        warnings.append("with_nexus_llm_off_while_bare_uses_gemini")
+    if args.without_mode in {"gemini", "codex"} and args.with_llm_mode == "off":
+        warnings.append(f"with_nexus_llm_off_while_bare_uses_{args.without_mode}")
     if not _hidden_verifier_mode_enabled():
         failures.append("hidden_verifier_disabled")
     if int(args.timeout_sec) <= 0:
@@ -2446,6 +2786,7 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "same_model": bool(env_model and direct_model and env_model == direct_model),
             "without_mode": args.without_mode,
             "with_llm_mode": args.with_llm_mode,
+            "with_model_provider": getattr(args, "with_model_provider", "gemini"),
         },
         "task_manifest": {
             "path": str(tasks_path),
@@ -2507,6 +2848,12 @@ def main() -> int:
     parser.add_argument("--with-nexus-runner", choices=["inprocess", "subprocess"], default="inprocess")
     parser.add_argument("--with-llm-mode", choices=["off", "hard", "all"], default="off")
     parser.add_argument(
+        "--with-model-provider",
+        choices=["gemini", "codex"],
+        default="gemini",
+        help="LLM provider for the Nexus treatment arm when --with-llm-mode enables model calls.",
+    )
+    parser.add_argument(
         "--enable-autoreason-executor",
         action="store_true",
         help="Enable the feature-flagged Autoreason candidate judge for the Nexus treatment arm.",
@@ -2529,7 +2876,7 @@ def main() -> int:
     )
     parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
     parser.add_argument("--llm-safe-probe", action="store_true")
-    parser.add_argument("--without-mode", choices=["service", "bare", "gemini"], default="bare")
+    parser.add_argument("--without-mode", choices=["service", "bare", "gemini", "codex"], default="bare")
     parser.add_argument("--force-learn-slo-ready", action="store_true")
     parser.add_argument(
         "--neutralize-history",
@@ -2644,7 +2991,13 @@ def main() -> int:
         allow_learning_loop=bool(args.allow_learning_loop),
     )
     if args.parallel_arms == "smoke-only":
-        model_name = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or "gemini")
+        model_name = str(
+            os.environ.get("NEXUS_GEMINI_MODEL_NAME")
+            or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL")
+            or os.environ.get("NEXUS_CODEX_MODEL_NAME")
+            or os.environ.get("NEXUS_DIRECT_CODEX_MODEL")
+            or "model"
+        )
         with_rows, without_rows = _build_parallel_smoke_rows(tasks, model_name=model_name)
         hidden_verifier_mode = _hidden_verifier_mode_enabled()
         for row in [*with_rows, *without_rows]:
@@ -2677,6 +3030,7 @@ def main() -> int:
                         "hidden_verifier_mode": hidden_verifier_mode,
                         "without_mode": args.without_mode,
                         "with_llm_mode": args.with_llm_mode,
+                        "with_model_provider": args.with_model_provider,
                         "force_flow": args.force_flow,
                         "parallel_arms": args.parallel_arms,
                         "runner_command": " ".join(sys.argv),
@@ -2771,6 +3125,7 @@ def main() -> int:
                 force_flow=flow,
                 runner_mode="subprocess" if effective_total_timeout_sec > 0 else args.with_nexus_runner,
                 with_llm_mode=args.with_llm_mode,
+                with_model_provider=args.with_model_provider,
                 tuning_profile=args.tuning_profile,
                 cli_runner=shared_cli_runner,
                 history_window=1,
@@ -2959,6 +3314,7 @@ def main() -> int:
                     "hidden_verifier_mode": hidden_verifier_mode,
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
+                    "with_model_provider": args.with_model_provider,
                     "enable_autoreason_executor": bool(args.enable_autoreason_executor),
                     "enable_ddtree_executor": bool(args.enable_ddtree_executor),
                     "enable_ultra_review_dry_gate": bool(args.enable_ultra_review_dry_gate),

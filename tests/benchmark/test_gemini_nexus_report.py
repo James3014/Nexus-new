@@ -224,7 +224,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Public claim gate: FAIL" in out
     assert "with_token_measured_below_threshold" in out
     assert "Formal treatment valid: 2/2 (100.0%)" in out
-    assert "Gemini uses Nexus rate: 100.0%" in out
+    assert "Model uses Nexus rate: 100.0%" in out
     assert "Token/cost claims are not public-safe" in out
 
 

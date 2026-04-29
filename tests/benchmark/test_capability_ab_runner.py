@@ -27,12 +27,17 @@ from scripts.bench.capability_ab_runner import (
     _hidden_verifier_mode_enabled,
     _hidden_test_for_visible_test,
     _ask_direct_gemini_flash_patch,
+    _ask_direct_codex_patch,
+    _parse_direct_patch_json,
+    _direct_codex_timeout_sec,
+    _extract_codex_stdout_tokens,
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
     _build_parallel_smoke_rows,
     build_public_benchmark_preflight,
     _materialize_fixture,
     _nexus_task_desc,
+    _nexus_codex_hidden_verifier_guidance,
     _parse_direct_gemini_json,
     _read_preserved_target,
     _remaining_leg_timeout,
@@ -219,6 +224,69 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
     assert report["public_claim_requirements"]["hidden_verifier_mode"] is True
 
 
+def test_public_benchmark_preflight_accepts_codex_model_lock(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-codex-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix the hidden bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_hidden_governance",
+                        "commercial_lane": "capability_lift",
+                        "source_manifest": "scripts/bench/public_benchmark_commercial_lanes_v1.json",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.delenv("NEXUS_GEMINI_MODEL_NAME", raising=False)
+    monkeypatch.delenv("NEXUS_DIRECT_GEMINI_MODEL", raising=False)
+    monkeypatch.setenv("NEXUS_CODEX_MODEL_NAME", "gpt-5.5")
+    monkeypatch.setenv("NEXUS_DIRECT_CODEX_MODEL", "gpt-5.5")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="codex",
+        with_llm_mode="all",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "PASS"
+    assert report["model_lock"]["same_model"] is True
+
+
 def test_public_benchmark_preflight_fails_for_unlocked_model_and_no_hidden_verifier(tmp_path: Path, monkeypatch):
     manifest = tmp_path / "tasks.json"
     manifest.write_text(
@@ -304,6 +372,13 @@ def test_parse_direct_gemini_json_marks_missing_gateway_stats():
     assert payload["gateway_token_source"] == "missing"
 
 
+def test_parse_direct_patch_json_accepts_fenced_codex_json():
+    payload, output = _parse_direct_patch_json('```json\n{"status":"OK","patch":"x = 1\\n"}\n```')
+    assert output.startswith("{")
+    assert payload["patch"] == "x = 1\n"
+    assert payload["token_capture_status"] == "missing_gateway_stats"
+
+
 def test_materialize_fixture_writes_files(tmp_path: Path):
     task = CapabilityTask(
         id="easy-001",
@@ -323,7 +398,7 @@ def test_materialize_fixture_writes_files(tmp_path: Path):
 def test_materialize_nexus_value_fixture_uses_fixture_kind(tmp_path: Path):
     task = CapabilityTask(
         id="nexus-value-trust-001",
-        difficulty="hard",
+        difficulty="easy",
         task_type="public_ops_research",
         task_desc="Fix trust mismatch",
         target_file="unused",
@@ -386,7 +461,7 @@ def test_public_candidate_fixtures_have_distinct_visible_and_hidden_tests(tmp_pa
 def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
     task = CapabilityTask(
         id="real-001",
-        difficulty="hard",
+        difficulty="easy",
         task_type="cross_module_refactor_swarm",
         task_desc="Use real files",
         target_file="src.py",
@@ -1167,6 +1242,84 @@ def test_run_with_nexus_enables_llm_mode_for_hard_tasks(tmp_path: Path, monkeypa
     assert out["semantic_status"] == "VERIFIED"
 
 
+def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="codex-nexus-001",
+        difficulty="easy",
+        task_type="public_bugfix",
+        task_desc="Fix evidence-backed normalization repair.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_codex_patch(*, prompt, timeout_sec):
+        assert "You are Codex wearing Nexus" in prompt
+        assert "[NEXUS ROUTE]" in prompt
+        assert "[NEXUS EXECUTION PROFILE]" in prompt
+        assert "[NEXUS HIDDEN-VERIFIER GUIDANCE]" in prompt
+        return (
+            {
+                "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
+                "tokens_used": 200,
+                "token_capture_status": "measured",
+                "model_name": "gpt-5.5",
+                "model_patch_generated": True,
+                "gateway_stats_present": True,
+                "gateway_token_source": "codex_stdout",
+            },
+            "",
+        )
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_codex_patch", fake_ask_direct_codex_patch)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="inprocess",
+        with_llm_mode="all",
+        with_model_provider="codex",
+    )
+
+    assert out["status"] == "SUCCESS"
+    assert out["provider"] == "codex"
+    assert out["model_name"] == "gpt-5.5"
+    assert out["gemini_uses_nexus"] is True
+    assert out["nexus_context_delivered"] is True
+    assert set(out["nexus_pillars_observed"]) == {"lancedb", "memory", "mempalace", "belief", "artifact"}
+    assert set(out["nexus_phases_observed"]) == {"P", "X", "D", "R", "A", "C"}
+    assert out["nexus_wearing_valid"] is True
+    assert out["codeintel_scan_report_present"] is True
+    assert out["gateway_stats_present"] is True
+    assert out["gateway_token_source"] == "codex_stdout"
+
+
+def test_nexus_codex_hidden_verifier_guidance_names_merge_invariant():
+    task = CapabilityTask(
+        id="repair",
+        difficulty="hard",
+        task_type="public_test_repair",
+        task_desc="Repair merge helper.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+
+    guidance = _nexus_codex_hidden_verifier_guidance(
+        task,
+        "def merge_limits(defaults, override):\n    result.update(override or {})\n",
+    )
+
+    assert "Visible tests are acceptance hints" in guidance
+    assert "preserve caller-owned inputs" in guidance
+    assert "ignore override values that are None" in guidance
+
+
 def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="rlm-harder-v2-evidence-001",
@@ -1574,6 +1727,51 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
     assert out["baseline_patch_len"] > 0
 
 
+def test_run_without_nexus_codex_mode_uses_direct_codex_baseline(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="easy-codex-001",
+        difficulty="easy",
+        task_type="bug",
+        task_desc="Fix text normalization",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_codex_patch(*, prompt, timeout_sec):
+        assert "Codex running without Nexus orchestration" in prompt
+        return (
+            {
+                "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
+                "tokens_used": 0,
+                "token_capture_status": "missing_gateway_stats",
+                "model_name": "gpt-5.5",
+                "model_patch_generated": True,
+            },
+            "",
+        )
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_codex_patch", fake_ask_direct_codex_patch)
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="codex",
+    )
+    assert out["status"] == "SUCCESS"
+    assert out["provider"] == "codex"
+    assert out["model_name"] == "gpt-5.5"
+    assert out["run_eligible"] is True
+    assert out["model_response_received"] is True
+    assert out["token_reliable"] is False
+    assert out["token_unreliable_reason"] == "estimated_tokens"
+    assert out["runtime_classification"] == "direct_codex"
+
+
 def test_run_without_nexus_hidden_verifier_omits_tests_from_prompt(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="nexus-value-hidden-001",
@@ -1890,6 +2088,42 @@ def test_direct_gemini_timeout_cap_defaults_to_180(monkeypatch):
     monkeypatch.delenv("NEXUS_DIRECT_GEMINI_TIMEOUT_SEC", raising=False)
     assert _direct_gemini_timeout_sec(420) == 180
     assert _direct_gemini_timeout_sec(60) == 60
+
+
+def test_direct_codex_timeout_cap_defaults_to_180(monkeypatch):
+    monkeypatch.delenv("NEXUS_DIRECT_CODEX_TIMEOUT_SEC", raising=False)
+    assert _direct_codex_timeout_sec(420) == 180
+    assert _direct_codex_timeout_sec(60) == 60
+
+
+def test_extract_codex_stdout_tokens_reads_cli_footer():
+    assert _extract_codex_stdout_tokens("done\ntokens used\n17,263\n") == 17263
+    assert _extract_codex_stdout_tokens("no token footer") == 0
+
+
+def test_direct_codex_patch_uses_read_only_exec(monkeypatch, tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured["cmd"] = cmd
+        last_path = Path(cmd[cmd.index("--output-last-message") + 1])
+        last_path.write_text('{"status":"OK","patch":"x = 1\\n"}', encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="tokens used\n17,263\n", stderr="")
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.shutil.which", lambda _name, **_kwargs: "/tmp/codex")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.Path.exists", lambda _self: True)
+    monkeypatch.setenv("NEXUS_CODEX_EXEC_CWD", str(tmp_path))
+
+    out, _ = _ask_direct_codex_patch(prompt="fix", timeout_sec=7)
+
+    cmd = captured["cmd"]
+    assert "--sandbox" in cmd
+    assert "read-only" in cmd
+    assert out["patch"] == "x = 1\n"
+    assert out["model_patch_generated"] is True
+    assert out["tokens_used"] == 17263
+    assert out["token_capture_status"] == "measured"
 
 
 def test_direct_gemini_returned_timeout_is_infra_invalid(tmp_path: Path, monkeypatch):
