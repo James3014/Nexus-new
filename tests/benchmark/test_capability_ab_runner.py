@@ -1324,6 +1324,48 @@ def test_run_with_nexus_can_enable_routing_layer_executors(tmp_path: Path, monke
     assert out["run_eligible"] is True
 
 
+def test_run_with_nexus_can_enable_ultra_dry_gate_without_llm(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-routing-no-llm",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix routing-sensitive public bug without llm",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":0,"total_tokens":0,"token_capture_status":"not_applicable_local_only"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="off",
+        enable_ultra_review_dry_gate=True,
+    )
+
+    assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
+    assert "NEXUS_AUTOREASON_EXECUTOR" not in captured["env"]
+    assert "NEXUS_DDTREE_EXECUTOR" not in captured["env"]
+    assert out["run_eligible"] is True
+
+
 def test_run_with_nexus_llm_all_forces_hyper_flow(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-001",

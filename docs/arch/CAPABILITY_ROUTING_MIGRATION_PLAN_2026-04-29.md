@@ -184,6 +184,25 @@ incrementally.
   - Public claims must not say Swarm, Drone, Nightshift, or Ultra Review improved
     the result until executor receipts exist.
 
+## 2026-04-29 P98-P103 Ultra Review Dry Gate Result
+- P38 initially exposed a runner wiring bug: `--enable-ultra-review-dry-gate`
+  was only propagated to subprocess runs when LLM mode was enabled. No-LLM
+  routing health therefore kept Ultra Review at `feature_flag_disabled`.
+- The runner now passes `NEXUS_ULTRA_REVIEW_DRY_GATE=1` for subprocess Nexus
+  treatment rows even when `--with-llm-mode off`.
+- Verification smoke used 3 no-Gemini cross-module rows:
+  - with Nexus: solve rate 100%, semantic verified 100%, trust mismatch 0%.
+  - Ultra Review receipts: 3/3 selected, invoked, evidence, gate, public-safe.
+  - average Nexus wall time: 22.63s.
+- P39-P41 status:
+  - Swarm/Drone/Nightshift still require production executor receipts.
+  - The current benchmark path must keep them selected-only until a real
+    `role_findings`, `subtask_artifact`, or `nightshift_report` receipt exists.
+- P43 status:
+  - Public reports already require `source=capability_receipts` for
+    capability-specific claims.
+  - Selected-only Swarm/Drone/Nightshift cannot pass the capability public gate.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

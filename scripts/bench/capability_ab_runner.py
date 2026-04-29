@@ -1476,6 +1476,8 @@ def run_with_nexus(
         env["NEXUS_MEMORY_AUTO_INIT"] = "0"
         env["NEXUS_FINDINGS_LANCEDB_SYNC"] = "0"
         env["NEXUS_LEARN_CLOSURE_WRITEBACK"] = "0"
+        if enable_ultra_review_dry_gate:
+            env["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
         if llm_enabled:
             env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
             env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
@@ -1488,8 +1490,6 @@ def run_with_nexus(
                 env["NEXUS_AUTOREASON_EXECUTOR"] = "1"
             if enable_ddtree_executor:
                 env["NEXUS_DDTREE_EXECUTOR"] = "1"
-            if enable_ultra_review_dry_gate:
-                env["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
             env["NEXUS_FORCE_INPLACE_EXECUTOR"] = "1"
         try:
