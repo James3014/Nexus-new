@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from nexus.engine.capability_executor_controls import build_execution_plan, build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.engine.capability_readiness import CORE_CAPABILITIES
+from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS
 from nexus.engine.capability_receipts import build_trace_receipts, selected_receipts
 from nexus.engine.capability_signals import build_capability_signals
 
@@ -301,6 +303,21 @@ def test_trace_receipts_promote_only_invoked_evidence_and_gate_chain():
     assert receipts["swarm"].selected is True
     assert receipts["swarm"].public_claim_safe is False
     assert receipts["swarm"].outcome_contributed is False
+
+
+def test_all_core_capabilities_have_receipt_adapters():
+    assert set(CORE_CAPABILITIES) <= set(RECEIPT_ADAPTERS)
+
+
+def test_all_core_receipts_explain_unproven_selection():
+    plan = {"selected_capabilities": list(CORE_CAPABILITIES)}
+
+    receipts = {item.name: item for item in build_trace_receipts(plan=plan, capabilities={})}
+
+    assert set(CORE_CAPABILITIES) <= set(receipts)
+    for name in CORE_CAPABILITIES:
+        assert receipts[name].public_claim_safe is False
+        assert receipts[name].failure_reason
 
 
 def test_core_gate_receipts_require_specific_evidence_before_public_claim():

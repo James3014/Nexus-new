@@ -19,7 +19,10 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["mempalace_gate", "delivery_gate"],
+      "capability_activation_contract": "required",
+      "hidden_oracle_kind": "semantic_fixture"
     },
     {
       "id": "rlm-harder-v2-evidence-001",
@@ -36,7 +39,10 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["artifact_gate", "claim_gate"],
+      "capability_activation_contract": "required",
+      "hidden_oracle_kind": "trace_receipt"
     },
     {
       "id": "rlm-harder-v2-governance-002",
@@ -53,7 +59,10 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["mempalace_gate", "delivery_gate"],
+      "capability_activation_contract": "required",
+      "hidden_oracle_kind": "semantic_fixture"
     },
     {
       "id": "rlm-harder-v2-evidence-002",
@@ -70,7 +79,10 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["artifact_gate", "claim_gate", "delivery_gate"],
+      "capability_activation_contract": "required",
+      "hidden_oracle_kind": "trace_receipt"
     },
     {
       "id": "rlm-harder-v2-second-round-001",
@@ -87,7 +99,11 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["hyper", "delivery_gate"],
+      "capability_activation_contract": "cost_capped",
+      "hidden_oracle_kind": "pytest_hidden",
+      "cost_budget": {"max_model_calls": 3, "max_capability_stack_size": 8}
     },
     {
       "id": "rlm-harder-v2-belief-001",
@@ -104,7 +120,11 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["belief"],
+      "capability_activation_contract": "cost_capped",
+      "hidden_oracle_kind": "cost_guard",
+      "cost_budget": {"max_model_calls": 3, "max_capability_stack_size": 8}
     },
     {
       "id": "rlm-harder-v2-memory-001",
@@ -121,7 +141,10 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["memory"],
+      "capability_activation_contract": "required",
+      "hidden_oracle_kind": "semantic_fixture"
     },
     {
       "id": "rlm-harder-v2-second-round-002",
@@ -138,7 +161,11 @@
       "allowed_files": ["target.py", "test_target.py"],
       "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
       "setup_command": "python -m pytest --version",
-      "verification_command": "python -m pytest -q test_target.py"
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["hyper", "delivery_gate"],
+      "capability_activation_contract": "cost_capped",
+      "hidden_oracle_kind": "pytest_hidden",
+      "cost_budget": {"max_model_calls": 3, "max_capability_stack_size": 8}
     }
   ]
 }

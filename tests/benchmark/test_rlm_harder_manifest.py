@@ -77,6 +77,18 @@ def test_rlm_harder_v2_manifest_uses_hidden_verifier_challenges(tmp_path: Path):
     assert challenge_counts["hidden_evidence"] >= 2
     assert challenge_counts["hidden_memory_contract"] + challenge_counts["hidden_belief_budget"] >= 2
     assert all(task["fixture_kind"].startswith("rlm_harder_v2_") for task in tasks)
+    assert not [task["id"] for task in tasks if not task.get("expected_capabilities")]
+    declared = {capability for task in tasks for capability in task["expected_capabilities"]}
+    assert {
+        "artifact_gate",
+        "belief",
+        "claim_gate",
+        "delivery_gate",
+        "hyper",
+        "memory",
+        "mempalace_gate",
+    } <= declared
+    assert {"autoreason", "ddtree", "ultra_review", "research", "lancedb", "swarm", "drone", "nightshift"}.isdisjoint(declared)
 
     for task in load_tasks(path):
         target, test = _materialize_fixture(tmp_path, task)

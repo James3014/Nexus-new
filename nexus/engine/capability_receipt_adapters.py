@@ -100,6 +100,12 @@ class CodeIntelReceiptAdapter:
             gate_passed=gate_passed,
             outcome_contributed=bool(gate_passed and claim_verified),
             executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=[str(item) for item in refs if str(item).strip()],
+                gate_passed=gate_passed,
+            ),
         )
 
 
