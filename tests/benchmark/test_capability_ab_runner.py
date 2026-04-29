@@ -215,11 +215,18 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
         require_clean_worktree=False,
         evidence_bundle=True,
         markdown_report="auto",
+        with_nexus_runner="subprocess",
+        with_model_provider="gemini",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
 
     assert report["status"] == "PASS"
+    assert report["capability_readiness"]["status"] == "PASS"
     assert report["model_lock"]["same_model"] is True
     assert report["task_manifest"]["selected_n"] == 1
     assert report["task_manifest"]["expanded_n"] == 2
@@ -281,12 +288,19 @@ def test_public_benchmark_preflight_accepts_codex_model_lock(tmp_path: Path, mon
         require_clean_worktree=False,
         evidence_bundle=True,
         markdown_report="auto",
+        with_nexus_runner="subprocess",
+        with_model_provider="codex",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
 
     assert report["status"] == "PASS"
     assert report["model_lock"]["same_model"] is True
+    assert "direct_codex_provider_is_prompt_wearing_only_for_external_model_claims" in str(report["capability_readiness"]["warnings"])
 
 
 def test_public_benchmark_preflight_fails_for_unlocked_model_and_no_hidden_verifier(tmp_path: Path, monkeypatch):
@@ -323,6 +337,12 @@ def test_public_benchmark_preflight_fails_for_unlocked_model_and_no_hidden_verif
         require_clean_worktree=False,
         evidence_bundle=True,
         markdown_report="",
+        with_nexus_runner="inprocess",
+        with_model_provider="gemini",
+        enable_autoreason_executor=False,
+        enable_ddtree_executor=False,
+        enable_ultra_review_dry_gate=False,
+        llm_candidate_cap=1,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
@@ -332,6 +352,76 @@ def test_public_benchmark_preflight_fails_for_unlocked_model_and_no_hidden_verif
     assert "hidden_verifier_disabled" in report["failures"]
     assert "per_task_stop_loss_above_600" in report["failures"]
     assert "manifest_tasks_empty" in report["failures"]
+    assert "capability_readiness:autoreason_executor_flag_missing" in report["failures"]
+    assert "capability_readiness:ddtree_executor_flag_missing" in report["failures"]
+    assert "capability_readiness:ultra_review_dry_gate_flag_missing" in report["failures"]
+
+
+def test_public_benchmark_preflight_blocks_model_run_without_executor_evidence_flags(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-readiness-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix a governance bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_hidden_governance",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="all",
+        with_model_provider="gemini",
+        with_nexus_runner="subprocess",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+        enable_autoreason_executor=False,
+        enable_ddtree_executor=False,
+        enable_ultra_review_dry_gate=False,
+        llm_candidate_cap=1,
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "FAIL"
+    assert report["capability_readiness"]["status"] == "FAIL"
+    assert "capability_readiness:autoreason_executor_flag_missing" in report["failures"]
+    assert "capability_readiness:llm_candidate_cap_below_ddtree_threshold" in report["failures"]
 
 
 def test_parse_direct_gemini_json_marks_stats_tokens_measured():

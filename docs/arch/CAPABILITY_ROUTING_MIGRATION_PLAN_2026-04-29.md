@@ -355,6 +355,21 @@ incrementally.
   capability-specific public claims from overstating which Nexus abilities
   actually executed.
 
+## 2026-04-29 P25-P39 Benchmark Readiness Gate Lesson
+- Public Gemini benchmarks must not start just because a task manifest and model
+  lock are valid. They also need Nexus capability readiness:
+  - core capability registry nodes are present,
+  - the Nexus arm uses the subprocess `research:auto-flow` path,
+  - Autoreason and DDTree executor flags are enabled,
+  - `llm_candidate_cap>=3` so DDTree can actually prune,
+  - Ultra Review dry gate is enabled for high-risk rows.
+- Direct Codex remains useful for self-benchmarking route value, but external
+  model claims should use the subprocess Nexus path so executor receipts can be
+  produced by the actual Nexus services.
+- Added preflight capability readiness so Gemini runs can fail before spending
+  quota when the planned comparison would only produce selected/prompt-only
+  capability evidence.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

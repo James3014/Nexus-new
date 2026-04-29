@@ -32,6 +32,7 @@ from nexus.app.research_flow_service import (
     build_route_executor_flags,
     run_auto_flow,
 )
+from nexus.engine.capability_readiness import build_benchmark_capability_readiness
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.route_decision_adapter import build_route_decision
@@ -2985,6 +2986,9 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         failures.append("per_task_stop_loss_missing")
     if int(args.per_task_stop_loss_sec) > 600:
         failures.append("per_task_stop_loss_above_600")
+    capability_readiness = build_benchmark_capability_readiness(args)
+    failures.extend(f"capability_readiness:{item}" for item in capability_readiness.get("failures", []) or [])
+    warnings.extend(f"capability_readiness:{item}" for item in capability_readiness.get("warnings", []) or [])
     effective_total = _effective_total_timeout_sec(int(args.total_timeout_sec), int(args.stop_loss_sec))
     if effective_total <= 0:
         warnings.append("total_timeout_disabled")
@@ -3046,6 +3050,7 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "parallel_arms": getattr(args, "parallel_arms", "off"),
             "public_claim_allowed": getattr(args, "parallel_arms", "off") == "off",
         },
+        "capability_readiness": capability_readiness,
     }
     return report
 
