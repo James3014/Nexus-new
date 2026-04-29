@@ -564,6 +564,92 @@ def test_run_auto_flow_replans_from_failed_llm_baseline_to_hyper(tmp_path: Path,
     assert payload["nexus_usage_trace"]["capabilities"]["hyper_used"] is True
 
 
+def test_run_auto_flow_keeps_successful_hyper_when_guard_fallback_fails(tmp_path: Path, monkeypatch):
+    target = tmp_path / "demo.py"
+    test_file = tmp_path / "test_demo.py"
+    target.write_text("def value():\n    return 1\n", encoding="utf-8")
+    test_file.write_text("from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8")
+    calls = {"count": 0}
+
+    class FakeLLMGenerator:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **_kwargs):
+            calls["count"] += 1
+            value = 2 if calls["count"] == 1 else 3
+            return (
+                f"def value():\n    return {value}\n",
+                {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "model_name": "gemini-3-flash-preview",
+                    "tokens_used": 123,
+                    "token_capture_status": "measured",
+                    "model_patch_generated": True,
+                },
+            )
+
+    def fake_hyper(*, repo_root, config):
+        import time
+        from nexus.research.sprint_service import SprintResult
+
+        time.sleep(0.2)
+        return SprintResult(
+            status="SUCCESS",
+            reason="ok",
+            target_file="demo.py",
+            winner_source="llm",
+            final_score=1.0,
+            elapsed_sec=0.2,
+            attempt_count=1,
+            model_calls=1,
+            quota_backoffs=0,
+            test_timeouts=0,
+            total_tokens=456,
+            token_capture_status="measured",
+            model_name="gemini-3-flash-preview",
+            model_patch_generated=True,
+            learning_trace={"mempalace_verified": True},
+            candidates=[],
+            pytest_cmd=[],
+            patch="def value():\n    return 2\n",
+        )
+
+    monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix flaky websocket timeout race under concurrent retries",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=True,
+        llm_baseline=True,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=0.1,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow=None,
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-guard-fallback",
+    )
+
+    assert payload["result"]["status"] == "SUCCESS"
+    assert payload["result"]["flow"] == "hyper_sprint"
+    assert payload["strategy"]["path"] == "probe_then_hyper_guard_fallback_rejected"
+    assert payload["result"]["report"]["guard_fallback_rejected"]["status"] == "FAILED"
+
+
 def test_ultra_review_gate_evidence_is_feature_flagged(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("NEXUS_ULTRA_REVIEW_DRY_GATE", raising=False)
 

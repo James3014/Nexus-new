@@ -1524,8 +1524,24 @@ def run_auto_flow(
                     guard_hit = True
                     hyper_result_for_guard = result
                     target_path.write_text(original_code, encoding="utf-8")
-                    result = _run_baseline_apply()
-                    if isinstance(result.get("report"), dict) and isinstance(hyper_result_for_guard.get("report"), dict):
+                    fallback_result = _run_baseline_apply()
+                    if fallback_result.get("status") == "SUCCESS":
+                        result = fallback_result
+                    else:
+                        result = hyper_result_for_guard
+                        result_report = result.get("report", {}) if isinstance(result.get("report"), dict) else {}
+                        result_report["guard_fallback_rejected"] = {
+                            "flow": fallback_result.get("flow"),
+                            "status": fallback_result.get("status"),
+                            "error": fallback_result.get("error"),
+                        }
+                        result["report"] = result_report
+                    fallback_succeeded = fallback_result.get("status") == "SUCCESS"
+                    if (
+                        fallback_succeeded
+                        and isinstance(result.get("report"), dict)
+                        and isinstance(hyper_result_for_guard.get("report"), dict)
+                    ):
                         hyper_report = hyper_result_for_guard["report"]
                         result["report"]["guard_fallback_from"] = {
                             "flow": hyper_result_for_guard.get("flow"),
@@ -1586,8 +1602,12 @@ def run_auto_flow(
                             int(result["report"].get("gateway_timeout_sec", 0) or 0),
                             int(hyper_report.get("gateway_timeout_sec", 0) or 0),
                         )
-                    chosen_flow = "baseline"
-                    strategy_path = "hyper_guard_fallback_to_baseline"
+                    if fallback_succeeded:
+                        chosen_flow = "baseline"
+                        strategy_path = "hyper_guard_fallback_to_baseline"
+                    else:
+                        chosen_flow = "hyper_sprint"
+                        strategy_path = "probe_then_hyper_guard_fallback_rejected"
     phase_wall_sec["R"] = round(time.time() - phase_started_at, 4)
 
     baseline_probe_for_report = None

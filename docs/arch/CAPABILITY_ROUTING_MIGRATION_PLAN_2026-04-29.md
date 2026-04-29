@@ -506,6 +506,23 @@ incrementally.
   - Re-run Flash smoke with lower gateway timeout and verify medium/hard rows
     become eligible capability outcomes rather than delivery-invalid records.
 
+## 2026-04-30 P45 Hard-Route Guard Lesson
+- Failure lesson:
+  - P45 exposed a guard bug on hard-001: Hyper could produce a better result,
+    but the time-ratio guard re-ran baseline and accepted the fallback result
+    even when that fallback failed. The system then reported a failed baseline
+    instead of preserving the successful Hyper path.
+- Fix:
+  - Guard fallback now replaces Hyper only when the fallback baseline succeeds.
+    If fallback fails, Nexus preserves the Hyper result and records
+    `guard_fallback_rejected` evidence.
+- Evidence:
+  - Added a regression test that simulates a successful Hyper result followed
+    by a failing guard fallback; final delivery remains Hyper SUCCESS.
+- Next:
+  - Re-run hard-001 Nexus-only, then rerun the public-candidate Flash slice.
+    Do not run larger Gemini comparisons until hard route no longer regresses.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.
