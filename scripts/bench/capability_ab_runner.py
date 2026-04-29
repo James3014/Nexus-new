@@ -980,6 +980,12 @@ def _extract_record(
     phase_trace = phase_trace if isinstance(phase_trace, dict) else {}
     capabilities = usage_trace.get("capabilities", {}) if isinstance(usage_trace, dict) else {}
     capabilities = capabilities if isinstance(capabilities, dict) else {}
+    swarm_report = capabilities.get("swarm_report", {})
+    swarm_report = swarm_report if isinstance(swarm_report, dict) else {}
+    drone_report = capabilities.get("drone_report", {})
+    drone_report = drone_report if isinstance(drone_report, dict) else {}
+    nightshift_report = capabilities.get("nightshift_report", {})
+    nightshift_report = nightshift_report if isinstance(nightshift_report, dict) else {}
     capability_stack = usage_trace.get("capability_stack", {}) if isinstance(usage_trace, dict) else {}
     capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
     capability_plan = usage_trace.get("capability_plan", {}) if isinstance(usage_trace, dict) else {}
@@ -1134,10 +1140,16 @@ def _extract_record(
         "capability_nightshift_invoked": bool(capabilities.get("nightshift_invoked", False)),
         "capability_nightshift_recovered": bool(capabilities.get("nightshift_recovered", False)),
         "capability_nightshift_report_path": str(capabilities.get("nightshift_report_path") or ""),
+        "capability_nightshift_report_schema_version": str(nightshift_report.get("schema_version") or ""),
+        "capability_nightshift_failure_reason": str(capabilities.get("nightshift_failure_reason") or nightshift_report.get("failure_reason") or ""),
         "capability_swarm_used": bool(capabilities.get("swarm_used", False)),
         "capability_swarm_evidence_count": int(capabilities.get("swarm_evidence_count", 0) or 0),
+        "capability_swarm_report_schema_version": str(swarm_report.get("schema_version") or ""),
+        "capability_swarm_consensus": str(capabilities.get("swarm_consensus") or swarm_report.get("consensus") or ""),
         "capability_drone_used": bool(capabilities.get("drone_used", False)),
         "capability_drone_invoked_count": int(capabilities.get("drone_invoked_count", 0) or 0),
+        "capability_drone_report_schema_version": str(drone_report.get("schema_version") or ""),
+        "capability_drone_artifact_path": str(capabilities.get("drone_artifact_path") or ""),
         "capability_stack_selected": list(capability_stack.get("selected_capabilities", []) or []),
         "capability_stack_acceleration_layers": list(capability_stack.get("acceleration_layers", []) or []),
         "capability_stack_governance_layers": list(capability_stack.get("governance_layers", []) or []),

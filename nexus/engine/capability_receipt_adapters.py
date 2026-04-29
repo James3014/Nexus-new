@@ -162,13 +162,15 @@ class SwarmReceiptAdapter:
     name = "swarm"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        evidence_count = as_int(payload.get("swarm_evidence_count", 0))
+        report = payload.get("swarm_report") if isinstance(payload.get("swarm_report"), dict) else {}
+        evidence_count = as_int(report.get("evidence_count", payload.get("swarm_evidence_count", 0)))
         invoked = bool(payload.get("swarm_used", False))
-        refs = []
+        refs = [str(item) for item in report.get("evidence_refs", []) or [] if str(item).strip()]
         if evidence_count > 0:
             refs.append(f"role_findings:{evidence_count}")
-        if payload.get("swarm_consensus"):
-            refs.append(f"consensus:{payload.get('swarm_consensus')}")
+        consensus = report.get("consensus") or payload.get("swarm_consensus")
+        if consensus:
+            refs.append(f"consensus:{consensus}")
         gate_passed = bool(evidence_count > 0 and claim_verified)
         return merge_capability_receipt(
             name=self.name,
@@ -191,9 +193,10 @@ class DroneReceiptAdapter:
     name = "drone"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        invoked_count = as_int(payload.get("drone_invoked_count", 0))
+        report = payload.get("drone_report") if isinstance(payload.get("drone_report"), dict) else {}
+        invoked_count = as_int(report.get("artifact_count", payload.get("drone_invoked_count", 0)))
         invoked = bool(payload.get("drone_used", False) or invoked_count > 0)
-        refs = []
+        refs = [f"artifact:{item}" for item in report.get("artifact_paths", []) or [] if str(item).strip()]
         if invoked_count > 0:
             refs.append(f"subtask_artifact:{invoked_count}")
         if payload.get("drone_artifact_path"):
@@ -220,12 +223,14 @@ class NightshiftReceiptAdapter:
     name = "nightshift"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        invoked = bool(payload.get("nightshift_invoked", False))
-        recovered = bool(payload.get("nightshift_recovered", False))
-        report_path = str(payload.get("nightshift_report_path") or "").strip()
+        report = payload.get("nightshift_report") if isinstance(payload.get("nightshift_report"), dict) else {}
+        invoked = bool(report.get("invoked", payload.get("nightshift_invoked", False)))
+        recovered = bool(report.get("recovered", payload.get("nightshift_recovered", False)))
+        report_path = str(report.get("report_path") or payload.get("nightshift_report_path") or "").strip()
         refs = [report_path] if report_path else []
-        if payload.get("nightshift_recommended") and not invoked:
-            failure_reason = str(payload.get("nightshift_failure_reason") or "recommended_without_invocation")
+        recommended = bool(report.get("recommended", payload.get("nightshift_recommended", False)))
+        if recommended and not invoked:
+            failure_reason = str(report.get("failure_reason") or payload.get("nightshift_failure_reason") or "recommended_without_invocation")
         else:
             failure_reason = selected_failure_reason(
                 selected=True,
@@ -233,6 +238,8 @@ class NightshiftReceiptAdapter:
                 evidence_refs=refs,
                 gate_passed=recovered,
             )
+        if report.get("failure_reason"):
+            failure_reason = str(report.get("failure_reason"))
         return merge_capability_receipt(
             name=self.name,
             selected=True,

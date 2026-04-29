@@ -198,20 +198,41 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
                 "swarm_used": True,
                 "swarm_evidence_count": 2,
                 "swarm_consensus": "pass",
+                "swarm_report": {
+                    "schema_version": "nexus_swarm_receipt_v1",
+                    "evidence_count": 2,
+                    "consensus": "pass",
+                    "evidence_refs": ["candidate_summary:0", "candidate_summary:1"],
+                },
                 "drone_used": True,
                 "drone_invoked_count": 2,
                 "drone_artifact_path": ".nexus/reports/drone/run.json",
+                "drone_report": {
+                    "schema_version": "nexus_drone_receipt_v1",
+                    "artifact_count": 2,
+                    "artifact_paths": [".nexus/reports/drones/a.json", ".nexus/reports/drones/b.json"],
+                },
                 "nightshift_recommended": True,
                 "nightshift_invoked": True,
                 "nightshift_recovered": True,
                 "nightshift_report_path": ".nexus/reports/nightshift/run.json",
+                "nightshift_report": {
+                    "schema_version": "nexus_nightshift_receipt_v1",
+                    "recommended": True,
+                    "invoked": True,
+                    "recovered": True,
+                    "report_path": ".nexus/reports/nightshift/run.json",
+                    "failure_reason": "",
+                },
             },
         )
     }
 
     assert receipts["swarm"].public_claim_safe is True
+    assert "candidate_summary:0" in receipts["swarm"].evidence_refs
     assert "role_findings:2" in receipts["swarm"].evidence_refs
     assert receipts["drone"].public_claim_safe is True
+    assert "artifact:.nexus/reports/drones/a.json" in receipts["drone"].evidence_refs
     assert "subtask_artifact:2" in receipts["drone"].evidence_refs
     assert receipts["nightshift"].public_claim_safe is True
     assert receipts["nightshift"].failure_reason == ""

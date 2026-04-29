@@ -260,6 +260,28 @@ incrementally.
   - Swarm/Drone/Nightshift must remain pending until P59-P61 connects stable
     executor evidence.
 
+## 2026-04-29 P59-P61 Receipt Schema Result
+- Swarm/Drone/Nightshift now have stable receipt payload schemas inside
+  `nexus_usage_trace.capabilities`:
+  - `swarm_report`: `nexus_swarm_receipt_v1`, derived from hyper sprint
+    candidate summaries with evidence refs and consensus.
+  - `drone_report`: `nexus_drone_receipt_v1`, derived from drone crystal paths
+    with artifact count and artifact paths.
+  - `nightshift_report`: `nexus_nightshift_receipt_v1`, separating recommended,
+    invoked, recovered, report path, and failure reason.
+- Receipt adapters now prefer these structured report payloads while preserving
+  legacy fields for compatibility.
+- Benchmark rows expose audit fields for public report diagnostics:
+  - `capability_swarm_report_schema_version`
+  - `capability_swarm_consensus`
+  - `capability_drone_report_schema_version`
+  - `capability_drone_artifact_path`
+  - `capability_nightshift_report_schema_version`
+  - `capability_nightshift_failure_reason`
+- This is not a full production executor rollout yet. It makes the evidence
+  contract stable so P62 can safely connect true executor reports without
+  another report-format rewrite.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

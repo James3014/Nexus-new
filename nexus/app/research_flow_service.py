@@ -283,10 +283,23 @@ def _capability_evidence(
         if isinstance(item, dict) and _candidate_summary_has_swarm_evidence(item)
     )
     swarm_consensus = "candidate_summary_evidence" if swarm_count > 0 else ""
+    swarm_report = {
+        "schema_version": "nexus_swarm_receipt_v1",
+        "source": "hyper_sprint_candidate_summaries",
+        "evidence_count": swarm_count,
+        "consensus": swarm_consensus,
+        "evidence_refs": [f"candidate_summary:{idx}" for idx, item in enumerate(candidate_summaries) if isinstance(item, dict) and _candidate_summary_has_swarm_evidence(item)],
+    }
     drone_crystals = learning_trace.get("drone_crystals", [])
     if not isinstance(drone_crystals, list):
         drone_crystals = []
     drone_artifact_path = str(drone_crystals[0]) if drone_crystals else ""
+    drone_report = {
+        "schema_version": "nexus_drone_receipt_v1",
+        "source": "drone_crystals",
+        "artifact_paths": [str(item) for item in drone_crystals],
+        "artifact_count": len(drone_crystals),
+    }
     nightshift_report_path = str(learning_trace.get("nightshift_report_path") or result_report.get("nightshift_report_path") or "")
     nightshift_recovered = bool(
         learning_trace.get("nightshift_recovered", False)
@@ -297,18 +310,29 @@ def _capability_evidence(
         nightshift_failure_reason = "recommended_without_report"
     elif nightshift_report_path and not nightshift_recovered:
         nightshift_failure_reason = "report_without_recovery"
+    nightshift_report = {
+        "schema_version": "nexus_nightshift_receipt_v1",
+        "recommended": bool(nightshift_recommended),
+        "invoked": bool(nightshift_report_path),
+        "recovered": nightshift_recovered,
+        "report_path": nightshift_report_path,
+        "failure_reason": nightshift_failure_reason,
+    }
     return {
         "swarm_evidence_count": swarm_count,
         "swarm_used": swarm_count > 0,
         "swarm_consensus": swarm_consensus,
+        "swarm_report": swarm_report,
         "drone_invoked_count": len(drone_crystals),
         "drone_used": len(drone_crystals) > 0,
         "drone_artifact_path": drone_artifact_path,
+        "drone_report": drone_report,
         "nightshift_recommended": bool(nightshift_recommended),
         "nightshift_invoked": bool(nightshift_report_path),
         "nightshift_recovered": nightshift_recovered,
         "nightshift_report_path": nightshift_report_path,
         "nightshift_failure_reason": nightshift_failure_reason,
+        "nightshift_report": nightshift_report,
     }
 
 

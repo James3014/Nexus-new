@@ -665,10 +665,25 @@ def test_extract_record_maps_semantic_fields():
                 "nightshift_invoked": True,
                 "nightshift_recovered": False,
                 "nightshift_report_path": ".nexus/reports/nightshift/run.json",
+                "nightshift_failure_reason": "report_without_recovery",
+                "nightshift_report": {
+                    "schema_version": "nexus_nightshift_receipt_v1",
+                    "failure_reason": "report_without_recovery",
+                },
                 "swarm_used": True,
                 "swarm_evidence_count": 2,
+                "swarm_consensus": "candidate_summary_evidence",
+                "swarm_report": {
+                    "schema_version": "nexus_swarm_receipt_v1",
+                    "consensus": "candidate_summary_evidence",
+                },
                 "drone_used": True,
                 "drone_invoked_count": 1,
+                "drone_artifact_path": ".nexus/reports/drones/d1_crystal.json",
+                "drone_report": {
+                    "schema_version": "nexus_drone_receipt_v1",
+                    "artifact_count": 1,
+                },
             },
             "capability_stack": {
                 "selected_capabilities": ["hyper_sprint", "autoreason"],
@@ -777,11 +792,17 @@ def test_extract_record_maps_semantic_fields():
     assert out["capability_claim_verified"] is True
     assert out["capability_swarm_used"] is True
     assert out["capability_swarm_evidence_count"] == 2
+    assert out["capability_swarm_report_schema_version"] == "nexus_swarm_receipt_v1"
+    assert out["capability_swarm_consensus"] == "candidate_summary_evidence"
     assert out["capability_drone_used"] is True
     assert out["capability_drone_invoked_count"] == 1
+    assert out["capability_drone_report_schema_version"] == "nexus_drone_receipt_v1"
+    assert out["capability_drone_artifact_path"] == ".nexus/reports/drones/d1_crystal.json"
     assert out["capability_nightshift_invoked"] is True
     assert out["capability_nightshift_recovered"] is False
     assert out["capability_nightshift_report_path"] == ".nexus/reports/nightshift/run.json"
+    assert out["capability_nightshift_report_schema_version"] == "nexus_nightshift_receipt_v1"
+    assert out["capability_nightshift_failure_reason"] == "report_without_recovery"
     assert out["capability_stack_selected"] == ["hyper_sprint", "autoreason"]
     assert out["capability_stack_acceleration_layers"] == ["ddtree"]
     assert out["capability_stack_governance_layers"] == ["ultra_review"]
