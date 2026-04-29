@@ -29,6 +29,9 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert out["explain_payload"]["risk"] == "CRITICAL"
     assert out["route_features"]["risk_score"] >= 50
     assert out["consensus"]["winner"] in {"baseline", "hyper_sprint"}
+    assert out["recommended_flow"] == "hyper_sprint"
+    assert out["recommended_reason"] == "complex_bug_prefer_hyper"
+    assert out["should_research"] is True
 
 
 def test_compose_capability_plan_preserves_legacy_stack_shape():
@@ -50,6 +53,76 @@ def test_compose_capability_plan_preserves_legacy_stack_shape():
     assert out["governance_layers"] == ["ultra_review"]
     assert out["stop_policy"]["type"] == "a_streak"
     assert out["explain_caps"][0]["capability"] == "hyper_sprint"
+
+
+def test_collect_route_signals_includes_history_memory_hits(tmp_path: Path):
+    history_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-history.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(
+        json.dumps(
+            {
+                "a|b": [
+                    {
+                        "flow": "hyper_sprint",
+                        "status": "SUCCESS",
+                        "reason": "stage1_pass",
+                        "task_type": "bug",
+                        "task_desc": "fix websocket timeout race in coordinator",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    signals = research_flow_service._collect_route_signals(
+        repo_root=tmp_path,
+        task_desc="fix websocket timeout race in orchestrator",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query="",
+        target_file="demo.py",
+    )
+
+    assert signals["memory_hits"] >= 1
+    assert signals["adjusted_root_cause_confidence"] == pytest.approx(0.8)
+    assert signals["has_hard_signal"] is True
+
+
+def test_decide_flow_preserves_core_route_cases(tmp_path: Path):
+    def decide(task_desc, task_type, confidence=0.9, candidate_count=1, target_file=None):
+        signals = research_flow_service._collect_route_signals(
+            repo_root=tmp_path,
+            task_desc=task_desc,
+            task_type=task_type,
+            candidate_count=candidate_count,
+            root_cause_confidence=confidence,
+            findings_query="",
+            target_file=target_file,
+        )
+        return research_flow_service._decide_flow(
+            task_desc=task_desc,
+            task_type=task_type,
+            candidate_count=candidate_count,
+            target_file=target_file,
+            signals=signals,
+        )
+
+    doc = decide("fix typo in README", "bug", target_file="README.md")
+    public = decide("Fix claim verification evidence governance", "public_feature")
+    hard_bug = decide("Fix flaky websocket timeout", "bug", confidence=0.4)
+    feature = decide("Add small UI option", "feature")
+    refactor = decide("Refactor helper", "refactor")
+
+    assert (doc["recommended_flow"], doc["recommended_reason"]) == ("baseline", "Matched Doc-Fix Rule")
+    assert (public["recommended_flow"], public["recommended_reason"]) == (
+        "hyper_sprint",
+        "commercial_public_task_prefers_hyper",
+    )
+    assert (hard_bug["recommended_flow"], hard_bug["recommended_reason"]) == ("hyper_sprint", "complex_bug_prefer_hyper")
+    assert feature["recommended_flow"] == "baseline"
+    assert refactor["recommended_flow"] == "baseline"
 
 
 def test_route_executor_flags_enable_dynamic_controls_for_repair_and_governance():

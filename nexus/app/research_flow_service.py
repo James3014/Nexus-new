@@ -541,7 +541,7 @@ def compose_capability_plan(
     ).to_dict()
 
 
-def build_route(
+def _collect_route_signals(
     *,
     repo_root: Path,
     task_desc: str,
@@ -550,8 +550,7 @@ def build_route(
     root_cause_confidence: float,
     findings_query: str | None,
     target_file: str | None = None,
-) -> dict:
-
+) -> dict[str, Any]:
     findings_hits = 0
     memory_hits = 0
     historical_hints = []
@@ -579,12 +578,11 @@ def build_route(
     }
     decision = policy.route({}, task_desc, task_type=task_type, prediction=prediction)
 
-    # 🐝 [P2 Optimization] Doc-Fix Interception
     task_lower = (task_desc or "").lower()
     target_lower = (target_file or "").lower()
     doc_patterns = ["readme", ".md", "doc:", "fix typo", "documentation", "typo:"]
     is_doc_fix = any(p in task_lower for p in doc_patterns) or any(p in target_lower for p in doc_patterns if p.startswith("."))
-    
+
     task_upper = (task_desc or "").upper()
     hard_keywords = ["FLAKY", "RACE", "DEADLOCK", "TIMEOUT", "LATENCY", "WEBSOCKET", "SDK", "API"]
     cross_module_keywords = ["CROSS-MODULE", "MULTI-MODULE", "COORDINATOR", "SWARM", "DRONE", "NIGHTSHIFT"]
@@ -604,8 +602,37 @@ def build_route(
     ]
     has_commercial_signal = commercial_public_task and any(kw in task_upper for kw in commercial_keywords)
     has_hard_signal = any(kw in task_upper for kw in hard_keywords) or is_cross_module_task or has_commercial_signal
-    
-    # R2 Tuning: Feature/Refactor prefer baseline, Bugfix with risk prefers hyper
+
+    return {
+        "findings_hits": findings_hits,
+        "memory_hits": memory_hits,
+        "historical_hints": historical_hints,
+        "adjusted_root_cause_confidence": adjusted_root_cause_confidence,
+        "decision": decision,
+        "is_doc_fix": is_doc_fix,
+        "is_cross_module_task": is_cross_module_task,
+        "has_commercial_signal": has_commercial_signal,
+        "has_hard_signal": has_hard_signal,
+    }
+
+
+def _decide_flow(
+    *,
+    task_desc: str,
+    task_type: str,
+    candidate_count: int,
+    target_file: str | None,
+    signals: dict[str, Any],
+) -> dict[str, Any]:
+    findings_hits = int(signals["findings_hits"])
+    memory_hits = int(signals["memory_hits"])
+    adjusted_root_cause_confidence = float(signals["adjusted_root_cause_confidence"])
+    decision = signals["decision"]
+    is_doc_fix = bool(signals["is_doc_fix"])
+    is_cross_module_task = bool(signals["is_cross_module_task"])
+    has_commercial_signal = bool(signals["has_commercial_signal"])
+    has_hard_signal = bool(signals["has_hard_signal"])
+
     if is_doc_fix:
         recommended_flow = "baseline"
         recommended_reason = "Matched Doc-Fix Rule"
@@ -616,7 +643,6 @@ def build_route(
         recommended_flow = "baseline"
         recommended_reason = f"structural_task_type_{task_type}_prefer_baseline"
     else:
-        # Bugfix case
         is_risky_bug = (
             candidate_count > 1
             or adjusted_root_cause_confidence < 0.75
@@ -685,9 +711,9 @@ def build_route(
         "is_cross_module_task": is_cross_module_task,
         "is_doc_fix": is_doc_fix,
         "candidate_count": int(candidate_count),
-        "findings_hits": int(findings_hits),
-        "memory_hits": int(memory_hits),
-        "adjusted_root_cause_confidence": round(float(adjusted_root_cause_confidence), 4),
+        "findings_hits": findings_hits,
+        "memory_hits": memory_hits,
+        "adjusted_root_cause_confidence": round(adjusted_root_cause_confidence, 4),
         "risk_score": risk_score,
     }
 
@@ -695,10 +721,64 @@ def build_route(
         "task_type": task_type,
         "risk": risk_level,
         "files": [target_file] if target_file else [],
-        "history": {"findings_hits": findings_hits, "memory_hits": memory_hits, "hints_count": len(historical_hints)},
+        "history": {
+            "findings_hits": findings_hits,
+            "memory_hits": memory_hits,
+            "hints_count": len(signals["historical_hints"]),
+        },
         "confidence": round(adjusted_root_cause_confidence, 2),
-        "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. TaskType: {task_type}."
+        "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. TaskType: {task_type}.",
     }
+    return {
+        "should_research": should_research,
+        "mode": mode,
+        "reason": reason,
+        "recommended_flow": recommended_flow,
+        "recommended_reason": recommended_reason,
+        "risk_score": risk_score,
+        "route_features": route_features,
+        "explain_payload": explain,
+        "consensus": {
+            "votes": consensus_votes,
+            "reasons": vote_reasons,
+            "winner": recommended_flow,
+        },
+    }
+
+
+def build_route(
+    *,
+    repo_root: Path,
+    task_desc: str,
+    task_type: str,
+    candidate_count: int,
+    root_cause_confidence: float,
+    findings_query: str | None,
+    target_file: str | None = None,
+) -> dict:
+    signals = _collect_route_signals(
+        repo_root=repo_root,
+        task_desc=task_desc,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        root_cause_confidence=root_cause_confidence,
+        findings_query=findings_query,
+        target_file=target_file,
+    )
+    decision_payload = _decide_flow(
+        task_desc=task_desc,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        target_file=target_file,
+        signals=signals,
+    )
+    findings_hits = int(signals["findings_hits"])
+    memory_hits = int(signals["memory_hits"])
+    historical_hints = signals["historical_hints"]
+    adjusted_root_cause_confidence = float(signals["adjusted_root_cause_confidence"])
+    decision = signals["decision"]
+    route_features = decision_payload["route_features"]
+    recommended_flow = decision_payload["recommended_flow"]
     capability_stack = compose_capability_plan(
         task_desc=task_desc,
         task_type=task_type,
@@ -708,26 +788,22 @@ def build_route(
     )
 
     return {
-        "should_research": should_research,
-        "mode": mode,
-        "reason": reason,
-        "rounds": decision.rounds if should_research else 0,
-        "stable_wins": decision.stable_wins if should_research else 0,
+        "should_research": decision_payload["should_research"],
+        "mode": decision_payload["mode"],
+        "reason": decision_payload["reason"],
+        "rounds": decision.rounds if decision_payload["should_research"] else 0,
+        "stable_wins": decision.stable_wins if decision_payload["should_research"] else 0,
         "findings_hits": findings_hits,
         "prior_fix_hits": findings_hits + memory_hits,
         "historical_hints": list(dict.fromkeys(historical_hints))[:3],  # Unique, max 3
         "adjusted_root_cause_confidence": adjusted_root_cause_confidence,
         "require_codex_audit": adjusted_root_cause_confidence < 0.6,
         "recommended_flow": recommended_flow,
-        "recommended_reason": recommended_reason,
-        "explain_payload": explain,
+        "recommended_reason": decision_payload["recommended_reason"],
+        "explain_payload": decision_payload["explain_payload"],
         "route_features": route_features,
         "capability_stack": capability_stack,
-        "consensus": {
-            "votes": consensus_votes,
-            "reasons": vote_reasons,
-            "winner": recommended_flow,
-        },
+        "consensus": decision_payload["consensus"],
     }
 
 
