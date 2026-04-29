@@ -157,6 +157,15 @@ class DDTreeReceiptAdapter:
         if saved_steps > 0:
             refs = [str(item) for item in (payload.get("selected_candidate_ids", []) or []) if str(item).strip()]
             refs.append(f"saved_steps:{saved_steps}")
+            tree_stats = payload.get("tree_stats") if isinstance(payload.get("tree_stats"), dict) else {}
+            if tree_stats:
+                refs.extend(
+                    [
+                        f"tree_depth:{as_int(tree_stats.get('max_depth'))}",
+                        f"branch_count:{as_int(tree_stats.get('branch_count'))}",
+                        f"pruned_count:{as_int(tree_stats.get('pruned_count', saved_steps))}",
+                    ]
+                )
         clean_refs = [str(item).strip() for item in refs if str(item).strip()]
         invoked = bool(
             payload.get("enabled")

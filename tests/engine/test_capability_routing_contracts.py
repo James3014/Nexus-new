@@ -574,6 +574,7 @@ def test_ddtree_receipt_requires_real_candidate_pruning():
                 "max_candidates": 2,
                 "selected_candidate_ids": ["candidate-a", "candidate-b"],
                 "actual_saved_steps": 2,
+                "tree_stats": {"max_depth": 1, "branch_count": 4, "pruned_count": 2},
             },
         )
     }
@@ -587,6 +588,9 @@ def test_ddtree_receipt_requires_real_candidate_pruning():
     assert pruned["ddtree"].public_claim_safe is True
     assert pruned["ddtree"].failure_reason == ""
     assert "saved_steps:2" in pruned["ddtree"].evidence_refs
+    assert "tree_depth:1" in pruned["ddtree"].evidence_refs
+    assert "branch_count:4" in pruned["ddtree"].evidence_refs
+    assert "pruned_count:2" in pruned["ddtree"].evidence_refs
 
 
 def test_ultra_review_receipt_requires_report_evidence_for_outcome():
