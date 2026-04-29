@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from nexus.services.codeintel.graph_builder import build_graph, scan_codebase
+from nexus.services.codeintel.graph_builder import build_graph, matching_modules, scan_codebase
 
 
 def test_build_graph_records_python_import_edges(tmp_path: Path) -> None:
@@ -15,6 +15,14 @@ def test_build_graph_records_python_import_edges(tmp_path: Path) -> None:
 
     assert {"id": "pkg.core", "type": "python_module", "path": "pkg/core.py"} in graph["nodes"]
     assert {"from": "pkg.consumer", "to": "pkg.core", "type": "imports"} in graph["edges"]
+
+
+def test_matching_modules_uses_prefix_index_without_losing_existing_semantics() -> None:
+    modules = sorted(["pkg", "pkg.core", "pkg.core.deep", "pkg.other", "util"])
+
+    assert matching_modules("pkg.core", modules) == ["pkg.core.deep"]
+    assert matching_modules("pkg.core.deep.extra", modules) == ["pkg.core.deep"]
+    assert matching_modules("missing.module", modules) == []
 
 
 def test_scan_codebase_writes_index_and_ignores_nexus_cache(tmp_path: Path) -> None:

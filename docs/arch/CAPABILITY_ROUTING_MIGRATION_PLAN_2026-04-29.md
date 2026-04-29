@@ -418,6 +418,29 @@ incrementally.
     optimize that path first; Gemini benchmarks should start only after the
     Nexus route overhead is understood.
 
+## 2026-04-30 P42b CodeIntel Scan Cost Lesson
+- Failure lesson:
+  - The timing probe showed CodeIntel dominated local-only Nexus wall time:
+    `timing_codeintel_sec` was about 60.55s on a single easy fixture. The
+    graph builder used `Path.rglob("*.py")`, which filtered ignored paths only
+    after traversal, so ignored worktree/cache directories were still walked.
+  - Import matching also scanned the full module set per import. That was less
+    severe than directory traversal, but it made the graph builder less
+    scalable as Nexus grows.
+- Fix:
+  - Replaced recursive globbing with pruned `os.walk` traversal so ignored
+    directories are not entered.
+  - Added indexed module matching for imports while preserving existing
+    deepest-match behavior.
+- Evidence:
+  - Direct CodeIntel scan on this repo dropped to about 2.46s for 1454 nodes.
+  - The same 1-task Nexus-only benchmark probe dropped from 68.33s wall /
+    60.55s CodeIntel to 11.92s wall / 3.92s CodeIntel.
+- Next:
+  - Flash/Pro benchmark runs may proceed only after route smoke stays under the
+    stop-loss threshold. If larger tasks still show CodeIntel as dominant, add
+    cached graph reuse before expanding to full public-candidate runs.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.
