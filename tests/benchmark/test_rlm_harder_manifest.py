@@ -101,3 +101,18 @@ def test_rlm_harder_v2_governance_guard_visible_test_has_repair_signal(tmp_path:
     assert "benchmarks/result.json" not in visible_source
     assert "logs/run.json" in hidden_source
     assert "benchmarks/result.json" in hidden_source
+
+
+def test_rlm_harder_v2_second_round_visible_test_has_repair_signal(tmp_path: Path):
+    tasks = load_tasks("scripts/bench/public_benchmark_rlm_harder_v2.json")
+    task = next(task for task in tasks if task.fixture_kind == "rlm_harder_v2_second_round")
+
+    _target, visible_test = _materialize_fixture(tmp_path, task)
+    hidden_test = _hidden_test_for_visible_test(visible_test)
+    visible_source = Path(visible_test).read_text(encoding="utf-8")
+    hidden_source = Path(hidden_test).read_text(encoding="utf-8")
+
+    assert "test_preserves_inputs_and_ignores_none_values" in visible_source
+    assert "assert defaults == {'timeout': 10, 'retries': 2}" in visible_source
+    assert "test_empty_override_returns_copy_not_alias" not in visible_source
+    assert "test_empty_override_returns_copy_not_alias" in hidden_source

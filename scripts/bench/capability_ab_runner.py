@@ -521,8 +521,14 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
             "from target import rlm_harder_v2_merge_settings\n\n"
             "def test_plain_override_wins():\n"
             "    assert rlm_harder_v2_merge_settings({'timeout': 10}, {'timeout': 20}) == {'timeout': 20}\n"
+            "\n"
+            "def test_preserves_inputs_and_ignores_none_values():\n"
+            "    defaults = {'timeout': 10, 'retries': 2}\n"
+            "    merged = rlm_harder_v2_merge_settings(defaults, {'timeout': None, 'jitter': 1})\n"
+            "    assert merged == {'timeout': 10, 'retries': 2, 'jitter': 1}\n"
+            "    assert defaults == {'timeout': 10, 'retries': 2}\n"
         )
-        hidden = test_code + (
+        hidden = visible + (
             "\n"
             "def test_empty_override_returns_copy_not_alias():\n"
             "    defaults = {'timeout': 10}\n"
