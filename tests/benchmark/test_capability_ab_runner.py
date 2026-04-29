@@ -25,6 +25,7 @@ from scripts.bench.capability_ab_runner import (
     _force_learn_slo_ready,
     _history_policy_name,
     _hidden_verifier_mode_enabled,
+    _hidden_test_for_visible_test,
     _ask_direct_gemini_flash_patch,
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
@@ -1238,12 +1239,12 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
 
     assert "Nexus MemPalace rule" in _nexus_task_desc(governance)
     assert "Nexus scope enforcement rule" in _nexus_task_desc(scope)
-    assert "{'allowed': False, 'reason': 'scope_block'}" in _nexus_task_desc(scope)
+    assert "{'allowed': False, 'reason': 'scope_block'}" not in _nexus_task_desc(scope)
     assert "Nexus Belief/Memory rule" in _nexus_task_desc(memory)
     assert "Nexus Belief budget rule" in _nexus_task_desc(belief)
-    assert "{'rounds': 3, 'needs_evidence': True}" in _nexus_task_desc(belief)
+    assert "{'rounds': 3, 'needs_evidence': True}" not in _nexus_task_desc(belief)
     assert "Nexus replay evidence rule" in _nexus_task_desc(replay)
-    assert "`exit_code`, not `replay_exit_code`" in _nexus_task_desc(replay)
+    assert "`exit_code`, not `replay_exit_code`" not in _nexus_task_desc(replay)
 
 
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):
@@ -1634,6 +1635,135 @@ def test_run_without_nexus_hidden_verifier_omits_rlm_harder_tests(tmp_path: Path
     )
 
     assert out["baseline_patch_changed"] is False
+
+
+def test_rlm_harder_fixture_materializes_visible_and_hidden_tests(tmp_path: Path):
+    task = CapabilityTask(
+        id="rlm-v2-hidden-001",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix hidden RLM task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="rlm_harder_v2_evidence_gap",
+    )
+
+    _target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    hidden_test_file = _hidden_test_for_visible_test(visible_test_file)
+
+    visible = Path(visible_test_file).read_text(encoding="utf-8")
+    hidden = Path(hidden_test_file).read_text(encoding="utf-8")
+    assert Path(visible_test_file).name == "test_visible.py"
+    assert Path(hidden_test_file).name == "test_hidden.py"
+    assert "test_accepts_supported_passing_claim" in visible
+    assert "test_rejects_empty_and_non_string_artifacts" in hidden
+    assert "test_rejects_empty_and_non_string_artifacts" not in visible
+
+
+def test_hidden_verifier_uses_hidden_test_for_final_bare_gate(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="rlm-v2-hidden-001",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix hidden RLM task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="rlm_harder_v2_evidence_gap",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    captured_cmds: list[list[str]] = []
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        assert "test_accepts_supported_passing_claim" not in prompt
+        assert "test_rejects_empty_and_non_string_artifacts" not in prompt
+        patch = (
+            "def rlm_harder_v2_verified_claims(claims):\n"
+            "    return [claim['id'] for claim in claims if claim.get('status') == 'pass' and claim.get('artifact')]\n"
+        )
+        return (
+            {
+                "patch": patch,
+                "tokens_used": 123,
+                "token_capture_status": "measured",
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": True,
+            },
+            "",
+        )
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured_cmds.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert captured_cmds
+    assert captured_cmds[-1][-1].endswith("test_hidden.py")
+
+
+def test_hidden_verifier_overrides_successful_nexus_row(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="rlm-v2-hidden-001",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix hidden RLM task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="rlm_harder_v2_evidence_gap",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    captured_cmds: list[list[str]] = []
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured_cmds.append(list(cmd))
+        if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
+            payload = {
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "result": {"elapsed_sec": 0.1},
+                "report": {"model_calls": 0, "total_tokens": 0},
+            }
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="hidden failed", stderr="")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+    )
+
+    assert captured_cmds
+    assert captured_cmds[-1][-1].endswith("test_hidden.py")
+    assert out["status"] == "FAILED"
+    assert out["semantic_status"] == "UNVERIFIED"
+    assert out["semantic_completed"] is False
+    assert out["hidden_verifier_passed"] is False
+    assert out["report_trust_mismatch"] is True
 
 
 def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeypatch):

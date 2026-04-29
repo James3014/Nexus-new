@@ -53,6 +53,7 @@ class CapabilityTask:
     manifest_hash: str = ""
     trial_index: int = 1
     fixture_kind: str = ""
+    hidden_test_file: str = ""
 
 
 PILLAR_OBSERVATION_FIELDS = {
@@ -269,6 +270,7 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
                 repo_ref=str(row.get("repo_ref", "")),
                 manifest_hash=manifest_hash,
                 fixture_kind=str(row.get("fixture_kind", "")),
+                hidden_test_file=str(row.get("hidden_test_file", "")),
             )
         )
     return tasks
@@ -337,6 +339,7 @@ def expand_task_trials(tasks: list[CapabilityTask], *, repeat_trials: int, shuff
                     manifest_hash=task.manifest_hash,
                     trial_index=trial_index,
                     fixture_kind=task.fixture_kind,
+                    hidden_test_file=task.hidden_test_file,
                 )
             )
     if shuffle_seed is not None:
@@ -348,19 +351,24 @@ def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, st
     case_dir = (repo_root / ".nexus" / "bench_cases" / task.id).resolve()
     case_dir.mkdir(parents=True, exist_ok=True)
     target_path = case_dir / "target.py"
-    test_path = case_dir / "test_target.py"
+    visible_test_path = case_dir / "test_visible.py"
+    hidden_test_path = case_dir / "test_hidden.py"
 
     fixture = task.fixture_kind.strip()
     if fixture.startswith("rlm_harder_"):
-        target_code, test_code = _rlm_harder_fixture_sources(fixture)
+        target_code, visible_test_code, hidden_test_code = _rlm_harder_fixture_sources(fixture)
         target_path.write_text(target_code, encoding="utf-8")
-        test_path.write_text(test_code, encoding="utf-8")
-        return str(target_path), str(test_path)
+        visible_test_path.write_text(visible_test_code, encoding="utf-8")
+        hidden_test_path.write_text(hidden_test_code, encoding="utf-8")
+        return str(target_path), str(visible_test_path)
     if fixture.startswith("nexus_value_"):
-        target_code, test_code = _nexus_value_fixture_sources(fixture)
+        target_code, visible_test_code, hidden_test_code = _nexus_value_fixture_sources(fixture)
         target_path.write_text(target_code, encoding="utf-8")
-        test_path.write_text(test_code, encoding="utf-8")
-        return str(target_path), str(test_path)
+        visible_test_path.write_text(visible_test_code, encoding="utf-8")
+        hidden_test_path.write_text(hidden_test_code, encoding="utf-8")
+        return str(target_path), str(visible_test_path)
+
+    test_path = case_dir / "test_target.py"
 
     difficulty = task.difficulty.lower()
     if difficulty == "easy":
@@ -423,7 +431,66 @@ def _materialize_fixture(repo_root: Path, task: CapabilityTask) -> tuple[str, st
     return str(target_path), str(test_path)
 
 
-def _nexus_value_fixture_sources(fixture_kind: str) -> tuple[str, str]:
+def _split_fixture_tests(test_code: str) -> tuple[str, str]:
+    portable = _portable_fixture_test_import(test_code)
+    return portable, portable
+
+
+def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[str, str]:
+    if fixture_kind == "rlm_harder_v2_governance_guard":
+        visible = (
+            "from target import rlm_harder_v2_filter_action\n\n"
+            "def test_read_file_is_allowed():\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'read_file'}) == {'allowed': True, 'reason': 'ok'}\n"
+        )
+        hidden = (
+            "from target import rlm_harder_v2_filter_action\n\n"
+            "def test_blocks_dangerous_actions_and_paths():\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'read_file'}) == {'allowed': True, 'reason': 'ok'}\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'run_command', 'cmd': 'rm -rf .nexus'}) == {'allowed': False, 'reason': 'governance_block'}\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'delete_file', 'path': 'logs/run.json'}) == {'allowed': False, 'reason': 'governance_block'}\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'write_file', 'path': 'benchmarks/result.json'}) == {'allowed': False, 'reason': 'governance_block'}\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_evidence_gap":
+        visible = (
+            "from target import rlm_harder_v2_verified_claims\n\n"
+            "def test_accepts_supported_passing_claim():\n"
+            "    assert rlm_harder_v2_verified_claims([{'id': 'a', 'status': 'pass', 'artifact': 'reports/a.json'}]) == ['a']\n"
+            "    assert rlm_harder_v2_verified_claims([{'id': 'c', 'status': 'fail', 'artifact': 'reports/c.json'}]) == []\n"
+        )
+        hidden = test_code + (
+            "\n"
+            "def test_rejects_empty_and_non_string_artifacts():\n"
+            "    claims = [\n"
+            "        {'id': 'empty', 'status': 'pass', 'artifact': ''},\n"
+            "        {'id': 'none', 'status': 'pass', 'artifact': None},\n"
+            "        {'id': 'list', 'status': 'pass', 'artifact': []},\n"
+            "        {'id': 'ok', 'status': 'pass', 'artifact': 'reports/ok.json'},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_verified_claims(claims) == ['ok']\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_governance_scope":
+        visible = (
+            "from target import rlm_harder_v2_scope_decision\n\n"
+            "def test_approved_and_read_only_paths():\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'read', 'approved': False}) == {'allowed': True, 'reason': 'read_only'}\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'write', 'approved': True}) == {'allowed': True, 'reason': 'approved'}\n"
+        )
+        hidden = (
+            "from target import rlm_harder_v2_scope_decision\n\n"
+            "def test_unapproved_mutation_and_unknown_actions_are_blocked():\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'read', 'approved': False}) == {'allowed': True, 'reason': 'read_only'}\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'delete', 'approved': False}) == {'allowed': False, 'reason': 'scope_block'}\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'write'}) == {'allowed': False, 'reason': 'scope_block'}\n"
+            "    assert rlm_harder_v2_scope_decision({'action': 'unknown', 'approved': False}) == {'allowed': False, 'reason': 'scope_block'}\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    return _split_fixture_tests(test_code)
+
+
+def _nexus_value_fixture_sources(fixture_kind: str) -> tuple[str, str, str]:
     fixtures: dict[str, tuple[str, str]] = {
         "nexus_value_hidden_state": (
             "def apply_events(events):\n"
@@ -548,10 +615,11 @@ def _nexus_value_fixture_sources(fixture_kind: str) -> tuple[str, str]:
         target_code, test_code = fixtures[fixture_kind]
     except KeyError as exc:
         raise ValueError(f"unknown_nexus_value_fixture:{fixture_kind}") from exc
-    return target_code, _portable_fixture_test_import(test_code)
+    visible_test_code, hidden_test_code = _split_fixture_tests(test_code)
+    return target_code, visible_test_code, hidden_test_code
 
 
-def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str]:
+def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str, str]:
     fixtures: dict[str, tuple[str, str]] = {
         "rlm_harder_multifile_contract": (
             "CANONICAL_FIELD = 'status'\n\n"
@@ -671,7 +739,8 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str]:
         target_code, test_code = fixtures[fixture_kind]
     except KeyError as exc:
         raise ValueError(f"unknown_rlm_harder_fixture:{fixture_kind}") from exc
-    return target_code, _portable_fixture_test_import(test_code)
+    visible_test_code, hidden_test_code = _split_rlm_harder_fixture_tests(fixture_kind, test_code)
+    return target_code, visible_test_code, hidden_test_code
 
 
 def _portable_fixture_test_import(test_code: str) -> str:
@@ -716,25 +785,21 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
         )
     if task.fixture_kind == "rlm_harder_v2_governance_scope":
         desc += (
-            "\n\nNexus scope enforcement rule: implement "
-            "`rlm_harder_v2_scope_decision(request)` so unapproved read-only requests "
-            "return `{'allowed': True, 'reason': 'read_only'}`, unapproved mutating "
-            "requests such as delete return `{'allowed': False, 'reason': 'scope_block'}`, "
-            "and approved requests return `{'allowed': True, 'reason': 'approved'}`."
+            "\n\nNexus scope enforcement rule: distinguish inspection from mutation, "
+            "keep explicit approvals authoritative, and default uncertain requests to the "
+            "safer governance boundary."
         )
     if task.fixture_kind == "rlm_harder_v2_evidence_gap":
         desc += (
-            "\n\nNexus Artifact/Claim rule: a claim is VERIFIED only when it has "
-            "status='pass' and a non-empty artifact reference. Do not accept "
-            "unsupported passing claims."
+            "\n\nNexus Artifact/Claim rule: accept only claims that pair a successful "
+            "outcome with concrete, checkable support. Unsupported success language "
+            "is not enough."
         )
     if task.fixture_kind == "rlm_harder_v2_evidence_replay":
         desc += (
-            "\n\nNexus replay evidence rule: implement "
-            "`rlm_harder_v2_accept_receipt(receipt)` so it returns True only when "
-            "`receipt.get('claim') == 'verified'`, `receipt.get('replay_command')` "
-            "is present, and `receipt.get('exit_code') == 0`. The field is named "
-            "`exit_code`, not `replay_exit_code`. Return False otherwise."
+            "\n\nNexus replay evidence rule: trust receipts only when the claim, "
+            "replay command, and execution result all agree. Similar-looking fields "
+            "must not bypass the contract."
         )
     if task.fixture_kind == "rlm_harder_v2_memory_contract":
         desc += (
@@ -743,11 +808,9 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
         )
     if task.fixture_kind == "rlm_harder_v2_belief_budget":
         desc += (
-            "\n\nNexus Belief budget rule: implement "
-            "`rlm_harder_v2_repair_budget(confidence, risk)` so low-confidence, "
-            "high-risk work returns `{'rounds': 3, 'needs_evidence': True}`. "
-            "High-confidence, low-risk work should stay fast with "
-            "`{'rounds': 1, 'needs_evidence': False}`."
+            "\n\nNexus Belief budget rule: allocate more repair effort and require "
+            "evidence when uncertainty and risk are high; keep simple, confident work "
+            "on the faster path."
         )
     return desc
 
@@ -768,6 +831,22 @@ def _resolve_task_files(repo_root: Path, task: CapabilityTask, *, materialize_mi
     if not test_path.exists():
         raise FileNotFoundError(f"Missing test_file for {task.id}: {task.test_file}")
     return str(target_path), str(test_path)
+
+
+def _hidden_test_for_visible_test(test_file: str) -> str:
+    test_path = Path(test_file)
+    hidden_path = test_path.with_name("test_hidden.py")
+    if hidden_path.exists():
+        return str(hidden_path)
+    return test_file
+
+
+def _verification_test_for_task(task: CapabilityTask, test_file: str) -> str:
+    if _hidden_verifier_mode_enabled() and (
+        task.fixture_kind.startswith("nexus_value_") or task.fixture_kind.startswith("rlm_harder_")
+    ):
+        return _hidden_test_for_visible_test(test_file)
+    return test_file
 
 
 def _read_preserved_target(target_file: str, *, materialize_missing: bool) -> str | None:
@@ -1457,6 +1536,7 @@ def run_with_nexus(
     enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
     test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file
+    verification_test_file = _verification_test_for_task(task, test_file)
     args = [
         "nexus",
         "research:auto-flow",
@@ -1542,6 +1622,23 @@ def run_with_nexus(
     if not payload:
         payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    if payload.get("status") == "SUCCESS" and verification_test_file != test_file:
+        verify = _run_process_group(
+            ["uv", "run", "pytest", "-q", "--maxfail=1", verification_test_file],
+            cwd=repo_root,
+            env=os.environ.copy(),
+            timeout_sec=_remaining_task_timeout(start + max(1, int(timeout_sec)), timeout_sec),
+        )
+        hidden_passed = verify.returncode == 0
+        row["hidden_verifier_file"] = verification_test_file
+        row["hidden_verifier_passed"] = hidden_passed
+        row["hidden_verifier_stdout_tail"] = _tail_text(verify.stdout, max_chars=1000)
+        row["hidden_verifier_stderr_tail"] = _tail_text(verify.stderr, max_chars=1000)
+        if not hidden_passed:
+            row["status"] = "FAILED"
+            row["semantic_status"] = "UNVERIFIED"
+            row["semantic_completed"] = False
+            row["report_trust_mismatch"] = True
     return _annotate_benchmark_eligibility(
         row,
         provider="gemini" if llm_enabled else "local",
@@ -1567,6 +1664,7 @@ def run_without_nexus(
         test_path = Path(test_file)
         original = target_path.read_text(encoding="utf-8")
         test_source = test_path.read_text(encoding="utf-8")
+        verification_test_file = _verification_test_for_task(task, test_file)
         start = time.monotonic()
         status = "FAILED"
         err = ""
@@ -1622,7 +1720,7 @@ def run_without_nexus(
             patch_changed = bool(patch and patch != original)
             if patch_changed:
                 target_path.write_text(patch, encoding="utf-8")
-                cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
+                cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", verification_test_file]
                 res = _run_process_group(
                     cmd,
                     cwd=repo_root,
@@ -1686,6 +1784,7 @@ def run_without_nexus(
                 "raw_tail": raw_tail,
                 "pytest_stdout_tail": pytest_stdout_tail,
                 "pytest_stderr_tail": pytest_stderr_tail,
+                "verification_test_file": verification_test_file,
             },
         }
         row = _extract_record(mode="without_nexus", task=task, payload=payload, wall_time_sec=wall)
