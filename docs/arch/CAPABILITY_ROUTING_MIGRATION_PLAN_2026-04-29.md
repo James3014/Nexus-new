@@ -254,6 +254,19 @@ incrementally.
   becoming quiet; use focused unit tests plus an explicit benchmark smoke for
   this path instead of letting changed-only own long benchmark execution.
 
+## 2026-04-29 P12 Receipt Source Lesson
+- Direct Codex-with-Nexus runs bypass the CLI/service auto-flow receipt path, so
+  they must build `capability_receipts` explicitly before report extraction.
+  Otherwise public reports fall back to legacy inferred coverage and fail the
+  capability-specific public gate with `receipt_source_missing`.
+- Prompt-delivered executor flags are not the same as executor evidence.
+  Autoreason, DDTree, and Ultra Review may be selected by the route decision,
+  but public capability claims still require winner/judge evidence, real
+  candidate pruning evidence, or Ultra Review report evidence.
+- DDTree receipts must not treat missing candidate counts as invocation. A
+  pruning receipt is invoked only when `candidate_count > max_candidates > 0`,
+  and public-safe only when saved-step evidence exists.
+
 ## 2026-04-29 P54-P58 Pending Executor Result
 - Planner now exposes `pending_capabilities` for beta collaboration abilities
   that can be recommended but do not yet have production executor receipts in

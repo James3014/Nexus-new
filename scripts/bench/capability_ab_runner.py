@@ -33,6 +33,7 @@ from nexus.app.research_flow_service import (
     run_auto_flow,
 )
 from nexus.engine.capability_planner import CapabilityPlanner
+from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.services.gemini_cli import (
@@ -2057,6 +2058,17 @@ def _run_with_nexus_codex(
         plan=capability_plan,
         stop_policy=(route.get("capability_stack", {}) or {}).get("stop_policy", {}),
     ).to_dict()
+    usage_trace["capability_receipts"] = [
+        item.to_dict()
+        for item in build_trace_receipts(
+            plan=capability_plan,
+            capabilities=usage_trace["capabilities"],
+            autoreason=usage_trace["autoreason"],
+            ddtree=usage_trace["ddtree"],
+            ultra_review=usage_trace["ultra_review"],
+            codeintel=codeintel,
+        )
+    ]
     payload = {
         "result": {
             "status": status,

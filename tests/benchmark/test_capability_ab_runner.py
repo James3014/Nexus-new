@@ -1320,6 +1320,8 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert set(out["nexus_phases_observed"]) == {"P", "X", "D", "R", "A", "C"}
     assert out["nexus_wearing_valid"] is True
     assert out["codeintel_scan_report_present"] is True
+    assert any(item["name"] == "codeintel" and item["public_claim_safe"] for item in out["capability_receipts"])
+    assert out["capability_receipts_json"]
     assert out["gateway_stats_present"] is True
     assert out["gateway_token_source"] == "codex_stdout"
     assert out["gateway_prompt_chars"] > 0

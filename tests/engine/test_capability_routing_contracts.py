@@ -330,8 +330,10 @@ def test_ddtree_receipt_requires_real_candidate_pruning():
 
     assert not_pruned["ddtree"].invoked is False
     assert not_pruned["ddtree"].public_claim_safe is False
+    assert not_pruned["ddtree"].failure_reason == "selected_without_invocation"
     assert pruned["ddtree"].invoked is True
     assert pruned["ddtree"].public_claim_safe is True
+    assert pruned["ddtree"].failure_reason == ""
     assert "saved_steps:2" in pruned["ddtree"].evidence_refs
 
 
