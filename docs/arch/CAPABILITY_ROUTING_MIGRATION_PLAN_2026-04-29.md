@@ -228,6 +228,38 @@ incrementally.
     accurate yet; they remain `selected_without_invocation` until executor
     receipts are connected.
 
+## 2026-04-29 P54-P58 Pending Executor Result
+- Planner now exposes `pending_capabilities` for beta collaboration abilities
+  that can be recommended but do not yet have production executor receipts in
+  the benchmark path: Swarm, Drone, and Nightshift.
+- Receipt/report behavior:
+  - Pending executor capabilities remain visible in the capability plan.
+  - They are emitted as `selected=false` with `failure_reason=pending_executor`
+    until real executor evidence is present.
+  - This prevents selected-only recommendations from inflating capability
+    coverage or public capability claims.
+- P55-P57 executor check:
+  - Swarm has existing role-finding/consensus plumbing through hyper sprint
+    candidate summaries, but no standalone public-safe executor report.
+  - Drone has crystal artifacts under `.nexus/reports/drones/`, but needs a
+    stable subtask receipt schema before it can be claimed as production active.
+  - Nightshift has a direct runner/report path, but no-Gemini benchmark fixtures
+    cannot trigger a true Nightshift recovery; they can only test field plumbing.
+- P58 no-Gemini routing health ran 12 cross-module hard tasks:
+  - with Nexus: solve rate 100%, semantic verified 100%, trust mismatch 0%.
+  - service control: solve rate 100%, semantic verified 0%, trust mismatch 100%.
+  - average wall time: Nexus 41.19s, service control 25.01s.
+  - public-safe receipts: CodeIntel 12/12, Autoreason 12/12, Ultra Review 12/12,
+    DDTree 2/12 eligible rows.
+  - pending executor receipts: Swarm 4, Drone 5, Nightshift 5.
+- Interpretation:
+  - The new router is now more honest: it can recommend collaboration/escalation
+    abilities without letting them masquerade as executed capabilities.
+  - The route is public-safe for CodeIntel, Autoreason, eligible DDTree, and
+    Ultra Review in this no-Gemini preflight.
+  - Swarm/Drone/Nightshift must remain pending until P59-P61 connects stable
+    executor evidence.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

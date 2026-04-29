@@ -81,9 +81,10 @@ def test_selected_receipts_do_not_imply_invocation_or_public_claim_safety():
     receipts = {item.name: item for item in selected_receipts(plan)}
 
     assert {"swarm", "drone", "nightshift"} <= set(receipts)
-    assert receipts["swarm"].selected is True
+    assert receipts["swarm"].selected is False
     assert receipts["swarm"].invoked is False
     assert receipts["swarm"].evidence_present is False
+    assert receipts["swarm"].failure_reason == "pending_executor"
     assert receipts["swarm"].public_claim_safe is False
 
 
@@ -214,3 +215,33 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
     assert "subtask_artifact:2" in receipts["drone"].evidence_refs
     assert receipts["nightshift"].public_claim_safe is True
     assert receipts["nightshift"].failure_reason == ""
+
+
+def test_pending_executor_receipts_do_not_count_as_selected_until_evidence_exists():
+    plan = {
+        "selected_capabilities": ["swarm", "drone", "nightshift"],
+        "pending_capabilities": ["swarm", "drone", "nightshift"],
+    }
+
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={
+                "claim_verified": True,
+                "swarm_used": False,
+                "swarm_evidence_count": 0,
+                "drone_used": True,
+                "drone_invoked_count": 0,
+                "nightshift_recommended": True,
+                "nightshift_invoked": False,
+            },
+        )
+    }
+
+    assert receipts["swarm"].selected is False
+    assert receipts["swarm"].failure_reason == "pending_executor"
+    assert receipts["drone"].selected is False
+    assert receipts["drone"].failure_reason == "pending_executor"
+    assert receipts["nightshift"].selected is False
+    assert receipts["nightshift"].failure_reason == "pending_executor"

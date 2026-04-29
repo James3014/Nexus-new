@@ -93,6 +93,7 @@ class CapabilityPlan:
     required_capabilities: list[str]
     optional_capabilities: list[str]
     conditional_capabilities: list[str]
+    pending_capabilities: list[str]
     forbidden_capabilities: list[str]
     constraints: list[str]
     decision_trace: list[dict[str, Any]]

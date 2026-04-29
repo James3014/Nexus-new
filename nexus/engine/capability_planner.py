@@ -5,6 +5,8 @@ from typing import Any
 from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, PHASES
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
 
+PENDING_EXECUTOR_CAPABILITIES = {"swarm", "drone", "nightshift"}
+
 
 def default_capability_nodes() -> dict[str, CapabilityNode]:
     nodes = [
@@ -576,6 +578,7 @@ class CapabilityPlanner:
             enable("stress_test", "stress_or_recursion_signal")
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
+        pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
         total_cost = sum(self.nodes[name].cost for name in selected)
         forbidden: list[str] = []
         if total_cost > constraint_model.max_cost:
@@ -622,6 +625,7 @@ class CapabilityPlanner:
             required_capabilities=[name for name, state in states.items() if state == "required"],
             optional_capabilities=[name for name, state in states.items() if state == "optional"],
             conditional_capabilities=[name for name, state in states.items() if state == "conditional"],
+            pending_capabilities=pending,
             forbidden_capabilities=[name for name, state in states.items() if state == "forbidden"],
             constraints=constraints,
             decision_trace=decision_trace,

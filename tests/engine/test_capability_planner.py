@@ -36,6 +36,7 @@ def test_capability_planner_builds_constrained_composition_trace():
     assert {"codeintel", "research", "hyper", "autoreason", "ddtree", "ultra_review", "swarm", "drone"} <= set(
         plan["conditional_capabilities"]
     )
+    assert {"swarm", "drone"} <= set(plan["pending_capabilities"])
     assert "claim_fail_closed" in plan["constraints"]
     assert any(item["capability"] == "ultra_review" and item["state"] == "conditional" for item in plan["decision_trace"])
     assert any(item["phase"] == "A" and "claim_and_artifact_fail_closed" in item["replan_reasons"] for item in plan["replan_trace"])
