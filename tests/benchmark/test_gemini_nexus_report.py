@@ -2,7 +2,36 @@ from __future__ import annotations
 
 import json
 
+from scripts.bench.ab_eval import summarize_capability_coverage
 from scripts.bench.gemini_nexus_report import _public_claim_gate, render_markdown_report
+
+
+def test_capability_coverage_marks_receipt_required_legacy_as_untrusted():
+    matrix = summarize_capability_coverage(
+        [
+            {
+                "status": "SUCCESS",
+                "autoreason_enabled": True,
+                "autoreason_winner": "candidate-2",
+                "capability_claim_verified": True,
+                "ddtree_enabled": True,
+                "ddtree_eligible": True,
+                "ddtree_selected_candidate_ids": "candidate-2",
+                "ddtree_actual_saved_steps": 1,
+                "ultra_review_recommended": True,
+                "ultra_review_invoked": True,
+                "ultra_review_gate_passed": True,
+                "ultra_review_report_path": ".nexus/reports/ultra.json",
+            }
+        ]
+    )
+
+    assert matrix["autoreason"]["source"] == "legacy_untrusted"
+    assert matrix["autoreason"]["public_safe"] is False
+    assert matrix["ddtree"]["source"] == "legacy_untrusted"
+    assert matrix["ddtree"]["public_safe"] is False
+    assert matrix["ultra_review"]["source"] == "legacy_untrusted"
+    assert matrix["ultra_review"]["public_safe"] is False
 
 
 def test_public_claim_gate_rejects_rlm_submit_without_a_gate():

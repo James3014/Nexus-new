@@ -256,6 +256,29 @@ def test_uninvoked_reasoning_receipt_does_not_treat_none_as_evidence():
     assert receipts["ultra_review"].outcome_contributed is False
 
 
+def test_autoreason_disabled_status_is_not_invoked_or_evidenced():
+    plan = {
+        "selected_capabilities": ["autoreason"],
+    }
+
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            autoreason={"enabled": False, "status": "DISABLED", "winner_id": "candidate-b"},
+        )
+    }
+
+    receipt = receipts["autoreason"]
+    assert receipt.invoked is False
+    assert receipt.evidence_present is False
+    assert receipt.gate_passed is False
+    assert receipt.outcome_contributed is False
+    assert receipt.public_claim_safe is False
+    assert receipt.failure_reason == "selected_without_invocation"
+
+
 def test_autoreason_receipt_requires_winner_and_exposes_tournament_context():
     plan = {
         "selected_capabilities": ["autoreason"],
@@ -329,12 +352,37 @@ def test_ddtree_receipt_requires_real_candidate_pruning():
     }
 
     assert not_pruned["ddtree"].invoked is False
+    assert not_pruned["ddtree"].evidence_present is False
+    assert not_pruned["ddtree"].evidence_refs == ()
     assert not_pruned["ddtree"].public_claim_safe is False
     assert not_pruned["ddtree"].failure_reason == "selected_without_invocation"
     assert pruned["ddtree"].invoked is True
     assert pruned["ddtree"].public_claim_safe is True
     assert pruned["ddtree"].failure_reason == ""
     assert "saved_steps:2" in pruned["ddtree"].evidence_refs
+
+
+def test_ultra_review_receipt_requires_report_evidence_for_outcome():
+    plan = {
+        "selected_capabilities": ["ultra_review"],
+    }
+
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            ultra_review={"invoked": True, "gate_passed": True, "report_path": ""},
+        )
+    }
+
+    receipt = receipts["ultra_review"]
+    assert receipt.invoked is True
+    assert receipt.evidence_present is False
+    assert receipt.gate_passed is False
+    assert receipt.outcome_contributed is False
+    assert receipt.public_claim_safe is False
+    assert receipt.failure_reason == "invoked_without_evidence"
 
 
 def test_msa_receipts_become_public_safe_with_executor_evidence():

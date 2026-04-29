@@ -469,7 +469,7 @@ def test_run_auto_flow_exposes_swarm_report_in_usage_trace(tmp_path: Path, monke
         history_fail_threshold=999,
         dynamic_timeout_multiplier=2.5,
         min_dynamic_stage1_timeout=1,
-        force_flow="hyper_sprint",
+        force_flow=None,
         report_file=".nexus/reports/research/auto-flow-report.json",
         output_file=None,
         task_id="case-123",
@@ -1050,7 +1050,7 @@ def test_hyper_learning_trace_exposes_autoreason_and_ddtree(tmp_path: Path, monk
         history_fail_threshold=9999,
         dynamic_timeout_multiplier=2.5,
         min_dynamic_stage1_timeout=12,
-        force_flow="hyper_sprint",
+        force_flow=None,
         report_file=".nexus/reports/research/test-auto-flow.json",
         output_file=None,
         success_criteria="artifact_changed_and_tests_pass",
@@ -1059,6 +1059,126 @@ def test_hyper_learning_trace_exposes_autoreason_and_ddtree(tmp_path: Path, monk
     trace = payload["nexus_usage_trace"]
     assert trace["autoreason"]["winner"] == "llm:2"
     assert trace["ddtree"]["actual_saved_steps"] == 1
+
+
+def test_forced_hyper_skips_baseline_probe(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+
+    def fail_if_baseline_runs(*_args, **_kwargs):
+        raise AssertionError("forced hyper_sprint must not run baseline probe")
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="VALUE = 2\n",
+            winner_source="llm",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=1,
+            model_calls=1,
+            model_name="gemini-3-flash-preview",
+            model_patch_generated=True,
+            fallback_used=False,
+            total_tokens=111,
+            token_capture_status="measured",
+            learning_trace={},
+            candidates=[],
+        )
+
+    monkeypatch.setattr(research_flow_service, "generate_local_candidate", fail_if_baseline_runs)
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix public bug with forced hyper",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=99.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        success_criteria="artifact_changed_and_tests_pass",
+    )
+
+    assert payload["strategy"]["baseline_probe_skipped"] is True
+    assert payload["strategy"]["path"] == "hyper_direct_forced"
+    assert payload["result"]["report"]["model_calls"] == 1
+
+
+def test_llm_candidate_cap_remains_hard_limit_when_ddtree_selected(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+    captured = {}
+
+    def fake_hyper(*, repo_root, config):
+        captured["candidate_count"] = config.candidate_count
+        captured["enable_ddtree_executor"] = config.enable_ddtree_executor
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="VALUE = 2\n",
+            winner_source="llm",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=1,
+            model_calls=1,
+            model_name="gemini-3-flash-preview",
+            model_patch_generated=True,
+            fallback_used=False,
+            total_tokens=111,
+            token_capture_status="measured",
+            learning_trace={},
+            candidates=[],
+        )
+
+    monkeypatch.setenv("NEXUS_LLM_CANDIDATE_CAP", "1")
+    monkeypatch.setenv("NEXUS_DDTREE_EXECUTOR", "1")
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix complex candidate selection with evidence risk",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="bug",
+        candidate_count=3,
+        root_cause_confidence=0.3,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        success_criteria="artifact_changed_and_tests_pass",
+    )
+
+    assert captured["enable_ddtree_executor"] is True
+    assert captured["candidate_count"] == 1
 
 
 def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, monkeypatch):
@@ -1132,7 +1252,7 @@ def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, mon
         history_fail_threshold=9999,
         dynamic_timeout_multiplier=2.5,
         min_dynamic_stage1_timeout=12,
-        force_flow="hyper_sprint",
+        force_flow=None,
         report_file=".nexus/reports/research/test-auto-flow.json",
         output_file=None,
         success_criteria="artifact_changed_and_tests_pass",

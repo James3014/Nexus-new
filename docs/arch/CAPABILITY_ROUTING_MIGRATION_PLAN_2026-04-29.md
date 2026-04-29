@@ -321,6 +321,24 @@ incrementally.
   contract stable so P62 can safely connect true executor reports without
   another report-format rewrite.
 
+## 2026-04-29 P16-P19 Cost and Truthfulness Lesson
+- Forced `hyper_sprint` benchmark rows must not pay for a baseline probe first.
+  The route can still use verification-only rescue for cross-module tasks, but
+  the forced path should be a direct hyper execution path.
+- `NEXUS_LLM_CANDIDATE_CAP` is a hard benchmark budget. Planner-selected DDTree
+  may remain enabled, but it must not silently raise the LLM candidate count
+  above the cap.
+- Gemini/Nexus benchmark runs now default LLM self-heal to off. Extra repair
+  calls are useful for product quality experiments, but public A/B comparisons
+  must opt in explicitly with `--enable-llm-self-heal`.
+- Public capability claims must be receipt-backed:
+  - Autoreason disabled/prompt-only payloads are not invoked evidence.
+  - DDTree selected candidate IDs are diagnostics unless `actual_saved_steps>0`.
+  - Ultra Review cannot contribute to a verified outcome without report
+    evidence.
+  - Legacy inferred coverage for receipt-required capabilities is marked
+    `legacy_untrusted`, so it cannot pass the capability-specific public gate.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

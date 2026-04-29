@@ -298,12 +298,14 @@ def summarize_capability_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
         return receipt_matrix
     total = len(rows)
     matrix: dict[str, Any] = {}
+    receipt_required = {"autoreason", "ddtree", "ultra_review", "swarm", "drone", "nightshift"}
     for capability, spec in _CAPABILITY_COVERAGE_SPEC.items():
         selected = sum(1 for row in rows if spec["selected"](row))
         invoked = sum(1 for row in rows if spec["invoked"](row))
         evidence = sum(1 for row in rows if spec["evidence"](row))
         gate = sum(1 for row in rows if spec["gate"](row))
         outcome = sum(1 for row in rows if spec["gate"](row) and _is_solved(row))
+        source = "legacy_untrusted" if capability in receipt_required else "legacy"
         matrix[capability] = {
             "selected_count": selected,
             "selected_rate": round(selected / total, 4) if total else 0.0,
@@ -315,7 +317,10 @@ def summarize_capability_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "gate_rate": round(gate / total, 4) if total else 0.0,
             "outcome_count": outcome,
             "outcome_rate": round(outcome / total, 4) if total else 0.0,
-            "public_safe": bool(total and selected and invoked == selected and evidence == selected and gate == selected),
+            "public_safe": bool(
+                source == "legacy" and total and selected and invoked == selected and evidence == selected and gate == selected
+            ),
+            "source": source,
         }
     return matrix
 

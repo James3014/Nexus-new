@@ -2144,6 +2144,7 @@ def run_with_nexus(
     enable_ddtree_executor: bool = False,
     enable_ultra_review_dry_gate: bool = False,
     llm_candidate_cap: int = 1,
+    enable_llm_self_heal: bool = False,
 ) -> dict[str, Any]:
     enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
@@ -2214,6 +2215,7 @@ def run_with_nexus(
                 _benchmark_gateway_timeout_for_task(timeout_sec)
             )
             env["NEXUS_LLM_CANDIDATE_CAP"] = str(max(1, int(llm_candidate_cap)))
+            env["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] = "1" if enable_llm_self_heal else "0"
             if enable_autoreason_executor:
                 env["NEXUS_AUTOREASON_EXECUTOR"] = "1"
             if enable_ddtree_executor:
@@ -3091,6 +3093,11 @@ def main() -> int:
         default=1,
         help="Maximum LLM candidate count for the Nexus treatment arm. Use 3+ to make DDTree eligible.",
     )
+    parser.add_argument(
+        "--enable-llm-self-heal",
+        action="store_true",
+        help="Allow one extra LLM repair call after a pytest failure in the Nexus treatment arm.",
+    )
     parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
     parser.add_argument("--llm-safe-probe", action="store_true")
     parser.add_argument("--without-mode", choices=["service", "bare", "gemini", "codex"], default="bare")
@@ -3351,6 +3358,7 @@ def main() -> int:
                 enable_ddtree_executor=bool(args.enable_ddtree_executor),
                 enable_ultra_review_dry_gate=bool(args.enable_ultra_review_dry_gate),
                 llm_candidate_cap=int(args.llm_candidate_cap),
+                enable_llm_self_heal=bool(args.enable_llm_self_heal),
             )
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
@@ -3536,6 +3544,7 @@ def main() -> int:
                     "enable_ddtree_executor": bool(args.enable_ddtree_executor),
                     "enable_ultra_review_dry_gate": bool(args.enable_ultra_review_dry_gate),
                     "llm_candidate_cap": int(args.llm_candidate_cap),
+                    "enable_llm_self_heal": bool(args.enable_llm_self_heal),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
                     "runner_command": " ".join(sys.argv),

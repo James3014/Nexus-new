@@ -85,30 +85,34 @@ class AutoreasonReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         winner = payload.get("winner") or payload.get("winner_id")
-        refs = [winner] + [str(item) for item in (payload.get("judge_votes", []) or payload.get("judge_scores", []) or [])]
-        for key in ("incumbent_id", "stop_reason"):
-            if payload.get(key):
-                refs.append(f"{key}:{payload.get(key)}")
+        status = str(payload.get("status") or "").strip().upper()
+        disabled = status in {"DISABLED", "FEATURE_FLAG_DISABLED", "SKIPPED", "NOOP"}
+        invoked = bool(payload.get("enabled") and not disabled)
+        refs: list[Any] = []
+        if invoked:
+            refs = [winner] + [str(item) for item in (payload.get("judge_votes", []) or payload.get("judge_scores", []) or [])]
+            for key in ("incumbent_id", "stop_reason"):
+                if payload.get(key):
+                    refs.append(f"{key}:{payload.get(key)}")
         clean_refs = [
             str(item).strip()
             for item in refs
             if item is not None and str(item).strip() and str(item).strip() != "None"
         ]
-        invoked = bool(payload.get("enabled") or payload.get("status"))
         gate_passed = bool(winner and claim_verified)
         return merge_capability_receipt(
             name=self.name,
             selected=True,
             invoked=invoked,
             evidence_refs=refs,
-            gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            gate_passed=bool(invoked and gate_passed),
+            outcome_contributed=bool(invoked and gate_passed and clean_refs),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
                 invoked=invoked,
                 evidence_refs=clean_refs,
-                gate_passed=gate_passed,
+                gate_passed=bool(invoked and gate_passed),
             ),
         )
 
@@ -117,14 +121,14 @@ class DDTreeReceiptAdapter:
     name = "ddtree"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        refs = [str(item) for item in (payload.get("selected_candidate_ids", []) or [])]
-        clean_refs = [str(item).strip() for item in refs if str(item).strip()]
         saved_steps = as_int(payload.get("actual_saved_steps", 0))
         candidate_count = as_int(payload.get("candidate_count", 0))
         max_candidates = as_int(payload.get("max_candidates", 0))
+        refs: list[str] = []
         if saved_steps > 0:
+            refs = [str(item) for item in (payload.get("selected_candidate_ids", []) or []) if str(item).strip()]
             refs.append(f"saved_steps:{saved_steps}")
-            clean_refs.append(f"saved_steps:{saved_steps}")
+        clean_refs = [str(item).strip() for item in refs if str(item).strip()]
         invoked = bool(
             payload.get("enabled")
             and payload.get("eligible")
@@ -153,24 +157,25 @@ class UltraReviewReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         invoked = bool(payload.get("invoked", False))
-        gate_passed = bool(payload.get("gate_passed", False))
         report_path = str(payload.get("report_path") or "").strip()
+        evidence_refs = [report_path] if report_path else []
+        gate_passed = bool(payload.get("gate_passed", False) and evidence_refs)
         if not invoked and payload.get("reason"):
             failure_reason = str(payload.get("reason") or "")
         else:
             failure_reason = selected_failure_reason(
                 selected=True,
                 invoked=invoked,
-                evidence_refs=[report_path] if report_path else [],
+                evidence_refs=evidence_refs,
                 gate_passed=gate_passed,
             )
         return merge_capability_receipt(
             name=self.name,
             selected=True,
             invoked=invoked,
-            evidence_refs=[report_path],
+            evidence_refs=evidence_refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=bool(gate_passed and claim_verified and evidence_refs),
             executor_id=self.name,
             failure_reason=failure_reason,
         )

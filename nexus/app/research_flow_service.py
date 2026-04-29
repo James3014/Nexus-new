@@ -1324,14 +1324,21 @@ def run_auto_flow(
                 min(stage1_timeout_sec, dynamic_timeout),
             )
         executor_flags = build_route_executor_flags(task_desc=task_desc, task_type=task_type, route=route)
+        effective_candidate_count = max(
+            execution_profile["effective_candidate_count"],
+            3 if executor_flags["enable_ddtree_executor"] else 1,
+        )
+        llm_candidate_cap_raw = os.environ.get("NEXUS_LLM_CANDIDATE_CAP", "").strip()
+        if llm_mode and llm_candidate_cap_raw:
+            try:
+                effective_candidate_count = min(effective_candidate_count, max(1, int(llm_candidate_cap_raw)))
+            except ValueError:
+                pass
         cfg = SprintConfig(
             task=task_desc_with_codeintel if llm_mode else task_desc,
             target_file=target_file,
             test_file=test_file,
-            candidate_count=max(
-                execution_profile["effective_candidate_count"],
-                3 if executor_flags["enable_ddtree_executor"] else 1,
-            ),
+            candidate_count=effective_candidate_count,
             max_rounds=execution_profile["effective_max_rounds"],
             timeout_sec=timeout_sec,
             safe_mode=True,
@@ -1388,14 +1395,24 @@ def run_auto_flow(
         strategy_path = "baseline_only"
     else:
         direct_hyper = bool(execution_profile.get("prefer_direct_hyper", False))
-        if (
+        forced_hyper = force_flow == "hyper_sprint"
+        if forced_hyper or (
             force_flow is None
             and execution_profile["is_hard_task"]
             and (skip_baseline_probe_for_hard or direct_hyper)
         ):
             baseline_probe_skipped = True
             result = _run_hyper_apply()
-            strategy_path = "hyper_direct_hard_skip_probe" if skip_baseline_probe_for_hard else "hyper_direct_cross_module"
+            if (
+                result.get("status") != "SUCCESS"
+                and str(task_type).startswith("cross_module_refactor")
+                and verification_only_allowed
+            ):
+                result = _run_original_verification_rescue(result)
+            if forced_hyper:
+                strategy_path = "hyper_direct_forced"
+            else:
+                strategy_path = "hyper_direct_hard_skip_probe" if skip_baseline_probe_for_hard else "hyper_direct_cross_module"
         else:
         # Probe first to avoid unnecessary Hyper run for obvious quick fixes.
             baseline_probe = _run_baseline_probe()
@@ -1725,6 +1742,7 @@ def run_auto_flow(
             "forced_flow": force_flow or "auto",
             "flow_ladder": ["baseline_probe", "hyper_sprint", "baseline_fallback"],
             "learn_gate_blocked": bool(learn_gate_blocked),
+            "baseline_probe_skipped": baseline_probe_skipped,
         },
         "artifact_summary": artifact_summary,
         "success_criteria": {
