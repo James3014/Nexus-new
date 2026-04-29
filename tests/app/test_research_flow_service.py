@@ -465,6 +465,41 @@ def test_write_msa_receipt_reports_persists_swarm_and_drone_artifacts(tmp_path: 
     assert json.loads(drone_path.read_text(encoding="utf-8"))["artifact_count"] == 1
 
 
+def test_local_msa_executor_adds_drone_receipt_only_after_verified_artifact(tmp_path: Path, monkeypatch):
+    evidence = research_flow_service._capability_evidence(
+        result_report={},
+        learning_trace={},
+        nightshift_recommended=False,
+    )
+
+    unchanged = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-drone-001",
+        task_desc="Accept drone output only when every delegated subtask has a returned artifact path and owner.",
+        task_type="public_ops_research",
+        evidence=evidence,
+        artifact_verified=False,
+    )
+
+    assert unchanged["drone_used"] is False
+
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
+    updated = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-drone-001",
+        task_desc="Accept drone output only when every delegated subtask has a returned artifact path and owner.",
+        task_type="public_ops_research",
+        evidence=evidence,
+        artifact_verified=True,
+    )
+
+    artifact_path = Path(updated["drone_artifact_path"])
+    assert updated["drone_used"] is True
+    assert updated["drone_invoked_count"] == 1
+    assert artifact_path.exists()
+    assert json.loads(artifact_path.read_text(encoding="utf-8"))["owner"] == "local_msa_bench_executor"
+
+
 def test_run_auto_flow_exposes_swarm_report_in_usage_trace(tmp_path: Path, monkeypatch):
     target = tmp_path / "demo.py"
     test_file = tmp_path / "test_demo.py"
