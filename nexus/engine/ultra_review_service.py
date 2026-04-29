@@ -29,6 +29,10 @@ SECURITY_PATTERNS = (
     ("unsafe_delete", re.compile(r"shutil\.rmtree\([^#\n]*(ignore_errors\s*=\s*True|force|/tmp|\*)")),
 )
 SECURITY_REPRO_TIMEOUT_SEC = 10
+RUNTIME_ARTIFACT_PREFIXES = (
+    ".nexus/reports/",
+    ".nexus-swarm-",
+)
 
 
 class UltraReviewError(RuntimeError):
@@ -57,7 +61,7 @@ class UltraReviewService:
         progress: list[dict[str, Any]] = []
         self._record_progress(progress, progress_path, "sandbox_prepared", sandbox_path=str(sandbox_path))
         diff_text = self._capture_diff(base_ref)
-        status_text = self._git(["status", "--short"])
+        status_text = self._capture_status()
 
         diff_path = sandbox_path / "changes.diff"
         diff_path.write_text(diff_text, encoding="utf-8")
@@ -245,6 +249,8 @@ class UltraReviewService:
             if not raw:
                 continue
             rel = raw.decode("utf-8", errors="ignore")
+            if self._is_runtime_artifact_path(rel):
+                continue
             source = self.project_root / rel
             target = execution_root / rel
             try:
@@ -286,7 +292,46 @@ class UltraReviewService:
         return {"strategy": "copytree", "diff_applied": True}
 
     def _capture_diff(self, base_ref: str) -> str:
-        return self._git(["diff", "--binary", base_ref])
+        return self._filter_diff(self._git(["diff", "--binary", base_ref]))
+
+    def _capture_status(self) -> str:
+        lines: list[str] = []
+        for line in self._git(["status", "--short"]).splitlines():
+            path = line[3:] if len(line) > 3 else ""
+            if path.startswith('"') and " -> " not in path:
+                path = path.strip('"')
+            if " -> " in path:
+                path = path.rsplit(" -> ", 1)[-1].strip('"')
+            if path and self._is_runtime_artifact_path(path):
+                continue
+            lines.append(line)
+        return "\n".join(lines) + ("\n" if lines else "")
+
+    def _filter_diff(self, diff_text: str) -> str:
+        chunks: list[list[str]] = []
+        current: list[str] = []
+        for line in diff_text.splitlines(keepends=True):
+            if line.startswith("diff --git "):
+                if current:
+                    chunks.append(current)
+                current = [line]
+                continue
+            if current:
+                current.append(line)
+            else:
+                chunks.append([line])
+        if current:
+            chunks.append(current)
+
+        kept: list[str] = []
+        for chunk in chunks:
+            header = chunk[0] if chunk else ""
+            if header.startswith("diff --git "):
+                path = self._path_from_diff_header(header.rstrip("\n"))
+                if path and self._is_runtime_artifact_path(path):
+                    continue
+            kept.extend(chunk)
+        return "".join(kept)
 
     def _derive_regression_candidate_map(self, diff_text: str) -> list[dict[str, Any]]:
         candidate_map: list[dict[str, Any]] = []
@@ -699,9 +744,15 @@ class UltraReviewService:
             if not line.startswith("diff --git "):
                 continue
             path = self._path_from_diff_header(line)
-            if path:
+            if path and not self._is_runtime_artifact_path(path):
                 files.append(path)
         return files
+
+    def _is_runtime_artifact_path(self, path: str) -> bool:
+        normalized = path.replace("\\", "/")
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        return any(normalized.startswith(prefix) for prefix in RUNTIME_ARTIFACT_PREFIXES)
 
     def _resolve(self, path: Path | str) -> Path:
         path_obj = Path(path)

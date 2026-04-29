@@ -97,8 +97,8 @@ def test_ultra_review_sandbox_mirror_falls_back_to_copytree(tmp_path, monkeypatc
     monkeypatch.setattr("nexus.engine.ultra_review_service.subprocess.run", fake_run)
 
     payload = UltraReviewService(tmp_path).run(
-        report_path="reports/ultra.json",
-        sandbox_root="reports/sandboxes",
+        report_path=".nexus/reports/ultra_review_report.json",
+        sandbox_root=".nexus/reports/ultra_review/sandboxes",
     )
 
     assert payload["gate_passed"] is True
@@ -110,8 +110,8 @@ def test_ultra_review_worktree_mirror_keeps_empty_diff_fast_path(tmp_path):
     _init_repo(tmp_path)
 
     payload = UltraReviewService(tmp_path).run(
-        report_path="reports/ultra.json",
-        sandbox_root="reports/sandboxes",
+        report_path=".nexus/reports/ultra_review_report.json",
+        sandbox_root=".nexus/reports/ultra_review/sandboxes",
     )
 
     assert payload["gate_passed"] is True
@@ -131,8 +131,8 @@ def test_ultra_review_maps_research_tests_and_security_observations(tmp_path):
     (tmp_path / "nexus" / "research" / "probe.py").write_text(secret_line, encoding="utf-8")
 
     payload = UltraReviewService(tmp_path).run(
-        report_path="reports/ultra.json",
-        sandbox_root="reports/sandboxes",
+        report_path=".nexus/reports/ultra_review_report.json",
+        sandbox_root=".nexus/reports/ultra_review/sandboxes",
     )
 
     assert payload["gate_passed"] is False
@@ -272,6 +272,35 @@ def test_changed_files_preserves_paths_with_spaces(tmp_path):
     diff_text = "diff --git a/docs/Ops - Learning Closure Matrix.md b/docs/Ops - Learning Closure Matrix.md\n"
 
     assert service._changed_files(diff_text) == ["docs/Ops - Learning Closure Matrix.md"]
+
+
+def test_ultra_review_filters_runtime_artifacts_from_diff_and_status(tmp_path):
+    _init_repo(tmp_path)
+    runtime_file = tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json"
+    runtime_file.parent.mkdir(parents=True)
+    runtime_file.write_text('{"status":"old"}\n', encoding="utf-8")
+    swarm_db = tmp_path / ".nexus-swarm-001" / "swarmtasks.db"
+    swarm_db.parent.mkdir(parents=True)
+    swarm_db.write_text("old\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "add runtime artifacts"], cwd=tmp_path, check=True, capture_output=True)
+
+    runtime_file.write_text('{"status":"new"}\n', encoding="utf-8")
+    swarm_db.write_text("new\n", encoding="utf-8")
+    (tmp_path / ".nexus" / "reports" / "bench" / "run.json").parent.mkdir(parents=True)
+    (tmp_path / ".nexus" / "reports" / "bench" / "run.json").write_text("{}\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path=".nexus/reports/ultra_review_report.json",
+        sandbox_root=".nexus/reports/ultra_review/sandboxes",
+    )
+
+    assert payload["gate_passed"] is True
+    assert payload["diff"]["changed_files"] == []
+    assert payload["diff"]["has_worktree_delta"] is False
+    diff_text = (tmp_path / payload["artifacts"]["diff"]).read_text(encoding="utf-8")
+    assert ".nexus/reports" not in diff_text
+    assert ".nexus-swarm-001" not in diff_text
 
 
 def test_ultra_review_logic_repro_handles_changed_paths_with_spaces(tmp_path):
