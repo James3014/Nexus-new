@@ -1931,6 +1931,172 @@ def test_run_with_nexus_can_enable_ultra_dry_gate_without_llm(tmp_path: Path, mo
     assert out["run_eligible"] is True
 
 
+def test_run_with_nexus_can_enable_routing_layer_executors_without_llm(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-routing-no-llm-executors",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix routing-sensitive public bug without llm",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":0,"total_tokens":0,"token_capture_status":"not_applicable_local_only"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="off",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+    )
+
+    assert captured["env"]["NEXUS_AUTOREASON_EXECUTOR"] == "1"
+    assert captured["env"]["NEXUS_DDTREE_EXECUTOR"] == "1"
+    assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "3"
+    assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
+    assert out["run_eligible"] is True
+
+
+def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-routing-receipts-no-llm",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix evidence-heavy routing bug without llm",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+    receipts = [
+        {
+            "name": "autoreason",
+            "selected": True,
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+            "outcome_contributed": True,
+            "public_claim_safe": True,
+            "evidence_refs": ["candidate-2", "stop_reason:a_streak_met"],
+        },
+        {
+            "name": "ddtree",
+            "selected": True,
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+            "outcome_contributed": True,
+            "public_claim_safe": True,
+            "evidence_refs": ["saved_steps:2"],
+        },
+        {
+            "name": "ultra_review",
+            "selected": True,
+            "invoked": True,
+            "evidence_present": True,
+            "gate_passed": True,
+            "outcome_contributed": True,
+            "public_claim_safe": True,
+            "evidence_refs": [".nexus/reports/ultra_review/route_gate_report.json"],
+        },
+    ]
+    payload = {
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "nexus_usage_trace": {
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "usage_valid": True,
+            "pillars": {
+                "lancedb": {"active": True},
+                "memory": {"active": True},
+                "mempalace": {"active": True},
+                "belief": {"active": True},
+                "artifact": {"active": True},
+            },
+            "phase_trace": {
+                "P": "route_built",
+                "X": "retrieval_checked",
+                "D": "guard_decision",
+                "R": "hyper_executed",
+                "A": "artifact_verified",
+                "C": "closure_written",
+            },
+            "capabilities": {"claim_verified": True},
+            "capability_receipts": receipts,
+        },
+        "result": {
+            "elapsed_sec": 0.1,
+            "report": {
+                "attempt_count": 1,
+                "model_calls": 0,
+                "total_tokens": 0,
+                "token_capture_status": "not_applicable_local_only",
+            },
+        },
+    }
+
+    class _Proc:
+        stdout = json.dumps(payload)
+        stderr = ""
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="off",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+    )
+
+    assert captured["cmd"][:4] == ["uv", "run", "scripts/engine/nexus_cli.py", "nexus"]
+    assert "--output-json" in captured["cmd"]
+    assert captured["env"]["NEXUS_AUTOREASON_EXECUTOR"] == "1"
+    assert captured["env"]["NEXUS_DDTREE_EXECUTOR"] == "1"
+    assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
+    assert out["capability_receipts"] == receipts
+    assert json.loads(out["capability_receipts_json"]) == receipts
+    receipt_by_name = {item["name"]: item for item in out["capability_receipts"]}
+    assert receipt_by_name["autoreason"]["public_claim_safe"] is True
+    assert receipt_by_name["ddtree"]["public_claim_safe"] is True
+    assert receipt_by_name["ultra_review"]["public_claim_safe"] is True
+
+
 def test_run_with_nexus_llm_all_forces_hyper_flow(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-001",

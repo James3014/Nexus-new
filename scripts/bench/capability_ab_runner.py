@@ -2220,6 +2220,11 @@ def run_with_nexus(
         env["NEXUS_LEARN_CLOSURE_WRITEBACK"] = "0"
         if enable_ultra_review_dry_gate:
             env["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
+        if enable_autoreason_executor:
+            env["NEXUS_AUTOREASON_EXECUTOR"] = "1"
+        if enable_ddtree_executor:
+            env["NEXUS_DDTREE_EXECUTOR"] = "1"
+        env["NEXUS_LLM_CANDIDATE_CAP"] = str(max(1, int(llm_candidate_cap)))
         if llm_enabled:
             env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
             env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
@@ -2227,12 +2232,7 @@ def run_with_nexus(
             env["NEXUS_GATEWAY_TIMEOUT_SEC"] = _benchmark_gateway_timeout_sec(
                 _benchmark_gateway_timeout_for_task(timeout_sec)
             )
-            env["NEXUS_LLM_CANDIDATE_CAP"] = str(max(1, int(llm_candidate_cap)))
             env["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] = "1" if enable_llm_self_heal else "0"
-            if enable_autoreason_executor:
-                env["NEXUS_AUTOREASON_EXECUTOR"] = "1"
-            if enable_ddtree_executor:
-                env["NEXUS_DDTREE_EXECUTOR"] = "1"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
         if enable_swarm_bench_executor:
             env["NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR"] = "1"

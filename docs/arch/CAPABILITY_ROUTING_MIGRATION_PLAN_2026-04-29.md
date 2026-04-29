@@ -370,6 +370,27 @@ incrementally.
   quota when the planned comparison would only produce selected/prompt-only
   capability evidence.
 
+## 2026-04-29 P40-P41 Local Executor Smoke Lesson
+- Failure lesson:
+  - The benchmark runner originally passed Autoreason/DDTree executor flags only
+    when `with_llm_mode` enabled a model call. That blocked local-only P40
+    validation from proving real executor receipts before Gemini spending.
+  - P41 route smoke showed another important distinction: `auto` routing can
+    correctly keep easy/medium tasks in light baseline lanes, so selected
+    Autoreason/DDTree capabilities may remain non-invoked there. Executor proof
+    needs a forced/high-risk hyper lane, while route-tier smoke needs `auto`.
+- Fix:
+  - `NEXUS_AUTOREASON_EXECUTOR`, `NEXUS_DDTREE_EXECUTOR`, and
+    `NEXUS_LLM_CANDIDATE_CAP` are now passed to the Nexus subprocess even when
+    the treatment arm is local-only.
+- Evidence:
+  - P40 forced-hyper local smoke produced public-safe receipts for CodeIntel,
+    Autoreason, DDTree, and Ultra Review without calling Gemini.
+  - P41 auto route smoke produced both light and full tiers without calling
+    Gemini, but also exposed that local-only subprocess overhead is still about
+    75-78 seconds per row while phase timings account for only about 8-11
+    seconds.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.
