@@ -131,3 +131,23 @@ def test_rlm_harder_v2_evidence_replay_visible_test_has_repair_signal(tmp_path: 
     assert "'exit_code': 1" in visible_source
     assert "replay_exit_code" not in visible_source
     assert "replay_exit_code" in hidden_source
+
+
+def test_rlm_harder_v2_all_hidden_fixtures_have_visible_repair_signal(tmp_path: Path):
+    tasks = load_tasks("scripts/bench/public_benchmark_rlm_harder_v2.json")
+    for task in tasks:
+        task_root = tmp_path / task.id
+        task_root.mkdir()
+        _target, visible_test = _materialize_fixture(task_root, task)
+        visible_source = Path(visible_test).read_text(encoding="utf-8")
+
+        assert "spec_from_file_location" in visible_source
+        if task.fixture_kind == "rlm_harder_v2_evidence_gap":
+            assert "test_requires_artifact_reference" in visible_source
+            assert "{'id': 'b', 'status': 'pass'}" in visible_source
+        if task.fixture_kind == "rlm_harder_v2_memory_contract":
+            assert "test_requires_type_and_keyword_overlap" in visible_source
+            assert "old-bug" in visible_source
+        if task.fixture_kind == "rlm_harder_v2_belief_budget":
+            assert "test_low_confidence_high_risk_requires_more_evidence" in visible_source
+            assert "0.42, 'high'" in visible_source

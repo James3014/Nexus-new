@@ -1990,7 +1990,7 @@ def test_rlm_harder_fixture_materializes_visible_and_hidden_tests(tmp_path: Path
     hidden = Path(hidden_test_file).read_text(encoding="utf-8")
     assert Path(visible_test_file).name == "test_visible.py"
     assert Path(hidden_test_file).name == "test_hidden.py"
-    assert "test_accepts_supported_passing_claim" in visible
+    assert "test_requires_artifact_reference" in visible
     assert "test_rejects_empty_and_non_string_artifacts" in hidden
     assert "test_rejects_empty_and_non_string_artifacts" not in visible
 
@@ -2011,7 +2011,7 @@ def test_hidden_verifier_uses_hidden_test_for_final_bare_gate(tmp_path: Path, mo
     captured_cmds: list[list[str]] = []
 
     def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
-        assert "test_accepts_supported_passing_claim" in prompt
+        assert "test_requires_artifact_reference" in prompt
         assert "test_rejects_empty_and_non_string_artifacts" not in prompt
         patch = (
             "def rlm_harder_v2_verified_claims(claims):\n"

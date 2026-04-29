@@ -470,11 +470,15 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
     if fixture_kind == "rlm_harder_v2_evidence_gap":
         visible = (
             "from target import rlm_harder_v2_verified_claims\n\n"
-            "def test_accepts_supported_passing_claim():\n"
-            "    assert rlm_harder_v2_verified_claims([{'id': 'a', 'status': 'pass', 'artifact': 'reports/a.json'}]) == ['a']\n"
-            "    assert rlm_harder_v2_verified_claims([{'id': 'c', 'status': 'fail', 'artifact': 'reports/c.json'}]) == []\n"
+            "def test_requires_artifact_reference():\n"
+            "    claims = [\n"
+            "        {'id': 'a', 'status': 'pass', 'artifact': 'reports/a.json'},\n"
+            "        {'id': 'b', 'status': 'pass'},\n"
+            "        {'id': 'c', 'status': 'fail', 'artifact': 'reports/c.json'},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_verified_claims(claims) == ['a']\n"
         )
-        hidden = test_code + (
+        hidden = visible + (
             "\n"
             "def test_rejects_empty_and_non_string_artifacts():\n"
             "    claims = [\n"
@@ -544,11 +548,14 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
     if fixture_kind == "rlm_harder_v2_memory_contract":
         visible = (
             "from target import rlm_harder_v2_select_memory_hits\n\n"
-            "def test_selects_matching_type_and_keyword():\n"
-            "    items = [{'id': 'target', 'task_type': 'bug', 'keywords': ['websocket', 'timeout']}]\n"
-            "    assert rlm_harder_v2_select_memory_hits(items, 'bug', ['websocket']) == items\n"
+            "def test_requires_type_and_keyword_overlap():\n"
+            "    items = [\n"
+            "        {'id': 'old-bug', 'task_type': 'bug', 'keywords': ['invoice', 'rounding']},\n"
+            "        {'id': 'target', 'task_type': 'bug', 'keywords': ['websocket', 'timeout']},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_select_memory_hits(items, 'bug', ['websocket', 'timeout']) == [items[1]]\n"
         )
-        hidden = test_code + (
+        hidden = visible + (
             "\n"
             "def test_rejects_same_type_without_keyword_overlap_and_wrong_type():\n"
             "    items = [\n"
@@ -562,10 +569,11 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
     if fixture_kind == "rlm_harder_v2_belief_budget":
         visible = (
             "from target import rlm_harder_v2_repair_budget\n\n"
-            "def test_high_confidence_low_risk_stays_fast():\n"
+            "def test_low_confidence_high_risk_requires_more_evidence():\n"
+            "    assert rlm_harder_v2_repair_budget(0.42, 'high') == {'rounds': 3, 'needs_evidence': True}\n"
             "    assert rlm_harder_v2_repair_budget(0.91, 'low') == {'rounds': 1, 'needs_evidence': False}\n"
         )
-        hidden = test_code + (
+        hidden = visible + (
             "\n"
             "def test_uncertain_or_high_risk_paths_require_evidence():\n"
             "    assert rlm_harder_v2_repair_budget(0.74, 'medium')['needs_evidence'] is True\n"
