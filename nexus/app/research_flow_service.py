@@ -1434,6 +1434,29 @@ def run_auto_flow(
     if chosen_flow == "baseline":
         result = _run_baseline_apply()
         strategy_path = "baseline_only"
+        baseline_report = result.get("report", {}) if isinstance(result.get("report"), dict) else {}
+        baseline_model_attempted = int(baseline_report.get("model_calls", 0) or 0) > 0
+        if (
+            force_flow is None
+            and llm_mode
+            and llm_baseline
+            and baseline_model_attempted
+            and result.get("status") != "SUCCESS"
+        ):
+            failed_baseline = result
+            result = _run_hyper_apply()
+            result_report = result.get("report", {}) if isinstance(result.get("report"), dict) else {}
+            if isinstance(result_report, dict):
+                result_report["replanned_from"] = {
+                    "flow": failed_baseline.get("flow"),
+                    "status": failed_baseline.get("status"),
+                    "error": failed_baseline.get("error"),
+                    "model_calls": baseline_report.get("model_calls", 0),
+                    "gateway_error_category": baseline_report.get("gateway_error_category", ""),
+                }
+                result["report"] = result_report
+            chosen_flow = "hyper_sprint"
+            strategy_path = "baseline_llm_failed_replan_hyper"
     else:
         direct_hyper = bool(execution_profile.get("prefer_direct_hyper", False))
         forced_hyper = force_flow == "hyper_sprint"

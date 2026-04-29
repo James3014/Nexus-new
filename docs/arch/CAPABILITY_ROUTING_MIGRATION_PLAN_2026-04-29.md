@@ -489,6 +489,23 @@ incrementally.
     tests or times out on medium/hard tasks, re-plan into Hyper/Autoreason
     within the same Nexus run. Do not globally force Hyper for all LLM tasks.
 
+## 2026-04-30 P44c Baseline Failure Replan Lesson
+- Failure lesson:
+  - Letting baseline use Gemini fixed the wearing contract, but medium rows
+    showed a new quality gap: an LLM baseline patch can be syntactically
+    delivered and still fail tests. Treating that as final loses Nexus's
+    self-healing value.
+- Fix:
+  - When auto routing selects baseline, LLM baseline was attempted, and tests
+    fail, Nexus now replans to Hyper/Autoreason in the same run. Explicit
+    `--force-flow baseline` remains respected.
+- Evidence:
+  - Added a regression test where Gemini baseline returns a bad patch, tests
+    fail, and Nexus escalates to Hyper to produce a verified patch.
+- Next:
+  - Re-run Flash smoke with lower gateway timeout and verify medium/hard rows
+    become eligible capability outcomes rather than delivery-invalid records.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.
