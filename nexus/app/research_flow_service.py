@@ -1042,6 +1042,7 @@ def run_auto_flow(
 
     flow_started_at = time.time()
     phase_wall_sec: dict[str, float] = {}
+    timing_breakdown_sec: dict[str, float] = {}
     phase_started_at = time.time()
     route = build_route(
         repo_root=repo_root,
@@ -1117,16 +1118,22 @@ def run_auto_flow(
     phase_wall_sec["D"] = round(time.time() - phase_started_at, 4)
 
     guard_hit = False
+    setup_started_at = time.time()
     target_path = (repo_root / target_file).resolve()
     if not target_path.exists():
         raise click.ClickException(f"Target file not found: {target_file}")
     pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
     original_code = target_path.read_text(encoding="utf-8")
+    timing_breakdown_sec["target_io_sec"] = round(time.time() - setup_started_at, 4)
     normalized_success_criteria = (success_criteria or "all_target_tests_pass").strip()
     verification_only_allowed = normalized_success_criteria == "all_target_tests_pass"
     mutation_required = normalized_success_criteria in {"artifact_changed_and_tests_pass", "mutation_required"}
+    codeintel_started_at = time.time()
     codeintel_evidence = _build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task_desc)
+    timing_breakdown_sec["codeintel_sec"] = round(time.time() - codeintel_started_at, 4)
+    context_started_at = time.time()
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
+    timing_breakdown_sec["context_pack_sec"] = round(time.time() - context_started_at, 4)
 
     def _generate_baseline_patch(trial: int = 0) -> tuple[str, str]:
         """R4: Enhanced baseline generation with LLM fast-fallback and conservative local paths."""
@@ -1754,6 +1761,7 @@ def run_auto_flow(
         "timing": {
             "cli_elapsed_sec": round(time.time() - flow_started_at, 4),
             "phase_wall_sec": phase_wall_sec,
+            "breakdown_sec": timing_breakdown_sec,
         },
         "io": {
             "output_written": False,
@@ -1786,6 +1794,7 @@ def run_auto_flow(
     phase_wall_sec["C"] = round(time.time() - phase_started_at, 4)
     payload["timing"]["cli_elapsed_sec"] = round(time.time() - flow_started_at, 4)
     payload["timing"]["phase_wall_sec"] = phase_wall_sec
+    payload["timing"]["breakdown_sec"] = timing_breakdown_sec
     payload["nexus_usage_trace"]["phase_wall_sec"] = phase_wall_sec
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     if payload["io"].get("output_path"):

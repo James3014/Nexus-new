@@ -391,6 +391,33 @@ incrementally.
     75-78 seconds per row while phase timings account for only about 8-11
     seconds.
 
+## 2026-04-30 P42-P43 Nexus-Only Timing Lesson
+- Failure lesson:
+  - Single-arm route tuning is useful before spending Gemini quota, but it must
+    be labeled as `nexus_only` and must fail the public A/B claim gate. A run
+    without a bare/control arm can prove Nexus route receipts and wall-time
+    behavior, but it cannot prove uplift.
+  - The first P43 smoke showed `with_nexus` average wall time around 69.39s
+    while measured phase time was only around 7.49s. Without child timing
+    breakdowns, that gap could be misattributed to Gemini, routing quality, or
+    executor logic.
+- Fix:
+  - Added benchmark `--nexus-only` for route/timing smoke. It skips the bare
+    arm, records `nexus_only=true`, and marks evidence bundles as
+    `single_arm_run` so public claims stay blocked.
+  - Added service-level `timing.breakdown_sec` for target IO, CodeIntel, and
+    context packing, then surfaced those fields in benchmark rows.
+- Evidence:
+  - P43 local smoke executed 3 Nexus rows, 0 bare rows, solved 3/3, and
+    correctly failed comparable public A/B gating as a single-arm run.
+  - Targeted timing/gate tests and the route/executor slice passed with
+    `175 passed`.
+- Next:
+  - Re-run a 1-task Nexus-only timing probe with the new breakdown before any
+    Gemini run. If CodeIntel or another phase-adjacent step dominates the gap,
+    optimize that path first; Gemini benchmarks should start only after the
+    Nexus route overhead is understood.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

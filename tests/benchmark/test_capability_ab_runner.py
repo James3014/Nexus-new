@@ -51,6 +51,7 @@ from scripts.bench.capability_ab_runner import (
     _run_process_group,
     _tail_text,
     _task_uses_materialized_fixture,
+    _without_tasks_for_run,
     _with_nexus_timeout_payload,
     _write_trial_evidence,
     assert_clean_worktree,
@@ -221,6 +222,7 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
         enable_ddtree_executor=True,
         enable_ultra_review_dry_gate=True,
         llm_candidate_cap=3,
+        nexus_only=False,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
@@ -294,6 +296,7 @@ def test_public_benchmark_preflight_accepts_codex_model_lock(tmp_path: Path, mon
         enable_ddtree_executor=True,
         enable_ultra_review_dry_gate=True,
         llm_candidate_cap=3,
+        nexus_only=False,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
@@ -343,6 +346,7 @@ def test_public_benchmark_preflight_fails_for_unlocked_model_and_no_hidden_verif
         enable_ddtree_executor=False,
         enable_ultra_review_dry_gate=False,
         llm_candidate_cap=1,
+        nexus_only=False,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
@@ -414,6 +418,7 @@ def test_public_benchmark_preflight_blocks_model_run_without_executor_evidence_f
         enable_ddtree_executor=False,
         enable_ultra_review_dry_gate=False,
         llm_candidate_cap=1,
+        nexus_only=False,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
@@ -422,6 +427,74 @@ def test_public_benchmark_preflight_blocks_model_run_without_executor_evidence_f
     assert report["capability_readiness"]["status"] == "FAIL"
     assert "capability_readiness:autoreason_executor_flag_missing" in report["failures"]
     assert "capability_readiness:llm_candidate_cap_below_ddtree_threshold" in report["failures"]
+
+
+def test_public_benchmark_preflight_allows_nexus_only_without_direct_model(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-nexus-only-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix a governance bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_hidden_governance",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.delenv("NEXUS_DIRECT_GEMINI_MODEL", raising=False)
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="all",
+        with_model_provider="gemini",
+        with_nexus_runner="subprocess",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+        nexus_only=True,
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "PASS"
+    assert "direct_model_env_missing" not in report["failures"]
+    assert report["public_claim_requirements"]["single_arm_run"] is True
+    assert report["public_claim_requirements"]["public_claim_allowed"] is False
 
 
 def test_parse_direct_gemini_json_marks_stats_tokens_measured():
@@ -763,6 +836,56 @@ def test_write_evidence_bundle_fails_gate_for_parallel_smoke(tmp_path: Path):
     assert "parallel_smoke" in payload["public_claim_gate"]["failures"]
 
 
+def test_write_evidence_bundle_fails_gate_for_single_arm_run(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_row = {"mode": "with_nexus", "model_name": "gemini-3-flash-preview", "run_eligible": True}
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "abc", "runner_command": "run --nexus-only"},
+    )
+
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    assert payload["row_counts"]["with_nexus"] == 1
+    assert payload["row_counts"]["without_nexus"] == 0
+    assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert "single_arm_run" in payload["public_claim_gate"]["failures"]
+
+
+def test_partial_markdown_report_explains_single_arm_run():
+    out = _render_partial_markdown_report(
+        benchmark_date="2026-04-30",
+        with_rows=[{"mode": "with_nexus"}],
+        without_rows=[],
+        benchmark_summary={"with_nexus": {"total_n": 1}},
+    )
+
+    assert "Public claim gate: FAIL" in out
+    assert "single-arm run" in out
+
+
+def test_without_tasks_for_run_skips_bare_arm_for_nexus_only():
+    task = CapabilityTask(
+        id="route-smoke",
+        difficulty="easy",
+        task_type="bug",
+        task_desc="Fix",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="all_target_tests_pass",
+    )
+
+    assert _without_tasks_for_run([task], timed_out=False, nexus_only=False) == [task]
+    assert _without_tasks_for_run([task], timed_out=False, nexus_only=True) == []
+    assert _without_tasks_for_run([task], timed_out=True, nexus_only=False) == []
+
+
 def test_total_timeout_budget_helper():
     assert _budget_exceeded(0.0, 1) is True
     assert _budget_exceeded(0.0, 0) is False
@@ -954,7 +1077,11 @@ def test_extract_record_maps_semantic_fields():
                 },
             },
         },
-        "timing": {"cli_elapsed_sec": 2.4, "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5}},
+        "timing": {
+            "cli_elapsed_sec": 2.4,
+            "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5},
+            "breakdown_sec": {"target_io_sec": 0.01, "codeintel_sec": 0.2, "context_pack_sec": 0.03},
+        },
         "result": {
             "elapsed_sec": 2.3,
             "report": {
@@ -995,6 +1122,12 @@ def test_extract_record_maps_semantic_fields():
     assert out["pillar_mempalace_verified"] is True
     assert out["phase_r"] == "hyper_executed"
     assert out["cli_elapsed_sec"] == 2.4
+    assert out["phase_wall_total_sec"] == 2.6
+    assert out["cli_uninstrumented_sec"] == 0.0
+    assert out["runner_overhead_sec"] == 0.1
+    assert out["timing_target_io_sec"] == 0.01
+    assert out["timing_codeintel_sec"] == 0.2
+    assert out["timing_context_pack_sec"] == 0.03
     assert out["phase_wall_r_sec"] == 1.1
     assert out["capability_hyper_used"] is True
     assert out["capability_claim_verified"] is True
@@ -1059,6 +1192,37 @@ def test_extract_record_maps_semantic_fields():
     assert out["semantic_completed"] is False
     assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
     assert out["nexus_phases_observed"] == ["P", "X", "D", "R", "A", "C"]
+
+
+def test_extract_record_summarizes_child_and_parent_timing_gaps():
+    task = CapabilityTask(
+        id="timing-001",
+        difficulty="hard",
+        task_type="bug",
+        task_desc="Fix timing",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="all_target_tests_pass",
+    )
+    payload = {
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "timing": {
+            "cli_elapsed_sec": 10.0,
+            "phase_wall_sec": {"P": 1.0, "X": 2.0, "D": 0.5, "R": 1.5, "A": 2.0, "C": 1.0},
+            "breakdown_sec": {"target_io_sec": 0.2, "codeintel_sec": 1.7, "context_pack_sec": 0.1},
+        },
+        "result": {"elapsed_sec": 10.0, "report": {"model_calls": 0, "total_tokens": 0}},
+    }
+
+    out = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=12.5)
+
+    assert out["phase_wall_total_sec"] == 8.0
+    assert out["cli_uninstrumented_sec"] == 2.0
+    assert out["runner_overhead_sec"] == 2.5
+    assert out["timing_target_io_sec"] == 0.2
+    assert out["timing_codeintel_sec"] == 1.7
+    assert out["timing_context_pack_sec"] == 0.1
 
 
 def test_extract_record_summarizes_rlm_trace_quality(tmp_path: Path):
@@ -2728,7 +2892,19 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
     rows = [
         {"mode": "without_nexus", "run_eligible": True, "status": "SUCCESS", "semantic_completed": True, "report_trust_mismatch": False, "wall_duration_sec": 2.0, "total_tokens": 100, "model_calls": 1},
         {"mode": "without_nexus", "run_eligible": False, "infra_invalid_reason": "quota_exhausted", "status": "FAILED", "semantic_completed": False, "report_trust_mismatch": True, "wall_duration_sec": 3.0, "total_tokens": 0, "model_calls": 1},
-        {"mode": "with_nexus", "run_eligible": True, "status": "FAILED", "semantic_completed": False, "report_trust_mismatch": True, "wall_duration_sec": 4.0, "total_tokens": 200, "model_calls": 2},
+        {
+            "mode": "with_nexus",
+            "run_eligible": True,
+            "status": "FAILED",
+            "semantic_completed": False,
+            "report_trust_mismatch": True,
+            "wall_duration_sec": 4.0,
+            "phase_wall_total_sec": 1.5,
+            "cli_uninstrumented_sec": 2.0,
+            "runner_overhead_sec": 0.5,
+            "total_tokens": 200,
+            "model_calls": 2,
+        },
     ]
 
     summary = _summarize_benchmark_rows(rows)
@@ -2738,6 +2914,9 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
     assert summary["without_nexus"]["infra_invalid_n"] == 1
     assert summary["without_nexus"]["solve_rate"] == 1.0
     assert summary["with_nexus"]["solve_rate"] == 0.0
+    assert summary["with_nexus"]["avg_phase_wall_total_sec"] == 1.5
+    assert summary["with_nexus"]["avg_cli_uninstrumented_sec"] == 2.0
+    assert summary["with_nexus"]["avg_runner_overhead_sec"] == 0.5
 
 
 def test_per_task_stop_loss_marks_row_infra_invalid():

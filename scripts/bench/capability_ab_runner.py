@@ -227,6 +227,29 @@ def _avg(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 4)
 
 
+def _sum_phase_wall_sec(phase_wall: dict[str, Any]) -> float:
+    total = 0.0
+    for phase in ("P", "X", "D", "R", "A", "C"):
+        try:
+            total += float(phase_wall.get(phase, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 4)
+
+
+def _nonnegative_delta(left: Any, right: Any) -> float | None:
+    try:
+        return round(max(0.0, float(left or 0.0) - float(right or 0.0)), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _without_tasks_for_run(tasks: list[CapabilityTask], *, timed_out: bool, nexus_only: bool) -> list[CapabilityTask]:
+    if timed_out or nexus_only:
+        return []
+    return tasks
+
+
 def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     summary: dict[str, dict[str, Any]] = {}
     for mode in sorted({str(row.get("mode", "")) for row in rows if row.get("mode") is not None}):
@@ -249,6 +272,9 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
             "trust_mismatch_rate": round(len(trust_mismatch) / len(eligible), 4) if eligible else None,
             "first_pass_rate": round(len(first_pass) / len(eligible), 4) if eligible else None,
             "avg_wall_time_sec": _avg([float(row.get("wall_duration_sec", 0) or 0) for row in eligible]),
+            "avg_phase_wall_total_sec": _avg([float(row.get("phase_wall_total_sec", 0) or 0) for row in eligible]),
+            "avg_cli_uninstrumented_sec": _avg([float(row.get("cli_uninstrumented_sec", 0) or 0) for row in eligible]),
+            "avg_runner_overhead_sec": _avg([float(row.get("runner_overhead_sec", 0) or 0) for row in eligible]),
             "avg_tokens": _avg([float(row.get("total_tokens", 0) or 0) for row in eligible]),
             "token_reliable_rate": round(len(token_reliable) / len(eligible), 4) if eligible else None,
             "token_unreliable_reasons": sorted(
@@ -1232,8 +1258,11 @@ def _extract_record(
     usage_trace = usage_trace if isinstance(usage_trace, dict) else {}
     timing = payload.get("timing", {}) if isinstance(payload, dict) else {}
     timing = timing if isinstance(timing, dict) else {}
+    timing_breakdown = timing.get("breakdown_sec", {}) if isinstance(timing, dict) else {}
+    timing_breakdown = timing_breakdown if isinstance(timing_breakdown, dict) else {}
     phase_wall = timing.get("phase_wall_sec") or usage_trace.get("phase_wall_sec") or {}
     phase_wall = phase_wall if isinstance(phase_wall, dict) else {}
+    phase_wall_total_sec = _sum_phase_wall_sec(phase_wall)
     pillars = usage_trace.get("pillars", {}) if isinstance(usage_trace, dict) else {}
     pillars = pillars if isinstance(pillars, dict) else {}
     phase_trace = usage_trace.get("phase_trace", {}) if isinstance(usage_trace, dict) else {}
@@ -1314,6 +1343,12 @@ def _extract_record(
         "subprocess_wall_sec": round(wall_time_sec, 4) if mode == "with_nexus" else None,
         "cli_elapsed_sec": timing.get("cli_elapsed_sec"),
         "receipt_elapsed_sec": timing.get("cli_elapsed_sec"),
+        "phase_wall_total_sec": phase_wall_total_sec,
+        "cli_uninstrumented_sec": _nonnegative_delta(timing.get("cli_elapsed_sec"), phase_wall_total_sec),
+        "runner_overhead_sec": _nonnegative_delta(wall_time_sec, timing.get("cli_elapsed_sec")),
+        "timing_target_io_sec": timing_breakdown.get("target_io_sec"),
+        "timing_codeintel_sec": timing_breakdown.get("codeintel_sec"),
+        "timing_context_pack_sec": timing_breakdown.get("context_pack_sec"),
         "phase_wall_p_sec": phase_wall.get("P"),
         "phase_wall_x_sec": phase_wall.get("X"),
         "phase_wall_d_sec": phase_wall.get("D"),
@@ -2554,7 +2589,7 @@ def _render_partial_markdown_report(
             "",
             "Public claim gate: FAIL",
             "",
-            "Reason: benchmark stopped before both arms produced comparable rows.",
+            "Reason: single-arm run; benchmark did not produce comparable with/without rows.",
             "",
             f"With Nexus rows: {len(with_rows)}",
             f"Without Nexus rows: {len(without_rows)}",
@@ -2665,6 +2700,8 @@ def write_evidence_bundle(
     gate_failures = []
     if config.get("parallel_arms") == "smoke-only":
         gate_failures.append("parallel_smoke")
+    if len(with_rows) == 0 or len(without_rows) == 0:
+        gate_failures.append("single_arm_run")
     if len(with_models) != 1 or len(without_models) != 1 or with_models != without_models:
         gate_failures.append("model_mismatch")
     if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
@@ -2972,7 +3009,8 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
     direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "").strip()
     if not env_model:
         failures.append("nexus_model_env_missing")
-    if args.without_mode in {"gemini", "codex"} and not direct_model:
+    nexus_only = bool(getattr(args, "nexus_only", False))
+    if not nexus_only and args.without_mode in {"gemini", "codex"} and not direct_model:
         failures.append("direct_model_env_missing")
     if env_model and direct_model and env_model != direct_model:
         failures.append("model_lock_mismatch")
@@ -3048,7 +3086,8 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "markdown_report_requested": bool(args.markdown_report),
             "nexus_wearing_required": args.with_llm_mode in {"hard", "all"},
             "parallel_arms": getattr(args, "parallel_arms", "off"),
-            "public_claim_allowed": getattr(args, "parallel_arms", "off") == "off",
+            "public_claim_allowed": getattr(args, "parallel_arms", "off") == "off" and not nexus_only,
+            "single_arm_run": nexus_only,
         },
         "capability_readiness": capability_readiness,
     }
@@ -3153,6 +3192,11 @@ def main() -> int:
     )
     parser.add_argument("--progress-log", dest="progress_log", action="store_true", default=True)
     parser.add_argument("--no-progress-log", dest="progress_log", action="store_false")
+    parser.add_argument(
+        "--nexus-only",
+        action="store_true",
+        help="Run only the with_nexus treatment arm. Intended for route/receipt/wall-time smoke, not public uplift claims.",
+    )
     parser.add_argument("--repeat-trials", type=int, default=1)
     parser.add_argument("--shuffle-seed", type=int, default=None)
     parser.add_argument(
@@ -3428,10 +3472,7 @@ def main() -> int:
             _restore_preserved_target(target_file, original_target)
     if args.neutralize_history:
         _reset_auto_flow_history(repo_root)
-    if not timed_out:
-        without_tasks = tasks
-    else:
-        without_tasks = []
+    without_tasks = _without_tasks_for_run(tasks, timed_out=timed_out, nexus_only=bool(args.nexus_only))
     for task in without_tasks:
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
@@ -3564,6 +3605,7 @@ def main() -> int:
                     "enable_llm_self_heal": bool(args.enable_llm_self_heal),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
+                    "nexus_only": bool(args.nexus_only),
                     "runner_command": " ".join(sys.argv),
                     "timeout_sec": int(args.timeout_sec),
                     "total_timeout_sec": int(args.total_timeout_sec),
@@ -3613,6 +3655,7 @@ def main() -> int:
                 "tasks_executed": min(len(with_rows), len(without_rows)) if without_tasks else len(with_rows),
                 "with_nexus_executed": len(with_rows),
                 "without_nexus_executed": len(without_rows),
+                "nexus_only": bool(args.nexus_only),
                 "total_timeout_sec": int(args.total_timeout_sec),
                 "stop_loss_sec": int(args.stop_loss_sec),
                 "effective_total_timeout_sec": effective_total_timeout_sec,

@@ -819,6 +819,9 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
     assert {"mempalace_gate", "artifact_gate", "claim_gate"} <= set(trace["capability_plan"]["required_capabilities"])
     assert any(item["phase"] == "A" for item in trace["capability_plan"]["replan_trace"])
     assert payload["timing"]["cli_elapsed_sec"] >= 0
+    assert payload["timing"]["breakdown_sec"]["target_io_sec"] >= 0
+    assert payload["timing"]["breakdown_sec"]["codeintel_sec"] >= 0
+    assert payload["timing"]["breakdown_sec"]["context_pack_sec"] >= 0
     for phase in ["P", "X", "D", "R", "A", "C"]:
         assert phase in payload["timing"]["phase_wall_sec"]
 
