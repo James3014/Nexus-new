@@ -41,6 +41,22 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
     assert signals.evidence_signal is True
 
 
+def test_ui_signal_does_not_match_public_substring():
+    public_task = build_capability_signals(
+        task_desc="Tighten an action filter for ordinary public ops research.",
+        task_type="public_ops_research",
+        route={},
+    )
+    ui_task = build_capability_signals(
+        task_desc="Validate a UI browser screen for accessibility.",
+        task_type="frontend",
+        route={},
+    )
+
+    assert public_task.ui_signal is False
+    assert ui_task.ui_signal is True
+
+
 def test_executor_controls_are_derived_from_plan_not_raw_keywords():
     plain_plan = {"selected_capabilities": ["baseline"]}
     heavy_plan = CapabilityPlanner().plan(
@@ -104,6 +120,62 @@ def test_execution_plan_serializes_selected_capabilities_and_controls():
     assert execution["schema_version"] == "nexus_capability_execution_plan_v1"
     assert "ultra_review" in execution["selected_capabilities"]
     assert execution["executor_controls"]["enable_ultra_review"] is True
+
+
+def test_planner_composes_core_capabilities_from_commercial_lane_signals():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Public benchmark: repair a cross-module evidence and governance regression. "
+            "Use research, code impact, memory lessons, swarm review, drone split work, "
+            "nightshift fallback, and stress validation when confidence is low."
+        ),
+        task_type="cross_module_refactor_swarm_drone_nightshift",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 92,
+                "adjusted_root_cause_confidence": 0.42,
+                "candidate_count": 4,
+                "memory_hits": 2,
+                "findings_hits": 1,
+                "is_cross_module_task": True,
+                "has_hard_signal": True,
+            },
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+        pillars={"lancedb": {"hits": 3}},
+        codeintel={"impact_report_present": True},
+    )
+
+    selected = set(plan.selected_capabilities)
+    assert {
+        "research_route",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate",
+        "delivery_gate",
+        "codeintel",
+        "research",
+        "hyper",
+        "autoreason",
+        "ddtree",
+        "ultra_review",
+        "sandbox",
+        "memory",
+        "lancedb",
+        "belief",
+        "swarm",
+        "drone",
+        "nightshift",
+        "stress_test",
+        "benchmark",
+    } <= selected
+    assert {"swarm", "drone", "nightshift"} <= set(plan.pending_capabilities)
 
 
 def test_trace_receipts_promote_only_invoked_evidence_and_gate_chain():

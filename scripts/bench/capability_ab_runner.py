@@ -487,7 +487,139 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
             "    assert rlm_harder_v2_scope_decision({'action': 'unknown', 'approved': False}) == {'allowed': False, 'reason': 'scope_block'}\n"
         )
         return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_evidence_replay":
+        visible = (
+            "from target import rlm_harder_v2_accept_receipt\n\n"
+            "def test_accepts_verified_receipt_with_replay():\n"
+            "    receipt = {'claim': 'verified', 'replay_command': 'pytest -q', 'exit_code': 0}\n"
+            "    assert rlm_harder_v2_accept_receipt(receipt) is True\n"
+        )
+        hidden = test_code + (
+            "\n"
+            "def test_rejects_near_miss_receipt_fields():\n"
+            "    assert rlm_harder_v2_accept_receipt({'claim': 'verified', 'replay_command': 'pytest -q', 'replay_exit_code': 0}) is False\n"
+            "    assert rlm_harder_v2_accept_receipt({'claim': 'partial', 'replay_command': 'pytest -q', 'exit_code': 0}) is False\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_second_round":
+        visible = (
+            "from target import rlm_harder_v2_merge_settings\n\n"
+            "def test_plain_override_wins():\n"
+            "    assert rlm_harder_v2_merge_settings({'timeout': 10}, {'timeout': 20}) == {'timeout': 20}\n"
+        )
+        hidden = test_code + (
+            "\n"
+            "def test_empty_override_returns_copy_not_alias():\n"
+            "    defaults = {'timeout': 10}\n"
+            "    merged = rlm_harder_v2_merge_settings(defaults, {})\n"
+            "    assert merged == {'timeout': 10}\n"
+            "    assert merged is not defaults\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_memory_contract":
+        visible = (
+            "from target import rlm_harder_v2_select_memory_hits\n\n"
+            "def test_selects_matching_type_and_keyword():\n"
+            "    items = [{'id': 'target', 'task_type': 'bug', 'keywords': ['websocket', 'timeout']}]\n"
+            "    assert rlm_harder_v2_select_memory_hits(items, 'bug', ['websocket']) == items\n"
+        )
+        hidden = test_code + (
+            "\n"
+            "def test_rejects_same_type_without_keyword_overlap_and_wrong_type():\n"
+            "    items = [\n"
+            "        {'id': 'same-type', 'task_type': 'bug', 'keywords': ['invoice', 'rounding']},\n"
+            "        {'id': 'wrong-type', 'task_type': 'feature', 'keywords': ['websocket', 'timeout']},\n"
+            "        {'id': 'target', 'task_type': 'bug', 'keywords': ['websocket', 'timeout']},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_select_memory_hits(items, 'bug', ['websocket']) == [items[2]]\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_belief_budget":
+        visible = (
+            "from target import rlm_harder_v2_repair_budget\n\n"
+            "def test_high_confidence_low_risk_stays_fast():\n"
+            "    assert rlm_harder_v2_repair_budget(0.91, 'low') == {'rounds': 1, 'needs_evidence': False}\n"
+        )
+        hidden = test_code + (
+            "\n"
+            "def test_uncertain_or_high_risk_paths_require_evidence():\n"
+            "    assert rlm_harder_v2_repair_budget(0.74, 'medium')['needs_evidence'] is True\n"
+            "    assert rlm_harder_v2_repair_budget(0.95, 'high')['needs_evidence'] is True\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
     return _split_fixture_tests(test_code)
+
+
+def _split_nexus_value_fixture_tests(fixture_kind: str, test_code: str) -> tuple[str, str]:
+    visible_tests = {
+        "nexus_value_hidden_state": (
+            "from target import apply_events\n\n"
+            "def test_applies_unique_happy_path_events():\n"
+            "    events = [{'id': 'a', 'delta': 2}, {'id': 'b', 'delta': 3}]\n"
+            "    assert apply_events(events) == {'count': 5, 'seen': ['a', 'b']}\n"
+        ),
+        "nexus_value_hidden_parser": (
+            "from target import normalize_key\n\n"
+            "def test_normalize_key_simple_spacing():\n"
+            "    assert normalize_key('  User Name  ') == 'user-name'\n"
+        ),
+        "nexus_value_self_heal_invariant": (
+            "from target import merge_limits\n\n"
+            "def test_merge_limits_overrides_plain_values():\n"
+            "    assert merge_limits({'timeout': 10}, {'timeout': 20}) == {'timeout': 20}\n"
+        ),
+        "nexus_value_self_heal_timeout": (
+            "from target import remaining_ms\n\n"
+            "def test_remaining_ms_simple_elapsed_case():\n"
+            "    assert remaining_ms(100, 125, 50) == 25\n"
+        ),
+        "nexus_value_mempalace_secret_redaction": (
+            "from target import redact\n\n"
+            "def test_redact_preserves_non_secret_fields():\n"
+            "    assert redact({'user': 'ada', 'note': 'ok'}) == {'user': 'ada', 'note': 'ok'}\n"
+        ),
+        "nexus_value_mempalace_deny_default": (
+            "from target import can_access\n\n"
+            "def test_viewer_can_read_and_admin_can_write():\n"
+            "    assert can_access('admin', 'write') is True\n"
+            "    assert can_access('viewer', 'read') is True\n"
+        ),
+        "nexus_value_artifact_claim_rollup": (
+            "from target import verified_claims\n\n"
+            "def test_verified_claims_accepts_supported_pass():\n"
+            "    claims = [{'id': 'a', 'status': 'pass', 'artifact': 'reports/a.json'}]\n"
+            "    assert verified_claims(claims) == ['a']\n"
+        ),
+        "nexus_value_artifact_phase_report": (
+            "from target import phase_ready\n\n"
+            "def test_phase_ready_accepts_pass_with_evidence():\n"
+            "    assert phase_ready({'status': 'pass', 'evidence': 'x.json', 'reason': ''}) is True\n"
+        ),
+        "nexus_value_context_docs_contract": (
+            "from target import build_response\n\n"
+            "def test_build_response_returns_mapping():\n"
+            "    assert isinstance(build_response('ok'), dict)\n"
+        ),
+        "nexus_value_context_config_contract": (
+            "from target import parse_config\n\n"
+            "def test_parse_config_preserves_explicit_values():\n"
+            "    assert parse_config({'strict': False, 'retries': 0}) == {'strict': False, 'retries': 0}\n"
+        ),
+        "nexus_value_trust_phase_aggregator": (
+            "from target import overall_status\n\n"
+            "def test_overall_status_passes_when_all_phases_pass():\n"
+            "    assert overall_status([{'status': 'pass', 'evidence': 'a'}]) == 'pass'\n"
+        ),
+        "nexus_value_trust_incident_classifier": (
+            "from target import classify\n\n"
+            "def test_classifier_keeps_open_failed_smoke():\n"
+            "    assert classify(False, {'verified': True}) == 'open'\n"
+        ),
+    }
+    visible = visible_tests.get(fixture_kind)
+    if visible is None:
+        return _split_fixture_tests(test_code)
+    return _portable_fixture_test_import(visible), _portable_fixture_test_import(test_code)
 
 
 def _nexus_value_fixture_sources(fixture_kind: str) -> tuple[str, str, str]:
@@ -615,7 +747,7 @@ def _nexus_value_fixture_sources(fixture_kind: str) -> tuple[str, str, str]:
         target_code, test_code = fixtures[fixture_kind]
     except KeyError as exc:
         raise ValueError(f"unknown_nexus_value_fixture:{fixture_kind}") from exc
-    visible_test_code, hidden_test_code = _split_fixture_tests(test_code)
+    visible_test_code, hidden_test_code = _split_nexus_value_fixture_tests(fixture_kind, test_code)
     return target_code, visible_test_code, hidden_test_code
 
 
@@ -1682,10 +1814,7 @@ def run_without_nexus(
         pytest_stderr_tail = ""
         task_deadline = start + max(1, int(timeout_sec))
         try:
-            hidden_verifier_mode = _hidden_verifier_mode_enabled()
-            prompt_tests = "" if hidden_verifier_mode and (
-                task.fixture_kind.startswith("nexus_value_") or task.fixture_kind.startswith("rlm_harder_")
-            ) else test_source
+            prompt_tests = test_source
             prompt = (
                 "You are Gemini 3 Flash running without Nexus orchestration. "
                 "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "

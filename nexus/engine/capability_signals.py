@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from nexus.engine.capability_contracts import CapabilityConstraints, CapabilitySignalSet, SkillSignalSet
@@ -25,6 +26,17 @@ def _as_float(value: Any, default: float = 0.0) -> float:
 
 def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in text for token in tokens)
+
+
+def _contains_word_or_phrase(text: str, tokens: tuple[str, ...]) -> bool:
+    for token in tokens:
+        if " " in token:
+            if token in text:
+                return True
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text):
+            return True
+    return False
 
 
 def build_skill_signals(skills: list[dict[str, Any]] | None = None) -> SkillSignalSet:
@@ -84,7 +96,10 @@ def build_capability_signals(
         swarm_signal="swarm" in task_lower,
         drone_signal="drone" in task_lower or "parallel" in task_lower or "split" in task_lower,
         nightshift_signal="nightshift" in task_lower,
-        ui_signal=_contains_any(task_lower, ("ui", "browser", "screen", "accessibility", "visual")),
+        ui_signal=_contains_word_or_phrase(
+            task_lower,
+            ("ui", "user interface", "browser", "screen", "accessibility", "visual"),
+        ),
         continuity_signal=_contains_any(task_lower, ("resume", "distill", "checkpoint", "metabolism")),
         benchmark_signal="benchmark" in task_lower or "public report" in task_lower,
         meta_opt_signal="meta-opt" in task_lower or "autotune" in task_lower,

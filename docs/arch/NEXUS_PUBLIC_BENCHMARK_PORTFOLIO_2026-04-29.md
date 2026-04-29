@@ -111,6 +111,57 @@ Allowed headline shape:
 ## Next Implementation Notes
 
 1. Treat `public_benchmark_rlm_harder_v2.json` as the current governance/evidence lane after hidden-test splitting.
-2. Do not use `public_benchmark_nexus_value_v1.json` for public value claims until it also has visible/hidden split fixtures.
+2. Treat `public_benchmark_nexus_value_v1.json` as public-candidate only after every `nexus_value_*` fixture has distinct visible and hidden tests.
 3. Add a cost-efficiency lane after route decisions are stable enough to compare light Nexus, full Nexus, and bare.
 4. Add a commercial suite manifest that groups tasks by lane instead of mixing all task types into one headline.
+
+## Route Optimization Loop
+
+Use benchmark results to optimize routing, not just to score the model:
+
+1. Run a fixed lane with hidden verifier enabled.
+2. Classify every Nexus miss:
+   - task too easy;
+   - route did not select the needed capability;
+   - capability selected but not invoked;
+   - capability invoked without public-safe evidence;
+   - hidden verifier too weak or too direct;
+   - cost too high for the lift.
+3. Change exactly one routing or fixture factor.
+4. Re-run the same lane and compare verified delivery, hidden pass, trust mismatch, wall time, tokens, and model calls.
+5. Promote only when the candidate route wins on verified delivery or cost per verified delivery without increasing trust mismatch.
+
+## External Design Patterns Used
+
+### Karpathy Autoresearch
+Use the ratchet idea: fixed eval, fixed metric, small mutation, keep/discard. Nexus route experiments should produce `promote`, `discard`, or `quarantine`, never silent permanent changes.
+
+### AutoResearchClaw
+Use staged progress, SmartPause, and rollback discipline. Nexus should stop or downgrade when budget, confidence, evidence, or policy constraints fail.
+
+### Nous Autoreason
+Use tournament-style candidate comparison for high-risk or ambiguous work. LLM-style judging can rank candidates, but hidden verifier and Artifact/Claim gate remain the final authority.
+
+## Current Capability Trigger Matrix
+
+| Signal | Required route behavior |
+|---|---|
+| code change or cross-module risk | Select CodeIntel and JIT-related test evidence. |
+| context gap or research source needed | Select Research/LanceDB/Memory before repair. |
+| low confidence or multiple candidates | Select Autoreason and Belief. |
+| repeated failure or self-heal signal | Select RLM/repair loop and consider DDTree. |
+| candidate count >= 3 | Select DDTree for pruning. |
+| governance, secret, auth, deny-by-default | Select MemPalace and Ultra Review. |
+| high risk or hard signal | Select sandbox and Ultra Review. |
+| cross-module high risk | Select Swarm as pending unless executor evidence exists. |
+| parallel or split-work signal | Select Drone as pending unless executor evidence exists. |
+| long-running or critical risk | Select Nightshift as pending unless report evidence exists. |
+| public benchmark/report | Select benchmark and public claim gate. |
+
+Public reports must distinguish selected capability from invoked public-safe capability.
+
+## Failure-To-Lesson Writeback
+
+- Hidden verifier lesson: a hidden file is not enough. Public-candidate fixtures must prove visible and hidden tests differ, and the final gate must execute the hidden test for both bare and Nexus arms.
+- Routing signal lesson: short substring signals are unsafe. The `ui` signal must use token/phrase matching so words like `public` do not accidentally select UI validation.
+- Smoke lesson: no-LLM benchmark runs are useful for harness and receipt validation, but not for Nexus value claims. They should be read as route/harness diagnostics only.

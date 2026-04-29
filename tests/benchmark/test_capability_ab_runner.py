@@ -337,10 +337,13 @@ def test_materialize_nexus_value_fixture_uses_fixture_kind(tmp_path: Path):
 
     target_source = Path(target).read_text(encoding="utf-8")
     test_source = Path(test).read_text(encoding="utf-8")
+    hidden_test_source = Path(_hidden_test_for_visible_test(test)).read_text(encoding="utf-8")
     assert "overall_status" in target_source
     assert "compute_backoff" not in target_source
     assert "spec_from_file_location" in test_source
-    assert "missing_evidence" in test_source
+    assert "test_overall_status_passes_when_all_phases_pass" in test_source
+    assert "missing_evidence" not in test_source
+    assert "missing_evidence" in hidden_test_source
 
 
 def test_materialize_all_nexus_value_manifest_fixtures_are_distinct(tmp_path: Path):
@@ -356,6 +359,28 @@ def test_materialize_all_nexus_value_manifest_fixtures_are_distinct(tmp_path: Pa
         signatures.add((Path(target).read_text(encoding="utf-8"), Path(test).read_text(encoding="utf-8")))
 
     assert len(signatures) == len(tasks)
+
+
+def test_public_candidate_fixtures_have_distinct_visible_and_hidden_tests(tmp_path: Path):
+    manifest_paths = [
+        "scripts/bench/public_benchmark_nexus_value_v1.json",
+        "scripts/bench/public_benchmark_rlm_harder_v2.json",
+    ]
+    tasks = [
+        task
+        for manifest_path in manifest_paths
+        for task in load_tasks(manifest_path)
+        if task.fixture_kind.startswith(("nexus_value_", "rlm_harder_"))
+    ]
+
+    not_split: list[str] = []
+    for task in tasks:
+        _target, visible_test = _materialize_fixture(tmp_path, task)
+        hidden_test = _hidden_test_for_visible_test(visible_test)
+        if Path(visible_test).read_text(encoding="utf-8") == Path(hidden_test).read_text(encoding="utf-8"):
+            not_split.append(task.fixture_kind)
+
+    assert not not_split
 
 
 def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
@@ -1564,6 +1589,7 @@ def test_run_without_nexus_hidden_verifier_omits_tests_from_prompt(tmp_path: Pat
     target_file, test_file = _materialize_fixture(tmp_path, task)
 
     def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        assert "test_applies_unique_happy_path_events" in prompt
         assert "test_duplicate_events_are_idempotent" not in prompt
         original = Path(target_file).read_text(encoding="utf-8")
         return (
@@ -1608,6 +1634,7 @@ def test_run_without_nexus_hidden_verifier_omits_rlm_harder_tests(tmp_path: Path
     target_file, test_file = _materialize_fixture(tmp_path, task)
 
     def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        assert "test_accepts_supported_passing_claim" in prompt
         assert "test_requires_artifact_reference" not in prompt
         original = Path(target_file).read_text(encoding="utf-8")
         return (
@@ -1678,7 +1705,7 @@ def test_hidden_verifier_uses_hidden_test_for_final_bare_gate(tmp_path: Path, mo
     captured_cmds: list[list[str]] = []
 
     def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
-        assert "test_accepts_supported_passing_claim" not in prompt
+        assert "test_accepts_supported_passing_claim" in prompt
         assert "test_rejects_empty_and_non_string_artifacts" not in prompt
         patch = (
             "def rlm_harder_v2_verified_claims(claims):\n"
