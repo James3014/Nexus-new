@@ -126,6 +126,69 @@ def _capability_coverage_rows(report: dict[str, Any]) -> list[str]:
     return rows
 
 
+def _ratio_text(item: dict[str, Any], key: str, total: int) -> str:
+    count = int(item.get(f"{key}_count", 0) or 0)
+    return f"{count}/{total}"
+
+
+def _activation_status(item: dict[str, Any]) -> str:
+    selected = int(item.get("selected_count", 0) or 0)
+    invoked = int(item.get("invoked_count", 0) or 0)
+    evidence = int(item.get("evidence_count", 0) or 0)
+    gate = int(item.get("gate_count", 0) or 0)
+    outcome = int(item.get("outcome_count", 0) or 0)
+    if selected <= 0:
+        if invoked > 0 or evidence > 0 or gate > 0 or outcome > 0:
+            return "observed_unplanned"
+        return "not_selected"
+    if item.get("public_safe"):
+        return "public_safe"
+    if invoked > 0 or evidence > 0 or gate > 0:
+        return "observed_partial"
+    return "selected_only"
+
+
+def _activation_note(status: str) -> str:
+    if status == "public_safe":
+        return "Can claim: selected, invoked, evidenced, and gated."
+    if status == "observed_partial":
+        return "Observed, but not enough evidence for a public capability claim."
+    if status == "selected_only":
+        return "Selected but not fully invoked/evidenced/gated."
+    if status == "observed_unplanned":
+        return "Evidence exists, but route selection did not record this capability."
+    return "Not selected in this run."
+
+
+def _capability_activation_rows(report: dict[str, Any]) -> list[str]:
+    coverage = ((report.get("capability_coverage") or {}).get("b") or {})
+    total = int(((report.get("b") or {}).get("summary") or {}).get("total_runs", 0) or 0)
+    if not isinstance(coverage, dict) or not coverage:
+        return ["| none | not_selected | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | none | Not selected in this run. |"]
+    rows: list[str] = []
+    for name in sorted(coverage):
+        item = coverage.get(name) or {}
+        status = _activation_status(item)
+        rows.append(
+            "| "
+            + " | ".join(
+                [
+                    str(name),
+                    status,
+                    _ratio_text(item, "selected", total),
+                    _ratio_text(item, "invoked", total),
+                    _ratio_text(item, "evidence", total),
+                    _ratio_text(item, "gate", total),
+                    _ratio_text(item, "outcome", total),
+                    str(item.get("source") or "legacy"),
+                    _activation_note(status),
+                ]
+            )
+            + " |"
+        )
+    return rows
+
+
 def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
     coverage = ((report.get("capability_coverage") or {}).get("b") or {})
     failures: list[str] = []
@@ -470,6 +533,12 @@ def render_markdown_report(
         "| Capability | Selected | Invoked | Evidence | Gate | Outcome | Public safe | Source | Failure reasons |",
         "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
         *_capability_coverage_rows(report),
+        "",
+        "## Capability Activation Details",
+        "",
+        "| Capability | Status | Selected | Invoked | Evidence | Gate | Outcome | Source | Interpretation |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        *_capability_activation_rows(report),
         "",
         "## Capability Win Map",
         "",

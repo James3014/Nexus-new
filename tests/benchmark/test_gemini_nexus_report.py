@@ -653,6 +653,9 @@ def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_p
     assert "Cost claim gate: PASS" in out
     assert "Per-capability public-safe capabilities: autoreason" in out
     assert "| autoreason | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | YES | capability_receipts | none |" in out
+    assert "## Capability Activation Details" in out
+    assert "| autoreason | public_safe | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 | capability_receipts | Can claim: selected, invoked, evidenced, and gated. |" in out
+    assert "| artifact_gate | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
 
 
 def test_render_markdown_report_explains_selected_only_capability_receipts(tmp_path):
@@ -733,6 +736,74 @@ def test_render_markdown_report_explains_selected_only_capability_receipts(tmp_p
     assert "swarm:invoked+evidence+gate" in out
     assert "artifact_gate:invoked+evidence+gate" not in out
     assert "| swarm | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO | capability_receipts | selected_without_invocation:1 |" in out
+    assert "| swarm | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
+
+
+def test_render_markdown_report_marks_unplanned_capability_evidence(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 12,
+                "model_calls": 1,
+                "total_tokens": 120,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 9,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "capability_claim_verified": True,
+                "capability_receipts": [
+                    {
+                        "name": "self_heal",
+                        "selected": False,
+                        "invoked": False,
+                        "evidence_present": True,
+                        "gate_passed": True,
+                        "outcome_contributed": True,
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "| self_heal | observed_unplanned | 0/1 | 0/1 | 1/1 | 1/1 | 1/1 | capability_receipts | Evidence exists, but route selection did not record this capability. |" in out
 
 
 def test_render_markdown_report_does_not_claim_lift_when_solve_rate_ties(tmp_path):
