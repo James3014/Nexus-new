@@ -247,6 +247,7 @@ def _coverage_from_receipts(rows: list[dict[str, Any]]) -> dict[str, Any] | None
     matrix: dict[str, Any] = {}
     for capability in capabilities:
         selected = invoked = evidence = gate = outcome = 0
+        failures: dict[str, int] = {}
         for row in rows:
             receipt = next(
                 (
@@ -266,6 +267,9 @@ def _coverage_from_receipts(rows: list[dict[str, Any]]) -> dict[str, Any] | None
                 gate += 1
             if _is_true(receipt.get("outcome_contributed")):
                 outcome += 1
+            failure_reason = str(receipt.get("failure_reason") or "").strip()
+            if failure_reason:
+                failures[failure_reason] = failures.get(failure_reason, 0) + 1
         matrix[capability] = {
             "selected_count": selected,
             "selected_rate": round(selected / total, 4) if total else 0.0,
@@ -279,6 +283,7 @@ def _coverage_from_receipts(rows: list[dict[str, Any]]) -> dict[str, Any] | None
             "outcome_rate": round(outcome / total, 4) if total else 0.0,
             "public_safe": bool(total and selected and invoked == selected and evidence == selected and gate == selected),
             "source": "capability_receipts",
+            "failure_reasons": failures,
         }
     return matrix
 

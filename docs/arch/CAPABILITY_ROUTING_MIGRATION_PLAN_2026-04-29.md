@@ -203,6 +203,31 @@ incrementally.
     capability-specific claims.
   - Selected-only Swarm/Drone/Nightshift cannot pass the capability public gate.
 
+## 2026-04-29 P104-P113 Adapter Refactor Result
+- Receipt construction moved behind `capability_receipt_adapters.py`.
+  `capability_receipts.py` is now a dispatcher instead of a growing capability
+  branch table.
+- Behavior-preserving checks passed for CodeIntel, Autoreason, DDTree, Ultra
+  Review, Swarm, Drone, and Nightshift receipts.
+- P49 no-Gemini routing health after the adapter refactor:
+  - with Nexus: solve rate 100%, semantic verified 100%, trust mismatch 0%.
+  - service control: solve rate 100%, semantic verified 0%, trust mismatch 100%.
+  - public-safe receipts: CodeIntel 12/12, Autoreason 12/12, Ultra Review 12/12,
+    DDTree 2/12 eligible rows.
+  - selected-only receipts: Swarm 4, Drone 5, Nightshift 5.
+- P53 report hardening:
+  - Capability matrix now shows `Source` and `Failure reasons`.
+  - Capability-specific public gate evaluates public capability nodes only:
+    CodeIntel, Autoreason, DDTree, Ultra Review, Swarm, Drone, Nightshift.
+  - Internal governance/routing nodes remain visible in the matrix but do not
+    fail capability-specific public claims.
+- Routing accuracy interpretation:
+  - The router is accurate for selecting CodeIntel, Autoreason, Ultra Review,
+    and eligible DDTree in the current benchmark path.
+  - Swarm/Drone/Nightshift recommendations are plausible but not execution-
+    accurate yet; they remain `selected_without_invocation` until executor
+    receipts are connected.
+
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence
   before they can be counted as fully active capabilities.

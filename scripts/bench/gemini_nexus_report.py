@@ -9,6 +9,17 @@ from typing import Any
 from scripts.bench.ab_eval import compare_datasets, load_runs
 
 
+_PUBLIC_CLAIM_CAPABILITIES = {
+    "autoreason",
+    "codeintel",
+    "ddtree",
+    "drone",
+    "nightshift",
+    "swarm",
+    "ultra_review",
+}
+
+
 def _pct(value: Any) -> str:
     try:
         return f"{float(value) * 100:.1f}%"
@@ -89,10 +100,12 @@ def _reasons_text(counts: dict[str, int]) -> str:
 def _capability_coverage_rows(report: dict[str, Any]) -> list[str]:
     coverage = ((report.get("capability_coverage") or {}).get("b") or {})
     if not isinstance(coverage, dict) or not coverage:
-        return ["| none | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO |"]
+        return ["| none | 0.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO | none | none |"]
     rows: list[str] = []
     for name in sorted(coverage):
         item = coverage.get(name) or {}
+        failure_reasons = item.get("failure_reasons", {})
+        failure_text = _reasons_text(failure_reasons if isinstance(failure_reasons, dict) else {})
         rows.append(
             "| "
             + " | ".join(
@@ -104,6 +117,8 @@ def _capability_coverage_rows(report: dict[str, Any]) -> list[str]:
                     _pct(item.get("gate_rate")),
                     _pct(item.get("outcome_rate")),
                     "YES" if item.get("public_safe") else "NO",
+                    str(item.get("source") or "legacy"),
+                    failure_text,
                 ]
             )
             + " |"
@@ -120,6 +135,8 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
     for name, item in sorted(coverage.items()):
         if not isinstance(item, dict):
             failures.append(f"{name}:invalid_coverage")
+            continue
+        if str(name) not in _PUBLIC_CLAIM_CAPABILITIES:
             continue
         selected = float(item.get("selected_rate", 0.0) or 0.0)
         if selected <= 0:
@@ -449,8 +466,8 @@ def render_markdown_report(
         "",
         "## Capability Coverage Matrix",
         "",
-        "| Capability | Selected | Invoked | Evidence | Gate | Outcome | Public safe |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Capability | Selected | Invoked | Evidence | Gate | Outcome | Public safe | Source | Failure reasons |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
         *_capability_coverage_rows(report),
         "",
         "## Capability Win Map",

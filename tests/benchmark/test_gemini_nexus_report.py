@@ -615,6 +615,14 @@ def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_p
                 "capability_claim_verified": True,
                 "capability_receipts": [
                     {
+                        "name": "artifact_gate",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                    },
+                    {
                         "name": "autoreason",
                         "selected": True,
                         "invoked": True,
@@ -642,6 +650,87 @@ def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_p
     assert "Capability-specific claim gate: PASS" in out
     assert "Cost claim gate: PASS" in out
     assert "Per-capability public-safe capabilities: autoreason" in out
+    assert "| autoreason | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | YES | capability_receipts | none |" in out
+
+
+def test_render_markdown_report_explains_selected_only_capability_receipts(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 12,
+                "model_calls": 1,
+                "total_tokens": 120,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 9,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "capability_claim_verified": True,
+                "capability_receipts": [
+                    {
+                        "name": "autoreason",
+                        "selected": True,
+                        "invoked": True,
+                        "evidence_present": True,
+                        "gate_passed": True,
+                        "outcome_contributed": True,
+                    },
+                    {
+                        "name": "swarm",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                        "failure_reason": "selected_without_invocation",
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "Capability-specific claim gate: FAIL" in out
+    assert "Per-capability public-safe capabilities: autoreason" in out
+    assert "swarm:invoked+evidence+gate" in out
+    assert "artifact_gate:invoked+evidence+gate" not in out
+    assert "| swarm | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO | capability_receipts | selected_without_invocation:1 |" in out
 
 
 def test_render_markdown_report_does_not_claim_lift_when_solve_rate_ties(tmp_path):
