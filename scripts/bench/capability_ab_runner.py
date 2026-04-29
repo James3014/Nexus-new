@@ -454,8 +454,9 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
     if fixture_kind == "rlm_harder_v2_governance_guard":
         visible = (
             "from target import rlm_harder_v2_filter_action\n\n"
-            "def test_read_file_is_allowed():\n"
+            "def test_read_file_is_allowed_and_dangerous_shell_is_blocked():\n"
             "    assert rlm_harder_v2_filter_action({'tool': 'read_file'}) == {'allowed': True, 'reason': 'ok'}\n"
+            "    assert rlm_harder_v2_filter_action({'tool': 'run_command', 'cmd': 'rm -rf .nexus'}) == {'allowed': False, 'reason': 'governance_block'}\n"
         )
         hidden = (
             "from target import rlm_harder_v2_filter_action\n\n"

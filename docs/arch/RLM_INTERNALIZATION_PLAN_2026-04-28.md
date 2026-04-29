@@ -697,3 +697,8 @@ Failure lesson：
 - `gemini_nexus_report.py` 在 treatment trust mismatch 非 0 時阻擋 public claim。
 - `capability_ab_runner.py` 將 governance guard/scope hidden contract 下沉到 Nexus prompt guidance。
 - Capability Activation Details 新增 `observed_unplanned` 狀態，避免把 self-heal 類未記錄 selection 的證據誤標為未觸發。
+
+補充 lesson：
+
+- `rlm-harder-v2-governance-001` 的可見測試只檢查 read-only allow，初始 target 已可通過，導致修復型 `research:auto-flow` 缺少 repair signal；hidden verifier 才要求 block forbidden path，會把 benchmark 題型問題誤判成 Nexus 沒發揮。
+- hidden verifier 題仍需在 visible test 放一個代表性失敗案例，hidden test 則保留額外泛化案例；這樣才同時滿足「可修復」與「可驗證泛化」。
