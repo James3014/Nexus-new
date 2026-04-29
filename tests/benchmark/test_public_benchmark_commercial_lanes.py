@@ -6,6 +6,18 @@ from pathlib import Path
 from scripts.bench.commercial_lane_tasks import build_lane_tasks
 from scripts.bench.capability_ab_runner import load_tasks
 
+PUBLIC_CAPABILITY_TARGETS = {
+    "codeintel",
+    "research",
+    "hyper",
+    "nightshift",
+    "swarm",
+    "drone",
+    "ultra_review",
+    "autoreason",
+    "ddtree",
+}
+
 
 def test_commercial_lanes_reference_existing_public_tasks():
     manifest = json.loads(Path("scripts/bench/public_benchmark_commercial_lanes_v1.json").read_text(encoding="utf-8"))
@@ -47,3 +59,21 @@ def test_commercial_lane_compiler_outputs_runner_tasks_file():
         "nexus-value-gov-001",
         "rlm-harder-v2-governance-001",
     }
+
+
+def test_commercial_lanes_cover_public_capability_targets_without_running_models():
+    manifest = json.loads(Path("scripts/bench/public_benchmark_commercial_lanes_v1.json").read_text(encoding="utf-8"))
+    task_expected: dict[str, set[str]] = {}
+    for path in {ref["manifest"] for lane in manifest["lanes"] for ref in lane["task_refs"]}:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        for task in payload["tasks"]:
+            task_expected[str(task["id"])] = set(task.get("expected_capabilities", []))
+
+    covered: set[str] = set()
+    for lane in manifest["lanes"]:
+        for ref in lane["task_refs"]:
+            covered.update(task_expected[ref["task_id"]])
+
+    missing = PUBLIC_CAPABILITY_TARGETS - covered
+
+    assert missing == {"research", "nightshift", "swarm", "drone", "ultra_review", "autoreason", "ddtree"}

@@ -165,3 +165,23 @@ Failure lessons:
 - Commercial lane task manifests include compiler provenance (`commercial_lane`, `source_manifest`), so public preflight schema allowlists must include provenance fields or valid compiled manifests fail before execution.
 - A generic Nexus context was not enough for hidden-verifier repair tasks: Codex+Nexus and Codex bare both failed the `merge_limits` hidden invariant until the Nexus treatment prompt explicitly framed visible tests as acceptance hints and supplied repair invariants such as preserving caller-owned inputs and ignoring `None` override values for existing keys.
 - One-task smoke can prove wiring, but not value; the first Codex 1x1 smoke had both arms passing. A 3-task smoke exposed a bare failure and produced a public-claim-gated lift.
+
+## 2026-04-30 Route Debugging Before Public Benchmarks
+
+What: Capability routing changes must be validated before a Gemini public-candidate run starts. Route debugging uses static capability coverage, route contract tests, receipt adapter tests, and targeted Nexus-only smoke runs. Gemini is reserved for the final same-model comparison after these local gates pass.
+
+Why: A public benchmark should measure model value with and without Nexus, not discover missing route metadata, overly broad selected-only claims, shared report paths, or disabled executors. If the route is still being tuned, the benchmark can burn quota and produce misleading public claims.
+
+How: The public preflight records manifest-declared `expected_capabilities` and compares them with Nexus core capabilities. A task set with missing expected capability declarations or core coverage gaps is not ready for public claims. Treatment rows must distinguish `selected` from `invoked`, `evidence`, `gate`, and `outcome`; selected-only capabilities are route-planning signals, not proof that Nexus used the capability.
+
+Failure lessons:
+
+- `--skip-llm-baseline` must not let Nexus silently solve with the local baseline path when the run is intended to test a model wearing Nexus. The treatment arm must either invoke the model or explicitly force a Nexus execution flow that is labeled non-public.
+- Per-task reports must be task-scoped. Shared route-gate reports can make later tasks overwrite earlier evidence and inflate receipt confidence.
+- Public manifests need explicit `expected_capabilities`; otherwise a task can pass hidden verification while leaving CodeIntel, Research, Hyper, Nightshift, Swarm, Drone, Ultra Review, Autoreason, DDTree, and gate capabilities unmeasured.
+
+COE action items:
+
+- Treat route debugging as a blameless COE event. The report names only process gaps: missing manifest contracts, missing receipt adapters, selected-only overclaim risk, and benchmark used too early.
+- Apply five whys before widening capability claims. A capability can be added to `expected_capabilities` only when the task oracle can verify its behavior, not merely because the route may select it.
+- Keep public-capability labels conservative. If a capability is useful but not directly verified by the task, mark it as route telemetry or future coverage debt instead of public claim evidence.

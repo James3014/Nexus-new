@@ -62,6 +62,29 @@ def selected_failure_reason(*, selected: bool, invoked: bool, evidence_refs: lis
     return ""
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "pass", "passed", "verified"}
+    return bool(value)
+
+
+def _as_refs(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value is None:
+        return []
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _pillar_present(payload: dict[str, Any], *names: str) -> bool:
+    pillars = payload.get("pillars") if isinstance(payload.get("pillars"), dict) else {}
+    for name in names:
+        if _as_bool(pillars.get(name)):
+            return True
+    return False
+
+
 class CodeIntelReceiptAdapter:
     name = "codeintel"
 
@@ -147,6 +170,230 @@ class DDTreeReceiptAdapter:
                 selected=True,
                 invoked=invoked,
                 evidence_refs=clean_refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class HyperReceiptAdapter:
+    name = "hyper"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        invoked = bool(payload.get("hyper_used", False))
+        refs: list[str] = []
+        if invoked:
+            refs.append(str(payload.get("winner_source") or "hyper_sprint"))
+            if payload.get("attempt_count"):
+                refs.append(f"attempt_count:{payload.get('attempt_count')}")
+            if payload.get("self_heal_used"):
+                refs.append("self_heal_used:true")
+        gate_passed = bool(invoked and claim_verified)
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=gate_passed,
+            executor_id="hyper_sprint",
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class MemPalaceGateReceiptAdapter:
+    name = "mempalace_gate"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or payload.get("mempalace_audit_ref"))
+        refs = _as_refs(payload.get("mempalace_audit_ref") or payload.get("mempalace_refs"))
+        gate_passed = bool(refs and _as_bool(payload.get("mempalace_gate_passed", True)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class ArtifactGateReceiptAdapter:
+    name = "artifact_gate"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        invoked = bool(_pillar_present(payload, "artifact", "artifact_gate") or payload.get("artifact_refs"))
+        refs = _as_refs(payload.get("artifact_refs") or payload.get("artifact_ref"))
+        gate_passed = bool(refs and _as_bool(payload.get("artifact_gate_passed", True)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class ClaimGateReceiptAdapter:
+    name = "claim_gate"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("claim_refs") or payload.get("claim_ref"))
+        invoked = bool(claim_verified or refs or payload.get("claim_gate_invoked"))
+        gate_passed = bool(refs and claim_verified)
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=gate_passed,
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class DeliveryGateReceiptAdapter:
+    name = "delivery_gate"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("delivery_refs") or payload.get("delivery_ref") or payload.get("evidence_bundle_path"))
+        invoked = bool(payload.get("delivery_gate_passed") is not None or refs or payload.get("delivery_gate_invoked") or claim_verified)
+        gate_passed = bool(refs and _as_bool(payload.get("delivery_gate_passed", claim_verified)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class MemoryReceiptAdapter:
+    name = "memory"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        hits = as_int(payload.get("memory_hits", payload.get("route_memory_hits", 0)))
+        refs = _as_refs(payload.get("memory_refs") or payload.get("memory_ref"))
+        invoked = bool(hits > 0 or refs or payload.get("memory_used"))
+        gate_passed = bool(refs and _as_bool(payload.get("memory_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class BeliefReceiptAdapter:
+    name = "belief"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("belief_refs") or payload.get("belief_ref"))
+        invoked = bool(payload.get("belief_confidence") is not None or refs or _pillar_present(payload, "belief"))
+        gate_passed = bool(refs and _as_bool(payload.get("belief_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class ResearchReceiptAdapter:
+    name = "research"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("research_refs") or payload.get("research_ref") or payload.get("research_report_path"))
+        invoked = bool(payload.get("research_used") or payload.get("should_research") or refs)
+        gate_passed = bool(refs and _as_bool(payload.get("research_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class LanceDBReceiptAdapter:
+    name = "lancedb"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        hits = as_int(payload.get("lancedb_hits", payload.get("route_findings_hits", 0)))
+        refs = _as_refs(payload.get("lancedb_refs") or payload.get("lancedb_ref"))
+        invoked = bool(hits > 0 or refs or _pillar_present(payload, "lancedb"))
+        gate_passed = bool(refs and _as_bool(payload.get("lancedb_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
                 gate_passed=gate_passed,
             ),
         )
@@ -285,9 +532,18 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
         CodeIntelReceiptAdapter(),
         AutoreasonReceiptAdapter(),
         DDTreeReceiptAdapter(),
+        HyperReceiptAdapter(),
         UltraReviewReceiptAdapter(),
         SwarmReceiptAdapter(),
         DroneReceiptAdapter(),
         NightshiftReceiptAdapter(),
+        MemPalaceGateReceiptAdapter(),
+        ArtifactGateReceiptAdapter(),
+        ClaimGateReceiptAdapter(),
+        DeliveryGateReceiptAdapter(),
+        MemoryReceiptAdapter(),
+        BeliefReceiptAdapter(),
+        ResearchReceiptAdapter(),
+        LanceDBReceiptAdapter(),
     )
 }

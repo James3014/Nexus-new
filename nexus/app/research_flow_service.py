@@ -425,6 +425,7 @@ def _ultra_review_gate_evidence(
     *,
     repo_root: Path,
     task_desc: str,
+    task_id: str | None = None,
     capability_stack: dict[str, Any],
 ) -> dict[str, Any]:
     governance_layers = capability_stack.get("governance_layers", [])
@@ -449,7 +450,8 @@ def _ultra_review_gate_evidence(
             "failures": [],
             "reason": "feature_flag_disabled",
         }
-    report_path = repo_root / ".nexus" / "reports" / "ultra_review" / "route_gate_report.json"
+    slug = _safe_trace_slug(task_id or task_desc or "route_gate")
+    report_path = repo_root / ".nexus" / "reports" / "ultra_review" / f"{slug}_route_gate_report.json"
     try:
         from nexus.engine.ultra_review_service import UltraReviewService
         from scripts.ops.ultra_gate import evaluate_report
@@ -1661,6 +1663,7 @@ def run_auto_flow(
     ultra_review_evidence = _ultra_review_gate_evidence(
         repo_root=repo_root,
         task_desc=task_desc,
+        task_id=task_id,
         capability_stack=route.get("capability_stack", {}),
     )
     phase_wall_sec["A"] = round(time.time() - phase_started_at, 4)

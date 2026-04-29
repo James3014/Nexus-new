@@ -31,6 +31,7 @@ from scripts.bench.capability_ab_runner import (
     _parse_direct_patch_json,
     _direct_codex_timeout_sec,
     _extract_codex_stdout_tokens,
+    _expected_capability_coverage,
     _prompt_leak_audit_failures,
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
@@ -102,6 +103,13 @@ def test_load_tasks_parses_public_manifest_metadata(tmp_path: Path):
                 "task_desc": "Fix public task",
                 "fixture_kind": "python_demo",
                 "success_criteria": "patch_and_tests_pass",
+                "expected_capabilities": ["codeintel", "hyper"],
+                "capability_activation_contract": "required",
+                "hidden_oracle_kind": "pytest_hidden",
+                "cost_budget": {"max_wall_sec": 600, "max_model_calls": 2},
+                "token_budget": 50000,
+                "wall_time_budget_sec": 600,
+                "public_claim_allowed_metrics": ["verified_delivery_rate"],
             }
         ]
     }
@@ -114,6 +122,45 @@ def test_load_tasks_parses_public_manifest_metadata(tmp_path: Path):
     assert tasks[0].repo_kind == "neutral_fixture"
     assert tasks[0].repo == "fixture://demo"
     assert tasks[0].repo_ref == "v1"
+    assert tasks[0].expected_capabilities == ("codeintel", "hyper")
+    assert tasks[0].capability_activation_contract == "required"
+    assert tasks[0].hidden_oracle_kind == "pytest_hidden"
+    assert tasks[0].cost_budget == {"max_wall_sec": 600, "max_model_calls": 2}
+    assert tasks[0].token_budget == 50000
+    assert tasks[0].wall_time_budget_sec == 600.0
+    assert tasks[0].public_claim_allowed_metrics == ("verified_delivery_rate",)
+
+
+def test_expected_capability_coverage_reports_static_gaps():
+    tasks = [
+        CapabilityTask(
+            id="a",
+            difficulty="hard",
+            task_type="bug",
+            task_desc="a",
+            target_file="a",
+            test_file="a",
+            success_criteria="patch_and_tests_pass",
+            expected_capabilities=("codeintel", "hyper"),
+            capability_activation_contract="required",
+        ),
+        CapabilityTask(
+            id="b",
+            difficulty="hard",
+            task_type="bug",
+            task_desc="b",
+            target_file="b",
+            test_file="b",
+            success_criteria="patch_and_tests_pass",
+        ),
+    ]
+
+    out = _expected_capability_coverage(tasks)
+
+    assert out["declared"] == ["codeintel", "hyper"]
+    assert "swarm" in out["missing_core"]
+    assert out["tasks_missing_expected"] == ["b"]
+    assert out["required_or_cost_capped"] == ["codeintel", "hyper"]
 
 
 def test_expand_task_trials_repeats_and_shuffles_deterministically():
@@ -190,6 +237,17 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
                         "verification_command": "pytest",
                         "fixture_kind": "rlm_harder_v2_hidden_governance",
                         "rlm_challenge": "hidden_governance",
+                        "commercial_lane": "capability_lift",
+                        "expected_capabilities": ["codeintel", "hyper", "autoreason"],
+                        "capability_activation_contract": "required",
+                        "hidden_oracle_kind": "pytest_hidden",
+                        "cost_budget": {
+                            "max_wall_sec": 600,
+                            "max_model_calls": 3,
+                            "max_tokens": 60000,
+                            "max_capability_stack_size": 6,
+                        },
+                        "public_claim_allowed_metrics": ["verified_delivery_rate"],
                     }
                 ],
             }
@@ -228,6 +286,9 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
 
     assert report["status"] == "PASS"
+    coverage = report["task_manifest"]["expected_capability_coverage"]
+    assert coverage["declared"] == ["autoreason", "codeintel", "hyper"]
+    assert "swarm" in coverage["missing_core"]
     assert report["capability_readiness"]["status"] == "PASS"
     assert report["model_lock"]["same_model"] is True
     assert report["task_manifest"]["selected_n"] == 1
@@ -1997,7 +2058,7 @@ def test_run_with_nexus_can_enable_routing_layer_executors(tmp_path: Path, monke
         target_file=target_file,
         test_file=test_file,
         timeout_sec=10,
-        force_flow="hyper_sprint",
+        force_flow=None,
         runner_mode="subprocess",
         with_llm_mode="all",
         enable_autoreason_executor=True,
@@ -2011,6 +2072,54 @@ def test_run_with_nexus_can_enable_routing_layer_executors(tmp_path: Path, monke
     assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
     assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "3"
     assert captured["env"]["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "0"
+    assert out["run_eligible"] is True
+
+
+def test_run_with_nexus_can_skip_llm_baseline_for_cost_control(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-routing-cost",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix routing-sensitive public bug with direct Hyper",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"pillars":{"lancedb":{"active":true},"memory":{"active":true},"mempalace":{"active":true},"belief":{"active":true},"artifact":{"active":true}},"phase_trace":{"P":"route_built","X":"retrieval_checked","D":"guard_decision","R":"hyper_executed","A":"artifact_verified","C":"closure_written"}},"result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"model_name":"gemini-3.1-pro-preview","model_patch_generated":true,"fallback_used":false,"total_tokens":10,"token_capture_status":"ok"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["cmd"] = _cmd
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+        skip_llm_baseline=True,
+    )
+
+    assert "--llm-mode" in captured["cmd"]
+    assert "--llm-baseline" not in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--force-flow") + 1] == "hyper_sprint"
+    assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "3"
     assert out["run_eligible"] is True
 
 

@@ -9,6 +9,7 @@
     "frozen": {"type": "boolean"},
     "benchmark_id": {"type": "string"},
     "description": {"type": "string"},
+    "commercial_lane_source": {"type": "string"},
     "tasks": {
       "type": "array",
       "minItems": 1,
@@ -43,6 +44,55 @@
           "target_file": {"type": "string"},
           "test_file": {"type": "string"},
           "fixture_kind": {"type": "string"},
+          "commercial_lane": {
+            "enum": ["capability_lift", "governed_delivery", "cost_efficiency"]
+          },
+          "source_manifest": {"type": "string"},
+          "expected_capabilities": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "codeintel",
+                "research",
+                "hyper",
+                "nightshift",
+                "swarm",
+                "drone",
+                "ultra_review",
+                "autoreason",
+                "ddtree",
+                "memory",
+                "lancedb",
+                "belief",
+                "mempalace_gate",
+                "artifact_gate",
+                "claim_gate",
+                "delivery_gate"
+              ]
+            }
+          },
+          "capability_activation_contract": {
+            "enum": ["required", "allowed", "forbidden", "cost_capped"]
+          },
+          "hidden_oracle_kind": {
+            "enum": ["pytest_hidden", "report_claims", "semantic_fixture", "trace_receipt", "cost_guard"]
+          },
+          "cost_budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "max_wall_sec": {"type": "number"},
+              "max_model_calls": {"type": "integer"},
+              "max_tokens": {"type": "integer"},
+              "max_capability_stack_size": {"type": "integer"}
+            }
+          },
+          "token_budget": {"type": "integer"},
+          "wall_time_budget_sec": {"type": "number"},
+          "public_claim_allowed_metrics": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
           "rlm_challenge": {
             "enum": [
               "multi_file",

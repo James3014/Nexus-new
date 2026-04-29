@@ -32,7 +32,7 @@ from nexus.app.research_flow_service import (
     build_route_executor_flags,
     run_auto_flow,
 )
-from nexus.engine.capability_readiness import build_benchmark_capability_readiness
+from nexus.engine.capability_readiness import CORE_CAPABILITIES, build_benchmark_capability_readiness
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.route_decision_adapter import build_route_decision
@@ -68,6 +68,13 @@ class CapabilityTask:
     trial_index: int = 1
     fixture_kind: str = ""
     hidden_test_file: str = ""
+    expected_capabilities: tuple[str, ...] = ()
+    capability_activation_contract: str = ""
+    hidden_oracle_kind: str = ""
+    cost_budget: dict[str, Any] | None = None
+    token_budget: int | None = None
+    wall_time_budget_sec: float | None = None
+    public_claim_allowed_metrics: tuple[str, ...] = ()
 
 
 PILLAR_OBSERVATION_FIELDS = {
@@ -300,6 +307,8 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
     for row in tasks_raw:
         category = str(row.get("category", ""))
         task_type = str(row.get("task_type", f"public_{category}" if category else "task"))
+        cost_budget = row.get("cost_budget")
+        cost_budget = cost_budget if isinstance(cost_budget, dict) else None
         tasks.append(
             CapabilityTask(
                 id=str(row["id"]),
@@ -316,9 +325,42 @@ def load_tasks(path: str | Path) -> list[CapabilityTask]:
                 manifest_hash=manifest_hash,
                 fixture_kind=str(row.get("fixture_kind", "")),
                 hidden_test_file=str(row.get("hidden_test_file", "")),
+                expected_capabilities=tuple(str(item) for item in row.get("expected_capabilities", []) or []),
+                capability_activation_contract=str(row.get("capability_activation_contract", "")),
+                hidden_oracle_kind=str(row.get("hidden_oracle_kind", "")),
+                cost_budget=cost_budget,
+                token_budget=int(row["token_budget"]) if row.get("token_budget") is not None else None,
+                wall_time_budget_sec=float(row["wall_time_budget_sec"]) if row.get("wall_time_budget_sec") is not None else None,
+                public_claim_allowed_metrics=tuple(str(item) for item in row.get("public_claim_allowed_metrics", []) or []),
             )
         )
     return tasks
+
+
+def _expected_capability_coverage(tasks: list[CapabilityTask]) -> dict[str, Any]:
+    declared = sorted({name for task in tasks for name in task.expected_capabilities})
+    core = set(CORE_CAPABILITIES)
+    unknown = sorted(set(declared) - core)
+    missing_core = sorted(core - set(declared))
+    tasks_missing_expected = [task.id for task in tasks if not task.expected_capabilities]
+    required_or_capped = sorted(
+        {
+            name
+            for task in tasks
+            if task.capability_activation_contract in {"required", "cost_capped"}
+            for name in task.expected_capabilities
+        }
+    )
+    return {
+        "declared": declared,
+        "declared_count": len(declared),
+        "core_count": len(CORE_CAPABILITIES),
+        "unknown": unknown,
+        "missing_core": missing_core,
+        "tasks_missing_expected": tasks_missing_expected,
+        "required_or_cost_capped": required_or_capped,
+        "coverage_rate": round(len(set(declared) & core) / len(core), 4) if core else 1.0,
+    }
 
 
 def select_tasks(tasks: list[CapabilityTask], *, difficulty: str, max_tasks: int) -> list[CapabilityTask]:
@@ -2193,6 +2235,7 @@ def run_with_nexus(
     enable_ultra_review_dry_gate: bool = False,
     llm_candidate_cap: int = 1,
     enable_llm_self_heal: bool = False,
+    skip_llm_baseline: bool = False,
 ) -> dict[str, Any]:
     enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
@@ -2233,8 +2276,11 @@ def run_with_nexus(
         )
     if llm_enabled:
         args.append("--llm-mode")
-        args.append("--llm-baseline")
+        if not skip_llm_baseline:
+            args.append("--llm-baseline")
     effective_force_flow = force_flow
+    if llm_enabled and skip_llm_baseline and effective_force_flow is None:
+        effective_force_flow = "hyper_sprint"
     if effective_force_flow:
         args.extend(["--force-flow", effective_force_flow])
 
@@ -2909,6 +2955,13 @@ def _public_manifest_shape_failures(path: Path) -> list[str]:
         "rlm_challenge",
         "commercial_lane",
         "source_manifest",
+        "expected_capabilities",
+        "capability_activation_contract",
+        "hidden_oracle_kind",
+        "cost_budget",
+        "token_budget",
+        "wall_time_budget_sec",
+        "public_claim_allowed_metrics",
     }
     for index, task in enumerate(payload["tasks"], start=1):
         if not isinstance(task, dict):
@@ -3003,6 +3056,15 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         if not selected_tasks:
             failures.append("no_tasks_selected")
         failures.extend(_prompt_leak_audit_failures(selected_tasks, repo_root=repo_root))
+        expected_coverage = _expected_capability_coverage(selected_tasks)
+        if expected_coverage["unknown"]:
+            failures.append("expected_capabilities_unknown:" + ",".join(expected_coverage["unknown"]))
+        if expected_coverage["tasks_missing_expected"]:
+            warnings.append("expected_capabilities_missing:" + ",".join(expected_coverage["tasks_missing_expected"][:5]))
+        if expected_coverage["missing_core"]:
+            warnings.append("expected_capabilities_core_gap:" + ",".join(expected_coverage["missing_core"][:8]))
+    if not tasks_path.exists():
+        expected_coverage = _expected_capability_coverage([])
 
     env_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or "").strip()
     direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "").strip()
@@ -3069,6 +3131,7 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "repeat_trials": int(args.repeat_trials),
             "shuffle_seed": args.shuffle_seed,
             "task_ids": [task.id for task in selected_tasks],
+            "expected_capability_coverage": expected_coverage,
         },
         "timeouts": {
             "timeout_sec": int(args.timeout_sec),
@@ -3152,6 +3215,11 @@ def main() -> int:
         "--enable-llm-self-heal",
         action="store_true",
         help="Allow one extra LLM repair call after a pytest failure in the Nexus treatment arm.",
+    )
+    parser.add_argument(
+        "--skip-llm-baseline",
+        action="store_true",
+        help="When Nexus LLM mode is enabled, avoid the preliminary baseline Gemini call and let the route choose Hyper/capability execution directly.",
     )
     parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
     parser.add_argument("--llm-safe-probe", action="store_true")
@@ -3419,6 +3487,7 @@ def main() -> int:
                 enable_ultra_review_dry_gate=bool(args.enable_ultra_review_dry_gate),
                 llm_candidate_cap=int(args.llm_candidate_cap),
                 enable_llm_self_heal=bool(args.enable_llm_self_heal),
+                skip_llm_baseline=bool(args.skip_llm_baseline),
             )
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
@@ -3602,6 +3671,7 @@ def main() -> int:
                     "enable_ultra_review_dry_gate": bool(args.enable_ultra_review_dry_gate),
                     "llm_candidate_cap": int(args.llm_candidate_cap),
                     "enable_llm_self_heal": bool(args.enable_llm_self_heal),
+                    "skip_llm_baseline": bool(args.skip_llm_baseline),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
                     "nexus_only": bool(args.nexus_only),

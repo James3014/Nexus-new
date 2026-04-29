@@ -34,6 +34,49 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert out["should_research"] is True
 
 
+def test_ultra_review_gate_report_path_is_task_scoped(tmp_path: Path, monkeypatch):
+    class _FakeUltraReviewService:
+        def __init__(self, _repo_root):
+            pass
+
+        def run(self, **kwargs):
+            report_path = Path(kwargs["report_path"])
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema_version": "ultra-review.v1",
+                "status": "DRY_RUN_PASS",
+                "gate_passed": True,
+                "findings": [],
+                "artifacts": {},
+                "verification": {"reproduction_required": True},
+            }
+            report_path.write_text(json.dumps(payload), encoding="utf-8")
+            return payload
+
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DRY_GATE", "1")
+    monkeypatch.setattr("nexus.engine.ultra_review_service.UltraReviewService", _FakeUltraReviewService)
+    monkeypatch.setattr("scripts.ops.ultra_gate.evaluate_report", lambda _payload, check_artifacts=True: (True, []))
+
+    first = research_flow_service._ultra_review_gate_evidence(
+        repo_root=tmp_path,
+        task_desc="Review task",
+        task_id="task-a",
+        capability_stack={"governance_layers": ["ultra_review"]},
+    )
+    second = research_flow_service._ultra_review_gate_evidence(
+        repo_root=tmp_path,
+        task_desc="Review task",
+        task_id="task-b",
+        capability_stack={"governance_layers": ["ultra_review"]},
+    )
+
+    assert first["invoked"] is True
+    assert second["invoked"] is True
+    assert first["report_path"] != second["report_path"]
+    assert first["report_path"].endswith("task-a_route_gate_report.json")
+    assert second["report_path"].endswith("task-b_route_gate_report.json")
+
+
 def test_build_route_public_contract_exact_keys(tmp_path: Path):
     out = research_flow_service.build_route(
         repo_root=tmp_path,
