@@ -210,6 +210,38 @@ def _annotate_benchmark_eligibility(
     return row
 
 
+def _expected_capability_receipt_coverage(
+    expected_capabilities: tuple[str, ...],
+    capability_receipts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    receipts = {
+        str(item.get("name") or ""): item
+        for item in capability_receipts
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    public_safe: list[str] = []
+    missing: list[str] = []
+    failure_reasons: dict[str, str] = {}
+    for capability in expected_capabilities:
+        receipt = receipts.get(capability)
+        if not receipt:
+            missing.append(capability)
+            failure_reasons[capability] = "missing_receipt"
+            continue
+        if bool(receipt.get("public_claim_safe")):
+            public_safe.append(capability)
+            continue
+        missing.append(capability)
+        failure_reasons[capability] = str(receipt.get("failure_reason") or "receipt_not_public_safe")
+    return {
+        "expected": list(expected_capabilities),
+        "public_safe": public_safe,
+        "missing": missing,
+        "failure_reasons": failure_reasons,
+        "all_public_safe": bool(expected_capabilities) and not missing,
+    }
+
+
 def _apply_per_task_stop_loss(row: dict[str, Any], limit_sec: int) -> bool:
     if limit_sec <= 0:
         return False
@@ -1583,6 +1615,9 @@ def _extract_record(
         "repo": task.repo,
         "repo_ref": task.repo_ref,
         "manifest_hash": task.manifest_hash,
+        "expected_capabilities": list(task.expected_capabilities),
+        "capability_activation_contract": task.capability_activation_contract,
+        "hidden_oracle_kind": task.hidden_oracle_kind,
         "difficulty": task.difficulty,
         "task_type": task.task_type,
         "task_desc": task.task_desc,
@@ -1734,6 +1769,10 @@ def _extract_record(
         "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),
         "capability_receipts": capability_receipts,
         "capability_receipts_json": json.dumps(capability_receipts, ensure_ascii=False, sort_keys=True),
+        "expected_capability_receipt_coverage": _expected_capability_receipt_coverage(
+            task.expected_capabilities,
+            [item for item in capability_receipts if isinstance(item, dict)],
+        ),
         "capability_plan_phases": [
             str(item.get("phase"))
             for item in capability_replan_trace

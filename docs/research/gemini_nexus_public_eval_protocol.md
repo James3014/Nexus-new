@@ -181,6 +181,9 @@ Failure lessons:
 - Public manifests need explicit `expected_capabilities`; otherwise a task can pass hidden verification while leaving CodeIntel, Research, Hyper, Nightshift, Swarm, Drone, Ultra Review, Autoreason, DDTree, and gate capabilities unmeasured.
 - Commercial lane compilation must use the checked-in `scripts/bench/commercial_lane_tasks.py` entrypoint. Ad hoc helper names are process drift, not benchmark evidence.
 - Sandbox or `uv` cache permission failures are infra-invalid preflight events. They must be retried under the approved runtime context and must not be counted as route, model, or Nexus capability failures.
+- Nexus-only route smoke is a receipt diagnostic, not a public uplift benchmark. `with_llm_mode=off` can prove route selection, executor receipts, and gate evidence, but hidden-verifier failures from the local path must not be interpreted as Gemini+Nexus product performance.
+- Pending executor capabilities must preserve `selected=true` while blocking public claims. Hiding selection makes route debugging weaker; public-safety comes from `invoked`, `evidence_present`, `gate_passed`, and `outcome_contributed`, not from erasing the route decision.
+- DDTree currently proves candidate pruning receipts, but the next production upgrade must move beyond flat dependency maps toward explicit tree pruning with measurable saved branches. Route argmax also needs tunable cost and risk weights instead of only hard-coded score constants.
 
 COE action items:
 

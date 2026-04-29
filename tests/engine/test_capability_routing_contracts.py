@@ -4,6 +4,7 @@ from nexus.engine.capability_executor_controls import build_execution_plan, buil
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_readiness import CORE_CAPABILITIES
 from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS
+from nexus.engine.capability_contracts import CapabilityReceipt
 from nexus.engine.capability_receipts import build_trace_receipts, selected_receipts
 from nexus.engine.capability_signals import build_capability_signals
 
@@ -99,7 +100,7 @@ def test_selected_receipts_do_not_imply_invocation_or_public_claim_safety():
     receipts = {item.name: item for item in selected_receipts(plan)}
 
     assert {"swarm", "drone", "nightshift"} <= set(receipts)
-    assert receipts["swarm"].selected is False
+    assert receipts["swarm"].selected is True
     assert receipts["swarm"].invoked is False
     assert receipts["swarm"].evidence_present is False
     assert receipts["swarm"].failure_reason == "pending_executor"
@@ -303,6 +304,19 @@ def test_trace_receipts_promote_only_invoked_evidence_and_gate_chain():
     assert receipts["swarm"].selected is True
     assert receipts["swarm"].public_claim_safe is False
     assert receipts["swarm"].outcome_contributed is False
+
+
+def test_public_claim_safe_requires_outcome_contribution():
+    receipt = CapabilityReceipt(
+        name="autoreason",
+        selected=True,
+        invoked=True,
+        evidence_present=True,
+        gate_passed=True,
+        outcome_contributed=False,
+    )
+
+    assert receipt.public_claim_safe is False
 
 
 def test_all_core_capabilities_have_receipt_adapters():
@@ -656,7 +670,7 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
     assert receipts["nightshift"].failure_reason == ""
 
 
-def test_pending_executor_receipts_do_not_count_as_selected_until_evidence_exists():
+def test_pending_executor_receipts_keep_route_selection_but_block_public_claims():
     plan = {
         "selected_capabilities": ["swarm", "drone", "nightshift"],
         "pending_capabilities": ["swarm", "drone", "nightshift"],
@@ -678,9 +692,12 @@ def test_pending_executor_receipts_do_not_count_as_selected_until_evidence_exist
         )
     }
 
-    assert receipts["swarm"].selected is False
+    assert receipts["swarm"].selected is True
+    assert receipts["swarm"].public_claim_safe is False
     assert receipts["swarm"].failure_reason == "pending_executor"
-    assert receipts["drone"].selected is False
+    assert receipts["drone"].selected is True
+    assert receipts["drone"].public_claim_safe is False
     assert receipts["drone"].failure_reason == "pending_executor"
-    assert receipts["nightshift"].selected is False
+    assert receipts["nightshift"].selected is True
+    assert receipts["nightshift"].public_claim_safe is False
     assert receipts["nightshift"].failure_reason == "pending_executor"

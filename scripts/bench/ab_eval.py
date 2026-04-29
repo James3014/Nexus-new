@@ -285,7 +285,14 @@ def _coverage_from_receipts(rows: list[dict[str, Any]]) -> dict[str, Any] | None
             "gate_rate": round(gate / total, 4) if total else 0.0,
             "outcome_count": outcome,
             "outcome_rate": round(outcome / total, 4) if total else 0.0,
-            "public_safe": bool(total and selected and invoked == selected and evidence == selected and gate == selected),
+            "public_safe": bool(
+                total
+                and selected
+                and invoked == selected
+                and evidence == selected
+                and gate == selected
+                and outcome == selected
+            ),
             "source": "capability_receipts",
             "failure_reasons": failures,
         }

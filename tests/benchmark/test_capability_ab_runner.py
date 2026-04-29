@@ -2293,6 +2293,9 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
         target_file="unused",
         test_file="unused",
         success_criteria="all_target_tests_pass",
+        expected_capabilities=("autoreason", "ddtree", "ultra_review"),
+        capability_activation_contract="required",
+        hidden_oracle_kind="trace_receipt",
     )
     target_file, test_file = _materialize_fixture(tmp_path, task)
     captured = {}
@@ -2398,6 +2401,16 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
     assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
     assert out["capability_receipts"] == receipts
     assert json.loads(out["capability_receipts_json"]) == receipts
+    assert out["expected_capabilities"] == ["autoreason", "ddtree", "ultra_review"]
+    assert out["capability_activation_contract"] == "required"
+    assert out["hidden_oracle_kind"] == "trace_receipt"
+    assert out["expected_capability_receipt_coverage"] == {
+        "expected": ["autoreason", "ddtree", "ultra_review"],
+        "public_safe": ["autoreason", "ddtree", "ultra_review"],
+        "missing": [],
+        "failure_reasons": {},
+        "all_public_safe": True,
+    }
     receipt_by_name = {item["name"]: item for item in out["capability_receipts"]}
     assert receipt_by_name["autoreason"]["public_claim_safe"] is True
     assert receipt_by_name["ddtree"]["public_claim_safe"] is True

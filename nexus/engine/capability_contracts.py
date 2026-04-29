@@ -143,7 +143,13 @@ class CapabilityReceipt:
 
     @property
     def public_claim_safe(self) -> bool:
-        return bool(self.selected and self.invoked and self.evidence_present and self.gate_passed)
+        return bool(
+            self.selected
+            and self.invoked
+            and self.evidence_present
+            and self.gate_passed
+            and self.outcome_contributed
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self) | {

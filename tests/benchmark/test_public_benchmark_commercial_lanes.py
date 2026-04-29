@@ -18,6 +18,16 @@ PUBLIC_CAPABILITY_TARGETS = {
     "ddtree",
 }
 
+PUBLIC_GATE_TARGETS = {
+    "memory",
+    "lancedb",
+    "belief",
+    "mempalace_gate",
+    "artifact_gate",
+    "claim_gate",
+    "delivery_gate",
+}
+
 
 def test_commercial_lanes_reference_existing_public_tasks():
     manifest = json.loads(Path("scripts/bench/public_benchmark_commercial_lanes_v1.json").read_text(encoding="utf-8"))
@@ -75,5 +85,23 @@ def test_commercial_lanes_cover_public_capability_targets_without_running_models
             covered.update(task_expected[ref["task_id"]])
 
     missing = PUBLIC_CAPABILITY_TARGETS - covered
+
+    assert missing == set()
+
+
+def test_commercial_lanes_cover_public_gate_targets_without_running_models():
+    manifest = json.loads(Path("scripts/bench/public_benchmark_commercial_lanes_v1.json").read_text(encoding="utf-8"))
+    task_expected: dict[str, set[str]] = {}
+    for path in {ref["manifest"] for lane in manifest["lanes"] for ref in lane["task_refs"]}:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        for task in payload["tasks"]:
+            task_expected[str(task["id"])] = set(task.get("expected_capabilities", []))
+
+    covered: set[str] = set()
+    for lane in manifest["lanes"]:
+        for ref in lane["task_refs"]:
+            covered.update(task_expected[ref["task_id"]])
+
+    missing = PUBLIC_GATE_TARGETS - covered
 
     assert missing == set()
