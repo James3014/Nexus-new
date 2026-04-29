@@ -571,12 +571,29 @@ def build_route(
     hard_keywords = ["FLAKY", "RACE", "DEADLOCK", "TIMEOUT", "LATENCY", "WEBSOCKET", "SDK", "API"]
     cross_module_keywords = ["CROSS-MODULE", "MULTI-MODULE", "COORDINATOR", "SWARM", "DRONE", "NIGHTSHIFT"]
     is_cross_module_task = "cross_module" in str(task_type).lower() or any(kw in task_upper for kw in cross_module_keywords)
-    has_hard_signal = any(kw in task_upper for kw in hard_keywords) or is_cross_module_task
+    commercial_public_task = str(task_type).startswith("public_")
+    commercial_keywords = [
+        "CLAIM",
+        "EVIDENCE",
+        "ARTIFACT",
+        "GOVERNANCE",
+        "SECRET",
+        "AUTHORIZATION",
+        "TRUST",
+        "VERIFICATION",
+        "SEMANTIC",
+        "REPAIR",
+    ]
+    has_commercial_signal = commercial_public_task and any(kw in task_upper for kw in commercial_keywords)
+    has_hard_signal = any(kw in task_upper for kw in hard_keywords) or is_cross_module_task or has_commercial_signal
     
     # R2 Tuning: Feature/Refactor prefer baseline, Bugfix with risk prefers hyper
     if is_doc_fix:
         recommended_flow = "baseline"
         recommended_reason = "Matched Doc-Fix Rule"
+    elif has_commercial_signal:
+        recommended_flow = "hyper_sprint"
+        recommended_reason = "commercial_public_task_prefers_hyper"
     elif task_type in ["feature", "refactor"]:
         recommended_flow = "baseline"
         recommended_reason = f"structural_task_type_{task_type}_prefer_baseline"
@@ -604,6 +621,9 @@ def build_route(
     if has_hard_signal:
         consensus_votes["hyper_sprint"] += 1
         vote_reasons.append("hard_signal_prefers_hyper")
+    if has_commercial_signal:
+        consensus_votes["hyper_sprint"] += 1
+        vote_reasons.append("commercial_public_task_prefers_hyper")
     if adjusted_root_cause_confidence < 0.75:
         consensus_votes["hyper_sprint"] += 1
         vote_reasons.append("low_confidence_prefers_hyper")
@@ -638,10 +658,12 @@ def build_route(
     risk_score += 12 if memory_hits > 0 else 0
     risk_score += 10 if candidate_count > 1 else 0
     risk_score += 20 if is_cross_module_task else 0
+    risk_score += 15 if has_commercial_signal else 0
     risk_score = min(100, risk_score)
     route_features = {
         "task_type": task_type,
         "has_hard_signal": has_hard_signal,
+        "has_commercial_signal": has_commercial_signal,
         "is_cross_module_task": is_cross_module_task,
         "is_doc_fix": is_doc_fix,
         "candidate_count": int(candidate_count),
@@ -708,9 +730,22 @@ def build_hyper_execution_profile(
     is_cross_module = "cross_module" in str(task_type).lower() or any(
         kw in text for kw in ["cross-module", "multi-module", "coordinator", "swarm", "drone", "nightshift"]
     )
+    commercial_keywords = [
+        "claim",
+        "evidence",
+        "artifact",
+        "governance",
+        "secret",
+        "authorization",
+        "trust",
+        "verification",
+        "semantic",
+        "repair",
+    ]
+    commercial_public_task = str(task_type).startswith("public_") and any(keyword in text for keyword in commercial_keywords)
     low_confidence = float(root_cause_confidence) < 0.75
     risk_bug = task_type == "bug" and route_recommended_flow == "hyper_sprint"
-    is_hard_task = bool(has_hard_keyword or is_cross_module or low_confidence or risk_bug)
+    is_hard_task = bool(has_hard_keyword or is_cross_module or low_confidence or risk_bug or commercial_public_task)
 
     effective_candidate_count = max(1, int(candidate_count))
     effective_max_rounds = 1
@@ -734,6 +769,12 @@ def build_hyper_execution_profile(
         effective_candidate_count = max(effective_candidate_count, 4)
         effective_max_rounds = max(effective_max_rounds, 3)
         tuning_reasons.append("low_root_cause_confidence")
+
+    if commercial_public_task:
+        effective_candidate_count = max(effective_candidate_count, 3)
+        effective_max_rounds = max(effective_max_rounds, 2)
+        effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
+        tuning_reasons.append("commercial_public_task")
 
     if float(belief_confidence) < 0.6:
         effective_candidate_count = max(effective_candidate_count, 4)
@@ -786,6 +827,7 @@ def build_hyper_execution_profile(
         "has_hard_keyword": has_hard_keyword,
         "low_confidence": low_confidence,
         "risk_bug": risk_bug,
+        "commercial_public_task": commercial_public_task,
         "is_cross_module": is_cross_module,
         "prefer_direct_hyper": prefer_direct_hyper,
         "belief_confidence": float(belief_confidence),

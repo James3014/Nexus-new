@@ -110,6 +110,37 @@ def test_build_route_cross_module_task_has_high_risk_feature(tmp_path: Path):
     assert out["route_features"]["risk_score"] >= 50
 
 
+def test_build_route_treats_public_commercial_tasks_as_hard(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Fix claim verification so only fully supported successful claims are accepted.",
+        task_type="public_feature",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+    )
+
+    assert out["recommended_flow"] == "hyper_sprint"
+    assert out["should_research"] is True
+    assert out["route_features"]["has_hard_signal"] is True
+    assert out["route_features"]["risk_score"] >= 50
+    assert out["reason"] == "commercial_public_task_prefers_hyper"
+
+
+def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
+    profile = research_flow_service.build_hyper_execution_profile(
+        task_desc="Fix claim verification so only fully supported successful claims are accepted.",
+        task_type="public_feature",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        route_recommended_flow="hyper_sprint",
+    )
+
+    assert profile["is_hard_task"] is True
+    assert profile["effective_candidate_count"] >= 3
+    assert "commercial_public_task" in profile["tuning_reasons"]
+
+
 def test_build_hyper_execution_profile_prefers_direct_hyper_for_cross_module():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="cross-module refactor for swarm and drone coordination",
