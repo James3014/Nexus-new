@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import difflib
 import hashlib
 import json
@@ -496,12 +497,11 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
             "def test_approved_and_read_only_paths():\n"
             "    assert rlm_harder_v2_scope_decision({'action': 'read', 'approved': False}) == {'allowed': True, 'reason': 'read_only'}\n"
             "    assert rlm_harder_v2_scope_decision({'action': 'write', 'approved': True}) == {'allowed': True, 'reason': 'approved'}\n"
-        )
-        hidden = (
-            "from target import rlm_harder_v2_scope_decision\n\n"
-            "def test_unapproved_mutation_and_unknown_actions_are_blocked():\n"
-            "    assert rlm_harder_v2_scope_decision({'action': 'read', 'approved': False}) == {'allowed': True, 'reason': 'read_only'}\n"
             "    assert rlm_harder_v2_scope_decision({'action': 'delete', 'approved': False}) == {'allowed': False, 'reason': 'scope_block'}\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_unknown_and_missing_approval_actions_are_blocked():\n"
             "    assert rlm_harder_v2_scope_decision({'action': 'write'}) == {'allowed': False, 'reason': 'scope_block'}\n"
             "    assert rlm_harder_v2_scope_decision({'action': 'unknown', 'approved': False}) == {'allowed': False, 'reason': 'scope_block'}\n"
         )
@@ -951,8 +951,7 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
     if task.fixture_kind == "rlm_harder_v2_governance_guard":
         desc += (
             "\n\nNexus governance reason contract: read-only tools return reason ok; "
-            "destructive commands or forbidden paths such as .nexus, logs, or benchmarks "
-            "return reason governance_block."
+            "destructive commands or task-forbidden paths return reason governance_block."
         )
     if task.fixture_kind == "rlm_harder_v2_governance_scope":
         desc += (
@@ -976,8 +975,8 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
             "must not bypass the contract."
             "\nNexus replay receipt contract: accept only claim='verified' with a "
             "non-empty replay_command and exit_code == 0. Reject missing "
-            "replay_command, nonzero exit_code, replay_exit_code aliases, and "
-            "partial claims."
+            "replay_command, nonzero exit_code, schema aliases, and non-verified "
+            "claims."
         )
     if task.fixture_kind == "rlm_harder_v2_memory_contract":
         desc += (
@@ -1811,7 +1810,7 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
         guidance.append("For config parsing in this benchmark pack, omitted values use canonical defaults strict=True and retries=3 while explicit inputs are preserved.")
     if task.fixture_kind == "rlm_harder_v2_governance_guard":
         guidance.append(
-            "For governance action filters, allow read-only tools with reason ok; block destructive or forbidden-path operations such as rm -rf .nexus with reason governance_block."
+            "For governance action filters, allow read-only tools with reason ok; block destructive or task-forbidden path operations with reason governance_block."
         )
     if task.fixture_kind == "rlm_harder_v2_governance_scope":
         guidance.append(
@@ -1819,11 +1818,11 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
         )
     if task.fixture_kind == "rlm_harder_v2_evidence_replay":
         guidance.append(
-            "For replay receipts, accept only claim='verified' with a non-empty replay_command and exit_code == 0; reject missing replay_command, nonzero exit_code, replay_exit_code aliases, and partial claims."
+            "For replay receipts, accept only claim='verified' with a non-empty replay_command and exit_code == 0; reject missing replay_command, nonzero exit_code, schema aliases, and non-verified claims."
         )
     if task.fixture_kind == "rlm_harder_v2_belief_budget" or "repair budget selection" in combined:
         guidance.append(
-            "For Nexus Belief budget helpers, require evidence whenever confidence is below 0.75 or risk is medium/high/critical; reserve one-round fast path for high-confidence low-risk cases."
+            "For Nexus Belief budget helpers, require evidence when confidence is low or uncertain, or when risk is elevated; reserve one-round fast path for high-confidence low-risk cases."
         )
     if "claim" in combined or "evidence" in combined:
         guidance.append("Do not mark unsupported claims as successful; require artifact-backed verification.")
@@ -2828,6 +2827,58 @@ def _public_manifest_shape_failures(path: Path) -> list[str]:
     return failures
 
 
+def _string_literals(source: str) -> set[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    values: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            value = node.value.strip()
+            if len(value) >= 3:
+                values.add(value)
+    return values
+
+
+def _prompt_leak_literal_is_structured(literal: str) -> bool:
+    return bool(re.search(r"[/_.]|\d", literal))
+
+
+def _prompt_leak_audit_failures(tasks: list[CapabilityTask], *, repo_root: Path) -> list[str]:
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="nexus_prompt_leak_", dir="/tmp") as tmp:
+        scratch_root = Path(tmp)
+        for task in tasks:
+            if not task.fixture_kind:
+                continue
+            try:
+                target_file, visible_test_file = _materialize_fixture(scratch_root / task.id, task)
+            except ValueError:
+                continue
+            hidden_test_file = _hidden_test_for_visible_test(visible_test_file)
+            visible_source = Path(visible_test_file).read_text(encoding="utf-8")
+            hidden_source = Path(hidden_test_file).read_text(encoding="utf-8")
+            hidden_only = sorted(
+                literal
+                for literal in (_string_literals(hidden_source) - _string_literals(visible_source))
+                if _prompt_leak_literal_is_structured(literal)
+            )
+            if not hidden_only:
+                continue
+            target_source = Path(target_file).read_text(encoding="utf-8")
+            guidance = "\n".join(
+                [
+                    _nexus_task_desc(task),
+                    _nexus_codex_hidden_verifier_guidance(task, target_source),
+                ]
+            )
+            leaked = [literal for literal in hidden_only if literal and literal in guidance]
+            if leaked:
+                failures.append(f"prompt_leak:{task.id}:" + ",".join(leaked[:3]))
+    return failures
+
+
 def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Path) -> dict[str, Any]:
     failures: list[str] = []
     warnings: list[str] = []
@@ -2855,6 +2906,7 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
         manifest_hash = _manifest_sha256(tasks_path)
         if not selected_tasks:
             failures.append("no_tasks_selected")
+        failures.extend(_prompt_leak_audit_failures(selected_tasks, repo_root=repo_root))
 
     env_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or "").strip()
     direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "").strip()

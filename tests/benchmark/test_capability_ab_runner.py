@@ -31,6 +31,7 @@ from scripts.bench.capability_ab_runner import (
     _parse_direct_patch_json,
     _direct_codex_timeout_sec,
     _extract_codex_stdout_tokens,
+    _prompt_leak_audit_failures,
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
     _build_parallel_smoke_rows,
@@ -1395,8 +1396,8 @@ def test_nexus_codex_hidden_verifier_guidance_names_belief_budget_contract():
 
     guidance = _nexus_codex_hidden_verifier_guidance(task, "def rlm_harder_v2_repair_budget(confidence, risk): pass")
 
-    assert "confidence is below 0.75" in guidance
-    assert "risk is medium/high/critical" in guidance
+    assert "confidence is low or uncertain" in guidance
+    assert "risk is elevated" in guidance
 
 
 def test_nexus_codex_hidden_verifier_guidance_names_governance_contracts():
@@ -1444,7 +1445,7 @@ def test_nexus_codex_hidden_verifier_guidance_names_replay_contract():
 
     assert "non-empty replay_command" in guidance
     assert "exit_code == 0" in guidance
-    assert "replay_exit_code aliases" in guidance
+    assert "schema aliases" in guidance
 
 
 def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypatch):
@@ -1552,7 +1553,31 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
     assert "Nexus replay evidence rule" in _nexus_task_desc(replay)
     assert "non-empty replay_command" in _nexus_task_desc(replay)
     assert "exit_code == 0" in _nexus_task_desc(replay)
-    assert "replay_exit_code aliases" in _nexus_task_desc(replay)
+    assert "schema aliases" in _nexus_task_desc(replay)
+
+
+def test_prompt_leak_audit_accepts_current_rlm_harder_v2_guidance():
+    tasks = load_tasks("scripts/bench/public_benchmark_rlm_harder_v2.json")
+
+    failures = _prompt_leak_audit_failures(tasks, repo_root=Path.cwd())
+
+    assert failures == []
+
+
+def test_prompt_leak_audit_blocks_hidden_only_literals(monkeypatch):
+    task = next(
+        task
+        for task in load_tasks("scripts/bench/public_benchmark_rlm_harder_v2.json")
+        if task.fixture_kind == "rlm_harder_v2_evidence_replay"
+    )
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._nexus_task_desc",
+        lambda _task: "Use replay_exit_code to solve the hidden case.",
+    )
+
+    failures = _prompt_leak_audit_failures([task], repo_root=Path.cwd())
+
+    assert failures == ["prompt_leak:rlm-harder-v2-evidence-002:replay_exit_code"]
 
 
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):

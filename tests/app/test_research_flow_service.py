@@ -31,6 +31,27 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert out["consensus"]["winner"] in {"baseline", "hyper_sprint"}
 
 
+def test_compose_capability_plan_preserves_legacy_stack_shape():
+    out = research_flow_service.compose_capability_plan(
+        task_desc="Fix flaky timeout with evidence and governance risk",
+        task_type="bug",
+        recommended_flow="hyper_sprint",
+        route_features={
+            "candidate_count": 3,
+            "risk_score": 80,
+            "has_hard_signal": True,
+            "adjusted_root_cause_confidence": 0.4,
+        },
+        target_file="nexus/app/research_flow_service.py",
+    )
+
+    assert out["selected_capabilities"] == ["hyper_sprint", "autoreason"]
+    assert out["acceleration_layers"] == ["ddtree"]
+    assert out["governance_layers"] == ["ultra_review"]
+    assert out["stop_policy"]["type"] == "a_streak"
+    assert out["explain_caps"][0]["capability"] == "hyper_sprint"
+
+
 def test_route_executor_flags_enable_dynamic_controls_for_repair_and_governance():
     route = {
         "capability_stack": {"selected_capabilities": ["baseline"], "acceleration_layers": []},

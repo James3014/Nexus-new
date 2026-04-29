@@ -523,6 +523,24 @@ def read_phase_slo_summary_fast(repo_root: Path) -> dict[str, Any]:
         return {"phase_slo_pass": False, "global": {"required_done_ratio": 0.0}, "status": "UNAVAILABLE", "reason": "phase_slo_summary_invalid"}
 
 
+def compose_capability_plan(
+    *,
+    task_desc: str,
+    task_type: str,
+    recommended_flow: str,
+    route_features: dict[str, Any],
+    target_file: str | None = None,
+) -> dict[str, Any]:
+    """Compose the legacy capability_stack from the current planner seam."""
+    return CapabilityRouter().route(
+        task_desc=task_desc,
+        task_type=task_type,
+        recommended_flow=recommended_flow,
+        route_features=route_features,
+        target_file=target_file,
+    ).to_dict()
+
+
 def build_route(
     *,
     repo_root: Path,
@@ -681,13 +699,13 @@ def build_route(
         "confidence": round(adjusted_root_cause_confidence, 2),
         "reasoning": f"Flow '{recommended_flow}' chosen due to {recommended_reason}. TaskType: {task_type}."
     }
-    capability_stack = CapabilityRouter().route(
+    capability_stack = compose_capability_plan(
         task_desc=task_desc,
         task_type=task_type,
         recommended_flow=recommended_flow,
         route_features=route_features,
         target_file=target_file,
-    ).to_dict()
+    )
 
     return {
         "should_research": should_research,

@@ -706,3 +706,5 @@ Failure lesson：
 - `rlm-harder-v2-evidence-002` 同樣不能只在 visible 測 valid receipt；缺少 replay command、非 0 exit code 這類 fail-closed 代表案例必須進 visible，hidden 再保留 near-miss 欄位名稱檢查。
 - 在正式 8x1 前要先跑本地 fixture sanity：每個 hidden-verifier task 的初始 target 應至少被 visible test 擋下一個代表性錯誤；否則 benchmark 會測到 runner/題目設計缺陷，而不是 Nexus 能力。
 - 即使 visible 有 replay 失敗訊號，Gemini+Nexus 對 Artifact replay 題仍可能不穩；需要把精確 receipt contract 下沉到 Nexus task_desc：只接受 `claim='verified'`、非空 `replay_command`、且 `exit_code == 0`，並拒絕 alias/partial claim。
+- Prompt guidance 不能包含 hidden-only structured literals；preflight 必須先跑 prompt-leak audit，否則 P4/P5 會產出看似漂亮但不可公開宣稱的數據。
+- 智能路由重構要先做 no-behavior-change extraction；本輪只抽出 `compose_capability_plan()`，不改 `recommended_flow/risk_score/consensus`，避免 benchmark treatment drift。
