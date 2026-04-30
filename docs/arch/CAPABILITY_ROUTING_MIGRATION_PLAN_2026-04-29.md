@@ -624,6 +624,36 @@ incrementally.
 - This smoke suite is the required preflight before spending Gemini quota on
   public comparison runs.
 
+## 2026-04-30 Codex 5.5 Internal A/B Smoke Lesson
+- A fixed 4-task internal same-model smoke now exists at
+  `scripts/ops/codex_nexus_ab_smoke.py`. It locks `gpt-5.5` bare vs `gpt-5.5`
+  wearing Nexus, hidden verifier, same-model arms, subprocess Nexus runner,
+  Autoreason/DDTree executor flags, Ultra Review dry gate, and
+  `llm_candidate_cap=3`.
+- Clean preflight result:
+  - `status=PASS`, `failures=[]`, `dirty_entries=[]`.
+  - Warnings are expected: this is a Direct Codex calibration path, not an
+    external Gemini capability-claim path, and the selected 4-task slice does
+    not cover every Nexus capability.
+- Actual 4-task result:
+  - with Nexus: eligible solve rate 100%, semantic verified 100%, trust
+    mismatch 0%, avg model calls 1.00, avg tokens 14289, avg wall 27.84s.
+  - bare Codex: eligible solve rate 50%, semantic verified 50%, trust mismatch
+    0%, avg model calls 1.00, avg tokens 17026.25, avg wall 11.12s.
+  - observed lift: +50 percentage points absolute solve/semantic-verified
+    rate, or +100% relative to the bare 50% baseline.
+- COE lesson:
+  - This proves Nexus context/governance framing improves Codex 5.5 on this
+    fixed hard slice, but it must not be used to claim all selected executors
+    contributed. Direct Codex wearing is prompt/context wearing; report gates
+    correctly failed capability-specific claims for Autoreason, DDTree,
+    Nightshift, and Ultra Review when executor receipts were absent.
+- Next:
+  - Use this as a fast route/value calibration before Gemini spending.
+  - Use subprocess Gemini runs for public external-model claims and only claim
+    capabilities whose receipts are selected, invoked, evidenced, gated, and
+    public-safe.
+
 ## Residual Debt
 - Swarm, Drone, and Nightshift now have bench-safe local executor receipts, but
   they still need production-grade non-benchmark executor evidence before broad
