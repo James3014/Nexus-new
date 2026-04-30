@@ -79,8 +79,8 @@ Waiver: 00_Home/[System Overview](System Overview.md).md
     *   **v24.1 標準收據**: 所有交付均需通過 8 點物理完整性核驗（包含防漂移、血緣追蹤等）。
 *   **🌙 Night Shift v24.0**: Bayesian warm-start enabled code factory with Gaussian Process optimization.
     *   **夜班代碼工廠 v24.0**: 具備貝葉斯溫啟動與高斯過程優化的自主演進生產線。
-*   **🧠 Belief-Driven Routing**: Dynamic capability routing based on confidence signals and risk policies.
-    *   **信心驅動路由**: 根據信念信號與風險規約，動態選擇最優能力組合。
+*   **🧠 Belief-Driven Routing**: Dynamic [Capability Routing](../05_Protocols/Protocol - Capability Routing.md) based on confidence signals and risk policies.
+    *   **信心驅動路由**: 根據信念信號與風險規約，動態選擇最優 [能力組合](../05_Protocols/Protocol - Capability Routing.md)。
 
 ---
 

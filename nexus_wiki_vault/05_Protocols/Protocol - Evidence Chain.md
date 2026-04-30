@@ -33,6 +33,7 @@ version_scope:
 - **鏈式追蹤**: 確保 `manifest.json` 完整包含單次任務的所有子工件。
 - **誠信校驗**: 透過 8 點物理檢查確保交付物之真實性。
 - **證據封印**: 產出不可竄改的 `receipt.json` 作為晉升憑證。
+- **斷言驗證 (Claim Verification)**: 將主觀的完成聲明 (Claim) 轉化為由物理證據支撐的物理事實，杜絕敘事幻覺。
 
 ## 📜 v24.1 交付收據規格 (Delivery Receipt)
 所有任務結案前必須產出 `receipt.json`，並通過以下 8 大誠信檢查（8-Point Integrity Check）：
