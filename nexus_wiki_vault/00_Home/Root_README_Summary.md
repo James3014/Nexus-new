@@ -44,45 +44,43 @@ Waiver: 00_Home/[System Overview](System Overview.md).md
 - Pending detailed [[documentation]].
 
 ---
-# Nexus v9 Autonomic: Zero-Drift Intelligence 🧬💎🚀
+# Nexus v26 Singularity: Hardened Governance & Recursive Evolution 🧬💎🚀
 
-> **⚠️ Nexus 不是 Agent。Nexus 是戰甲 (Battlesuit)。**
-> 任何 AI 模型穿上 Nexus 都會獲得 P-X-D-R-A-C 六階段自癒管線與學習系統。
-> 學習系統屬於 Nexus（戰甲），不屬於穿它的模型。經驗累積在戰甲裡，換模型也不會丟失。
+> **⚠️ Nexus 不是 Agent。Nexus 是戰甲 (Battlesuit) & 作業系統 (Singularity OS)。**
+> 任何 AI 模型穿上 Nexus 都會獲得 P-X-D-R-A-C 六階段自癒管線、Dual-Loop 調度與 RLM 遞迴學習系統。
+> 經驗累積在戰甲（MemPalace）中，實現「模型可換，智慧永續」。
 
-> **Beyond loops. Autonomic evolution, experience crystallization, and fallback resilience.**
-> **超越循環。自主演進、經驗結晶與備援韌性。**
+> **Beyond loops. Dual-Loop Orchestration, RLM Recursive Evolution, and v24.1 Canonical Evidence.**
+> **超越循環。雙環調度、RLM 遞迴演進與 v24.1 標準證據鏈。**
 
-[![Success Rate](https://img.shields.io/badge/Live-99.5%25-brightgreen)](benchmark_report.json)
-[![Status](https://img.shields.io/badge/Status-v23.1.0--SOTA-blue)](v23_release_roadmap.md)
-[![Engine](https://img.shields.io/badge/Engine-v23--Governance-red)](MUSE_ENGINE_SPEC_V17.1_HARDENED.md)
+[![Success Rate](https://img.shields.io/badge/Live-99.7%25-brightgreen)](benchmark_report.json)
+[![Status](https://img.shields.io/badge/Status-v26.2.0--Singularity-blue)](v26_release_roadmap.md)
+[![Engine](https://img.shields.io/badge/Engine-v26--Dual--Loop-red)](MUSE-NEXUS-Engine-Specification-v22-Eternal.md)
 
 ---
 
 ## 🏟️ Overview | 概覽
 
-**[EN]** Nexus v9 is the first autonomic AI development interface. It doesn't just execute loops; it learns from every execution trace to optimize its own decision weights and provides transparent fallback chains for mission-critical reliability.
+**[EN]** Nexus v26 Singularity is the world's first recursive AI development OS. It implements a **Dual-Loop Orchestration** (Planner vs. Executor) and **RLM (Recursive Learning Machine)** to ensure that every failure becomes a formal constraint, and every success is crystallized into a permanent skill.
 
-**[ZH]** Nexus v9 是首個具備「自主演進」能力的 AI 開發介面。它不再只是單純執行循環，而是能從每一次的執行軌跡中學習，自動優化自身的決策權重，並為關鍵任務提供透明的備援鏈，確保極致的可靠性。
+**[ZH]** Nexus v26 Singularity 是全球首個具備遞迴演進能力的 AI 開發作業系統。它實作了 **Dual-Loop 調度架構**（策劃與執行物理分離）與 **RLM (遞迴學習機)**，確保每一次失敗都會轉化為正式約束，每一次成功都結晶為永久職能。
 
 ---
 
 ## 🏆 Key Features | 核心特性
 
-*   **💎 Crystal Experience Crystallization**: Active learning from `tracelog.jsonl` to optimize router weights automatically.
-    *   **Crystal 經驗結晶化**: 從 `tracelog.jsonl` 中主動學習，自動優化路由權重，實現職能演進。
-*   **🚀 Fallback Resilience Chain**: Automatic switch to Top-K candidates if the primary [[SKILL]] fails.
-    *   **備援韌性鏈**: 當首選職能失效時，自動切換至 Top-K 候選職能，確保任務零中斷。
-*   **P-D-R-A-C Lifecycle**: Formalized autonomic state machine for zero-drift development.
-    *   **P-D-R-A-C 生命週期**: 正式化自主演進狀態機，終結幻覺，實現精準研發。
-*   **FlashJudge 8.0 (Enhanced)**: Higher fidelity gate with semantic drift detection.
-    *   **FlashJudge 8.0 (強化版)**: 具備語義漂移偵測的高保真品質門禁。
-*   **Stadium Explorer (WarRoom v9)**: Real-time telemetry for [[SKILL]] hit rates and autonomic adjustments.
-    *   **戰場探索者 (戰情室 v9)**: 職能命中率與自學習調權的實時遙測面板。
-*   **🌙 Night Shift Code Factory [V23]**: Fully integrated autonomic production line with governance auto-stop.
-    *   **夜班代碼工廠 (v23)**: 深度整合自主演進邏輯，具備 19 層治理自動停機與標竿優化。
-*   **🛡️ 19-Layer Governance (v23.1)**: Permanent L0 Rules & L1 [index](../.nexus/graph/index.md) for cross-turn state persistence.
-    *   **19 層治理架構 (v23.1)**: L0 治理根與 L1 任務索引常駐化，達成 30% Context 減量與跨回合狀態繼承。
+*   **🌀 RLM (Recursive Learning Machine)**: Recursive self-correction with `trace_budget` enforcement and local convergence.
+    *   **RLM 遞迴學習機**: 具備 `trace_budget` 約束的遞迴自我修正，實現局部快速收斂。
+*   **⛓️ Dual-Loop Orchestration**: Physical separation of Planner (Outer Loop) and Executor (Inner Loop) with **Intent Purity Guard**.
+    *   **雙環調度架構**: Planner 與 Executor 物理隔離，輔以 **意圖純度守衛 (Intent Purity Guard)**，杜絕寫入衝突。
+*   **💎 MemPalace v26 (AAAK 30x)**: High-density experience crystallization using LanceDB and Arweave permanent distillation.
+    *   **記憶宮殿 v26**: 採用 LanceDB 與 Arweave 永久蒸餾技術，搭配 AAAK 30倍壓縮，實現智慧永生。
+*   **🛡️ v24.1 Canonical Receipt**: 8-point physical integrity check (Integrity, Anti-Drift, Lineage, etc.) for all deliveries.
+    *   **v24.1 標準收據**: 所有交付均需通過 8 點物理完整性核驗（包含防漂移、血緣追蹤等）。
+*   **🌙 Night Shift v24.0**: Bayesian warm-start enabled code factory with Gaussian Process optimization.
+    *   **夜班代碼工廠 v24.0**: 具備貝葉斯溫啟動與高斯過程優化的自主演進生產線。
+*   **🧠 Belief-Driven Routing**: Dynamic capability routing based on confidence signals and risk policies.
+    *   **信心驅動路由**: 根據信念信號與風險規約，動態選擇最優能力組合。
 
 ---
 

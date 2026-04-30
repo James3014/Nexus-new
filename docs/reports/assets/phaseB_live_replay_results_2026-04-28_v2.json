@@ -1,0 +1,98 @@
+{
+  "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/assets/phaseB_live_replay_manifest_v2.json",
+  "summary": {
+    "total": 12,
+    "pass": 9,
+    "fail": 3,
+    "pass_rate": 0.75,
+    "strict_topic_all_pass": true,
+    "citation_coverage": 1.0,
+    "keyword_hit_rate": 0.75
+  },
+  "rows": [
+    {
+      "id": "B01",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    },
+    {
+      "id": "B02",
+      "status": "FAIL",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": false
+    },
+    {
+      "id": "B03",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    },
+    {
+      "id": "B04",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    },
+    {
+      "id": "B05",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    },
+    {
+      "id": "B06",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    },
+    {
+      "id": "B07",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    },
+    {
+      "id": "B08",
+      "status": "FAIL",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": false
+    },
+    {
+      "id": "B09",
+      "status": "FAIL",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": false
+    },
+    {
+      "id": "B10",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 4,
+      "keyword_hit": true
+    },
+    {
+      "id": "B11",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    },
+    {
+      "id": "B12",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true
+    }
+  ]
+}

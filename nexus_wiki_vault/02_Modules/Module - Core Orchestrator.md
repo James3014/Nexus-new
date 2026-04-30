@@ -11,25 +11,35 @@ tags: '[module, core, orchestrator, engine, service_mesh, seam]'
 title: Module - Core Orchestrator
 ---
 
-# Module - Core Orchestrator (v26.2 Hardened Seams)
+# Module - Core Orchestrator (v26.2 Dual-Loop Singularity)
 
 ## One-sentence summary
-本模組為 Nexus 的「動力引擎」，負責協調 L4 指揮層任務拆解與 L3 執行層的 P-X-D-R-A-C 閉環。
+本模組為 Nexus 的「動力引擎」，負責協調 **Planner (Outer Loop)** 指揮層任務拆解與 **Executor (Inner Loop)** 執行層的物理操作，實現權責徹底分離。
 
-## 🛡️ 引擎與縫合點硬化 (April 22 Hardening)
-在最近的重構中，Nexus 廢棄了所有的舊版回退機制（Legacy Fallbacks）：
-- **Canonical Seam**: `campaign_master_loop` 現在強制透過 `execute_tactical_node` 委派工作。
-- **Seam Function**: `_execute_via_canonical_service` 成為 L4 與 L3 交互的唯一物理入口。
-- **No Legacy Fallback**: 移除 `scripts/v1.8_mega.py` 等舊版腳本的影子調用路徑。
+## 🧬 Dual-Loop 架構 (Dual-Loop Orchestration)
+Nexus v26 實現了 Planner 與 Executor 的物理分離，以解決「大腦與工具」間的寫入衝突。
 
-## 🧱 服務網格化 (Service Mesh)
-`NexusEngine` 將具備物理執行力的任務委派至以下核心服務：
+### 1. Planner (Outer Loop - 策劃環)
+- **職責**: 負責語義理解、意圖識別、DAG 任務拆解與策略選擇。
+- **物理約束**: 處於 **唯讀狀態**。禁止直接呼叫 `file_write` 或 `git_commit`。
+- **產出**: 結構化任務清單 (Task Manifest)。
 
-| Domain | Key Service | Source (Path) |
+### 2. Executor (Inner Loop - 執行環)
+- **職責**: 負責並行執行 DAG 任務、物理修正代碼與執行測試。
+- **物理約束**: 處於 **原子 Worktree** 中。每次執行必須獨立且可回滾。
+
+## 🛡️ 意圖純度守衛 (Intent Purity Guard)
+為了防止 Planner 產生「幻覺」並試圖直接修改文件，調度器內置了純度守衛：
+- **Blocklist**: 攔截 Planner 層的所有寫入類工具調用（如 `replace_file_content`）。
+- **Violation Trigger**: 一旦偵測到越權行為，立即拋出 `IntentViolation` 並強制中斷當前任務鏈。
+
+## 🧱 服務分層 (Service Stratification)
+| Domain | Key Service | Architecture |
 | :--- | :--- | :--- |
-| **Routing** | `AutonomicRoutingService` | `nexus/engine/autonomic_routing_service.py` |
-| **Repair** | `RepairLoopService` | `nexus/engine/repair_loop_service.py` |
-| **Seam** | `CanonicalTaskSeam` | `nexus/engine/canonical_task_seam.py` |
+| **Planning** | `ProjectPlanner` | Outer Loop |
+| **Routing** | `CapabilitySelector` | Bayesian Route |
+| **Execution** | `DualLoopOrchestrator` | Inner Loop |
+| **Repair** | `RLM_Service` | Recursive Loop |
 
 ## ⚙️ 核心特徵
 - **Atomic Init**: 所有服務由 `bootstrap.py` 原子化產出。

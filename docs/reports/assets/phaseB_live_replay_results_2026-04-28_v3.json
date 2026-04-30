@@ -1,0 +1,110 @@
+{
+  "manifest": "/Users/jameschen/Workspace/nexus/docs/reports/assets/phaseB_live_replay_manifest_v3.json",
+  "summary": {
+    "total": 12,
+    "pass": 12,
+    "fail": 0,
+    "pass_rate": 1.0,
+    "strict_topic_all_pass": true,
+    "citation_coverage": 1.0,
+    "keyword_hit_rate": 1.0
+  },
+  "rows": [
+    {
+      "id": "B01",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- **⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=11-92]\n- Any token/coin using the GitNexus name on Pump. "
+    },
+    {
+      "id": "B02",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- |                   | **CLI + MCP**                                            | **Web UI**                                             | [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=2"
+    },
+    {
+      "id": "B03",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- **⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=11-92]\n- Any token/coin using the GitNexus name on Pump. "
+    },
+    {
+      "id": "B04",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- - **CLI direct:** `gitnexus query|context|impact|cypher` in `tool. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/ARCHITECTURE.md#span=1437-1503]\n- `query`, `context`, and `impact` are group-aware: pas"
+    },
+    {
+      "id": "B05",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- gitnexus analyze --skills        # Generate repo-specific skill files from detected communities [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=8211-8306]\n- | `rename`         | Multi-fil"
+    },
+    {
+      "id": "B06",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- gitnexus group create <name>                                   # Create a repository group [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=9457-9547]\n- gitnexus group add <group> <groupPa"
+    },
+    {
+      "id": "B07",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- gitnexus analyze --skip-agents-md  # Preserve custom AGENTS. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=8380-8440]\n- gitnexus analyze --skip-agents-md  # Preserve custom AGENTS. [fil"
+    },
+    {
+      "id": "B08",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP, Kotlin, Swift, Ruby [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/gitnexus/README.md#span=8351-8435]\n- - **OCaml support** - additional"
+    },
+    {
+      "id": "B09",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- svg\" alt=\"License: PolyForm Noncommercial\"/> [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=1079-1123]\n- | `gitnexus://repos`                      | List all indexed repositories (read t"
+    },
+    {
+      "id": "B10",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 4,
+      "keyword_hit": true,
+      "answer_preview": "- **⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=11-92]\n- | `gitnexus://repos`                      | List"
+    },
+    {
+      "id": "B11",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- The **CLI + MCP** is how you make your AI agent actually reliable — it gives Cursor, Claude Code, Codex, and friends a deep architectural view of your codebase so they stop missing dependencies, breaking call chains, a"
+    },
+    {
+      "id": "B12",
+      "status": "PASS",
+      "strict_topic_ok": true,
+      "citations_count": 5,
+      "keyword_hit": true,
+      "answer_preview": "- **⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. [file:///Users/jameschen/Workspace/nexus/docs/external/GitNexus/README.md#span=11-92]\n- Any token/coin using the GitNexus name on Pump. "
+    }
+  ]
+}

@@ -1,0 +1,508 @@
+{
+  "dataset": "/Users/jameschen/Workspace/nexus/docs/reports/assets/phaseA_prompt_replay_set_v1.json",
+  "summary": {
+    "with_skill": {
+      "cases": 24,
+      "trigger_cases": 16,
+      "non_trigger_cases": 8,
+      "hit_at_1": 0.9375,
+      "false_positive_rate": 0.0,
+      "contract_compliance": 0.9583
+    },
+    "baseline": {
+      "cases": 24,
+      "trigger_cases": 16,
+      "non_trigger_cases": 8,
+      "hit_at_1": 0.0,
+      "false_positive_rate": 0.0,
+      "contract_compliance": 0.3333
+    }
+  },
+  "delta": {
+    "hit_at_1_delta": 0.9375,
+    "fpr_delta": 0.0,
+    "contract_compliance_delta": 0.625
+  },
+  "rows": [
+    {
+      "id": "ATD-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "autonomous-task-director",
+      "pred": "autonomous-task-director",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ATD-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "autonomous-task-director",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "ATD-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ATD-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ATD-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "autonomous-task-director",
+      "pred": "autonomous-task-director",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ATD-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "autonomous-task-director",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "AEF-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "acceptance-evidence-failclosed",
+      "pred": "acceptance-evidence-failclosed",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "AEF-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "acceptance-evidence-failclosed",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "AEF-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "AEF-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "AEF-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "acceptance-evidence-failclosed",
+      "pred": "acceptance-evidence-failclosed",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "AEF-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "acceptance-evidence-failclosed",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "SPG-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "safe-preview-boundary-gate",
+      "pred": "safe-preview-boundary-gate",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "SPG-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "safe-preview-boundary-gate",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "SPG-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "SPG-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "SPG-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "safe-preview-boundary-gate",
+      "pred": "safe-preview-boundary-gate",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "SPG-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "safe-preview-boundary-gate",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "LDP-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "live-data-delivery-profile-gate",
+      "pred": "live-data-delivery-profile-gate",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "LDP-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "live-data-delivery-profile-gate",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "LDP-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "LDP-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "LDP-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "live-data-delivery-profile-gate",
+      "pred": "live-data-delivery-profile-gate",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "LDP-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "live-data-delivery-profile-gate",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "PEP-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "pm-eval-first-planner",
+      "pred": "pm-eval-first-planner",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "PEP-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "pm-eval-first-planner",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "PEP-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "PEP-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "PEP-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "pm-eval-first-planner",
+      "pred": "pm-eval-first-planner",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "PEP-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "pm-eval-first-planner",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "ALT-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "agent-longrun-task-tracker",
+      "pred": "agent-longrun-task-tracker",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ALT-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "agent-longrun-task-tracker",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "ALT-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ALT-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ALT-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "agent-longrun-task-tracker",
+      "pred": "agent-longrun-task-tracker",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "ALT-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "agent-longrun-task-tracker",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "WTB-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "workos-trial-build-playbook",
+      "pred": "acceptance-evidence-failclosed",
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "WTB-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "workos-trial-build-playbook",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "WTB-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "WTB-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "WTB-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "workos-trial-build-playbook",
+      "pred": "workos-trial-build-playbook",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "WTB-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "workos-trial-build-playbook",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "WLD-01",
+      "type": "should_trigger",
+      "mode": "with_skill",
+      "gold": "workos-live-preview-debug-loop",
+      "pred": "workos-live-preview-debug-loop",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "WLD-01",
+      "type": "should_trigger",
+      "mode": "baseline",
+      "gold": "workos-live-preview-debug-loop",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    },
+    {
+      "id": "WLD-02",
+      "type": "should_not_trigger",
+      "mode": "with_skill",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "WLD-02",
+      "type": "should_not_trigger",
+      "mode": "baseline",
+      "gold": null,
+      "pred": null,
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "WLD-03",
+      "type": "paraphrase",
+      "mode": "with_skill",
+      "gold": "workos-live-preview-debug-loop",
+      "pred": "workos-live-preview-debug-loop",
+      "hit": true,
+      "false_positive": false,
+      "contract_compliance": 1.0
+    },
+    {
+      "id": "WLD-03",
+      "type": "paraphrase",
+      "mode": "baseline",
+      "gold": "workos-live-preview-debug-loop",
+      "pred": null,
+      "hit": false,
+      "false_positive": false,
+      "contract_compliance": 0.0
+    }
+  ]
+}

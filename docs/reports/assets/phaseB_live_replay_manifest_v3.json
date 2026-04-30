@@ -1,0 +1,118 @@
+{
+  "version": "2026-04-28.v2",
+  "topic": "gitnexus-project",
+  "mode": "nexus ask live replay",
+  "cases": [
+    {
+      "id": "B01",
+      "question": "GitNexus 的核心定位是什麼？",
+      "expected_keywords": [
+        "knowledge graph",
+        "analyze",
+        "AI coding agent"
+      ]
+    },
+    {
+      "id": "B02",
+      "question": "請僅根據 ARCHITECTURE.md 說明 GitNexus 的介面形態（回答中需包含 CLI/MCP 與 Web UI）。",
+      "expected_keywords": [
+        "CLI",
+        "MCP",
+        "Web UI"
+      ]
+    },
+    {
+      "id": "B03",
+      "question": "GitNexus 的索引資料流大致是什麼？",
+      "expected_keywords": [
+        "analyze",
+        "KnowledgeGraph",
+        "LadybugDB"
+      ]
+    },
+    {
+      "id": "B04",
+      "question": "query/context/impact 在 GitNexus 各自扮演什麼角色？",
+      "expected_keywords": [
+        "query",
+        "context",
+        "impact"
+      ]
+    },
+    {
+      "id": "B05",
+      "question": "GitNexus 是否支援 detect_changes 與 rename 類能力？",
+      "expected_keywords": [
+        "detect_changes",
+        "rename"
+      ]
+    },
+    {
+      "id": "B06",
+      "question": "GitNexus 的多 repo group 能力包含哪些關鍵點？",
+      "expected_keywords": [
+        "group",
+        "cross",
+        "Contract Registry"
+      ]
+    },
+    {
+      "id": "B07",
+      "question": "GitNexus 和哪些 agent 生態有整合？",
+      "expected_keywords": [
+        "Claude Code",
+        "Cursor",
+        "Codex",
+        "Windsurf",
+        "OpenCode"
+      ]
+    },
+    {
+      "id": "B08",
+      "question": "請僅根據 gitnexus/README.md 的 language support 段落，列出支援語言（至少含 TypeScript、Python、Java、Go、Rust）。",
+      "expected_keywords": [
+        "TypeScript",
+        "Python",
+        "Java",
+        "Go",
+        "Rust"
+      ]
+    },
+    {
+      "id": "B09",
+      "question": "請僅根據 README 的 License 區塊回答：授權名稱與商業使用限制是什麼（關鍵字 PolyForm Noncommercial）。",
+      "expected_keywords": [
+        "PolyForm",
+        "Noncommercial",
+        "license"
+      ]
+    },
+    {
+      "id": "B10",
+      "question": "README 有沒有對 token/coin 做防詐騙聲明？",
+      "expected_keywords": [
+        "NO official cryptocurrency",
+        "token",
+        "coin"
+      ]
+    },
+    {
+      "id": "B11",
+      "question": "為什麼大 repo 場景會建議以 CLI/MCP 為主？",
+      "expected_keywords": [
+        "browser memory",
+        "CLI",
+        "MCP"
+      ]
+    },
+    {
+      "id": "B12",
+      "question": "在實務上，GitNexus 比純文件式理解多了什麼？",
+      "expected_keywords": [
+        "relationship",
+        "knowledge graph",
+        "impact"
+      ]
+    }
+  ]
+}
