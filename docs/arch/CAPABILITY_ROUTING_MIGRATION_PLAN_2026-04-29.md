@@ -612,6 +612,18 @@ incrementally.
     `nexus-value-repair-001` covered Hyper + Delivery Gate, and
     `nexus-value-context-001` covered CodeIntel + Memory.
 
+## 2026-04-30 Fixed Capability Smoke Suite
+- The fixed smoke entry is now `scripts/ops/capability_route_smoke.py`.
+- It runs two suites:
+  - `route_oracles`: the 8 route-oracle tasks for Autoreason, DDTree,
+    Ultra Review, Research, LanceDB, Swarm, Drone, and Nightshift.
+  - `codeintel_hyper`: the 2 Nexus value tasks for Hyper, CodeIntel, Memory,
+    and Delivery Gate.
+- The current capability status table is
+  `docs/arch/CAPABILITY_ROUTE_STATUS_2026-04-30.md`.
+- This smoke suite is the required preflight before spending Gemini quota on
+  public comparison runs.
+
 ## Residual Debt
 - Swarm, Drone, and Nightshift now have bench-safe local executor receipts, but
   they still need production-grade non-benchmark executor evidence before broad
