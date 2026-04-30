@@ -67,6 +67,10 @@ def build_capability_signals(
     capability_stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
     route_decision = route.get("route_decision", {}) if isinstance(route, dict) else {}
     route_decision = route_decision if isinstance(route_decision, dict) else {}
+    autonomic = route.get("autonomic_signals", {}) if isinstance(route, dict) else {}
+    autonomic = autonomic if isinstance(autonomic, dict) else {}
+    msa = route.get("msa_routing", {}) if isinstance(route, dict) else {}
+    msa = msa if isinstance(msa, dict) else {}
     decision_selected = route_decision.get("selected_capabilities", []) or []
     decision_acceleration = route_decision.get("acceleration_layers", []) or []
     decision_governance = route_decision.get("governance_layers", []) or []
@@ -121,6 +125,13 @@ def build_capability_signals(
         ),
         skill_candidates=skill_signals.top_skill_ids,
         skill_confidence=skill_signals.skill_confidence,
+        autonomic_suggested_mode=str(autonomic.get("suggested_mode") or ""),
+        autonomic_policy_match_count=_as_int(autonomic.get("policy_match_count"), 0),
+        autonomic_research_requested=bool(autonomic.get("research_requested", False)),
+        autonomic_swarm_candidate=bool(autonomic.get("swarm_candidate", False)),
+        msa_candidate_count=_as_int(msa.get("candidate_count"), 0),
+        msa_top_score=_as_float(msa.get("top_score"), 0.0),
+        msa_rerank_reasons=tuple(str(item) for item in (msa.get("rerank_reasons", []) or []) if str(item)),
     )
 
 

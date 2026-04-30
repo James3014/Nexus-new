@@ -126,6 +126,47 @@ def _is_true(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
+def _has_policy_hit(row: dict[str, Any]) -> bool:
+    if _is_true(row.get("policy_applied")):
+        return True
+    if _as_int(row.get("policy_hit_count"), 0) > 0:
+        return True
+    if _as_int(row.get("autonomic_policy_match_count"), 0) > 0:
+        return True
+    return bool(str(row.get("policy_hit") or row.get("policy_hit_ids") or "").strip())
+
+
+def _is_fail_closed_block(row: dict[str, Any]) -> bool:
+    if _is_true(row.get("fail_closed_blocked")):
+        return True
+    text = " ".join(
+        str(row.get(key) or "")
+        for key in ("runtime_classification", "infra_invalid_reason", "reject_reason", "blocked_reason", "failure_reason")
+    ).lower()
+    if any(token in text for token in ("fail_closed", "blocked", "gate_rejected", "missing_route_decision")):
+        return True
+    for receipt in _row_capability_receipts(row):
+        reason = str(receipt.get("failure_reason") or "").strip()
+        if reason in {"pending_executor", "selected_without_invocation", "invoked_without_evidence", "evidence_without_gate_pass"}:
+            return True
+    return False
+
+
+def _replay_observed(row: dict[str, Any]) -> bool:
+    return any(
+        key in row
+        for key in ("replay_passed", "replay_status", "replay_exit_code", "replay_report_path", "replay_command")
+    )
+
+
+def _replay_passed(row: dict[str, Any]) -> bool:
+    if "replay_passed" in row:
+        return _is_true(row.get("replay_passed"))
+    if "replay_exit_code" in row:
+        return _as_int(row.get("replay_exit_code"), 1) == 0
+    return str(row.get("replay_status") or "").strip().upper() in {"PASS", "PASSED", "SUCCESS"}
+
+
 def _model_uses_nexus(row: dict[str, Any]) -> bool:
     return _is_true(row.get("model_uses_nexus", row.get("gemini_uses_nexus")))
 
@@ -442,6 +483,14 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "mutation_required_rate": 0.0,
             "mutation_success_rate": 0.0,
             "rlm_trace_present_rate": 0.0,
+            "avg_time_to_verified_sec": 0.0,
+            "fail_closed_block_rate": 0.0,
+            "replay_pass_rate": 0.0,
+            "replay_observed_rate": 0.0,
+            "policy_hit_success_rate": 0.0,
+            "no_policy_success_rate": 0.0,
+            "policy_hit_success_lift": 0.0,
+            "onboarding_success_7d": 0.0,
         }
 
     solved = sum(1 for row in rows if _is_solved(row))
@@ -560,6 +609,16 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
     phase_keys = ("phase_p", "phase_x", "phase_d", "phase_r", "phase_a", "phase_c")
     mutation_required_rows = [row for row in rows if _is_true(row.get("mutation_required"))]
     patch_success = sum(1 for row in rows if _is_solved(row) and _is_true(row.get("artifact_changed")))
+    verified_wall_durations = [
+        _as_float(row.get("wall_duration_sec", row.get("duration_sec", row.get("elapsed_sec", 0.0))), 0.0)
+        for row in rows
+        if _is_solved(row)
+    ]
+    replay_rows = [row for row in rows if _replay_observed(row)]
+    policy_rows = [row for row in rows if _has_policy_hit(row)]
+    no_policy_rows = [row for row in rows if not _has_policy_hit(row)]
+    policy_hit_success_rate = _rate(policy_rows, _is_solved)
+    no_policy_success_rate = _rate(no_policy_rows, _is_solved)
 
     return {
         "total_runs": total,
@@ -633,6 +692,14 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "mutation_required_rate": _rate(rows, lambda r: _is_true(r.get("mutation_required"))),
         "mutation_success_rate": _rate(mutation_required_rows, lambda r: _is_solved(r) and _is_true(r.get("artifact_changed"))),
         "rlm_trace_present_rate": _rate(rows, lambda r: _is_true(r.get("rlm_trace_present"))),
+        "avg_time_to_verified_sec": round(_mean(verified_wall_durations), 4),
+        "fail_closed_block_rate": _rate(rows, _is_fail_closed_block),
+        "replay_pass_rate": _rate(replay_rows, _replay_passed),
+        "replay_observed_rate": round(len(replay_rows) / total, 4),
+        "policy_hit_success_rate": policy_hit_success_rate,
+        "no_policy_success_rate": no_policy_success_rate,
+        "policy_hit_success_lift": round(policy_hit_success_rate - no_policy_success_rate, 4),
+        "onboarding_success_7d": 0.0,
     }
 
 
@@ -817,6 +884,22 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         "patch_success_rate_delta": round(summary_b["patch_success_rate"] - summary_a["patch_success_rate"], 4),
         "verification_only_rate_delta": round(summary_b["verification_only_rate"] - summary_a["verification_only_rate"], 4),
         "mutation_success_rate_delta": round(summary_b["mutation_success_rate"] - summary_a["mutation_success_rate"], 4),
+        "avg_time_to_verified_sec_delta": round(
+            summary_b["avg_time_to_verified_sec"] - summary_a["avg_time_to_verified_sec"], 4
+        ),
+        "fail_closed_block_rate_delta": round(
+            summary_b["fail_closed_block_rate"] - summary_a["fail_closed_block_rate"], 4
+        ),
+        "replay_pass_rate_delta": round(summary_b["replay_pass_rate"] - summary_a["replay_pass_rate"], 4),
+        "replay_observed_rate_delta": round(
+            summary_b["replay_observed_rate"] - summary_a["replay_observed_rate"], 4
+        ),
+        "policy_hit_success_rate_delta": round(
+            summary_b["policy_hit_success_rate"] - summary_a["policy_hit_success_rate"], 4
+        ),
+        "policy_hit_success_lift_delta": round(
+            summary_b["policy_hit_success_lift"] - summary_a["policy_hit_success_lift"], 4
+        ),
     }
     return {
         "a": {"label": label_a, "summary": summary_a},

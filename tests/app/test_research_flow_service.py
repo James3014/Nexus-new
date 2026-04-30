@@ -63,13 +63,13 @@ def test_ultra_review_gate_report_path_is_task_scoped(tmp_path: Path, monkeypatc
         repo_root=tmp_path,
         task_desc="Review task",
         task_id="task-a",
-        capability_stack={"governance_layers": ["ultra_review"]},
+        route_decision={"governance_layers": ["ultra_review"]},
     )
     second = research_flow_service._ultra_review_gate_evidence(
         repo_root=tmp_path,
         task_desc="Review task",
         task_id="task-b",
-        capability_stack={"governance_layers": ["ultra_review"]},
+        route_decision={"governance_layers": ["ultra_review"]},
     )
 
     assert first["invoked"] is True
@@ -114,7 +114,7 @@ def test_ultra_review_route_gate_cleans_sandbox_after_evaluation(tmp_path: Path,
         repo_root=tmp_path,
         task_desc="Review task",
         task_id="task-a",
-        capability_stack={"governance_layers": ["ultra_review"]},
+        route_decision={"governance_layers": ["ultra_review"]},
     )
 
     assert out["gate_passed"] is True
@@ -319,6 +319,18 @@ def test_route_executor_flags_enable_dynamic_controls_for_repair_and_governance(
     assert repair["enable_ultra_review"] is True
     assert repair["enable_rlm"] is True
     assert governance["enable_autoreason_executor"] is True
+
+
+def test_route_executor_flags_fail_closed_without_route_decision_or_capability_plan():
+    out = research_flow_service.build_route_executor_flags(
+        task_desc="Plain task with legacy ultra_review keyword should not enable executor.",
+        task_type="bug",
+        route={"capability_stack": {"governance_layers": ["ultra_review"]}},
+    )
+
+    assert out["enable_ultra_review"] is False
+    assert out["enable_autoreason_executor"] is False
+    assert out["enable_ddtree_executor"] is False
 
 
 def test_codeintel_context_is_injected_into_task_text():
@@ -912,7 +924,7 @@ def test_ultra_review_gate_evidence_is_feature_flagged(tmp_path: Path, monkeypat
     out = research_flow_service._ultra_review_gate_evidence(
         repo_root=tmp_path,
         task_desc="fix risky orchestrator bug",
-        capability_stack={"governance_layers": ["ultra_review"]},
+        route_decision={"governance_layers": ["ultra_review"]},
     )
 
     assert out["recommended"] is True
@@ -954,7 +966,7 @@ def test_ultra_review_gate_evidence_runs_dry_gate_when_enabled(tmp_path: Path, m
     out = research_flow_service._ultra_review_gate_evidence(
         repo_root=tmp_path,
         task_desc="fix risky orchestrator bug",
-        capability_stack={"governance_layers": ["ultra_review"]},
+        route_decision={"governance_layers": ["ultra_review"]},
     )
 
     assert out["recommended"] is True

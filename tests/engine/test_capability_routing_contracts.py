@@ -5,7 +5,7 @@ from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_readiness import CORE_CAPABILITIES
 from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS
 from nexus.engine.capability_contracts import CapabilityReceipt
-from nexus.engine.capability_receipts import build_trace_receipts, selected_receipts
+from nexus.engine.capability_receipts import build_skill_receipts, build_trace_receipts, selected_receipts
 from nexus.engine.capability_signals import build_capability_signals
 
 
@@ -28,6 +28,17 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
                 "selected_capabilities": ["hyper_sprint"],
                 "acceleration_layers": ["ddtree"],
             },
+            "autonomic_signals": {
+                "suggested_mode": "research_first",
+                "research_requested": True,
+                "swarm_candidate": True,
+                "policy_match_count": 12,
+            },
+            "msa_routing": {
+                "candidate_count": 2,
+                "top_score": 0.81,
+                "rerank_reasons": ["source:lancedb", "sot:code"],
+            },
         },
         pillars={"lancedb": {"hits": 3}},
         codeintel={"impact_report_present": True},
@@ -40,6 +51,13 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
     assert signals.findings_hits == 1
     assert signals.codeintel_impact_present is True
     assert signals.skill_candidates == ("as-test-driven-development",)
+    assert signals.autonomic_suggested_mode == "research_first"
+    assert signals.autonomic_policy_match_count == 12
+    assert signals.autonomic_research_requested is True
+    assert signals.autonomic_swarm_candidate is True
+    assert signals.msa_candidate_count == 2
+    assert signals.msa_top_score == 0.81
+    assert signals.msa_rerank_reasons == ("source:lancedb", "sot:code")
     assert signals.repair_signal is True
     assert signals.evidence_signal is True
 
@@ -105,6 +123,21 @@ def test_selected_receipts_do_not_imply_invocation_or_public_claim_safety():
     assert receipts["swarm"].evidence_present is False
     assert receipts["swarm"].failure_reason == "pending_executor"
     assert receipts["swarm"].public_claim_safe is False
+
+
+def test_skill_receipts_separate_candidate_selection_from_usage_evidence():
+    receipts = build_skill_receipts(
+        skills=[{"skill_id": "as-code-review-and-quality", "score": 0.91}],
+        injected_ids={"as-code-review-and-quality"},
+        used_ids={"as-code-review-and-quality"},
+    )
+
+    assert receipts[0].selected is True
+    assert receipts[0].injected is True
+    assert receipts[0].used is True
+    assert receipts[0].evidence_present is False
+    assert receipts[0].outcome_contributed is False
+    assert receipts[0].failure_reason == "used_without_evidence"
 
 
 def test_execution_plan_serializes_selected_capabilities_and_controls():

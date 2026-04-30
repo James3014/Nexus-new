@@ -532,9 +532,6 @@ def _ultra_review_gate_evidence(
     route_decision = route_decision if isinstance(route_decision, dict) else {}
     controls = route_decision.get("executor_controls") if isinstance(route_decision.get("executor_controls"), dict) else {}
     governance_layers = route_decision.get("governance_layers")
-    if governance_layers is None:
-        capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
-        governance_layers = capability_stack.get("governance_layers", [])
     if not isinstance(governance_layers, list):
         governance_layers = []
     recommended = bool(controls.get("enable_ultra_review") or "ultra_review" in {str(item) for item in governance_layers})
@@ -545,7 +542,7 @@ def _ultra_review_gate_evidence(
             "gate_passed": None,
             "report_path": "",
             "failures": [],
-            "reason": "not_recommended",
+            "reason": "missing_route_decision" if not route_decision else "not_recommended",
         }
     if os.environ.get("NEXUS_ULTRA_REVIEW_DRY_GATE", "").strip().lower() not in {"1", "true", "yes", "on"}:
         return {
@@ -1200,8 +1197,7 @@ def build_route_executor_flags(*, task_desc: str, task_type: str, route: dict[st
         if isinstance(plan_payload, dict) and plan_payload.get("selected_capabilities") is not None:
             controls = build_executor_controls(plan_payload)
         else:
-            plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=route)
-            controls = build_executor_controls(plan)
+            controls = {}
     return {
         "enable_autoreason_executor": bool(controls.get("enable_autoreason_executor", False)),
         "enable_ddtree_executor": bool(controls.get("enable_ddtree_executor", False)),

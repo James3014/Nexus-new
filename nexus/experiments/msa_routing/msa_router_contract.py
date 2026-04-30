@@ -38,6 +38,7 @@ class RoutingResult(BaseModel):
     score: float = 0.0
     selected: List[MemoryCandidate] = Field(default_factory=list)
     reject_reason: Optional[str] = None
+    rerank_reasons: List[str] = Field(default_factory=list)
     status: Literal["ANSWERED", "UNKNOWN", "CONFLICT"]
 
 class MSARouter:
@@ -58,6 +59,15 @@ class MSARouter:
         score = semantic_score * candidate.claim_confidence * candidate.confidence_decay * evidence_weight
         return max(0.0, min(1.0, score))
 
+    def _rerank_reason(self, candidate: MemoryCandidate) -> str:
+        if candidate.retrieval_source != "lancedb":
+            return f"{candidate.id}:source={candidate.retrieval_source}:capped_below_threshold"
+        return (
+            f"{candidate.id}:source=lancedb:type={candidate.type}:"
+            f"vector={candidate.vector_similarity:.3f}:claim={candidate.claim_confidence:.3f}:"
+            f"decay={candidate.confidence_decay:.3f}:score={candidate.score:.3f}"
+        )
+
     def route(self, query_id: str, retrieved_candidates: List[MemoryCandidate], query_type: str = "default") -> RoutingResult:
         if not retrieved_candidates:
             return RoutingResult(
@@ -69,6 +79,7 @@ class MSARouter:
         for candidate in retrieved_candidates:
             candidate.score = self._hybrid_score(candidate)
         sorted_candidates = sorted(retrieved_candidates, key=lambda c: c.score, reverse=True)
+        rerank_reasons = [self._rerank_reason(candidate) for candidate in sorted_candidates]
         best_candidate = sorted_candidates[0]
 
         if best_candidate.score < self.confidence_threshold:
@@ -77,7 +88,8 @@ class MSARouter:
                 candidates=sorted_candidates,
                 score=best_candidate.score,
                 status="UNKNOWN",
-                reject_reason=f"best_score_{best_candidate.score}_below_threshold_{self.confidence_threshold}"
+                reject_reason=f"best_score_{best_candidate.score}_below_threshold_{self.confidence_threshold}",
+                rerank_reasons=rerank_reasons,
             )
 
         selected = [c for c in sorted_candidates if c.score >= self.confidence_threshold]
@@ -87,5 +99,6 @@ class MSARouter:
             candidates=sorted_candidates,
             score=best_candidate.score,
             selected=selected,
+            rerank_reasons=rerank_reasons,
             status="ANSWERED"
         )

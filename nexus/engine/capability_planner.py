@@ -480,6 +480,7 @@ class CapabilityPlanner:
         codeintel: dict[str, Any] | None = None,
         phase_trace: dict[str, Any] | None = None,
         budget: dict[str, Any] | None = None,
+        skills: list[dict[str, Any]] | None = None,
     ) -> CapabilityPlan:
         pillars = pillars or {}
         codeintel = codeintel or {}
@@ -491,6 +492,7 @@ class CapabilityPlanner:
             route=route,
             pillars=pillars,
             codeintel=codeintel,
+            skills=skills,
         )
         constraint_model = build_capability_constraints(budget)
         scoring = CapabilityScoringConfig.from_budget(budget)
@@ -549,6 +551,17 @@ class CapabilityPlanner:
             enable("codeintel", "impact_or_blast_radius_needed")
         if signals.should_research or not signals.lancedb_hits:
             enable("research", "context_or_retrieval_gap")
+        if signals.autonomic_research_requested or signals.autonomic_suggested_mode == "research_first":
+            enable("research", "autonomic_research_signal")
+        if signals.autonomic_policy_match_count >= 10:
+            enable("pregate", "autonomic_policy_density_signal")
+            enable("plan_quality_gate", "autonomic_policy_density_signal")
+        if signals.autonomic_swarm_candidate and signals.risk_score >= 60:
+            enable("swarm", "autonomic_swarm_candidate_signal")
+        if signals.msa_candidate_count > 0 or signals.msa_top_score >= 0.75:
+            enable("lancedb", "msa_retrieval_signal")
+        if signals.skill_candidates:
+            enable("registry_sync", "skill_candidate_signal")
         if signals.learning_signal:
             enable("learn_mode", "claim_or_citation_learning_signal")
             enable("learn_phase_slo", "learn_phase_policy_needed")

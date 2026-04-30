@@ -111,6 +111,13 @@ class CapabilitySignalSet:
     research_control_signal: bool = False
     skill_candidates: tuple[str, ...] = ()
     skill_confidence: float = 0.0
+    autonomic_suggested_mode: str = ""
+    autonomic_policy_match_count: int = 0
+    autonomic_research_requested: bool = False
+    autonomic_swarm_candidate: bool = False
+    msa_candidate_count: int = 0
+    msa_top_score: float = 0.0
+    msa_rerank_reasons: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

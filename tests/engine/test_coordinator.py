@@ -133,6 +133,23 @@ def test_run_benchmark_returns_current_result_shape():
         stack.close()
 
 
+def test_run_research_does_not_translate_cache_flag_into_swarm_mode():
+    config = EngineConfig(project_root=Path("/tmp/nexus_test"), run_dir=Path("/tmp/nexus_test/runs/test-run"), silent=True)
+    engine, _, stack = _build_engine(config, reporter=MagicMock())
+    try:
+        engine._execute_task_workflow = MagicMock(return_value=True)
+
+        result = engine.run_research(task_id="research-1", query="find context", use_cache=True)
+
+        assert result is True
+        call = engine._execute_task_workflow.call_args
+        state = call.kwargs["state"]
+        assert state.metadata["use_sota_cache"] is True
+        assert state.metadata["swarm_mode"] is False
+    finally:
+        stack.close()
+
+
 def test_run_task_pipeline_binds_explicit_spec_into_direct_mode_context():
     config = EngineConfig(project_root=Path("/tmp/nexus_test"), run_dir=Path("/tmp/nexus_test/runs/test-run"), silent=True)
     engine, _, stack = _build_engine(config, reporter=MagicMock())

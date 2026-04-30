@@ -314,15 +314,17 @@ class NexusEngine:
         query = kwargs.get("query", "")
         # 🧪 物理具現：彈性化 context 吸收
         context = kwargs.get("context") or {}
-        use_cache = kwargs.get("use_sota_cache") or kwargs.get("use_cache", True)
+        use_cache = kwargs.get("use_sota_cache", kwargs.get("use_cache", True))
+        swarm_mode = bool(kwargs.get("swarm_mode", context.get("swarm_mode", False)))
         
         # ⚖️ 狀態導通：實例化物理主權
         state = NexusState(task_id=task_id)
         
-        # 🧬 物理具現：注入進化元數據
-        state.metadata["swarm_mode"] = use_cache
-        state.metadata["task_description"] = query
         state.metadata.update(context)
+        # 🧬 物理具現：注入進化元數據
+        state.metadata["use_sota_cache"] = use_cache
+        state.metadata["swarm_mode"] = swarm_mode
+        state.metadata["task_description"] = query
         
         return self._execute_task_workflow(task_id, "nexus:research", state=state)
 

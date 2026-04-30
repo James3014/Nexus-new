@@ -402,3 +402,36 @@ def test_capability_planner_selects_msa_capabilities_from_explicit_task_type_wor
 
     selected = set(plan["selected_capabilities"])
     assert {"swarm", "drone", "nightshift"} <= selected
+
+
+def test_capability_planner_consumes_provider_signals_without_executor_side_effects():
+    plan = CapabilityPlanner().plan(
+        task_desc="Investigate policy-dense route signal with MSA code evidence.",
+        task_type="bug",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 65,
+                "adjusted_root_cause_confidence": 0.7,
+                "candidate_count": 1,
+            },
+            "autonomic_signals": {
+                "suggested_mode": "research_first",
+                "research_requested": True,
+                "swarm_candidate": True,
+                "policy_match_count": 12,
+            },
+            "msa_routing": {
+                "candidate_count": 1,
+                "top_score": 0.86,
+                "rerank_reasons": ["source:lancedb", "sot:code"],
+            },
+        },
+        skills=[{"skill_id": "as-code-review-and-quality", "score": 0.91}],
+    )
+
+    payload = plan.to_dict()
+    selected = set(payload["selected_capabilities"])
+    assert {"research", "pregate", "plan_quality_gate", "swarm", "lancedb", "registry_sync"} <= selected
+    assert payload["signal_snapshot"]["autonomic_suggested_mode"] == "research_first"
+    assert payload["signal_snapshot"]["msa_rerank_reasons"] == ("source:lancedb", "sot:code")

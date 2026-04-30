@@ -177,6 +177,8 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "nexus_usage_valid": True,
                         "nexus_rescued": True,
                         "nexus_winner_source": "local",
+                        "policy_hit_count": 2,
+                        "replay_status": "PASS",
                         "pillar_lancedb_active": True,
                         "pillar_memory_active": True,
                         "pillar_mempalace_active": True,
@@ -213,6 +215,7 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
                         "nexus_usage_valid": True,
                         "nexus_rescued": False,
                         "nexus_winner_source": "llm_self_heal",
+                        "fail_closed_blocked": True,
                         "pillar_lancedb_active": True,
                         "pillar_memory_active": True,
                         "pillar_mempalace_active": True,
@@ -270,6 +273,13 @@ def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     assert "Nightshift recovered | 0.0% | 0.0% | 0.0%" in out
     assert "## Capability Win Map" in out
     assert "Token public-safe claim | NO | NO | n/a" in out
+    assert "## Trustworthy Delivery KPIs" in out
+    assert "Time-to-Verified | 10.00s | 9.00s | -1.00s" in out
+    assert "Fail-closed block rate | 0.0% | 50.0% | 50.0%" in out
+    assert "Replay observed rate | 0.0% | 50.0% | 50.0%" in out
+    assert "Replay pass rate | 0.0% | 100.0% | 100.0%" in out
+    assert "Policy-hit success rate | 0.0% | 100.0% | 100.0%" in out
+    assert "7-day onboarding success | observation | observation | n/a" in out
     assert "| measured | 2 | 1 |" in out
     assert "| estimated | 0 | 1 |" in out
     assert "Without Nexus infra invalid reasons: none" in out

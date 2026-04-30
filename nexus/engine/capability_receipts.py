@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nexus.engine.capability_contracts import CapabilityPlan, CapabilityReceipt
+from nexus.engine.capability_contracts import CapabilityPlan, CapabilityReceipt, SkillReceipt
 from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS, merge_capability_receipt
 
 
@@ -72,4 +72,45 @@ def build_trace_receipts(
             receipts.append(receipt)
             continue
         receipts.append(_pending_receipt(name) if name in pending else CapabilityReceipt(name=name, selected=True))
+    return receipts
+
+
+def build_skill_receipts(
+    *,
+    skills: list[dict[str, Any]] | None = None,
+    injected_ids: set[str] | tuple[str, ...] | list[str] | None = None,
+    used_ids: set[str] | tuple[str, ...] | list[str] | None = None,
+    evidence_ids: set[str] | tuple[str, ...] | list[str] | None = None,
+    outcome_ids: set[str] | tuple[str, ...] | list[str] | None = None,
+) -> list[SkillReceipt]:
+    injected = {str(item) for item in (injected_ids or [])}
+    used = {str(item) for item in (used_ids or [])}
+    evidence = {str(item) for item in (evidence_ids or [])}
+    outcome = {str(item) for item in (outcome_ids or [])}
+    receipts: list[SkillReceipt] = []
+    for skill in skills or []:
+        skill_id = str(skill.get("skill_id") or skill.get("task_id") or "").strip()
+        if not skill_id:
+            continue
+        selected = bool(skill.get("selected", True))
+        was_injected = skill_id in injected or bool(skill.get("injected", False))
+        was_used = skill_id in used or bool(skill.get("used", False))
+        has_evidence = skill_id in evidence or bool(skill.get("evidence_present", False))
+        contributed = skill_id in outcome or bool(skill.get("outcome_contributed", False))
+        failure_reason = ""
+        if selected and not was_injected:
+            failure_reason = "selected_without_injection"
+        elif selected and was_used and not has_evidence:
+            failure_reason = "used_without_evidence"
+        receipts.append(
+            SkillReceipt(
+                skill_id=skill_id,
+                selected=selected,
+                injected=was_injected,
+                used=was_used,
+                evidence_present=has_evidence,
+                outcome_contributed=bool(contributed and has_evidence),
+                failure_reason=failure_reason,
+            )
+        )
     return receipts

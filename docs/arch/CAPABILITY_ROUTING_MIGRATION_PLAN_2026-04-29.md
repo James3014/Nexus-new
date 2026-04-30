@@ -854,6 +854,51 @@ incrementally.
     `RouteDecision` through the planner SSOT.
   - Do not use fallback-generated candidates as public benchmark evidence.
 
+## 2026-05-01 Provider Signal SSOT COE Lesson
+- Failure lesson:
+  - Removing fake fallback is not enough if provider outputs still bypass the
+    planner. Autonomic, Skill, and MSA providers must feed a shared signal model
+    before any execution flag or public receipt can be produced.
+  - `run_research()` also reused `swarm_mode` to mean cache usage. That metadata
+    can be consumed by repair setup as an executor switch, so cache and swarm
+    must remain separate concepts.
+  - Executor flags and Ultra Review gates must not rebuild decisions from
+    legacy `capability_stack`; missing `RouteDecision` or formal
+    `capability_plan` means fail-closed.
+- Fix:
+  - `CapabilitySignalSet` now carries Autonomic signal fields, MSA retrieval
+    fields, and skill candidate fields as observability inputs.
+  - `CapabilityPlanner.plan(..., skills=...)` consumes provider signals and only
+    converts them into planner selections/reasons.
+  - `SkillReceipt` projection separates selected/injected/used/evidence/outcome
+    from capability receipts, preventing skill candidates from becoming public
+    capability claims.
+  - Ultra Review recommendation no longer falls back to legacy
+    `capability_stack.governance_layers`; executor flags no longer re-run the
+    selector when both `RouteDecision` and formal `capability_plan` are absent.
+- Benchmark KPI mapping:
+  - `Time-to-Verified`: measured from runner wall time plus semantic verified
+    completion.
+  - `Fail-closed block rate`: measured from gate/reject reasons such as
+    `missing_route_decision`, `selected_without_invocation`, and
+    `pending_executor`.
+  - `Replay pass rate`: measured by route smoke, changed-only replay, and future
+    public A/B replay bundles.
+  - `Policy-hit success lift`: measured by rows with Autonomic policy density or
+    MemPalace hits versus rows without those signals.
+  - `7-day onboarding success`: tracked as a separate observation/onboarding
+    suite, not as a single Gemini A/B denominator.
+- Evidence:
+  - `uv run pytest -q tests/app/test_research_flow_service.py
+    tests/engine/test_coordinator.py tests/engine/test_capability_routing_contracts.py
+    tests/engine/test_capability_planner.py tests/experiments/test_msa_routing.py`
+    -> 113 passed.
+- Next:
+  - Add report columns for the KPI mapping before publishing any public
+    comparison.
+  - Keep single-run public benchmark claims focused on verified delivery,
+    fail-closed behavior, replayability, and cost/time efficiency.
+
 ## 2026-04-29 P2 RouteDecision Adapter Lesson
 - Failure lesson:
   - Do not expose full capability state by adding new fields to the legacy

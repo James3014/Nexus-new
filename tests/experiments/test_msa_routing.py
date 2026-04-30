@@ -79,6 +79,7 @@ def test_router_caps_fallback_candidates_below_answer_threshold():
 
     assert result.status == "UNKNOWN"
     assert result.candidates[0].score < 0.8
+    assert "capped_below_threshold" in result.rerank_reasons[0]
 
 
 def test_router_reranks_by_confidence_and_sot_weight():
@@ -109,6 +110,7 @@ def test_router_reranks_by_confidence_and_sot_weight():
     result = router.route("query-rerank", [belief, code])
 
     assert result.candidates[0].id == "code"
+    assert "type=code" in result.rerank_reasons[0]
 
 
 def test_retriever_missing_db_returns_no_candidates(tmp_path):
