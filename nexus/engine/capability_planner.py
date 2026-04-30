@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, PHASES
+from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, CapabilityScoringConfig, PHASES
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
 
 PENDING_EXECUTOR_CAPABILITIES = {"swarm", "drone", "nightshift"}
@@ -493,6 +493,7 @@ class CapabilityPlanner:
             codeintel=codeintel,
         )
         constraint_model = build_capability_constraints(budget)
+        scoring = CapabilityScoringConfig.from_budget(budget)
 
         states: dict[str, str] = {
             name: ("required" if node.default_state == "required" else "optional")
@@ -594,7 +595,7 @@ class CapabilityPlanner:
         if total_cost > constraint_model.max_cost:
             for name in sorted(
                 [item for item in selected if states[item] == "conditional"],
-                key=lambda item: (self.nodes[item].benefit + self.nodes[item].risk_reduction - self.nodes[item].cost, self.nodes[item].cost),
+                key=lambda item: (scoring.score(self.nodes[item]), self.nodes[item].cost),
             ):
                 if total_cost <= constraint_model.max_cost:
                     break
@@ -607,7 +608,7 @@ class CapabilityPlanner:
         score = 0
         for name, node in self.nodes.items():
             state = states[name]
-            score_delta = node.benefit + node.risk_reduction - node.cost if state in {"required", "conditional"} else 0
+            score_delta = scoring.score(node) if state in {"required", "conditional"} else 0
             score += score_delta
             decision_trace.append(
                 {
@@ -618,6 +619,8 @@ class CapabilityPlanner:
                     "dependencies": list(node.dependencies),
                     "parallelizable_with": list(node.parallelizable_with),
                     "score_delta": score_delta,
+                    "score_components": scoring.components(node),
+                    "scoring_weights": scoring.to_dict(),
                 }
             )
 

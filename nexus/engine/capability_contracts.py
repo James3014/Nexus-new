@@ -31,6 +31,47 @@ class CapabilityNode:
 
 
 @dataclass(frozen=True)
+class CapabilityScoringConfig:
+    benefit_weight: float = 1.0
+    risk_weight: float = 1.0
+    cost_weight: float = 1.0
+
+    @staticmethod
+    def _weight(raw: Any, default: float = 1.0) -> float:
+        try:
+            return float(raw or default)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def from_budget(cls, budget: dict[str, Any] | None) -> "CapabilityScoringConfig":
+        raw = (budget or {}).get("scoring", {})
+        raw = raw if isinstance(raw, dict) else {}
+        return cls(
+            benefit_weight=cls._weight(raw.get("benefit_weight")),
+            risk_weight=cls._weight(raw.get("risk_weight")),
+            cost_weight=cls._weight(raw.get("cost_weight")),
+        )
+
+    def score(self, node: "CapabilityNode") -> float:
+        return (
+            float(node.benefit) * self.benefit_weight
+            + float(node.risk_reduction) * self.risk_weight
+            - float(node.cost) * self.cost_weight
+        )
+
+    def components(self, node: "CapabilityNode") -> dict[str, float]:
+        return {
+            "benefit": float(node.benefit) * self.benefit_weight,
+            "risk_reduction": float(node.risk_reduction) * self.risk_weight,
+            "cost_penalty": float(node.cost) * self.cost_weight,
+        }
+
+    def to_dict(self) -> dict[str, float]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class CapabilitySignalSet:
     task_desc: str
     task_type: str
@@ -102,7 +143,7 @@ class CapabilityPlan:
     constraints: list[str]
     decision_trace: list[dict[str, Any]]
     replan_trace: list[dict[str, Any]]
-    score: int
+    score: float
     planner_mode: str = "dry_run"
     signal_snapshot: dict[str, Any] = field(default_factory=dict)
 

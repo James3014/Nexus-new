@@ -164,6 +164,23 @@ incrementally.
   verified outcome. A globally verified task must not make selected-only
   capabilities look contributory.
 
+## 2026-04-30 V3 Plan Alignment
+- The repo SSOT for routing migration is this document. A referenced
+  `docs/arch/NEXUS_ROUTING_LONG_PLAN_V2.md` was not present in this worktree,
+  and `PHASE3_TASKBOARD.md` currently describes algebraic reasoning evidence,
+  not the capability-routing P1-P34 board.
+- Autoreason, DDTree, and CapabilityReceipt are no longer roadmap-only:
+  - Autoreason has executor receipts with winner and judge evidence.
+  - DDTree has v2 tree-pruning evidence (`tree_depth`, `branch_count`,
+    `pruned_count`) while preserving the existing selected-candidate behavior.
+  - CapabilityReceipt requires selected, invoked, evidence, gate, and outcome
+    before public capability claims are safe.
+- Drone has a bench-safe local receipt path for verified route-oracle artifacts.
+  Swarm and Nightshift remain pending until they produce real executor evidence.
+- Route argmax now accepts `budget.scoring` weights for benefit, risk reduction,
+  and cost. Defaults preserve the legacy `benefit + risk_reduction - cost`
+  formula while exposing score components for reports and future tuning.
+
 ## 2026-04-29 P90-P97 Routing Health Result
 - P37 Nexus-only routing health ran 12 cross-module hard tasks with no Gemini:
   - with Nexus: solve rate 100%, semantic verified 100%, trust mismatch 0%.
@@ -522,6 +539,26 @@ incrementally.
 - Next:
   - Re-run hard-001 Nexus-only, then rerun the public-candidate Flash slice.
     Do not run larger Gemini comparisons until hard route no longer regresses.
+
+## 2026-04-30 P46 Argmax Cost/Risk Lesson
+- Failure lesson:
+  - Auto-flow writes several same-sized Python patches in rapid sequence during
+    baseline probe, Hyper, and guard fallback verification. In subprocess
+    pytest, Python can reuse stale bytecode when the source file size and
+    timestamp granularity line up. That made a failing fallback patch look
+    successful in broader ordered test runs.
+  - Benchmark harnesses must treat rapid patch/restore loops as bytecode-cache
+    sensitive. Otherwise route quality, wall time, and verified-delivery data
+    can be polluted by stale `.pyc` execution rather than true model or Nexus
+    behavior.
+- Fix:
+  - Auto-flow source writes now invalidate the matching Python bytecode cache
+    after each patch or restore.
+  - Capability argmax scoring now accepts `budget.scoring` weights for benefit,
+    risk reduction, and cost while preserving the legacy default formula.
+- Evidence:
+  - The route-contract and capability-routing ordered repros now pass.
+  - The broader route/app/benchmark regression slice passes with 191 tests.
 
 ## Residual Debt
 - Nightshift, Swarm, and Drone still need production-grade executor evidence

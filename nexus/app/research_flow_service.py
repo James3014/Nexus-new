@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import concurrent.futures
+import importlib.util
 import subprocess
 import re
 import difflib
@@ -25,6 +26,20 @@ from nexus.engine.capability_router import CapabilityRouter
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.services.codeintel import analyze_impact, scan_codebase
+
+
+def _write_source_text(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+    if path.suffix != ".py":
+        return
+    try:
+        cache_path = Path(importlib.util.cache_from_source(str(path)))
+    except (NotImplementedError, ValueError):
+        return
+    try:
+        cache_path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 @dataclass(frozen=True)
@@ -1295,13 +1310,13 @@ def run_auto_flow(
             else:
                 companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline", 0)
                 restored_files[target_path] = original_code
-                target_path.write_text(patched, encoding="utf-8")
+                _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
                     if extra_path == target_path:
                         continue
                     restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
                     extra_path.parent.mkdir(parents=True, exist_ok=True)
-                    extra_path.write_text(extra_code, encoding="utf-8")
+                    _write_source_text(extra_path, extra_code)
                 res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
                 ok = res.returncode == 0
                 if not ok:
@@ -1316,7 +1331,7 @@ def run_auto_flow(
                     if path.exists():
                         path.unlink()
                 else:
-                    path.write_text(original_text, encoding="utf-8")
+                    _write_source_text(path, original_text)
         return {
             "flow": "baseline",
             "status": "SUCCESS" if ok else "FAILED",
@@ -1341,13 +1356,13 @@ def run_auto_flow(
             else:
                 companion_edits = generate_local_companion_edits(repo_root, target_path, task_desc, "baseline_probe", 0)
                 restored_files[target_path] = original_code
-                target_path.write_text(patched, encoding="utf-8")
+                _write_source_text(target_path, patched)
                 for extra_path, extra_code in companion_edits.items():
                     if extra_path == target_path:
                         continue
                     restored_files[extra_path] = extra_path.read_text(encoding="utf-8") if extra_path.exists() else None
                     extra_path.parent.mkdir(parents=True, exist_ok=True)
-                    extra_path.write_text(extra_code, encoding="utf-8")
+                    _write_source_text(extra_path, extra_code)
                 res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
                 ok = res.returncode == 0
                 if not ok:
@@ -1360,7 +1375,7 @@ def run_auto_flow(
                     if path.exists():
                         path.unlink()
                 else:
-                    path.write_text(original_text, encoding="utf-8")
+                    _write_source_text(path, original_text)
         return {
             "flow": "baseline_probe",
             "status": "SUCCESS" if ok else "FAILED",
@@ -1372,7 +1387,7 @@ def run_auto_flow(
 
     def _run_original_verification_rescue(previous_result: dict) -> dict:
         start = time.time()
-        target_path.write_text(original_code, encoding="utf-8")
+        _write_source_text(target_path, original_code)
         report = dict(previous_result.get("report", {}) if isinstance(previous_result.get("report"), dict) else {})
         try:
             res = subprocess.run(pytest_cmd, cwd=repo_root, capture_output=True, text=True, timeout=timeout_sec)
@@ -1433,7 +1448,7 @@ def run_auto_flow(
         ok = res.status == "SUCCESS" and bool(res.patch)
         err = ""
         if ok:
-            target_path.write_text(res.patch, encoding="utf-8")
+            _write_source_text(target_path, res.patch)
         else:
             err = res.reason
         return {
@@ -1530,7 +1545,7 @@ def run_auto_flow(
                 early_baseline_shortcut = True
                 probe_patch = baseline_probe.get("_patch")
                 if isinstance(probe_patch, str) and probe_patch and probe_patch != original_code:
-                    target_path.write_text(probe_patch, encoding="utf-8")
+                    _write_source_text(target_path, probe_patch)
                     result = {
                         "flow": "baseline",
                         "status": "SUCCESS",
@@ -1542,7 +1557,7 @@ def run_auto_flow(
                         },
                     }
                 else:
-                    target_path.write_text(original_code, encoding="utf-8")
+                    _write_source_text(target_path, original_code)
                     result = _run_baseline_apply()
                 chosen_flow = "baseline"
                 strategy_path = "probe_success_fastpath_baseline"
@@ -1564,7 +1579,7 @@ def run_auto_flow(
                 ):
                     guard_hit = True
                     hyper_result_for_guard = result
-                    target_path.write_text(original_code, encoding="utf-8")
+                    _write_source_text(target_path, original_code)
                     fallback_result = _run_baseline_apply()
                     if fallback_result.get("status") == "SUCCESS":
                         result = fallback_result

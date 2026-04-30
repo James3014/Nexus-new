@@ -65,6 +65,87 @@ def test_capability_planner_downgrades_optional_cost_but_keeps_gates():
     assert not {"mempalace_gate", "artifact_gate", "claim_gate"} & set(plan["forbidden_capabilities"])
 
 
+def test_capability_planner_default_scoring_matches_legacy_formula():
+    plan = CapabilityPlanner().plan(
+        task_desc="Repair a candidate-heavy bug with DDTree pruning",
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 60, "candidate_count": 4},
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+            },
+        },
+    ).to_dict()
+
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert trace["ddtree"]["score_delta"] == 3
+    assert trace["ddtree"]["score_components"] == {
+        "benefit": 3.0,
+        "risk_reduction": 1.0,
+        "cost_penalty": 1.0,
+    }
+    assert trace["ddtree"]["scoring_weights"] == {
+        "benefit_weight": 1.0,
+        "risk_weight": 1.0,
+        "cost_weight": 1.0,
+    }
+
+
+def test_capability_planner_accepts_cost_risk_scoring_weights():
+    plan = CapabilityPlanner().plan(
+        task_desc="Repair a candidate-heavy bug with DDTree pruning",
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 60, "candidate_count": 4},
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+            },
+        },
+        budget={"scoring": {"benefit_weight": 1.0, "risk_weight": 2.0, "cost_weight": 3.0}},
+    ).to_dict()
+
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert trace["ddtree"]["score_delta"] == 2
+    assert trace["ddtree"]["score_components"] == {
+        "benefit": 3.0,
+        "risk_reduction": 2.0,
+        "cost_penalty": 3.0,
+    }
+    assert trace["ddtree"]["scoring_weights"] == {
+        "benefit_weight": 1.0,
+        "risk_weight": 2.0,
+        "cost_weight": 3.0,
+    }
+
+
+def test_capability_planner_ignores_invalid_scoring_weights():
+    plan = CapabilityPlanner().plan(
+        task_desc="Repair a candidate-heavy bug with DDTree pruning",
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 60, "candidate_count": 4},
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+            },
+        },
+        budget={"scoring": {"benefit_weight": "bad", "risk_weight": None, "cost_weight": {}}},
+    ).to_dict()
+
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert trace["ddtree"]["score_delta"] == 3
+    assert trace["ddtree"]["scoring_weights"] == {
+        "benefit_weight": 1.0,
+        "risk_weight": 1.0,
+        "cost_weight": 1.0,
+    }
+
+
 def test_default_capability_nodes_cover_core_space():
     nodes = default_capability_nodes()
     for name in (
