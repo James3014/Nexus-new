@@ -533,6 +533,8 @@ class CapabilityPlanner:
             enable("belief", "confidence_control_needed")
         if signals.memory_hits or signals.findings_hits:
             enable("memory", "prior_lesson_or_findings_available")
+        if "docs_code_sync" in task_lower or "context" in task_lower or "contract" in task_lower:
+            enable("memory", "context_contract_memory_needed")
         if signals.lancedb_hits:
             enable("lancedb", "semantic_memory_hits_available")
         if "ddtree" in signals.acceleration_seed or signals.candidate_count >= 3 or signals.repair_signal:

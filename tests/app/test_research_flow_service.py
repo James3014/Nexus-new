@@ -77,6 +77,51 @@ def test_ultra_review_gate_report_path_is_task_scoped(tmp_path: Path, monkeypatc
     assert second["report_path"].endswith("task-b_route_gate_report.json")
 
 
+def test_ultra_review_route_gate_cleans_sandbox_after_evaluation(tmp_path: Path, monkeypatch):
+    sandbox_ref: dict[str, Path] = {}
+
+    class _FakeUltraReviewService:
+        def __init__(self, _repo_root):
+            pass
+
+        def run(self, **kwargs):
+            sandbox_path = Path(kwargs["sandbox_root"]) / "ultra-review-test"
+            (sandbox_path / "worktree").mkdir(parents=True, exist_ok=True)
+            (sandbox_path / "changes.diff").write_text("diff --git a/a.py b/a.py\n", encoding="utf-8")
+            (sandbox_path / "worktree" / "large.tmp").write_text("large sandbox mirror", encoding="utf-8")
+            sandbox_ref["path"] = sandbox_path
+            report_path = Path(kwargs["report_path"])
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema_version": "ultra-review.v1",
+                "status": "DRY_RUN_PASS",
+                "gate_passed": True,
+                "sandbox_path": str(sandbox_path),
+                "findings": [],
+                "artifacts": {"diff": str(sandbox_path / "changes.diff")},
+                "verification": {"reproduction_required": True},
+            }
+            report_path.write_text(json.dumps(payload), encoding="utf-8")
+            return payload
+
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DRY_GATE", "1")
+    monkeypatch.setattr("nexus.engine.ultra_review_service.UltraReviewService", _FakeUltraReviewService)
+    monkeypatch.setattr("scripts.ops.ultra_gate.evaluate_report", lambda _payload, check_artifacts=True: (True, []))
+
+    out = research_flow_service._ultra_review_gate_evidence(
+        repo_root=tmp_path,
+        task_desc="Review task",
+        task_id="task-a",
+        capability_stack={"governance_layers": ["ultra_review"]},
+    )
+
+    assert out["gate_passed"] is True
+    assert sandbox_ref["path"].exists() is True
+    assert (sandbox_ref["path"] / "changes.diff").exists() is True
+    assert (sandbox_ref["path"] / "worktree").exists() is False
+    assert Path(out["report_path"]).exists() is True
+
+
 def test_build_route_public_contract_exact_keys(tmp_path: Path):
     out = research_flow_service.build_route(
         repo_root=tmp_path,
@@ -585,6 +630,39 @@ def test_local_msa_executor_adds_nightshift_receipt_only_after_verified_recovery
     report = json.loads(Path(written["nightshift_report_path"]).read_text(encoding="utf-8"))
     assert report["source"] == "local_msa_bench_executor"
     assert report["recovered"] is True
+
+
+def test_local_route_oracle_adds_research_and_lancedb_receipt_refs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
+    evidence = research_flow_service._capability_evidence(
+        result_report={},
+        learning_trace={},
+        nightshift_recommended=False,
+    )
+
+    research = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-research-001",
+        task_desc="Choose a research-backed answer only when the cited source supports the claim.",
+        task_type="public_docs_code_sync",
+        evidence=evidence,
+        artifact_verified=True,
+    )
+    lancedb = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-lancedb-001",
+        task_desc="Select retrieval hits only when semantic score, topic pack, and source identifiers are all usable as evidence.",
+        task_type="public_docs_code_sync",
+        evidence=evidence,
+        artifact_verified=True,
+    )
+
+    assert research["research_used"] is True
+    assert research["research_gate_passed"] is True
+    assert research["research_refs"] == ["research:route-oracle-research-001:citation"]
+    assert lancedb["lancedb_hits"] == 1
+    assert lancedb["lancedb_gate_passed"] is True
+    assert lancedb["lancedb_refs"] == ["lancedb:route-oracle-lancedb-001:source_id"]
 
 
 def test_run_auto_flow_exposes_swarm_report_in_usage_trace(tmp_path: Path, monkeypatch):

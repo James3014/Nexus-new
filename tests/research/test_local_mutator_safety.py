@@ -186,6 +186,27 @@ def rlm_harder_v2_accept_swarm_report(report):
     assert accept({"consensus": "pass", "findings": [{"role": "logic"}, {"role": "security", "evidence": "b"}]}) is False
 
 
+def test_ultra_report_patch_requires_repro_command_and_negative_run():
+    source = """
+def rlm_harder_v2_accept_ultra_report(report):
+    return bool(report.get('sandbox_id') and report.get('gate_passed'))
+"""
+    patched = generate_local_candidate(
+        source,
+        "Accept an Ultra Review report only when sandbox evidence, gate status, and verified findings are present.",
+        "local",
+        0,
+    )
+    ns = {}
+    exec(patched, ns)
+    accept = ns["rlm_harder_v2_accept_ultra_report"]
+
+    assert accept({"sandbox_id": "s1", "gate_passed": True, "verified_findings": []}) is True
+    assert accept({"sandbox_id": "s1", "gate_passed": True, "verified_findings": [{"id": "bug"}]}) is False
+    assert accept({"sandbox_id": "s1", "gate_passed": True, "verified_findings": [{"id": "bug", "repro_command": "pytest -q", "negative_exit_code": 1}]}) is True
+    assert accept({"sandbox_id": "s1", "gate_passed": False, "verified_findings": []}) is False
+
+
 @pytest.mark.parametrize(
     ("source", "task", "function_name", "cases"),
     [

@@ -582,6 +582,36 @@ incrementally.
   - Nexus-only MSA route smoke passed 3/3 with all expected receipts
     `public_claim_safe=true` for Swarm, Drone, and Nightshift.
 
+## 2026-04-30 P51-P56 Route Oracle Cleanup Lesson
+- Failure lesson:
+  - Ultra Review route-gate smoke filled the disk: generated sandboxes under
+    `.nexus/reports/ultra_review/route_gate_sandboxes` grew to 61G, and the
+    broader `.nexus/reports/ultra_review` tree reached 64G. Capability smoke then
+    failed with `No space left on device`, which is infra-invalid and must not be
+    counted as a Nexus capability failure.
+  - Benchmark-only runtime caps can leak into nested verification. In this case
+    `NEXUS_LLM_CANDIDATE_CAP=3` polluted Ultra Review ghost regression tests and
+    made valid route-gate rows look like verified regressions.
+  - Context/documentation tasks selected CodeIntel, but the planner did not
+    select Memory and the receipt layer did not emit delivery/memory evidence.
+    That made solved tasks fail public-safe expected receipt coverage.
+- Fix:
+  - Route-gate Ultra Review now removes the per-run sandbox after evaluation and
+    keeps the JSON report as the durable evidence artifact.
+  - Ultra Review ghost regression sanitizes benchmark-only env vars before
+    running pytest inside the sandbox.
+  - Context/contract docs-sync tasks now select Memory, and verified runs emit
+    delivery and context-memory receipt refs.
+- Evidence:
+  - Freed disk from 103MiB available to 64GiB available by removing generated
+    Ultra Review route-gate sandboxes.
+  - Route-oracle smoke passed 8/8 with all expected receipts public-safe:
+    Autoreason, DDTree, Ultra Review, Research, LanceDB, Swarm, Drone, and
+    Nightshift.
+  - CodeIntel/Hyper补齐 smoke passed 2/2 with all expected receipts public-safe:
+    `nexus-value-repair-001` covered Hyper + Delivery Gate, and
+    `nexus-value-context-001` covered CodeIntel + Memory.
+
 ## Residual Debt
 - Swarm, Drone, and Nightshift now have bench-safe local executor receipts, but
   they still need production-grade non-benchmark executor evidence before broad

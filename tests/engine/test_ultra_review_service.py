@@ -17,8 +17,9 @@ def _init_repo(path):
     subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True)
 
 
-def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
+def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path, monkeypatch):
     _init_repo(tmp_path)
+    monkeypatch.setenv("NEXUS_LLM_CANDIDATE_CAP", "3")
     (tmp_path / "tests" / "engine").mkdir(parents=True)
     (tmp_path / "tests" / "engine" / "test_sample.py").write_text("def test_sample(): pass\n", encoding="utf-8")
     (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
@@ -61,6 +62,7 @@ def test_ultra_review_dry_run_writes_report_and_sandbox(tmp_path):
     assert payload["ghost_regression"]["execution_mode"] == "sandbox_mirror"
     assert payload["ghost_regression"]["timeout_sec"] == 30
     assert payload["ghost_regression"]["dependency_mode"] == "active_venv"
+    assert payload["ghost_regression"]["sanitized_env"] == ["NEXUS_LLM_CANDIDATE_CAP"]
     assert payload["ghost_regression"]["execution_cwd"].startswith(payload["sandbox_path"])
     assert (tmp_path / "reports" / "sandboxes" / payload["run_id"] / "worktree").exists()
     logic = payload["logic_breaker"]

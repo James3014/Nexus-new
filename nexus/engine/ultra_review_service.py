@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +33,9 @@ SECURITY_REPRO_TIMEOUT_SEC = 10
 RUNTIME_ARTIFACT_PREFIXES = (
     ".nexus/reports/",
     ".nexus-swarm-",
+)
+BENCHMARK_ONLY_ENV_VARS = (
+    "NEXUS_LLM_CANDIDATE_CAP",
 )
 
 
@@ -682,11 +686,18 @@ class UltraReviewService:
             }
 
         cmd = ["uv", "run", "--active", "pytest", "-q", *test_candidates]
+        env = os.environ.copy()
+        sanitized_env = []
+        for key in BENCHMARK_ONLY_ENV_VARS:
+            if key in env:
+                env.pop(key, None)
+                sanitized_env.append(key)
         timeout = False
         try:
             result = subprocess.run(
                 cmd,
                 cwd=execution_root,
+                env=env,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -734,6 +745,7 @@ class UltraReviewService:
             "timeout": timeout,
             "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
             "dependency_mode": "active_venv",
+            "sanitized_env": sanitized_env,
             "pytest_stdout_tail": stdout_tail,
             "pytest_stderr_tail": stderr_tail,
         }

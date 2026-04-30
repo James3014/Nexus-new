@@ -696,6 +696,25 @@ def _patch_swarm_report_requires_distinct_evidence(source: str) -> str:
     )
 
 
+def _patch_ultra_report_requires_repro_evidence(source: str) -> str:
+    if "def rlm_harder_v2_accept_ultra_report" not in source:
+        return source
+    if "negative_exit_code" in source and "repro_command" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_accept_ultra_report",
+        "report",
+        "    if not report.get('sandbox_id') or not report.get('gate_passed'):\n"
+        "        return False\n"
+        "    for finding in report.get('verified_findings', []):\n"
+        "        if not finding.get('repro_command') or finding.get('negative_exit_code') != 1:\n"
+        "            return False\n"
+        "    return True",
+        "<ultra_report_repro_evidence_patch>",
+    )
+
+
 def generate_local_companion_edits(
     repo_root: Path,
     target_path: Path,
@@ -816,6 +835,7 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
         _patch_verified_claims_require_artifact,
         _patch_classify_requires_semantic_evidence,
         _patch_swarm_report_requires_distinct_evidence,
+        _patch_ultra_report_requires_repro_evidence,
     ):
         patched = patcher(source)
         if patched != source:

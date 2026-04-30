@@ -93,6 +93,24 @@ def test_capability_planner_default_scoring_matches_legacy_formula():
     }
 
 
+def test_capability_planner_selects_memory_for_context_contract_tasks():
+    plan = CapabilityPlanner().plan(
+        task_desc="Sync code and docs after a renamed public contract field",
+        task_type="public_docs_code_sync",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 35, "candidate_count": 1, "memory_hits": 0, "findings_hits": 0},
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+    ).to_dict()
+
+    assert "memory" in plan["selected_capabilities"]
+    assert any(
+        item["capability"] == "memory" and "context_contract_memory_needed" in item["reasons"]
+        for item in plan["decision_trace"]
+    )
+
+
 def test_capability_planner_accepts_cost_risk_scoring_weights():
     plan = CapabilityPlanner().plan(
         task_desc="Repair a candidate-heavy bug with DDTree pruning",
