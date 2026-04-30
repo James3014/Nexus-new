@@ -980,6 +980,74 @@ def test_local_contract_fallback_repairs_phase_evidence_fields(monkeypatch, tmp_
     assert res.winner_source == "local"
 
 
+def test_hidden_verifier_mode_adds_local_shadow_for_llm_visible_pass(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "def merge_limits(defaults, override):\n"
+        "    result = defaults\n"
+        "    result.update(override or {})\n"
+        "    return result\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import merge_limits\n\n"
+        "def test_merge_limits_overrides_plain_values():\n"
+        "    assert merge_limits({'timeout': 10}, {'timeout': 20}) == {'timeout': 20}\n",
+        encoding="utf-8",
+    )
+
+    calls = {"llm": 0}
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            calls["llm"] += 1
+            return (
+                "def merge_limits(defaults, override):\n"
+                "    result = defaults.copy()\n"
+                "    result.update(override or {})\n"
+                "    return result\n",
+                {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "tokens_used": 10,
+                    "token_capture_status": "measured",
+                    "model_patch_generated": True,
+                },
+            )
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_AUTOREASON_EXECUTOR", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+
+    cfg = SprintConfig(
+        task="Repair merge_limits so override None preserves defaults and inputs are not mutated.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=3,
+        llm_mode=True,
+        safe_mode=True,
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert calls["llm"] == 1
+    assert res.fallback_used is True
+    assert res.winner_source == "local_hidden_shadow"
+    assert "value is not None" in (res.patch or "")
+    assert "hidden_invariant_shadow_candidate" in res.error_codes
+
+
 def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")

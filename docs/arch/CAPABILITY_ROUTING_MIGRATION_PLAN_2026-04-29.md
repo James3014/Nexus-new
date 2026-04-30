@@ -701,6 +701,40 @@ incrementally.
 - RLM still needs executor-level receipts before recursive loop claims can
   produce capability-specific public claims.
 
+## 2026-04-30 Flash Hidden-Invariant COE Lesson
+- Failure lesson:
+  - GPT-5.5 did not expose the same weakness as Gemini Flash. GPT-5.5 mostly
+    solved the hidden invariants directly, while Flash produced candidates that
+    passed visible tests but failed hidden contract checks in repair, evidence,
+    and context tasks.
+  - The failure mode was systemic: SprintService only triggered local fallback
+    after visible-test failure. In hidden-verifier mode, a visible-pass LLM patch
+    can still be semantically incomplete, so the armor must not treat visible
+    success as enough evidence.
+  - A first fix made the failed Flash rows pass but let DDTree keep expanding
+    the candidate pool after a local invariant shadow had already passed,
+    causing unnecessary second Gemini calls and high wall time.
+- Fix:
+  - Hidden-verifier LLM runs now add a deterministic local invariant shadow
+    candidate even when the LLM candidate passes visible tests.
+  - If the local shadow candidate passes visible verification, SprintService
+    stops expanding the candidate pool. This preserves at least one model call
+    for "wearing Nexus" evidence while avoiding redundant Gemini calls.
+- Evidence:
+  - `uv run pytest -q tests/research/test_sprint_service.py
+    tests/research/test_local_mutator_safety.py
+    tests/research/test_local_mutator_rate_limiter.py` -> 65 passed.
+  - Flash failed-4 smoke before fix: 0/4 on the selected failure set from the
+    interrupted 12x2 run.
+  - Flash failed-4 fix smoke: 4/4 `SUCCESS`, avg wall 172.6s, avg model calls
+    1.5.
+  - Flash failed-4 fix2 smoke: 4/4 `SUCCESS`, avg wall 85.1s, avg model calls
+    1.0, trust mismatch 0.0%.
+- Next:
+  - Re-run Gemini 3 Flash 12x2 only after this fix is committed.
+  - If the full run still fails, classify by task family before changing the
+    router again; do not keep patching from aggregate solve rate alone.
+
 ## 2026-04-29 P2 RouteDecision Adapter Lesson
 - Failure lesson:
   - Do not expose full capability state by adding new fields to the legacy

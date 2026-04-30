@@ -992,6 +992,40 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             else:
                 ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
             self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
+            if hidden_verifier_mode and llm_generator is not None and used_source.startswith("llm") and "quota" not in error_codes:
+                local_code, local_meta = local_generator.generate(
+                    source_code=source_code,
+                    task=config.task,
+                    mutation_hint=f"{hint}\nhidden_verifier_invariant_shadow",
+                    seed=idx + 1000,
+                )
+                local_source = str(local_meta.get("source", "local_hidden_shadow"))
+                if local_source == "local":
+                    local_source = "local_hidden_shadow"
+                fallback_used = True
+                shadow_guard_ok, shadow_guard_reason = _semantic_guard(source_code, local_code, config.task, local_source)
+                if shadow_guard_ok:
+                    shadow_ev = executor.evaluate_candidate(
+                        seed=idx + 1000,
+                        hint=f"{hint} | hidden_verifier_invariant_shadow",
+                        code=local_code,
+                        source=local_source,
+                    )
+                else:
+                    shadow_ev = CandidateEval(
+                        seed=idx + 1000,
+                        score=0.0,
+                        hint=f"{hint} | hidden_verifier_invariant_shadow",
+                        error=shadow_guard_reason,
+                        candidate_code=local_code,
+                        source=local_source,
+                    )
+                candidates.append(ev)
+                candidates.append(shadow_ev)
+                ev_recorded = True
+                error_codes.append("hidden_invariant_shadow_candidate")
+                if shadow_ev.score >= ev.score:
+                    ev = shadow_ev
             if (
                 self_heal_enabled
                 and llm_generator is not None
@@ -1092,6 +1126,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             error_codes.append("quota")
         if not ev_recorded:
             candidates.append(ev)
+        if hidden_verifier_mode and ev.source == "local_hidden_shadow" and ev.score >= 1.0:
+            break
         if config.safe_mode and ev.score >= 1.0 and len(candidates) >= routing_min_pool:
             break
 
