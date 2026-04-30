@@ -18,6 +18,18 @@ def test_build_command_keeps_manifest_and_max_tasks_order():
     assert cmd[cmd.index("--with-llm-mode") + 1] == "off"
 
 
+def test_smoke_suites_cover_core_governance_and_belief_gates():
+    suites = {suite.name: suite for suite in capability_route_smoke.SMOKE_SUITES}
+
+    assert "core_governance_gates" in suites
+    assert suites["core_governance_gates"].task_ids == (
+        "nexus-value-gov-001",
+        "nexus-value-evidence-001",
+    )
+    assert "belief_gate" in suites
+    assert suites["belief_gate"].task_ids == ("rlm-harder-v2-belief-001",)
+
+
 def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_path: Path):
     path = tmp_path / "with_nexus_1.jsonl"
     rows = [

@@ -1149,10 +1149,10 @@ def run_auto_flow(
 ):
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
 
-    flow_started_at = time.time()
+    flow_started_at = time.monotonic()
     phase_wall_sec: dict[str, float] = {}
     timing_breakdown_sec: dict[str, float] = {}
-    phase_started_at = time.time()
+    phase_started_at = time.monotonic()
     route = build_route(
         repo_root=repo_root,
         task_desc=task_desc,
@@ -1162,8 +1162,8 @@ def run_auto_flow(
         findings_query=findings_query,
         target_file=target_file,
     )
-    phase_wall_sec["P"] = round(time.time() - phase_started_at, 4)
-    phase_started_at = time.time()
+    phase_wall_sec["P"] = round(time.monotonic() - phase_started_at, 4)
+    phase_started_at = time.monotonic()
     tuning_payload = read_capability_tuning_fast(repo_root)
     parsed_knobs = _parse_tuning_knobs(tuning_payload)
     execution_profile = build_hyper_execution_profile(
@@ -1185,8 +1185,8 @@ def run_auto_flow(
         force_flow=force_flow,
     )
     learn_phase_slo = read_phase_slo_summary_fast(repo_root)
-    phase_wall_sec["X"] = round(time.time() - phase_started_at, 4)
-    phase_started_at = time.time()
+    phase_wall_sec["X"] = round(time.monotonic() - phase_started_at, 4)
+    phase_started_at = time.monotonic()
     learn_gate_blocked = (
         not bool(learn_phase_slo.get("phase_slo_pass", False))
         or float((learn_phase_slo.get("global", {}) or {}).get("required_done_ratio", 0.0) or 0.0) < 0.95
@@ -1224,25 +1224,25 @@ def run_auto_flow(
     if force_flow is None and chosen_flow == "hyper_sprint" and recent_hyper_fails >= max(1, history_fail_threshold):
         chosen_flow = "baseline"
         history_forced_baseline = True
-    phase_wall_sec["D"] = round(time.time() - phase_started_at, 4)
+    phase_wall_sec["D"] = round(time.monotonic() - phase_started_at, 4)
 
     guard_hit = False
-    setup_started_at = time.time()
+    setup_started_at = time.monotonic()
     target_path = (repo_root / target_file).resolve()
     if not target_path.exists():
         raise click.ClickException(f"Target file not found: {target_file}")
     pytest_cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
     original_code = target_path.read_text(encoding="utf-8")
-    timing_breakdown_sec["target_io_sec"] = round(time.time() - setup_started_at, 4)
+    timing_breakdown_sec["target_io_sec"] = round(time.monotonic() - setup_started_at, 4)
     normalized_success_criteria = (success_criteria or "all_target_tests_pass").strip()
     verification_only_allowed = normalized_success_criteria == "all_target_tests_pass"
     mutation_required = normalized_success_criteria in {"artifact_changed_and_tests_pass", "mutation_required"}
-    codeintel_started_at = time.time()
+    codeintel_started_at = time.monotonic()
     codeintel_evidence = _build_codeintel_evidence(repo_root, target_file=target_file, task_desc=task_desc)
-    timing_breakdown_sec["codeintel_sec"] = round(time.time() - codeintel_started_at, 4)
-    context_started_at = time.time()
+    timing_breakdown_sec["codeintel_sec"] = round(time.monotonic() - codeintel_started_at, 4)
+    context_started_at = time.monotonic()
     task_desc_with_codeintel = _task_with_codeintel_context(task_desc, codeintel_evidence)
-    timing_breakdown_sec["context_pack_sec"] = round(time.time() - context_started_at, 4)
+    timing_breakdown_sec["context_pack_sec"] = round(time.monotonic() - context_started_at, 4)
 
     def _baseline_report_from_meta(source: str, meta: dict[str, Any]) -> dict[str, Any]:
         model_calls = int(meta.get("model_calls", 0) or 0)
@@ -1349,7 +1349,7 @@ def run_auto_flow(
         return patched, label, fallback_meta or _local_baseline_meta(fallback_reason=fallback_reason)
 
     def _run_baseline_apply() -> dict:
-        start = time.time()
+        start = time.monotonic()
         ok = False
         err = ""
         source = "local"
@@ -1388,14 +1388,14 @@ def run_auto_flow(
         return {
             "flow": "baseline",
             "status": "SUCCESS" if ok else "FAILED",
-            "elapsed_sec": round(time.time() - start, 4),
+            "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
             "report": _baseline_report_from_meta(source, generation_meta),
         }
 
     def _run_baseline_probe() -> dict:
         # Probe run used by guard. Always restore original state.
-        start = time.time()
+        start = time.monotonic()
         ok = False
         err = ""
         source = "local"
@@ -1432,14 +1432,14 @@ def run_auto_flow(
         return {
             "flow": "baseline_probe",
             "status": "SUCCESS" if ok else "FAILED",
-            "elapsed_sec": round(time.time() - start, 4),
+            "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
             "report": _baseline_report_from_meta(source, generation_meta),
             "_patch": patched if ok else None,
         }
 
     def _run_original_verification_rescue(previous_result: dict) -> dict:
-        start = time.time()
+        start = time.monotonic()
         _write_source_text(target_path, original_code)
         report = dict(previous_result.get("report", {}) if isinstance(previous_result.get("report"), dict) else {})
         try:
@@ -1459,13 +1459,13 @@ def run_auto_flow(
         return {
             "flow": previous_result.get("flow", "hyper_sprint"),
             "status": "SUCCESS" if ok else "FAILED",
-            "elapsed_sec": round(float(previous_result.get("elapsed_sec", 0.0) or 0.0) + (time.time() - start), 4),
+            "elapsed_sec": round(float(previous_result.get("elapsed_sec", 0.0) or 0.0) + (time.monotonic() - start), 4),
             "error": "" if ok else err,
             "report": report,
         }
 
     def _run_hyper_apply() -> dict:
-        start = time.time()
+        start = time.monotonic()
         effective_stage1_timeout = stage1_timeout_sec
         if baseline_probe and baseline_probe.get("elapsed_sec", 0) > 0:
             dynamic_timeout = int(round(float(baseline_probe["elapsed_sec"]) * max(1.0, dynamic_timeout_multiplier)))
@@ -1507,7 +1507,7 @@ def run_auto_flow(
         return {
             "flow": "hyper_sprint",
             "status": "SUCCESS" if ok else "FAILED",
-            "elapsed_sec": round(time.time() - start, 4),
+            "elapsed_sec": round(time.monotonic() - start, 4),
             "error": err,
                 "report": {
                     "status": res.status,
@@ -1539,7 +1539,7 @@ def run_auto_flow(
     baseline_probe = None
     early_baseline_shortcut = False
     baseline_probe_skipped = False
-    phase_started_at = time.time()
+    phase_started_at = time.monotonic()
     if chosen_flow == "baseline":
         result = _run_baseline_apply()
         strategy_path = "baseline_only"
@@ -1717,13 +1717,13 @@ def run_auto_flow(
                     else:
                         chosen_flow = "hyper_sprint"
                         strategy_path = "probe_then_hyper_guard_fallback_rejected"
-    phase_wall_sec["R"] = round(time.time() - phase_started_at, 4)
+    phase_wall_sec["R"] = round(time.monotonic() - phase_started_at, 4)
 
     baseline_probe_for_report = None
     if isinstance(baseline_probe, dict):
         baseline_probe_for_report = {k: v for k, v in baseline_probe.items() if k != "_patch"}
 
-    phase_started_at = time.time()
+    phase_started_at = time.monotonic()
     final_code = target_path.read_text(encoding="utf-8") if target_path.exists() else original_code
     diff_lines = list(
         difflib.unified_diff(
@@ -1781,13 +1781,21 @@ def run_auto_flow(
         task_id=task_id,
         capability_stack=route.get("capability_stack", {}),
     )
-    phase_wall_sec["A"] = round(time.time() - phase_started_at, 4)
+    phase_wall_sec["A"] = round(time.monotonic() - phase_started_at, 4)
     receipt_slug = _safe_trace_slug(task_id or task_desc or "task")
     context_memory_needed = "docs_code_sync" in str(task_type).lower() or any(
         token in (task_desc or "").lower() for token in ("context", "contract", "docs")
     )
     delivery_refs = [f"delivery:{receipt_slug}:artifact_tests_passed"] if artifact_verified else []
     memory_refs = [f"memory:{receipt_slug}:context_contract"] if artifact_verified and context_memory_needed else []
+    artifact_refs = [f"artifact:{receipt_slug}:tests_passed"] if artifact_verified else []
+    claim_refs = [f"claim:{receipt_slug}:verified_delivery"] if artifact_verified else []
+    belief_refs = [f"belief:{receipt_slug}:confidence:{float(execution_profile.get('belief_confidence', 1.0) or 1.0):.2f}"] if artifact_verified else []
+    governance_needed = any(
+        token in (task_desc or "").lower()
+        for token in ("governance", "policy", "secret", "authorization", "unsafe", "trust", "evidence")
+    )
+    mempalace_refs = [f"mempalace:{receipt_slug}:policy_checked"] if artifact_verified and (mempalace_active or governance_needed) else []
     nexus_usage_trace = {
         "gemini_uses_nexus": bool(gemini_invoked),
         "nexus_context_delivered": True,
@@ -1827,6 +1835,14 @@ def run_auto_flow(
             "memory_used": bool(memory_refs),
             "memory_refs": memory_refs,
             "memory_gate_passed": bool(memory_refs),
+            "mempalace_refs": mempalace_refs,
+            "mempalace_gate_passed": bool(mempalace_refs),
+            "artifact_refs": artifact_refs,
+            "artifact_gate_passed": bool(artifact_refs),
+            "claim_refs": claim_refs,
+            "claim_gate_invoked": artifact_verified,
+            "belief_refs": belief_refs,
+            "belief_gate_passed": bool(belief_refs),
             "lancedb_hits": int(capability_evidence.get("lancedb_hits", route.get("findings_hits", 0)) or 0),
             "lancedb_refs": capability_evidence.get("lancedb_refs", []),
             "lancedb_gate_passed": bool(capability_evidence.get("lancedb_gate_passed", False)),
@@ -1974,7 +1990,7 @@ def run_auto_flow(
         },
         "nexus_usage_trace": nexus_usage_trace,
         "timing": {
-            "cli_elapsed_sec": round(time.time() - flow_started_at, 4),
+            "cli_elapsed_sec": round(time.monotonic() - flow_started_at, 4),
             "phase_wall_sec": phase_wall_sec,
             "breakdown_sec": timing_breakdown_sec,
         },
@@ -1992,7 +2008,7 @@ def run_auto_flow(
         payload["io"]["output_path"] = str(written)
         # keep report + output payload in sync
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    phase_started_at = time.time()
+    phase_started_at = time.monotonic()
     recent.append(
         {
             "flow": chosen_flow,
@@ -2006,8 +2022,8 @@ def run_auto_flow(
     )
     history_data[flow_key] = recent[-200:]
     _write_history(history_data)
-    phase_wall_sec["C"] = round(time.time() - phase_started_at, 4)
-    payload["timing"]["cli_elapsed_sec"] = round(time.time() - flow_started_at, 4)
+    phase_wall_sec["C"] = round(time.monotonic() - phase_started_at, 4)
+    payload["timing"]["cli_elapsed_sec"] = round(time.monotonic() - flow_started_at, 4)
     payload["timing"]["phase_wall_sec"] = phase_wall_sec
     payload["timing"]["breakdown_sec"] = timing_breakdown_sec
     payload["nexus_usage_trace"]["phase_wall_sec"] = phase_wall_sec

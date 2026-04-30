@@ -293,6 +293,20 @@ def test_capability_planner_selects_memory_belief_and_preflight_governance():
     assert "sandbox" not in selected
 
 
+def test_capability_planner_selects_belief_for_explicit_budget_tasks():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix repair budget selection so uncertain confidence and elevated risk require evidence.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 45, "candidate_count": 3},
+            "capability_stack": {"selected_capabilities": ["hyper_sprint", "autoreason"]},
+        },
+    ).to_dict()
+
+    assert "belief" in set(plan["selected_capabilities"])
+
+
 def test_capability_planner_selects_sandbox_for_high_risk_governance():
     plan = CapabilityPlanner().plan(
         task_desc="Refactor credential scrubber without weakening secret redaction governance.",

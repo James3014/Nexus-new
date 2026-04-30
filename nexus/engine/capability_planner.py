@@ -529,7 +529,7 @@ class CapabilityPlanner:
             or signals.governance_signal
         ):
             enable("autoreason", "low_confidence_or_multi_candidate_or_history")
-        if signals.confidence < 0.8:
+        if signals.confidence < 0.8 or "belief" in task_lower or "confidence" in task_lower or "budget" in task_lower:
             enable("belief", "confidence_control_needed")
         if signals.memory_hits or signals.findings_hits:
             enable("memory", "prior_lesson_or_findings_available")

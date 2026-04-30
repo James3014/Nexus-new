@@ -614,15 +614,52 @@ incrementally.
 
 ## 2026-04-30 Fixed Capability Smoke Suite
 - The fixed smoke entry is now `scripts/ops/capability_route_smoke.py`.
-- It runs two suites:
+- It runs four suites:
   - `route_oracles`: the 8 route-oracle tasks for Autoreason, DDTree,
     Ultra Review, Research, LanceDB, Swarm, Drone, and Nightshift.
   - `codeintel_hyper`: the 2 Nexus value tasks for Hyper, CodeIntel, Memory,
     and Delivery Gate.
+  - `core_governance_gates`: the 2 Nexus value tasks for MemPalace Gate,
+    Artifact Gate, and Claim Gate.
+  - `belief_gate`: the 1 RLM harder task for Belief Gate.
 - The current capability status table is
   `docs/arch/CAPABILITY_ROUTE_STATUS_2026-04-30.md`.
 - This smoke suite is the required preflight before spending Gemini quota on
   public comparison runs.
+
+## 2026-04-30 Core Gate Receipt COE Lesson
+- Failure lesson:
+  - A route smoke that only covers executor-like capabilities can still miss
+    the soul-stack gates. That creates a false sense of readiness because
+    MemPalace, Artifact, Claim, and Belief are the public-trust contract, not
+    optional decorations.
+  - Capability receipts must not infer governance gates from generic task
+    success. They need task-scoped refs so the report can prove selected,
+    invoked, evidenced, gated, and public-safe status without drifting into
+    broad labels.
+  - Timing evidence must use a monotonic clock. Mixing wall-clock deltas into
+    phase totals can make the route look slow or inconsistent even when the
+    execution path is healthy.
+- Fix:
+  - Auto-flow now emits task-scoped `mempalace`, `artifact`, `claim`, and
+    `belief` refs when the corresponding gates are verified.
+  - The fixed smoke suite now covers 13 Nexus-only tasks across executor,
+    retrieval, memory, delivery, governance, and belief capabilities.
+  - The smoke summary explicitly labels itself as
+    `diagnostic_type=receipt_diagnostic` and blocks public benchmark claims
+    with `public_benchmark_claim_allowed=false`.
+  - Repair timing now uses monotonic elapsed time for route cost reports.
+- Evidence:
+  - `uv run pytest -q tests/engine/test_capability_planner.py
+    tests/research/test_local_mutator_rate_limiter.py
+    tests/engine/test_capability_receipt_adapters.py
+    tests/ops/test_capability_route_smoke.py` -> 30 passed.
+  - `uv run python scripts/ops/capability_route_smoke.py` -> 13/13 tasks
+    `SUCCESS/VERIFIED`, missing expected receipts = 0,
+    `receipt_diagnostic_pass=true`.
+- Next:
+  - Gemini 3 Flash can start with a small same-model A/B smoke only after this
+    diagnostic remains green in a clean worktree.
 
 ## 2026-04-30 Codex 5.5 Internal A/B Smoke Lesson
 - A fixed 4-task internal same-model smoke now exists at

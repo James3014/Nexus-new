@@ -46,6 +46,23 @@ SMOKE_SUITES: tuple[SmokeSuite, ...] = (
             "nexus-value-context-001",
         ),
     ),
+    SmokeSuite(
+        name="core_governance_gates",
+        manifest="scripts/bench/public_benchmark_nexus_value_v1.json",
+        output_dir=".nexus/reports/bench_route_core_gates_smoke",
+        task_ids=(
+            "nexus-value-gov-001",
+            "nexus-value-evidence-001",
+        ),
+    ),
+    SmokeSuite(
+        name="belief_gate",
+        manifest="scripts/bench/public_benchmark_rlm_harder_v2.json",
+        output_dir=".nexus/reports/bench_route_belief_smoke",
+        task_ids=(
+            "rlm-harder-v2-belief-001",
+        ),
+    ),
 )
 
 
@@ -168,6 +185,10 @@ def main(argv: list[str] | None = None) -> int:
     failures = [failure for summary in summaries for failure in summary.get("failures", [])]
     payload = {
         "schema_version": "nexus_capability_route_smoke.v1",
+        "diagnostic_type": "receipt_diagnostic",
+        "receipt_diagnostic_pass": not failures,
+        "public_benchmark_claim_allowed": False,
+        "public_benchmark_claim_blocked_reason": "nexus_only_receipt_smoke_not_same_model_ab",
         "suites": summaries,
         "failures": failures,
         "passed": not failures,

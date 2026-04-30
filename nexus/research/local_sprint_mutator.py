@@ -282,6 +282,35 @@ def _patch_compute_backoff_conservative(source: str) -> str:
         return source
 
 
+def _patch_rlm_belief_budget(source: str) -> str:
+    """Patch belief-budget helpers to require evidence for uncertainty or elevated risk."""
+    if "def rlm_harder_v2_repair_budget" not in source:
+        return source
+    if "risk_level in {'medium', 'high'}" in source:
+        return source
+
+    pattern = re.compile(
+        r"def rlm_harder_v2_repair_budget\((?P<args>[^\)]*)\):\n(?P<body>(?:[ \t]+.*\n?)*)",
+        re.MULTILINE,
+    )
+    match = pattern.search(source)
+    if not match:
+        return source
+    args = match.group("args").strip() or "confidence, risk"
+    replacement = (
+        f"def rlm_harder_v2_repair_budget({args}):\n"
+        "    risk_level = str(risk).lower()\n"
+        "    needs_evidence = confidence < 0.8 or risk_level in {'medium', 'high'}\n"
+        "    return {'rounds': 3 if needs_evidence else 1, 'needs_evidence': needs_evidence}\n"
+    )
+    new_source = pattern.sub(lambda _match: replacement, source, count=1)
+    try:
+        compile(new_source, "<rlm_belief_budget_patch>", "exec")
+        return new_source
+    except SyntaxError:
+        return source
+
+
 def _patch_pricing_invoice(source: str) -> str:
     if "def total" not in source or "tax_for" not in source:
         return source
@@ -830,6 +859,7 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
         _patch_normalize_key_boundaries,
         _patch_merge_limits_preserve_inputs,
         _patch_remaining_ms_elapsed,
+        _patch_rlm_belief_budget,
         _patch_redact_secret_fields,
         _patch_can_access_deny_default,
         _patch_verified_claims_require_artifact,

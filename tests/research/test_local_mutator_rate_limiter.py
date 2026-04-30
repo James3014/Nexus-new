@@ -98,3 +98,22 @@ class RateLimiter:
     patched = generate_local_candidate(source, task, hint, 0)
     assert "self.hits = [h for h in self.hits if now - h < self.window_sec]" in patched
     assert "if len(self.hits) >= self.limit:" in patched
+
+
+def test_rlm_belief_budget_requires_evidence_for_medium_or_high_risk():
+    source = """
+def rlm_harder_v2_repair_budget(confidence, risk):
+    return {'rounds': 1, 'needs_evidence': False}
+"""
+    patched = generate_local_candidate(
+        source,
+        "Fix repair budget selection so low confidence and high risk require extra evidence-gathering rounds.",
+        "local",
+        0,
+    )
+    namespace = {}
+    exec(patched, namespace)
+
+    assert namespace["rlm_harder_v2_repair_budget"](0.42, "high") == {"rounds": 3, "needs_evidence": True}
+    assert namespace["rlm_harder_v2_repair_budget"](0.74, "medium") == {"rounds": 3, "needs_evidence": True}
+    assert namespace["rlm_harder_v2_repair_budget"](0.91, "low") == {"rounds": 1, "needs_evidence": False}

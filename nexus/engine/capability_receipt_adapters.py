@@ -224,8 +224,8 @@ class MemPalaceGateReceiptAdapter:
     name = "mempalace_gate"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or payload.get("mempalace_audit_ref"))
         refs = _as_refs(payload.get("mempalace_audit_ref") or payload.get("mempalace_refs"))
+        invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or refs)
         gate_passed = bool(refs and _as_bool(payload.get("mempalace_gate_passed", True)))
         return merge_capability_receipt(
             name=self.name,
