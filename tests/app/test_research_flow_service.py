@@ -397,10 +397,11 @@ def test_capability_evidence_requires_real_swarm_signal():
         nightshift_recommended=True,
     )
 
-    assert with_swarm["swarm_used"] is True
+    assert with_swarm["swarm_used"] is False
     assert with_swarm["swarm_evidence_count"] == 1
-    assert with_swarm["swarm_consensus"] == "candidate_summary_evidence"
+    assert with_swarm["swarm_consensus"] == "candidate_summary_signal"
     assert with_swarm["swarm_report"]["schema_version"] == "nexus_swarm_receipt_v1"
+    assert with_swarm["swarm_report"]["source"] == "hyper_sprint_candidate_summaries"
     assert with_swarm["swarm_report"]["evidence_refs"] == ["candidate_summary:0"]
     assert with_swarm["nightshift_recommended"] is True
     assert with_swarm["nightshift_failure_reason"] == "recommended_without_report"
@@ -444,10 +445,12 @@ def test_write_msa_receipt_reports_persists_swarm_and_drone_artifacts(tmp_path: 
     evidence = {
         "swarm_report": {
             "schema_version": "nexus_swarm_receipt_v1",
+            "source": "local_msa_bench_executor",
             "evidence_count": 2,
-            "consensus": "candidate_summary_evidence",
+            "consensus": "pass",
             "evidence_refs": ["candidate_summary:0", "candidate_summary:1"],
         },
+        "swarm_used": True,
         "drone_report": {
             "schema_version": "nexus_drone_receipt_v1",
             "artifact_count": 1,
@@ -463,6 +466,47 @@ def test_write_msa_receipt_reports_persists_swarm_and_drone_artifacts(tmp_path: 
     assert drone_path.exists()
     assert json.loads(swarm_path.read_text(encoding="utf-8"))["schema_version"] == "nexus_swarm_receipt_v1"
     assert json.loads(drone_path.read_text(encoding="utf-8"))["artifact_count"] == 1
+
+
+def test_local_msa_executor_adds_swarm_receipt_only_after_verified_artifact(tmp_path: Path, monkeypatch):
+    evidence = research_flow_service._capability_evidence(
+        result_report={},
+        learning_trace={},
+        nightshift_recommended=False,
+    )
+
+    unchanged = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-swarm-001",
+        task_desc="Coordinate swarm review for a cross-module ownership conflict.",
+        task_type="cross_module_refactor_swarm",
+        evidence=evidence,
+        artifact_verified=False,
+    )
+
+    assert unchanged["swarm_used"] is False
+
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
+    updated = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-swarm-001",
+        task_desc="Coordinate swarm review for a cross-module ownership conflict.",
+        task_type="cross_module_refactor_swarm",
+        evidence=evidence,
+        artifact_verified=True,
+    )
+    written = research_flow_service._write_msa_receipt_reports(
+        tmp_path,
+        task_id="route-oracle-swarm-001",
+        evidence=updated,
+    )
+
+    assert written["swarm_used"] is True
+    assert written["swarm_consensus"] == "pass"
+    assert Path(written["swarm_report_path"]).exists()
+    report = json.loads(Path(written["swarm_report_path"]).read_text(encoding="utf-8"))
+    assert report["source"] == "local_msa_bench_executor"
+    assert report["evidence_count"] == 2
 
 
 def test_local_msa_executor_adds_drone_receipt_only_after_verified_artifact(tmp_path: Path, monkeypatch):
@@ -498,6 +542,49 @@ def test_local_msa_executor_adds_drone_receipt_only_after_verified_artifact(tmp_
     assert updated["drone_invoked_count"] == 1
     assert artifact_path.exists()
     assert json.loads(artifact_path.read_text(encoding="utf-8"))["owner"] == "local_msa_bench_executor"
+
+
+def test_local_msa_executor_adds_nightshift_receipt_only_after_verified_recovery(tmp_path: Path, monkeypatch):
+    evidence = research_flow_service._capability_evidence(
+        result_report={},
+        learning_trace={},
+        nightshift_recommended=True,
+    )
+
+    unchanged = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-nightshift-001",
+        task_desc="Nightshift fallback for long critical recovery after repeated failures.",
+        task_type="bug",
+        evidence=evidence,
+        artifact_verified=False,
+    )
+
+    assert unchanged["nightshift_invoked"] is False
+    assert unchanged["nightshift_failure_reason"] == "recommended_without_report"
+
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
+    updated = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-nightshift-001",
+        task_desc="Nightshift fallback for long critical recovery after repeated failures.",
+        task_type="bug",
+        evidence=evidence,
+        artifact_verified=True,
+    )
+    written = research_flow_service._write_msa_receipt_reports(
+        tmp_path,
+        task_id="route-oracle-nightshift-001",
+        evidence=updated,
+    )
+
+    assert written["nightshift_invoked"] is True
+    assert written["nightshift_recovered"] is True
+    assert written["nightshift_failure_reason"] == ""
+    assert Path(written["nightshift_report_path"]).exists()
+    report = json.loads(Path(written["nightshift_report_path"]).read_text(encoding="utf-8"))
+    assert report["source"] == "local_msa_bench_executor"
+    assert report["recovered"] is True
 
 
 def test_run_auto_flow_exposes_swarm_report_in_usage_trace(tmp_path: Path, monkeypatch):

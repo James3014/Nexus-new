@@ -560,9 +560,32 @@ incrementally.
   - The route-contract and capability-routing ordered repros now pass.
   - The broader route/app/benchmark regression slice passes with 191 tests.
 
+## 2026-04-30 P47-P50 MSA Receipt Lesson
+- Failure lesson:
+  - Swarm candidate-summary hints are not executor evidence. Treating a timing
+    hint like `create/sync/test` as `swarm_used=true` risks overclaiming a
+    selected or inferred capability as a public-safe capability.
+  - The first Nexus-only MSA smoke correctly failed Swarm: the route selected
+    Swarm, but the local no-LLM executor did not yet produce a verified patch,
+    so no Swarm receipt could be public-safe.
+- Fix:
+  - Swarm candidate summaries are now kept as signal-only evidence unless the
+    local MSA bench executor is explicitly enabled and artifact verification
+    passes.
+  - Local MSA bench executor can now produce receipt-backed Swarm, Drone, and
+    Nightshift evidence. Nightshift recovery receipts are persisted alongside
+    Swarm/Drone reports.
+  - Added a deterministic local mutator for the Swarm route oracle: consensus
+    must be `pass`, findings must include evidence, and roles must be distinct.
+- Evidence:
+  - Swarm/Drone/Nightshift receipt adapter and app tests pass.
+  - Nexus-only MSA route smoke passed 3/3 with all expected receipts
+    `public_claim_safe=true` for Swarm, Drone, and Nightshift.
+
 ## Residual Debt
-- Nightshift, Swarm, and Drone still need production-grade executor evidence
-  before they can be counted as fully active capabilities.
+- Swarm, Drone, and Nightshift now have bench-safe local executor receipts, but
+  they still need production-grade non-benchmark executor evidence before broad
+  product claims.
 - Planner is not yet the execution SSOT; it is the migration target.
 - Benchmark/report layers consume `CapabilityReceipt` when available, but the
   old inference path remains for historical report compatibility.

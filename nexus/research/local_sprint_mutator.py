@@ -674,6 +674,28 @@ def _patch_classify_requires_semantic_evidence(source: str) -> str:
     )
 
 
+def _patch_swarm_report_requires_distinct_evidence(source: str) -> str:
+    if "def rlm_harder_v2_accept_swarm_report" not in source:
+        return source
+    if "roles = set()" in source and "finding.get('evidence')" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_accept_swarm_report",
+        "report",
+        "    if report.get('consensus') != 'pass':\n"
+        "        return False\n"
+        "    roles = set()\n"
+        "    for finding in report.get('findings', []):\n"
+        "        role = finding.get('role')\n"
+        "        if not role or not finding.get('evidence'):\n"
+        "            return False\n"
+        "        roles.add(role)\n"
+        "    return len(roles) >= 2",
+        "<swarm_report_distinct_evidence_patch>",
+    )
+
+
 def generate_local_companion_edits(
     repo_root: Path,
     target_path: Path,
@@ -793,6 +815,7 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
         _patch_can_access_deny_default,
         _patch_verified_claims_require_artifact,
         _patch_classify_requires_semantic_evidence,
+        _patch_swarm_report_requires_distinct_evidence,
     ):
         patched = patcher(source)
         if patched != source:

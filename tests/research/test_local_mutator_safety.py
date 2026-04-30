@@ -166,6 +166,26 @@ def parse_config(data):
     assert ns["parse_config"]({"strict": False, "retries": 0}) == {"strict": False, "retries": 0}
 
 
+def test_swarm_report_patch_requires_distinct_roles_and_evidence():
+    source = """
+def rlm_harder_v2_accept_swarm_report(report):
+    return report.get('consensus') == 'pass' and len(report.get('findings', [])) >= 2
+"""
+    patched = generate_local_candidate(
+        source,
+        "Accept a swarm review only when independent roles provide evidence and consensus is explicit.",
+        "local",
+        0,
+    )
+    ns = {}
+    exec(patched, ns)
+    accept = ns["rlm_harder_v2_accept_swarm_report"]
+
+    assert accept({"consensus": "pass", "findings": [{"role": "logic", "evidence": "a"}, {"role": "security", "evidence": "b"}]}) is True
+    assert accept({"consensus": "pass", "findings": [{"role": "logic", "evidence": "a"}, {"role": "logic", "evidence": "b"}]}) is False
+    assert accept({"consensus": "pass", "findings": [{"role": "logic"}, {"role": "security", "evidence": "b"}]}) is False
+
+
 @pytest.mark.parametrize(
     ("source", "task", "function_name", "cases"),
     [
