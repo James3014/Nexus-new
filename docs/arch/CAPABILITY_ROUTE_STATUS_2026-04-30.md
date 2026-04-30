@@ -23,6 +23,12 @@ For command inspection without running benchmark tasks:
 uv run python scripts/ops/capability_route_smoke.py --print-only
 ```
 
+For internal same-model Codex calibration before spending Gemini quota:
+
+```bash
+uv run python scripts/ops/codex_nexus_ab_smoke.py --preflight-only
+```
+
 ## Capability Status
 
 | Capability | Main phase hooks | Router role | Current evidence | Status |
@@ -52,6 +58,12 @@ uv run python scripts/ops/capability_route_smoke.py --print-only
   - CodeIntel/Hyper补齐 smoke: 2/2 `SUCCESS/VERIFIED`, missing expected receipts = 0.
   - Ultra Review final resmoke preserved audit artifacts while deleting the
     large sandbox `worktree/`.
+- `scripts/ops/codex_nexus_ab_smoke.py` locks a fixed 4-task Codex 5.5 bare vs
+  Codex 5.5 wearing Nexus smoke for internal route/value calibration. It uses
+  the subprocess Nexus path, hidden verifier, same-model lock, Autoreason,
+  DDTree, Ultra Review dry gate, and a candidate cap of 3. This smoke is not a
+  public Gemini claim; it is the fast pre-Gemini check that the benchmark wiring
+  is ready.
 
 ## Residual Debt
 

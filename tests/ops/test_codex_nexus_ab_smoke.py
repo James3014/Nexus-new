@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+from scripts.ops import codex_nexus_ab_smoke
+
+
+def test_build_command_locks_codex_bare_and_nexus_arms():
+    cmd = codex_nexus_ab_smoke.build_command(
+        output_dir=".nexus/reports/test",
+        task_ids=("a", "b"),
+        preflight_only=True,
+    )
+
+    assert cmd[1] == "scripts/bench/capability_ab_runner.py"
+    assert cmd[cmd.index("--with-model-provider") + 1] == "codex"
+    assert cmd[cmd.index("--without-mode") + 1] == "codex"
+    assert cmd[cmd.index("--with-llm-mode") + 1] == "all"
+    assert cmd[cmd.index("--task-id-filter") + 1] == "a,b"
+    assert "--enable-autoreason-executor" in cmd
+    assert "--enable-ddtree-executor" in cmd
+    assert "--enable-ultra-review-dry-gate" in cmd
+    assert cmd[cmd.index("--llm-candidate-cap") + 1] == "3"
+    assert "--preflight-only" in cmd
+
+
+def test_benchmark_env_locks_same_model(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "existing")
+
+    env = codex_nexus_ab_smoke.benchmark_env("gpt-5.5")
+
+    assert env["NEXUS_VALUE_HIDDEN_VERIFIER"] == "1"
+    assert env["NEXUS_CODEX_MODEL_NAME"] == "gpt-5.5"
+    assert env["NEXUS_DIRECT_CODEX_MODEL"] == "gpt-5.5"
+    assert "existing" in env["PYTHONPATH"]
