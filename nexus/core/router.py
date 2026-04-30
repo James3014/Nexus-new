@@ -151,10 +151,8 @@ class SkillsRouter:
         
         query = context.get("task_desc", context.get("task_id", ""))
         candidates = self._msa_search(query, context)
-        
         if not candidates:
-            # Fallback to pure logic / traditional RAG behavior when MSA yields nothing
-            candidates = [{"skill_id": "demo-skill", "score": 1.0, "source": "fallback"}]
+            candidates = self._inventory_candidates(phase, context)
             
         for c in candidates:
             c["decision_id"] = decision_id
@@ -167,11 +165,48 @@ class SkillsRouter:
             "phase": phase,
             "task_id": context.get("task_id", ""),
             "candidate_count": len(candidates),
+            "fallback_used": False,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         with open(log_path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         return candidates
+
+    def _inventory_candidates(self, phase: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        inventory_path = Path(self.project_root) / "scripts" / "skills_inventory.json"
+        if not inventory_path.exists():
+            return []
+        try:
+            inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+
+        phase_value = str(phase or "").upper()
+        query = " ".join(
+            str(context.get(key, ""))
+            for key in ("task_desc", "task_id", "query")
+            if context.get(key)
+        ).lower()
+        candidates: List[Dict[str, Any]] = []
+        for skill_id, meta in (inventory.get("skills", {}) or {}).items():
+            builtin_skill = Path(self.project_root) / "scripts" / "skills_builtin" / skill_id / "SKILL.md"
+            external_skill = Path(self.project_root) / "scripts" / skill_id / "SKILL.md"
+            if not builtin_skill.exists() and not external_skill.exists():
+                continue
+            phases = [str(p).upper() for p in (meta.get("phases") or [])]
+            if phases and phase_value and phase_value not in phases:
+                continue
+            triggers = [str(t).lower() for t in (meta.get("triggers") or [])]
+            trigger_hit = any(t and t in query for t in triggers)
+            candidates.append(
+                {
+                    "skill_id": skill_id,
+                    "score": 1.0 if trigger_hit else 0.5,
+                    "source": "inventory",
+                    "artifact_found": True,
+                }
+            )
+        return sorted(candidates, key=lambda c: c["score"], reverse=True)
 
     def route(self, phase: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Legacy single-route API used by router artifact compatibility tests."""

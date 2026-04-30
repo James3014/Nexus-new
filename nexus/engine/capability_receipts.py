@@ -18,7 +18,7 @@ def _pending_capabilities(plan: CapabilityPlan | dict[str, Any]) -> set[str]:
 def _pending_receipt(name: str, receipt: CapabilityReceipt | None = None) -> CapabilityReceipt:
     return merge_capability_receipt(
         name=name,
-        selected=True,
+        selected=False,
         invoked=bool(receipt.invoked) if receipt else False,
         evidence_refs=receipt.evidence_refs if receipt else (),
         gate_passed=bool(receipt.gate_passed) if receipt else False,

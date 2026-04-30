@@ -266,7 +266,8 @@ def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
         pillars={"lancedb": {"hits": 0}},
     ).to_dict()
 
-    assert {"autoreason", "ddtree", "repair_loop"} <= set(repair_plan["selected_capabilities"])
+    assert {"autoreason", "repair_loop"} <= set(repair_plan["selected_capabilities"])
+    assert "ddtree" not in set(repair_plan["selected_capabilities"])
     assert "autoreason" in set(trust_plan["selected_capabilities"])
 
 

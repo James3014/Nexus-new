@@ -7,15 +7,17 @@ from nexus.engine.capability_contracts import CapabilityExecutionPlan, Capabilit
 
 def build_executor_controls(plan: CapabilityPlan | dict[str, Any]) -> dict[str, Any]:
     selected = set(plan.selected_capabilities if isinstance(plan, CapabilityPlan) else plan.get("selected_capabilities", []) or [])
+    pending = set(plan.pending_capabilities if isinstance(plan, CapabilityPlan) else plan.get("pending_capabilities", []) or [])
+    executable = selected - pending
     return {
-        "enable_autoreason_executor": "autoreason" in selected,
-        "enable_ddtree_executor": "ddtree" in selected,
+        "enable_autoreason_executor": "autoreason" in executable,
+        "enable_ddtree_executor": "ddtree" in executable,
         "ddtree_max_candidates": 2,
-        "enable_ultra_review": "ultra_review" in selected,
-        "enable_swarm": "swarm" in selected,
-        "enable_drone": "drone" in selected,
-        "enable_nightshift": "nightshift" in selected,
-        "enable_rlm": "rlm" in selected or "repair_loop" in selected,
+        "enable_ultra_review": "ultra_review" in executable,
+        "enable_swarm": "swarm" in executable,
+        "enable_drone": "drone" in executable,
+        "enable_nightshift": "nightshift" in executable,
+        "enable_rlm": "rlm" in executable or "repair_loop" in executable,
     }
 
 

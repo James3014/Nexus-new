@@ -796,6 +796,79 @@ def test_render_markdown_report_explains_selected_only_capability_receipts(tmp_p
     assert "| swarm | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
 
 
+def test_render_markdown_report_does_not_fail_gate_for_non_actionable_selected_only(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    base = {
+        "task_id": "a",
+        "trial_index": 1,
+        "semantic_status": "VERIFIED",
+        "wall_duration_sec": 10,
+        "model_calls": 1,
+        "total_tokens": 100,
+        "token_capture_status": "measured",
+        "run_eligible": True,
+    }
+    without.write_text(json.dumps(base) + "\n", encoding="utf-8")
+    with_nexus.write_text(
+        json.dumps(
+            base
+            | {
+                "gemini_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "pillar_lancedb_active": True,
+                "pillar_memory_active": True,
+                "pillar_mempalace_active": True,
+                "pillar_belief_active": True,
+                "pillar_artifact_active": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "capability_claim_verified": True,
+                "capability_receipts": [
+                    {
+                        "name": "ddtree",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                        "failure_reason": "no_pruning_opportunity",
+                    },
+                    {
+                        "name": "ultra_review",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                        "failure_reason": "feature_flag_disabled",
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "Per-capability public gate: PASS" in out
+    assert "Capability-specific claim gate: PASS" in out
+    assert "| ddtree | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
+    assert "| ultra_review | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
+
+
 def test_render_markdown_report_prefers_incomplete_receipts_over_legacy_capability_flags(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"
@@ -872,8 +945,8 @@ def test_render_markdown_report_prefers_incomplete_receipts_over_legacy_capabili
     )
 
     assert "Public claim gate: PASS" in out
-    assert "Capability-specific claim gate: FAIL" in out
-    assert "ultra_review:invoked+evidence+gate:1" in out
+    assert "Capability-specific claim gate: PASS" in out
+    assert "ultra_review:invoked+evidence+gate:1" not in out
     assert "Per-capability public-safe capabilities: none" in out
     assert "| ultra_review | 100.0% | 0.0% | 0.0% | 0.0% | 0.0% | NO | capability_receipts | direct_codex_no_ultra_review_report:1 |" in out
 

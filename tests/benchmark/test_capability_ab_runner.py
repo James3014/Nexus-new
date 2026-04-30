@@ -1676,7 +1676,7 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert receipts["autoreason"]["failure_reason"] == "selected_without_invocation"
     assert receipts["ddtree"]["invoked"] is False
     assert receipts["ddtree"]["public_claim_safe"] is False
-    assert receipts["ddtree"]["failure_reason"] == "selected_without_invocation"
+    assert receipts["ddtree"]["failure_reason"] == "feature_flag_disabled"
     assert receipts["ultra_review"]["invoked"] is False
     assert receipts["ultra_review"]["public_claim_safe"] is False
     assert receipts["ultra_review"]["failure_reason"] == "direct_codex_no_ultra_review_report"

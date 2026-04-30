@@ -61,6 +61,85 @@ def test_router_fail_closed():
     assert result.status == "UNKNOWN"
     assert result.reject_reason is not None
 
+def test_router_caps_fallback_candidates_below_answer_threshold():
+    router = MSARouter(confidence_threshold=0.8)
+    fallback = MemoryCandidate(
+        id="fallback",
+        content="synthetic",
+        type="belief",
+        score=0.99,
+        vector_similarity=0.99,
+        claim_confidence=0.99,
+        version_id="v1",
+        source_hash="h",
+        retrieval_source="fallback",
+    )
+
+    result = router.route("query-fallback", [fallback])
+
+    assert result.status == "UNKNOWN"
+    assert result.candidates[0].score < 0.8
+
+
+def test_router_reranks_by_confidence_and_sot_weight():
+    router = MSARouter(confidence_threshold=0.5)
+    belief = MemoryCandidate(
+        id="belief",
+        content="soft memory",
+        type="belief",
+        score=0.95,
+        vector_similarity=0.95,
+        claim_confidence=0.7,
+        version_id="v1",
+        source_hash="hb",
+        retrieval_source="lancedb",
+    )
+    code = MemoryCandidate(
+        id="code",
+        content="source evidence",
+        type="code",
+        score=0.9,
+        vector_similarity=0.9,
+        claim_confidence=0.9,
+        version_id="v1",
+        source_hash="hc",
+        retrieval_source="lancedb",
+    )
+
+    result = router.route("query-rerank", [belief, code])
+
+    assert result.candidates[0].id == "code"
+
+
+def test_retriever_missing_db_returns_no_candidates(tmp_path):
+    from nexus.experiments.msa_routing.msa_indexer import LanceDBRetriever
+
+    retriever = LanceDBRetriever(str(tmp_path))
+
+    assert retriever.retrieve("expected answered should not fabricate") == []
+
+
+@pytest.mark.asyncio
+async def test_index_worker_skips_when_embedding_unavailable(tmp_path, monkeypatch):
+    from nexus.experiments.msa_routing import msa_indexer
+
+    file_path = tmp_path / "target.py"
+    file_path.write_text("print('hello')\n", encoding="utf-8")
+
+    async def fake_embedding(_client, _content):
+        return None
+
+    monkeypatch.setattr(msa_indexer, "_fetch_embedding_async", fake_embedding)
+
+    record = await msa_indexer._index_file_worker_async(
+        client=None,
+        fpath="target.py",
+        content=file_path.read_text(encoding="utf-8"),
+        repo_root=str(tmp_path),
+    )
+
+    assert record is None
+
 def test_hash_drift():
     lifecycle = MSALifecycle(decay_rate=0.5)
     

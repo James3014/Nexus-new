@@ -1606,7 +1606,6 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
             task_type=task_type,
             recommended_flow=out["recommended_flow"],
             plan=plan,
-            stop_policy=out["capability_stack"].get("stop_policy", {}),
         )
         written = write_route_decision_report(report_path, decision)
         out["route_decision_report"] = str(written)

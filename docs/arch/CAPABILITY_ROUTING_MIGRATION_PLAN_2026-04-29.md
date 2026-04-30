@@ -701,6 +701,40 @@ incrementally.
 - RLM still needs executor-level receipts before recursive loop claims can
   produce capability-specific public claims.
 
+## 2026-04-30 Receipt Boundary COE Lesson
+- Failure lesson:
+  - The Flash 12x2 report correctly proved Nexus value, but capability coverage
+    still mixed three meanings: planner selection, executor invocation, and
+    public-safe evidence. This made DDTree/Ultra Review look like route
+    problems even when they were selected-only or feature-flag-disabled.
+  - Hyper execution was also being counted as Research invocation without a
+    research citation/report ref, which produced `invoked_without_evidence` and
+    weakened report readability.
+- Fix:
+  - Research is no longer marked invoked just because Hyper ran; it needs
+    research-specific evidence from `capability_evidence`.
+  - DDTree receipt invocation now requires actual pruning evidence
+    (`actual_saved_steps > 0`), and no-op pruning is reported as
+    `no_pruning_opportunity`.
+  - Public per-capability gates ignore non-actionable selected-only states such
+    as feature-disabled Ultra Review and no-op DDTree, while still listing them
+    as not public-safe in the coverage matrix.
+- Evidence:
+  - `uv run pytest -q tests/engine/test_capability_routing_contracts.py
+    tests/benchmark/test_gemini_nexus_report.py tests/benchmark/test_capability_ab_runner.py
+    -k "receipt or capability or codex_provider_delivers"` -> 129 passed.
+  - `uv run pytest -q tests/app/test_research_flow_service.py -k
+    "capability_evidence or local_route_oracle or hyper_learning_trace"` -> 4
+    passed.
+  - Re-rendering the Gemini Flash 12x2 report from existing JSONL now keeps
+    public and per-capability gates PASS while still showing DDTree,
+    Research, and Ultra Review as not public-safe unless they have real
+    invocation/evidence/gate receipts.
+- Next:
+  - Future Gemini/3.1 Pro publication runs should use freshly generated rows so
+    Research reflects the stricter invocation boundary rather than old JSONL
+    semantics.
+
 ## 2026-04-30 Flash Hidden-Invariant COE Lesson
 - Failure lesson:
   - GPT-5.5 did not expose the same weakness as Gemini Flash. GPT-5.5 mostly
@@ -734,6 +768,91 @@ incrementally.
   - Re-run Gemini 3 Flash 12x2 only after this fix is committed.
   - If the full run still fails, classify by task family before changing the
     router again; do not keep patching from aggregate solve rate alone.
+
+## 2026-05-01 RouteDecision SSOT COE Lesson
+- Failure lesson:
+  - `build_route()` already produced planner-derived data, but executor flags,
+    Ultra Review gate, and some benchmark prompt fields could still be driven
+    by the legacy `capability_stack`.
+  - Pending executor capabilities were also easy to over-claim: route selection
+    and public capability coverage were conflated, making Swarm/Drone/Nightshift
+    look selected even when the executable adapter was still pending.
+- Fix:
+  - `build_route()` now emits `capability_plan` and `route_decision` as first
+    class outputs.
+  - Executor controls and Ultra Review recommendation now read
+    `RouteDecision.executor_controls/governance_layers` first.
+  - Pending executor receipts demote to `selected=false`; only executable or
+    receipt-backed capabilities count toward public coverage.
+- Next:
+  - Keep `capability_stack` as report compatibility only.
+  - Remove the remaining seed reads in `capability_signals.py` after old report
+    consumers finish migrating to `RouteDecision`.
+
+## 2026-05-01 Route Smoke COE Lesson
+- Failure lesson:
+  - A strong model benchmark can hide route defects because the task may still
+    pass even when a capability receipt is missing or unsafe.
+  - The Nexus-only route smoke caught two issues that model A/B would not make
+    obvious: pending Swarm/Drone/Nightshift executors were enabled in executor
+    controls, and LanceDB retrieval tasks did not select a LanceDB receipt.
+  - Ultra Review also failed because ghost regression exercised an outdated
+    DDTree expectation for baseline repair tasks.
+- Fix:
+  - Executor controls now subtract `pending_capabilities` before enabling
+    executable controls.
+  - LanceDB is selected on retrieval/vector-hit signals, not only pre-existing
+    pillar hits.
+  - The planner test now reflects the DDTree boundary: baseline repair may use
+    autoreason/repair_loop, while DDTree is reserved for hyper candidate pruning.
+- Evidence:
+  - `uv run pytest -q tests/ops/test_capability_route_smoke.py
+    tests/engine/test_route_contracts.py tests/engine/test_capability_routing_contracts.py
+    tests/app/test_research_flow_service.py tests/benchmark/test_capability_ab_runner.py
+    -k "route or executor or capability or smoke"` -> 152 passed.
+  - `uv run python scripts/ops/capability_route_smoke.py` -> 13/13 Nexus-only
+    tasks passed; receipt_diagnostic_pass=true; route_oracles public_safe covers
+    autoreason, ddtree, drone, lancedb, nightshift, research, swarm, and
+    ultra_review.
+- Next:
+  - Use Nexus-only route smoke before any Gemini/GPT public comparison run.
+  - Treat model A/B as publication evidence, not as the primary route debugger.
+
+## 2026-05-01 Legacy Router Consolidation COE Lesson
+- Failure lesson:
+  - Route smoke can be green while older routing layers still claim control
+    through side effects or fake fallback candidates.
+  - `AutonomicRoutingService` used diagnostic modes to set executor-facing
+    metadata such as `swarm_mode` and `force_external`; that bypassed the
+    planner/receipt contract.
+  - `SkillsRouter.route_candidates()` returned `demo-skill` when no real skill
+    artifact existed, and experimental MSA retrieval fabricated fallback
+    candidates and pseudo vectors when the index or embedding service was
+    unavailable.
+- Fix:
+  - Autonomic routing is now a signal provider only. It records
+    `autonomic_signals` and `autonomic_matched_policies`, but does not enable
+    Swarm, force research, or inject external skill instructions.
+  - Skills routing only returns inventory candidates backed by a real `SKILL.md`
+    artifact; no-candidate cases stay empty and observable.
+  - Experimental MSA retrieval/indexing is fail-closed: missing DB/table,
+    embedding failure, and LanceDB errors return no candidates instead of
+    synthetic high-confidence evidence.
+  - MSA routing now applies a small explainable hybrid score using retrieval
+    source, vector similarity, claim confidence, decay, and evidence type.
+- Evidence:
+  - `uv run pytest -q tests/engine/test_autonomic_routing_service.py
+    tests/test_router_decision_id.py tests/test_skills_router_builtin.py
+    tests/experiments/test_msa_routing.py tests/experiments/test_msa_benchmark_runner.py`
+    -> 23 passed.
+  - `uv run python scripts/ops/capability_route_smoke.py` -> passed;
+    receipt_diagnostic_pass=true; 13/13 Nexus-only tasks passed across route
+    oracles, CodeIntel/Hyper, governance gates, and Belief.
+- Next:
+  - Treat AutonomicRouter, SkillsRouter, and experimental MSA as signal/provider
+    lanes until their outputs are converted into `CapabilitySignalSet` and
+    `RouteDecision` through the planner SSOT.
+  - Do not use fallback-generated candidates as public benchmark evidence.
 
 ## 2026-04-29 P2 RouteDecision Adapter Lesson
 - Failure lesson:

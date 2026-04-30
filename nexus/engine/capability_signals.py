@@ -65,6 +65,11 @@ def build_capability_signals(
     codeintel = codeintel or {}
     route_features = route.get("route_features", {}) if isinstance(route, dict) else {}
     capability_stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
+    route_decision = route.get("route_decision", {}) if isinstance(route, dict) else {}
+    route_decision = route_decision if isinstance(route_decision, dict) else {}
+    decision_selected = route_decision.get("selected_capabilities", []) or []
+    decision_acceleration = route_decision.get("acceleration_layers", []) or []
+    decision_governance = route_decision.get("governance_layers", []) or []
     task_lower = f"{task_desc} {task_type}".lower()
     skill_signals = build_skill_signals(skills)
 
@@ -72,9 +77,9 @@ def build_capability_signals(
         task_desc=task_desc,
         task_type=task_type,
         recommended_flow=str(route.get("recommended_flow", "") or ""),
-        selected_seed=tuple(str(item) for item in capability_stack.get("selected_capabilities", []) or []),
-        acceleration_seed=tuple(str(item) for item in capability_stack.get("acceleration_layers", []) or []),
-        governance_seed=tuple(str(item) for item in capability_stack.get("governance_layers", []) or []),
+        selected_seed=tuple(str(item) for item in (decision_selected or capability_stack.get("selected_capabilities", []) or [])),
+        acceleration_seed=tuple(str(item) for item in (decision_acceleration or capability_stack.get("acceleration_layers", []) or [])),
+        governance_seed=tuple(str(item) for item in (decision_governance or capability_stack.get("governance_layers", []) or [])),
         risk_score=_as_int(route_features.get("risk_score"), 0),
         confidence=_as_float(route_features.get("adjusted_root_cause_confidence"), 1.0),
         candidate_count=max(1, _as_int(route_features.get("candidate_count"), 1)),

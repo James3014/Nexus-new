@@ -43,6 +43,20 @@ class RoutingResult(BaseModel):
 class MSARouter:
     def __init__(self, confidence_threshold: float = 0.75):
         self.confidence_threshold = confidence_threshold
+        self.sot_weight = {
+            "code": 1.0,
+            "rule": 0.95,
+            "artifact": 0.9,
+            "belief": 0.8,
+        }
+
+    def _hybrid_score(self, candidate: MemoryCandidate) -> float:
+        if candidate.retrieval_source != "lancedb":
+            return min(candidate.score, self.confidence_threshold - 0.01)
+        evidence_weight = self.sot_weight.get(candidate.type, 0.75)
+        semantic_score = candidate.vector_similarity or candidate.score
+        score = semantic_score * candidate.claim_confidence * candidate.confidence_decay * evidence_weight
+        return max(0.0, min(1.0, score))
 
     def route(self, query_id: str, retrieved_candidates: List[MemoryCandidate], query_type: str = "default") -> RoutingResult:
         if not retrieved_candidates:
@@ -52,8 +66,8 @@ class MSARouter:
                 reject_reason="no_candidates_retrieved"
             )
 
-        # reranker module missing, fallback to score sorting
-        # 1. Apply Hybrid Reranking
+        for candidate in retrieved_candidates:
+            candidate.score = self._hybrid_score(candidate)
         sorted_candidates = sorted(retrieved_candidates, key=lambda c: c.score, reverse=True)
         best_candidate = sorted_candidates[0]
 

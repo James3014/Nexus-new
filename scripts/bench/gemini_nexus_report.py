@@ -19,6 +19,18 @@ _PUBLIC_CLAIM_CAPABILITIES = {
     "ultra_review",
 }
 
+_NON_ACTIONABLE_CAPABILITY_REASONS = {
+    "direct_codex_no_ultra_review_report",
+    "feature_flag_disabled",
+    "no_pruning_opportunity",
+    "pending_executor",
+    "recommended_without_invocation",
+}
+
+_CAPABILITY_NON_ACTIONABLE_REASONS = {
+    "ddtree": {"selected_without_invocation"},
+}
+
 
 def _pct(value: Any) -> str:
     try:
@@ -210,6 +222,12 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
         if item.get("public_safe"):
             public_safe.append(str(name))
         else:
+            failure_reasons = item.get("failure_reasons", {})
+            if isinstance(failure_reasons, dict):
+                reasons = {str(reason) for reason in failure_reasons if str(reason).strip()}
+                ignored = _NON_ACTIONABLE_CAPABILITY_REASONS | _CAPABILITY_NON_ACTIONABLE_REASONS.get(str(name), set())
+                if reasons and reasons <= ignored:
+                    continue
             missing = [
                 layer
                 for layer in ("invoked", "evidence", "gate")

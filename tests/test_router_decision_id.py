@@ -35,3 +35,21 @@ def test_router_emits_decision_id_in_candidates_and_log(tmp_path: Path):
     line = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()][-1]
     row = json.loads(line)
     assert str(row.get("decision_id", "")).startswith("dec_r_")
+
+
+def test_router_returns_no_candidates_without_real_skill_artifact(tmp_path: Path):
+    inventory_path = tmp_path / "scripts" / "skills_inventory.json"
+    inventory_path.parent.mkdir(parents=True, exist_ok=True)
+    inventory_path.write_text(
+        json.dumps({"skills": {"demo-skill": {"phases": ["R"], "triggers": ["demo"]}}}),
+        encoding="utf-8",
+    )
+
+    router = SkillsRouter(project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t2"))
+    candidates = router.route_candidates("R", {"task_id": "demo task"})
+
+    assert candidates == []
+    log_path = tmp_path / ".nexus" / "runs" / "t2" / "router_decisions.jsonl"
+    row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert row["candidate_count"] == 0
+    assert row["fallback_used"] is False

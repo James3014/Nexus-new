@@ -100,7 +100,7 @@ def test_selected_receipts_do_not_imply_invocation_or_public_claim_safety():
     receipts = {item.name: item for item in selected_receipts(plan)}
 
     assert {"swarm", "drone", "nightshift"} <= set(receipts)
-    assert receipts["swarm"].selected is True
+    assert receipts["swarm"].selected is False
     assert receipts["swarm"].invoked is False
     assert receipts["swarm"].evidence_present is False
     assert receipts["swarm"].failure_reason == "pending_executor"
@@ -583,7 +583,7 @@ def test_ddtree_receipt_requires_real_candidate_pruning():
     assert not_pruned["ddtree"].evidence_present is False
     assert not_pruned["ddtree"].evidence_refs == ()
     assert not_pruned["ddtree"].public_claim_safe is False
-    assert not_pruned["ddtree"].failure_reason == "selected_without_invocation"
+    assert not_pruned["ddtree"].failure_reason == "no_pruning_opportunity"
     assert pruned["ddtree"].invoked is True
     assert pruned["ddtree"].public_claim_safe is True
     assert pruned["ddtree"].failure_reason == ""
@@ -671,7 +671,31 @@ def test_msa_receipts_become_public_safe_with_executor_evidence():
     assert "artifact:.nexus/reports/drones/a.json" in receipts["drone"].evidence_refs
     assert "subtask_artifact:2" in receipts["drone"].evidence_refs
     assert receipts["nightshift"].public_claim_safe is True
-    assert receipts["nightshift"].failure_reason == ""
+
+
+def test_ddtree_receipt_distinguishes_no_pruning_opportunity_from_invocation():
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["ddtree"]},
+            capabilities={"claim_verified": True},
+            ddtree={
+                "enabled": True,
+                "eligible": True,
+                "candidate_count": 2,
+                "max_candidates": 2,
+                "actual_saved_steps": 0,
+                "selected_candidate_ids": [],
+            },
+        )
+    }
+
+    receipt = receipts["ddtree"]
+    assert receipt.selected is True
+    assert receipt.invoked is False
+    assert receipt.evidence_present is False
+    assert receipt.public_claim_safe is False
+    assert receipt.failure_reason == "no_pruning_opportunity"
 
 
 def test_pending_executor_receipts_keep_route_selection_but_block_public_claims():
@@ -696,12 +720,12 @@ def test_pending_executor_receipts_keep_route_selection_but_block_public_claims(
         )
     }
 
-    assert receipts["swarm"].selected is True
+    assert receipts["swarm"].selected is False
     assert receipts["swarm"].public_claim_safe is False
     assert receipts["swarm"].failure_reason == "pending_executor"
-    assert receipts["drone"].selected is True
+    assert receipts["drone"].selected is False
     assert receipts["drone"].public_claim_safe is False
     assert receipts["drone"].failure_reason == "pending_executor"
-    assert receipts["nightshift"].selected is True
+    assert receipts["nightshift"].selected is False
     assert receipts["nightshift"].public_claim_safe is False
     assert receipts["nightshift"].failure_reason == "pending_executor"

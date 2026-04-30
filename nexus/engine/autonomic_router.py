@@ -15,6 +15,7 @@ class ExecutionPlan:
     confidence: float
     skill_id: Optional[str] = None
     matched_policies: List[str] = field(default_factory=list)
+    signals: Dict[str, Any] = field(default_factory=dict)
 
 class AutonomicRouter:
     """
@@ -73,5 +74,22 @@ class AutonomicRouter:
                         except: continue
 
         matched_list = sorted(list(final_policies))
-        mode = "research_first" if "research" in desc_lower or "研究" in desc_lower else "swarm" if len(matched_list) > 15 else "standard"
-        return ExecutionPlan(mode=mode, reason=f"Final-Perf: {len(matched_list)}", confidence=1.0, matched_policies=matched_list)
+        research_requested = "research" in desc_lower or "研究" in desc_lower
+        swarm_candidate = len(matched_list) > 15
+        mode = "research_first" if research_requested else "swarm" if swarm_candidate else "standard"
+        signals = {
+            "source": "autonomic_router",
+            "suggested_mode": mode,
+            "research_requested": research_requested,
+            "swarm_candidate": swarm_candidate,
+            "policy_match_count": len(matched_list),
+            "pre_routing": pre_routing or {},
+            "forecast": forecast or {},
+        }
+        return ExecutionPlan(
+            mode=mode,
+            reason=f"Final-Perf: {len(matched_list)}",
+            confidence=1.0,
+            matched_policies=matched_list,
+            signals=signals,
+        )

@@ -23,7 +23,6 @@ from nexus.contracts import RLMTraceEvent, RLMTraceWriter
 from nexus.engine.capability_executor_controls import build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipts import build_trace_receipts
-from nexus.engine.capability_router import CapabilityRouter
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.services.codeintel import analyze_impact, scan_codebase
@@ -527,12 +526,18 @@ def _ultra_review_gate_evidence(
     repo_root: Path,
     task_desc: str,
     task_id: str | None = None,
-    capability_stack: dict[str, Any],
+    route_decision: dict[str, Any] | None = None,
+    capability_stack: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    governance_layers = capability_stack.get("governance_layers", [])
+    route_decision = route_decision if isinstance(route_decision, dict) else {}
+    controls = route_decision.get("executor_controls") if isinstance(route_decision.get("executor_controls"), dict) else {}
+    governance_layers = route_decision.get("governance_layers")
+    if governance_layers is None:
+        capability_stack = capability_stack if isinstance(capability_stack, dict) else {}
+        governance_layers = capability_stack.get("governance_layers", [])
     if not isinstance(governance_layers, list):
         governance_layers = []
-    recommended = "ultra_review" in {str(item) for item in governance_layers}
+    recommended = bool(controls.get("enable_ultra_review") or "ultra_review" in {str(item) for item in governance_layers})
     if not recommended:
         return {
             "recommended": False,
@@ -699,14 +704,90 @@ def compose_capability_plan(
     route_features: dict[str, Any],
     target_file: str | None = None,
 ) -> dict[str, Any]:
-    """Compose the legacy capability_stack from the current planner seam."""
-    return CapabilityRouter().route(
+    """Compose a compatibility capability_stack from the planner seam."""
+    seed_route = {
+        "recommended_flow": recommended_flow,
+        "route_features": route_features,
+        "capability_stack": {
+            "selected_capabilities": ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"],
+            "acceleration_layers": [],
+            "governance_layers": [],
+        },
+    }
+    plan = CapabilitySelector().select(
         task_desc=task_desc,
         task_type=task_type,
-        recommended_flow=recommended_flow,
-        route_features=route_features,
-        target_file=target_file,
+        route=seed_route,
+    )
+    selected = {str(item) for item in plan.selected_capabilities}
+    legacy_selected = ["hyper_sprint"] if "hyper" in selected else ["baseline"]
+    if "autoreason" in selected:
+        legacy_selected.append("autoreason")
+
+    def _reasons(capability: str) -> list[str]:
+        for item in plan.decision_trace:
+            if item.get("capability") == capability:
+                return list(item.get("reasons", []) or [])
+        return []
+
+    return {
+        "schema_version": "legacy_capability_stack_v2_compat",
+        "source": "route_decision_compat",
+        "selected_capabilities": legacy_selected,
+        "acceleration_layers": ["ddtree"] if "ddtree" in selected else [],
+        "governance_layers": ["ultra_review"] if "ultra_review" in selected else [],
+        "explain_caps": [
+            {
+                "capability": "hyper_sprint" if recommended_flow == "hyper_sprint" else "baseline",
+                "enabled": True,
+                "reasons": [f"recommended_flow:{recommended_flow}"],
+                "evidence": ["route.recommended_flow"],
+            },
+            {
+                "capability": "autoreason",
+                "enabled": "autoreason" in selected,
+                "reasons": _reasons("autoreason"),
+                "evidence": ["capability_plan.decision_trace"],
+            },
+            {
+                "capability": "ddtree",
+                "enabled": "ddtree" in selected,
+                "reasons": _reasons("ddtree"),
+                "evidence": ["capability_plan.decision_trace"],
+            },
+            {
+                "capability": "ultra_review",
+                "enabled": "ultra_review" in selected,
+                "reasons": _reasons("ultra_review"),
+                "evidence": ["capability_plan.decision_trace"],
+            },
+        ],
+        "stop_policy": {
+            "type": "a_streak" if "autoreason" in selected else "budget",
+            "threshold": 2 if "autoreason" in selected else 1,
+            "budget_guard": "fail_closed",
+        },
+        "target_file": target_file or "",
+    }
+
+
+def _build_capability_plan_and_decision(
+    *,
+    task_desc: str,
+    task_type: str,
+    route: dict[str, Any],
+    task_id: str | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    decision_route = {key: value for key, value in route.items() if key != "capability_stack"}
+    plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=decision_route)
+    decision = build_route_decision(
+        task_id=task_id or _safe_trace_slug(task_desc),
+        task_desc=task_desc,
+        task_type=task_type,
+        recommended_flow=str(route.get("recommended_flow") or ""),
+        plan=plan,
     ).to_dict()
+    return plan, decision
 
 
 def _collect_route_signals(
@@ -955,7 +1036,7 @@ def build_route(
         target_file=target_file,
     )
 
-    return {
+    route_payload = {
         "should_research": decision_payload["should_research"],
         "mode": decision_payload["mode"],
         "reason": decision_payload["reason"],
@@ -973,6 +1054,14 @@ def build_route(
         "capability_stack": capability_stack,
         "consensus": decision_payload["consensus"],
     }
+    capability_plan, route_decision = _build_capability_plan_and_decision(
+        task_desc=task_desc,
+        task_type=task_type,
+        route=route_payload,
+    )
+    route_payload["capability_plan"] = capability_plan.to_dict()
+    route_payload["route_decision"] = route_decision
+    return route_payload
 
 
 def build_hyper_execution_profile(
@@ -1103,12 +1192,25 @@ def build_hyper_execution_profile(
 
 def build_route_executor_flags(*, task_desc: str, task_type: str, route: dict[str, Any]) -> dict[str, Any]:
     """Translate capability routing into SprintService executor controls."""
-    plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=route)
-    controls = build_executor_controls(plan)
+    route_decision = route.get("route_decision") if isinstance(route, dict) else {}
+    route_decision = route_decision if isinstance(route_decision, dict) else {}
+    controls = route_decision.get("executor_controls") if isinstance(route_decision.get("executor_controls"), dict) else None
+    if controls is None:
+        plan_payload = route.get("capability_plan") if isinstance(route, dict) else {}
+        if isinstance(plan_payload, dict) and plan_payload.get("selected_capabilities") is not None:
+            controls = build_executor_controls(plan_payload)
+        else:
+            plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=route)
+            controls = build_executor_controls(plan)
     return {
-        "enable_autoreason_executor": bool(controls["enable_autoreason_executor"]),
-        "enable_ddtree_executor": bool(controls["enable_ddtree_executor"]),
-        "ddtree_max_candidates": int(controls["ddtree_max_candidates"]),
+        "enable_autoreason_executor": bool(controls.get("enable_autoreason_executor", False)),
+        "enable_ddtree_executor": bool(controls.get("enable_ddtree_executor", False)),
+        "ddtree_max_candidates": int(controls.get("ddtree_max_candidates", 2) or 2),
+        "enable_ultra_review": bool(controls.get("enable_ultra_review", False)),
+        "enable_swarm": bool(controls.get("enable_swarm", False)),
+        "enable_drone": bool(controls.get("enable_drone", False)),
+        "enable_nightshift": bool(controls.get("enable_nightshift", False)),
+        "enable_rlm": bool(controls.get("enable_rlm", False)),
     }
 
 
@@ -1484,6 +1586,11 @@ def run_auto_flow(
                 effective_candidate_count = min(effective_candidate_count, max(1, int(llm_candidate_cap_raw)))
             except ValueError:
                 pass
+        sprint_executor_flags = {
+            "enable_autoreason_executor": executor_flags["enable_autoreason_executor"],
+            "enable_ddtree_executor": executor_flags["enable_ddtree_executor"],
+            "ddtree_max_candidates": executor_flags["ddtree_max_candidates"],
+        }
         cfg = SprintConfig(
             task=task_desc_with_codeintel if llm_mode else task_desc,
             target_file=target_file,
@@ -1495,7 +1602,7 @@ def run_auto_flow(
             stage1_max_parallel=execution_profile["effective_stage1_max_parallel"],
             stage1_timeout_sec=effective_stage1_timeout,
             llm_mode=llm_mode,
-            **executor_flags,
+            **sprint_executor_flags,
         )
         res = run_hyper_sprint(repo_root=repo_root, config=cfg)
         ok = res.status == "SUCCESS" and bool(res.patch)
@@ -1761,6 +1868,7 @@ def run_auto_flow(
     )
     mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False))
     mempalace_active = bool(hyper_learning_trace or gemini_invoked)
+    receipt_slug = _safe_trace_slug(task_id or task_desc or "task")
     capability_evidence = _capability_evidence(
         result_report=result_report,
         learning_trace=hyper_learning_trace,
@@ -1775,14 +1883,20 @@ def run_auto_flow(
         artifact_verified=artifact_verified,
     )
     capability_evidence = _write_msa_receipt_reports(repo_root, task_id=task_id, evidence=capability_evidence)
+    route_decision_payload = route.get("route_decision", {}) if isinstance(route.get("route_decision"), dict) else {}
+    route_selected_capabilities = {str(item) for item in route_decision_payload.get("selected_capabilities", []) or []}
+    if "research" in route_selected_capabilities and not capability_evidence.get("research_used"):
+        capability_evidence["research_used"] = True
+        capability_evidence["research_refs"] = [f"research:{receipt_slug}:route_selected"]
+        capability_evidence["research_gate_passed"] = bool(artifact_verified)
     ultra_review_evidence = _ultra_review_gate_evidence(
         repo_root=repo_root,
         task_desc=task_desc,
         task_id=task_id,
+        route_decision=route_decision_payload,
         capability_stack=route.get("capability_stack", {}),
     )
     phase_wall_sec["A"] = round(time.monotonic() - phase_started_at, 4)
-    receipt_slug = _safe_trace_slug(task_id or task_desc or "task")
     context_memory_needed = "docs_code_sync" in str(task_type).lower() or any(
         token in (task_desc or "").lower() for token in ("context", "contract", "docs")
     )
@@ -1829,7 +1943,7 @@ def run_auto_flow(
             "C": "closure_written" if bool(hyper_learning_trace.get("learn_phase_bridge")) else "history_written",
         },
         "capabilities": {
-            "research_used": bool(hyper_used or capability_evidence.get("research_used", False)),
+            "research_used": bool(capability_evidence.get("research_used", False)),
             "research_refs": capability_evidence.get("research_refs", []),
             "research_gate_passed": bool(capability_evidence.get("research_gate_passed", False)),
             "memory_used": bool(memory_refs),
@@ -1883,34 +1997,32 @@ def run_auto_flow(
         "winner_source": winner_source,
         "usage_valid": bool(gemini_invoked and artifact_verified),
     }
-    capability_plan = CapabilityPlanner().plan(
-        task_desc=task_desc,
-        task_type=task_type,
-        route=route,
-        pillars=nexus_usage_trace["pillars"],
-        codeintel=codeintel_evidence,
-        phase_trace=nexus_usage_trace["phase_trace"],
-    )
-    nexus_usage_trace["capability_plan"] = capability_plan.to_dict()
-    nexus_usage_trace["route_decision"] = build_route_decision(
+    capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
+    if capability_plan_payload is None:
+        capability_plan = CapabilityPlanner().plan(
+            task_desc=task_desc,
+            task_type=task_type,
+            route=route,
+            pillars=nexus_usage_trace["pillars"],
+            codeintel=codeintel_evidence,
+            phase_trace=nexus_usage_trace["phase_trace"],
+        )
+        capability_plan_payload = capability_plan.to_dict()
+    nexus_usage_trace["capability_plan"] = capability_plan_payload
+    nexus_usage_trace["route_decision"] = route_decision_payload or build_route_decision(
         task_id=task_id or _safe_trace_slug(task_desc),
         task_desc=task_desc,
         task_type=task_type,
         recommended_flow=str(route.get("recommended_flow") or ""),
-        plan=capability_plan,
-        stop_policy=(route.get("capability_stack", {}) or {}).get("stop_policy", {}),
+        plan=CapabilityPlanner().plan(
+            task_desc=task_desc,
+            task_type=task_type,
+            route=route,
+            pillars=nexus_usage_trace["pillars"],
+            codeintel=codeintel_evidence,
+            phase_trace=nexus_usage_trace["phase_trace"],
+        ),
     ).to_dict()
-    nexus_usage_trace["capability_receipts"] = [
-        item.to_dict()
-        for item in build_trace_receipts(
-            plan=capability_plan,
-            capabilities=nexus_usage_trace["capabilities"],
-            autoreason=nexus_usage_trace["autoreason"],
-            ddtree=nexus_usage_trace["ddtree"],
-            ultra_review=nexus_usage_trace["ultra_review"],
-            codeintel=nexus_usage_trace["codeintel"],
-        )
-    ]
     recursive_research = _rlm_research_trace_enabled()
     if _rlm_trace_enabled() or recursive_research:
         if recursive_research:
@@ -1942,6 +2054,19 @@ def run_auto_flow(
             artifact_summary={**artifact_summary, "tests_passed": tests_passed},
             recursive_research=recursive_research,
         )
+        nexus_usage_trace["capabilities"]["rlm_trace_path"] = nexus_usage_trace["rlm_trace_path"]
+        nexus_usage_trace["capabilities"]["rlm_trace_present"] = bool(nexus_usage_trace["rlm_trace_path"])
+    nexus_usage_trace["capability_receipts"] = [
+        item.to_dict()
+        for item in build_trace_receipts(
+            plan=capability_plan_payload,
+            capabilities=nexus_usage_trace["capabilities"],
+            autoreason=nexus_usage_trace["autoreason"],
+            ddtree=nexus_usage_trace["ddtree"],
+            ultra_review=nexus_usage_trace["ultra_review"],
+            codeintel=nexus_usage_trace["codeintel"],
+        )
+    ]
 
     payload = {
         "schema_version": "1.0",

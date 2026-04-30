@@ -167,12 +167,19 @@ class DDTreeReceiptAdapter:
                     ]
                 )
         clean_refs = [str(item).strip() for item in refs if str(item).strip()]
-        invoked = bool(
-            payload.get("enabled")
-            and payload.get("eligible")
-            and (saved_steps > 0 or (max_candidates > 0 and candidate_count > max_candidates))
-        )
+        invoked = bool(payload.get("enabled") and payload.get("eligible") and saved_steps > 0)
         gate_passed = bool(saved_steps > 0 and claim_verified)
+        if not payload.get("enabled"):
+            failure_reason = "feature_flag_disabled"
+        elif payload.get("eligible") and not invoked:
+            failure_reason = "no_pruning_opportunity"
+        else:
+            failure_reason = selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=clean_refs,
+                gate_passed=gate_passed,
+            )
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -181,12 +188,7 @@ class DDTreeReceiptAdapter:
             gate_passed=gate_passed,
             outcome_contributed=bool(gate_passed and claim_verified),
             executor_id=self.name,
-            failure_reason=selected_failure_reason(
-                selected=True,
-                invoked=invoked,
-                evidence_refs=clean_refs,
-                gate_passed=gate_passed,
-            ),
+            failure_reason=failure_reason,
         )
 
 
@@ -541,6 +543,31 @@ class NightshiftReceiptAdapter:
         )
 
 
+class RepairLoopReceiptAdapter:
+    name = "repair_loop"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        trace_path = str(payload.get("rlm_trace_path") or "").strip()
+        refs = [trace_path] if trace_path else []
+        invoked = bool(payload.get("rlm_trace_present") or trace_path)
+        gate_passed = bool(invoked and claim_verified)
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and refs),
+            executor_id="rlm_trace_bridge",
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
 RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
     adapter.name: adapter
     for adapter in (
@@ -560,5 +587,6 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
         BeliefReceiptAdapter(),
         ResearchReceiptAdapter(),
         LanceDBReceiptAdapter(),
+        RepairLoopReceiptAdapter(),
     )
 }

@@ -9,7 +9,12 @@ logger = logging.getLogger(__name__)
 
 
 class AutonomicRoutingService:
-    """Coordinator-facing wrapper for autonomic route resolution and side effects."""
+    """Coordinator-facing wrapper for autonomic route signals.
+
+    Capability execution is owned by RouteDecision/CapabilityPlanner. This
+    service may record autonomic diagnostics, but it must not enable executor
+    flags or inject skill instructions by itself.
+    """
 
     def __init__(
         self,
@@ -65,22 +70,18 @@ class AutonomicRoutingService:
         state.metadata["autonomic_route"] = exec_plan.mode
         state.metadata["autonomic_reason"] = exec_plan.reason
         state.metadata["est_tokens"] = forecast.get("est_tokens", 0)
-
-        if exec_plan.mode == "swarm":
-            state.metadata["swarm_mode"] = True
-            logger.info("🧠 [Autonomic] Auto-escalated to SWARM: %s", exec_plan.reason)
-        elif exec_plan.mode == "research_first":
-            state.metadata["force_external"] = True
-            logger.info("🧠 [Autonomic] Auto-routed to RESEARCH_FIRST: %s", exec_plan.reason)
-        elif exec_plan.mode == "self_heal" and self.selector:
-            logger.info("🧠 [Autonomic] Priority: SELF_HEAL triggered by memory match.")
-        elif exec_plan.mode == "external_skill":
-            self._apply_external_skill(state=state, skill_id=str(getattr(exec_plan, "skill_id", "")))
+        state.metadata["autonomic_route_source"] = "signal_provider"
+        state.metadata["autonomic_signals"] = dict(getattr(exec_plan, "signals", {}) or {})
+        state.metadata["autonomic_matched_policies"] = list(
+            getattr(exec_plan, "matched_policies", []) or []
+        )
+        logger.info("🧠 [Autonomic] Recorded route signal %s: %s", exec_plan.mode, exec_plan.reason)
 
         return {
             "mode": exec_plan.mode,
             "reason": exec_plan.reason,
             "skill_id": str(getattr(exec_plan, "skill_id", "")),
+            "signals": state.metadata["autonomic_signals"],
         }
 
     def _apply_external_skill(self, *, state: Any, skill_id: str) -> None:

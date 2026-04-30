@@ -535,9 +535,10 @@ class CapabilityPlanner:
             enable("memory", "prior_lesson_or_findings_available")
         if "docs_code_sync" in task_lower or "context" in task_lower or "contract" in task_lower:
             enable("memory", "context_contract_memory_needed")
-        if signals.lancedb_hits:
-            enable("lancedb", "semantic_memory_hits_available")
-        if "ddtree" in signals.acceleration_seed or signals.candidate_count >= 3 or signals.repair_signal:
+        if signals.lancedb_hits or "lancedb" in task_lower or "retrieval" in task_lower or "vector hit" in task_lower:
+            enable("lancedb", "semantic_memory_or_retrieval_signal_available")
+        hyper_selected = "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint"
+        if "ddtree" in signals.acceleration_seed or (hyper_selected and (signals.candidate_count >= 3 or signals.repair_signal)):
             enable("ddtree", "candidate_space_pruning")
         if signals.repair_signal:
             enable("repair_loop", "repair_or_self_heal_signal")

@@ -23,6 +23,8 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert "route_features" in out
     assert "consensus" in out
     assert "capability_stack" in out
+    assert "capability_plan" in out
+    assert "route_decision" in out
     assert out["capability_stack"]["selected_capabilities"] == ["hyper_sprint", "autoreason"]
     assert out["capability_stack"]["acceleration_layers"] == ["ddtree"]
     assert out["capability_stack"]["governance_layers"] == ["ultra_review"]
@@ -148,6 +150,8 @@ def test_build_route_public_contract_exact_keys(tmp_path: Path):
         "explain_payload",
         "route_features",
         "capability_stack",
+        "capability_plan",
+        "route_decision",
         "consensus",
     }
 
@@ -289,22 +293,31 @@ def test_decide_flow_payload_schema_keys(tmp_path: Path):
 
 def test_route_executor_flags_enable_dynamic_controls_for_repair_and_governance():
     route = {
-        "capability_stack": {"selected_capabilities": ["baseline"], "acceleration_layers": []},
-        "route_features": {"candidate_count": 1},
+        "route_decision": {
+            "executor_controls": {
+                "enable_autoreason_executor": True,
+                "enable_ddtree_executor": True,
+                "ddtree_max_candidates": 2,
+                "enable_ultra_review": True,
+                "enable_rlm": True,
+            }
+        },
     }
     repair = research_flow_service.build_route_executor_flags(
-        task_desc="Repair a flaky-looking timeout calculation without deleting assertions.",
-        task_type="public_test_repair",
+        task_desc="Simple wording without route keywords.",
+        task_type="plain",
         route=route,
     )
     governance = research_flow_service.build_route_executor_flags(
-        task_desc="Refactor credential scrubber while preserving secret redaction.",
-        task_type="public_refactor",
+        task_desc="Another plain task.",
+        task_type="plain",
         route=route,
     )
 
     assert repair["enable_autoreason_executor"] is True
     assert repair["enable_ddtree_executor"] is True
+    assert repair["enable_ultra_review"] is True
+    assert repair["enable_rlm"] is True
     assert governance["enable_autoreason_executor"] is True
 
 

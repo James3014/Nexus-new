@@ -67,7 +67,7 @@ async def _fetch_embedding_async(client: httpx.AsyncClient, content: str) -> Opt
         pass
     return None
 
-async def _index_file_worker_async(client: httpx.AsyncClient, fpath: str, content: str, repo_root: str) -> Dict[str, Any]:
+async def _index_file_worker_async(client: httpx.AsyncClient, fpath: str, content: str, repo_root: str) -> Optional[Dict[str, Any]]:
     """Async worker for file indexing."""
     full_path = os.path.join(repo_root, fpath)
     file_hash = get_file_hash(full_path)
@@ -83,9 +83,8 @@ async def _index_file_worker_async(client: httpx.AsyncClient, fpath: str, conten
     vector = await _fetch_embedding_async(client, content)
 
     if not vector:
-        # Fallback to hash-based pseudo vector
-        hash_int = int(file_hash[:8], 16) if file_hash else 0
-        vector = [(hash_int % (i + 1)) / 100.0 for i in range(128)]
+        logger.warning("⚠️ [MSA Indexer] Embedding unavailable; skipping vector record: %s", fpath)
+        return None
 
     return {
         "id": fpath,
@@ -118,7 +117,7 @@ async def incremental_index_async(repo_root: str, auto_upsert: bool = True) -> L
             _index_file_worker_async(client, fpath, content, repo_root) 
             for fpath, content in tasks_data
         ]
-        indexed_data = await asyncio.gather(*tasks)
+        indexed_data = [record for record in await asyncio.gather(*tasks) if record]
 
     if auto_upsert and indexed_data:
         upsert_to_lancedb(repo_root, indexed_data)
@@ -142,7 +141,8 @@ def upsert_to_lancedb(repo_root: str, records: List[Dict[str, Any]]) -> bool:
         import lancedb
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         db = lancedb.connect(db_path)
-        if "msa_knowledge" in db.table_names():
+        table_names = db.list_tables() if hasattr(db, "list_tables") else db.table_names()
+        if "msa_knowledge" in table_names:
             table = db.open_table("msa_knowledge")
             table.add(records)
             try:
@@ -171,11 +171,12 @@ class LanceDBRetriever:
             import lancedb
             import pandas as pd
             if not os.path.exists(self.db_path):
-                return self._degraded_fallback(query)
+                return []
             
             db = lancedb.connect(self.db_path)
-            if "msa_knowledge" not in db.table_names():
-                return self._degraded_fallback(query)
+            table_names = db.list_tables() if hasattr(db, "list_tables") else db.table_names()
+            if "msa_knowledge" not in table_names:
+                return []
                 
             table = db.open_table("msa_knowledge")
             
@@ -221,26 +222,8 @@ class LanceDBRetriever:
                 candidates.append(c)
             return candidates
         except Exception as e:
-            logger.warning("LanceDB real retrieval failed: %s. Falling back.", e)
-            return self._degraded_fallback(query)
+            logger.warning("LanceDB real retrieval failed: %s. Returning no MSA candidates.", e)
+            return []
 
     def _degraded_fallback(self, query: str) -> List[Any]:
-        from nexus.experiments.msa_routing.msa_router_contract import MemoryCandidate
-        c = MemoryCandidate(
-            id=f"doc_{hash(query) % 1000}",
-            content=f"Content for {query}",
-            type="belief",
-            version_id="v1",
-            source_hash="hash_1",
-            retrieval_source="fallback"
-        )
-        # Using a deterministic pseudo-random logic for stable fallback
-        if "expected" in query.lower() and "answered" in query.lower():
-            c.vector_similarity = 0.9
-            c.claim_confidence = 0.9
-            c.score = 0.9
-        else:
-            c.vector_similarity = 0.5
-            c.claim_confidence = 0.5
-            c.score = 0.5
-        return [c]
+        return []

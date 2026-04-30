@@ -2185,8 +2185,13 @@ def _compact_nexus_route_for_prompt(route: dict[str, Any]) -> dict[str, Any]:
     features = features if isinstance(features, dict) else {}
     consensus = route.get("consensus", {}) if isinstance(route, dict) else {}
     consensus = consensus if isinstance(consensus, dict) else {}
+    decision = route.get("route_decision", {}) if isinstance(route, dict) else {}
+    decision = decision if isinstance(decision, dict) else {}
     stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
     stack = stack if isinstance(stack, dict) else {}
+    selected = list(decision.get("selected_capabilities", []) or stack.get("selected_capabilities", []) or [])
+    governance_layers = list(decision.get("governance_layers", []) or stack.get("governance_layers", []) or [])
+    acceleration_layers = list(decision.get("acceleration_layers", []) or stack.get("acceleration_layers", []) or [])
     return {
         "recommended_flow": route.get("recommended_flow"),
         "reason": route.get("recommended_reason") or route.get("reason"),
@@ -2196,9 +2201,9 @@ def _compact_nexus_route_for_prompt(route: dict[str, Any]) -> dict[str, Any]:
         "memory_hits": int(features.get("memory_hits", 0) or 0),
         "findings_hits": int(route.get("findings_hits", 0) or 0),
         "consensus_winner": consensus.get("winner"),
-        "selected_capabilities": list(stack.get("selected_capabilities", []) or [])[:8],
-        "governance_layers": list(stack.get("governance_layers", []) or [])[:8],
-        "acceleration_layers": list(stack.get("acceleration_layers", []) or [])[:8],
+        "selected_capabilities": selected[:8],
+        "governance_layers": governance_layers[:8],
+        "acceleration_layers": acceleration_layers[:8],
     }
 
 
@@ -2229,6 +2234,8 @@ def _compact_executor_flags_for_prompt(flags: dict[str, Any]) -> dict[str, Any]:
         "autoreason": bool(flags.get("enable_autoreason_executor", False)),
         "ddtree": bool(flags.get("enable_ddtree_executor", False)),
         "ddtree_max_candidates": int(flags.get("ddtree_max_candidates", 0) or 0),
+        "ultra_review": bool(flags.get("enable_ultra_review", False)),
+        "rlm": bool(flags.get("enable_rlm", False)),
     }
 
 
@@ -2281,6 +2288,8 @@ def _run_with_nexus_codex(
         prior_fix_hits=int(route.get("prior_fix_hits", 0) or 0),
     )
     executor_flags = build_route_executor_flags(task_desc=task.task_desc, task_type=task.task_type, route=route)
+    route_decision = route.get("route_decision", {}) if isinstance(route.get("route_decision"), dict) else {}
+    route_selected = {str(item).lower() for item in route_decision.get("selected_capabilities", []) or []}
     prompt = (
         "You are Codex wearing Nexus. Return ONLY valid JSON with keys status and patch. No markdown. "
         "Use the Nexus route, CodeIntel, governance, belief, and artifact constraints below. "
@@ -2358,8 +2367,10 @@ def _run_with_nexus_codex(
             "self_heal_used": False,
             "claim_verified": tests_passed,
             "nightshift_recommended": bool((route.get("route_features", {}) or {}).get("is_cross_module_task", False)),
-            "swarm_used": "swarm" in [str(item).lower() for item in (route.get("capability_stack", {}) or {}).get("selected_capabilities", [])],
-            "drone_used": "drone" in [str(item).lower() for item in (route.get("capability_stack", {}) or {}).get("selected_capabilities", [])],
+            "swarm_used": False,
+            "drone_used": False,
+            "swarm_recommended": "swarm" in route_selected,
+            "drone_recommended": "drone" in route_selected,
         },
         "capability_stack": route.get("capability_stack", {}),
         "autoreason": {
@@ -2387,27 +2398,36 @@ def _run_with_nexus_codex(
         "nexus_rescued": False,
         "winner_source": "codex_wearing_nexus",
     }
-    capability_plan = CapabilityPlanner().plan(
-        task_desc=task.task_desc,
-        task_type=task.task_type,
-        route=route,
-        pillars=usage_trace["pillars"],
-        codeintel=codeintel,
-        phase_trace=usage_trace["phase_trace"],
-    )
-    usage_trace["capability_plan"] = capability_plan.to_dict()
-    usage_trace["route_decision"] = build_route_decision(
+    capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
+    if capability_plan_payload is None:
+        capability_plan = CapabilityPlanner().plan(
+            task_desc=task.task_desc,
+            task_type=task.task_type,
+            route=route,
+            pillars=usage_trace["pillars"],
+            codeintel=codeintel,
+            phase_trace=usage_trace["phase_trace"],
+        )
+        capability_plan_payload = capability_plan.to_dict()
+    usage_trace["capability_plan"] = capability_plan_payload
+    usage_trace["route_decision"] = route_decision or build_route_decision(
         task_id=task.id,
         task_desc=task.task_desc,
         task_type=task.task_type,
         recommended_flow=str(route.get("recommended_flow") or ""),
-        plan=capability_plan,
-        stop_policy=(route.get("capability_stack", {}) or {}).get("stop_policy", {}),
+        plan=CapabilityPlanner().plan(
+            task_desc=task.task_desc,
+            task_type=task.task_type,
+            route=route,
+            pillars=usage_trace["pillars"],
+            codeintel=codeintel,
+            phase_trace=usage_trace["phase_trace"],
+        ),
     ).to_dict()
     usage_trace["capability_receipts"] = [
         item.to_dict()
         for item in build_trace_receipts(
-            plan=capability_plan,
+            plan=capability_plan_payload,
             capabilities=usage_trace["capabilities"],
             autoreason=usage_trace["autoreason"],
             ddtree=usage_trace["ddtree"],

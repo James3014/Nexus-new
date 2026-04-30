@@ -33,9 +33,7 @@ def run_baseline(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     retriever = LanceDBRetriever()
     
     for item in dataset:
-        # Append expected_mode to query to ensure deterministic fallback behavior
-        test_query = f"{item['query']} ({item['expected_mode']})"
-        candidates = retriever.retrieve(test_query)
+        candidates = retriever.retrieve(item["query"])
         status = "ANSWERED" if candidates and any(c.score >= 0.75 for c in candidates) else "UNKNOWN"
         
         if item["expected_mode"] == "ANSWERED" and status == "ANSWERED":
@@ -81,8 +79,7 @@ def run_msa(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     
     # classify_query missing, fallback to default
     for item in dataset:
-        test_query = f"{item['query']} ({item['expected_mode']})"
-        candidates = retriever.retrieve(test_query)
+        candidates = retriever.retrieve(item["query"])
         
         query_type = "default"
         
