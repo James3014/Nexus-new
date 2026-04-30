@@ -131,6 +131,13 @@ $$ \text{Target} = \text{argmax}(\text{Expected Value} - \text{Cost} - \text{Ris
 - **高風險**：強制升級至 `Ultra Review` 與 `Swarm`。
 - **連續失敗**：觸發 `NightShift` 長程恢復。
 
+## 🚦 驗證門禁：Smoke Gate (Pre-flight)
+在執行任何 Gemini 公開基準測試 (Public Benchmark) 之前，**必須** 通過 Smoke Gate 驗證，以確保路由邏輯與證據收據 (Receipt) 系統 100% 正常。
+
+- **物理位置**: `scripts/ops/capability_route_smoke.py`
+- **硬性門檻**: `passed == true` 且 `missing_expected_receipts == 0`。
+- **作用**: 杜絕在路由未對齊的情況下浪費 Token 額度跑無效對照。
+
 ## 🏗️ 能力組合引擎 (Capability Composition)
 - **CodeIntel**: 代碼影響圖譜感知。
 - **Autoreason**: 候選方案評審與多維 Borda 投票。

@@ -44,6 +44,36 @@ Nexus 的能力建立在「五支柱」與「三機制」的基石之上。
 
 ---
 
+## 🚦 能力成熟度狀態 (Capability Status - 2026-04-30)
+
+| Capability | Status | Evidence |
+|---|---|---|
+| **CodeIntel** | 🟢 **smoke-green** | scan + impact report + claim bundle |
+| **Research** | 🟢 **smoke-green** | research refs + gate flag |
+| **Hyper** | 🟢 **smoke-green** | hyper sprint receipt + verified artifact |
+| **Nightshift** | 🟢 **smoke-green** | nightshift report path + recovered flag |
+| **Swarm** | 🟢 **smoke-green** | role findings + evidence + consensus |
+| **Drone** | 🟢 **smoke-green** | artifact paths + artifact count |
+| **Ultra Review** | 🟢 **smoke-green** | Ultra Review report + audit artifacts |
+| **Autoreason** | 🟢 **smoke-green** | judge votes + winner + stop reason |
+| **DDTree** | 🟢 **smoke-green** | selected candidate ids + saved steps |
+| **LanceDB** | 🟢 **smoke-green** | vector hit refs + source id |
+| **Memory** | 🟢 **smoke-green** | memory refs + memory gate flag |
+| **Delivery Gate** | 🟢 **smoke-green** | delivery refs + gate flag |
+
+---
+
+## 🛡️ 物理驗證：Capability Smoke Suite
+為了確保路由邏輯不產生漂移，系統設有固定的 Smoke Suite 作為前置門禁。
+
+*   **固定入口**: `scripts/ops/capability_route_smoke.py`
+*   **執行命令**: `uv run python scripts/ops/capability_route_smoke.py`
+*   **覆蓋範圍**:
+    *   **Route Oracles (8/8)**: 驗證 8 種核心路由預言機。
+    *   **Nexus Value (2/2)**: 驗證 CodeIntel/Hyper 補齊價值。
+
+---
+
 ## 🏆 Nexus 18 項核心能力盤點
 
 ### 1. 偵查與上下文 (Recon & Context)
