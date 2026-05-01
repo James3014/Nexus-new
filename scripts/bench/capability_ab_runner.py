@@ -3130,6 +3130,8 @@ def write_evidence_bundle(
             "repeat_trials": int(config.get("repeat_trials", 1) or 1),
             "shuffle_seed": config.get("shuffle_seed"),
         },
+        "public_disclosure_manifest": config.get("public_disclosure_manifest")
+        or {"path": "", "sha256": "", "status": "not_provided", "failures": []},
         "timeouts": {
             "timeout_sec": int(config.get("timeout_sec", 0) or 0),
             "total_timeout_sec": int(config.get("total_timeout_sec", 0) or 0),
@@ -3282,6 +3284,42 @@ def _manifest_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
 
 
+def _public_disclosure_manifest(path_value: str, *, repo_root: Path) -> dict[str, Any]:
+    if not path_value:
+        return {"path": "", "sha256": "", "status": "not_provided", "failures": []}
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = (repo_root / path).resolve()
+    if not path.exists():
+        return {"path": str(path), "sha256": "", "status": "FAIL", "failures": ["disclosure_manifest_missing"]}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "path": str(path),
+            "sha256": "",
+            "status": "FAIL",
+            "failures": [f"disclosure_manifest_parse_failed:{exc.__class__.__name__}"],
+        }
+    failures: list[str] = []
+    if payload.get("schema") != "nexus_public_benchmark_sanitized_manifest_v1":
+        failures.append("disclosure_manifest_schema_invalid")
+    for index, task in enumerate(payload.get("tasks", []) or [], start=1):
+        if not isinstance(task, dict):
+            failures.append(f"disclosure_task_{index}_not_object")
+            continue
+        if "allowed_files" in task or "forbidden_files" in task:
+            failures.append(f"disclosure_task_{index}_contains_file_scope")
+        if not str(task.get("repo", "")).startswith("fixture://"):
+            failures.append(f"disclosure_task_{index}_repo_not_sanitized")
+    return {
+        "path": str(path),
+        "sha256": _manifest_sha256(path),
+        "status": "PASS" if not failures else "FAIL",
+        "failures": failures,
+    }
+
+
 def _public_manifest_shape_failures(path: Path) -> list[str]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -3429,6 +3467,11 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             warnings.append("expected_capabilities_core_gap:" + ",".join(expected_coverage["missing_core"][:8]))
     if not tasks_path.exists():
         expected_coverage = _expected_capability_coverage([])
+    disclosure_manifest = _public_disclosure_manifest(
+        str(getattr(args, "public_disclosure_manifest", "") or ""),
+        repo_root=repo_root,
+    )
+    failures.extend(f"public_disclosure:{item}" for item in disclosure_manifest.get("failures", []) or [])
 
     env_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or "").strip()
     direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "").strip()
@@ -3497,6 +3540,7 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "task_ids": [task.id for task in selected_tasks],
             "expected_capability_coverage": expected_coverage,
         },
+        "public_disclosure_manifest": disclosure_manifest,
         "timeouts": {
             "timeout_sec": int(args.timeout_sec),
             "total_timeout_sec": int(args.total_timeout_sec),
@@ -3523,6 +3567,11 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run capability A/B benchmark: with_nexus vs without_nexus.")
     parser.add_argument("--tasks-file", default="scripts/bench/capability_tasks_v1.json")
+    parser.add_argument(
+        "--public-disclosure-manifest",
+        default="",
+        help="Optional sanitized manifest for public/external disclosure evidence. Execution still uses --tasks-file.",
+    )
     parser.add_argument("--output-dir", default=".nexus/reports/bench")
     parser.add_argument("--max-tasks", type=int, default=6)
     parser.add_argument("--timeout-sec", type=int, default=30)
@@ -3736,6 +3785,10 @@ def main() -> int:
                     config={
                         "tasks_file": args.tasks_file,
                         "tasks_manifest_hash": selected_tasks[0].manifest_hash if selected_tasks else "",
+                        "public_disclosure_manifest": _public_disclosure_manifest(
+                            args.public_disclosure_manifest,
+                            repo_root=repo_root,
+                        ),
                         "unique_tasks_requested": len(selected_tasks),
                         "repeat_trials": max(1, int(args.repeat_trials)),
                         "shuffle_seed": args.shuffle_seed,
@@ -4019,6 +4072,10 @@ def main() -> int:
                 config={
                     "tasks_file": args.tasks_file,
                     "tasks_manifest_hash": selected_tasks[0].manifest_hash if selected_tasks else "",
+                    "public_disclosure_manifest": _public_disclosure_manifest(
+                        args.public_disclosure_manifest,
+                        repo_root=repo_root,
+                    ),
                     "unique_tasks_requested": len(selected_tasks),
                     "repeat_trials": max(1, int(args.repeat_trials)),
                     "shuffle_seed": args.shuffle_seed,

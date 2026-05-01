@@ -240,6 +240,7 @@ def test_remaining_task_timeout_raises_when_deadline_is_spent(monkeypatch):
 
 def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Path, monkeypatch):
     manifest = tmp_path / "tasks.json"
+    disclosure_manifest = tmp_path / "tasks.public.json"
     manifest.write_text(
         json.dumps(
             {
@@ -281,11 +282,28 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
         ),
         encoding="utf-8",
     )
+    disclosure_manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_sanitized_manifest_v1",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "repo": "fixture://sanitized",
+                        "task_desc": "Fix the hidden bug.",
+                        "expected_capabilities": ["codeintel", "hyper", "autoreason"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
     monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
     monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
     args = argparse.Namespace(
         tasks_file=str(manifest),
+        public_disclosure_manifest=str(disclosure_manifest),
         repo_kind_filter="all",
         task_id_filter="all",
         difficulty="all",
@@ -321,6 +339,93 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
     assert report["task_manifest"]["selected_n"] == 1
     assert report["task_manifest"]["expanded_n"] == 2
     assert report["public_claim_requirements"]["hidden_verifier_mode"] is True
+    assert report["public_disclosure_manifest"]["status"] == "PASS"
+    assert report["public_disclosure_manifest"]["sha256"]
+
+
+def test_public_benchmark_preflight_rejects_unsanitized_disclosure_manifest(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix the hidden bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_hidden_governance",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    disclosure_manifest = tmp_path / "tasks.public.json"
+    disclosure_manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_sanitized_manifest_v1",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "repo": "/Users/example/private/repo",
+                        "allowed_files": ["target.py"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        public_disclosure_manifest=str(disclosure_manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="all",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+        with_nexus_runner="subprocess",
+        with_model_provider="gemini",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+        nexus_only=False,
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "FAIL"
+    assert report["public_disclosure_manifest"]["status"] == "FAIL"
+    assert "public_disclosure:disclosure_task_1_contains_file_scope" in report["failures"]
+    assert "public_disclosure:disclosure_task_1_repo_not_sanitized" in report["failures"]
 
 
 def test_public_benchmark_preflight_accepts_codex_model_lock(tmp_path: Path, monkeypatch):
