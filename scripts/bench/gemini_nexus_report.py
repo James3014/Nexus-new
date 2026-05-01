@@ -390,6 +390,8 @@ def _public_claim_gate(
         failures.append("missing_rows")
     if _multiset_counts(rows_without) != _multiset_counts(rows_with):
         failures.append("task_trial_mismatch")
+    if _run_eligible_count(rows_without) != len(rows_without) or _run_eligible_count(rows_with) != len(rows_with):
+        failures.append("run_eligibility_incomplete")
     try:
         if float(summary_without.get("token_measured_rate", 0.0) or 0.0) < min_token_rate:
             failures.append("without_token_measured_below_threshold")

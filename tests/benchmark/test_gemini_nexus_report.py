@@ -675,6 +675,86 @@ def test_render_markdown_report_surfaces_infra_invalid_rows(tmp_path):
     assert "With Nexus infra invalid reasons: none" in out
 
 
+def test_render_markdown_report_rejects_public_claim_when_eligibility_incomplete(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    common_with = {
+        "semantic_status": "VERIFIED",
+        "wall_duration_sec": 8,
+        "model_calls": 1,
+        "total_tokens": 100,
+        "token_capture_status": "measured",
+        "run_eligible": True,
+        "gemini_uses_nexus": True,
+        "model_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "hyper_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+        "capability_claim_verified": True,
+        "route_decision_schema_version": "nexus_route_decision_v1",
+    }
+    without.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "task_id": "a",
+                        "trial_index": 1,
+                        "semantic_status": "VERIFIED",
+                        "wall_duration_sec": 10,
+                        "model_calls": 1,
+                        "total_tokens": 100,
+                        "token_capture_status": "measured",
+                        "run_eligible": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "task_id": "b",
+                        "trial_index": 1,
+                        "semantic_status": "UNVERIFIED",
+                        "wall_duration_sec": 10,
+                        "model_calls": 0,
+                        "total_tokens": 0,
+                        "token_capture_status": "unknown",
+                        "run_eligible": False,
+                        "infra_invalid_reason": "timeout_before_model_call",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        "\n".join(
+            [
+                json.dumps({"task_id": "a", "trial_index": 1, **common_with}),
+                json.dumps({"task_id": "b", "trial_index": 1, **common_with}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "Public claim gate: FAIL" in out
+    assert "run_eligibility_incomplete" in out
+    assert "No public performance claim is allowed from this run" in out
+
+
 def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"
