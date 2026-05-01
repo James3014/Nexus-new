@@ -37,22 +37,28 @@ def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_
             "task_id": "ok",
             "status": "SUCCESS",
             "semantic_status": "VERIFIED",
+            "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_decision_selected_count": 3,
             "expected_capability_receipt_coverage": {
                 "expected": ["hyper"],
                 "public_safe": ["hyper"],
                 "missing": [],
                 "failure_reasons": {},
+                "all_public_safe": True,
             },
         },
         {
             "task_id": "missing",
             "status": "SUCCESS",
             "semantic_status": "VERIFIED",
+            "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_decision_selected_count": 3,
             "expected_capability_receipt_coverage": {
                 "expected": ["memory"],
                 "public_safe": [],
                 "missing": ["memory"],
                 "failure_reasons": {"memory": "missing_receipt"},
+                "all_public_safe": False,
             },
         },
     ]
@@ -70,8 +76,34 @@ def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_
             "semantic_status": "VERIFIED",
             "missing": ["memory"],
             "failure_reasons": {"memory": "missing_receipt"},
+            "row_failures": [
+                "expected_capability_not_public_safe",
+                "expected_capability_coverage_incomplete",
+            ],
         }
     ]
+
+
+def test_summarize_jsonl_fails_when_route_decision_missing(tmp_path: Path):
+    path = tmp_path / "with_nexus_1.jsonl"
+    row = {
+        "task_id": "legacy-looking",
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "expected_capability_receipt_coverage": {
+            "expected": ["hyper"],
+            "public_safe": ["hyper"],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": True,
+        },
+    }
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    out = capability_route_smoke.summarize_jsonl(path)
+
+    assert out["failures"][0]["task_id"] == "legacy-looking"
+    assert out["failures"][0]["row_failures"] == ["route_decision_missing", "route_decision_empty"]
 
 
 def test_latest_with_nexus_file_excludes_stale_outputs(tmp_path: Path):

@@ -156,6 +156,32 @@ def test_public_claim_gate_rejects_expected_capability_without_public_safe_recei
     assert "expected_capability_not_public_safe:a:swarm" in gate["failures"]
 
 
+def test_public_claim_gate_rejects_missing_route_decision():
+    gate = _public_claim_gate(
+        rows_without=[{"task_id": "a", "trial_index": 1, "token_measured": True}],
+        rows_with=[
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "token_measured": True,
+            }
+        ],
+        summary_without={"token_measured_rate": 1.0},
+        summary_with={
+            "token_measured_rate": 1.0,
+            "model_uses_nexus_rate": 1.0,
+            "gemini_uses_nexus_rate": 1.0,
+            "nexus_usage_valid_rate": 1.0,
+            "phase_completion_rate": 1.0,
+            "claim_verified_rate": 1.0,
+        },
+        formal={"valid_rate": 1.0},
+    )
+
+    assert gate["verdict"] == "FAIL"
+    assert "route_decision_missing:a" in gate["failures"]
+
+
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"
@@ -623,6 +649,7 @@ def test_render_markdown_report_surfaces_infra_invalid_rows(tmp_path):
                 "capability_plan_trace_present": True,
                 "capability_plan_node_count": 12,
                 "capability_plan_score": 24,
+                "route_decision_schema_version": "nexus_route_decision_v1",
                 "rlm_trace_present": True,
                 "rlm_trace_quality_score": 90,
             }
@@ -702,6 +729,7 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
                 "capability_plan_trace_present": True,
                 "capability_plan_node_count": 12,
                 "capability_plan_score": 24,
+                "route_decision_schema_version": "nexus_route_decision_v1",
                 "rlm_trace_present": True,
                 "rlm_trace_quality_score": 90,
             }
@@ -1032,6 +1060,7 @@ def test_render_markdown_report_prefers_incomplete_receipts_over_legacy_capabili
                 "ultra_review_invoked": True,
                 "ultra_review_gate_passed": True,
                 "ultra_review_report_path": "",
+                "route_decision_schema_version": "nexus_route_decision_v1",
                 "capability_receipts": [
                     {
                         "name": "ultra_review",
@@ -1162,6 +1191,7 @@ def test_render_markdown_report_does_not_claim_lift_when_solve_rate_ties(tmp_pat
         "phase_a": "artifact_verified",
         "phase_c": "closure_written",
         "capability_claim_verified": True,
+        "route_decision_schema_version": "nexus_route_decision_v1",
     }
     without.write_text(json.dumps(bare) + "\n", encoding="utf-8")
     with_nexus.write_text(json.dumps(nexus) + "\n", encoding="utf-8")

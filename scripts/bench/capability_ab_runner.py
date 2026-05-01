@@ -3068,6 +3068,7 @@ def write_evidence_bundle(
     nexus_context_delivered_rate = _rate_for(with_rows, "nexus_context_delivered")
     nexus_usage_valid_rate = _rate_for(with_rows, "nexus_usage_valid")
     claim_verified_rate = _rate_for(with_rows, "capability_claim_verified")
+    route_decision_present_rate = _rate_for(with_rows, "route_decision_schema_version")
     eligibility_complete = len(eligible_with) == len(with_rows) and len(eligible_without) == len(without_rows)
     gate_failures = []
     if config.get("parallel_arms") == "smoke-only":
@@ -3096,6 +3097,8 @@ def write_evidence_bundle(
         gate_failures.append("nexus_usage_valid_below_threshold")
     if claim_verified_rate < 1.0:
         gate_failures.append("claim_verified_below_threshold")
+    if route_decision_present_rate < 1.0:
+        gate_failures.append("route_decision_missing")
     if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
         gate_failures.append("manifest_missing")
     if not config.get("runner_command"):
@@ -3184,6 +3187,7 @@ def write_evidence_bundle(
                 "nexus_context_delivered_rate": nexus_context_delivered_rate,
                 "nexus_usage_valid_rate": nexus_usage_valid_rate,
                 "claim_verified_rate": claim_verified_rate,
+                "route_decision_present_rate": route_decision_present_rate,
                 "runner_command_present": bool(config.get("runner_command")),
                 "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
                 "raw_file_hashes_present": True,

@@ -832,6 +832,7 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "nexus_context_delivered": True,
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
+        "route_decision_schema_version": "nexus_route_decision_v1",
     }
     evidence = _write_trial_evidence(
         evidence_root=tmp_path / "evidence",
@@ -890,6 +891,51 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["public_claim_gate"]["checks"]["run_eligibility_complete"] is True
     assert payload["public_claim_gate"]["checks"]["trust_mismatch_free"] is True
     assert payload["public_claim_gate"]["checks"]["nexus_wearing_valid_rate"] == 1.0
+    assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 1.0
+
+
+def test_write_evidence_bundle_fails_gate_when_route_decision_missing(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_row = {
+        "mode": "with_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "nexus_wearing_valid": True,
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "capability_claim_verified": True,
+    }
+    without_row = {
+        "mode": "without_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+    }
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [without_row])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row, without_row],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "runner_command": "run",
+            "hidden_verifier_mode": True,
+        },
+    )
+
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert "route_decision_missing" in payload["public_claim_gate"]["failures"]
+    assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 0.0
 
 
 def test_write_evidence_bundle_v2_fails_gate_for_missing_hidden_verifier_and_trust_mismatch(tmp_path: Path):

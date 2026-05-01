@@ -130,7 +130,20 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
         coverage = row.get("expected_capability_receipt_coverage") or {}
         expected.update(str(item) for item in coverage.get("expected", []) or [])
         public_safe.update(str(item) for item in coverage.get("public_safe", []) or [])
-        if row.get("status") != "SUCCESS" or row.get("semantic_status") != "VERIFIED" or coverage.get("missing"):
+        row_failures: list[str] = []
+        if row.get("status") != "SUCCESS":
+            row_failures.append("status_not_success")
+        if row.get("semantic_status") != "VERIFIED":
+            row_failures.append("semantic_not_verified")
+        if coverage.get("missing"):
+            row_failures.append("expected_capability_not_public_safe")
+        if coverage.get("expected") and not bool(coverage.get("all_public_safe", False)):
+            row_failures.append("expected_capability_coverage_incomplete")
+        if not str(row.get("route_decision_schema_version") or "").strip():
+            row_failures.append("route_decision_missing")
+        if int(row.get("route_decision_selected_count", 0) or 0) <= 0:
+            row_failures.append("route_decision_empty")
+        if row_failures:
             failures.append(
                 {
                     "task_id": row.get("task_id"),
@@ -138,6 +151,7 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
                     "semantic_status": row.get("semantic_status"),
                     "missing": coverage.get("missing", []),
                     "failure_reasons": coverage.get("failure_reasons", {}),
+                    "row_failures": row_failures,
                 }
             )
     return {

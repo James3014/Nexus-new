@@ -409,6 +409,10 @@ def _public_claim_gate(
             failures.append("with_trust_mismatch_above_zero")
     except (TypeError, ValueError):
         failures.append("metric_parse_error")
+    for row in rows_with:
+        if not str(row.get("route_decision_schema_version") or "").strip():
+            task_id = str(row.get("task_id") or "unknown")
+            failures.append(f"route_decision_missing:{task_id}")
     rlm_rows = [row for row in rows_with if row.get("rlm_trace_present")]
     for row in rlm_rows:
         submit_count = int(row.get("rlm_submit_count", 0) or 0)
