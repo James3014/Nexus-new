@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.bench.nexus_value_comparison_report import main, render_report, summarize_run
+from scripts.bench.nexus_value_comparison_report import final_report_failures, main, render_report, summarize_run
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -29,7 +29,14 @@ def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: 
     )
     (run_dir / "gemini_nexus_report_1.md").write_text("- Public claim gate: FAIL\n- Public claim gate failures: run_eligibility_incomplete:1\n", encoding="utf-8")
     (run_dir / "evidence_bundle.json").write_text(
-        json.dumps({"schema": "nexus_public_benchmark_evidence_bundle_v2", "public_claim_gate": {"verdict": "PASS", "failures": []}}),
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_evidence_bundle_v2",
+                "task_manifest": {"sha256": "abc"},
+                "public_disclosure_manifest": {"status": "PASS"},
+                "public_claim_gate": {"verdict": "PASS", "failures": []},
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -42,6 +49,7 @@ def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: 
     assert "markdown FAIL; bundle PASS" in summary.gate_status
     assert "markdown failures: run_eligibility_incomplete:1" in report
     assert "GPT-5.5" in report
+    assert "Final gate: FAIL" in report
 
 
 def test_main_accepts_claim_boundary_notes(tmp_path: Path, monkeypatch) -> None:
@@ -71,3 +79,33 @@ def test_main_accepts_claim_boundary_notes(tmp_path: Path, monkeypatch) -> None:
 
     assert main() == 0
     assert "capability gate FAIL" in output.read_text(encoding="utf-8")
+
+
+def test_final_report_gate_requires_v2_pass_same_scope_and_manifest(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    rows = [{"task_id": "a", "trial_index": 1, "semantic_status": "VERIFIED", "run_eligible": True}]
+    _write_jsonl(run_dir / "without_nexus_1.jsonl", rows)
+    _write_jsonl(run_dir / "with_nexus_1.jsonl", rows)
+    (run_dir / "gemini_nexus_report_1.md").write_text(
+        "- Public claim gate: PASS\n- Public claim gate failures: none\n",
+        encoding="utf-8",
+    )
+    (run_dir / "evidence_bundle.json").write_text(
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_evidence_bundle_v2",
+                "task_manifest": {"sha256": "same"},
+                "public_disclosure_manifest": {"status": "PASS"},
+                "public_claim_gate": {"verdict": "PASS", "failures": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_run("Gemini 3 Flash", run_dir, scope="12x2", claim_status="final")
+
+    assert final_report_failures([summary], expected_models=("Gemini 3 Flash",)) == []
+    assert final_report_failures([summary], expected_models=("Gemini 3 Flash", "Gemini 3.1 Pro")) == [
+        "model_missing:Gemini 3.1 Pro"
+    ]
