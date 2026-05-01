@@ -3302,7 +3302,10 @@ def _public_disclosure_manifest(path_value: str, *, repo_root: Path) -> dict[str
             "failures": [f"disclosure_manifest_parse_failed:{exc.__class__.__name__}"],
         }
     failures: list[str] = []
-    if payload.get("schema") != "nexus_public_benchmark_sanitized_manifest_v1":
+    if payload.get("schema") not in {
+        "nexus_public_benchmark_sanitized_manifest_v1",
+        "nexus_public_benchmark_execution_safe_manifest_v1",
+    }:
         failures.append("disclosure_manifest_schema_invalid")
     for index, task in enumerate(payload.get("tasks", []) or [], start=1):
         if not isinstance(task, dict):
