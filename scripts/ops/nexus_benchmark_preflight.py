@@ -183,6 +183,7 @@ def _check_public_claim_gate() -> ReadinessCheck:
         | {
             "mode": "with_nexus",
             "status": "SUCCESS",
+            "route_decision_schema_version": "nexus_route_decision_v1",
             "rlm_trace_present": True,
             "rlm_submit_count": 1,
             "rlm_verified_count": 1,
