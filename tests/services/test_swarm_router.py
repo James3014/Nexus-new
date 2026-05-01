@@ -40,15 +40,15 @@ def test_select_best_route_prefers_healthier_candidate():
 
 
 def test_select_best_route_falls_back_when_empty():
-    """驗證無候選時回 legacy-core-router"""
+    """驗證無候選時 fail-closed，不偽造 legacy route"""
     decision = select_best_route([])
-    assert decision.backend_used == "legacy"
-    assert decision.selected_route == "legacy-core-router"
+    assert decision.backend_used == "fail-closed"
+    assert decision.selected_route == "no-route-available"
     print("✅ Swarm Router Empty Fallback Verified")
 
 
 def test_select_best_route_falls_back_when_all_unavailable():
-    """驗證全不可用時回 legacy-core-router"""
+    """驗證全不可用時 fail-closed，不偽造 legacy route"""
     candidates = [
         RouteCandidate(
             route_id="route-a",
@@ -67,6 +67,6 @@ def test_select_best_route_falls_back_when_all_unavailable():
     ]
 
     decision = select_best_route(candidates)
-    assert decision.backend_used == "legacy"
-    assert decision.selected_route == "legacy-core-router"
+    assert decision.backend_used == "fail-closed"
+    assert decision.selected_route == "no-route-available"
     print("✅ Swarm Router Unavailable Fallback Verified")

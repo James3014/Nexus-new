@@ -102,16 +102,16 @@ def score_route(candidate: RouteCandidate) -> Dict[str, Any]:
 def select_best_route(
     candidates: List[RouteCandidate],
     *,
-    fallback_route_id: str = "legacy-core-router"
+    fallback_route_id: str = "no-route-available",
 ) -> RouteDecision:
     """
-    🏆 最佳路徑選擇：具備 Legacy 斷路 Fallback 能力。
+    🏆 最佳路徑選擇：無可用候選時 fail-closed，不偽造 legacy route。
     """
     if not candidates:
         return RouteDecision(
             selected_route=fallback_route_id,
             score=0.0,
-            backend_used="legacy",
+            backend_used="fail-closed",
             explanation={"reason": "no_candidates"},
             ranked_candidates=[],
         )
@@ -124,7 +124,7 @@ def select_best_route(
         return RouteDecision(
             selected_route=fallback_route_id,
             score=0.0,
-            backend_used="legacy",
+            backend_used="fail-closed",
             explanation={"reason": "all_candidates_unavailable"},
             ranked_candidates=ranked,
         )

@@ -109,9 +109,9 @@ class RepairPhaseHandler(BasePhaseHandler):
         
         state.metadata["self_heal_route"] = heal_decision
         
-        if heal_decision["backend_used"] == "legacy-fallback":
+        if heal_decision["backend_used"] == "fail-closed":
             logger.info(f"🛡️ [Armor:Repair] Self-heal BLOCKED: {heal_decision.get('reason', 'unknown')}")
-            # 原有的修復邏輯
+            # 保守本地修復：路由失效時不得偽造 legacy route。
             local_result = try_local_repair(
                 project_root=self.project_root,
                 state=state,

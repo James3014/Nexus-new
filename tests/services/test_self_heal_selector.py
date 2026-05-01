@@ -8,7 +8,7 @@ from nexus.services.self_heal_selector import select_self_heal_route
 
 
 def test_self_heal_selector_blocks_low_health():
-    """驗證當分層治理觸發 BLOCK 時，Self-heal 自動退回 Legacy"""
+    """驗證 Self-heal 不會回傳 legacy 假路由"""
     repo_root = Path("/tmp/mock_nexus_p3dy3_block")
     repo_root.mkdir(parents=True, exist_ok=True)
     
@@ -27,11 +27,8 @@ def test_self_heal_selector_blocks_low_health():
             diagnosis,
         )
         
-        # 預期：目前由於 LanceDB table 未建立，health_result 為 status=error, 
-        # gate_decision 為 INFO (default)，所以會用 swarm-gated。
-        # 如果要測試 BLOCK，我們需要在 policy_gate 中更精確模擬。
-        # 但遵循用戶提供的 test 模板：
-        assert decision["selected_route"] in ["legacy-core-router", "rust-v16"]
+        assert not str(decision["selected_route"]).startswith("legacy")
+        assert decision["backend_used"] in {"swarm-gated", "fail-closed"}
         print(f"\n✅ Self-heal Selector Decision: {decision['selected_route']}")
     finally:
         shutil.rmtree(repo_root)

@@ -26,6 +26,15 @@ def select_self_heal_route(
     
     # 2. Swarm 基礎路由評分
     route_decision = select_best_route(candidates)
+    if route_decision.backend_used == "fail-closed":
+        return {
+            "selected_route": route_decision.selected_route,
+            "backend_used": "fail-closed",
+            "reason": route_decision.explanation.get("reason", "route_unavailable"),
+            "gated_score": route_decision.score,
+            "signals": [],
+            "health_metrics": {},
+        }
     
     # 3. 獲取當前 Phase 健康指標
     health = compute_phase_health(repo_root, phase)
@@ -44,8 +53,8 @@ def select_self_heal_route(
     # 5. 生成 Self-heal 整合決策
     if gate_decision.decision == "block":
         return {
-            "selected_route": "legacy-core-router",
-            "backend_used": "legacy-fallback",
+            "selected_route": "policy-blocked",
+            "backend_used": "fail-closed",
             "reason": "policy-blocked",
             "gated_score": gate_decision.gated_score,
             "signals": [s.__dict__ for s in gate_decision.signals],
@@ -83,9 +92,9 @@ def load_self_heal_candidates(
                 regression_pass_rate=0.9,
             ),
             RouteCandidate(
-                route_id="legacy-core-router",
-                provider="legacy",
-                armor_id="legacy",
+                route_id="conservative-local-repair",
+                provider="local",
+                armor_id="local",
                 phase=phase,
                 base_weight=0.45,
                 success_rate=0.6,
