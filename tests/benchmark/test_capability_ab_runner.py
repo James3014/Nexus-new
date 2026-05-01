@@ -836,6 +836,28 @@ def test_route_oracle_fixtures_have_hidden_capability_conditions(tmp_path: Path)
     assert "recommended_without_invocation" in by_fixture["rlm_harder_v2_nightshift_recovery"]
 
 
+def test_codex_guidance_names_incident_classifier_needs_evidence() -> None:
+    task = CapabilityTask(
+        id="nexus-value-trust-002",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix an incident classifier that over-trusts a passing smoke test.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_trust_incident_classifier",
+    )
+
+    guidance = _nexus_codex_hidden_verifier_guidance(
+        task,
+        "def classify(smoke_passed, semantic_evidence):\n    return 'resolved' if smoke_passed else 'open'\n",
+    )
+
+    assert "returns needs_evidence" in guidance
+    assert "smoke_passed=False remains open" in guidance
+
+
 def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
     task = CapabilityTask(
         id="real-001",

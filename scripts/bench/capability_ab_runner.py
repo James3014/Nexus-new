@@ -2206,6 +2206,12 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
         )
     if "claim" in combined or "evidence" in combined:
         guidance.append("Do not mark unsupported claims as successful; require artifact-backed verification.")
+    if task.fixture_kind == "nexus_value_trust_incident_classifier":
+        guidance.append(
+            "For incident classifiers, smoke_passed=True with semantic_evidence.verified is True returns resolved; "
+            "smoke_passed=True with missing or false semantic verification returns needs_evidence; "
+            "smoke_passed=False remains open."
+        )
     return "\n".join(f"- {item}" for item in guidance)
 
 
