@@ -71,6 +71,35 @@ def test_select_candidate_with_routing_layers_uses_config_flags_without_env(monk
     assert learning_trace["autoreason"]["enabled"] is True
 
 
+def test_select_candidate_with_routing_layers_keeps_verified_candidate_over_shadow(monkeypatch):
+    monkeypatch.delenv("NEXUS_DDTREE_EXECUTOR", raising=False)
+    learning_trace = {}
+    candidates = [
+        CandidateEval(seed=0, score=1.0, source="llm", hint="verified patch"),
+        CandidateEval(
+            seed=1000,
+            score=0.4,
+            source="local_hidden_shadow",
+            hint="very specific shadow verifier evidence " * 8,
+            stdout="pytest failure evidence\n" * 20,
+        ),
+    ]
+
+    best, active = _select_candidate_with_routing_layers(
+        candidates,
+        task="implement artifact-backed claim verification",
+        learning_trace=learning_trace,
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=False,
+    )
+
+    assert best.source == "llm"
+    assert [item.source for item in active] == ["llm", "local_hidden_shadow"]
+    assert learning_trace["autoreason"]["winner"] == "local_hidden_shadow:1000"
+    assert learning_trace["autoreason"]["winner_overridden_by_score_guard"] is True
+    assert learning_trace["autoreason"]["score_guard_winner"] == "llm:0"
+
+
 def test_run_hyper_sprint_collects_pool_when_route_enables_ddtree(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")

@@ -404,6 +404,75 @@ def test_render_markdown_report_maps_task_wins_to_capabilities(tmp_path):
     assert "| rlm-harder-v2-belief-001 | 1 | Belief / Memory | UNVERIFIED | VERIFIED |" in out
 
 
+def test_render_markdown_report_does_not_label_repair_win_as_rlm_without_trace(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    without.write_text(
+        json.dumps(
+            {
+                "task_id": "repair-001",
+                "trial_index": 1,
+                "task_type": "public_test_repair",
+                "semantic_status": "UNVERIFIED",
+                "status": "FAILED",
+                "wall_duration_sec": 20,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "repair-001",
+                "trial_index": 1,
+                "task_type": "public_test_repair",
+                "semantic_status": "VERIFIED",
+                "status": "SUCCESS",
+                "wall_duration_sec": 30,
+                "model_calls": 1,
+                "total_tokens": 100,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "pillar_lancedb_active": True,
+                "pillar_memory_active": True,
+                "pillar_mempalace_active": True,
+                "pillar_belief_active": True,
+                "pillar_artifact_active": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "capability_claim_verified": True,
+                "rlm_trace_present": False,
+                "capability_self_heal_used": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-04-27",
+    )
+
+    assert "| repair-001 | 1 | Repair verification | UNVERIFIED | VERIFIED |" in out
+    assert "RLM / self-heal | UNVERIFIED | VERIFIED" not in out
+
+
 def test_render_markdown_report_marks_token_claim_unsafe_when_tokens_missing(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"

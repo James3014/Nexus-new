@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -296,6 +297,13 @@ def _public_token_claim_status(a: dict[str, Any], b: dict[str, Any], *, min_rate
 
 
 def _capability_label(row: dict[str, Any]) -> str:
+    if bool(row.get("rlm_trace_present")) or bool(row.get("capability_self_heal_used")) or bool(row.get("llm_self_heal_used")):
+        return "RLM / self-heal"
+    public_caps = _row_public_safe_capabilities(row)
+    if "autoreason" in public_caps:
+        return "Artifact / Claim + Autoreason"
+    if {"artifact_gate", "claim_gate"} & public_caps:
+        return "Artifact / Claim"
     text = " ".join(
         str(row.get(key) or "")
         for key in ("task_id", "category", "task_type", "fixture_kind", "task_desc", "success_criteria")
@@ -307,8 +315,28 @@ def _capability_label(row: dict[str, Any]) -> str:
     if any(token in text for token in ("evidence", "artifact", "claim", "verify", "verification")):
         return "Artifact / Claim"
     if any(token in text for token in ("second", "round", "repair", "self-heal", "self_heal")):
-        return "RLM / self-heal"
+        return "Repair verification"
     return "General"
+
+
+def _row_public_safe_capabilities(row: dict[str, Any]) -> set[str]:
+    receipts = row.get("capability_receipts")
+    if isinstance(receipts, str):
+        try:
+            receipts = json.loads(receipts)
+        except json.JSONDecodeError:
+            receipts = []
+    if not isinstance(receipts, list):
+        return set()
+    names: set[str] = set()
+    for receipt in receipts:
+        if not isinstance(receipt, dict):
+            continue
+        if receipt.get("public_claim_safe"):
+            name = str(receipt.get("name") or "").strip()
+            if name:
+                names.add(name)
+    return names
 
 
 def _pillar_win_rows(

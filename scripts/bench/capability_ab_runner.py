@@ -106,7 +106,36 @@ def _model_uses_nexus(row: dict[str, Any]) -> bool:
     return bool(row.get("model_uses_nexus", row.get("gemini_uses_nexus", False)))
 
 
+def _hidden_verifier_infra_reason(row: dict[str, Any]) -> str | None:
+    if row.get("hidden_verifier_passed") is not False:
+        return None
+    combined = "\n".join(
+        [
+            str(row.get("hidden_verifier_stdout_tail") or ""),
+            str(row.get("hidden_verifier_stderr_tail") or ""),
+        ]
+    ).lower()
+    if "operation not permitted" in combined or ".cache/uv" in combined:
+        return "hidden_verifier_infra_error"
+    if "no such file or directory" in combined and ("uv" in combined or "pytest" in combined):
+        return "hidden_verifier_infra_error"
+    if "permission denied" in combined:
+        return "hidden_verifier_infra_error"
+    return None
+
+
+def _pytest_verifier_cmd(test_file: str) -> list[str]:
+    return [sys.executable, "-m", "pytest", "-q", "--maxfail=1", test_file]
+
+
 def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool, nexus_required: bool) -> str | None:
+    hidden_reason = str(row.get("hidden_verifier_infra_invalid_reason") or "").strip()
+    if hidden_reason:
+        return hidden_reason
+    hidden_reason = _hidden_verifier_infra_reason(row)
+    if hidden_reason:
+        return hidden_reason
+
     gateway_error = str(row.get("baseline_gateway_error_category") or "").strip()
     raw_tail = str(row.get("baseline_raw_tail") or "")
     combined = f"{gateway_error}\n{raw_tail}".lower()
@@ -2312,7 +2341,7 @@ def _run_with_nexus_codex(
         if patch_changed:
             target_path.write_text(patch, encoding="utf-8")
             res = _run_process_group(
-                ["uv", "run", "pytest", "-q", "--maxfail=1", verification_test_file],
+                _pytest_verifier_cmd(verification_test_file),
                 cwd=repo_root,
                 env=os.environ.copy(),
                 timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec),
@@ -2616,7 +2645,7 @@ def run_with_nexus(
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
     if payload.get("status") == "SUCCESS" and verification_test_file != test_file:
         verify = _run_process_group(
-            ["uv", "run", "pytest", "-q", "--maxfail=1", verification_test_file],
+            _pytest_verifier_cmd(verification_test_file),
             cwd=repo_root,
             env=os.environ.copy(),
             timeout_sec=_remaining_task_timeout(start + max(1, int(timeout_sec)), timeout_sec),
@@ -2627,10 +2656,16 @@ def run_with_nexus(
         row["hidden_verifier_stdout_tail"] = _tail_text(verify.stdout, max_chars=1000)
         row["hidden_verifier_stderr_tail"] = _tail_text(verify.stderr, max_chars=1000)
         if not hidden_passed:
+            hidden_infra_reason = _hidden_verifier_infra_reason(row)
+            if hidden_infra_reason:
+                row["hidden_verifier_infra_invalid_reason"] = hidden_infra_reason
+                row["infra_invalid_reason"] = hidden_infra_reason
+                row["report_trust_mismatch"] = False
+            else:
+                row["report_trust_mismatch"] = True
             row["status"] = "FAILED"
             row["semantic_status"] = "UNVERIFIED"
             row["semantic_completed"] = False
-            row["report_trust_mismatch"] = True
     return _annotate_benchmark_eligibility(
         row,
         provider="gemini" if llm_enabled else "local",
@@ -2712,9 +2747,8 @@ def run_without_nexus(
             patch_changed = bool(patch and patch != original)
             if patch_changed:
                 target_path.write_text(patch, encoding="utf-8")
-                cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", verification_test_file]
                 res = _run_process_group(
-                    cmd,
+                    _pytest_verifier_cmd(verification_test_file),
                     cwd=repo_root,
                     env=os.environ.copy(),
                     timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec),
@@ -2798,8 +2832,7 @@ def run_without_nexus(
                 patched = generate_local_candidate(original, task.task_desc, "local", 0)
                 if patched != original:
                     target_path.write_text(patched, encoding="utf-8")
-            cmd = ["uv", "run", "pytest", "-q", "--maxfail=1", test_file]
-            res = _run_process_group(cmd, cwd=repo_root, env=os.environ.copy(), timeout_sec=timeout_sec)
+            res = _run_process_group(_pytest_verifier_cmd(test_file), cwd=repo_root, env=os.environ.copy(), timeout_sec=timeout_sec)
             status = "SUCCESS" if res.returncode == 0 else "FAILED"
         except Exception:
             status = "FAILED"
@@ -2959,6 +2992,14 @@ def _model_names(rows: list[dict[str, Any]]) -> set[str]:
     return {str(row.get("model_name") or "").strip() for row in rows if str(row.get("model_name") or "").strip()}
 
 
+def _row_key_counts(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
+    for row in rows:
+        key = (str(row.get("task_id") or ""), str(row.get("trial_index") or "1"))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _write_trial_evidence(
     *,
     evidence_root: Path,
@@ -3018,6 +3059,17 @@ def write_evidence_bundle(
     eligible_without = [row for row in without_rows if bool(row.get("run_eligible", True))]
     with_models = _model_names(with_rows)
     without_models = _model_names(without_rows)
+    hidden_verifier_mode = bool(config.get("hidden_verifier_mode"))
+    same_task_trials = _row_key_counts(with_rows) == _row_key_counts(without_rows)
+    with_trust_mismatch_rate = _rate_for(eligible_with, "report_trust_mismatch")
+    without_trust_mismatch_rate = _rate_for(eligible_without, "report_trust_mismatch")
+    nexus_valid_rate = _rate_for(with_rows, "nexus_wearing_valid")
+    model_uses_nexus_rate = _rate_for(with_rows, "model_uses_nexus")
+    legacy_gemini_uses_nexus_rate = _rate_for(with_rows, "gemini_uses_nexus")
+    nexus_context_delivered_rate = _rate_for(with_rows, "nexus_context_delivered")
+    nexus_usage_valid_rate = _rate_for(with_rows, "nexus_usage_valid")
+    claim_verified_rate = _rate_for(with_rows, "capability_claim_verified")
+    eligibility_complete = len(eligible_with) == len(with_rows) and len(eligible_without) == len(without_rows)
     gate_failures = []
     if config.get("parallel_arms") == "smoke-only":
         gate_failures.append("parallel_smoke")
@@ -3025,6 +3077,26 @@ def write_evidence_bundle(
         gate_failures.append("single_arm_run")
     if len(with_models) != 1 or len(without_models) != 1 or with_models != without_models:
         gate_failures.append("model_mismatch")
+    if not same_task_trials:
+        gate_failures.append("task_trial_mismatch")
+    if not hidden_verifier_mode:
+        gate_failures.append("hidden_verifier_disabled")
+    if not eligibility_complete:
+        gate_failures.append("run_eligibility_incomplete")
+    if with_trust_mismatch_rate > 0.0:
+        gate_failures.append("with_trust_mismatch_above_zero")
+    if without_trust_mismatch_rate > 0.0:
+        gate_failures.append("without_trust_mismatch_above_zero")
+    if nexus_valid_rate < 1.0:
+        gate_failures.append("nexus_wearing_below_threshold")
+    if max(model_uses_nexus_rate, legacy_gemini_uses_nexus_rate) < 1.0:
+        gate_failures.append("model_uses_nexus_below_threshold")
+    if nexus_context_delivered_rate < 1.0:
+        gate_failures.append("nexus_context_delivered_below_threshold")
+    if nexus_usage_valid_rate < 1.0:
+        gate_failures.append("nexus_usage_valid_below_threshold")
+    if claim_verified_rate < 1.0:
+        gate_failures.append("claim_verified_below_threshold")
     if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
         gate_failures.append("manifest_missing")
     if not config.get("runner_command"):
@@ -3088,18 +3160,31 @@ def write_evidence_bundle(
             "gateway_stats_source_rate_with": _rate_for(with_rows, "gateway_stats_present"),
         },
         "nexus_wearing": {
-            "valid_rate": _rate_for(with_rows, "nexus_wearing_valid"),
-            "gemini_uses_nexus_rate": _rate_for(with_rows, "gemini_uses_nexus"),
-            "model_uses_nexus_rate": _rate_for(with_rows, "model_uses_nexus"),
-            "nexus_context_delivered_rate": _rate_for(with_rows, "nexus_context_delivered"),
-            "nexus_usage_valid_rate": _rate_for(with_rows, "nexus_usage_valid"),
-            "claim_verified_rate": _rate_for(with_rows, "capability_claim_verified"),
+            "valid_rate": nexus_valid_rate,
+            "gemini_uses_nexus_rate": legacy_gemini_uses_nexus_rate,
+            "model_uses_nexus_rate": model_uses_nexus_rate,
+            "nexus_context_delivered_rate": nexus_context_delivered_rate,
+            "nexus_usage_valid_rate": nexus_usage_valid_rate,
+            "claim_verified_rate": claim_verified_rate,
         },
         "public_claim_gate": {
             "verdict": "PASS" if not gate_failures else "FAIL",
-            "failures": gate_failures,
+            "failures": sorted(set(gate_failures)),
             "checks": {
                 "same_model": bool(with_models and without_models and with_models == without_models),
+                "same_task_trials": same_task_trials,
+                "hidden_verifier_mode": hidden_verifier_mode,
+                "run_eligibility_complete": eligibility_complete,
+                "eligible_with_nexus": len(eligible_with),
+                "eligible_without_nexus": len(eligible_without),
+                "trust_mismatch_free": with_trust_mismatch_rate == 0.0 and without_trust_mismatch_rate == 0.0,
+                "with_trust_mismatch_rate": with_trust_mismatch_rate,
+                "without_trust_mismatch_rate": without_trust_mismatch_rate,
+                "nexus_wearing_valid_rate": nexus_valid_rate,
+                "model_uses_nexus_rate": max(model_uses_nexus_rate, legacy_gemini_uses_nexus_rate),
+                "nexus_context_delivered_rate": nexus_context_delivered_rate,
+                "nexus_usage_valid_rate": nexus_usage_valid_rate,
+                "claim_verified_rate": claim_verified_rate,
                 "runner_command_present": bool(config.get("runner_command")),
                 "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
                 "raw_file_hashes_present": True,

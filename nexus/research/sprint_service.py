@@ -377,8 +377,14 @@ def _select_candidate_with_routing_layers(
         autoreason["enabled"] = True
         learning_trace["autoreason"] = autoreason
         winner = str(autoreason.get("winner") or "")
+        score_winner = max(active, key=lambda c: c.score)
         for item in active:
             if _candidate_id(item) == winner:
+                if score_winner.score >= 1.0 and item.score < score_winner.score:
+                    autoreason["winner_overridden_by_score_guard"] = True
+                    autoreason["score_guard_winner"] = _candidate_id(score_winner)
+                    autoreason["score_guard_reason"] = "verified_candidate_must_not_be_overridden_by_lower_score"
+                    return score_winner, active
                 return item, active
     else:
         learning_trace["autoreason"] = {"enabled": False, "status": "DISABLED", "reason": "feature_flag_disabled"}

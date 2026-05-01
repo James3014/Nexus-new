@@ -14,6 +14,7 @@ from scripts.bench.capability_ab_runner import (
     _benchmark_memory_db_path,
     _budget_exceeded,
     _classify_timeout_stage,
+    _hidden_verifier_infra_reason,
     _direct_gemini_timeout_sec,
     _emit_progress,
     _effective_total_timeout_sec,
@@ -42,6 +43,7 @@ from scripts.bench.capability_ab_runner import (
     _nexus_codex_hidden_verifier_guidance,
     _compact_nexus_route_for_prompt,
     _parse_direct_gemini_json,
+    _pytest_verifier_cmd,
     _read_preserved_target,
     _remaining_leg_timeout,
     _remaining_task_timeout,
@@ -88,6 +90,31 @@ def test_load_tasks_parses_capability_schema(tmp_path: Path):
     assert tasks[0].id == "hard-001"
     assert tasks[0].difficulty == "hard"
     assert len(tasks[0].manifest_hash) == 64
+
+
+def test_hidden_verifier_infra_error_is_not_trust_mismatch():
+    row = {
+        "status": "FAILED",
+        "semantic_status": "UNVERIFIED",
+        "hidden_verifier_passed": False,
+        "hidden_verifier_stderr_tail": "error: failed to open file `/Users/example/.cache/uv/sdists-v9/.git`: Operation not permitted",
+        "report_trust_mismatch": False,
+    }
+
+    assert _hidden_verifier_infra_reason(row) == "hidden_verifier_infra_error"
+    annotated = _annotate_benchmark_eligibility(row, provider="local", model_required=False, nexus_required=False)
+
+    assert annotated["run_eligible"] is False
+    assert annotated["infra_invalid_reason"] == "hidden_verifier_infra_error"
+    assert annotated["report_trust_mismatch"] is False
+
+
+def test_pytest_verifier_cmd_uses_current_python():
+    cmd = _pytest_verifier_cmd("tests/test_demo.py")
+
+    assert cmd[:3] == [sys.executable, "-m", "pytest"]
+    assert "uv" not in cmd
+    assert cmd[-1] == "tests/test_demo.py"
 
 
 def test_load_tasks_parses_public_manifest_metadata(tmp_path: Path):
@@ -842,6 +869,7 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
             "tasks_manifest_hash": "abc",
             "unique_tasks_requested": 1,
             "runner_command": "capability_ab_runner.py --tasks-file tasks.json",
+            "hidden_verifier_mode": True,
             "timeout_sec": 30,
             "total_timeout_sec": 60,
             "effective_total_timeout_sec": 60,
@@ -858,6 +886,50 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["row_counts"]["without_nexus"] == 1
     assert payload["nexus_wearing"]["valid_rate"] == 1.0
     assert payload["public_claim_gate"]["verdict"] == "PASS"
+    assert payload["public_claim_gate"]["checks"]["hidden_verifier_mode"] is True
+    assert payload["public_claim_gate"]["checks"]["run_eligibility_complete"] is True
+    assert payload["public_claim_gate"]["checks"]["trust_mismatch_free"] is True
+    assert payload["public_claim_gate"]["checks"]["nexus_wearing_valid_rate"] == 1.0
+
+
+def test_write_evidence_bundle_v2_fails_gate_for_missing_hidden_verifier_and_trust_mismatch(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_row = {
+        "mode": "with_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "nexus_wearing_valid": True,
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "capability_claim_verified": True,
+        "report_trust_mismatch": True,
+    }
+    without_row = {
+        "mode": "without_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+    }
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [without_row])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row, without_row],
+        config={"tasks_file": "tasks.json", "tasks_manifest_hash": "abc", "runner_command": "run"},
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert "hidden_verifier_disabled" in payload["public_claim_gate"]["failures"]
+    assert "with_trust_mismatch_above_zero" in payload["public_claim_gate"]["failures"]
+    assert payload["public_claim_gate"]["checks"]["trust_mismatch_free"] is False
 
 
 def test_write_evidence_bundle_v2_fails_gate_when_models_differ(tmp_path: Path):
