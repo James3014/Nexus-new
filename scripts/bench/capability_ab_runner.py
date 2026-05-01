@@ -2249,6 +2249,10 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
         guidance.append(
             "For scope decisions, approved mutations return reason approved, read-only inspection returns reason read_only, and unapproved mutating or unknown actions return reason scope_block."
         )
+    if task.fixture_kind == "nexus_value_mempalace_secret_redaction":
+        guidance.append(
+            "For Nexus MemPalace secret redaction, preserve non-secret keys and redact token, password, secret, api_key, and credential-like fields to '[REDACTED]'."
+        )
     if task.fixture_kind == "rlm_harder_v2_evidence_replay":
         guidance.append(
             "For replay receipts, accept only claim='verified' with a non-empty replay_command and exit_code == 0; reject missing replay_command, nonzero exit_code, schema aliases, and non-verified claims."

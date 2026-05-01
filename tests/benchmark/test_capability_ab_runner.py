@@ -2078,6 +2078,24 @@ def test_nexus_codex_hidden_verifier_guidance_names_governance_contracts():
     assert "reason scope_block" in _nexus_codex_hidden_verifier_guidance(scope_task, "def rlm_harder_v2_scope_decision(request): pass")
 
 
+def test_nexus_codex_hidden_verifier_guidance_names_secret_redaction_contract():
+    task = CapabilityTask(
+        id="nexus-value-gov-001",
+        difficulty="hard",
+        task_type="public_refactor",
+        task_desc="Refactor a credential scrubber while preserving the governance boundary.",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="nexus_value_mempalace_secret_redaction",
+    )
+
+    guidance = _nexus_codex_hidden_verifier_guidance(task, "def redact(record): pass")
+
+    assert "redact token, password, secret, api_key" in guidance
+    assert "'[REDACTED]'" in guidance
+
+
 def test_nexus_codex_hidden_verifier_guidance_names_replay_contract():
     task = CapabilityTask(
         id="replay",
