@@ -1916,15 +1916,13 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert out["codeintel_scan_report_present"] is True
     assert any(item["name"] == "codeintel" and item["public_claim_safe"] for item in out["capability_receipts"])
     receipts = {item["name"]: item for item in out["capability_receipts"]}
-    assert receipts["autoreason"]["invoked"] is False
-    assert receipts["autoreason"]["public_claim_safe"] is False
-    assert receipts["autoreason"]["failure_reason"] == "selected_without_invocation"
-    assert receipts["ddtree"]["invoked"] is False
-    assert receipts["ddtree"]["public_claim_safe"] is False
-    assert receipts["ddtree"]["failure_reason"] == "feature_flag_disabled"
-    assert receipts["ultra_review"]["invoked"] is False
-    assert receipts["ultra_review"]["public_claim_safe"] is False
-    assert receipts["ultra_review"]["failure_reason"] == "direct_codex_no_ultra_review_report"
+    assert "autoreason" not in receipts
+    assert "ddtree" not in receipts
+    assert "ultra_review" not in receipts
+    assert receipts["artifact_gate"]["public_claim_safe"] is True
+    assert receipts["claim_gate"]["public_claim_safe"] is True
+    assert receipts["delivery_gate"]["public_claim_safe"] is True
+    assert receipts["mempalace_gate"]["public_claim_safe"] is True
     assert out["ultra_review_invoked"] is False
     assert out["ultra_review_gate_passed"] is False
     assert out["capability_receipts_json"]

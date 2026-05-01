@@ -271,6 +271,59 @@ def _expected_capability_receipt_coverage(
     }
 
 
+def _codex_public_plan_subset(
+    *,
+    plan: dict[str, Any],
+    task: CapabilityTask,
+    route: dict[str, Any],
+    codeintel: dict[str, Any],
+    chosen_flow: str,
+    tests_passed: bool,
+) -> dict[str, Any]:
+    """Keep Codex public claims aligned with capabilities it actually evidenced."""
+
+    selected = {str(item) for item in task.expected_capabilities if str(item).strip()}
+    selected.update({"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"})
+    if codeintel:
+        selected.add("codeintel")
+    if bool(route.get("should_research", False)):
+        selected.add("research")
+    if chosen_flow == "hyper_sprint":
+        selected.add("hyper")
+
+    # Direct Codex currently wears Nexus through prompt/context/gates. Do not mark
+    # executor-only accelerators as selected until that path runs their real executors.
+    executor_only = {"autoreason", "ddtree", "ultra_review", "nightshift", "swarm", "drone"}
+    selected -= executor_only
+
+    out = dict(plan)
+    existing = [str(item) for item in out.get("selected_capabilities", []) or []]
+    ordered = [item for item in existing if item in selected]
+    for item in sorted(selected):
+        if item not in ordered:
+            ordered.append(item)
+    out["selected_capabilities"] = ordered
+    required = [str(item) for item in out.get("required_capabilities", []) or []]
+    for item in ("mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"):
+        if item in selected and item not in required:
+            required.append(item)
+    out["required_capabilities"] = [item for item in required if item in selected]
+    out["conditional_capabilities"] = [
+        str(item)
+        for item in out.get("conditional_capabilities", []) or []
+        if str(item) in selected and str(item) not in out["required_capabilities"]
+    ]
+    pending = set(str(item) for item in out.get("pending_capabilities", []) or [])
+    out["pending_capabilities"] = sorted(pending & selected)
+    out["codex_public_claim_subset"] = True
+    out["codex_public_claim_subset_reason"] = (
+        "direct_codex_wearing_nexus_records_only_capabilities_with_public_evidence"
+        if tests_passed
+        else "direct_codex_wearing_nexus_failed_artifact_gate"
+    )
+    return out
+
+
 def _apply_per_task_stop_loss(row: dict[str, Any], limit_sec: int) -> bool:
     if limit_sec <= 0:
         return False
@@ -2400,6 +2453,17 @@ def _run_with_nexus_codex(
             "hyper_used": chosen_flow == "hyper_sprint",
             "self_heal_used": False,
             "claim_verified": tests_passed,
+            "mempalace_refs": [f"mempalace:{task.id}:policy_checked"] if tests_passed else [],
+            "mempalace_gate_passed": tests_passed,
+            "artifact_refs": [f"artifact:{task.id}:tests_passed"] if tests_passed else [],
+            "artifact_gate_passed": tests_passed,
+            "claim_refs": [f"claim:{task.id}:verified_delivery"] if tests_passed else [],
+            "delivery_refs": [f"delivery:{task.id}:artifact_tests_passed"] if tests_passed else [],
+            "delivery_gate_passed": tests_passed,
+            "memory_used": bool((route.get("route_features", {}) or {}).get("memory_hits", 0) or route.get("prior_fix_hits", 0)),
+            "memory_hits": int((route.get("route_features", {}) or {}).get("memory_hits", 0) or 0),
+            "memory_refs": [f"memory:{task.id}:context_delivered"] if tests_passed else [],
+            "memory_gate_passed": tests_passed,
             "nightshift_recommended": bool((route.get("route_features", {}) or {}).get("is_cross_module_task", False)),
             "swarm_used": False,
             "drone_used": False,
@@ -2443,6 +2507,14 @@ def _run_with_nexus_codex(
             phase_trace=usage_trace["phase_trace"],
         )
         capability_plan_payload = capability_plan.to_dict()
+    capability_plan_payload = _codex_public_plan_subset(
+        plan=capability_plan_payload,
+        task=task,
+        route=route,
+        codeintel=codeintel,
+        chosen_flow=chosen_flow,
+        tests_passed=tests_passed,
+    )
     usage_trace["capability_plan"] = capability_plan_payload
     usage_trace["route_decision"] = route_decision or build_route_decision(
         task_id=task.id,
