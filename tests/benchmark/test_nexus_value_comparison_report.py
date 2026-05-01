@@ -109,3 +109,31 @@ def test_final_report_gate_requires_v2_pass_same_scope_and_manifest(tmp_path: Pa
     assert final_report_failures([summary], expected_models=("Gemini 3 Flash", "Gemini 3.1 Pro")) == [
         "model_missing:Gemini 3.1 Pro"
     ]
+
+
+def test_summarize_run_accepts_non_gemini_markdown_report_name(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    rows = [{"task_id": "a", "trial_index": 1, "semantic_status": "VERIFIED", "run_eligible": True}]
+    _write_jsonl(run_dir / "without_nexus_1.jsonl", rows)
+    _write_jsonl(run_dir / "with_nexus_1.jsonl", rows)
+    (run_dir / "gpt55_nexus_report_final.md").write_text(
+        "- Public claim gate: PASS\n- Public claim gate failures: none\n",
+        encoding="utf-8",
+    )
+    (run_dir / "evidence_bundle.json").write_text(
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_evidence_bundle_v2",
+                "task_manifest": {"sha256": "same"},
+                "public_disclosure_manifest": {"status": "PASS"},
+                "public_claim_gate": {"verdict": "PASS", "failures": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_run("GPT-5.5", run_dir, scope="12x2", claim_status="final")
+
+    assert summary.markdown_gate == "PASS"
+    assert final_report_failures([summary], expected_models=("GPT-5.5",)) == []

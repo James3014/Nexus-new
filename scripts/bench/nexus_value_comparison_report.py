@@ -91,6 +91,8 @@ def summarize_arm(rows: list[dict[str, Any]]) -> RunArm:
 def _markdown_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...]]:
     reports = sorted(run_dir.glob("gemini_nexus_report_*.md"))
     if not reports:
+        reports = sorted(run_dir.glob("*.md"))
+    if not reports:
         return None, ()
     text = reports[-1].read_text(encoding="utf-8", errors="ignore")
     match = re.search(r"^- Public claim gate: (PASS|FAIL)\s*$", text, re.MULTILINE)
