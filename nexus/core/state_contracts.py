@@ -71,6 +71,26 @@ class NexusResearch(BaseModel):
     key_findings: List[str]
     metadata: Dict[str, Any] = {}
 
+# --- E 階段: Evidence & Derivation (v26 Algebraic Reasoning) ---
+
+class DerivationStep(BaseModel):
+    step_index: int
+    operation: str # e.g., Rewrite, Compose, Fold
+    rationale: str
+    law_id: Optional[str] = None
+    input_state: Optional[str] = None
+    output_state: Optional[str] = None
+
+class NexusDerivation(BaseModel):
+    task_id: str
+    goal: str
+    reasoning_mode: str = "FORMAL"
+    invariants: List[str] = []
+    proof_obligations: List[str] = []
+    steps: List[DerivationStep] = []
+    final_equivalence_proven: bool = False
+    metadata: Dict[str, Any] = {}
+
 # --- A 階段: Audit ---
 
 class NexusRepair(BaseModel):
@@ -135,8 +155,15 @@ class StepRecord(BaseModel):
     status: str # pending, in_progress, completed, failed
     started_at: datetime
     ended_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展 # 支援自省等靈活擴展
+    metadata: Dict[str, Any] = Field(default_factory=dict) # 支援自省等靈活擴展
     summary: Optional[str] = None
+
+class NexusManifest(BaseModel):
+    task_id: str
+    formal_reasoning: Dict[str, Any] = Field(default_factory=dict) # gate_passed, coverage
+    seal_status: str = "OPEN" # OPEN, SEALED, FAILED
+    artifact_hashes: Dict[str, str] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 # --- H 階段: Health & Self-Check (CHK-001) ---
 
@@ -180,6 +207,7 @@ class NexusState(BaseModel, NexusStateLegacyMixin):
     observability: ObservabilityContext = Field(default_factory=ObservabilityContext)
     audit: AuditCounters = Field(default_factory=AuditCounters)
     phase_health: PhaseHealthSnapshot = Field(default_factory=PhaseHealthSnapshot)
+    derivation: Optional[NexusDerivation] = None
 
     # Legacy (保持)
     superpowers_plan: Dict[str, Any] = Field(default_factory=dict)
