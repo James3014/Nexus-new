@@ -3117,6 +3117,53 @@ def _write_trial_evidence(
     }
 
 
+def _route_cost_ledger(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def number(row: dict[str, Any], *keys: str) -> float:
+        for key in keys:
+            value = row.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
+
+    def mean(values: list[float]) -> float:
+        return round(sum(values) / len(values), 4) if values else 0.0
+
+    def arm(mode: str) -> dict[str, Any]:
+        arm_rows = [row for row in rows if str(row.get("mode")) == mode]
+        eligible = [row for row in arm_rows if bool(row.get("run_eligible", True))]
+        return {
+            "rows": len(arm_rows),
+            "eligible_rows": len(eligible),
+            "avg_wall_duration_sec": mean([number(row, "wall_duration_sec", "duration_sec") for row in eligible]),
+            "avg_model_calls": mean([number(row, "model_calls") for row in eligible]),
+            "avg_tokens": mean([number(row, "total_tokens", "model_total_tokens") for row in eligible]),
+            "token_measured_rate": _rate_for(eligible, "token_measured"),
+            "route_recommended_flow_present_rate": _rate_for(eligible, "route_recommended_flow"),
+            "chosen_flow_present_rate": _rate_for(eligible, "chosen_flow"),
+            "route_decision_present_rate": _rate_for(eligible, "route_decision_schema_version"),
+            "capability_selected_avg": mean([number(row, "route_decision_selected_count") for row in eligible]),
+            "capability_required_avg": mean([number(row, "route_decision_required_count") for row in eligible]),
+            "capability_conditional_avg": mean([number(row, "route_decision_conditional_count") for row in eligible]),
+        }
+
+    return {
+        "schema": "nexus_route_cost_ledger_v1",
+        "scope": "measured_benchmark_telemetry_not_billing_cost",
+        "arms": {
+            "without_nexus": arm("without_nexus"),
+            "with_nexus": arm("with_nexus"),
+        },
+        "claim_boundary": [
+            "Do not treat measured tokens as provider billing cost.",
+            "Do not infer per-capability ROI until per-capability allocation exists.",
+        ],
+    }
+
+
 def write_evidence_bundle(
     *,
     out_dir: Path,
@@ -3185,6 +3232,7 @@ def write_evidence_bundle(
         gate_failures.append("manifest_missing")
     if not config.get("runner_command"):
         gate_failures.append("runner_command_missing")
+    route_cost_ledger = _route_cost_ledger(rows)
     payload = {
         "schema": "nexus_public_benchmark_evidence_bundle_v2",
         "created_at_unix": int(time.time()),
@@ -3245,6 +3293,7 @@ def write_evidence_bundle(
             "gateway_stats_source_rate_without": _rate_for(without_rows, "gateway_stats_present"),
             "gateway_stats_source_rate_with": _rate_for(with_rows, "gateway_stats_present"),
         },
+        "route_cost_ledger": route_cost_ledger,
         "nexus_wearing": {
             "valid_rate": nexus_valid_rate,
             "gemini_uses_nexus_rate": legacy_gemini_uses_nexus_rate,
@@ -3276,6 +3325,8 @@ def write_evidence_bundle(
                 "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
                 "raw_file_hashes_present": True,
                 "artifact_hash_count": len(artifact_files),
+                "route_cost_ledger_present": bool(route_cost_ledger),
+                "route_cost_ledger_schema": route_cost_ledger.get("schema", ""),
             },
         },
     }
