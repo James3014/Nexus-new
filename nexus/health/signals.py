@@ -9,6 +9,20 @@ class HealthSignalCollector:
     """Collect measurable health signals without inventing optimistic defaults."""
 
     @staticmethod
+    def _risk_score_0_1(prediction_meta: dict[str, Any]) -> float:
+        if prediction_meta.get("risk_score_0_1") is not None:
+            raw = prediction_meta.get("risk_score_0_1")
+        else:
+            raw = prediction_meta.get("risk_score", 0.5)
+        try:
+            risk = float(raw)
+        except (TypeError, ValueError):
+            return 0.5
+        if risk > 1.0:
+            risk = risk / 100.0
+        return max(0.0, min(1.0, risk))
+
+    @staticmethod
     def collect(state: NexusState) -> Dict[str, Dict[str, float]]:
         collected: Dict[str, Dict[str, float]] = {}
         raw_metrics = state.phase_metrics or {}
@@ -26,7 +40,7 @@ class HealthSignalCollector:
                 prediction_meta = prediction.metadata.get("prediction", {}) if prediction else {}
                 if prediction_meta:
                     intent_pass = 100.0 if prediction_meta.get("intent_pass") else 40.0
-                    risk_score = float(prediction_meta.get("risk_score", 0.5))
+                    risk_score = HealthSignalCollector._risk_score_0_1(prediction_meta)
                     signals.setdefault("plan_completeness", intent_pass)
                     signals.setdefault("dependency_validity", max(0.0, 100.0 - (risk_score * 100.0)))
                 if state.metadata.get("task_description"):

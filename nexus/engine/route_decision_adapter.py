@@ -45,6 +45,39 @@ def build_pillar_signal_summary(plan: CapabilityPlan) -> dict[str, dict[str, Any
     }
 
 
+def build_forecast_gate_shadow(plan: CapabilityPlan) -> dict[str, Any]:
+    snapshot = dict(plan.signal_snapshot)
+    risk_score = int(snapshot.get("risk_score_0_100", snapshot.get("risk_score", 0)) or 0)
+    confidence = float(snapshot.get("confidence", 1.0) or 1.0)
+    selected = set(plan.selected_capabilities)
+
+    if risk_score >= 70 or "ultra_review" in selected:
+        suggested_tier = "L3_full_governed"
+        reason = "high_risk_or_ultra_review_selected"
+    elif risk_score >= 30 or "codeintel" in selected or "research" in selected:
+        suggested_tier = "L2_context_governed"
+        reason = "medium_risk_or_context_needed"
+    else:
+        suggested_tier = "L1_light_governed"
+        reason = "low_risk_light_route_candidate"
+
+    early_exit_candidate = bool(
+        suggested_tier == "L1_light_governed"
+        and confidence >= 0.9
+        and not plan.pending_capabilities
+    )
+    return {
+        "schema": "nexus_forecast_gate_shadow_v1",
+        "shadow_mode": True,
+        "suggested_tier": suggested_tier,
+        "suggested_tier_reason": reason,
+        "early_exit_candidate": early_exit_candidate,
+        "early_exit_policy": "never_skip_mempalace_artifact_claim_delivery_gates",
+        "risk_score_0_100": risk_score,
+        "confidence": confidence,
+    }
+
+
 def build_route_decision(
     *,
     task_id: str,
@@ -61,6 +94,7 @@ def build_route_decision(
     governance = tuple(item for item in ("ultra_review", "mempalace_gate", "artifact_gate", "claim_gate") if item in selected)
     signal_snapshot = dict(plan.signal_snapshot)
     signal_snapshot["pillar_signals"] = build_pillar_signal_summary(plan)
+    forecast_gate_shadow = build_forecast_gate_shadow(plan)
     return RouteDecision(
         schema_version="nexus_route_decision_v1",
         task_id=task_id,
@@ -82,6 +116,7 @@ def build_route_decision(
         stop_policy=stop_policy or {"type": "receipt_backed", "budget_guard": "fail_closed"},
         receipt_requirements=("invoked", "evidence_present", "gate_passed", "outcome_contributed"),
         fallback_policy="fail_closed",
+        forecast_gate_shadow=forecast_gate_shadow,
         tuning_snapshot=tuning_snapshot or {},
         created_at=datetime.now(timezone.utc).isoformat(),
     )

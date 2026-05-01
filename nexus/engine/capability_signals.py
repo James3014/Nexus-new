@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from nexus.engine.capability_contracts import CapabilityConstraints, CapabilitySignalSet, SkillSignalSet
+from nexus.engine.capability_contracts import (
+    CapabilityConstraints,
+    CapabilitySignalSet,
+    SkillSignalSet,
+    normalize_risk_score,
+)
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -75,6 +80,7 @@ def build_capability_signals(
     decision_governance = route_decision.get("governance_layers", []) or []
     task_lower = f"{task_desc} {task_type}".lower()
     skill_signals = build_skill_signals(skills)
+    risk = normalize_risk_score(route_features.get("risk_score"))
 
     return CapabilitySignalSet(
         task_desc=task_desc,
@@ -84,7 +90,11 @@ def build_capability_signals(
         selected_seed=tuple(str(item) for item in (decision_selected or [])),
         acceleration_seed=tuple(str(item) for item in (decision_acceleration or [])),
         governance_seed=tuple(str(item) for item in (decision_governance or [])),
-        risk_score=_as_int(route_features.get("risk_score"), 0),
+        risk_score=risk["risk_score_0_100"],
+        risk_score_0_100=risk["risk_score_0_100"],
+        risk_score_0_1=risk["risk_score_0_1"],
+        risk_band=risk["risk_band"],
+        risk_band_reason=risk["risk_band_reason"],
         confidence=_as_float(route_features.get("adjusted_root_cause_confidence"), 1.0),
         candidate_count=max(1, _as_int(route_features.get("candidate_count"), 1)),
         memory_hits=_as_int(route_features.get("memory_hits"), 0),

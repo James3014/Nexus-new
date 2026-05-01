@@ -7,6 +7,43 @@ from typing import Any
 PHASES = ("S", "P", "X", "D", "R", "A", "C")
 
 
+def normalize_risk_score(value: Any) -> dict[str, Any]:
+    """Normalize mixed 0-1 and 0-100 risk scores into an explicit contract."""
+    raw_value = value
+    raw_text = str(value).strip()
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = 0.0
+
+    source_scale = "0_100"
+    if 0.0 < numeric <= 1.0 and ("." in raw_text or isinstance(raw_value, float)):
+        source_scale = "0_1"
+        score_0_1 = max(0.0, min(1.0, numeric))
+        score_0_100 = int(round(score_0_1 * 100))
+    else:
+        score_0_100 = int(round(max(0.0, min(100.0, numeric))))
+        score_0_1 = round(score_0_100 / 100.0, 4)
+
+    if score_0_100 >= 90:
+        band = "critical"
+    elif score_0_100 >= 70:
+        band = "high"
+    elif score_0_100 >= 30:
+        band = "medium"
+    else:
+        band = "low"
+
+    return {
+        "raw": raw_value,
+        "source_scale": source_scale,
+        "risk_score_0_100": score_0_100,
+        "risk_score_0_1": score_0_1,
+        "risk_band": band,
+        "risk_band_reason": f"{band}_risk:{score_0_100}",
+    }
+
+
 @dataclass(frozen=True)
 class CapabilityNode:
     name: str
@@ -81,6 +118,10 @@ class CapabilitySignalSet:
     acceleration_seed: tuple[str, ...] = ()
     governance_seed: tuple[str, ...] = ()
     risk_score: int = 0
+    risk_score_0_100: int = 0
+    risk_score_0_1: float = 0.0
+    risk_band: str = "low"
+    risk_band_reason: str = "low_risk:0"
     confidence: float = 1.0
     candidate_count: int = 1
     memory_hits: int = 0
@@ -230,6 +271,7 @@ class RouteDecision:
     receipt_requirements: tuple[str, ...] = ()
     public_claim_scope: str = "receipt_backed"
     fallback_policy: str = "fail_closed"
+    forecast_gate_shadow: dict[str, Any] = field(default_factory=dict)
     tuning_snapshot: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
 

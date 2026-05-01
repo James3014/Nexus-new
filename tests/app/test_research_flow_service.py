@@ -365,6 +365,21 @@ def test_build_hyper_execution_profile_boosts_hard_bug():
     assert profile["is_hard_task"] is True
 
 
+def test_build_hyper_execution_profile_treats_public_bugfix_hyper_route_as_hard():
+    profile = research_flow_service.build_hyper_execution_profile(
+        task_desc="Fix a state normalization bug with hidden invariant coverage.",
+        task_type="public_bugfix",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        route_recommended_flow="hyper_sprint",
+    )
+
+    assert profile["risk_bug"] is True
+    assert profile["is_hard_task"] is True
+    assert profile["prefer_direct_hyper"] is True
+    assert profile["effective_candidate_count"] >= 3
+
+
 def test_build_hyper_execution_profile_honors_llm_candidate_cap(monkeypatch):
     monkeypatch.setenv("NEXUS_LLM_CANDIDATE_CAP", "1")
     profile = research_flow_service.build_hyper_execution_profile(

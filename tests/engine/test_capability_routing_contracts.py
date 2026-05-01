@@ -65,6 +65,24 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
     assert signals.msa_rerank_reasons == ("source:lancedb", "sot:code")
     assert signals.repair_signal is True
     assert signals.evidence_signal is True
+    assert signals.risk_score == 72
+    assert signals.risk_score_0_100 == 72
+    assert signals.risk_score_0_1 == 0.72
+    assert signals.risk_band == "high"
+    assert signals.risk_band_reason == "high_risk:72"
+
+
+def test_capability_signals_normalize_fractional_risk_scale():
+    signals = build_capability_signals(
+        task_desc="Review a medium-risk policy change.",
+        task_type="bug",
+        route={"route_features": {"risk_score": 0.45}},
+    )
+
+    assert signals.risk_score == 45
+    assert signals.risk_score_0_100 == 45
+    assert signals.risk_score_0_1 == 0.45
+    assert signals.risk_band == "medium"
 
 
 def test_capability_signals_do_not_fallback_to_legacy_capability_stack():
@@ -181,6 +199,35 @@ def test_execution_plan_serializes_selected_capabilities_and_controls():
     assert execution["schema_version"] == "nexus_capability_execution_plan_v1"
     assert "ultra_review" in execution["selected_capabilities"]
     assert execution["executor_controls"]["enable_ultra_review"] is True
+
+
+def test_route_decision_includes_forecast_gate_shadow_contract():
+    from nexus.engine.route_decision_adapter import build_route_decision
+
+    plan = CapabilityPlanner().plan(
+        task_desc="Low-risk wording update with high confidence.",
+        task_type="doc-fix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 0.1, "adjusted_root_cause_confidence": 0.95},
+        },
+        pillars={"lancedb": {"hits": 1}},
+    )
+
+    decision = build_route_decision(
+        task_id="route-shadow-001",
+        task_desc="Low-risk wording update with high confidence.",
+        task_type="doc-fix",
+        recommended_flow="baseline",
+        plan=plan,
+    ).to_dict()
+
+    assert decision["signal_snapshot"]["risk_score_0_100"] == 10
+    assert decision["signal_snapshot"]["risk_band"] == "low"
+    assert decision["forecast_gate_shadow"]["schema"] == "nexus_forecast_gate_shadow_v1"
+    assert decision["forecast_gate_shadow"]["shadow_mode"] is True
+    assert decision["forecast_gate_shadow"]["suggested_tier"] == "L1_light_governed"
+    assert decision["forecast_gate_shadow"]["early_exit_policy"] == "never_skip_mempalace_artifact_claim_delivery_gates"
 
 
 def test_planner_composes_core_capabilities_from_commercial_lane_signals():

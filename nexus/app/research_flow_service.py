@@ -1095,7 +1095,9 @@ def build_hyper_execution_profile(
     ]
     commercial_public_task = str(task_type).startswith("public_") and any(keyword in text for keyword in commercial_keywords)
     low_confidence = float(root_cause_confidence) < 0.75
-    risk_bug = task_type == "bug" and route_recommended_flow == "hyper_sprint"
+    task_type_l = str(task_type or "").lower()
+    bug_like_task = task_type_l == "bug" or task_type_l.endswith("bugfix") or "bug" in task_type_l
+    risk_bug = bug_like_task and route_recommended_flow == "hyper_sprint"
     is_hard_task = bool(has_hard_keyword or is_cross_module or low_confidence or risk_bug or commercial_public_task)
 
     effective_candidate_count = max(1, int(candidate_count))
@@ -1108,6 +1110,7 @@ def build_hyper_execution_profile(
         effective_candidate_count = max(effective_candidate_count, 3)
         effective_max_rounds = max(effective_max_rounds, 2)
         effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
+        prefer_direct_hyper = True
         tuning_reasons.append("risk_bug_promote_hyper_budget")
 
     if has_hard_keyword:

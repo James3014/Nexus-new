@@ -1654,6 +1654,10 @@ def _extract_record(
     capability_plan = capability_plan if isinstance(capability_plan, dict) else {}
     route_decision = usage_trace.get("route_decision", {}) if isinstance(usage_trace, dict) else {}
     route_decision = route_decision if isinstance(route_decision, dict) else {}
+    route_signal_snapshot = route_decision.get("signal_snapshot", {}) if isinstance(route_decision, dict) else {}
+    route_signal_snapshot = route_signal_snapshot if isinstance(route_signal_snapshot, dict) else {}
+    forecast_gate_shadow = route_decision.get("forecast_gate_shadow", {}) if isinstance(route_decision, dict) else {}
+    forecast_gate_shadow = forecast_gate_shadow if isinstance(forecast_gate_shadow, dict) else {}
     capability_receipts = usage_trace.get("capability_receipts", []) if isinstance(usage_trace, dict) else []
     capability_receipts = capability_receipts if isinstance(capability_receipts, list) else []
     capability_replan_trace = capability_plan.get("replan_trace", []) if isinstance(capability_plan, dict) else []
@@ -1762,6 +1766,10 @@ def _extract_record(
         "route_recommended_flow": route.get("recommended_flow"),
         "route_reason": route.get("recommended_reason"),
         "route_risk_score": int(route_features.get("risk_score", 0) or 0),
+        "route_risk_score_0_100": int(route_signal_snapshot.get("risk_score_0_100", route_features.get("risk_score", 0)) or 0),
+        "route_risk_score_0_1": float(route_signal_snapshot.get("risk_score_0_1", 0.0) or 0.0),
+        "route_risk_band": str(route_signal_snapshot.get("risk_band") or ""),
+        "route_risk_band_reason": str(route_signal_snapshot.get("risk_band_reason") or ""),
         "route_consensus_winner": consensus.get("winner"),
         "route_consensus_hyper_votes": int(consensus_votes.get("hyper_sprint", 0) or 0),
         "route_consensus_baseline_votes": int(consensus_votes.get("baseline", 0) or 0),
@@ -1843,9 +1851,15 @@ def _extract_record(
         "route_decision_conditional_count": len(route_decision.get("conditional_capabilities", []) or []),
         "route_decision_pending": list(route_decision.get("pending_capabilities", []) or []),
         "route_decision_forbidden": list(route_decision.get("forbidden_capabilities", []) or []),
+        "forecast_gate_shadow_schema": str(forecast_gate_shadow.get("schema") or ""),
+        "forecast_gate_shadow_mode": bool(forecast_gate_shadow.get("shadow_mode", False)),
+        "forecast_gate_suggested_tier": str(forecast_gate_shadow.get("suggested_tier") or ""),
+        "forecast_gate_suggested_tier_reason": str(forecast_gate_shadow.get("suggested_tier_reason") or ""),
+        "forecast_gate_early_exit_candidate": bool(forecast_gate_shadow.get("early_exit_candidate", False)),
+        "forecast_gate_early_exit_policy": str(forecast_gate_shadow.get("early_exit_policy") or ""),
         "route_decision_pillars_active": [
             str(name)
-            for name, data in ((route_decision.get("signal_snapshot", {}) or {}).get("pillar_signals", {}) or {}).items()
+            for name, data in ((route_signal_snapshot or {}).get("pillar_signals", {}) or {}).items()
             if isinstance(data, dict) and bool(data.get("active", False))
         ],
         "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),

@@ -37,6 +37,48 @@ def test_signal_collector_populates_missing_spec_metrics():
     assert "research_latency" in collected["X"]
 
 
+def test_signal_collector_accepts_normalized_and_legacy_risk_scales():
+    fractional = NexusState(task_id="health-risk-fractional")
+    fractional.steps_history = [
+        StepRecord(
+            phase="P",
+            step_id="P-1",
+            status="completed",
+            started_at=datetime.now(),
+            metadata={"prediction": {"intent_pass": True, "risk_score": 0.25}},
+        ),
+    ]
+    fractional.phase_metrics.setdefault("P", PhaseMetric(signals={}))
+
+    legacy = NexusState(task_id="health-risk-legacy")
+    legacy.steps_history = [
+        StepRecord(
+            phase="P",
+            step_id="P-1",
+            status="completed",
+            started_at=datetime.now(),
+            metadata={"prediction": {"intent_pass": True, "risk_score": 25}},
+        ),
+    ]
+    legacy.phase_metrics.setdefault("P", PhaseMetric(signals={}))
+
+    normalized = NexusState(task_id="health-risk-normalized")
+    normalized.steps_history = [
+        StepRecord(
+            phase="P",
+            step_id="P-1",
+            status="completed",
+            started_at=datetime.now(),
+            metadata={"prediction": {"intent_pass": True, "risk_score": 90, "risk_score_0_1": 0.25}},
+        ),
+    ]
+    normalized.phase_metrics.setdefault("P", PhaseMetric(signals={}))
+
+    assert HealthSignalCollector.collect(fractional)["P"]["dependency_validity"] == 75.0
+    assert HealthSignalCollector.collect(legacy)["P"]["dependency_validity"] == 75.0
+    assert HealthSignalCollector.collect(normalized)["P"]["dependency_validity"] == 75.0
+
+
 def test_scorer_accepts_research_latency_norm_alias():
     state = NexusState(task_id="spec-lock-x-alias")
     state.phase_metrics["X"].signals = {

@@ -1399,11 +1399,23 @@ def test_extract_record_maps_semantic_fields():
                 "pending_capabilities": ["swarm"],
                 "forbidden_capabilities": [],
                 "signal_snapshot": {
+                    "risk_score_0_100": 87,
+                    "risk_score_0_1": 0.87,
+                    "risk_band": "high",
+                    "risk_band_reason": "high_risk:87",
                     "pillar_signals": {
                         "MemPalace": {"active": True},
                         "Artifact": {"active": True},
                         "Claim": {"active": True},
                     }
+                },
+                "forecast_gate_shadow": {
+                    "schema": "nexus_forecast_gate_shadow_v1",
+                    "shadow_mode": True,
+                    "suggested_tier": "L3_full_governed",
+                    "suggested_tier_reason": "high_risk_or_ultra_review_selected",
+                    "early_exit_candidate": False,
+                    "early_exit_policy": "never_skip_mempalace_artifact_claim_delivery_gates",
                 },
             },
         },
@@ -1432,6 +1444,10 @@ def test_extract_record_maps_semantic_fields():
     assert out["token_capture_status"] == "measured"
     assert out["report_trust_mismatch"] is False
     assert out["route_risk_score"] == 87
+    assert out["route_risk_score_0_100"] == 87
+    assert out["route_risk_score_0_1"] == 0.87
+    assert out["route_risk_band"] == "high"
+    assert out["route_risk_band_reason"] == "high_risk:87"
     assert out["route_consensus_winner"] == "hyper_sprint"
     assert out["route_consensus_hyper_votes"] == 3
     assert out["route_memory_hits"] == 1
@@ -1518,6 +1534,11 @@ def test_extract_record_maps_semantic_fields():
     assert out["route_decision_required_count"] == 3
     assert out["route_decision_conditional_count"] == 2
     assert out["route_decision_pending"] == ["swarm"]
+    assert out["forecast_gate_shadow_schema"] == "nexus_forecast_gate_shadow_v1"
+    assert out["forecast_gate_shadow_mode"] is True
+    assert out["forecast_gate_suggested_tier"] == "L3_full_governed"
+    assert out["forecast_gate_early_exit_candidate"] is False
+    assert out["forecast_gate_early_exit_policy"] == "never_skip_mempalace_artifact_claim_delivery_gates"
     assert out["route_decision_pillars_active"] == ["MemPalace", "Artifact", "Claim"]
     assert out["semantic_completed"] is False
     assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
