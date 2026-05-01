@@ -142,3 +142,49 @@ Public claim gate checks：
 - 公開報告必須保留 public claim gate、evidence bundle、route decision evidence 與 eligibility schema。
 - 低風險任務需要 light route 控制成本；高風險任務才應啟用完整 Nexus 治理。
 - 下次跨模型比較前，必須先明確確認外部模型資料傳輸授權，避免 benchmark 因合規審核中斷。
+
+## Repeat Observation：12 題 x 2 Trials
+
+同日又補跑一次 `12 題 x 2 trials` repeat，用來觀察穩定性。這一輪不作 public PASS claim，因為 bare arm 有 1 筆 `timeout_before_model_call`，導致 evidence bundle 的 public claim gate 為 `FAIL`，原因是 `run_eligibility_incomplete`。
+
+觀察數據：
+
+| 指標 | Gemini bare | Gemini + Nexus | 備註 |
+| :--- | ---: | ---: | :--- |
+| Rows | 24 | 24 | 12 題 x 2 trials |
+| Eligible rows | 23 | 24 | bare 有 1 筆 infra invalid |
+| Infra invalid | 1 | 0 | `timeout_before_model_call` |
+| Eligible verified | 14/23 | 24/24 | 不作 public PASS claim |
+| Eligible solve rate | 60.9% | 100.0% | 觀察性 +39.1pp |
+| Trust mismatch | 0.0% | 0.0% | 兩邊皆 0 |
+| Avg wall time | 37.19s | 60.92s | Nexus 較慢 |
+| Avg model calls | 0.96 | 1.08 | bare 受 infra invalid 影響 |
+| Token measured rate | 95.8% | 100.0% | bare 受 infra invalid 影響 |
+
+Repeat 類別觀察：
+
+| Category | Gemini bare | Gemini + Nexus | 解讀 |
+| :--- | :---: | :---: | :--- |
+| `bugfix` | 4/4 | 4/4 | 兩邊都穩定 |
+| `refactor` | 4/4 | 4/4 | 兩邊都穩定 |
+| `feature` | 4/4 | 4/4 | 兩邊都穩定 |
+| `test_repair` | 0/4 | 4/4 | Nexus 自癒/Hyper/Delivery Gate 價值穩定重現 |
+| `docs_code_sync` | 0/3 eligible | 4/4 | CodeIntel / Memory 類缺口穩定重現；另有 1 筆 bare infra invalid |
+| `ops_research` | 2/4 | 4/4 | Claim Gate / Delivery Gate 對信任題有穩定補位 |
+
+Report Trust lesson：
+
+- 這輪先發現 markdown report 與 evidence bundle gate 不一致：bundle 正確標 `FAIL`，markdown 曾誤報 `PASS`。
+- 已修正 `scripts/bench/gemini_nexus_report.py`，讓 markdown public gate 也在任一 arm 有 infra-invalid row 時 fail closed。
+- Regression：`uv run pytest -q tests/benchmark/test_gemini_nexus_report.py tests/benchmark/test_capability_ab_runner.py -k 'public_claim_gate or markdown_report or evidence_bundle'`，結果 `25 passed`。
+
+Repeat 證據檔：
+
+- Markdown report：`.nexus/reports/bench_gemini3flash_value12x2_20260501_route_gate_public/gemini_nexus_report_1777635318.md`
+- Evidence bundle：`.nexus/reports/bench_gemini3flash_value12x2_20260501_route_gate_public/evidence_bundle.json`
+- With Nexus JSONL：`.nexus/reports/bench_gemini3flash_value12x2_20260501_route_gate_public/with_nexus_1777635318.jsonl`
+- Without Nexus JSONL：`.nexus/reports/bench_gemini3flash_value12x2_20260501_route_gate_public/without_nexus_1777635318.jsonl`
+
+## Gemini 3.1 Pro Status
+
+本輪曾準備跑 `gemini-3.1-pro-preview` 同規格 12 題，但執行被安全審核拒絕：該 benchmark 會把本機 benchmark prompt/task data 傳給外部 Gemini 3.1 Pro，而目前 tenant policy 禁止這類外部 disclosure。此模型暫不納入 2026-05-01 報告。
