@@ -103,3 +103,11 @@ Nexus 在這裡是戰甲，不是獨立 agent。所有 headline 都必須遵守�
 2. Create sanitized/public Pro benchmark prompts so 3.1 Pro can be rerun under current external disclosure policy.
 3. Re-run GPT-5.5 12x2 with zero infra invalid and current hardened markdown/evidence consistency.
 4. Add a small public report generator so these tables are generated from evidence bundles, not hand-maintained.
+
+## Tooling Added
+
+- Report generator：`scripts/bench/nexus_value_comparison_report.py`
+- Sanitized manifest generator：`scripts/bench/sanitize_public_benchmark.py`
+- Sanitized manifest artifact：`.nexus/reports/sanitized_public_benchmark_nexus_value_v1.json`
+
+Sanitized reruns should use the sanitized manifest as the reviewable disclosure artifact. It removes local file scope fields such as `allowed_files` and `forbidden_files`, preserves fixture/task contract metadata, and marks the manifest as `nexus_public_benchmark_sanitized_manifest_v1`.
