@@ -702,12 +702,15 @@ def compose_capability_plan(
     target_file: str | None = None,
 ) -> dict[str, Any]:
     """Compose a compatibility capability_stack from the planner seam."""
+    task_lower = f"{task_desc} {task_type}".lower()
+    seed_selected = ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]
+    seed_acceleration = ["ddtree"] if "repair" in task_lower or "timeout" in task_lower or "flaky" in task_lower else []
     seed_route = {
         "recommended_flow": recommended_flow,
         "route_features": route_features,
-        "capability_stack": {
-            "selected_capabilities": ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"],
-            "acceleration_layers": [],
+        "route_decision": {
+            "selected_capabilities": seed_selected,
+            "acceleration_layers": seed_acceleration,
             "governance_layers": [],
         },
     }

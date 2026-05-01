@@ -1766,20 +1766,43 @@ def test_compact_nexus_route_for_prompt_excludes_verbose_payload():
         "recommended_reason": "commercial_public_task_prefers_hyper",
         "findings_hits": 2,
         "route_features": {"risk_score": 55, "has_hard_signal": True, "memory_hits": 1},
-        "capability_stack": {
+        "route_decision": {
             "selected_capabilities": ["research", "hyper", "ultra_review"],
+            "governance_layers": ["ultra_review"],
+            "acceleration_layers": [],
             "decision_trace": [{"node": "verbose"}],
         },
+        "capability_stack": {"selected_capabilities": ["legacy-only"]},
         "explain_payload": {"reasoning": "large"},
     }
 
     compact = _compact_nexus_route_for_prompt(route)
 
     assert compact["recommended_flow"] == "hyper_sprint"
+    assert compact["routing_evidence_status"] == "route_decision_present"
     assert compact["risk_score"] == 55
     assert compact["selected_capabilities"] == ["research", "hyper", "ultra_review"]
+    assert compact["governance_layers"] == ["ultra_review"]
     assert "decision_trace" not in compact
     assert "explain_payload" not in compact
+
+
+def test_compact_nexus_route_for_prompt_does_not_fallback_to_capability_stack():
+    route = {
+        "recommended_flow": "baseline",
+        "capability_stack": {
+            "selected_capabilities": ["hyper_sprint", "autoreason"],
+            "acceleration_layers": ["ddtree"],
+            "governance_layers": ["ultra_review"],
+        },
+    }
+
+    compact = _compact_nexus_route_for_prompt(route)
+
+    assert compact["routing_evidence_status"] == "missing_route_decision"
+    assert compact["selected_capabilities"] == []
+    assert compact["governance_layers"] == []
+    assert compact["acceleration_layers"] == []
 
 
 def test_nexus_codex_hidden_verifier_guidance_names_merge_invariant():

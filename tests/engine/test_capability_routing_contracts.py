@@ -24,9 +24,10 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
                 "findings_hits": 1,
                 "is_cross_module_task": True,
             },
-            "capability_stack": {
+            "route_decision": {
                 "selected_capabilities": ["hyper_sprint"],
                 "acceleration_layers": ["ddtree"],
+                "governance_layers": ["ultra_review"],
             },
             "autonomic_signals": {
                 "suggested_mode": "research_first",
@@ -46,6 +47,10 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
     )
 
     assert signals.recommended_flow == "hyper_sprint"
+    assert signals.route_decision_present is True
+    assert signals.selected_seed == ("hyper_sprint",)
+    assert signals.acceleration_seed == ("ddtree",)
+    assert signals.governance_seed == ("ultra_review",)
     assert signals.lancedb_hits == 3
     assert signals.memory_hits == 2
     assert signals.findings_hits == 1
@@ -60,6 +65,26 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
     assert signals.msa_rerank_reasons == ("source:lancedb", "sot:code")
     assert signals.repair_signal is True
     assert signals.evidence_signal is True
+
+
+def test_capability_signals_do_not_fallback_to_legacy_capability_stack():
+    signals = build_capability_signals(
+        task_desc="Plain doc cleanup",
+        task_type="doc-fix",
+        route={
+            "recommended_flow": "baseline",
+            "capability_stack": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "acceleration_layers": ["ddtree"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+    )
+
+    assert signals.route_decision_present is False
+    assert signals.selected_seed == ()
+    assert signals.acceleration_seed == ()
+    assert signals.governance_seed == ()
 
 
 def test_ui_signal_does_not_match_public_substring():

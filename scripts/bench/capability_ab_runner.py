@@ -2216,14 +2216,13 @@ def _compact_nexus_route_for_prompt(route: dict[str, Any]) -> dict[str, Any]:
     consensus = consensus if isinstance(consensus, dict) else {}
     decision = route.get("route_decision", {}) if isinstance(route, dict) else {}
     decision = decision if isinstance(decision, dict) else {}
-    stack = route.get("capability_stack", {}) if isinstance(route, dict) else {}
-    stack = stack if isinstance(stack, dict) else {}
-    selected = list(decision.get("selected_capabilities", []) or stack.get("selected_capabilities", []) or [])
-    governance_layers = list(decision.get("governance_layers", []) or stack.get("governance_layers", []) or [])
-    acceleration_layers = list(decision.get("acceleration_layers", []) or stack.get("acceleration_layers", []) or [])
+    selected = list(decision.get("selected_capabilities", []) or [])
+    governance_layers = list(decision.get("governance_layers", []) or [])
+    acceleration_layers = list(decision.get("acceleration_layers", []) or [])
     return {
         "recommended_flow": route.get("recommended_flow"),
         "reason": route.get("recommended_reason") or route.get("reason"),
+        "routing_evidence_status": "route_decision_present" if decision else "missing_route_decision",
         "risk_score": int(features.get("risk_score", 0) or 0),
         "hard_signal": bool(features.get("has_hard_signal", False)),
         "commercial_signal": bool(features.get("has_commercial_signal", False)),

@@ -423,6 +423,31 @@ def _public_claim_gate(
             failures.append("rlm_trace_quality_below_threshold")
         if bool(row.get("rlm_loop_phase") == "X") and not bool(row.get("rlm_x_loop_budget_observed", False)):
             failures.append("rlm_x_loop_budget_missing")
+    for row in rows_with:
+        expected = row.get("expected_capabilities") or []
+        if isinstance(expected, str):
+            try:
+                expected = json.loads(expected)
+            except json.JSONDecodeError:
+                expected = []
+        if not expected:
+            continue
+        coverage = row.get("expected_capability_receipt_coverage") or {}
+        if isinstance(coverage, str):
+            try:
+                coverage = json.loads(coverage)
+            except json.JSONDecodeError:
+                coverage = {}
+        if not isinstance(coverage, dict):
+            failures.append("expected_capability_coverage_invalid")
+            continue
+        missing = coverage.get("missing") or []
+        if missing:
+            task_id = str(row.get("task_id") or "unknown")
+            failures.append(f"expected_capability_not_public_safe:{task_id}:{','.join(str(item) for item in missing)}")
+        elif not bool(coverage.get("all_public_safe", False)):
+            task_id = str(row.get("task_id") or "unknown")
+            failures.append(f"expected_capability_coverage_incomplete:{task_id}")
     return {
         "verdict": "PASS" if not failures else "FAIL",
         "failures": sorted(set(failures)),
