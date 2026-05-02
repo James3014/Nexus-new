@@ -1381,6 +1381,13 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
             "replay_command, nonzero exit_code, schema aliases, and non-verified "
             "claims."
         )
+    if task.fixture_kind == "rlm_harder_v2_nightshift_recovery":
+        desc += (
+            "\n\nNexus Nightshift recovery rule: accept a Nightshift recovery only "
+            "when escalation was recommended, actually invoked, recovered the task, "
+            "and produced a non-empty report_path. Boolean success flags without a "
+            "report path are not auditable recovery evidence."
+        )
     if task.fixture_kind == "rlm_harder_v2_memory_contract":
         desc += (
             "\n\nNexus Belief/Memory rule: prior fixes are relevant only when they share "
@@ -2270,6 +2277,10 @@ def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> 
     if task.fixture_kind == "rlm_harder_v2_evidence_replay":
         guidance.append(
             "For replay receipts, accept only claim='verified' with a non-empty replay_command and exit_code == 0; reject missing replay_command, nonzero exit_code, schema aliases, and non-verified claims."
+        )
+    if task.fixture_kind == "rlm_harder_v2_nightshift_recovery":
+        guidance.append(
+            "For Nexus Nightshift recovery, accept only reports with recommended, invoked, recovered, and a non-empty report_path; reject boolean-only recovery without report_path."
         )
     if task.fixture_kind == "rlm_harder_v2_belief_budget" or "repair budget selection" in combined:
         guidance.append(

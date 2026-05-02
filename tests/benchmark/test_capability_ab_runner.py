@@ -2145,6 +2145,25 @@ def test_nexus_codex_hidden_verifier_guidance_names_replay_contract():
     assert "schema aliases" in guidance
 
 
+def test_nexus_codex_hidden_verifier_guidance_names_nightshift_report_contract():
+    task = CapabilityTask(
+        id="nightshift",
+        category="ops_research",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Accept Nightshift recovery only when escalation was invoked, recovered, and produced a report path.",
+        target_file="target.py",
+        test_file="test_target.py",
+        fixture_kind="rlm_harder_v2_nightshift_recovery",
+        success_criteria="patch_and_tests_pass",
+    )
+
+    guidance = _nexus_codex_hidden_verifier_guidance(task, "def rlm_harder_v2_accept_nightshift(report): pass")
+
+    assert "non-empty report_path" in guidance
+    assert "reject boolean-only recovery" in guidance
+
+
 def test_run_with_nexus_augments_rlm_evidence_task_desc(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="rlm-harder-v2-evidence-001",
@@ -2251,6 +2270,20 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
     assert "non-empty replay_command" in _nexus_task_desc(replay)
     assert "exit_code == 0" in _nexus_task_desc(replay)
     assert "schema aliases" in _nexus_task_desc(replay)
+
+    nightshift = CapabilityTask(
+        id="nightshift",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix Nightshift recovery.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_nightshift_recovery",
+    )
+
+    assert "Nexus Nightshift recovery rule" in _nexus_task_desc(nightshift)
+    assert "non-empty report_path" in _nexus_task_desc(nightshift)
 
 
 def test_prompt_leak_audit_accepts_current_rlm_harder_v2_guidance():

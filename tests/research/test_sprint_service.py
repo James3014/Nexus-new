@@ -238,6 +238,40 @@ def test_run_hyper_sprint_semantic_guard_for_feature(monkeypatch, tmp_path: Path
     assert res.rejection_summary.get("semantic_guard_low_delta_feature", 0) >= 1
 
 
+def test_run_hyper_sprint_rejects_hidden_verifier_placeholder_only(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("def accept(report):\n    return True\n", encoding="utf-8")
+
+    class FakeGenerator:
+        source = "local_hidden_shadow"
+
+        def generate(self, *args, **kwargs):
+            return (
+                "def accept(report):\n    return True\n\n"
+                "# Structural placeholder for feature/refactor\n"
+                "_NEXUS_TASK_SENTINEL = 123\n",
+                {"source": "local_hidden_shadow", "model_calls": 0, "quota_backoffs": 0},
+            )
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **_kwargs):
+            raise AssertionError("placeholder-only candidates must be rejected before pytest")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="Fix hidden report_path contract", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "FAILED"
+    assert "semantic_guard" in res.error_codes
+    assert res.rejection_summary.get("semantic_guard_placeholder_only", 0) >= 1
+
+
 def test_run_hyper_sprint_learning_trace_persist_path(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
@@ -442,6 +476,20 @@ def test_value_task_contract_includes_artifact_and_override_rules():
     assert "Use singular field 'artifact'" in artifact_contract
     assert "return the claim ids" in artifact_contract
     assert "preserve the existing default" in override_contract
+
+
+def test_value_task_contract_includes_nightshift_report_path_rule():
+    contract = _build_value_task_contract(
+        source_code="def rlm_harder_v2_accept_nightshift(report):\n    pass\n",
+        task="Accept Nightshift recovery only when escalation was invoked, recovered, and produced a report path.",
+        test_source=(
+            "assert rlm_harder_v2_accept_nightshift({'recommended': True, 'invoked': True, "
+            "'recovered': True, 'report_path': 'reports/nightshift.json'}) is True"
+        ),
+    )
+
+    assert "non-empty report_path" in contract
+    assert "Reject boolean-only Nightshift recovery" in contract
 
 
 def test_hidden_verifier_mode_omits_initial_test_source(monkeypatch, tmp_path: Path):

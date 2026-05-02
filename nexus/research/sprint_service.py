@@ -245,6 +245,11 @@ def _build_value_task_contract(*, source_code: str, task: str, test_source: str 
     if "phase" in combined or "evidence" in combined or "reason" in combined:
         rules.append("Use the canonical phase fields 'status', 'evidence', and 'reason' exactly when they appear in source/tests.")
         rules.append("Passing phases require evidence; failing phases require a non-empty reason.")
+    if "nightshift" in combined or "report_path" in combined:
+        rules.append(
+            "Nightshift recovery is auditable only when recommended, invoked, recovered, and a non-empty report_path are all present."
+        )
+        rules.append("Reject boolean-only Nightshift recovery when report_path is missing or empty.")
     if "deny" in combined or "authorization" in combined or "redact" in combined:
         rules.append("MemPalace rule: fail closed for unknown or missing authorization data and never weaken redaction.")
     if "strict" in combined or "canonical" in combined or "config" in combined:
@@ -715,6 +720,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
 
         src_lines = {ln.strip() for ln in source.splitlines() if ln.strip()}
         cand_lines = {ln.strip() for ln in candidate.splitlines() if ln.strip()}
+        added_lines = cand_lines - src_lines
+        if hidden_verifier_mode and added_lines and all(
+            line.startswith("# Structural placeholder") or line.startswith("_NEXUS_TASK_SENTINEL")
+            for line in added_lines
+        ):
+            return False, "semantic_guard_placeholder_only"
         changed_count = len(cand_lines - src_lines)
         task_l = task.lower()
         feature_words = ("implement", "add", "create", "introduce", "support", "enable")
