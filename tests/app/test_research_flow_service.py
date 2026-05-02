@@ -279,6 +279,7 @@ def test_decide_flow_payload_schema_keys(tmp_path: Path):
         "task_type",
         "has_hard_signal",
         "has_commercial_signal",
+        "has_strong_commercial_signal",
         "is_cross_module_task",
         "is_doc_fix",
         "candidate_count",
@@ -419,8 +420,27 @@ def test_build_route_treats_public_commercial_tasks_as_hard(tmp_path: Path):
     assert out["recommended_flow"] == "hyper_sprint"
     assert out["should_research"] is True
     assert out["route_features"]["has_hard_signal"] is True
+    assert out["route_features"]["has_commercial_signal"] is True
+    assert out["route_features"]["has_strong_commercial_signal"] is True
     assert out["route_features"]["risk_score"] >= 50
     assert out["reason"] == "commercial_public_task_prefers_hyper"
+
+
+def test_build_route_treats_public_non_strong_commercial_task_as_baseline(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Repair merge helper behavior without changing default values in normal path.",
+        task_type="public_test_repair",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+    )
+
+    assert out["recommended_flow"] == "baseline"
+    assert out["should_research"] is False
+    assert out["route_features"]["has_commercial_signal"] is True
+    assert out["route_features"]["has_strong_commercial_signal"] is False
+    assert out["route_features"]["has_hard_signal"] is False
 
 
 def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
@@ -436,6 +456,19 @@ def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
     assert profile["prefer_direct_hyper"] is True
     assert profile["effective_candidate_count"] >= 3
     assert "commercial_public_task" in profile["tuning_reasons"]
+
+
+def test_build_hyper_execution_profile_weak_public_commercial_task_not_hard():
+    profile = research_flow_service.build_hyper_execution_profile(
+        task_desc="Repair merge helper behavior without changing default values in normal path.",
+        task_type="public_test_repair",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        route_recommended_flow="baseline",
+    )
+
+    assert profile["is_hard_task"] is False
+    assert "commercial_public_task" not in profile["tuning_reasons"]
 
 
 def test_build_hyper_execution_profile_prefers_direct_hyper_for_cross_module():

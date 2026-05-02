@@ -60,6 +60,7 @@ class RouteSignals(TypedDict):
     is_doc_fix: bool
     is_cross_module_task: bool
     has_commercial_signal: bool
+    has_strong_commercial_signal: bool
     has_hard_signal: bool
 
 
@@ -82,6 +83,7 @@ class RouteFeatures(TypedDict):
     task_type: str
     has_hard_signal: bool
     has_commercial_signal: bool
+    has_strong_commercial_signal: bool
     is_cross_module_task: bool
     is_doc_fix: bool
     candidate_count: int
@@ -144,6 +146,44 @@ def _derive_findings_query(task_desc: str, target_file: str | None = None) -> st
     if target_file:
         text = f"{text} {target_file}".strip()
     return text[:200]
+
+
+def _classify_commercial_signal(task_type: str, task_desc: str) -> tuple[bool, bool]:
+    """Return (commercial_signal, strong_commercial_signal) for public tasks."""
+    if not str(task_type).startswith("public_"):
+        return False, False
+
+    task_upper = (task_desc or "").upper()
+    commercial_keywords_soft = (
+        "CLAIM",
+        "EVIDENCE",
+        "ARTIFACT",
+        "GOVERNANCE",
+        "SECRET",
+        "AUTHORIZATION",
+        "TRUST",
+        "VERIFICATION",
+        "SEMANTIC",
+        "COMPLIANCE",
+        "REPAIR",
+    )
+    commercial_keywords_strong = (
+        "CLAIM",
+        "EVIDENCE",
+        "ARTIFACT",
+        "GOVERNANCE",
+        "SECRET",
+        "AUTHORIZATION",
+        "TRUST",
+        "VERIFICATION",
+        "COMPLIANCE",
+        "SECURITY",
+        "RISK",
+    )
+
+    has_commercial_signal = any(kw in task_upper for kw in commercial_keywords_soft)
+    has_strong_commercial_signal = any(kw in task_upper for kw in commercial_keywords_strong)
+    return has_commercial_signal, has_strong_commercial_signal
 
 
 def _extract_keywords(text: str, *, limit: int = 12) -> list[str]:
@@ -837,20 +877,8 @@ def _collect_route_signals(
     cross_module_keywords = ["CROSS-MODULE", "MULTI-MODULE", "COORDINATOR", "SWARM", "DRONE", "NIGHTSHIFT"]
     is_cross_module_task = "cross_module" in str(task_type).lower() or any(kw in task_upper for kw in cross_module_keywords)
     commercial_public_task = str(task_type).startswith("public_")
-    commercial_keywords = [
-        "CLAIM",
-        "EVIDENCE",
-        "ARTIFACT",
-        "GOVERNANCE",
-        "SECRET",
-        "AUTHORIZATION",
-        "TRUST",
-        "VERIFICATION",
-        "SEMANTIC",
-        "REPAIR",
-    ]
-    has_commercial_signal = commercial_public_task and any(kw in task_upper for kw in commercial_keywords)
-    has_hard_signal = any(kw in task_upper for kw in hard_keywords) or is_cross_module_task or has_commercial_signal
+    has_commercial_signal, has_strong_commercial_signal = _classify_commercial_signal(task_type=task_type, task_desc=task_desc)
+    has_hard_signal = any(kw in task_upper for kw in hard_keywords) or is_cross_module_task or has_strong_commercial_signal
 
     return {
         "findings_hits": findings_hits,
@@ -861,6 +889,7 @@ def _collect_route_signals(
         "is_doc_fix": is_doc_fix,
         "is_cross_module_task": is_cross_module_task,
         "has_commercial_signal": has_commercial_signal,
+        "has_strong_commercial_signal": has_strong_commercial_signal,
         "has_hard_signal": has_hard_signal,
     }
 
@@ -880,26 +909,29 @@ def _decide_flow(
     is_doc_fix = signals["is_doc_fix"]
     is_cross_module_task = signals["is_cross_module_task"]
     has_commercial_signal = signals["has_commercial_signal"]
+    has_strong_commercial_signal = signals["has_strong_commercial_signal"]
     has_hard_signal = signals["has_hard_signal"]
 
     if is_doc_fix:
         recommended_flow = "baseline"
         recommended_reason = "Matched Doc-Fix Rule"
-    elif has_commercial_signal:
+    elif has_strong_commercial_signal:
         recommended_flow = "hyper_sprint"
         recommended_reason = "commercial_public_task_prefers_hyper"
     elif task_type in ["feature", "refactor"]:
         recommended_flow = "baseline"
         recommended_reason = f"structural_task_type_{task_type}_prefer_baseline"
     else:
-        is_risky_bug = (
-            candidate_count > 1
-            or adjusted_root_cause_confidence < 0.75
-            or findings_hits > 0
-            or memory_hits > 0
-            or has_hard_signal
-            or decision.should_research
-        )
+        is_public_task = str(task_type).startswith("public_")
+        is_non_strong_public_task = is_public_task and not has_strong_commercial_signal
+        is_risky_bug = findings_hits > 0 or memory_hits > 0 or has_hard_signal
+        if not is_non_strong_public_task:
+            is_risky_bug = (
+                is_risky_bug
+                or decision.should_research
+                or candidate_count > 1
+                or adjusted_root_cause_confidence < 0.75
+            )
         recommended_flow = "hyper_sprint" if is_risky_bug else "baseline"
         recommended_reason = "complex_bug_prefer_hyper" if is_risky_bug else "simple_bug_prefer_baseline"
 
@@ -914,7 +946,7 @@ def _decide_flow(
     if has_hard_signal:
         consensus_votes["hyper_sprint"] += 1
         vote_reasons.append("hard_signal_prefers_hyper")
-    if has_commercial_signal:
+    if has_strong_commercial_signal:
         consensus_votes["hyper_sprint"] += 1
         vote_reasons.append("commercial_public_task_prefers_hyper")
     if adjusted_root_cause_confidence < 0.75:
@@ -957,6 +989,7 @@ def _decide_flow(
         "task_type": task_type,
         "has_hard_signal": has_hard_signal,
         "has_commercial_signal": has_commercial_signal,
+        "has_strong_commercial_signal": has_strong_commercial_signal,
         "is_cross_module_task": is_cross_module_task,
         "is_doc_fix": is_doc_fix,
         "candidate_count": int(candidate_count),
@@ -1081,26 +1114,20 @@ def build_hyper_execution_profile(
     is_cross_module = "cross_module" in str(task_type).lower() or any(
         kw in text for kw in ["cross-module", "multi-module", "coordinator", "swarm", "drone", "nightshift"]
     )
-    commercial_keywords = [
-        "claim",
-        "evidence",
-        "artifact",
-        "governance",
-        "secret",
-        "authorization",
-        "trust",
-        "verification",
-        "semantic",
-        "repair",
-    ]
-    commercial_public_task = str(task_type).startswith("public_") and any(keyword in text for keyword in commercial_keywords)
+    is_public_commercial_task = str(task_type).startswith("public_")
+    _, has_strong_commercial_signal = _classify_commercial_signal(
+        task_type=task_type,
+        task_desc=task_desc,
+    )
+    commercial_public_task = is_public_commercial_task and has_strong_commercial_signal
     low_confidence = float(root_cause_confidence) < 0.75
     task_type_l = str(task_type or "").lower()
     bug_like_task = task_type_l == "bug" or task_type_l.endswith("bugfix") or "bug" in task_type_l
     risk_bug = bug_like_task and route_recommended_flow == "hyper_sprint"
     is_hard_task = bool(has_hard_keyword or is_cross_module or low_confidence or risk_bug or commercial_public_task)
 
-    effective_candidate_count = max(1, int(candidate_count))
+    requested_candidate_count = max(1, int(candidate_count))
+    effective_candidate_count = requested_candidate_count
     effective_max_rounds = 1
     effective_stage1_max_parallel = 1
     prefer_direct_hyper = False
@@ -1110,7 +1137,8 @@ def build_hyper_execution_profile(
         effective_candidate_count = max(effective_candidate_count, 3)
         effective_max_rounds = max(effective_max_rounds, 2)
         effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
-        prefer_direct_hyper = True
+        if low_confidence or requested_candidate_count > 1 or is_public_commercial_task:
+            prefer_direct_hyper = True
         tuning_reasons.append("risk_bug_promote_hyper_budget")
 
     if has_hard_keyword:
