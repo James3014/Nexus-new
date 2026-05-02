@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from scripts.bench.sanitize_public_benchmark import sanitize_execution_manifest, sanitize_manifest
+
 
 DEFAULT_LANES_FILE = Path("scripts/bench/public_benchmark_commercial_lanes_v1.json")
 
@@ -62,14 +64,40 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lanes-file", default=str(DEFAULT_LANES_FILE))
     parser.add_argument("--lane", default="all")
     parser.add_argument("--output", default="")
+    parser.add_argument(
+        "--execution-safe-output",
+        default="",
+        help="Optional public execution-safe manifest path for external model runs.",
+    )
+    parser.add_argument(
+        "--disclosure-output",
+        default="",
+        help="Optional disclosure manifest path for public benchmark preflight.",
+    )
     args = parser.parse_args(argv)
 
     payload = build_lane_tasks(lanes_file=args.lanes_file, lane=args.lane)
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
     else:
         print(text, end="")
+    if args.execution_safe_output:
+        out = Path(args.execution_safe_output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(sanitize_execution_manifest(payload), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    if args.disclosure_output:
+        out = Path(args.disclosure_output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(sanitize_manifest(payload), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     return 0
 
 

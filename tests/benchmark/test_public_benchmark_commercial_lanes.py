@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from scripts.bench.commercial_lane_tasks import build_lane_tasks
-from scripts.bench.capability_ab_runner import load_tasks
+from scripts.bench.capability_ab_runner import _public_disclosure_manifest, load_tasks
+from scripts.bench.sanitize_public_benchmark import sanitize_execution_manifest, sanitize_manifest
 
 PUBLIC_CAPABILITY_TARGETS = {
     "codeintel",
@@ -69,6 +70,28 @@ def test_commercial_lane_compiler_outputs_runner_tasks_file():
         "nexus-value-gov-001",
         "rlm-harder-v2-governance-001",
     }
+
+
+def test_commercial_lane_compiler_exports_safe_external_manifests(tmp_path: Path):
+    payload = build_lane_tasks(lane="cost_efficiency")
+    execution_payload = sanitize_execution_manifest(payload)
+    disclosure_payload = sanitize_manifest(payload)
+    execution_path = tmp_path / "cost_efficiency.execution_safe.json"
+    disclosure_path = tmp_path / "cost_efficiency.disclosure.json"
+    execution_path.write_text(json.dumps(execution_payload), encoding="utf-8")
+    disclosure_path.write_text(json.dumps(disclosure_payload), encoding="utf-8")
+
+    tasks = load_tasks(execution_path)
+    disclosure = _public_disclosure_manifest(str(disclosure_path), repo_root=Path.cwd())
+
+    assert len(tasks) == 6
+    assert {task.id for task in tasks} == {task["id"] for task in payload["tasks"]}
+    assert all(str(task["repo"]).startswith("fixture://") for task in execution_payload["tasks"])
+    assert all(task["allowed_files"] == ["target.py", "test_target.py"] for task in execution_payload["tasks"])
+    assert all("allowed_files" not in task and "forbidden_files" not in task for task in disclosure_payload["tasks"])
+    assert {task["commercial_lane"] for task in disclosure_payload["tasks"]} == {"cost_efficiency"}
+    assert disclosure["status"] == "PASS"
+    assert disclosure["sha256"]
 
 
 def test_commercial_lanes_cover_public_capability_targets_without_running_models():

@@ -19,6 +19,8 @@ ALLOWED_TASK_KEYS = {
     "mutation_required",
     "setup_command",
     "verification_command",
+    "commercial_lane",
+    "source_manifest",
     "expected_capabilities",
     "capability_activation_contract",
     "hidden_oracle_kind",
