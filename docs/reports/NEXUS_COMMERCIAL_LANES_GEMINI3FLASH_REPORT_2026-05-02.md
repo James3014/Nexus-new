@@ -76,6 +76,7 @@ Nightshift targeted oracle 初跑時，Nexus 選出的候選只插入 `_NEXUS_TA
 - 相對原始 cost_efficiency，Nexus 仍維持 100% verified delivery，wall time 約下降 **41.3%**，tokens 約下降 **22.0%**，model calls 從 1.33 降到 1.00。
 - 不建議第一步關閉 CodeIntel / Artifact / Claim / public gate；這些是公開可信度的核心證據鏈。
 - 另一個 agent 追加的商用訊號分級調整可作為 planner 層全域優化：強商用任務保留 Hyper，弱商用任務可先走 baseline/fallback。但目前 public benchmark 的 `--skip-llm-baseline` 會強制 Hyper 以維持同模型穿 Nexus 語義，所以該路由分級需等「Nexus baseline LLM path」完成後再宣稱 benchmark 成本收益。
+- Route-aware baseline 已追加診斷實跑，但目前不能作為公開 default：`routeaware_cap1_fixed` with Nexus 為 83.3% 且 public gate FAIL；加入 self-heal hard signal 後 `routeaware_cap1_selfheal` 仍只有 50.0%，失敗集中在 `baseline_llm_failed_replan_hyper` + `gateway_error` + local fallback。公開成本結論仍以 `--skip-llm-baseline --llm-candidate-cap 1` 為準。
 
 Evidence：
 

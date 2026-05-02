@@ -443,6 +443,45 @@ def test_build_route_treats_public_non_strong_commercial_task_as_baseline(tmp_pa
     assert out["route_features"]["has_hard_signal"] is False
 
 
+def test_build_route_ignores_nexus_wearing_contract_for_commercial_strength(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Repair merge helper behavior without changing default values in normal path."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+            "\n- Governance: keep the solution inside scope."
+        ),
+        task_type="public_test_repair",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+    )
+
+    assert out["recommended_flow"] == "baseline"
+    assert out["route_features"]["has_commercial_signal"] is True
+    assert out["route_features"]["has_strong_commercial_signal"] is False
+
+
+def test_build_route_treats_self_heal_failure_tail_as_hyper(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Repair the implementation after an intentionally tempting first patch breaks "
+            "an invariant; success requires using the failure tail to produce a bounded second edit."
+        ),
+        task_type="public_test_repair",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+    )
+
+    assert out["recommended_flow"] == "hyper_sprint"
+    assert out["recommended_reason"] == "complex_bug_prefer_hyper"
+    assert out["route_features"]["has_hard_signal"] is True
+    assert out["route_features"]["has_strong_commercial_signal"] is False
+
+
 def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix claim verification so only fully supported successful claims are accepted.",

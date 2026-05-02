@@ -50,3 +50,23 @@
 - 對公開 same-model A/B：先採用已驗證的 `--skip-llm-baseline --llm-candidate-cap 1`，保留 model-wearing 與 public gate。
 - 對路由內部優化：保留本次商用訊號分級，避免新路由在弱商用任務上過度升級。
 - 下一步若要讓路由分級也直接反映在公開 benchmark 成本上，需新增「Nexus baseline LLM path」，讓 baseline 仍由同一模型穿 Nexus 執行，而不是退回本地非模型修補。
+
+## Route-aware 實跑回查
+
+追加實跑後，route-aware baseline 目前不能升為公開 default：
+
+1. `routeaware_cap1_fixed` 確認修正後確實產生 `baseline 4 / hyper 2`，但 with Nexus 只有 `83.3%`，public claim gate 因 `with_trust_mismatch_above_zero` 失敗。
+2. 補上 self-heal/failure-tail hard signal 後，分流變成 `baseline 3 / hyper 3`，但 with Nexus 仍只有 `50.0%`，且 `local_fallback_unhelpful_rate=0.5`。
+3. 失敗 row 共同特徵是 `baseline_llm_failed_replan_hyper` + `gateway_error` + `fallback_used=true`，代表 baseline LLM path 目前仍會被 local fallback 污染，不適合公開 claim。
+
+因此目前採用策略是：
+
+- **公開 benchmark default**：`--skip-llm-baseline --llm-candidate-cap 1`。
+- **planner 內部保留**：商用訊號分級與 self-heal hard signal。
+- **暫不採用**：route-aware baseline 作為公開成本 lane default。
+- **後續工程化條件**：新增 strict Nexus LLM baseline，要求 baseline 由同一模型產生有效 patch；LLM failure 不得被 local fallback 洗成成功或混入 public denominator。
+
+診斷 evidence：
+
+- `.nexus/reports/bench_commercial_cost_efficiency_gemini3flash_routeaware_cap1_fixed_20260502/evidence_bundle.json`
+- `.nexus/reports/bench_commercial_cost_efficiency_gemini3flash_routeaware_cap1_selfheal_20260502/evidence_bundle.json`

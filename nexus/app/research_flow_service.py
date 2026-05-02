@@ -153,7 +153,8 @@ def _classify_commercial_signal(task_type: str, task_desc: str) -> tuple[bool, b
     if not str(task_type).startswith("public_"):
         return False, False
 
-    task_upper = (task_desc or "").upper()
+    task_body = (task_desc or "").split("\n\nNexus wearing contract:", 1)[0]
+    task_upper = task_body.upper()
     commercial_keywords_soft = (
         "CLAIM",
         "EVIDENCE",
@@ -873,7 +874,21 @@ def _collect_route_signals(
     is_doc_fix = any(p in task_lower for p in doc_patterns) or any(p in target_lower for p in doc_patterns if p.startswith("."))
 
     task_upper = (task_desc or "").upper()
-    hard_keywords = ["FLAKY", "RACE", "DEADLOCK", "TIMEOUT", "LATENCY", "WEBSOCKET", "SDK", "API"]
+    hard_keywords = [
+        "FLAKY",
+        "RACE",
+        "DEADLOCK",
+        "TIMEOUT",
+        "LATENCY",
+        "WEBSOCKET",
+        "SDK",
+        "API",
+        "INVARIANT",
+        "FAILURE TAIL",
+        "SECOND EDIT",
+        "SECOND PATCH",
+        "SELF-HEAL",
+    ]
     cross_module_keywords = ["CROSS-MODULE", "MULTI-MODULE", "COORDINATOR", "SWARM", "DRONE", "NIGHTSHIFT"]
     is_cross_module_task = "cross_module" in str(task_type).lower() or any(kw in task_upper for kw in cross_module_keywords)
     commercial_public_task = str(task_type).startswith("public_")
@@ -1109,7 +1124,21 @@ def build_hyper_execution_profile(
     tuning: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     text = (task_desc or "").lower()
-    hard_keywords = ["flaky", "race", "deadlock", "timeout", "latency", "websocket", "sdk", "api"]
+    hard_keywords = [
+        "flaky",
+        "race",
+        "deadlock",
+        "timeout",
+        "latency",
+        "websocket",
+        "sdk",
+        "api",
+        "invariant",
+        "failure tail",
+        "second edit",
+        "second patch",
+        "self-heal",
+    ]
     has_hard_keyword = any(keyword in text for keyword in hard_keywords)
     is_cross_module = "cross_module" in str(task_type).lower() or any(
         kw in text for kw in ["cross-module", "multi-module", "coordinator", "swarm", "drone", "nightshift"]
