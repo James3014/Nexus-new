@@ -433,6 +433,7 @@ def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
     )
 
     assert profile["is_hard_task"] is True
+    assert profile["prefer_direct_hyper"] is True
     assert profile["effective_candidate_count"] >= 3
     assert "commercial_public_task" in profile["tuning_reasons"]
 

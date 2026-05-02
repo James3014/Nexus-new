@@ -10,6 +10,24 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
 
+def _route_cost_ledger(schema: str = "nexus_route_cost_ledger_v1") -> dict:
+    return {
+        "schema": schema,
+        "scope": "measured_benchmark_telemetry_not_billing_cost",
+        "arms": {
+            "with_nexus": {
+                "route_decision_present_rate": 1.0,
+                "route_recommended_flow_present_rate": 1.0,
+                "chosen_flow_present_rate": 1.0,
+                "capability_selected_avg": 18.0,
+                "capability_required_avg": 5.0,
+                "capability_conditional_avg": 13.0,
+            },
+            "without_nexus": {},
+        },
+    }
+
+
 def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -35,6 +53,7 @@ def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: 
                 "task_manifest": {"sha256": "abc"},
                 "public_disclosure_manifest": {"status": "PASS"},
                 "public_claim_gate": {"verdict": "PASS", "failures": []},
+                "route_cost_ledger": _route_cost_ledger(),
             }
         ),
         encoding="utf-8",
@@ -46,7 +65,11 @@ def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: 
     assert summary.bare.eligible == 1
     assert summary.bare.verified == 1
     assert summary.nexus.verified == 2
+    assert summary.route_cost_ledger["schema"] == "nexus_route_cost_ledger_v1"
     assert "markdown FAIL; bundle PASS" in summary.gate_status
+    assert "## Route Cost Ledger" in report
+    assert "measured benchmark telemetry" in report
+    assert "selected 18.00, required 5.00, conditional 13.00" in report
     assert "markdown failures: run_eligibility_incomplete:1" in report
     assert "GPT-5.5" in report
     assert "Final gate: FAIL" in report
@@ -106,8 +129,41 @@ def test_final_report_gate_requires_v2_pass_same_scope_and_manifest(tmp_path: Pa
     summary = summarize_run("Gemini 3 Flash", run_dir, scope="12x2", claim_status="final")
 
     assert final_report_failures([summary], expected_models=("Gemini 3 Flash",)) == []
+    assert final_report_failures([summary], expected_models=("Gemini 3 Flash",), require_route_cost_ledger=True) == [
+        "Gemini 3 Flash:route_cost_ledger_missing"
+    ]
     assert final_report_failures([summary], expected_models=("Gemini 3 Flash", "Gemini 3.1 Pro")) == [
         "model_missing:Gemini 3.1 Pro"
+    ]
+
+
+def test_final_report_gate_rejects_wrong_route_cost_ledger_schema_when_enabled(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    rows = [{"task_id": "a", "trial_index": 1, "semantic_status": "VERIFIED", "run_eligible": True}]
+    _write_jsonl(run_dir / "without_nexus_1.jsonl", rows)
+    _write_jsonl(run_dir / "with_nexus_1.jsonl", rows)
+    (run_dir / "gemini_nexus_report_1.md").write_text(
+        "- Public claim gate: PASS\n- Public claim gate failures: none\n",
+        encoding="utf-8",
+    )
+    (run_dir / "evidence_bundle.json").write_text(
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_evidence_bundle_v2",
+                "task_manifest": {"sha256": "same"},
+                "public_disclosure_manifest": {"status": "PASS"},
+                "public_claim_gate": {"verdict": "PASS", "failures": []},
+                "route_cost_ledger": _route_cost_ledger("old_schema"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_run("Gemini 3 Flash", run_dir, scope="12x2", claim_status="final")
+
+    assert final_report_failures([summary], require_route_cost_ledger=True) == [
+        "Gemini 3 Flash:route_cost_ledger_schema_not_v1"
     ]
 
 

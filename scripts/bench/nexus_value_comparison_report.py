@@ -30,6 +30,7 @@ class RunSummary:
     markdown_gate: str
     disclosure_status: str
     manifest_hash: str
+    route_cost_ledger: dict[str, Any]
     bare: RunArm
     nexus: RunArm
     notes: tuple[str, ...]
@@ -100,14 +101,16 @@ def _markdown_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...]]:
     return (match.group(1) if match else None), (() if not failures or failures.group(1) == "none" else (failures.group(1),))
 
 
-def _bundle_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...], str, str, str]:
+def _bundle_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...], str, str, str, dict[str, Any]]:
     path = run_dir / "evidence_bundle.json"
     if not path.exists():
-        return None, (), "", "", ""
+        return None, (), "", "", "", {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     gate = payload.get("public_claim_gate") or {}
     disclosure = payload.get("public_disclosure_manifest") or {}
     manifest = payload.get("task_manifest") or {}
+    route_cost_ledger = payload.get("route_cost_ledger") or {}
+    route_cost_ledger = route_cost_ledger if isinstance(route_cost_ledger, dict) else {}
     failures = gate.get("failures") or ()
     return (
         gate.get("verdict"),
@@ -115,6 +118,7 @@ def _bundle_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...], str, str, 
         str(payload.get("schema") or ""),
         str(disclosure.get("status") or ""),
         str(manifest.get("sha256") or ""),
+        route_cost_ledger,
     )
 
 
@@ -122,7 +126,7 @@ def summarize_run(name: str, run_dir: Path, *, scope: str, claim_status: str, ex
     bare_rows = _load_jsonl(_first_jsonl(run_dir, "without_nexus"))
     nexus_rows = _load_jsonl(_first_jsonl(run_dir, "with_nexus"))
     markdown_gate, markdown_failures = _markdown_gate(run_dir)
-    bundle_gate, bundle_failures, schema, disclosure_status, manifest_hash = _bundle_gate(run_dir)
+    bundle_gate, bundle_failures, schema, disclosure_status, manifest_hash, route_cost_ledger = _bundle_gate(run_dir)
     gate_bits = []
     if markdown_gate:
         gate_bits.append(f"markdown {markdown_gate}")
@@ -145,6 +149,7 @@ def summarize_run(name: str, run_dir: Path, *, scope: str, claim_status: str, ex
         markdown_gate=markdown_gate or "",
         disclosure_status=disclosure_status,
         manifest_hash=manifest_hash,
+        route_cost_ledger=route_cost_ledger,
         bare=summarize_arm(bare_rows),
         nexus=summarize_arm(nexus_rows),
         notes=tuple(notes),
@@ -153,6 +158,23 @@ def summarize_run(name: str, run_dir: Path, *, scope: str, claim_status: str, ex
 
 def _pct(value: float) -> str:
     return f"{value * 100:.1f}%"
+
+
+def _ledger_arm(ledger: dict[str, Any], arm: str) -> dict[str, Any]:
+    arms = ledger.get("arms") if isinstance(ledger, dict) else {}
+    arms = arms if isinstance(arms, dict) else {}
+    data = arms.get(arm) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def _ledger_number(data: dict[str, Any], key: str) -> str:
+    value = data.get(key)
+    if value in (None, ""):
+        return "n/a"
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def render_report(summaries: list[RunSummary]) -> str:
@@ -195,6 +217,32 @@ def render_report(summaries: list[RunSummary]) -> str:
             f"{item.bare.avg_model_calls:.2f} -> {item.nexus.avg_model_calls:.2f} | "
             f"{item.bare.avg_tokens:.0f} -> {item.nexus.avg_tokens:.0f} |"
         )
+    lines.extend(
+        [
+            "",
+            "## Route Cost Ledger",
+            "",
+            "Scope: measured benchmark telemetry, not provider billing cost.",
+            "",
+            "| Model | Ledger | Route decision | Recommended flow | Chosen flow | Capability stack |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- |",
+        ]
+    )
+    for item in summaries:
+        ledger = item.route_cost_ledger
+        with_arm = _ledger_arm(ledger, "with_nexus")
+        stack = (
+            f"selected {_ledger_number(with_arm, 'capability_selected_avg')}, "
+            f"required {_ledger_number(with_arm, 'capability_required_avg')}, "
+            f"conditional {_ledger_number(with_arm, 'capability_conditional_avg')}"
+        )
+        lines.append(
+            f"| {item.name} | {ledger.get('schema', 'missing')} | "
+            f"{_ledger_number(with_arm, 'route_decision_present_rate')} | "
+            f"{_ledger_number(with_arm, 'route_recommended_flow_present_rate')} | "
+            f"{_ledger_number(with_arm, 'chosen_flow_present_rate')} | "
+            f"{stack} |"
+        )
     lines.extend(["", "## Claim Boundaries", ""])
     for item in summaries:
         note_text = "; ".join(item.notes) if item.notes else "none"
@@ -207,7 +255,12 @@ def render_report(summaries: list[RunSummary]) -> str:
     return "\n".join(lines)
 
 
-def final_report_failures(summaries: list[RunSummary], *, expected_models: tuple[str, ...] = ()) -> list[str]:
+def final_report_failures(
+    summaries: list[RunSummary],
+    *,
+    expected_models: tuple[str, ...] = (),
+    require_route_cost_ledger: bool = False,
+) -> list[str]:
     failures: list[str] = []
     by_name = {item.name: item for item in summaries}
     for model in expected_models:
@@ -229,6 +282,12 @@ def final_report_failures(summaries: list[RunSummary], *, expected_models: tuple
             failures.append(f"{item.name}:disclosure_not_pass")
         if item.bare.rows != item.nexus.rows or item.bare.eligible != item.bare.rows or item.nexus.eligible != item.nexus.rows:
             failures.append(f"{item.name}:eligibility_incomplete")
+        if require_route_cost_ledger:
+            schema = str((item.route_cost_ledger or {}).get("schema") or "")
+            if not item.route_cost_ledger:
+                failures.append(f"{item.name}:route_cost_ledger_missing")
+            elif schema != "nexus_route_cost_ledger_v1":
+                failures.append(f"{item.name}:route_cost_ledger_schema_not_v1")
     return sorted(set(failures))
 
 
@@ -243,6 +302,7 @@ def main() -> int:
         help="Require a model name to be present and final-gate eligible. Can be repeated.",
     )
     parser.add_argument("--fail-on-final-gate", action="store_true")
+    parser.add_argument("--require-route-cost-ledger", action="store_true")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     notes_by_name: dict[str, list[str]] = {}
@@ -262,7 +322,11 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_report(summaries), encoding="utf-8")
     print(str(output))
-    failures = final_report_failures(summaries, expected_models=tuple(args.require_final_model))
+    failures = final_report_failures(
+        summaries,
+        expected_models=tuple(args.require_final_model),
+        require_route_cost_ledger=args.require_route_cost_ledger,
+    )
     if args.fail_on_final_gate and failures:
         print("final_report_gate=FAIL " + ",".join(failures))
         return 2

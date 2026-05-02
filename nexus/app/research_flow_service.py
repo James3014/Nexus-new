@@ -1128,6 +1128,8 @@ def build_hyper_execution_profile(
         effective_candidate_count = max(effective_candidate_count, 3)
         effective_max_rounds = max(effective_max_rounds, 2)
         effective_stage1_max_parallel = max(effective_stage1_max_parallel, 2)
+        if route_recommended_flow == "hyper_sprint":
+            prefer_direct_hyper = True
         tuning_reasons.append("commercial_public_task")
 
     if float(belief_confidence) < 0.6:
