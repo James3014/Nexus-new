@@ -137,6 +137,8 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
         return hidden_reason
 
     gateway_error = str(row.get("baseline_gateway_error_category") or "").strip()
+    if not gateway_error and bool(row.get("baseline_llm_required", False)):
+        gateway_error = str(row.get("gateway_error_category") or "").strip()
     raw_tail = str(row.get("baseline_raw_tail") or "")
     combined = f"{gateway_error}\n{raw_tail}".lower()
     model_calls = int(row.get("model_calls", 0) or 0)
@@ -149,6 +151,8 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
         return "cli_missing"
     if gateway_error == "parse_failure":
         return "parse_error"
+    if bool(row.get("baseline_llm_required", False)) and gateway_error in {"gateway_error", "binary_missing"}:
+        return "cli_missing" if gateway_error == "binary_missing" else "model_gateway_error"
     if model_required and gateway_error == "timeout" and model_calls == 0:
         return "timeout_before_model_call"
 
@@ -1764,6 +1768,10 @@ def _extract_record(
         "local_rescue_tokens": int(report.get("local_rescue_tokens", 0) or 0),
         "rescue_cost_status": str(report.get("rescue_cost_status") or ""),
         "baseline_gateway_error_category": baseline_trace.get("gateway_error_category"),
+        "baseline_llm_required": bool(report.get("baseline_llm_required", False)),
+        "baseline_source_policy": str(report.get("baseline_source_policy") or ""),
+        "baseline_provider": "gemini" if bool(report.get("baseline_llm_required", False)) else "",
+        "baseline_model_name": str(report.get("model_name") or ""),
         "baseline_patch_len": int(baseline_trace.get("patch_len", 0) or 0),
         "baseline_patch_changed": bool(baseline_trace.get("patch_changed", False)),
         "baseline_raw_tail": baseline_trace.get("raw_tail"),
@@ -2647,6 +2655,7 @@ def run_with_nexus(
     llm_candidate_cap: int = 1,
     enable_llm_self_heal: bool = False,
     skip_llm_baseline: bool = False,
+    strict_llm_baseline: bool = False,
 ) -> dict[str, Any]:
     enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
@@ -2689,6 +2698,8 @@ def run_with_nexus(
         args.append("--llm-mode")
         if not skip_llm_baseline:
             args.append("--llm-baseline")
+            if strict_llm_baseline:
+                args.append("--llm-baseline-required")
     effective_force_flow = force_flow
     if llm_enabled and skip_llm_baseline and effective_force_flow is None:
         effective_force_flow = "hyper_sprint"
@@ -3877,6 +3888,11 @@ def main() -> int:
         action="store_true",
         help="When Nexus LLM mode is enabled, avoid the preliminary baseline Gemini call and let the route choose Hyper/capability execution directly.",
     )
+    parser.add_argument(
+        "--strict-llm-baseline",
+        action="store_true",
+        help="When Nexus LLM baseline is enabled, require the baseline patch to come from the model and forbid local fallback.",
+    )
     parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
     parser.add_argument("--llm-safe-probe", action="store_true")
     parser.add_argument("--without-mode", choices=["service", "bare", "gemini", "codex"], default="bare")
@@ -3958,6 +3974,8 @@ def main() -> int:
         help="preserve_target restores target files after each leg; worktree is reserved for clean worktree execution.",
     )
     args = parser.parse_args()
+    if args.skip_llm_baseline and args.strict_llm_baseline:
+        parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.llm_safe_probe:
         args.with_llm_mode = "hard"
         args.force_flow = "hyper_sprint"
@@ -4148,6 +4166,7 @@ def main() -> int:
                 llm_candidate_cap=int(args.llm_candidate_cap),
                 enable_llm_self_heal=bool(args.enable_llm_self_heal),
                 skip_llm_baseline=bool(args.skip_llm_baseline),
+                strict_llm_baseline=bool(args.strict_llm_baseline),
             )
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
@@ -4336,6 +4355,7 @@ def main() -> int:
                     "llm_candidate_cap": int(args.llm_candidate_cap),
                     "enable_llm_self_heal": bool(args.enable_llm_self_heal),
                     "skip_llm_baseline": bool(args.skip_llm_baseline),
+                    "strict_llm_baseline": bool(args.strict_llm_baseline),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
                     "nexus_only": bool(args.nexus_only),

@@ -1309,6 +1309,7 @@ def run_auto_flow(
     output_file: Path | None,
     success_criteria: str = "all_target_tests_pass",
     task_id: str | None = None,
+    llm_baseline_required: bool = False,
 ):
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
 
@@ -1427,6 +1428,8 @@ def run_auto_flow(
             "gateway_payload_chars": int(meta.get("gateway_payload_chars", 0) or 0),
             "gateway_total_chars": int(meta.get("gateway_total_chars", 0) or 0),
             "gateway_timeout_sec": int(meta.get("gateway_timeout_sec", 0) or 0),
+            "baseline_llm_required": bool(meta.get("baseline_llm_required", False)),
+            "baseline_source_policy": str(meta.get("baseline_source_policy", "")),
         }
 
     def _local_baseline_meta(*, fallback_reason: str | None = None) -> dict[str, Any]:
@@ -1441,6 +1444,19 @@ def run_auto_flow(
             meta["fallback_used"] = True
             meta["gateway_error_category"] = fallback_reason
         return meta
+
+    def _strict_baseline_failure_meta(reason: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        out = dict(meta or {})
+        out.setdefault("source", "nexus_llm_baseline")
+        out.setdefault("model_calls", 0)
+        out.setdefault("tokens_used", out.get("total_tokens", 0) or 0)
+        out.setdefault("token_capture_status", "missing_gateway_stats")
+        out["model_patch_generated"] = False
+        out["fallback_used"] = False
+        out["gateway_error_category"] = reason
+        out["baseline_llm_required"] = True
+        out["baseline_source_policy"] = "strict_llm_no_local_fallback"
+        return out
 
     def _generate_baseline_patch(trial: int = 0) -> tuple[str, str, dict[str, Any]]:
         """R4: Enhanced baseline generation with LLM fast-fallback and conservative local paths."""
@@ -1469,13 +1485,25 @@ def run_auto_flow(
                 # For now, we trust internal model_chain but monitor for rapid failure
                 patched, meta = gen.generate(source_code=original_code, task=task_desc_for_llm, mutation_hint="baseline", seed=trial)
                 if patched and patched != original_code:
+                    meta = dict(meta)
+                    if llm_baseline_required:
+                        meta["baseline_llm_required"] = True
+                        meta["baseline_source_policy"] = "strict_llm_no_local_fallback"
+                        return patched, "nexus_llm_baseline", meta
                     return patched, "llm_assisted", meta
                 else:
+                    if llm_baseline_required:
+                        return original_code, "nexus_llm_baseline_failed", _strict_baseline_failure_meta(
+                            "llm_no_patch",
+                            dict(meta),
+                        )
                     fallback_reason = "llm_generation_empty_fallback_local"
                     fallback_meta = dict(meta)
                     fallback_meta["fallback_used"] = True
                     fallback_meta["gateway_error_category"] = fallback_reason
             except LLMCandidateError as e:
+                if llm_baseline_required:
+                    return original_code, "nexus_llm_baseline_failed", _strict_baseline_failure_meta(str(e), e.metadata)
                 fallback_reason = f"llm_error_{str(e).lower()}_fallback_local"
                 fallback_meta = dict(e.metadata)
                 fallback_meta["fallback_used"] = True
@@ -1483,11 +1511,16 @@ def run_auto_flow(
             except Exception as e:
                 err_str = str(e).lower()
                 if "timeout" in err_str:
-                    fallback_reason = "llm_timeout_fallback_local"
+                    fallback_reason = "timeout"
                 elif any(p in err_str for p in ["quota", "429", "limit"]):
-                    fallback_reason = "llm_quota_fallback_local"
+                    fallback_reason = "quota_exhausted"
                 else:
-                    fallback_reason = f"llm_error_{err_str}_fallback_local"
+                    fallback_reason = f"llm_error_{err_str}"
+                if llm_baseline_required:
+                    return original_code, "nexus_llm_baseline_failed", _strict_baseline_failure_meta(fallback_reason)
+                fallback_reason = f"{fallback_reason}_fallback_local"
+        elif llm_baseline_required:
+            return original_code, "nexus_llm_baseline_missing", _strict_baseline_failure_meta("llm_baseline_required_missing")
         
         # Local fallback intentionally uses raw task_desc to avoid prior-art keyword pollution
         # (e.g., stale "flaky/race" hints forcing conservative patch on unrelated tasks).

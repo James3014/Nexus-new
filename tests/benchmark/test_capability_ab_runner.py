@@ -2503,6 +2503,49 @@ def test_run_with_nexus_can_skip_llm_baseline_for_cost_control(tmp_path: Path, m
     assert out["run_eligible"] is True
 
 
+def test_run_with_nexus_can_require_strict_llm_baseline(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-routing-strict-baseline",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix routing-sensitive public bug with strict baseline",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"pillars":{"lancedb":{"active":true},"memory":{"active":true},"mempalace":{"active":true},"belief":{"active":true},"artifact":{"active":true}},"phase_trace":{"P":"route_built","X":"retrieval_checked","D":"guard_decision","R":"baseline_executed","A":"artifact_verified","C":"closure_written"}},"result":{"elapsed_sec":0.1,"report":{"source":"nexus_llm_baseline","attempt_count":1,"model_calls":1,"model_name":"gemini-3.1-pro-preview","model_patch_generated":true,"fallback_used":false,"baseline_llm_required":true,"baseline_source_policy":"strict_llm_no_local_fallback","total_tokens":10,"token_capture_status":"ok"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["cmd"] = _cmd
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+
+    assert "--llm-baseline-required" in captured["cmd"]
+    assert out["baseline_llm_required"] is True
+    assert out["baseline_source_policy"] == "strict_llm_no_local_fallback"
+    assert out["baseline_provider"] == "gemini"
+    assert out["run_eligible"] is True
+
+
 def test_run_with_nexus_can_opt_into_llm_self_heal(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-routing-self-heal",
@@ -3183,6 +3226,43 @@ def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeyp
     assert out["model_calls"] == 1
     assert out["invocation_started"] is True
     assert out["model_response_received"] is False
+
+
+def test_strict_llm_baseline_gateway_error_is_infra_invalid():
+    row = {
+        "mode": "with_nexus",
+        "status": "FAILED",
+        "semantic_completed": False,
+        "model_calls": 1,
+        "model_patch_generated": False,
+        "total_tokens": 0,
+        "token_capture_status": "unknown",
+        "gateway_error_category": "gateway_error",
+        "baseline_llm_required": True,
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "baseline_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+    }
+
+    out = _annotate_benchmark_eligibility(
+        row,
+        provider="gemini",
+        model_required=True,
+        nexus_required=True,
+    )
+
+    assert out["run_eligible"] is False
+    assert out["infra_invalid_reason"] == "model_gateway_error"
 
 
 def test_run_without_nexus_gemini_timeout_before_response_is_recorded(tmp_path: Path, monkeypatch):

@@ -1706,6 +1706,11 @@ def research_report_cmd(input_dir, rolling, output):
 @click.option("--findings-query")
 @click.option("--llm-mode/--no-llm-mode", default=False, show_default=True)
 @click.option("--llm-baseline", is_flag=True, help="Enable LLM assistance for baseline generation.")
+@click.option(
+    "--llm-baseline-required",
+    is_flag=True,
+    help="Require baseline generation to come from the LLM path; do not fall back to local baseline mutation.",
+)
 @click.option("--timeout-sec", default=60, type=int, show_default=True)
 @click.option("--stage1-timeout-sec", default=20, type=int, show_default=True)
 @click.option("--max-time-ratio-guard", default=1.5, type=float, show_default=True)
@@ -1731,6 +1736,7 @@ def research_auto_flow(
     findings_query,
     llm_mode,
     llm_baseline,
+    llm_baseline_required,
     timeout_sec,
     stage1_timeout_sec,
     max_time_ratio_guard,
@@ -1770,6 +1776,7 @@ def research_auto_flow(
         findings_query=findings_query,
         llm_mode=llm_mode,
         llm_baseline=llm_baseline,
+        llm_baseline_required=llm_baseline_required,
         timeout_sec=timeout_sec,
         stage1_timeout_sec=stage1_timeout_sec,
         max_time_ratio_guard=max_time_ratio_guard,

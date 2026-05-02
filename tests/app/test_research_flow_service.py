@@ -920,6 +920,69 @@ def test_run_auto_flow_replans_from_failed_llm_baseline_to_hyper(tmp_path: Path,
     assert payload["nexus_usage_trace"]["capabilities"]["hyper_used"] is True
 
 
+def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypatch):
+    target = tmp_path / "demo.py"
+    test_file = tmp_path / "test_demo.py"
+    target.write_text("def value():\n    return 1\n", encoding="utf-8")
+    test_file.write_text("from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **_kwargs):
+            raise research_flow_service.LLMCandidateError(
+                "gateway_error",
+                {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "model_name": "gemini-3-flash-preview",
+                    "tokens_used": 0,
+                    "token_capture_status": "unknown",
+                    "model_patch_generated": False,
+                },
+            )
+
+    def fail_if_local_runs(*_args, **_kwargs):
+        raise AssertionError("strict LLM baseline must not run local fallback")
+
+    monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr(research_flow_service, "generate_local_candidate", fail_if_local_runs)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix value bug",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=True,
+        llm_baseline=True,
+        llm_baseline_required=True,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow="baseline",
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-strict-baseline",
+    )
+
+    report = payload["result"]["report"]
+    assert payload["result"]["status"] == "FAILED"
+    assert report["source"] == "nexus_llm_baseline_failed"
+    assert report["fallback_used"] is False
+    assert report["baseline_llm_required"] is True
+    assert report["baseline_source_policy"] == "strict_llm_no_local_fallback"
+
+
 def test_run_auto_flow_keeps_successful_hyper_when_guard_fallback_fails(tmp_path: Path, monkeypatch):
     target = tmp_path / "demo.py"
     test_file = tmp_path / "test_demo.py"

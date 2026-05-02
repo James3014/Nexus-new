@@ -66,6 +66,26 @@
 - **暫不採用**：route-aware baseline 作為公開成本 lane default。
 - **後續工程化條件**：新增 strict Nexus LLM baseline，要求 baseline 由同一模型產生有效 patch；LLM failure 不得被 local fallback 洗成成功或混入 public denominator。
 
+## Strict Nexus LLM baseline 接線狀態
+
+已完成工程接線，尚未完成外部 Gemini public rerun：
+
+1. `research:auto-flow` 新增 `--llm-baseline-required`。
+2. `run_auto_flow(..., llm_baseline_required=True)` 會要求 baseline patch 來自 LLM；LLM 空 patch / gateway error / timeout / quota 時，不再呼叫 local baseline fallback。
+3. `capability_ab_runner.py` 新增 `--strict-llm-baseline`，並把 `baseline_llm_required`、`baseline_source_policy`、`baseline_provider`、`baseline_model_name` 寫入 row。
+4. eligibility 會把 strict baseline 的 gateway failure 和 local fallback 污染分開，避免 public denominator 混入不乾淨樣本。
+
+驗證：
+
+- `uv run pytest -q tests/app/test_research_flow_service.py tests/benchmark/test_capability_ab_runner.py tests/research/test_sprint_service.py tests/engine/test_capability_planner.py` => `225 passed`
+- `uv run python -m py_compile nexus/app/research_flow_service.py scripts/bench/capability_ab_runner.py scripts/engine/nexus_cli.py` => pass
+
+限制：
+
+- strict route-aware Gemini rerun 被本機審核阻擋，原因是會把 local benchmark/task/code context 傳給外部 Gemini。
+- safer alternative 已跑到 preflight：模型鎖與 capability readiness PASS；但 `/tmp` task/disclosure manifest 當前不可讀，preflight fail 在 `tasks_file_missing` / `disclosure_manifest_missing`。
+- 下一次要重跑 public strict benchmark，需先產生可外傳的 sanitized task manifest，或在允許外傳 benchmark task data 的環境執行。
+
 診斷 evidence：
 
 - `.nexus/reports/bench_commercial_cost_efficiency_gemini3flash_routeaware_cap1_fixed_20260502/evidence_bundle.json`
