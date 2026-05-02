@@ -1,0 +1,74 @@
+{
+  "schema": "nexus_public_value_regression_baseline_v1",
+  "created_at": "2026-05-02",
+  "source_report": "docs/reports/NEXUS_PUBLIC_VALUE_COMPARISON_THREE_MODEL_FINAL_2026-05-02.md",
+  "task_manifest": {
+    "path": "scripts/bench/public_benchmark_nexus_value_v1.json",
+    "sha256": "c4eef755e9fa243b7d5205c2e88e4da2093560f033e8debd3bd754296c397148",
+    "unique_tasks_requested": 12,
+    "repeat_trials": 2
+  },
+  "public_gate_requirements": {
+    "public_claim_gate": "PASS",
+    "hidden_verifier_mode": true,
+    "infra_invalid_n": 0,
+    "trust_mismatch_rate": 0.0,
+    "route_cost_ledger_schema": "nexus_route_cost_ledger_v1",
+    "route_decision_present_rate_with_nexus": 1.0,
+    "recommended_flow_present_rate_with_nexus": 1.0,
+    "chosen_flow_present_rate_with_nexus": 1.0
+  },
+  "model_baselines": [
+    {
+      "model": "gemini-3-flash-preview",
+      "label": "Gemini 3 Flash",
+      "run_dir": ".nexus/reports/bench_gemini3flash_auto_12x2_20260502",
+      "bare_verified": 13,
+      "nexus_verified": 24,
+      "eligible_rows": 24,
+      "lift_pp": 45.8,
+      "nexus_avg_wall_sec": 59.048,
+      "bare_avg_wall_sec": 34.1215,
+      "nexus_avg_tokens": 33328.7083,
+      "bare_avg_tokens": 27128.25
+    },
+    {
+      "model": "gemini-3.1-pro-preview",
+      "label": "Gemini 3.1 Pro",
+      "run_dir": ".nexus/reports/bench_gemini31pro_auto_12x2_20260502",
+      "bare_verified": 10,
+      "nexus_verified": 24,
+      "eligible_rows": 24,
+      "lift_pp": 58.3,
+      "nexus_avg_wall_sec": 38.1367,
+      "bare_avg_wall_sec": 20.7567,
+      "nexus_avg_tokens": 23530.3333,
+      "bare_avg_tokens": 22253.4167
+    },
+    {
+      "model": "gpt-5.5",
+      "label": "GPT-5.5",
+      "run_dir": ".nexus/reports/bench_gpt55_auto_12x2_20260502",
+      "bare_verified": 13,
+      "nexus_verified": 24,
+      "eligible_rows": 24,
+      "lift_pp": 45.8,
+      "nexus_avg_wall_sec": 17.4139,
+      "bare_avg_wall_sec": 12.6334,
+      "nexus_avg_tokens": 13578.7917,
+      "bare_avg_tokens": 6618.2917
+    }
+  ],
+  "next_kpis_to_add": [
+    "time_to_verified",
+    "fail_closed_block_rate",
+    "replay_pass_rate",
+    "policy_hit_success_rate",
+    "first_onboarding_success_rate"
+  ],
+  "claim_boundary": [
+    "This baseline proves frozen benchmark verified-delivery lift, not universal production generalization.",
+    "Measured tokens are benchmark telemetry, not provider billing cost.",
+    "Swarm, Drone, and Nightshift require separate commercial-lane benchmarks before public capability claims."
+  ]
+}
