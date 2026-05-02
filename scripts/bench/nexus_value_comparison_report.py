@@ -31,6 +31,7 @@ class RunSummary:
     disclosure_status: str
     manifest_hash: str
     route_cost_ledger: dict[str, Any]
+    product_kpis: dict[str, Any]
     bare: RunArm
     nexus: RunArm
     notes: tuple[str, ...]
@@ -101,16 +102,18 @@ def _markdown_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...]]:
     return (match.group(1) if match else None), (() if not failures or failures.group(1) == "none" else (failures.group(1),))
 
 
-def _bundle_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...], str, str, str, dict[str, Any]]:
+def _bundle_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...], str, str, str, dict[str, Any], dict[str, Any]]:
     path = run_dir / "evidence_bundle.json"
     if not path.exists():
-        return None, (), "", "", "", {}
+        return None, (), "", "", "", {}, {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     gate = payload.get("public_claim_gate") or {}
     disclosure = payload.get("public_disclosure_manifest") or {}
     manifest = payload.get("task_manifest") or {}
     route_cost_ledger = payload.get("route_cost_ledger") or {}
     route_cost_ledger = route_cost_ledger if isinstance(route_cost_ledger, dict) else {}
+    product_kpis = payload.get("product_kpis") or {}
+    product_kpis = product_kpis if isinstance(product_kpis, dict) else {}
     failures = gate.get("failures") or ()
     return (
         gate.get("verdict"),
@@ -119,6 +122,7 @@ def _bundle_gate(run_dir: Path) -> tuple[str | None, tuple[str, ...], str, str, 
         str(disclosure.get("status") or ""),
         str(manifest.get("sha256") or ""),
         route_cost_ledger,
+        product_kpis,
     )
 
 
@@ -126,7 +130,7 @@ def summarize_run(name: str, run_dir: Path, *, scope: str, claim_status: str, ex
     bare_rows = _load_jsonl(_first_jsonl(run_dir, "without_nexus"))
     nexus_rows = _load_jsonl(_first_jsonl(run_dir, "with_nexus"))
     markdown_gate, markdown_failures = _markdown_gate(run_dir)
-    bundle_gate, bundle_failures, schema, disclosure_status, manifest_hash, route_cost_ledger = _bundle_gate(run_dir)
+    bundle_gate, bundle_failures, schema, disclosure_status, manifest_hash, route_cost_ledger, product_kpis = _bundle_gate(run_dir)
     gate_bits = []
     if markdown_gate:
         gate_bits.append(f"markdown {markdown_gate}")
@@ -150,6 +154,7 @@ def summarize_run(name: str, run_dir: Path, *, scope: str, claim_status: str, ex
         disclosure_status=disclosure_status,
         manifest_hash=manifest_hash,
         route_cost_ledger=route_cost_ledger,
+        product_kpis=product_kpis,
         bare=summarize_arm(bare_rows),
         nexus=summarize_arm(nexus_rows),
         notes=tuple(notes),
@@ -175,6 +180,13 @@ def _ledger_number(data: dict[str, Any], key: str) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _kpi_arm(kpis: dict[str, Any], arm: str) -> dict[str, Any]:
+    arms = kpis.get("arms") if isinstance(kpis, dict) else {}
+    arms = arms if isinstance(arms, dict) else {}
+    data = arms.get(arm) or {}
+    return data if isinstance(data, dict) else {}
 
 
 def render_report(summaries: list[RunSummary]) -> str:
@@ -243,6 +255,30 @@ def render_report(summaries: list[RunSummary]) -> str:
             f"{_ledger_number(with_arm, 'chosen_flow_present_rate')} | "
             f"{stack} |"
         )
+    lines.extend(
+        [
+            "",
+            "## Product KPIs",
+            "",
+            "Scope: benchmark-row telemetry. These metrics are product signals, not universal production rates.",
+            "",
+            "| Model | Time-to-Verified | Fail-closed block rate | Replay pass rate | Policy-hit success rate |",
+            "| :--- | :--- | :--- | :--- | :--- |",
+        ]
+    )
+    for item in summaries:
+        with_arm = _kpi_arm(item.product_kpis, "with_nexus")
+        without_arm = _kpi_arm(item.product_kpis, "without_nexus")
+        if not with_arm and not without_arm:
+            lines.append(f"| {item.name} | n/a | n/a | n/a | n/a |")
+            continue
+        lines.append(
+            f"| {item.name} | "
+            f"{_ledger_number(without_arm, 'avg_time_to_verified_sec')}s -> {_ledger_number(with_arm, 'avg_time_to_verified_sec')}s | "
+            f"{_ledger_number(without_arm, 'fail_closed_block_rate')} -> {_ledger_number(with_arm, 'fail_closed_block_rate')} | "
+            f"{_ledger_number(without_arm, 'replay_pass_rate')} -> {_ledger_number(with_arm, 'replay_pass_rate')} | "
+            f"{_ledger_number(without_arm, 'policy_hit_success_rate')} -> {_ledger_number(with_arm, 'policy_hit_success_rate')} |"
+        )
     lines.extend(["", "## Claim Boundaries", ""])
     for item in summaries:
         note_text = "; ".join(item.notes) if item.notes else "none"
@@ -260,6 +296,7 @@ def final_report_failures(
     *,
     expected_models: tuple[str, ...] = (),
     require_route_cost_ledger: bool = False,
+    baseline: dict[str, Any] | None = None,
 ) -> list[str]:
     failures: list[str] = []
     by_name = {item.name: item for item in summaries}
@@ -288,6 +325,35 @@ def final_report_failures(
                 failures.append(f"{item.name}:route_cost_ledger_missing")
             elif schema != "nexus_route_cost_ledger_v1":
                 failures.append(f"{item.name}:route_cost_ledger_schema_not_v1")
+    if baseline:
+        required = baseline.get("public_gate_requirements") if isinstance(baseline, dict) else {}
+        manifest = baseline.get("task_manifest") if isinstance(baseline, dict) else {}
+        expected_hash = str((manifest or {}).get("sha256") or "")
+        expected_rows = int((manifest or {}).get("unique_tasks_requested", 0) or 0) * int((manifest or {}).get("repeat_trials", 1) or 1)
+        model_baselines = baseline.get("model_baselines") or []
+        by_label = {str(item.get("label") or ""): item for item in model_baselines if isinstance(item, dict)}
+        if expected_hash:
+            for item in summaries:
+                if item.manifest_hash != expected_hash:
+                    failures.append(f"{item.name}:baseline_manifest_hash_mismatch")
+        for item in summaries:
+            base = by_label.get(item.name)
+            if not base:
+                failures.append(f"{item.name}:baseline_missing")
+                continue
+            min_nexus_verified = int(base.get("nexus_verified", 0) or 0)
+            min_bare_verified = int(base.get("bare_verified", 0) or 0)
+            if item.nexus.verified < min_nexus_verified:
+                failures.append(f"{item.name}:nexus_verified_regression")
+            if item.bare.verified < min_bare_verified:
+                failures.append(f"{item.name}:bare_verified_regression")
+            if expected_rows and item.nexus.eligible != expected_rows:
+                failures.append(f"{item.name}:baseline_eligible_row_mismatch")
+        if (required or {}).get("route_cost_ledger_schema"):
+            for item in summaries:
+                schema = str((item.route_cost_ledger or {}).get("schema") or "")
+                if schema != str(required.get("route_cost_ledger_schema")):
+                    failures.append(f"{item.name}:baseline_route_cost_schema_mismatch")
     return sorted(set(failures))
 
 
@@ -303,6 +369,7 @@ def main() -> int:
     )
     parser.add_argument("--fail-on-final-gate", action="store_true")
     parser.add_argument("--require-route-cost-ledger", action="store_true")
+    parser.add_argument("--baseline-file", help="Optional public value regression baseline JSON.")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     notes_by_name: dict[str, list[str]] = {}
@@ -322,10 +389,12 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_report(summaries), encoding="utf-8")
     print(str(output))
+    baseline = json.loads(Path(args.baseline_file).read_text(encoding="utf-8")) if args.baseline_file else None
     failures = final_report_failures(
         summaries,
         expected_models=tuple(args.require_final_model),
         require_route_cost_ledger=args.require_route_cost_ledger,
+        baseline=baseline,
     )
     if args.fail_on_final_gate and failures:
         print("final_report_gate=FAIL " + ",".join(failures))

@@ -3178,6 +3178,84 @@ def _route_cost_ledger(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _product_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def number(row: dict[str, Any], *keys: str) -> float:
+        for key in keys:
+            value = row.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
+
+    def mean(values: list[float]) -> float:
+        return round(sum(values) / len(values), 4) if values else 0.0
+
+    def is_verified(row: dict[str, Any]) -> bool:
+        return str(row.get("semantic_status") or "") == "VERIFIED"
+
+    def has_policy_hit(row: dict[str, Any]) -> bool:
+        return any(
+            [
+                bool(row.get("guard_hit")),
+                bool(row.get("capability_nightshift_recommended")),
+                number(row, "route_memory_hits", "memory_hits", "prior_fix_hits") > 0,
+                number(row, "policy_hits", "findings_hits") > 0,
+                str(row.get("capability_stack_governance_layers") or "").strip() not in {"", "[]"},
+            ]
+        )
+
+    def replay_observed(row: dict[str, Any]) -> bool:
+        return any(
+            [
+                bool(row.get("hidden_verifier_file")),
+                row.get("hidden_verifier_passed") not in (None, ""),
+                bool(row.get("replay_command")),
+                row.get("replay_exit_code") not in (None, ""),
+            ]
+        )
+
+    def replay_passed(row: dict[str, Any]) -> bool:
+        if row.get("hidden_verifier_passed") not in (None, ""):
+            return bool(row.get("hidden_verifier_passed"))
+        if row.get("replay_exit_code") not in (None, ""):
+            return number(row, "replay_exit_code") == 0
+        return False
+
+    def arm(mode: str) -> dict[str, Any]:
+        arm_rows = [row for row in rows if str(row.get("mode")) == mode]
+        eligible = [row for row in arm_rows if bool(row.get("run_eligible", True))]
+        verified = [row for row in eligible if is_verified(row)]
+        policy_rows = [row for row in eligible if has_policy_hit(row)]
+        replay_rows = [row for row in eligible if replay_observed(row)]
+        return {
+            "rows": len(arm_rows),
+            "eligible_rows": len(eligible),
+            "avg_time_to_verified_sec": mean([number(row, "wall_duration_sec", "duration_sec") for row in verified]),
+            "fail_closed_block_rate": round((len(eligible) - len(verified)) / len(eligible), 4) if eligible else 0.0,
+            "replay_observed_rate": round(len(replay_rows) / len(eligible), 4) if eligible else 0.0,
+            "replay_pass_rate": round(sum(1 for row in replay_rows if replay_passed(row)) / len(replay_rows), 4) if replay_rows else 0.0,
+            "policy_hit_rows": len(policy_rows),
+            "policy_hit_success_rate": round(sum(1 for row in policy_rows if is_verified(row)) / len(policy_rows), 4) if policy_rows else 0.0,
+        }
+
+    return {
+        "schema": "nexus_product_kpis_v1",
+        "scope": "benchmark_row_telemetry",
+        "arms": {
+            "without_nexus": arm("without_nexus"),
+            "with_nexus": arm("with_nexus"),
+        },
+        "claim_boundary": [
+            "Fail-closed block rate counts benchmark rows that remained unverified; it is not a production incident rate.",
+            "Replay pass rate uses hidden-verifier/replay evidence when present.",
+            "Policy-hit success rate depends on available row telemetry and should be compared within the same benchmark schema.",
+        ],
+    }
+
+
 def write_evidence_bundle(
     *,
     out_dir: Path,
@@ -3247,6 +3325,7 @@ def write_evidence_bundle(
     if not config.get("runner_command"):
         gate_failures.append("runner_command_missing")
     route_cost_ledger = _route_cost_ledger(rows)
+    product_kpis = _product_kpis(rows)
     payload = {
         "schema": "nexus_public_benchmark_evidence_bundle_v2",
         "created_at_unix": int(time.time()),
@@ -3308,6 +3387,7 @@ def write_evidence_bundle(
             "gateway_stats_source_rate_with": _rate_for(with_rows, "gateway_stats_present"),
         },
         "route_cost_ledger": route_cost_ledger,
+        "product_kpis": product_kpis,
         "nexus_wearing": {
             "valid_rate": nexus_valid_rate,
             "gemini_uses_nexus_rate": legacy_gemini_uses_nexus_rate,
@@ -3341,6 +3421,8 @@ def write_evidence_bundle(
                 "artifact_hash_count": len(artifact_files),
                 "route_cost_ledger_present": bool(route_cost_ledger),
                 "route_cost_ledger_schema": route_cost_ledger.get("schema", ""),
+                "product_kpis_present": bool(product_kpis),
+                "product_kpis_schema": product_kpis.get("schema", ""),
             },
         },
     }

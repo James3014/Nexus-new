@@ -1020,9 +1020,13 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["public_claim_gate"]["checks"]["nexus_wearing_valid_rate"] == 1.0
     assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 1.0
     assert payload["public_claim_gate"]["checks"]["route_cost_ledger_schema"] == "nexus_route_cost_ledger_v1"
+    assert payload["public_claim_gate"]["checks"]["product_kpis_schema"] == "nexus_product_kpis_v1"
     assert payload["route_cost_ledger"]["scope"] == "measured_benchmark_telemetry_not_billing_cost"
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["rows"] == 1
     assert payload["route_cost_ledger"]["arms"]["without_nexus"]["rows"] == 1
+    assert payload["product_kpis"]["schema"] == "nexus_product_kpis_v1"
+    assert payload["product_kpis"]["arms"]["with_nexus"]["avg_time_to_verified_sec"] == 0.0
+    assert payload["product_kpis"]["arms"]["without_nexus"]["fail_closed_block_rate"] == 1.0
 
 
 def test_write_evidence_bundle_fails_gate_when_route_decision_missing(tmp_path: Path):

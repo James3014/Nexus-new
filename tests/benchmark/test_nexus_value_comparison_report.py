@@ -28,6 +28,26 @@ def _route_cost_ledger(schema: str = "nexus_route_cost_ledger_v1") -> dict:
     }
 
 
+def _product_kpis() -> dict:
+    return {
+        "schema": "nexus_product_kpis_v1",
+        "arms": {
+            "without_nexus": {
+                "avg_time_to_verified_sec": 10,
+                "fail_closed_block_rate": 0.5,
+                "replay_pass_rate": 0.5,
+                "policy_hit_success_rate": 0.0,
+            },
+            "with_nexus": {
+                "avg_time_to_verified_sec": 21,
+                "fail_closed_block_rate": 0.0,
+                "replay_pass_rate": 1.0,
+                "policy_hit_success_rate": 1.0,
+            },
+        },
+    }
+
+
 def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -54,6 +74,7 @@ def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: 
                 "public_disclosure_manifest": {"status": "PASS"},
                 "public_claim_gate": {"verdict": "PASS", "failures": []},
                 "route_cost_ledger": _route_cost_ledger(),
+                "product_kpis": _product_kpis(),
             }
         ),
         encoding="utf-8",
@@ -68,6 +89,8 @@ def test_summarize_run_prefers_markdown_gate_and_keeps_infra_boundary(tmp_path: 
     assert summary.route_cost_ledger["schema"] == "nexus_route_cost_ledger_v1"
     assert "markdown FAIL; bundle PASS" in summary.gate_status
     assert "## Route Cost Ledger" in report
+    assert "## Product KPIs" in report
+    assert "10.00s -> 21.00s" in report
     assert "measured benchmark telemetry" in report
     assert "selected 18.00, required 5.00, conditional 13.00" in report
     assert "markdown failures: run_eligibility_incomplete:1" in report
@@ -164,6 +187,46 @@ def test_final_report_gate_rejects_wrong_route_cost_ledger_schema_when_enabled(t
 
     assert final_report_failures([summary], require_route_cost_ledger=True) == [
         "Gemini 3 Flash:route_cost_ledger_schema_not_v1"
+    ]
+
+
+def test_final_report_gate_detects_regression_against_baseline(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_jsonl(
+        run_dir / "without_nexus_1.jsonl",
+        [{"task_id": "a", "trial_index": 1, "semantic_status": "UNVERIFIED", "run_eligible": True}],
+    )
+    _write_jsonl(
+        run_dir / "with_nexus_1.jsonl",
+        [{"task_id": "a", "trial_index": 1, "semantic_status": "UNVERIFIED", "run_eligible": True}],
+    )
+    (run_dir / "gemini_nexus_report_1.md").write_text(
+        "- Public claim gate: PASS\n- Public claim gate failures: none\n",
+        encoding="utf-8",
+    )
+    (run_dir / "evidence_bundle.json").write_text(
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_evidence_bundle_v2",
+                "task_manifest": {"sha256": "same"},
+                "public_disclosure_manifest": {"status": "PASS"},
+                "public_claim_gate": {"verdict": "PASS", "failures": []},
+                "route_cost_ledger": _route_cost_ledger(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = summarize_run("Gemini 3 Flash", run_dir, scope="1x1", claim_status="candidate")
+    baseline = {
+        "task_manifest": {"sha256": "same", "unique_tasks_requested": 1, "repeat_trials": 1},
+        "public_gate_requirements": {"route_cost_ledger_schema": "nexus_route_cost_ledger_v1"},
+        "model_baselines": [{"label": "Gemini 3 Flash", "nexus_verified": 1, "bare_verified": 1}],
+    }
+
+    assert final_report_failures([summary], baseline=baseline) == [
+        "Gemini 3 Flash:bare_verified_regression",
+        "Gemini 3 Flash:nexus_verified_regression",
     ]
 
 
