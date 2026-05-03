@@ -105,6 +105,10 @@ def build_command(repo_root: Path, suite: SmokeSuite) -> list[str]:
 def smoke_env(repo_root: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["NEXUS_ENABLE_SWARM_BENCH_EXECUTOR"] = "1"
+    # Route smoke validates capability selection/receipt contracts.
+    # Keep Ultra Review deterministic in dirty benchmark worktrees.
+    env["NEXUS_ULTRA_SKIP_GHOST_REGRESSION"] = "1"
+    env["NEXUS_ULTRA_REUSE_WORKTREE"] = "1"
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = str(repo_root) if not existing_pythonpath else f"{repo_root}{os.pathsep}{existing_pythonpath}"
     return env
@@ -143,6 +147,8 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
             row_failures.append("route_decision_missing")
         if int(row.get("route_decision_selected_count", 0) or 0) <= 0:
             row_failures.append("route_decision_empty")
+        if bool(row.get("legacy_override_detected", False)):
+            row_failures.append("legacy_override_detected")
         if row_failures:
             failures.append(
                 {
