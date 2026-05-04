@@ -287,6 +287,10 @@ def test_decide_flow_payload_schema_keys(tmp_path: Path):
         "memory_hits",
         "adjusted_root_cause_confidence",
         "risk_score",
+        "router_hint_applied",
+        "router_hint_mode",
+        "router_hint_complexity",
+        "router_hint_confidence",
     }
     assert set(payload["consensus"]) == {"votes", "reasons", "winner"}
     assert set(payload["explain_payload"]["history"]) == {"findings_hits", "memory_hits", "hints_count"}
@@ -1321,6 +1325,49 @@ def test_build_route_ignores_unrelated_same_type_history(tmp_path: Path):
     )
     assert out["route_features"]["memory_hits"] == 0
     assert out["prior_fix_hits"] == 0
+
+
+def test_build_route_respects_router_hint_hard_complexity(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="small bugfix",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.95,
+        findings_query="",
+        routing_hint={"complexity": "hard", "mode": "standard"},
+    )
+    assert out["recommended_flow"] == "hyper_sprint"
+    assert out["route_features"]["router_hint_applied"] is True
+
+
+def test_build_route_respects_router_hint_recommended_flow(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="fix flaky timeout",
+        task_type="bug",
+        candidate_count=2,
+        root_cause_confidence=0.4,
+        findings_query="",
+        routing_hint={"recommended_flow": "baseline"},
+    )
+    assert out["recommended_flow"] == "baseline"
+    assert out["route_features"]["router_hint_applied"] is True
+
+
+def test_build_route_doc_fix_ignores_router_hint_override(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="fix typo in documentation",
+        task_type="doc-fix",
+        candidate_count=1,
+        root_cause_confidence=0.99,
+        findings_query="",
+        target_file="README.md",
+        routing_hint={"recommended_flow": "hyper_sprint", "complexity": "critical"},
+    )
+    assert out["recommended_flow"] == "baseline"
+    assert out["route_features"]["router_hint_applied"] is False
 
 
 def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: Path, monkeypatch):

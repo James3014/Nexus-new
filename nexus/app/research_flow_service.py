@@ -916,6 +916,7 @@ def _decide_flow(
     candidate_count: int,
     target_file: str | None,
     signals: RouteSignals,
+    routing_hint: dict[str, Any] | None = None,
 ) -> RouteDecisionPayload:
     findings_hits = signals["findings_hits"]
     memory_hits = signals["memory_hits"]
@@ -950,6 +951,43 @@ def _decide_flow(
         recommended_flow = "hyper_sprint" if is_risky_bug else "baseline"
         recommended_reason = "complex_bug_prefer_hyper" if is_risky_bug else "simple_bug_prefer_baseline"
 
+    hint = routing_hint if isinstance(routing_hint, dict) else {}
+    hint_mode = str(hint.get("mode", "") or "").strip().lower()
+    hint_complexity_raw = hint.get("complexity", "")
+    hint_complexity = str(hint_complexity_raw or "").strip().lower()
+    hint_should_research = hint.get("should_research", None)
+    hint_recommended_flow = str(hint.get("recommended_flow", "") or "").strip().lower()
+    hint_confidence_raw = hint.get("confidence", None)
+    hint_confidence: float | None = None
+    if hint_confidence_raw is not None:
+        try:
+            hint_confidence = min(1.0, max(0.0, float(hint_confidence_raw)))
+        except Exception:
+            hint_confidence = None
+    hint_complexity_hard = (
+        hint_complexity in {"hard", "very_hard", "critical", "high", "p1", "p0"}
+        or hint_complexity.startswith("hard_")
+    )
+    if not hint_complexity_hard:
+        try:
+            hint_complexity_hard = float(hint_complexity_raw) >= 8.0
+        except Exception:
+            hint_complexity_hard = False
+    router_hint_applied = False
+    if hint_recommended_flow in {"baseline", "hyper_sprint"} and not is_doc_fix:
+        recommended_flow = hint_recommended_flow
+        recommended_reason = f"router_hint_recommended_flow:{hint_recommended_flow}"
+        router_hint_applied = True
+    elif not is_doc_fix:
+        if hint_mode == "research_first" or hint_complexity_hard or hint_should_research is True:
+            recommended_flow = "hyper_sprint"
+            recommended_reason = "router_hint_forced_hyper"
+            router_hint_applied = True
+        elif hint_should_research is False and hint_mode == "standard" and task_type not in {"feature", "refactor"}:
+            recommended_flow = "baseline"
+            recommended_reason = "router_hint_forced_baseline"
+            router_hint_applied = True
+
     consensus_votes = {
         "baseline": 0,
         "hyper_sprint": 0,
@@ -976,6 +1014,12 @@ def _decide_flow(
     if task_type in {"feature", "refactor"}:
         consensus_votes["baseline"] += 1
         vote_reasons.append("structural_task_prefers_baseline")
+    if router_hint_applied:
+        if recommended_flow == "hyper_sprint":
+            consensus_votes["hyper_sprint"] += 1
+        else:
+            consensus_votes["baseline"] += 1
+        vote_reasons.append("router_hint_applied")
 
     if recommended_flow == "hyper_sprint":
         should_research = True
@@ -1012,6 +1056,10 @@ def _decide_flow(
         "memory_hits": memory_hits,
         "adjusted_root_cause_confidence": round(adjusted_root_cause_confidence, 4),
         "risk_score": risk_score,
+        "router_hint_applied": router_hint_applied,
+        "router_hint_mode": hint_mode,
+        "router_hint_complexity": hint_complexity,
+        "router_hint_confidence": hint_confidence,
     }
 
     explain = {
@@ -1052,6 +1100,7 @@ def build_route(
     root_cause_confidence: float,
     findings_query: str | None,
     target_file: str | None = None,
+    routing_hint: dict[str, Any] | None = None,
 ) -> dict:
     signals = _collect_route_signals(
         repo_root=repo_root,
@@ -1068,6 +1117,7 @@ def build_route(
         candidate_count=candidate_count,
         target_file=target_file,
         signals=signals,
+        routing_hint=routing_hint,
     )
     findings_hits = signals["findings_hits"]
     memory_hits = signals["memory_hits"]
@@ -1310,6 +1360,7 @@ def run_auto_flow(
     success_criteria: str = "all_target_tests_pass",
     task_id: str | None = None,
     llm_baseline_required: bool = False,
+    routing_hint: dict[str, Any] | None = None,
 ):
     """Internal impl for Auto Flow Runner: route -> run baseline/hyper -> enforce guard -> emit report."""
 
@@ -1325,6 +1376,7 @@ def run_auto_flow(
         root_cause_confidence=root_cause_confidence,
         findings_query=findings_query,
         target_file=target_file,
+        routing_hint=routing_hint,
     )
     phase_wall_sec["P"] = round(time.monotonic() - phase_started_at, 4)
     phase_started_at = time.monotonic()
