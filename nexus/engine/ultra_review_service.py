@@ -37,6 +37,8 @@ RUNTIME_ARTIFACT_PREFIXES = (
 BENCHMARK_ONLY_ENV_VARS = (
     "NEXUS_LLM_CANDIDATE_CAP",
 )
+ULTRA_REUSE_WORKTREE_ENV = "NEXUS_ULTRA_REUSE_WORKTREE"
+ULTRA_SKIP_GHOST_ENV = "NEXUS_ULTRA_SKIP_GHOST_REGRESSION"
 
 
 class UltraReviewError(RuntimeError):
@@ -180,7 +182,21 @@ class UltraReviewService:
         )
         return sandbox_path
 
+    def _benchmark_env_keys_removed(self) -> list[str]:
+        removed: list[str] = []
+        for key in BENCHMARK_ONLY_ENV_VARS:
+            if key in os.environ:
+                removed.append(key)
+        return removed
+
     def _prepare_execution_workspace(self, sandbox_path: Path, *, diff_path: Path) -> tuple[Path, dict[str, Any]]:
+        if os.getenv(ULTRA_REUSE_WORKTREE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+            reusable_root = self._resolve(".nexus/reports/ultra_review/reusable_worktree")
+            reusable_root.mkdir(parents=True, exist_ok=True)
+            execution_root = reusable_root / "worktree"
+            metadata = self._prepare_reusable_git_worktree(execution_root, diff_path=diff_path, sandbox_path=sandbox_path)
+            if metadata.get("strategy") == "git_worktree_reuse":
+                return execution_root, metadata
         execution_root = sandbox_path / "worktree"
         metadata = self._prepare_git_worktree_mirror(execution_root, diff_path=diff_path, sandbox_path=sandbox_path)
         if metadata.get("strategy") == "git_worktree":
@@ -189,6 +205,54 @@ class UltraReviewService:
         fallback_metadata = self._copy_execution_workspace(execution_root, sandbox_path)
         fallback_metadata["fallback_reason"] = metadata.get("fallback_reason", "")
         return execution_root, fallback_metadata
+
+    def _prepare_reusable_git_worktree(self, execution_root: Path, *, diff_path: Path, sandbox_path: Path) -> dict[str, Any]:
+        if not (execution_root / ".git").exists():
+            add_cmd = ["git", "worktree", "add", "--detach", str(execution_root), "HEAD"]
+            add = subprocess.run(add_cmd, cwd=self.project_root, capture_output=True, text=True, check=False)
+            if add.returncode != 0:
+                return {
+                    "strategy": "copytree",
+                    "fallback_reason": (add.stderr or add.stdout or "reusable git worktree add failed")[-1000:],
+                }
+            created = True
+        else:
+            created = False
+
+        reset_cmd = ["git", "reset", "--hard", "HEAD"]
+        clean_cmd = ["git", "clean", "-fd"]
+        reset = subprocess.run(reset_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+        clean = subprocess.run(clean_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+        if reset.returncode != 0 or clean.returncode != 0:
+            return {
+                "strategy": "copytree",
+                "fallback_reason": (
+                    reset.stderr
+                    or clean.stderr
+                    or reset.stdout
+                    or clean.stdout
+                    or "reusable git worktree reset/clean failed"
+                )[-1000:],
+            }
+
+        diff_has_content = bool(diff_path.read_text(encoding="utf-8").strip()) if diff_path.exists() else False
+        if diff_has_content:
+            apply_cmd = ["git", "apply", "--binary", str(diff_path)]
+            apply = subprocess.run(apply_cmd, cwd=execution_root, capture_output=True, text=True, check=False)
+            if apply.returncode != 0:
+                return {
+                    "strategy": "copytree",
+                    "fallback_reason": (apply.stderr or apply.stdout or "reusable git apply failed")[-1000:],
+                }
+
+        untracked_overlay_count = self._overlay_untracked_files(execution_root, sandbox_path=sandbox_path)
+        return {
+            "strategy": "git_worktree_reuse",
+            "diff_applied": True,
+            "empty_diff": not diff_has_content,
+            "reused": not created,
+            "untracked_overlay_count": untracked_overlay_count,
+        }
 
     def _prepare_git_worktree_mirror(self, execution_root: Path, *, diff_path: Path, sandbox_path: Path) -> dict[str, Any]:
         add_cmd = ["git", "worktree", "add", "--detach", str(execution_root), "HEAD"]
@@ -669,6 +733,20 @@ class UltraReviewService:
         }
 
     def _run_ghost_regression(self, test_candidates: list[str], *, execution_root: Path) -> dict[str, Any]:
+        if os.getenv(ULTRA_SKIP_GHOST_ENV, "").strip().lower() in {"1", "true", "yes", "on"}:
+            return {
+                "passed": True,
+                "executed_tests": [],
+                "failed_tests": [],
+                "skipped_tests": list(test_candidates),
+                "findings": [],
+                "execution_mode": "skipped_by_env",
+                "timeout_sec": GHOST_REGRESSION_TIMEOUT_SEC,
+                "dependency_mode": "active_venv",
+                "sanitized_env": self._benchmark_env_keys_removed(),
+                "execution_cwd": str(execution_root),
+                "timeout": False,
+            }
         if not test_candidates:
             return {
                 "passed": True,

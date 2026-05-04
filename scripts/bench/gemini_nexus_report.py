@@ -144,6 +144,44 @@ def _ratio_text(item: dict[str, Any], key: str, total: int) -> str:
     return f"{count}/{total}"
 
 
+def _safe_ratio(num: float, den: float) -> float:
+    if den <= 0:
+        return 0.0
+    return num / den
+
+
+def _route_quality_metrics(report: dict[str, Any], arm: str) -> dict[str, float]:
+    coverage = ((report.get("capability_coverage") or {}).get(arm) or {})
+    if not isinstance(coverage, dict) or not coverage:
+        return {
+            "selected_to_invoked_rate": 0.0,
+            "invoked_to_evidence_rate": 0.0,
+            "evidence_to_outcome_rate": 0.0,
+            "unnecessary_selected_rate": 0.0,
+        }
+    selected = 0.0
+    invoked = 0.0
+    evidence = 0.0
+    outcome = 0.0
+    for item in coverage.values():
+        if not isinstance(item, dict):
+            continue
+        selected += float(item.get("selected_count", 0) or 0)
+        invoked += float(item.get("invoked_count", 0) or 0)
+        evidence += float(item.get("evidence_count", 0) or 0)
+        outcome += float(item.get("outcome_count", 0) or 0)
+    selected_to_invoked = _safe_ratio(invoked, selected)
+    invoked_to_evidence = _safe_ratio(evidence, invoked)
+    evidence_to_outcome = _safe_ratio(outcome, evidence)
+    unnecessary_selected = _safe_ratio(max(selected - invoked, 0.0), selected)
+    return {
+        "selected_to_invoked_rate": selected_to_invoked,
+        "invoked_to_evidence_rate": invoked_to_evidence,
+        "evidence_to_outcome_rate": evidence_to_outcome,
+        "unnecessary_selected_rate": unnecessary_selected,
+    }
+
+
 def _activation_status(item: dict[str, Any]) -> str:
     selected = int(item.get("selected_count", 0) or 0)
     invoked = int(item.get("invoked_count", 0) or 0)
@@ -503,6 +541,8 @@ def render_markdown_report(
         formal=formal,
     )
     capability_gate = _per_capability_public_gate(report)
+    route_quality_without = _route_quality_metrics(report, "a")
+    route_quality_with = _route_quality_metrics(report, "b")
     claim_gates = _claim_gate_breakdown(
         public_gate=public_gate,
         capability_gate=capability_gate,
@@ -624,6 +664,15 @@ def render_markdown_report(
         "| Capability | Selected | Invoked | Evidence | Gate | Outcome | Public safe | Source | Failure reasons |",
         "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
         *_capability_coverage_rows(report),
+        "",
+        "## Route Quality",
+        "",
+        "| Metric | Without Nexus | With Nexus | Delta | Meaning |",
+        "| --- | ---: | ---: | ---: | --- |",
+        f"| Selected -> Invoked | {_pct(route_quality_without['selected_to_invoked_rate'])} | {_pct(route_quality_with['selected_to_invoked_rate'])} | {_pct(route_quality_with['selected_to_invoked_rate'] - route_quality_without['selected_to_invoked_rate'])} | Higher means selected capabilities are actually executed |",
+        f"| Invoked -> Evidence | {_pct(route_quality_without['invoked_to_evidence_rate'])} | {_pct(route_quality_with['invoked_to_evidence_rate'])} | {_pct(route_quality_with['invoked_to_evidence_rate'] - route_quality_without['invoked_to_evidence_rate'])} | Higher means execution is evidenced |",
+        f"| Evidence -> Outcome | {_pct(route_quality_without['evidence_to_outcome_rate'])} | {_pct(route_quality_with['evidence_to_outcome_rate'])} | {_pct(route_quality_with['evidence_to_outcome_rate'] - route_quality_without['evidence_to_outcome_rate'])} | Higher means evidence contributes to verified outcomes |",
+        f"| Unnecessary Selected | {_pct(route_quality_without['unnecessary_selected_rate'])} | {_pct(route_quality_with['unnecessary_selected_rate'])} | {_pct(route_quality_with['unnecessary_selected_rate'] - route_quality_without['unnecessary_selected_rate'])} | Lower means less over-selection friction |",
         "",
         "## Capability Activation Details",
         "",

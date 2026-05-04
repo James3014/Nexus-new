@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from typing import Any, Callable
+
+
+def apply_signal_policies(
+    *,
+    signals: Any,
+    task_desc: str,
+    task_type: str,
+    enable: Callable[[str, str], None],
+) -> None:
+    task_lower = f"{task_desc} {task_type}".lower()
+    hyper_selected = "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint"
+
+    if hyper_selected:
+        enable("hyper", "route_selected_hyper")
+    if signals.recommended_flow == "baseline":
+        enable("direct_mode", "baseline_execution_path")
+    if (
+        "autoreason" in signals.selected_seed
+        or signals.confidence < 0.75
+        or signals.candidate_count >= 2
+        or signals.memory_hits
+        or signals.findings_hits
+        or signals.repair_signal
+        or signals.evidence_signal
+        or signals.governance_signal
+    ):
+        enable("autoreason", "low_confidence_or_multi_candidate_or_history")
+    if signals.confidence < 0.8 or "belief" in task_lower or "confidence" in task_lower or "budget" in task_lower:
+        enable("belief", "confidence_control_needed")
+    if signals.memory_hits or signals.findings_hits:
+        enable("memory", "prior_lesson_or_findings_available")
+    if "docs_code_sync" in task_lower or "context" in task_lower or "contract" in task_lower:
+        enable("memory", "context_contract_memory_needed")
+    if signals.lancedb_hits or "lancedb" in task_lower or "retrieval" in task_lower or "vector hit" in task_lower:
+        enable("lancedb", "semantic_memory_or_retrieval_signal_available")
+    if "ddtree" in signals.acceleration_seed or (hyper_selected and (signals.candidate_count >= 3 or signals.repair_signal)):
+        enable("ddtree", "candidate_space_pruning")
+    if signals.repair_signal:
+        enable("repair_loop", "repair_or_self_heal_signal")
+    if "ultra_review" in signals.governance_seed or signals.risk_score >= 70 or signals.hard_signal or signals.governance_signal:
+        enable("ultra_review", "high_risk_or_governance_route")
+        enable("sandbox", "high_risk_isolated_execution")
+    if signals.cross_module or signals.codeintel_impact_present or signals.risk_score >= 30:
+        enable("codeintel", "impact_or_blast_radius_needed")
+    if signals.should_research or not signals.lancedb_hits:
+        enable("research", "context_or_retrieval_gap")
+    if signals.autonomic_research_requested or signals.autonomic_suggested_mode == "research_first":
+        enable("research", "autonomic_research_signal")
+    if signals.autonomic_policy_match_count >= 10:
+        enable("pregate", "autonomic_policy_density_signal")
+        enable("plan_quality_gate", "autonomic_policy_density_signal")
+    if signals.autonomic_swarm_candidate and signals.risk_score >= 60:
+        enable("swarm", "autonomic_swarm_candidate_signal")
+    if signals.msa_candidate_count > 0 or signals.msa_top_score >= 0.75:
+        enable("lancedb", "msa_retrieval_signal")
+    if signals.skill_candidates:
+        enable("registry_sync", "skill_candidate_signal")
+    if signals.learning_signal:
+        enable("learn_mode", "claim_or_citation_learning_signal")
+        enable("learn_phase_slo", "learn_phase_policy_needed")
+    if signals.risk_score >= 30 or signals.governance_signal or signals.evidence_signal:
+        enable("pregate", "risk_or_policy_precheck")
+        enable("plan_quality_gate", "plan_review_required")
+    if signals.acceptance_signal or signals.benchmark_signal or signals.evidence_signal:
+        enable("acceptance_check", "acceptance_or_public_claim_signal")
+    if signals.forecast_signal or signals.risk_score >= 80 or signals.confidence < 0.6:
+        enable("forecast_gate", "forecast_or_high_uncertainty_signal")
+    if signals.xray_signal or (signals.cross_module and signals.risk_score >= 60):
+        enable("xray", "deep_scan_or_dependency_signal")
+    if signals.research_control_signal or "research:auto-flow" in task_lower:
+        enable("research_control_plane", "research_control_or_experiment_signal")
+    if signals.swarm_signal or (signals.cross_module and signals.risk_score >= 70):
+        enable("swarm", "cross_module_high_risk_review")
+    if signals.drone_signal or (signals.cross_module and signals.candidate_count >= 2):
+        enable("drone", "parallelizable_subtask_signal")
+    if signals.multi_agent_signal or (signals.cross_module and signals.risk_score >= 60):
+        enable("file_lock", "multi_agent_write_boundary")
+        enable("multi_agent", "coordinated_ownership_required")
+    if "merge" in task_lower or "integrate" in task_lower or "integration" in task_lower:
+        enable("integration_manager", "integration_or_merge_signal")
+    if signals.risk_score >= 90 or "long" in task_lower or signals.nightshift_signal or "nightshift" in signals.governance_seed:
+        enable("nightshift", "long_or_critical_risk")
+    if signals.ui_signal:
+        enable("ui_validator", "ui_validation_signal")
+    if signals.continuity_signal:
+        enable("metabolism", "continuity_or_resume_signal")
+    if signals.benchmark_signal:
+        enable("benchmark", "evaluation_or_public_report_signal")
+    if signals.meta_opt_signal:
+        enable("meta_opt", "optimization_signal")
+    if signals.registry_signal:
+        enable("registry_sync", "platform_registry_signal")
+    if signals.oracle_signal:
+        enable("oracle_shadow", "shadow_promotion_signal")
+    if signals.federation_signal:
+        enable("federation", "federated_learning_signal")
+    if signals.stress_signal:
+        enable("stress_test", "stress_or_recursion_signal")
+
+
+def apply_tier_policies(
+    *,
+    states: dict[str, str],
+    reasons: dict[str, list[str]],
+    routing_tier: str,
+    signals: Any,
+    enable: Callable[[str, str], None],
+) -> None:
+    if routing_tier == "L1_green_lane":
+        for capability in ("swarm", "drone", "nightshift", "research_control_plane", "stress_test"):
+            if states.get(capability) == "conditional":
+                states[capability] = "optional"
+                reasons[capability].append("tier_l1_cost_control")
+        if not signals.hazard_forced_l3 and signals.confidence >= 0.95 and (signals.memory_hits > 0 or signals.findings_hits > 0):
+            states["research"] = "optional"
+            reasons["research"].append("forecast_gate_early_exit_candidate")
+    elif routing_tier == "L3_swarm_deep":
+        for capability in ("swarm", "drone", "nightshift", "ultra_review", "research"):
+            enable(capability, "tier_l3_deep_governance")

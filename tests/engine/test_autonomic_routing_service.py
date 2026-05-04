@@ -31,7 +31,7 @@ def test_autonomic_routing_service_direct_mode_skips_context_hub():
     context_hub.make_pre_routing_decision.assert_not_called()
 
 
-def test_autonomic_routing_service_swarm_route_records_signal_without_executor_flag():
+def test_autonomic_routing_service_swarm_route_sets_metadata():
     context_hub = MagicMock()
     context_hub.make_pre_routing_decision.return_value = {"priority": "high"}
     service = AutonomicRoutingService(
@@ -45,8 +45,6 @@ def test_autonomic_routing_service_swarm_route_records_signal_without_executor_f
     exec_plan.mode = "swarm"
     exec_plan.reason = "high_risk"
     exec_plan.skill_id = ""
-    exec_plan.signals = {"swarm_candidate": True, "policy_match_count": 16}
-    exec_plan.matched_policies = ["POLICY-1"]
 
     with patch("nexus.engine.autonomic_router.AutonomicRouter") as router_cls:
         router_cls.return_value.route.return_value = exec_plan
@@ -61,15 +59,12 @@ def test_autonomic_routing_service_swarm_route_records_signal_without_executor_f
     assert out["mode"] == "swarm"
     assert state.metadata["autonomic_route"] == "swarm"
     assert state.metadata["autonomic_reason"] == "high_risk"
-    assert state.metadata["autonomic_route_source"] == "signal_provider"
-    assert state.metadata["autonomic_signals"]["swarm_candidate"] is True
-    assert state.metadata["autonomic_matched_policies"] == ["POLICY-1"]
-    assert "swarm_mode" not in state.metadata
+    assert state.metadata["swarm_mode"] is True
     assert state.metadata["est_tokens"] == 77
     context_hub.make_pre_routing_decision.assert_called_once()
 
 
-def test_autonomic_routing_service_external_skill_signal_does_not_inject_instructions(tmp_path: Path):
+def test_autonomic_routing_service_external_skill_injects_instructions(tmp_path: Path):
     context_hub = MagicMock()
     context_hub.make_pre_routing_decision.return_value = {}
     service = AutonomicRoutingService(
@@ -88,8 +83,6 @@ def test_autonomic_routing_service_external_skill_signal_does_not_inject_instruc
     exec_plan.mode = "external_skill"
     exec_plan.reason = "matched"
     exec_plan.skill_id = "external-skill-1"
-    exec_plan.signals = {"external_skill_candidate": True}
-    exec_plan.matched_policies = []
 
     with patch("nexus.engine.autonomic_router.AutonomicRouter") as router_cls, patch(
         "nexus.core.unified_registry.UnifiedRegistry"
@@ -109,38 +102,5 @@ def test_autonomic_routing_service_external_skill_signal_does_not_inject_instruc
         )
 
     assert out["mode"] == "external_skill"
-    assert out["signals"]["external_skill_candidate"] is True
-    assert "active_external_skill" not in state.metadata
-    assert state.metadata["task_description"] == "fix bug"
-
-
-def test_autonomic_routing_service_research_signal_does_not_force_external():
-    context_hub = MagicMock()
-    context_hub.make_pre_routing_decision.return_value = {}
-    service = AutonomicRoutingService(
-        project_root=Path("/tmp/nexus_test"),
-        memory_service=MagicMock(),
-        context_hub=context_hub,
-    )
-    state = NexusState(task_id="route-3")
-
-    exec_plan = MagicMock()
-    exec_plan.mode = "research_first"
-    exec_plan.reason = "research requested"
-    exec_plan.skill_id = ""
-    exec_plan.signals = {"research_requested": True}
-    exec_plan.matched_policies = []
-
-    with patch("nexus.engine.autonomic_router.AutonomicRouter") as router_cls:
-        router_cls.return_value.route.return_value = exec_plan
-        out = service.apply(
-            state=state,
-            task_id="route-3",
-            task_desc="research regression",
-            task_type="bug",
-            forecast={"est_tokens": 42},
-        )
-
-    assert out["mode"] == "research_first"
-    assert state.metadata["autonomic_signals"]["research_requested"] is True
-    assert "force_external" not in state.metadata
+    assert state.metadata["active_external_skill"] == "external-skill"
+    assert "[EXTERNAL SKILL INSTRUCTIONS: external-skill]" in state.metadata["task_description"]

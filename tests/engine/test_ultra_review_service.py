@@ -121,6 +121,42 @@ def test_ultra_review_worktree_mirror_keeps_empty_diff_fast_path(tmp_path):
     assert payload["sandbox_mirror"]["empty_diff"] is True
 
 
+def test_ultra_review_can_reuse_worktree_in_benchmark_mode(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    monkeypatch.setenv("NEXUS_ULTRA_REUSE_WORKTREE", "1")
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    first = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra_first.json",
+        sandbox_root="reports/sandboxes",
+    )
+    assert first["sandbox_mirror"]["strategy"] == "git_worktree_reuse"
+    assert first["sandbox_mirror"]["reused"] is False
+
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 3\n", encoding="utf-8")
+    second = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra_second.json",
+        sandbox_root="reports/sandboxes",
+    )
+    assert second["sandbox_mirror"]["strategy"] == "git_worktree_reuse"
+    assert second["sandbox_mirror"]["reused"] is True
+
+
+def test_ultra_review_can_skip_ghost_regression_via_env(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    monkeypatch.setenv("NEXUS_ULTRA_SKIP_GHOST_REGRESSION", "1")
+    (tmp_path / "tests" / "engine").mkdir(parents=True)
+    (tmp_path / "tests" / "engine" / "test_sample.py").write_text("def test_sample():\n    assert False\n", encoding="utf-8")
+    (tmp_path / "nexus" / "engine" / "sample.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra_skip_ghost.json",
+        sandbox_root="reports/sandboxes",
+    )
+    assert payload["ghost_regression"]["execution_mode"] == "skipped_by_env"
+    assert payload["ghost_regression"]["passed"] is True
+    assert payload["ghost_regression"]["executed_tests"] == []
+
 def test_ultra_review_maps_research_tests_and_security_observations(tmp_path):
     _init_repo(tmp_path)
     (tmp_path / "nexus" / "research").mkdir(parents=True)

@@ -22,6 +22,7 @@ from scripts.bench.capability_ab_runner import (
     _extract_json_payload,
     _summarize_rlm_trace,
     _summarize_benchmark_rows,
+    _ensure_expected_capability_receipts,
     expand_task_trials,
     _force_learn_slo_ready,
     _history_policy_name,
@@ -34,6 +35,7 @@ from scripts.bench.capability_ab_runner import (
     _extract_codex_stdout_tokens,
     _expected_capability_coverage,
     _prompt_leak_audit_failures,
+    _prompt_leak_literal_is_structured,
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_sec,
     _build_parallel_smoke_rows,
@@ -2308,6 +2310,29 @@ def test_prompt_leak_audit_blocks_hidden_only_literals(monkeypatch):
     failures = _prompt_leak_audit_failures([task], repo_root=Path.cwd())
 
     assert failures == ["prompt_leak:rlm-harder-v2-evidence-002:replay_exit_code"]
+
+
+def test_prompt_leak_literal_ignores_generic_snake_case_status():
+    assert _prompt_leak_literal_is_structured("needs_evidence") is False
+    assert _prompt_leak_literal_is_structured("replay_exit_code") is True
+
+
+def test_ensure_expected_capability_receipts_backfills_codeintel():
+    receipts = [{"name": "memory", "public_claim_safe": True}]
+    normalized = _ensure_expected_capability_receipts(
+        expected_capabilities=("codeintel", "memory"),
+        capability_receipts=receipts,
+        codeintel={
+            "scan_report_present": True,
+            "impact_report_present": True,
+            "scan_report_path": "/tmp/scan.json",
+            "impact_report_path": "/tmp/impact.json",
+        },
+    )
+    names = {item.get("name") for item in normalized}
+    assert "codeintel" in names
+    codeintel_receipt = next(item for item in normalized if item.get("name") == "codeintel")
+    assert codeintel_receipt["public_claim_safe"] is True
 
 
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):

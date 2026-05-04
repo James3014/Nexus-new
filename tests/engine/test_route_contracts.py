@@ -8,6 +8,9 @@ from nexus.engine.route_decision_adapter import build_route_decision
 def test_route_decision_preserves_composable_capability_state():
     decision = RouteDecision(
         schema_version="nexus_route_decision_v1",
+        plan_schema_version="nexus_capability_plan_v1",
+        plan_mode="dry_run",
+        plan_score=42,
         task_id="task-1",
         task_type="cross_module_refactor",
         task_desc_hash="abc123",
@@ -30,6 +33,9 @@ def test_route_decision_preserves_composable_capability_state():
     ).to_dict()
 
     assert decision["schema_version"] == "nexus_route_decision_v1"
+    assert decision["plan_schema_version"] == "nexus_capability_plan_v1"
+    assert decision["plan_mode"] == "dry_run"
+    assert decision["plan_score"] == 42
     assert decision["decision_source"] == "capability_planner"
     assert decision["selected_capabilities"] == ["codeintel", "autoreason", "ultra_review"]
     assert decision["pending_capabilities"] == ["drone", "nightshift"]
@@ -89,7 +95,39 @@ def test_route_decision_adapter_preserves_full_capability_space():
     assert decision["executor_controls"]["enable_nightshift"] is False
     assert decision["fallback_policy"] == "fail_closed"
     assert decision["public_claim_scope"] == "receipt_backed"
+    assert decision["plan_schema_version"] == "nexus_capability_plan_v1"
+    assert decision["plan_mode"] == "dry_run"
+    assert isinstance(decision["plan_score"], int)
+    assert decision["derivation_meta"]["routing_tier_fallback_used"] is False
+    assert decision["derivation_meta"]["recommended_flow_mismatch"] is False
     assert any(item["capability"] == "codeintel" for item in decision["decision_trace"])
+
+
+def test_route_decision_adapter_records_recommended_flow_mismatch():
+    plan = CapabilityPlanner().plan(
+        task_desc="Low risk docs alignment",
+        task_type="doc-fix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 12,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+    )
+    decision = build_route_decision(
+        task_id="task-mismatch",
+        task_desc="Low risk docs alignment",
+        task_type="doc-fix",
+        recommended_flow="hyper_sprint",
+        plan=plan,
+    ).to_dict()
+
+    assert decision["derivation_meta"]["recommended_flow_plan"] == "baseline"
+    assert decision["derivation_meta"]["recommended_flow_param"] == "hyper_sprint"
+    assert decision["derivation_meta"]["recommended_flow_mismatch"] is True
 
 
 def test_route_experiment_requires_fixed_eval_and_rollback_context():

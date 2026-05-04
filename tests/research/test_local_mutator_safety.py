@@ -149,6 +149,23 @@ def build_response(value):
     assert ns["build_response"]("ok") == {"result": "ok"}
 
 
+def test_response_result_field_patch_normalizes_outcome_to_result():
+    source = """FIELD = 'outcome'
+
+def build_response(value):
+    return {FIELD: value}
+"""
+    patched = generate_local_candidate(
+        source,
+        "Sync code and docs after a renamed public field; infer canonical response key from contract context.",
+        "local",
+        0,
+    )
+    ns = {}
+    exec(patched, ns)
+    assert ns["build_response"]("ok") == {"result": "ok"}
+
+
 def test_parse_config_defaults_patch_preserves_explicit_values():
     source = """
 def parse_config(data):

@@ -160,6 +160,10 @@ class CapabilitySignalSet:
     msa_candidate_count: int = 0
     msa_top_score: float = 0.0
     msa_rerank_reasons: tuple[str, ...] = ()
+    hazard_hits: tuple[str, ...] = ()
+    hazard_forced_l3: bool = False
+    routing_tier_hint: str = ""
+    routing_tier_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -251,6 +255,9 @@ class CapabilityReceipt:
 @dataclass(frozen=True)
 class RouteDecision:
     schema_version: str
+    plan_schema_version: str
+    plan_mode: str
+    plan_score: int
     task_id: str
     task_type: str
     task_desc_hash: str
@@ -272,7 +279,15 @@ class RouteDecision:
     public_claim_scope: str = "receipt_backed"
     fallback_policy: str = "fail_closed"
     forecast_gate_shadow: dict[str, Any] = field(default_factory=dict)
+    routing_tier: str = "L2_hardened"
+    routing_tier_reason: str = ""
+    hazard_hits: tuple[str, ...] = ()
+    hazard_forced_l3: bool = False
+    early_exit_used: bool = False
+    policy_loaded_count: int = 0
+    policy_pruned_count: int = 0
     tuning_snapshot: dict[str, Any] = field(default_factory=dict)
+    derivation_meta: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -284,6 +299,7 @@ class RouteDecision:
             "forbidden_capabilities": list(self.forbidden_capabilities),
             "acceleration_layers": list(self.acceleration_layers),
             "governance_layers": list(self.governance_layers),
+            "hazard_hits": list(self.hazard_hits),
             "constraints": list(self.constraints),
             "decision_trace": list(self.decision_trace),
             "receipt_requirements": list(self.receipt_requirements),

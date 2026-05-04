@@ -511,7 +511,14 @@ def _patch_response_result_field(source: str) -> str:
         return source
     if "FIELD = 'result'" in source or 'FIELD = "result"' in source:
         return source
-    new_source = re.sub(r"^FIELD\s*=\s*['\"]status['\"]\s*$", "FIELD = 'result'", source, count=1, flags=re.MULTILINE)
+    # Canonicalize any single FIELD assignment (status/outcome/...) to result.
+    new_source = re.sub(
+        r"^FIELD\s*=\s*['\"][^'\"]+['\"]\s*$",
+        "FIELD = 'result'",
+        source,
+        count=1,
+        flags=re.MULTILINE,
+    )
     if new_source == source:
         return source
     try:

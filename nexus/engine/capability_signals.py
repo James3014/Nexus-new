@@ -142,6 +142,10 @@ def build_capability_signals(
         msa_candidate_count=_as_int(msa.get("candidate_count"), 0),
         msa_top_score=_as_float(msa.get("top_score"), 0.0),
         msa_rerank_reasons=tuple(str(item) for item in (msa.get("rerank_reasons", []) or []) if str(item)),
+        hazard_hits=tuple(str(item) for item in (route_features.get("hazard_hits", []) or []) if str(item)),
+        hazard_forced_l3=bool(route_features.get("hazard_forced_l3", False)),
+        routing_tier_hint=str(route_features.get("routing_tier", "") or ""),
+        routing_tier_reason=str(route_features.get("routing_tier_reason", "") or ""),
     )
 
 

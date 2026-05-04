@@ -49,9 +49,14 @@ def build_forecast_gate_shadow(plan: CapabilityPlan) -> dict[str, Any]:
     snapshot = dict(plan.signal_snapshot)
     risk_score = int(snapshot.get("risk_score_0_100", snapshot.get("risk_score", 0)) or 0)
     confidence = float(snapshot.get("confidence", 1.0) or 1.0)
+    memory_hits = int(snapshot.get("memory_hits", 0) or 0) + int(snapshot.get("findings_hits", 0) or 0)
+    hazard_forced_l3 = bool(snapshot.get("hazard_forced_l3", False))
     selected = set(plan.selected_capabilities)
 
-    if risk_score >= 70 or "ultra_review" in selected:
+    if hazard_forced_l3:
+        suggested_tier = "L3_full_governed"
+        reason = "hazard_mapping_forced_l3"
+    elif risk_score >= 70 or "ultra_review" in selected:
         suggested_tier = "L3_full_governed"
         reason = "high_risk_or_ultra_review_selected"
     elif risk_score >= 30 or "codeintel" in selected or "research" in selected:
@@ -63,7 +68,9 @@ def build_forecast_gate_shadow(plan: CapabilityPlan) -> dict[str, Any]:
 
     early_exit_candidate = bool(
         suggested_tier == "L1_light_governed"
-        and confidence >= 0.9
+        and confidence >= 0.95
+        and memory_hits > 0
+        and not hazard_forced_l3
         and not plan.pending_capabilities
     )
     return {
@@ -95,8 +102,33 @@ def build_route_decision(
     signal_snapshot = dict(plan.signal_snapshot)
     signal_snapshot["pillar_signals"] = build_pillar_signal_summary(plan)
     forecast_gate_shadow = build_forecast_gate_shadow(plan)
+    routing_tier = str(signal_snapshot.get("routing_tier", "") or "")
+    routing_tier_reason = str(signal_snapshot.get("routing_tier_reason", "") or "")
+    routing_tier_fallback_used = False
+    if not routing_tier:
+        routing_tier_fallback_used = True
+        routing_tier = str(forecast_gate_shadow.get("suggested_tier", "L2_context_governed"))
+        routing_tier_reason = str(forecast_gate_shadow.get("suggested_tier_reason", "forecast_gate_default"))
+    hazard_hits = tuple(str(item) for item in (signal_snapshot.get("hazard_hits", []) or []) if str(item))
+    hazard_forced_l3 = bool(signal_snapshot.get("hazard_forced_l3", False))
+    policy_loaded_count = int(signal_snapshot.get("policy_loaded_count", 0) or 0)
+    policy_pruned_count = int(signal_snapshot.get("policy_pruned_count", 0) or 0)
+    early_exit_used = bool(forecast_gate_shadow.get("early_exit_candidate", False) and routing_tier == "L1_green_lane")
+    plan_recommended_flow = str(signal_snapshot.get("recommended_flow", "") or "")
+    recommended_flow_mismatch = bool(plan_recommended_flow and plan_recommended_flow != recommended_flow)
+    derivation_meta = {
+        "routing_tier_fallback_used": routing_tier_fallback_used,
+        "recommended_flow_mismatch": recommended_flow_mismatch,
+        "recommended_flow_param": recommended_flow,
+        "recommended_flow_plan": plan_recommended_flow,
+        "acceleration_layers_rule": "selected_capabilities_intersection_ddtree",
+        "governance_layers_rule": "selected_capabilities_intersection_ultra_mempalace_artifact_claim",
+    }
     return RouteDecision(
         schema_version="nexus_route_decision_v1",
+        plan_schema_version=plan.schema_version,
+        plan_mode=plan.planner_mode,
+        plan_score=int(plan.score),
         task_id=task_id,
         task_type=task_type,
         task_desc_hash=_hash_task_desc(task_desc),
@@ -117,7 +149,15 @@ def build_route_decision(
         receipt_requirements=("invoked", "evidence_present", "gate_passed", "outcome_contributed"),
         fallback_policy="fail_closed",
         forecast_gate_shadow=forecast_gate_shadow,
+        routing_tier=routing_tier,
+        routing_tier_reason=routing_tier_reason,
+        hazard_hits=hazard_hits,
+        hazard_forced_l3=hazard_forced_l3,
+        early_exit_used=early_exit_used,
+        policy_loaded_count=policy_loaded_count,
+        policy_pruned_count=policy_pruned_count,
         tuning_snapshot=tuning_snapshot or {},
+        derivation_meta=derivation_meta,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
 

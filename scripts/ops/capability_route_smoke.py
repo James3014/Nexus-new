@@ -65,6 +65,20 @@ SMOKE_SUITES: tuple[SmokeSuite, ...] = (
     ),
 )
 
+REQUIRED_NINE_CAPABILITIES = frozenset(
+    {
+        "autoreason",
+        "ddtree",
+        "ultra_review",
+        "research",
+        "lancedb",
+        "swarm",
+        "drone",
+        "nightshift",
+        "belief",
+    }
+)
+
 
 def build_command(repo_root: Path, suite: SmokeSuite) -> list[str]:
     cmd = [
@@ -193,6 +207,56 @@ def run_suite(repo_root: Path, suite: SmokeSuite, *, print_only: bool) -> dict[s
     return summary
 
 
+def validate_nine_capability_identity(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    nine_target_summaries = [summary for summary in summaries if summary.get("suite") in {"route_oracles", "belief_gate"}]
+    nine_expected = {
+        cap
+        for summary in nine_target_summaries
+        for cap in (summary.get("expected_capabilities") or [])
+        if isinstance(cap, str)
+    }
+    nine_public_safe = {
+        cap
+        for summary in nine_target_summaries
+        for cap in (summary.get("public_safe_capabilities") or [])
+        if isinstance(cap, str)
+    }
+    if nine_expected != REQUIRED_NINE_CAPABILITIES:
+        failures.append(
+            {
+                "task_id": "__route_oracle_plus_belief__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": sorted(REQUIRED_NINE_CAPABILITIES - nine_expected),
+                "failure_reasons": {
+                    "expected_capabilities": {
+                        "required_nine": sorted(REQUIRED_NINE_CAPABILITIES),
+                        "actual": sorted(nine_expected),
+                    }
+                },
+                "row_failures": ["expected_capability_not_exact_nine"],
+            }
+        )
+    if nine_public_safe != REQUIRED_NINE_CAPABILITIES:
+        failures.append(
+            {
+                "task_id": "__route_oracle_plus_belief__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": sorted(REQUIRED_NINE_CAPABILITIES - nine_public_safe),
+                "failure_reasons": {
+                    "public_safe_capabilities": {
+                        "required_nine": sorted(REQUIRED_NINE_CAPABILITIES),
+                        "actual": sorted(nine_public_safe),
+                    }
+                },
+                "row_failures": ["public_safe_capability_not_exact_nine"],
+            }
+        )
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the fixed Nexus capability route smoke suite.")
     parser.add_argument("--repo-root", default=".", help="Repository root.")
@@ -203,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = Path(args.repo_root).resolve()
     summaries = [run_suite(repo_root, suite, print_only=args.print_only) for suite in SMOKE_SUITES]
     failures = [failure for summary in summaries for failure in summary.get("failures", [])]
+    if not args.print_only:
+        failures.extend(validate_nine_capability_identity(summaries))
     payload = {
         "schema_version": "nexus_capability_route_smoke.v1",
         "diagnostic_type": "receipt_diagnostic",

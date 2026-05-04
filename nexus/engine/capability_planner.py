@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, CapabilityScoringConfig, PHASES
+from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, CapabilityScoringConfig
+from nexus.engine.policy_evaluator import apply_signal_policies, apply_tier_policies
+from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
 
 PENDING_EXECUTOR_CAPABILITIES = {"swarm", "drone", "nightshift"}
@@ -515,110 +517,30 @@ class CapabilityPlanner:
             states[name] = "conditional"
             reasons[name].append(reason)
 
-        task_lower = f"{task_desc} {task_type}".lower()
-        if "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint":
-            enable("hyper", "route_selected_hyper")
-        if signals.recommended_flow == "baseline":
-            enable("direct_mode", "baseline_execution_path")
-        if (
-            "autoreason" in signals.selected_seed
-            or signals.confidence < 0.75
-            or signals.candidate_count >= 2
-            or signals.memory_hits
-            or signals.findings_hits
-            or signals.repair_signal
-            or signals.evidence_signal
-            or signals.governance_signal
-        ):
-            enable("autoreason", "low_confidence_or_multi_candidate_or_history")
-        if signals.confidence < 0.8 or "belief" in task_lower or "confidence" in task_lower or "budget" in task_lower:
-            enable("belief", "confidence_control_needed")
-        if signals.memory_hits or signals.findings_hits:
-            enable("memory", "prior_lesson_or_findings_available")
-        if "docs_code_sync" in task_lower or "context" in task_lower or "contract" in task_lower:
-            enable("memory", "context_contract_memory_needed")
-        if signals.lancedb_hits or "lancedb" in task_lower or "retrieval" in task_lower or "vector hit" in task_lower:
-            enable("lancedb", "semantic_memory_or_retrieval_signal_available")
-        hyper_selected = "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint"
-        if "ddtree" in signals.acceleration_seed or (hyper_selected and (signals.candidate_count >= 3 or signals.repair_signal)):
-            enable("ddtree", "candidate_space_pruning")
-        if signals.repair_signal:
-            enable("repair_loop", "repair_or_self_heal_signal")
-        if "ultra_review" in signals.governance_seed or signals.risk_score >= 70 or signals.hard_signal or signals.governance_signal:
-            enable("ultra_review", "high_risk_or_governance_route")
-            enable("sandbox", "high_risk_isolated_execution")
-        if signals.cross_module or signals.codeintel_impact_present or signals.risk_score >= 30:
-            enable("codeintel", "impact_or_blast_radius_needed")
-        if signals.should_research or not signals.lancedb_hits:
-            enable("research", "context_or_retrieval_gap")
-        if signals.autonomic_research_requested or signals.autonomic_suggested_mode == "research_first":
-            enable("research", "autonomic_research_signal")
-        if signals.autonomic_policy_match_count >= 10:
-            enable("pregate", "autonomic_policy_density_signal")
-            enable("plan_quality_gate", "autonomic_policy_density_signal")
-        if signals.autonomic_swarm_candidate and signals.risk_score >= 60:
-            enable("swarm", "autonomic_swarm_candidate_signal")
-        if signals.msa_candidate_count > 0 or signals.msa_top_score >= 0.75:
-            enable("lancedb", "msa_retrieval_signal")
-        if signals.skill_candidates:
-            enable("registry_sync", "skill_candidate_signal")
-        if signals.learning_signal:
-            enable("learn_mode", "claim_or_citation_learning_signal")
-            enable("learn_phase_slo", "learn_phase_policy_needed")
-        if signals.risk_score >= 30 or signals.governance_signal or signals.evidence_signal:
-            enable("pregate", "risk_or_policy_precheck")
-            enable("plan_quality_gate", "plan_review_required")
-        if signals.acceptance_signal or signals.benchmark_signal or signals.evidence_signal:
-            enable("acceptance_check", "acceptance_or_public_claim_signal")
-        if signals.forecast_signal or signals.risk_score >= 80 or signals.confidence < 0.6:
-            enable("forecast_gate", "forecast_or_high_uncertainty_signal")
-        if signals.xray_signal or (signals.cross_module and signals.risk_score >= 60):
-            enable("xray", "deep_scan_or_dependency_signal")
-        if signals.research_control_signal or "research:auto-flow" in task_lower:
-            enable("research_control_plane", "research_control_or_experiment_signal")
-        if signals.swarm_signal or (signals.cross_module and signals.risk_score >= 70):
-            enable("swarm", "cross_module_high_risk_review")
-        if signals.drone_signal or (signals.cross_module and signals.candidate_count >= 2):
-            enable("drone", "parallelizable_subtask_signal")
-        if signals.multi_agent_signal or (signals.cross_module and signals.risk_score >= 60):
-            enable("file_lock", "multi_agent_write_boundary")
-            enable("multi_agent", "coordinated_ownership_required")
-        if "merge" in task_lower or "integrate" in task_lower or "integration" in task_lower:
-            enable("integration_manager", "integration_or_merge_signal")
-        if signals.risk_score >= 90 or "long" in task_lower or signals.nightshift_signal or "nightshift" in signals.governance_seed:
-            enable("nightshift", "long_or_critical_risk")
-        if signals.ui_signal:
-            enable("ui_validator", "ui_validation_signal")
-        if signals.continuity_signal:
-            enable("metabolism", "continuity_or_resume_signal")
-        if signals.benchmark_signal:
-            enable("benchmark", "evaluation_or_public_report_signal")
-        if signals.meta_opt_signal:
-            enable("meta_opt", "optimization_signal")
-        if signals.registry_signal:
-            enable("registry_sync", "platform_registry_signal")
-        if signals.oracle_signal:
-            enable("oracle_shadow", "shadow_promotion_signal")
-        if signals.federation_signal:
-            enable("federation", "federated_learning_signal")
-        if signals.stress_signal:
-            enable("stress_test", "stress_or_recursion_signal")
+        routing_tier, routing_tier_reason = self._decide_routing_tier(signals)
+        apply_signal_policies(
+            signals=signals,
+            task_desc=task_desc,
+            task_type=task_type,
+            enable=enable,
+        )
+        apply_tier_policies(
+            states=states,
+            reasons=reasons,
+            routing_tier=routing_tier,
+            signals=signals,
+            enable=enable,
+        )
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
         total_cost = sum(self.nodes[name].cost for name in selected)
-        forbidden: list[str] = []
-        if total_cost > constraint_model.max_cost:
-            for name in sorted(
-                [item for item in selected if states[item] == "conditional"],
-                key=lambda item: (scoring.score(self.nodes[item]), self.nodes[item].cost),
-            ):
-                if total_cost <= constraint_model.max_cost:
-                    break
-                states[name] = "forbidden"
-                forbidden.append(name)
-                reasons[name].append("budget_downgrade")
-                total_cost -= self.nodes[name].cost
+        states, reasons, forbidden, total_cost = self._apply_budget_downgrade(
+            states=states,
+            reasons=reasons,
+            scoring=scoring,
+            max_cost=constraint_model.max_cost,
+        )
 
         decision_trace: list[dict[str, Any]] = []
         score = 0
@@ -640,12 +562,20 @@ class CapabilityPlanner:
                 }
             )
 
-        replan_trace = self._build_replan_trace(
+        replan_trace = build_replan_trace(
             states=states,
             phase_trace=phase_trace,
             risk_score=signals.risk_score,
             confidence=signals.confidence,
+            nodes=self.nodes,
         )
+        signal_snapshot = build_signal_snapshot(
+            signals=signals,
+            routing_tier=routing_tier,
+            routing_tier_reason=routing_tier_reason,
+        )
+        signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
+        signal_snapshot["planner_version"] = "capability_planner_v1"
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",
@@ -660,37 +590,41 @@ class CapabilityPlanner:
             decision_trace=decision_trace,
             replan_trace=replan_trace,
             score=score,
-            signal_snapshot=signals.to_dict(),
+            signal_snapshot=signal_snapshot,
         )
 
-    def _build_replan_trace(
+    @staticmethod
+    def _decide_routing_tier(signals: Any) -> tuple[str, str]:
+        if signals.hazard_forced_l3:
+            return "L3_swarm_deep", "hazard_mapping_forced_l3"
+        if signals.risk_score < 30 and signals.confidence >= 0.7 and not signals.cross_module:
+            return "L1_green_lane", "low_risk_low_ambiguity"
+        if signals.risk_score >= 70 or signals.cross_module:
+            return "L3_swarm_deep", "high_risk_or_cross_module"
+        return "L2_hardened", "default_hardened_lane"
+
+    def _apply_budget_downgrade(
         self,
         *,
         states: dict[str, str],
-        phase_trace: dict[str, Any],
-        risk_score: int,
-        confidence: float,
-    ) -> list[dict[str, Any]]:
-        trace: list[dict[str, Any]] = []
-        for phase in PHASES:
-            active = [
-                name
-                for name, state in states.items()
-                if state in {"required", "conditional"} and phase in self.nodes[name].phase_hooks
-            ]
-            reasons = []
-            if phase == "X" and "research" in active:
-                reasons.append("fill_context_gap")
-            if phase == "D" and (risk_score >= 70 or confidence < 0.75):
-                reasons.append("recheck_governance_and_belief")
-            if phase == "A":
-                reasons.append("claim_and_artifact_fail_closed")
-            trace.append(
-                {
-                    "phase": phase,
-                    "prior_state": str(phase_trace.get(phase) or ""),
-                    "active_capabilities": active,
-                    "replan_reasons": reasons or ["keep_current_plan"],
-                }
-            )
-        return trace
+        reasons: dict[str, list[str]],
+        scoring: CapabilityScoringConfig,
+        max_cost: int,
+    ) -> tuple[dict[str, str], dict[str, list[str]], list[str], int]:
+        selected = [name for name, state in states.items() if state in {"required", "conditional"}]
+        total_cost = sum(self.nodes[name].cost for name in selected)
+        forbidden: list[str] = []
+        if total_cost <= max_cost:
+            return states, reasons, forbidden, total_cost
+
+        for name in sorted(
+            [item for item in selected if states[item] == "conditional"],
+            key=lambda item: (scoring.score(self.nodes[item]), self.nodes[item].cost),
+        ):
+            if total_cost <= max_cost:
+                break
+            states[name] = "forbidden"
+            forbidden.append(name)
+            reasons[name].append("budget_downgrade")
+            total_cost -= self.nodes[name].cost
+        return states, reasons, forbidden, total_cost

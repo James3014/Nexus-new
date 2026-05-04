@@ -7,6 +7,7 @@ from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS
 from nexus.engine.capability_contracts import CapabilityReceipt
 from nexus.engine.capability_receipts import build_skill_receipts, build_trace_receipts, selected_receipts
 from nexus.engine.capability_signals import build_capability_signals
+from nexus.engine.route_decision_adapter import build_route_decision
 
 
 def test_capability_signals_normalize_five_pillar_and_skill_inputs():
@@ -228,6 +229,37 @@ def test_route_decision_includes_forecast_gate_shadow_contract():
     assert decision["forecast_gate_shadow"]["shadow_mode"] is True
     assert decision["forecast_gate_shadow"]["suggested_tier"] == "L1_light_governed"
     assert decision["forecast_gate_shadow"]["early_exit_policy"] == "never_skip_mempalace_artifact_claim_delivery_gates"
+    assert decision["routing_tier"] == "L1_green_lane"
+    assert decision["policy_loaded_count"] >= 1
+    assert decision["policy_pruned_count"] >= 0
+
+
+def test_route_decision_hazard_hits_force_l3_contract():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix handoff drift and policy bypass in coordinator path.",
+        task_type="bug",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 20,
+                "adjusted_root_cause_confidence": 0.98,
+                "hazard_hits": ["handoff_drift"],
+                "hazard_forced_l3": True,
+            },
+        },
+    )
+    decision = build_route_decision(
+        task_id="hazard-001",
+        task_desc="Fix handoff drift and policy bypass in coordinator path.",
+        task_type="bug",
+        recommended_flow="hyper_sprint",
+        plan=plan,
+    ).to_dict()
+
+    assert decision["hazard_forced_l3"] is True
+    assert "handoff_drift" in decision["hazard_hits"]
+    assert decision["routing_tier"] == "L3_swarm_deep"
+    assert decision["routing_tier_reason"] == "hazard_mapping_forced_l3"
 
 
 def test_planner_composes_core_capabilities_from_commercial_lane_signals():

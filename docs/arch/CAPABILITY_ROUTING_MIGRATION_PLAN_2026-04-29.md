@@ -932,3 +932,22 @@ incrementally.
     `forecast_gate`, `xray`, and `research_control_plane`.
   - Kept `learn_scheduler` and `autonomic_router` reserved until scheduler
     freshness signals and planner-SSOT migration are clearer.
+
+## 2026-05-04 P12-P14 Planner-Decision SSOT Alignment
+- Failure lesson:
+  - Route adapter carried multiple derived fields without explicit provenance,
+    making it hard to prove whether values came from planner SSOT or adapter
+    fallback logic.
+- Fix:
+  - `RouteDecision` now records planner provenance:
+    - `plan_schema_version`
+    - `plan_mode`
+    - `plan_score`
+  - Adapter now records derivation metadata:
+    - `routing_tier_fallback_used`
+    - `recommended_flow_mismatch`
+    - `recommended_flow_param`
+    - `recommended_flow_plan`
+- Guardrail:
+  - Route-derived fields remain diagnostic; public claims remain
+    `receipt_backed` and require invoked+evidence+gate.

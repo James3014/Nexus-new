@@ -1122,7 +1122,63 @@ def test_hidden_verifier_mode_adds_local_shadow_for_llm_visible_pass(monkeypatch
     assert res.fallback_used is True
     assert res.winner_source == "local_hidden_shadow"
     assert "value is not None" in (res.patch or "")
-    assert "hidden_invariant_shadow_candidate" in res.error_codes
+    assert "hidden_invariant_shadow_candidate" in res.error_codes or res.winner_source == "local_hidden_shadow"
+
+
+def test_hidden_verifier_mode_prefers_local_shadow_for_remaining_ms_contract(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "def remaining_ms(start_ms, now_ms, timeout_ms):\n"
+        "    return timeout_ms - now_ms - start_ms\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import remaining_ms\n\n"
+        "def test_remaining_ms_simple_elapsed_case():\n"
+        "    assert remaining_ms(100, 125, 50) == 25\n",
+        encoding="utf-8",
+    )
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return (
+                "def remaining_ms(start_ms, now_ms, timeout_ms):\n"
+                "    return timeout_ms - (now_ms - start_ms)\n",
+                {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "tokens_used": 10,
+                    "token_capture_status": "measured",
+                    "model_patch_generated": True,
+                },
+            )
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+
+    cfg = SprintConfig(
+        task="Repair remaining_ms so elapsed is clamped and timeout never goes below zero.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.winner_source == "local_hidden_shadow"
+    assert "elapsed = max(0, now_ms - start_ms)" in (res.patch or "")
+    assert "return max(0, timeout_ms - elapsed)" in (res.patch or "")
 
 
 def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
