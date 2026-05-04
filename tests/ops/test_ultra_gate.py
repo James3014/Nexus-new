@@ -37,6 +37,16 @@ def _valid_report(diff_path="/tmp/nexus-ultra/changes.diff", git_status_path="/t
             "unverified_observations": 0,
             "reproduction_required": True,
             "negative_test_execution": "not_applicable_dry_run",
+            "claim_check_required": False,
+        },
+        "route_confidence": 0.9,
+        "hitl": {
+            "attach_session": "",
+            "strategic_guidance": "",
+        },
+        "claim_check": {
+            "passed": True,
+            "results": [],
         },
         "created_at": "2026-04-24T00:00:00+00:00",
         "report_path": "/tmp/report.json",
@@ -160,3 +170,24 @@ def test_main_fails_closed_for_missing_report(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["passed"] is False
     assert payload["failures"]
+
+
+def test_evaluate_report_claim_check_required_and_failed():
+    payload = _valid_report()
+    payload["verification"]["claim_check_required"] = True
+    payload["claim_check"]["passed"] = False
+
+    passed, failures = ultra_gate.evaluate_report(payload)
+    assert passed is False
+    assert "claim_check_failed" in failures
+
+
+def test_evaluate_report_requires_hitl_for_low_confidence():
+    payload = _valid_report()
+    payload["route_confidence"] = 0.4
+    payload["hitl"] = {"attach_session": "", "strategic_guidance": ""}
+
+    passed, failures = ultra_gate.evaluate_report(payload)
+    assert passed is False
+    assert "hitl_attach_session_missing" in failures
+    assert "hitl_strategic_guidance_missing" in failures

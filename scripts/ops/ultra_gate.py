@@ -25,6 +25,7 @@ REQUIRED_TOP_LEVEL_FIELDS = (
     "created_at",
     "report_path",
 )
+HITL_CONFIDENCE_THRESHOLD = 0.6
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -115,6 +116,37 @@ def evaluate_report(
             severity = str(finding.get("severity", "")).lower()
             if state == "VERIFIED_FINDING" and severity in BLOCKING_SEVERITIES:
                 failures.append(f"blocking_verified_finding:{finding.get('id', 'unknown')}")
+
+    # Claim check fail-closed when explicitly required by payload.
+    verification_block = verification if isinstance(verification, dict) else {}
+    claim_required = bool(verification_block.get("claim_check_required", False))
+    claim_check = payload.get("claim_check", {})
+    if claim_required:
+        if not isinstance(claim_check, dict):
+            failures.append("claim_check_missing")
+        else:
+            if claim_check.get("passed") is not True:
+                failures.append("claim_check_failed")
+            if not isinstance(claim_check.get("results", []), list):
+                failures.append("claim_check_results_invalid")
+
+    # HITL gate: low-confidence routes must carry attached session + strategic guidance.
+    route_confidence_raw = payload.get("route_confidence")
+    route_confidence = None
+    if route_confidence_raw is not None:
+        try:
+            route_confidence = float(route_confidence_raw)
+        except (TypeError, ValueError):
+            failures.append("route_confidence_invalid")
+    hitl = payload.get("hitl", {})
+    if route_confidence is not None and route_confidence < HITL_CONFIDENCE_THRESHOLD:
+        if not isinstance(hitl, dict):
+            failures.append("hitl_missing")
+        else:
+            if not str(hitl.get("attach_session", "")).strip():
+                failures.append("hitl_attach_session_missing")
+            if not str(hitl.get("strategic_guidance", "")).strip():
+                failures.append("hitl_strategic_guidance_missing")
 
     return not failures, failures
 

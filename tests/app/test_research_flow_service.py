@@ -124,6 +124,64 @@ def test_ultra_review_route_gate_cleans_sandbox_after_evaluation(tmp_path: Path,
     assert Path(out["report_path"]).exists() is True
 
 
+def test_ultra_review_gate_forwards_claim_check_and_hitl(tmp_path: Path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeUltraReviewService:
+        def __init__(self, _repo_root):
+            pass
+
+        def run(self, **kwargs):
+            report_path = Path(kwargs["report_path"])
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schema_version": "ultra-review.v1",
+                "run_id": "x",
+                "status": "DRY_RUN_PASS",
+                "gate_passed": True,
+                "mode": "dry-run",
+                "project_root": "/tmp/project",
+                "sandbox_path": "/tmp/nexus-ultra",
+                "artifacts": {"diff": "/tmp/nexus-ultra/changes.diff", "git_status": "/tmp/nexus-ultra/git_status.txt"},
+                "diff": {"changed_files": []},
+                "fleet": [
+                    {"lane": "security_sentry"},
+                    {"lane": "logic_breaker"},
+                    {"lane": "ghost_regression"},
+                ],
+                "findings": [],
+                "verification": {"reproduction_required": True},
+                "created_at": "2026-04-24T00:00:00+00:00",
+                "report_path": str(report_path),
+            }
+            report_path.write_text(json.dumps(payload), encoding="utf-8")
+            return payload
+
+    def _fake_eval(payload, check_artifacts=True):
+        captured.update(payload)
+        return True, []
+
+    monkeypatch.setenv("NEXUS_ULTRA_REVIEW_DRY_GATE", "1")
+    monkeypatch.setattr("nexus.engine.ultra_review_service.UltraReviewService", _FakeUltraReviewService)
+    monkeypatch.setattr("scripts.ops.ultra_gate.evaluate_report", _fake_eval)
+
+    out = research_flow_service._ultra_review_gate_evidence(
+        repo_root=tmp_path,
+        task_desc="Review task",
+        task_id="task-a",
+        route_decision={"governance_layers": ["ultra_review"]},
+        claim_check={"passed": True, "results": []},
+        route_confidence=0.4,
+        hitl={"attach_session": "hitl-task-a", "strategic_guidance": "pause and ask"},
+    )
+
+    assert out["gate_passed"] is True
+    assert captured["claim_check"]["passed"] is True
+    assert captured["verification"]["claim_check_required"] is True
+    assert captured["route_confidence"] == 0.4
+    assert captured["hitl"]["attach_session"] == "hitl-task-a"
+
+
 def test_build_route_public_contract_exact_keys(tmp_path: Path):
     out = research_flow_service.build_route(
         repo_root=tmp_path,
@@ -1908,6 +1966,80 @@ def test_hyper_guard_fallback_preserves_gateway_token_source(tmp_path: Path, mon
     assert report["token_capture_status"] == "measured"
     assert report["model_calls"] == 1
     assert payload["nexus_usage_trace"]["gemini_uses_nexus"] is True
+
+
+def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="VALUE = 2\n",
+            winner_source="llm",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=1,
+            model_calls=1,
+            total_tokens=11,
+            token_capture_status="measured",
+            learning_trace={},
+            candidates=[
+                SimpleNamespace(
+                    seed=1,
+                    score=0.4,
+                    source="local",
+                    hint="baseline",
+                    error="",
+                    stdout="pytest failed",
+                    candidate_code="VALUE = 1\n",
+                    elapsed_sec=0.2,
+                ),
+                SimpleNamespace(
+                    seed=2,
+                    score=0.9,
+                    source="llm",
+                    hint="llm",
+                    error="",
+                    stdout="pytest passed",
+                    candidate_code="VALUE = 2\n",
+                    elapsed_sec=0.2,
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix flaky websocket timeout race",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.6,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=2.0,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+    )
+
+    ar = payload["nexus_usage_trace"]["autoreason"]
+    assert ar["status"] == "SUCCESS"
+    assert ar["winner"] == "candidate-2"
+    assert isinstance(ar["borda_scores"], dict)
 
 
 def test_auto_flow_writes_explicit_output_file(tmp_path: Path):

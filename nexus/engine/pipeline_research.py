@@ -9,6 +9,7 @@ import sys
 import time
 
 from nexus.research.research_pack import ResearchContext, build_research_pack
+from nexus.research.doc_scout_adapter import DocScoutAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class PipelineResearchMixin:
     def _stage_research(self, ctx: Any, tracer: Any):
         """Run experimental research and write diagnostic map into state metadata."""
         logger.info("🔍 [Phase X] Initiating Master Loop Research for: %s", ctx.task_id)
+        doc_scout = DocScoutAdapter(self.engine.project_root).search(ctx.task_desc, limit=6)
         nas_aggression = (ctx.bayesian_params or {}).get("nas_aggression", 0.7)
         rounds = max(int(5 * (1.0 + nas_aggression)), 1)
 
@@ -35,6 +37,7 @@ class PipelineResearchMixin:
             "findings": research_result.get("findings", []),
             "winner_params": research_result.get("winner", {}).get("params", {}),
             "evolution_score": research_result.get("winner", {}).get("final_metric", 0.0),
+            "doc_scout": doc_scout,
         }
         return True
 
@@ -181,4 +184,3 @@ class PipelineResearchMixin:
             raw={"report": report, "return_code": rc},
         )
         return build_research_pack(ctx=ctx)
-

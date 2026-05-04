@@ -25,6 +25,7 @@ from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
+from nexus.engine.autoreason_service import AutoreasonService
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
@@ -569,6 +570,9 @@ def _ultra_review_gate_evidence(
     task_id: str | None = None,
     route_decision: dict[str, Any] | None = None,
     capability_stack: dict[str, Any] | None = None,
+    claim_check: dict[str, Any] | None = None,
+    route_confidence: float | None = None,
+    hitl: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     route_decision = route_decision if isinstance(route_decision, dict) else {}
     controls = route_decision.get("executor_controls") if isinstance(route_decision.get("executor_controls"), dict) else {}
@@ -606,6 +610,17 @@ def _ultra_review_gate_evidence(
             report_path=report_path,
             sandbox_root=repo_root / ".nexus" / "reports" / "ultra_review" / "route_gate_sandboxes",
         )
+        if isinstance(claim_check, dict):
+            payload["claim_check"] = claim_check
+            verification = payload.get("verification", {})
+            if not isinstance(verification, dict):
+                verification = {}
+            verification["claim_check_required"] = True
+            payload["verification"] = verification
+        if route_confidence is not None:
+            payload["route_confidence"] = float(route_confidence)
+        if isinstance(hitl, dict):
+            payload["hitl"] = hitl
         gate_passed, failures = evaluate_report(payload, check_artifacts=True)
         sandbox_path = payload.get("sandbox_path")
         if sandbox_path:
@@ -647,6 +662,62 @@ def _nexus_tier(route_features: dict[str, Any], *, force_flow: str | None) -> di
         reason = "low_risk_light_governance"
         tier = "light"
     return {"tier": tier, "reason": reason, "risk_score": risk_score}
+
+
+def _claim_check_summary(
+    *,
+    task_desc: str,
+    tests_passed: bool,
+    artifact_summary: dict[str, Any],
+    route: dict[str, Any],
+) -> dict[str, Any]:
+    changed = bool(artifact_summary.get("changed", False))
+    verification_only = bool(artifact_summary.get("verification_only", False))
+    results = [
+        {
+            "claim_id": "tests_passed",
+            "status": "PASS" if tests_passed else "FAIL",
+            "evidence_refs": [str(artifact_summary.get("pytest_cmd", ""))],
+            "reason": "target tests execution",
+        },
+        {
+            "claim_id": "artifact_or_verification",
+            "status": "PASS" if (changed or verification_only) else "FAIL",
+            "evidence_refs": [f"changed:{changed}", f"verification_only:{verification_only}"],
+            "reason": "artifact mutation or verification-only rescue",
+        },
+    ]
+    claim_text = str(task_desc or "").lower()
+    has_claim_word = "claim" in claim_text or "evidence" in claim_text or "verify" in claim_text
+    if has_claim_word:
+        results.append(
+            {
+                "claim_id": "claim_keyword_requires_evidence",
+                "status": "PASS" if tests_passed else "FAIL",
+                "evidence_refs": [f"route_reason:{route.get('recommended_reason', '')}"],
+                "reason": "claim-bearing task must retain executable evidence",
+            }
+        )
+    passed = all(str(item.get("status", "")).upper() == "PASS" for item in results)
+    return {
+        "passed": passed,
+        "results": results,
+    }
+
+
+def _hitl_payload(*, route_confidence: float, route: dict[str, Any], task_id: str | None) -> dict[str, Any]:
+    if route_confidence >= 0.6:
+        return {"attach_session": "", "strategic_guidance": "", "reason": "not_required"}
+    confidence_text = f"{route_confidence:.2f}"
+    hint_mode = ((route.get("route_features", {}) if isinstance(route, dict) else {}) or {}).get("router_hint_mode", "")
+    return {
+        "attach_session": f"hitl-{_safe_trace_slug(task_id or 'task')}",
+        "strategic_guidance": (
+            f"Low confidence route ({confidence_text}); prioritize reversible steps, "
+            f"preserve test evidence, and prefer bounded edits. hint_mode={hint_mode}"
+        ),
+        "reason": "low_confidence_route",
+    }
 
 
 def _load_history_memory_signal(repo_root: Path, *, task_desc: str, task_type: str) -> dict[str, Any]:
@@ -2031,16 +2102,65 @@ def run_auto_flow(
     capability_evidence = _write_msa_receipt_reports(repo_root, task_id=task_id, evidence=capability_evidence)
     route_decision_payload = route.get("route_decision", {}) if isinstance(route.get("route_decision"), dict) else {}
     route_selected_capabilities = {str(item) for item in route_decision_payload.get("selected_capabilities", []) or []}
+    route_confidence = float(route.get("adjusted_root_cause_confidence", root_cause_confidence) or root_cause_confidence)
+    claim_check = _claim_check_summary(
+        task_desc=task_desc,
+        tests_passed=tests_passed,
+        artifact_summary=artifact_summary,
+        route=route,
+    )
+    hitl = _hitl_payload(route_confidence=route_confidence, route=route, task_id=task_id)
     if "research" in route_selected_capabilities and not capability_evidence.get("research_used"):
         capability_evidence["research_used"] = True
         capability_evidence["research_refs"] = [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
+    summaries = result_report.get("candidate_summaries", [])
+    autoreason_payload = hyper_learning_trace.get("autoreason", {}) if isinstance(hyper_learning_trace.get("autoreason", {}), dict) else {}
+    should_run_autoreason = str(result.get("flow", "")) == "hyper_sprint" and isinstance(summaries, list) and bool(summaries)
+    if should_run_autoreason:
+        candidates = []
+        for idx, item in enumerate(summaries):
+            if not isinstance(item, dict):
+                continue
+            candidates.append(
+                {
+                    "candidate_id": str(item.get("candidate_id") or f"candidate-{idx + 1}"),
+                    "summary": str(item.get("hint") or item.get("source") or ""),
+                    "evidence_refs": [str(item.get("stdout_excerpt", "") or "")],
+                    "score": float(item.get("score", 0.0) or 0.0),
+                }
+            )
+        if candidates:
+            autoreason_payload = AutoreasonService().run(
+                candidates,
+                task_desc=task_desc,
+                stop_threshold=int(
+                    ((route.get("capability_stack", {}) if isinstance(route.get("capability_stack"), dict) else {}).get(
+                        "stop_policy",
+                        {},
+                    )
+                    or {}
+                    ).get("threshold", 2)
+                ),
+            )
+    elif not autoreason_payload:
+        autoreason_payload = {
+            "schema": "nexus_autoreason_result_v1",
+            "status": "SKIPPED",
+            "winner": None,
+            "stop_reason": "candidate_summaries_missing",
+            "judge_votes": [],
+            "borda_scores": {},
+        }
     ultra_review_evidence = _ultra_review_gate_evidence(
         repo_root=repo_root,
         task_desc=task_desc,
         task_id=task_id,
         route_decision=route_decision_payload,
         capability_stack=route.get("capability_stack", {}),
+        claim_check=claim_check,
+        route_confidence=route_confidence,
+        hitl=hitl,
     )
     phase_wall_sec["A"] = round(time.monotonic() - phase_started_at, 4)
     context_memory_needed = "docs_code_sync" in str(task_type).lower() or any(
@@ -2134,9 +2254,12 @@ def run_auto_flow(
         },
         "phase_wall_sec": phase_wall_sec,
         "capability_stack": route.get("capability_stack", {}),
-        "autoreason": hyper_learning_trace.get("autoreason", {}) if isinstance(hyper_learning_trace, dict) else {},
+        "autoreason": autoreason_payload,
         "ddtree": hyper_learning_trace.get("ddtree", {}) if isinstance(hyper_learning_trace, dict) else {},
         "ultra_review": ultra_review_evidence,
+        "claim_check": claim_check,
+        "hitl": hitl,
+        "route_confidence": route_confidence,
         "codeintel": codeintel_evidence,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),
         "nexus_rescued": nexus_rescued,
@@ -2246,6 +2369,9 @@ def run_auto_flow(
             "reason": learn_phase_slo.get("reason", ""),
         },
         "result": result,
+        "claim_check": claim_check,
+        "hitl": hitl,
+        "route_confidence": route_confidence,
         "strategy": {
             "path": strategy_path,
             "forced_flow": force_flow or "auto",
