@@ -11,11 +11,14 @@ from nexus.services.workspace import WorkspaceManager
 from nexus.services.prompt_builder import PromptBuilder
 from nexus.services.reviewer import GatewayReviewLoop
 from nexus.core.commander import Commander
-from nexus.core.context_hub import ContextHub
+from nexus.core.belief_engine import BeliefEngine
+from nexus.core.context_hub import ContextDependencies, ContextHub
+from nexus.core.knowledge_injector import KnowledgeInjector
 from nexus.core.state_io import StateIO
 from nexus.core.router import SkillsRouter
 from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
 from nexus.services.memory import MemoryService
+from nexus.services.mem_palace import MemPalace
 from nexus.services.predictor import Predictor
 from nexus.engine.phases.planner import PlannerPhaseHandler
 from nexus.engine.phases.research import ResearchPhaseHandler
@@ -35,6 +38,10 @@ def _create_nexus_engine(**kwargs):
     config = EngineConfig(**config_args)
     
     return NexusEngine(config=config, **kwargs)
+
+
+def _create_belief_engine(project_root):
+    return BeliefEngine(Path(project_root) / ".nexus" / "belief_state.json")
 
 
 class NexusContainer(containers.DeclarativeContainer):
@@ -63,6 +70,16 @@ class NexusContainer(containers.DeclarativeContainer):
         MemoryService,
         project_root=project_root,
         run_dir=run_dir
+    )
+
+    mem_palace = providers.Singleton(
+        MemPalace,
+        project_root=project_root,
+    )
+
+    belief_engine = providers.Singleton(
+        _create_belief_engine,
+        project_root=project_root,
     )
 
     router = providers.Singleton(
@@ -94,6 +111,22 @@ class NexusContainer(containers.DeclarativeContainer):
         PromptBuilder,
         project_root=project_root
     )
+
+    knowledge_injector = providers.Singleton(
+        KnowledgeInjector,
+        skill_registry=None,
+        mem_palace=mem_palace,
+        wisdom_vault=None,
+    )
+
+    context_dependencies = providers.Factory(
+        ContextDependencies,
+        memory_service=memory_service,
+        wisdom_vault=None,
+        belief_engine=belief_engine,
+        knowledge_injector=knowledge_injector,
+        prompt_builder=prompt_builder,
+    )
     
     llm = providers.Singleton(
         LLMClient,
@@ -108,9 +141,10 @@ class NexusContainer(containers.DeclarativeContainer):
     context_hub = providers.Singleton(
         ContextHub,
         project_root=project_root,
-        memory_service=memory_service,
         run_dir=run_dir,
-        nexus_fs=nexus_fs
+        nexus_fs=nexus_fs,
+        deps=context_dependencies,
+        strict_deps=True,
     )
 
     commander = providers.Singleton(

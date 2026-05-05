@@ -108,3 +108,6 @@ def test_container_service_hubs_consistent(tmp_path):
     
     # 驗證 IntelHub 內的 context_hub 其 memory_service 屬性與直接從容器拿出來的是同一個 (Singleton)
     assert intel_hub.context_hub.memory_service is memory_service, "Service Hub 沒有正確使用 Singleton"
+    assert intel_hub.context_hub.prompt_builder is container.prompt_builder()
+    assert intel_hub.context_hub.knowledge_injector is container.knowledge_injector()
+    assert intel_hub.context_hub.belief_engine is container.belief_engine()

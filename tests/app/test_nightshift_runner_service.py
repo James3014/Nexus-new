@@ -8,6 +8,15 @@ def test_nightshift_service_init(tmp_path: Path):
     assert runner.project_root == tmp_path.resolve()
 
 
+def test_nightshift_uses_injected_context_hub(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    hub = object()
+
+    runner = AutoResearchNightShift(project_root=tmp_path, task="test-task", context_hub=hub)
+
+    assert runner.hub is hub
+
+
 def test_nightshift_policy_bypass_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("NIGHTSHIFT_BYPASS_POLICY", "1")
     runner = AutoResearchNightShift(project_root=tmp_path, task="test-task")

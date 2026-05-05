@@ -66,6 +66,8 @@ class AutoResearchNightShift:
         fallback_model_name: Optional[str] = "gemini-3-flash-preview",
         keep_worktree: Optional[bool] = None,
         project_root: Optional[Path] = None,
+        context_hub: Any = None,
+        context_dependencies: Any = None,
     ):
         self.task = task.strip()
         self.max_rounds = max_rounds
@@ -82,7 +84,12 @@ class AutoResearchNightShift:
         self.git_enabled = (self.project_root / ".git").exists()
             
         self.worktree_mgr = WorkspaceManager(str(self.project_root))
-        self.hub = ContextHub(self.project_root) if self.git_enabled else None
+        if context_hub is not None:
+            self.hub = context_hub
+        elif self.git_enabled and context_dependencies is not None:
+            self.hub = ContextHub(str(self.project_root), deps=context_dependencies, strict_deps=True)
+        else:
+            self.hub = None
         self.feynman_auditor = DualTrackAudit()
         self.compute_tier = "CLOUD"
 

@@ -35,7 +35,7 @@ class GatewayReviewLoop(NexusOrchestrator):
         from unittest.mock import MagicMock
         from nexus.core.config import OrchestratorConfig
         from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
-        from nexus.core.context_hub import ContextHub
+        from nexus.core.context_hub import ContextDependencies, ContextHub
 
         from nexus.core.commander import Commander
         from nexus.core.router import SkillsRouter
@@ -44,6 +44,11 @@ class GatewayReviewLoop(NexusOrchestrator):
         from nexus.services.linter import Linter
         from nexus.services.patcher import SafePatcher
         from nexus.services.workspace import WorkspaceManager
+        from nexus.core.belief_engine import BeliefEngine
+        from nexus.core.knowledge_injector import KnowledgeInjector
+        from nexus.services.memory import MemoryService
+        from nexus.services.mem_palace import MemPalace
+        from nexus.services.prompt_builder import PromptBuilder
         
         self.project_root = Path(kwargs.get("project_root", Path.cwd()))
         run_dir = kwargs.get("run_dir") or str(self.project_root / ".nexus" / "runs" / "latest")
@@ -62,6 +67,25 @@ class GatewayReviewLoop(NexusOrchestrator):
         linter_obj = kwargs.get("linter") or Linter()
         patcher_obj = kwargs.get("patcher") or SafePatcher(lock_dir="/tmp", project_root=str(self.project_root))
         workspace_obj = kwargs.get("workspace") or WorkspaceManager(str(self.project_root))
+        context_hub_obj = kwargs.get("context_hub")
+        if context_hub_obj is None:
+            context_deps = kwargs.get("context_dependencies")
+            if context_deps is None:
+                memory_service = kwargs.get("memory_service") or MemoryService(str(self.project_root), run_dir=run_dir)
+                mem_palace = kwargs.get("mem_palace") or MemPalace(str(self.project_root))
+                prompt_builder = kwargs.get("prompt_builder") or PromptBuilder(str(self.project_root))
+                context_deps = ContextDependencies(
+                    memory_service=memory_service,
+                    wisdom_vault=kwargs.get("wisdom_vault"),
+                    belief_engine=kwargs.get("belief_engine") or BeliefEngine(self.project_root / ".nexus" / "belief_state.json"),
+                    knowledge_injector=kwargs.get("knowledge_injector") or KnowledgeInjector(
+                        skill_registry=kwargs.get("skill_registry"),
+                        mem_palace=mem_palace,
+                        wisdom_vault=kwargs.get("wisdom_vault"),
+                    ),
+                    prompt_builder=prompt_builder,
+                )
+            context_hub_obj = ContextHub(str(self.project_root), run_dir=run_dir, deps=context_deps, strict_deps=True)
         
         infra = NexusInfraHub(
             git=git_obj,
@@ -71,7 +95,7 @@ class GatewayReviewLoop(NexusOrchestrator):
         )
         intel = NexusIntelHub(
             llm=llm_obj,
-            context_hub=kwargs.get("context_hub") or ContextHub(str(self.project_root), run_dir=run_dir),
+            context_hub=context_hub_obj,
             commander=kwargs.get("commander") or Commander(run_dir, state_io_obj, router_obj)
         )
         gov = NexusGovHub(

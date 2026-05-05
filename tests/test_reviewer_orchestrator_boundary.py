@@ -25,3 +25,21 @@ def test_reviewer_is_oneshot_even_on_failure():
     assert result["status"] == "REJECTED"
     # Even with apply_patch=True, the Reviewer component should be one-shot in v9
     assert mock_llm.ask.call_count == 1
+
+
+def test_reviewer_uses_injected_context_hub():
+    hub = MagicMock()
+    reviewer = CodexLoopV2(
+        project_root=".",
+        context_hub=hub,
+        git=MagicMock(),
+        llm=MagicMock(),
+        linter=MagicMock(),
+        patcher=MagicMock(),
+        reporter=MagicMock(),
+        workspace=MagicMock(),
+        router=MagicMock(),
+        state_io=MagicMock(),
+    )
+
+    assert reviewer.context_hub is hub
