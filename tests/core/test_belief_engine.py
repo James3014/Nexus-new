@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from nexus.core.belief_contracts import AuditOutcome
 from nexus.core.belief_engine import BeliefEngine
@@ -22,19 +23,21 @@ class TestBeliefEngine(unittest.TestCase):
 def test_belief_engine_processes_structured_audit_outcome(tmp_path):
     engine = BeliefEngine(tmp_path / "belief.json")
 
-    out = engine.process_audit_outcome(
-        AuditOutcome(
-            task_id="task-1",
-            assumption="AUDIT_FAILURE_1",
-            passed=False,
-            evidence_id="EV-FAIL",
-            reason="claim missing evidence",
+    with patch("nexus.core.belief_engine.NexusTracer.record_belief_shift") as record_shift:
+        out = engine.process_audit_outcome(
+            AuditOutcome(
+                task_id="task-1",
+                assumption="AUDIT_FAILURE_1",
+                passed=False,
+                evidence_id="EV-FAIL",
+                reason="claim missing evidence",
+            )
         )
-    )
 
     assert out["confidence"] == 0.1
     assert engine.get_confidence("task-1", "AUDIT_FAILURE_1") == 0.1
     assert engine.beliefs["AUDIT_FAILURE_1"]["reason"] == "claim missing evidence"
+    record_shift.assert_called_once_with("task-1", 0.7, 0.1)
 
 
 def test_orchestrator_records_audit_failure_through_belief_gate_without_magicmock_detection():

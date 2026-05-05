@@ -6,7 +6,7 @@ import socket
 import ssl
 from unittest.mock import MagicMock
 from nexus.security.tls_provider import TLSProvider
-from nexus.security.secure_sync import RegistryMessageHandler, SecureRegistrySync
+from nexus.security.secure_sync import RegistryMessageHandler, SecureRegistrySync, decode_sync_request
 
 @pytest.fixture
 def certs_dir(tmp_path):
@@ -122,3 +122,15 @@ def test_registry_message_handler_heartbeat_and_unknown_action():
     resp = handler.handle({"action": "unknown"}, "node-a")
     assert resp["status"] == "error"
     assert "Unknown action" in resp["message"]
+
+
+def test_decode_sync_request_rejects_invalid_and_oversized_messages():
+    assert decode_sync_request(b"{bad-json\n")[1] == {"status": "error", "message": "invalid_json"}
+    assert decode_sync_request(b"[]\n")[1] == {"status": "error", "message": "invalid_request"}
+    assert decode_sync_request(b'{"action":"heartbeat"}\n', max_bytes=4)[1] == {
+        "status": "error",
+        "message": "message_too_large",
+    }
+    req, error = decode_sync_request(b'{"action":"heartbeat"}\n')
+    assert error is None
+    assert req == {"action": "heartbeat"}

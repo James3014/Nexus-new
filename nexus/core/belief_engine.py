@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from nexus.core.belief_contracts import AuditOutcome
+from nexus.telemetry.tracer import NexusTracer
 
 class BeliefEngine:
     """維護當前的邏輯假設與信心度 (Subjective Trust)。"""
@@ -37,6 +38,7 @@ class BeliefEngine:
 
     def process_audit_outcome(self, outcome: AuditOutcome) -> dict[str, Any]:
         """Process a structured audit outcome without leaking confidence policy."""
+        old_confidence = self.assess_confidence(outcome.task_id, outcome.assumption)
         confidence = outcome.confidence
         if confidence is None:
             confidence = 0.9 if outcome.passed else 0.1
@@ -52,6 +54,7 @@ class BeliefEngine:
         self.beliefs[outcome.assumption]["metadata"] = dict(outcome.metadata)
         with open(self.state_file, "w") as f:
             json.dump(self.beliefs, f, indent=2)
+        NexusTracer.record_belief_shift(outcome.task_id, old_confidence, confidence)
         return {
             "task_id": outcome.task_id,
             "assumption": outcome.assumption,

@@ -14,6 +14,20 @@ from nexus.security.tls_provider import TLSProvider
 from nexus.learning.skill_registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
+MAX_SYNC_MESSAGE_BYTES = 1_048_576
+
+
+def decode_sync_request(line: bytes, *, max_bytes: int = MAX_SYNC_MESSAGE_BYTES) -> Tuple[Dict[str, Any] | None, Dict[str, Any] | None]:
+    """Decode one newline-delimited JSON object with bounded memory and type checks."""
+    if len(line) > max_bytes:
+        return None, {"status": "error", "message": "message_too_large"}
+    try:
+        req = json.loads(line.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, {"status": "error", "message": "invalid_json"}
+    if not isinstance(req, dict):
+        return None, {"status": "error", "message": "invalid_request"}
+    return req, None
 
 
 class IncomingMessageHandler(Protocol):
@@ -129,10 +143,11 @@ class SecureRegistrySync:
                         
             logger.debug("mTLS Conn established from %s (Node: %s)", addr, client_id)
             f = conn.makefile("rwb")
-            line = f.readline().decode("utf-8")
+            line = f.readline()
             if not line:
                 return
-            resp = self.handler.handle(json.loads(line), client_id)
+            req, error = decode_sync_request(line)
+            resp = error or self.handler.handle(req or {}, client_id)
             f.write((json.dumps(resp) + "\n").encode("utf-8"))
             f.flush()
             
