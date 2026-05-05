@@ -26,8 +26,11 @@ from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.autoreason_service import AutoreasonService
+from nexus.engine.asi_constraints import ASIConstraintExtractor
 from nexus.core.event_bus import NexusEventBus
+from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter
+from nexus.research.formal_report_service import FormalReportService
 from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
 from nexus.research.research_runtime_contracts import build_claim_probe, build_research_doctor
 from nexus.services.codeintel import analyze_impact, scan_codebase
@@ -509,15 +512,14 @@ def _augment_local_msa_bench_evidence(
     evidence: dict[str, Any],
     artifact_verified: bool,
 ) -> dict[str, Any]:
-    if os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() not in {"1", "true", "yes"}:
-        return evidence
+    local_swarm_enabled = os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     text = f"{task_id or ''} {task_desc} {task_type}".lower()
     if not artifact_verified:
         return evidence
 
     updated = dict(evidence)
     slug = _safe_trace_slug(task_id or task_desc)
-    if "swarm" in text:
+    if local_swarm_enabled and "swarm" in text:
         quiet_moment = {
             "schema_version": "nexus_quiet_moment.v1",
             "event_type": "quiet_moment",
@@ -544,7 +546,7 @@ def _augment_local_msa_bench_evidence(
             "quiet_moment": quiet_moment,
         }
         updated["quiet_moment"] = quiet_moment
-    if "drone" in text:
+    if local_swarm_enabled and "drone" in text:
         artifact_path = repo_root / ".nexus" / "reports" / "drones" / f"{slug}_local_msa_crystal.json"
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
         artifact = {
@@ -564,7 +566,7 @@ def _augment_local_msa_bench_evidence(
             "artifact_paths": [str(artifact_path)],
             "artifact_count": 1,
         }
-    if "nightshift" in text:
+    if local_swarm_enabled and "nightshift" in text:
         updated["nightshift_recommended"] = True
         updated["nightshift_invoked"] = True
         updated["nightshift_recovered"] = True
@@ -1788,6 +1790,185 @@ def _write_output_file(repo_root: Path, path: Path, payload: dict) -> Path:
     return out
 
 
+def _write_runtime_receipt_json(repo_root: Path, *, category: str, receipt_slug: str, payload: dict[str, Any]) -> str:
+    rel = Path(".nexus") / "reports" / "capabilities" / category / f"{receipt_slug}.json"
+    out = repo_root / rel
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return str(rel)
+
+
+def _stringify_claims(rows: list[Any]) -> list[str]:
+    out: list[str] = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            value = row.get("claim") or row.get("reason") or row.get("source") or row
+        else:
+            value = row
+        text = str(value).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _augment_semantic_runtime_capabilities(
+    *,
+    repo_root: Path,
+    task_id: str | None,
+    task_desc: str,
+    task_type: str,
+    target_file: str | None,
+    receipt_slug: str,
+    selected_capabilities: set[str],
+    nexus_usage_trace: dict[str, Any],
+    route: dict[str, Any],
+    asi_ledger: list[dict[str, Any]],
+    plateau: dict[str, Any],
+    artifact_verified: bool,
+    normalized_success_criteria: str,
+) -> None:
+    capabilities = nexus_usage_trace.setdefault("capabilities", {})
+    research_context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
+
+    if "llm_judge_panel" in selected_capabilities:
+        autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}
+        votes = autoreason.get("judge_votes", []) if isinstance(autoreason.get("judge_votes"), list) else []
+        winner = str(autoreason.get("winner") or "").strip()
+        if votes and winner:
+            report = {
+                "schema": "nexus_llm_judge_panel_receipt_v1",
+                "task_id": task_id or receipt_slug,
+                "winner": winner,
+                "votes": votes,
+                "borda_scores": autoreason.get("borda_scores", {}),
+                "status": autoreason.get("status", ""),
+            }
+            capabilities["llm_judge_panel_used"] = True
+            capabilities["llm_judge_panel_votes"] = votes
+            capabilities["llm_judge_panel_winner"] = winner
+            capabilities["llm_judge_panel_report_path"] = _write_runtime_receipt_json(
+                repo_root,
+                category="llm_judge_panel",
+                receipt_slug=receipt_slug,
+                payload=report,
+            )
+            capabilities["llm_judge_panel_gate_passed"] = bool(artifact_verified)
+
+    if "asi_constraint_extractor" in selected_capabilities:
+        constraints_packet = ASIConstraintExtractor().extract(asi_ledger, task_id=task_id or receipt_slug)
+        constraints = constraints_packet.get("constraints", []) if isinstance(constraints_packet.get("constraints"), list) else []
+        blocked = [str(item) for item in (research_context.get("blocked_assumptions", []) or []) if str(item).strip()]
+        if constraints or blocked:
+            report = {
+                "schema": "nexus_asi_constraint_runtime_receipt_v1",
+                "task_id": task_id or receipt_slug,
+                "constraints_packet": constraints_packet,
+                "blocked_assumptions": blocked,
+            }
+            capabilities["asi_constraints"] = constraints
+            capabilities["blocked_assumptions"] = blocked
+            capabilities["asi_constraint_report_path"] = _write_runtime_receipt_json(
+                repo_root,
+                category="asi_constraint_extractor",
+                receipt_slug=receipt_slug,
+                payload=report,
+            )
+            capabilities["asi_constraint_gate_passed"] = bool(artifact_verified and (constraints or blocked))
+
+    if "architecture_scout" in selected_capabilities:
+        scout_plateau = plateau if bool(plateau.get("detected")) else {
+            "detected": True,
+            "reason": "architecture_scout_selected_without_plateau",
+            "family": "flow:architecture_boundary_probe",
+        }
+        plan = DistantScoutPlanner().plan(task_desc=task_desc, plateau=scout_plateau, asi_ledger=asi_ledger)
+        if str(plan.get("status") or "") == "READY":
+            report_path = _write_runtime_receipt_json(
+                repo_root,
+                category="architecture_scout",
+                receipt_slug=receipt_slug,
+                payload=plan,
+            )
+            architecture_refs = [str(item) for item in plan.get("architecture_actions", []) if str(item).strip()]
+            blast_radius_refs = []
+            if target_file:
+                blast_radius_refs.append(str(target_file))
+            codeintel = nexus_usage_trace.get("codeintel", {}) if isinstance(nexus_usage_trace.get("codeintel"), dict) else {}
+            blast_radius_refs.extend(str(item) for item in codeintel.get("files", []) or [] if str(item).strip())
+            capabilities["architecture_scout_used"] = True
+            capabilities["architecture_scout_report_path"] = report_path
+            capabilities["architecture_refs"] = architecture_refs
+            capabilities["blast_radius_refs"] = list(dict.fromkeys(blast_radius_refs))
+            capabilities["architecture_scout_gate_passed"] = bool(artifact_verified and architecture_refs)
+
+    if "external_doc_scout" in selected_capabilities:
+        doc_scout = research_context.get("doc_scout", {}) if isinstance(research_context.get("doc_scout"), dict) else {}
+        hits = doc_scout.get("hits", []) if isinstance(doc_scout.get("hits"), list) else []
+        refs = []
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            ref = str(hit.get("source_url") or hit.get("path") or "").strip()
+            if ref:
+                refs.append(ref)
+        verified = _stringify_claims(research_context.get("verified_claims", []) or [])
+        rejected = _stringify_claims(research_context.get("rejected_claims", []) or [])
+        if refs or verified or rejected:
+            report = {
+                "schema": "nexus_external_doc_scout_receipt_v1",
+                "task_id": task_id or receipt_slug,
+                "external_doc_refs": refs,
+                "verified_claims": verified,
+                "rejected_claims": rejected,
+            }
+            capabilities["external_doc_scout_used"] = True
+            capabilities["external_doc_refs"] = list(dict.fromkeys(refs))
+            capabilities["verified_claims"] = verified
+            capabilities["rejected_claims"] = rejected
+            capabilities["external_doc_scout_report_path"] = _write_runtime_receipt_json(
+                repo_root,
+                category="external_doc_scout",
+                receipt_slug=receipt_slug,
+                payload=report,
+            )
+            capabilities["external_doc_scout_gate_passed"] = bool(artifact_verified)
+
+    if "formal_report" in selected_capabilities:
+        service = FormalReportService()
+        verification = [
+            {
+                "command": normalized_success_criteria,
+                "status": "PASS" if artifact_verified else "BLOCKED",
+            }
+        ]
+        route_receipts = [
+            {
+                "name": "artifact_gate",
+                "evidence_present": bool(capabilities.get("artifact_refs")),
+                "gate_passed": bool(capabilities.get("artifact_gate_passed", False)),
+            },
+            {
+                "name": "llm_judge_panel",
+                "evidence_present": bool(capabilities.get("llm_judge_panel_report_path")),
+                "gate_passed": bool(capabilities.get("llm_judge_panel_gate_passed", False)),
+            },
+        ]
+        report = service.build(
+            title=f"Nexus Formal Evidence Report: {task_id or receipt_slug}",
+            hypothesis=task_desc,
+            asi_constraints=capabilities.get("asi_constraints", []) or [],
+            judge_votes=capabilities.get("llm_judge_panel_votes", []) or [],
+            verification=verification,
+            route_receipts=route_receipts,
+        )
+        rel_path = Path(".nexus") / "reports" / "formal" / f"{receipt_slug}.md"
+        report_path = service.write_markdown(repo_root=repo_root, path=rel_path, report=report)
+        capabilities["formal_report_path"] = report_path
+        capabilities["formal_report_schema_version"] = str(report.get("schema") or "")
+        capabilities["verification_summary_ref"] = f"{normalized_success_criteria}:{verification[0]['status']}"
+        capabilities["formal_report_gate_passed"] = bool(report.get("status") == "READY" and artifact_verified)
+
+
 
 
 def run_auto_flow(
@@ -1884,6 +2065,32 @@ def run_auto_flow(
     recent = list(history_data.get(flow_key, []))
     asi_ledger = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
     plateau = _detect_plateau(asi_ledger)
+    if bool(plateau.get("detected")):
+        route_features = route.get("route_features", {}) if isinstance(route.get("route_features"), dict) else {}
+        route_features = {**route_features, "plateau_detected": True}
+        context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
+        risk_flags = list(context.get("risk_flags", []) or [])
+        blocked_assumptions = list(context.get("blocked_assumptions", []) or [])
+        if "plateau_detected" not in risk_flags:
+            risk_flags.append("plateau_detected")
+        if "local_micro_tuning_is_enough" not in blocked_assumptions:
+            blocked_assumptions.append("local_micro_tuning_is_enough")
+        context = {
+            **context,
+            "risk_flags": risk_flags,
+            "blocked_assumptions": blocked_assumptions,
+            "next_action_hint": "switch_to_architecture_scout_and_change_family",
+        }
+        route_features["blocked_assumptions_count"] = len(blocked_assumptions)
+        route["route_features"] = route_features
+        route["research_context"] = context
+        capability_plan, route_decision = _build_capability_plan_and_decision(
+            task_desc=task_desc,
+            task_type=task_type,
+            route=route,
+        )
+        route["capability_plan"] = capability_plan.to_dict()
+        route["route_decision"] = route_decision
     if force_flow is None and bool(plateau.get("detected")) and chosen_flow == "baseline":
         chosen_flow = "hyper_sprint"
     recent_window = recent[-max(1, history_window):]
@@ -2713,6 +2920,26 @@ def run_auto_flow(
             phase_trace=nexus_usage_trace["phase_trace"],
         ),
     ).to_dict()
+    selected_for_runtime_receipts = {
+        str(item)
+        for item in (capability_plan_payload.get("selected_capabilities", []) or [])
+        if str(item).strip()
+    }
+    _augment_semantic_runtime_capabilities(
+        repo_root=repo_root,
+        task_id=task_id,
+        task_desc=task_desc,
+        task_type=task_type,
+        target_file=target_file,
+        receipt_slug=receipt_slug,
+        selected_capabilities=selected_for_runtime_receipts,
+        nexus_usage_trace=nexus_usage_trace,
+        route=route,
+        asi_ledger=asi_ledger,
+        plateau=plateau,
+        artifact_verified=artifact_verified,
+        normalized_success_criteria=normalized_success_criteria,
+    )
     recursive_research = _rlm_research_trace_enabled()
     if _rlm_trace_enabled() or recursive_research:
         if recursive_research:

@@ -31,3 +31,24 @@ def test_formal_report_emits_markdown_when_evidence_chain_is_complete():
     assert out["claim_status"] == "PASS"
     assert "## Judge Panel" in out["markdown"]
     assert "flow:retry_delay" in out["markdown"]
+
+
+def test_formal_report_writer_persists_markdown_under_repo(tmp_path):
+    service = FormalReportService()
+    out = service.build(
+        title="ASI experiment",
+        hypothesis="semantic judge improves repair selection",
+        asi_constraints=[],
+        judge_votes=[{"judge": "fake", "ranking": ["B", "A"]}],
+        verification=[{"command": "pytest", "status": "PASS"}],
+        route_receipts=[{"name": "artifact_gate", "evidence_present": True, "gate_passed": True}],
+    )
+
+    rel = service.write_markdown(
+        repo_root=tmp_path,
+        path=".nexus/reports/formal/test.md",
+        report=out,
+    )
+
+    assert rel == ".nexus/reports/formal/test.md"
+    assert (tmp_path / rel).read_text(encoding="utf-8").startswith("# ASI experiment")

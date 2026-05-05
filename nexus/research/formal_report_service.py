@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 
@@ -77,3 +78,14 @@ class FormalReportService:
             parts = [f"{key}={value}" for key, value in sorted(row.items())]
             out.append(f"- {'; '.join(parts)}")
         return "\n".join(out)
+
+    def write_markdown(self, *, repo_root: Path, path: str | Path, report: dict[str, Any]) -> str:
+        out = Path(path)
+        if not out.is_absolute():
+            out = repo_root / out
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(str(report.get("markdown") or ""), encoding="utf-8")
+        try:
+            return str(out.relative_to(repo_root))
+        except ValueError:
+            return str(out)

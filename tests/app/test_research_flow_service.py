@@ -879,7 +879,7 @@ def test_local_msa_executor_adds_nightshift_receipt_only_after_verified_recovery
 
 
 def test_local_route_oracle_adds_research_and_lancedb_receipt_refs(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
+    monkeypatch.delenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", raising=False)
     evidence = research_flow_service._capability_evidence(
         result_report={},
         learning_trace={},
@@ -924,6 +924,7 @@ def test_local_route_oracle_adds_research_and_lancedb_receipt_refs(tmp_path: Pat
 
 
 def test_run_auto_flow_exposes_swarm_report_in_usage_trace(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "1")
     target = tmp_path / "demo.py"
     test_file = tmp_path / "test_demo.py"
     target.write_text("def value():\n    return 1\n", encoding="utf-8")
@@ -2170,6 +2171,115 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert payload["nexus_usage_trace"]["governance_event_summary"]["event_count"] == 2
     event_log = tmp_path / ".nexus" / "events" / "event_log.jsonl"
     assert "evidence_accepted" in event_log.read_text(encoding="utf-8")
+
+
+def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+    history_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-history.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    flow_key = f"{target}|{test_file}"
+    history_path.write_text(
+        json.dumps(
+            {
+                flow_key: [
+                    {
+                        "asi_record": {
+                            "status": "discard",
+                            "family": "flow:retry_delay",
+                            "metric": 0.41,
+                            "rollback_reason": "timeout_retry_plateau",
+                            "evidence": f"pytest-{idx}.log",
+                        }
+                    }
+                    for idx in range(4)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="VALUE = 2\n",
+            winner_source="llm",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=1,
+            model_calls=1,
+            total_tokens=11,
+            token_capture_status="measured",
+            learning_trace={},
+            candidates=[
+                SimpleNamespace(
+                    seed=1,
+                    score=0.4,
+                    source="local",
+                    hint="baseline",
+                    error="",
+                    stdout="pytest failed",
+                    candidate_code="VALUE = 1\n",
+                    elapsed_sec=0.2,
+                ),
+                SimpleNamespace(
+                    seed=2,
+                    score=0.9,
+                    source="llm",
+                    hint="llm",
+                    error="",
+                    stdout="pytest passed",
+                    candidate_code="VALUE = 2\n",
+                    elapsed_sec=0.2,
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Produce public report for sdk api claim evidence after repeated retry timeout plateau",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="public_cross_module_bug",
+        candidate_count=2,
+        root_cause_confidence=0.5,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=2.0,
+        baseline_fast_sec=0.0,
+        history_window=4,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        task_id="semantic-runtime-receipts",
+    )
+
+    receipts = {item["name"]: item for item in payload["nexus_usage_trace"]["capability_receipts"]}
+    for name in (
+        "llm_judge_panel",
+        "asi_constraint_extractor",
+        "architecture_scout",
+        "external_doc_scout",
+        "formal_report",
+    ):
+        assert receipts[name]["public_claim_safe"] is True, receipts[name]
+        assert receipts[name]["evidence_refs"]
+    capabilities = payload["nexus_usage_trace"]["capabilities"]
+    assert (tmp_path / capabilities["formal_report_path"]).exists()
+    assert capabilities["formal_report_schema_version"] == "nexus_formal_report_v1"
+    assert capabilities["llm_judge_panel_report_path"]
+    assert capabilities["architecture_scout_report_path"]
+    assert capabilities["external_doc_scout_report_path"]
 
 
 def test_auto_flow_writes_explicit_output_file(tmp_path: Path):
