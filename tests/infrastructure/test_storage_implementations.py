@@ -16,17 +16,19 @@ def test_local_cache_store_roundtrip_sets():
     assert cache.get("k") is None
 
 
-def test_lancedb_storage_search_has_no_service_layer_import():
-    source = Path("nexus/infrastructure/storage_implementations.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    imports = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            imports.append(node.module or "")
-        elif isinstance(node, ast.Import):
-            imports.extend(alias.name for alias in node.names)
+def test_infrastructure_layer_has_no_service_layer_imports():
+    violations = []
+    for path in Path("nexus/infrastructure").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            imports = []
+            if isinstance(node, ast.ImportFrom):
+                imports.append(node.module or "")
+            elif isinstance(node, ast.Import):
+                imports.extend(alias.name for alias in node.names)
+            violations.extend(f"{path}:{name}" for name in imports if name.startswith("nexus.services"))
 
-    assert not any(name.startswith("nexus.services") for name in imports)
+    assert violations == []
 
 
 def test_lancedb_storage_scoped_access_keeps_tenants_isolated(tmp_path):
