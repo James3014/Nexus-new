@@ -182,6 +182,40 @@ def test_public_claim_gate_rejects_missing_route_decision():
     assert "route_decision_missing:a" in gate["failures"]
 
 
+def test_public_claim_gate_rejects_route_quality_funnel_regression():
+    gate = _public_claim_gate(
+        rows_without=[{"task_id": "a", "trial_index": 1, "token_measured": True}],
+        rows_with=[
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "token_measured": True,
+                "route_decision_schema_version": "nexus_route_decision_v1",
+                "route_decision_selected_count": 10,
+                "route_decision_invoked_count": 4,
+                "route_decision_evidence_count": 3,
+                "route_decision_outcome_count": 2,
+            }
+        ],
+        summary_without={"token_measured_rate": 1.0},
+        summary_with={
+            "token_measured_rate": 1.0,
+            "model_uses_nexus_rate": 1.0,
+            "gemini_uses_nexus_rate": 1.0,
+            "nexus_usage_valid_rate": 1.0,
+            "phase_completion_rate": 1.0,
+            "claim_verified_rate": 1.0,
+        },
+        formal={"valid_rate": 1.0},
+    )
+
+    assert gate["verdict"] == "FAIL"
+    assert "route_quality_selected_to_invoked_below_threshold" in gate["failures"]
+    assert "route_quality_invoked_to_evidence_below_threshold" in gate["failures"]
+    assert "route_quality_evidence_to_outcome_below_threshold" in gate["failures"]
+    assert "route_quality_unnecessary_selected_above_threshold" in gate["failures"]
+
+
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"

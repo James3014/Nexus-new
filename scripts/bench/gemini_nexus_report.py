@@ -32,6 +32,13 @@ _CAPABILITY_NON_ACTIONABLE_REASONS = {
     "ddtree": {"selected_without_invocation"},
 }
 
+_ROUTE_QUALITY_GATE_THRESHOLDS = {
+    "selected_to_invoked_rate": 0.70,
+    "invoked_to_evidence_rate": 0.95,
+    "evidence_to_outcome_rate": 0.90,
+    "unnecessary_selected_rate_max": 0.30,
+}
+
 
 def _pct(value: Any) -> str:
     try:
@@ -411,6 +418,34 @@ def _multiset_counts(rows: list[dict[str, Any]]) -> dict[tuple[str, str], int]:
     return counts
 
 
+def _route_quality_gate_from_rows(rows_with: list[dict[str, Any]]) -> list[str]:
+    selected = 0.0
+    invoked = 0.0
+    evidence = 0.0
+    outcome = 0.0
+    for row in rows_with:
+        selected += float(row.get("route_decision_selected_count", 0) or 0)
+        invoked += float(row.get("route_decision_invoked_count", 0) or 0)
+        evidence += float(row.get("route_decision_evidence_count", 0) or 0)
+        outcome += float(row.get("route_decision_outcome_count", 0) or 0)
+    if selected <= 0:
+        return []
+    selected_to_invoked = invoked / selected
+    invoked_to_evidence = (evidence / invoked) if invoked > 0 else 0.0
+    evidence_to_outcome = (outcome / evidence) if evidence > 0 else 0.0
+    unnecessary_selected = max(selected - invoked, 0.0) / selected
+    failures: list[str] = []
+    if selected_to_invoked < _ROUTE_QUALITY_GATE_THRESHOLDS["selected_to_invoked_rate"]:
+        failures.append("route_quality_selected_to_invoked_below_threshold")
+    if invoked_to_evidence < _ROUTE_QUALITY_GATE_THRESHOLDS["invoked_to_evidence_rate"]:
+        failures.append("route_quality_invoked_to_evidence_below_threshold")
+    if evidence_to_outcome < _ROUTE_QUALITY_GATE_THRESHOLDS["evidence_to_outcome_rate"]:
+        failures.append("route_quality_evidence_to_outcome_below_threshold")
+    if unnecessary_selected > _ROUTE_QUALITY_GATE_THRESHOLDS["unnecessary_selected_rate_max"]:
+        failures.append("route_quality_unnecessary_selected_above_threshold")
+    return failures
+
+
 def _public_claim_gate(
     *,
     rows_without: list[dict[str, Any]],
@@ -492,6 +527,7 @@ def _public_claim_gate(
         elif not bool(coverage.get("all_public_safe", False)):
             task_id = str(row.get("task_id") or "unknown")
             failures.append(f"expected_capability_coverage_incomplete:{task_id}")
+    failures.extend(_route_quality_gate_from_rows(rows_with))
     return {
         "verdict": "PASS" if not failures else "FAIL",
         "failures": sorted(set(failures)),

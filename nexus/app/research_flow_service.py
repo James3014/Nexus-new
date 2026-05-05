@@ -720,6 +720,57 @@ def _hitl_payload(*, route_confidence: float, route: dict[str, Any], task_id: st
     }
 
 
+def _asi_record(
+    *,
+    run_id: int,
+    task_desc: str,
+    recommended_flow: str,
+    chosen_flow: str,
+    status: str,
+    error: str,
+    route_confidence: float,
+) -> dict[str, Any]:
+    metric = 1.0 if str(status).upper() == "SUCCESS" else 0.0
+    return {
+        "run_id": run_id,
+        "hypothesis": task_desc[:240],
+        "family": f"flow:{recommended_flow or chosen_flow or 'unknown'}",
+        "metric_name": "success_rate",
+        "metric": metric,
+        "status": "keep" if metric >= 1.0 else "discard",
+        "decision": "keep" if metric >= 1.0 else "discard",
+        "evidence": "artifact_verified" if metric >= 1.0 else "run_failed",
+        "rollback_reason": "" if metric >= 1.0 else (error or "failed"),
+        "next_action_hint": "consider_distant_scout" if metric < 1.0 else "continue",
+        "route_confidence": round(float(route_confidence), 4),
+        "schema_version": "nexus_asi_record_v1",
+    }
+
+
+def _detect_plateau(asi_ledger: list[dict[str, Any]]) -> dict[str, Any]:
+    window = [item for item in asi_ledger[-5:] if isinstance(item, dict)]
+    if len(window) < 4:
+        return {"detected": False, "reason": "insufficient_window"}
+    recent4 = window[-4:]
+    statuses = [str(item.get("status", "")).lower() for item in recent4]
+    if not all(status == "discard" for status in statuses):
+        return {"detected": False, "reason": "status_not_all_discard"}
+    families = [str(item.get("family", "")).strip() for item in recent4]
+    if len(set(families)) != 1:
+        return {"detected": False, "reason": "family_not_stable"}
+    metrics = [float(item.get("metric", 0.0) or 0.0) for item in recent4]
+    metric_span = max(metrics) - min(metrics)
+    if metric_span >= 0.05:
+        return {"detected": False, "reason": "metric_variance_too_high", "metric_span": metric_span}
+    return {
+        "detected": True,
+        "reason": "discard_streak_same_family_low_variance",
+        "family": families[0],
+        "metric_span": metric_span,
+        "next_lane": "DISTANT_SCOUT",
+    }
+
+
 def _load_history_memory_signal(repo_root: Path, *, task_desc: str, task_type: str) -> dict[str, Any]:
     history_path = (repo_root / ".nexus" / "reports" / "research" / "auto-flow-history.json").resolve()
     if not history_path.exists():
@@ -1497,6 +1548,10 @@ def run_auto_flow(
 
     history_data = _read_history()
     recent = list(history_data.get(flow_key, []))
+    asi_ledger = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
+    plateau = _detect_plateau(asi_ledger)
+    if force_flow is None and bool(plateau.get("detected")) and chosen_flow == "baseline":
+        chosen_flow = "hyper_sprint"
     recent_window = recent[-max(1, history_window):]
     recent_hyper_fails = sum(1 for item in recent_window if item.get("flow") == "hyper_sprint" and item.get("status") == "FAILED")
     stage1_fail_signals = sum(
@@ -2341,6 +2396,7 @@ def run_auto_flow(
         "schema_version": "1.0",
         "task_desc": task_desc,
         "task_type": task_type,
+        "asi_ledger": asi_ledger,
         "route": route,
         "execution_profile": execution_profile,
         "chosen_flow": chosen_flow,
@@ -2378,6 +2434,7 @@ def run_auto_flow(
             "flow_ladder": ["baseline_probe", "hyper_sprint", "baseline_fallback"],
             "learn_gate_blocked": bool(learn_gate_blocked),
             "baseline_probe_skipped": baseline_probe_skipped,
+            "plateau": plateau,
         },
         "artifact_summary": artifact_summary,
         "success_criteria": {
@@ -2415,8 +2472,18 @@ def run_auto_flow(
             "task_desc": task_desc[:200],
             "route_recommended_flow": str(route.get("recommended_flow", "")),
             "ts": datetime.now(timezone.utc).isoformat(),
+            "asi_record": _asi_record(
+                run_id=len(recent) + 1,
+                task_desc=task_desc,
+                recommended_flow=str(route.get("recommended_flow", "")),
+                chosen_flow=chosen_flow,
+                status=str(result.get("status", "")),
+                error=str(result.get("error", "")),
+                route_confidence=route_confidence,
+            ),
         }
     )
+    payload["asi_ledger"] = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
     history_data[flow_key] = recent[-200:]
     _write_history(history_data)
     phase_wall_sec["C"] = round(time.monotonic() - phase_started_at, 4)

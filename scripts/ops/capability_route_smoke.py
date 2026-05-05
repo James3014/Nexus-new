@@ -79,6 +79,13 @@ REQUIRED_NINE_CAPABILITIES = frozenset(
     }
 )
 
+ROUTE_QUALITY_THRESHOLDS = {
+    "selected_to_invoked_rate": 0.70,
+    "invoked_to_evidence_rate": 0.95,
+    "evidence_to_outcome_rate": 0.90,
+    "unnecessary_selected_rate_max": 0.30,
+}
+
 
 def build_command(repo_root: Path, suite: SmokeSuite) -> list[str]:
     cmd = [
@@ -144,10 +151,18 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
     public_safe: set[str] = set()
     expected: set[str] = set()
+    selected_total = 0
+    invoked_total = 0
+    evidence_total = 0
+    outcome_total = 0
     for row in rows:
         coverage = row.get("expected_capability_receipt_coverage") or {}
         expected.update(str(item) for item in coverage.get("expected", []) or [])
         public_safe.update(str(item) for item in coverage.get("public_safe", []) or [])
+        selected_total += int(row.get("route_decision_selected_count", 0) or 0)
+        invoked_total += int(row.get("route_decision_invoked_count", 0) or 0)
+        evidence_total += int(row.get("route_decision_evidence_count", 0) or 0)
+        outcome_total += int(row.get("route_decision_outcome_count", 0) or 0)
         row_failures: list[str] = []
         if row.get("status") != "SUCCESS":
             row_failures.append("status_not_success")
@@ -174,11 +189,25 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
                     "row_failures": row_failures,
                 }
             )
+    selected_to_invoked_rate = (invoked_total / selected_total) if selected_total > 0 else 0.0
+    invoked_to_evidence_rate = (evidence_total / invoked_total) if invoked_total > 0 else 0.0
+    evidence_to_outcome_rate = (outcome_total / evidence_total) if evidence_total > 0 else 0.0
+    unnecessary_selected_rate = ((selected_total - invoked_total) / selected_total) if selected_total > 0 else 0.0
     return {
         "file": str(path),
         "tasks": len(rows),
         "expected_capabilities": sorted(expected),
         "public_safe_capabilities": sorted(public_safe),
+        "route_quality": {
+            "selected_total": selected_total,
+            "invoked_total": invoked_total,
+            "evidence_total": evidence_total,
+            "outcome_total": outcome_total,
+            "selected_to_invoked_rate": selected_to_invoked_rate,
+            "invoked_to_evidence_rate": invoked_to_evidence_rate,
+            "evidence_to_outcome_rate": evidence_to_outcome_rate,
+            "unnecessary_selected_rate": unnecessary_selected_rate,
+        },
         "failures": failures,
     }
 
@@ -257,6 +286,86 @@ def validate_nine_capability_identity(summaries: list[dict[str, Any]]) -> list[d
     return failures
 
 
+def validate_route_quality_gate(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    selected_total = 0
+    invoked_total = 0
+    evidence_total = 0
+    outcome_total = 0
+    for summary in summaries:
+        quality = summary.get("route_quality") or {}
+        if not isinstance(quality, dict):
+            continue
+        selected_total += int(quality.get("selected_total", 0) or 0)
+        invoked_total += int(quality.get("invoked_total", 0) or 0)
+        evidence_total += int(quality.get("evidence_total", 0) or 0)
+        outcome_total += int(quality.get("outcome_total", 0) or 0)
+
+    if selected_total <= 0:
+        failures.append(
+            {
+                "task_id": "__route_quality__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": [],
+                "failure_reasons": {"route_quality": {"selected_total": selected_total}},
+                "row_failures": ["route_quality_selected_total_zero"],
+            }
+        )
+        return failures
+
+    selected_to_invoked_rate = invoked_total / selected_total
+    invoked_to_evidence_rate = (evidence_total / invoked_total) if invoked_total > 0 else 0.0
+    evidence_to_outcome_rate = (outcome_total / evidence_total) if evidence_total > 0 else 0.0
+    unnecessary_selected_rate = max(selected_total - invoked_total, 0) / selected_total
+
+    if selected_to_invoked_rate < ROUTE_QUALITY_THRESHOLDS["selected_to_invoked_rate"]:
+        failures.append(
+            {
+                "task_id": "__route_quality__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": [],
+                "failure_reasons": {"selected_to_invoked_rate": selected_to_invoked_rate},
+                "row_failures": ["route_quality_selected_to_invoked_below_threshold"],
+            }
+        )
+    if invoked_to_evidence_rate < ROUTE_QUALITY_THRESHOLDS["invoked_to_evidence_rate"]:
+        failures.append(
+            {
+                "task_id": "__route_quality__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": [],
+                "failure_reasons": {"invoked_to_evidence_rate": invoked_to_evidence_rate},
+                "row_failures": ["route_quality_invoked_to_evidence_below_threshold"],
+            }
+        )
+    if evidence_to_outcome_rate < ROUTE_QUALITY_THRESHOLDS["evidence_to_outcome_rate"]:
+        failures.append(
+            {
+                "task_id": "__route_quality__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": [],
+                "failure_reasons": {"evidence_to_outcome_rate": evidence_to_outcome_rate},
+                "row_failures": ["route_quality_evidence_to_outcome_below_threshold"],
+            }
+        )
+    if unnecessary_selected_rate > ROUTE_QUALITY_THRESHOLDS["unnecessary_selected_rate_max"]:
+        failures.append(
+            {
+                "task_id": "__route_quality__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": [],
+                "failure_reasons": {"unnecessary_selected_rate": unnecessary_selected_rate},
+                "row_failures": ["route_quality_unnecessary_selected_above_threshold"],
+            }
+        )
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the fixed Nexus capability route smoke suite.")
     parser.add_argument("--repo-root", default=".", help="Repository root.")
@@ -269,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = [failure for summary in summaries for failure in summary.get("failures", [])]
     if not args.print_only:
         failures.extend(validate_nine_capability_identity(summaries))
+        failures.extend(validate_route_quality_gate(summaries))
     payload = {
         "schema_version": "nexus_capability_route_smoke.v1",
         "diagnostic_type": "receipt_diagnostic",

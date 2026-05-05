@@ -21,6 +21,23 @@ class HumanReviewHandoff:
     trace_id: str = ""
     terminal_state: str = "HUMAN_REVIEW"
 
+
+@dataclass
+class ASIRecord:
+    """Long-lived experiment memory for route/repair evolution."""
+    run_id: int
+    hypothesis: str
+    family: str
+    metric: float
+    status: str
+    evidence: str
+    rollback_reason: str = ""
+    next_action_hint: str = ""
+    metric_name: str = "success_rate"
+    decision: str = ""
+    route_confidence: float = 0.0
+    schema_version: str = "nexus_asi_record_v1"
+
 @dataclass
 class PipelineOutcome:
     """統一 Pipeline 輸出物件，取代散落在 metadata 中的欄位"""
@@ -33,3 +50,4 @@ class PipelineOutcome:
     verification_exit_codes: List[int] = field(default_factory=list)
     sandbox_mode: str = "unknown"
     pregate_skip: bool = False
+    asi_ledger: List[ASIRecord] = field(default_factory=list)

@@ -1428,6 +1428,29 @@ def test_build_route_doc_fix_ignores_router_hint_override(tmp_path: Path):
     assert out["route_features"]["router_hint_applied"] is False
 
 
+def test_detect_plateau_when_discard_streak_same_family():
+    ledger = [
+        {"status": "discard", "family": "flow:baseline", "metric": 0.0},
+        {"status": "discard", "family": "flow:baseline", "metric": 0.0},
+        {"status": "discard", "family": "flow:baseline", "metric": 0.0},
+        {"status": "discard", "family": "flow:baseline", "metric": 0.0},
+    ]
+    out = research_flow_service._detect_plateau(ledger)
+    assert out["detected"] is True
+    assert out["next_lane"] == "DISTANT_SCOUT"
+
+
+def test_detect_plateau_not_detected_when_family_changes():
+    ledger = [
+        {"status": "discard", "family": "flow:baseline", "metric": 0.0},
+        {"status": "discard", "family": "flow:hyper_sprint", "metric": 0.0},
+        {"status": "discard", "family": "flow:baseline", "metric": 0.0},
+        {"status": "discard", "family": "flow:hyper_sprint", "metric": 0.0},
+    ]
+    out = research_flow_service._detect_plateau(ledger)
+    assert out["detected"] is False
+
+
 def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text(

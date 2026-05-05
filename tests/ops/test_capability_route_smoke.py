@@ -39,6 +39,9 @@ def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_
             "semantic_status": "VERIFIED",
             "route_decision_schema_version": "nexus_route_decision_v1",
             "route_decision_selected_count": 3,
+            "route_decision_invoked_count": 3,
+            "route_decision_evidence_count": 3,
+            "route_decision_outcome_count": 3,
             "expected_capability_receipt_coverage": {
                 "expected": ["hyper"],
                 "public_safe": ["hyper"],
@@ -53,6 +56,9 @@ def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_
             "semantic_status": "VERIFIED",
             "route_decision_schema_version": "nexus_route_decision_v1",
             "route_decision_selected_count": 3,
+            "route_decision_invoked_count": 2,
+            "route_decision_evidence_count": 2,
+            "route_decision_outcome_count": 2,
             "expected_capability_receipt_coverage": {
                 "expected": ["memory"],
                 "public_safe": [],
@@ -69,6 +75,8 @@ def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_
     assert out["tasks"] == 2
     assert out["expected_capabilities"] == ["hyper", "memory"]
     assert out["public_safe_capabilities"] == ["hyper"]
+    assert out["route_quality"]["selected_total"] == 6
+    assert out["route_quality"]["invoked_total"] == 5
     assert out["failures"] == [
         {
             "task_id": "missing",
@@ -185,6 +193,44 @@ def test_nine_capability_identity_union_passes_for_route_oracles_plus_belief(tmp
     ]
     failures = capability_route_smoke.validate_nine_capability_identity(summaries)
     assert failures == []
+
+
+def test_route_quality_gate_passes_on_thresholds():
+    failures = capability_route_smoke.validate_route_quality_gate(
+        [
+            {
+                "suite": "route_oracles",
+                "route_quality": {
+                    "selected_total": 20,
+                    "invoked_total": 15,
+                    "evidence_total": 15,
+                    "outcome_total": 14,
+                },
+            }
+        ]
+    )
+    assert failures == []
+
+
+def test_route_quality_gate_fails_on_over_selection_and_low_funnel():
+    failures = capability_route_smoke.validate_route_quality_gate(
+        [
+            {
+                "suite": "route_oracles",
+                "route_quality": {
+                    "selected_total": 20,
+                    "invoked_total": 10,
+                    "evidence_total": 8,
+                    "outcome_total": 6,
+                },
+            }
+        ]
+    )
+    codes = {code for item in failures for code in (item.get("row_failures") or [])}
+    assert "route_quality_selected_to_invoked_below_threshold" in codes
+    assert "route_quality_invoked_to_evidence_below_threshold" in codes
+    assert "route_quality_evidence_to_outcome_below_threshold" in codes
+    assert "route_quality_unnecessary_selected_above_threshold" in codes
 
 
 def test_nine_capability_identity_union_fails_when_belief_missing():
