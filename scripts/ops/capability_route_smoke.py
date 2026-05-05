@@ -69,6 +69,15 @@ SMOKE_SUITES: tuple[SmokeSuite, ...] = (
             "rlm-harder-v2-belief-001",
         ),
     ),
+    SmokeSuite(
+        name="runtime_receipt_oracles",
+        manifest="scripts/bench/public_benchmark_route_oracles_v1.json",
+        output_dir=".nexus/reports/bench_route_runtime_receipt_smoke",
+        task_ids=(
+            "route-oracle-semantic-searcher-001",
+            "route-oracle-swarm-quiet-moment-001",
+        ),
+    ),
 )
 
 REQUIRED_NINE_CAPABILITIES = frozenset(

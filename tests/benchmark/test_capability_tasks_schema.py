@@ -54,14 +54,16 @@ def test_public_route_oracle_manifest_targets_uncovered_route_capabilities():
 
     assert payload["frozen"] is True
     assert payload["benchmark_id"] == "nexus-public-route-oracles-v1"
-    assert len(tasks) == 8
+    assert len(tasks) == 10
     assert {task["fixture_kind"] for task in tasks} == {
         "rlm_harder_v2_autoreason_judge",
         "rlm_harder_v2_ddtree_pruning",
         "rlm_harder_v2_ultra_review_report",
         "rlm_harder_v2_research_citation",
         "rlm_harder_v2_lancedb_retrieval",
+        "rlm_harder_v2_semantic_searcher_refs",
         "rlm_harder_v2_swarm_consensus",
+        "rlm_harder_v2_swarm_quiet_moment",
         "rlm_harder_v2_drone_artifacts",
         "rlm_harder_v2_nightshift_recovery",
     }
@@ -71,7 +73,9 @@ def test_public_route_oracle_manifest_targets_uncovered_route_capabilities():
         ("ultra_review",),
         ("research",),
         ("lancedb",),
+        ("semantic_searcher",),
         ("swarm",),
+        ("swarm_quiet_moment",),
         ("drone",),
         ("nightshift",),
     }

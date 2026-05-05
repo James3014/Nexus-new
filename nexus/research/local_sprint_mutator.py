@@ -751,6 +751,27 @@ def _patch_ultra_report_requires_repro_evidence(source: str) -> str:
     )
 
 
+def _patch_semantic_refs_require_source_gate(source: str) -> str:
+    if "def rlm_harder_v2_select_semantic_refs" not in source:
+        return source
+    if "ref.get('gate_passed')" in source and "ref.get('source_id')" in source and "ref.get('topic') == topic" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_select_semantic_refs",
+        "refs, topic, min_relevance",
+        "    return [\n"
+        "        ref.get('source_id')\n"
+        "        for ref in refs\n"
+        "        if ref.get('gate_passed')\n"
+        "        and ref.get('source_id')\n"
+        "        and ref.get('topic') == topic\n"
+        "        and ref.get('relevance', 0) >= min_relevance\n"
+        "    ]",
+        "<semantic_refs_source_gate_patch>",
+    )
+
+
 def generate_local_companion_edits(
     repo_root: Path,
     target_path: Path,
@@ -873,6 +894,7 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
         _patch_classify_requires_semantic_evidence,
         _patch_swarm_report_requires_distinct_evidence,
         _patch_ultra_report_requires_repro_evidence,
+        _patch_semantic_refs_require_source_gate,
     ):
         patched = patcher(source)
         if patched != source:

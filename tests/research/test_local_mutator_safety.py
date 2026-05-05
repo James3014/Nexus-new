@@ -224,6 +224,30 @@ def rlm_harder_v2_accept_ultra_report(report):
     assert accept({"sandbox_id": "s1", "gate_passed": False, "verified_findings": []}) is False
 
 
+def test_semantic_refs_patch_requires_source_topic_and_gate():
+    source = """
+def rlm_harder_v2_select_semantic_refs(refs, topic, min_relevance):
+    return [ref.get('id') for ref in refs if ref.get('relevance', 0) >= min_relevance]
+"""
+    patched = generate_local_candidate(
+        source,
+        "Accept semantic retrieval evidence only when semantic_searcher returns gated refs tied to the requested source.",
+        "local",
+        0,
+    )
+    ns = {}
+    exec(patched, ns)
+    select = ns["rlm_harder_v2_select_semantic_refs"]
+
+    refs = [
+        {"id": "ungated", "relevance": 0.95, "topic": "nexus", "source_id": "claim-u", "gate_passed": False},
+        {"id": "missing-source", "relevance": 0.95, "topic": "nexus", "gate_passed": True},
+        {"id": "wrong-topic", "relevance": 0.9, "topic": "other", "source_id": "claim-x", "gate_passed": True},
+        {"id": "target", "relevance": 0.75, "topic": "nexus", "source_id": "claim-t", "gate_passed": True},
+    ]
+    assert select(refs, "nexus", 0.7) == ["claim-t"]
+
+
 @pytest.mark.parametrize(
     ("source", "task", "function_name", "cases"),
     [

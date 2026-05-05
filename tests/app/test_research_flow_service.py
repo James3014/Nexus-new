@@ -789,10 +789,15 @@ def test_local_msa_executor_adds_swarm_receipt_only_after_verified_artifact(tmp_
 
     assert written["swarm_used"] is True
     assert written["swarm_consensus"] == "pass"
+    assert written["quiet_moment"]["schema_version"] == "nexus_quiet_moment.v1"
+    assert written["quiet_moment"]["production_writes_allowed"] is False
+    assert written["quiet_moment"]["observe"]["status"] == "observed"
+    assert written["quiet_moment"]["rollback"]["status"] == "armed"
     assert Path(written["swarm_report_path"]).exists()
     report = json.loads(Path(written["swarm_report_path"]).read_text(encoding="utf-8"))
     assert report["source"] == "local_msa_bench_executor"
     assert report["evidence_count"] == 2
+    assert report["quiet_moment"]["allowed_actions"] == ["observe", "report", "rollback"]
 
 
 def test_local_msa_executor_adds_drone_receipt_only_after_verified_artifact(tmp_path: Path, monkeypatch):
@@ -897,6 +902,14 @@ def test_local_route_oracle_adds_research_and_lancedb_receipt_refs(tmp_path: Pat
         evidence=evidence,
         artifact_verified=True,
     )
+    semantic = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-semantic-searcher-001",
+        task_desc="Use semantic retrieval evidence only when semantic_searcher refs are present.",
+        task_type="public_docs_code_sync",
+        evidence=evidence,
+        artifact_verified=True,
+    )
 
     assert research["research_used"] is True
     assert research["research_gate_passed"] is True
@@ -904,6 +917,10 @@ def test_local_route_oracle_adds_research_and_lancedb_receipt_refs(tmp_path: Pat
     assert lancedb["lancedb_hits"] == 1
     assert lancedb["lancedb_gate_passed"] is True
     assert lancedb["lancedb_refs"] == ["lancedb:route-oracle-lancedb-001:source_id"]
+    assert semantic["semantic_searcher_used"] is True
+    assert semantic["semantic_searcher_hits"] == 1
+    assert semantic["semantic_searcher_gate_passed"] is True
+    assert semantic["semantic_searcher_refs"] == ["semantic:route-oracle-semantic-searcher-001:source_id"]
 
 
 def test_run_auto_flow_exposes_swarm_report_in_usage_trace(tmp_path: Path, monkeypatch):

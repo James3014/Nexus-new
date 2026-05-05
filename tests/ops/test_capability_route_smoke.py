@@ -29,6 +29,11 @@ def test_smoke_suites_cover_core_governance_and_belief_gates():
     )
     assert "belief_gate" in suites
     assert suites["belief_gate"].task_ids == ("rlm-harder-v2-belief-001",)
+    assert "runtime_receipt_oracles" in suites
+    assert suites["runtime_receipt_oracles"].task_ids == (
+        "route-oracle-semantic-searcher-001",
+        "route-oracle-swarm-quiet-moment-001",
+    )
 
 
 def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_path: Path):

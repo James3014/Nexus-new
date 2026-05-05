@@ -921,6 +921,28 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
             "    assert rlm_harder_v2_select_vector_hits(hits, 'nexus', 0.7) == ['target']\n"
         )
         return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_semantic_searcher_refs":
+        visible = (
+            "from target import rlm_harder_v2_select_semantic_refs\n\n"
+            "def test_selects_gated_semantic_ref_for_topic():\n"
+            "    refs = [\n"
+            "        {'id': 'a', 'relevance': 0.8, 'topic': 'nexus', 'source_id': 'claim-a', 'gate_passed': True},\n"
+            "        {'id': 'b', 'relevance': 0.4, 'topic': 'nexus', 'source_id': 'claim-b', 'gate_passed': True},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_select_semantic_refs(refs, 'nexus', 0.7) == ['claim-a']\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_ungated_missing_source_and_wrong_topic_refs():\n"
+            "    refs = [\n"
+            "        {'id': 'ungated', 'relevance': 0.95, 'topic': 'nexus', 'source_id': 'claim-u', 'gate_passed': False},\n"
+            "        {'id': 'missing-source', 'relevance': 0.95, 'topic': 'nexus', 'gate_passed': True},\n"
+            "        {'id': 'wrong-topic', 'relevance': 0.9, 'topic': 'other', 'source_id': 'claim-x', 'gate_passed': True},\n"
+            "        {'id': 'target', 'relevance': 0.75, 'topic': 'nexus', 'source_id': 'claim-t', 'gate_passed': True},\n"
+            "    ]\n"
+            "    assert rlm_harder_v2_select_semantic_refs(refs, 'nexus', 0.7) == ['claim-t']\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
     if fixture_kind == "rlm_harder_v2_swarm_consensus":
         visible = (
             "from target import rlm_harder_v2_accept_swarm_report\n\n"
@@ -933,6 +955,21 @@ def _split_rlm_harder_fixture_tests(fixture_kind: str, test_code: str) -> tuple[
             "def test_rejects_single_role_or_missing_evidence():\n"
             "    assert rlm_harder_v2_accept_swarm_report({'consensus': 'pass', 'findings': [{'role': 'logic', 'evidence': 'a'}, {'role': 'logic', 'evidence': 'b'}]}) is False\n"
             "    assert rlm_harder_v2_accept_swarm_report({'consensus': 'pass', 'findings': [{'role': 'logic'}, {'role': 'security', 'evidence': 'b'}]}) is False\n"
+        )
+        return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
+    if fixture_kind == "rlm_harder_v2_swarm_quiet_moment":
+        visible = (
+            "from target import rlm_harder_v2_accept_quiet_moment\n\n"
+            "def test_accepts_non_mutating_quiet_moment():\n"
+            "    event = {'schema_version': 'nexus_quiet_moment.v1', 'production_writes_allowed': False, 'allowed_actions': ['observe', 'report', 'rollback'], 'observe': {'status': 'observed'}, 'rollback': {'status': 'armed'}}\n"
+            "    assert rlm_harder_v2_accept_quiet_moment(event) is True\n"
+        )
+        hidden = visible + (
+            "\n"
+            "def test_rejects_mutating_or_incomplete_quiet_moment():\n"
+            "    assert rlm_harder_v2_accept_quiet_moment({'schema_version': 'nexus_quiet_moment.v1', 'production_writes_allowed': True, 'allowed_actions': ['observe', 'report', 'rollback'], 'observe': {'status': 'observed'}, 'rollback': {'status': 'armed'}}) is False\n"
+            "    assert rlm_harder_v2_accept_quiet_moment({'schema_version': 'nexus_quiet_moment.v1', 'production_writes_allowed': False, 'allowed_actions': ['observe', 'report'], 'observe': {'status': 'observed'}, 'rollback': {'status': 'armed'}}) is False\n"
+            "    assert rlm_harder_v2_accept_quiet_moment({'schema_version': 'nexus_quiet_moment.v1', 'production_writes_allowed': False, 'allowed_actions': ['observe', 'report', 'rollback'], 'observe': {}, 'rollback': {'status': 'armed'}}) is False\n"
         )
         return _portable_fixture_test_import(visible), _portable_fixture_test_import(hidden)
     if fixture_kind == "rlm_harder_v2_drone_artifacts":
@@ -1326,6 +1363,14 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str, str]:
             "    hits = [{'id': 'a', 'score': 0.8, 'topic_pack': 'nexus', 'source_id': 'claim-a'}]\n"
             "    assert rlm_harder_v2_select_vector_hits(hits, 'nexus', 0.7) == ['a']\n",
         ),
+        "rlm_harder_v2_semantic_searcher_refs": (
+            "def rlm_harder_v2_select_semantic_refs(refs, topic, min_relevance):\n"
+            "    return [ref.get('id') for ref in refs if ref.get('relevance', 0) >= min_relevance]\n",
+            "from target import rlm_harder_v2_select_semantic_refs\n\n"
+            "def test_selects_gated_semantic_ref_for_topic():\n"
+            "    refs = [{'id': 'a', 'relevance': 0.8, 'topic': 'nexus', 'source_id': 'claim-a', 'gate_passed': True}]\n"
+            "    assert rlm_harder_v2_select_semantic_refs(refs, 'nexus', 0.7) == ['claim-a']\n",
+        ),
         "rlm_harder_v2_swarm_consensus": (
             "def rlm_harder_v2_accept_swarm_report(report):\n"
             "    return report.get('consensus') == 'pass' and len(report.get('findings', [])) >= 2\n",
@@ -1333,6 +1378,14 @@ def _rlm_harder_fixture_sources(fixture_kind: str) -> tuple[str, str, str]:
             "def test_accepts_consensus_with_two_roles():\n"
             "    report = {'consensus': 'pass', 'findings': [{'role': 'logic', 'evidence': 'a'}, {'role': 'security', 'evidence': 'b'}]}\n"
             "    assert rlm_harder_v2_accept_swarm_report(report) is True\n",
+        ),
+        "rlm_harder_v2_swarm_quiet_moment": (
+            "def rlm_harder_v2_accept_quiet_moment(event):\n"
+            "    return bool(event.get('schema_version') == 'nexus_quiet_moment.v1' and event.get('production_writes_allowed') is False and event.get('allowed_actions') == ['observe', 'report', 'rollback'] and (event.get('observe') or {}).get('status') and (event.get('rollback') or {}).get('status'))\n",
+            "from target import rlm_harder_v2_accept_quiet_moment\n\n"
+            "def test_accepts_non_mutating_quiet_moment():\n"
+            "    event = {'schema_version': 'nexus_quiet_moment.v1', 'production_writes_allowed': False, 'allowed_actions': ['observe', 'report', 'rollback'], 'observe': {'status': 'observed'}, 'rollback': {'status': 'armed'}}\n"
+            "    assert rlm_harder_v2_accept_quiet_moment(event) is True\n",
         ),
         "rlm_harder_v2_drone_artifacts": (
             "def rlm_harder_v2_accept_drone_artifacts(artifacts, expected_count):\n"

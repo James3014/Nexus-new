@@ -518,6 +518,17 @@ def _augment_local_msa_bench_evidence(
     updated = dict(evidence)
     slug = _safe_trace_slug(task_id or task_desc)
     if "swarm" in text:
+        quiet_moment = {
+            "schema_version": "nexus_quiet_moment.v1",
+            "event_type": "quiet_moment",
+            "reason": "local_msa_bench_swarm_pre_repair_mutation_boundary",
+            "affected_nodes": ["local_msa_bench_executor", "repair"],
+            "resume_after_seconds": 0,
+            "allowed_actions": ["observe", "report", "rollback"],
+            "production_writes_allowed": False,
+            "observe": {"status": "observed", "production_writes_allowed": False},
+            "rollback": {"status": "armed", "production_writes_allowed": False},
+        }
         updated["swarm_used"] = True
         updated["swarm_evidence_count"] = 2
         updated["swarm_consensus"] = "pass"
@@ -530,7 +541,9 @@ def _augment_local_msa_bench_evidence(
                 "role:logic:evidence:artifact_verified",
                 "role:regression:evidence:tests_passed",
             ],
+            "quiet_moment": quiet_moment,
         }
+        updated["quiet_moment"] = quiet_moment
     if "drone" in text:
         artifact_path = repo_root / ".nexus" / "reports" / "drones" / f"{slug}_local_msa_crystal.json"
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
@@ -573,6 +586,11 @@ def _augment_local_msa_bench_evidence(
         updated["lancedb_hits"] = 1
         updated["lancedb_refs"] = [f"lancedb:{slug}:source_id"]
         updated["lancedb_gate_passed"] = True
+    if "semantic_searcher" in text or "semantic retrieval" in text or "semantic_searcher refs" in text:
+        updated["semantic_searcher_used"] = True
+        updated["semantic_searcher_hits"] = 1
+        updated["semantic_searcher_refs"] = [f"semantic:{slug}:source_id"]
+        updated["semantic_searcher_gate_passed"] = True
     return updated
 
 
@@ -2602,6 +2620,10 @@ def run_auto_flow(
             "lancedb_hits": int(capability_evidence.get("lancedb_hits", route.get("findings_hits", 0)) or 0),
             "lancedb_refs": capability_evidence.get("lancedb_refs", []),
             "lancedb_gate_passed": bool(capability_evidence.get("lancedb_gate_passed", False)),
+            "semantic_searcher_used": bool(capability_evidence.get("semantic_searcher_used", False)),
+            "semantic_searcher_hits": int(capability_evidence.get("semantic_searcher_hits", 0) or 0),
+            "semantic_searcher_refs": capability_evidence.get("semantic_searcher_refs", []),
+            "semantic_searcher_gate_passed": bool(capability_evidence.get("semantic_searcher_gate_passed", False)),
             "delivery_refs": delivery_refs,
             "delivery_gate_passed": bool(delivery_refs),
             "hyper_used": bool(hyper_used),
@@ -2614,6 +2636,7 @@ def run_auto_flow(
             "swarm_consensus": capability_evidence["swarm_consensus"],
             "swarm_report": capability_evidence["swarm_report"],
             "swarm_report_path": capability_evidence.get("swarm_report_path", ""),
+            "quiet_moment": capability_evidence.get("quiet_moment", {}),
             "drone_used": capability_evidence["drone_used"],
             "drone_invoked_count": capability_evidence["drone_invoked_count"],
             "drone_artifact_path": capability_evidence["drone_artifact_path"],

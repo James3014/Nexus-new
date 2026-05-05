@@ -156,6 +156,44 @@
       "expected_capabilities": ["nightshift"],
       "capability_activation_contract": "required",
       "hidden_oracle_kind": "trace_receipt"
+    },
+    {
+      "id": "route-oracle-semantic-searcher-001",
+      "category": "docs_code_sync",
+      "difficulty": "hard",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://nexus-route-oracles",
+      "repo_ref": "v1",
+      "task_desc": "Use semantic retrieval evidence only when semantic_searcher refs, relevance, and LanceDB vector hit source identifiers are present.",
+      "fixture_kind": "rlm_harder_v2_semantic_searcher_refs",
+      "success_criteria": "patch_and_tests_pass",
+      "mutation_required": true,
+      "allowed_files": ["target.py", "test_target.py"],
+      "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["semantic_searcher"],
+      "capability_activation_contract": "required",
+      "hidden_oracle_kind": "trace_receipt"
+    },
+    {
+      "id": "route-oracle-swarm-quiet-moment-001",
+      "category": "ops_research",
+      "difficulty": "hard",
+      "repo_kind": "neutral_fixture",
+      "repo": "fixture://nexus-route-oracles",
+      "repo_ref": "v1",
+      "task_desc": "Accept a swarm quiet moment only when the non-mutating observe/report/rollback boundary is explicit.",
+      "fixture_kind": "rlm_harder_v2_swarm_quiet_moment",
+      "success_criteria": "patch_and_tests_pass",
+      "mutation_required": true,
+      "allowed_files": ["target.py", "test_target.py"],
+      "forbidden_files": [".nexus/", "logs/", "benchmarks/"],
+      "setup_command": "python -m pytest --version",
+      "verification_command": "python -m pytest -q test_target.py",
+      "expected_capabilities": ["swarm_quiet_moment"],
+      "capability_activation_contract": "required",
+      "hidden_oracle_kind": "trace_receipt"
     }
   ]
 }
