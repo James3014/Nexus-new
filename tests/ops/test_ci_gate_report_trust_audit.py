@@ -132,6 +132,43 @@ def test_run_changed_scope_wiki_governance_uses_changed_only(monkeypatch):
     assert "--changed-only" in seen["cmd"]
 
 
+def test_selected_code_reality_audits_maps_changed_paths():
+    selected = ci_gate.selected_code_reality_audits(
+        [
+            "docs/ops/brain_hub_manifest.json",
+            "nexus/core/state_contracts.py",
+            "nexus/schemas/hallucination_index_v1.json",
+        ]
+    )
+
+    assert "Brain Hub Manifest Audit" in selected
+    assert "--manifest docs/ops/brain_hub_manifest.json" in selected["Brain Hub Manifest Audit"]
+    assert "Strategic Map Audit" in selected
+    assert "Hallucination Guard Drift Audit" in selected
+
+
+def test_run_code_reality_audits_skips_unrelated_changed_paths(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ci_gate, "run_step", lambda name, cmd: calls.append((name, cmd)) or (True, "ok"))
+
+    assert ci_gate.run_code_reality_audits(["README.md"]) is True
+
+    assert calls == []
+
+
+def test_run_code_reality_audits_blocks_selected_failure(monkeypatch):
+    calls = []
+
+    def fake_run_step(name, cmd):
+        calls.append(name)
+        return (False, "bad") if name == "Strategic Map Audit" else (True, "ok")
+
+    monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
+
+    assert ci_gate.run_code_reality_audits(["nexus/core/context_hub.py"]) is False
+    assert calls == ["Strategic Map Audit"]
+
+
 def test_ci_gate_main_strict_runs_changed_only_preflight(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_changed_only_check", lambda changed_paths: False)
 
@@ -165,6 +202,7 @@ def test_ci_gate_main_strict_high_risk_runs_ultra_review(monkeypatch):
     calls = []
     monkeypatch.setattr(ci_gate, "run_changed_only_check", lambda changed_paths: True)
     monkeypatch.setattr(ci_gate, "run_ultra_review_check", lambda: calls.append("ultra") or False)
+    monkeypatch.setattr(ci_gate, "run_code_reality_audits", lambda changed_paths=None: calls.append("code-reality") or True)
 
     args = argparse.Namespace(
         dry_run=False,
@@ -193,6 +231,39 @@ def test_ci_gate_main_strict_high_risk_runs_ultra_review(monkeypatch):
             mock_exit.assert_called_with(1)
 
 
+def test_ci_gate_main_strict_blocks_when_code_reality_audit_fails(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ci_gate, "run_changed_only_check", lambda changed_paths: True)
+    monkeypatch.setattr(ci_gate, "requires_ultra_review", lambda changed_paths: False)
+    monkeypatch.setattr(ci_gate, "run_code_reality_audits", lambda changed_paths=None: calls.append(changed_paths) or False)
+
+    args = argparse.Namespace(
+        dry_run=False,
+        changed_only=None,
+        changed_paths=["docs/ops/brain_hub_manifest.json"],
+        nightly=False,
+        strict=True,
+        benchmark_mode="off",
+        learn_mode="off",
+        learn_topic="nexus",
+        wiki_drift_enforce_level="warn",
+        wiki_capability_enforce_level="warn",
+        wiki_eval_enforce_level="warn",
+        require_closeout_contract=False,
+        closeout_contract_path=".nexus/reports/done_contract.json",
+        auto_heal=False,
+    )
+
+    with patch("argparse.ArgumentParser.parse_args", return_value=args):
+        with patch("sys.exit", side_effect=SystemExit) as mock_exit:
+            try:
+                ci_gate.main()
+            except SystemExit:
+                pass
+            assert calls == [["docs/ops/brain_hub_manifest.json"]]
+            mock_exit.assert_called_with(1)
+
+
 def test_run_dry_run_blocks_when_report_trust_audit_fails(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_integrity_check", lambda: True)
     monkeypatch.setattr(ci_gate, "run_protocol_check", lambda dry_run: True)
@@ -201,6 +272,7 @@ def test_run_dry_run_blocks_when_report_trust_audit_fails(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_wiki_sync_check", lambda dry_run: "OK")
     monkeypatch.setattr(ci_gate, "print_phase_6_summaries", lambda *args, **kwargs: None)
     monkeypatch.setattr(ci_gate, "run_report_trust_audit", lambda dry_run: False)
+    monkeypatch.setattr(ci_gate, "run_code_reality_audits", lambda changed_paths=None: True)
 
     exit_code = ci_gate.run_dry_run()
     assert exit_code == 1
@@ -212,6 +284,7 @@ def test_ci_gate_main_blocks_when_report_trust_audit_fails(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_wiki_sync_check", lambda dry_run: "OK")
     monkeypatch.setattr(ci_gate, "run_step", lambda *args, **kwargs: (True, "ok"))
     monkeypatch.setattr(ci_gate, "run_report_trust_audit", lambda dry_run: False)
+    monkeypatch.setattr(ci_gate, "run_code_reality_audits", lambda changed_paths=None: True)
     monkeypatch.setattr(ci_gate, "print_phase_6_summaries", lambda *args, **kwargs: None)
 
     args = argparse.Namespace(
