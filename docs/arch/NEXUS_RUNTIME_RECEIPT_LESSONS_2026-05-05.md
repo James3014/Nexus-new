@@ -1,0 +1,17 @@
+# Nexus Runtime Receipt Lessons - 2026-05-05
+
+## Scope
+This ADR records lessons from P321-P350 semantic runtime receipt integration.
+
+## Lessons
+- Plateau is detected after history is loaded, so capability planning must be refreshed after plateau detection. Otherwise `architecture_scout` can be required by runtime reality but absent from the selected plan.
+- `semantic_searcher` receipt evidence must not depend on `NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR`. Semantic retrieval evidence is a memory/retrieval capability, while local swarm execution is only required for `swarm`, `drone`, `nightshift`, and `swarm_quiet_moment` bench receipts.
+- Flash A/B timeout rows are not valid route-quality evidence. A run that exits before Nexus emits `nexus_usage_trace` must be classified as infra/runtime invalid, then rerun with an adequate gateway/subprocess budget before claiming route improvement.
+
+## Applied Fixes
+- Added late plateau replan before execution.
+- Added runtime receipt payloads for `llm_judge_panel`, `asi_constraint_extractor`, `architecture_scout`, `external_doc_scout`, and `formal_report`.
+- Decoupled `semantic_searcher` fixture evidence from the local swarm executor flag.
+
+## Remaining Debt
+- `swarm_quiet_moment` Flash path still needs a bounded non-timeout LLM profile before public A/B claims can include it.
