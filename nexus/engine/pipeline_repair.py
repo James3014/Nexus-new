@@ -48,9 +48,13 @@ class PipelineRepairMixin:
 
     def _execute_single_repair(self, ctx: PipelineContextProtocol, tracer: Any, repair_attempts: int) -> dict:
         """Executes a single repair attempt (Phase R - v24.0 Bayesian Hardened)."""
-        self._prepare_repair_context(ctx, repair_attempts)
-
         with tracer.phase_span('R', task_id=ctx.task_id) as r_span:
+            composed = self._run_composition_repair_phase(ctx, repair_attempts)
+            if composed is not None:
+                return composed
+
+            self._prepare_repair_context(ctx, repair_attempts)
+
             # 🧪 [Round 20] Inject Bayesian params based on previous trauma
             r_params = ctx.bayesian_params.copy()
             if repair_attempts > 1:
@@ -88,6 +92,46 @@ class PipelineRepairMixin:
                 "skill_id": r_out["current_skill_id"],
                 "attempt": repair_attempts
             }
+        )
+        return r_out
+
+    def _run_composition_repair_phase(self, ctx: PipelineContextProtocol, repair_attempts: int) -> dict | None:
+        """Run the composed R phase when explicitly registered."""
+        registry = getattr(self, "registry", None)
+        if registry is None:
+            return None
+        plugin = next((item for item in registry.get_ordered_plugins() if item.name == "R"), None)
+        if plugin is None or not plugin.should_run(ctx):
+            return None
+
+        ctx.pack.update(
+            {
+                "task": ctx.task_desc,
+                "attempt": repair_attempts,
+                "dry_run": bool(ctx.dry_run),
+            }
+        )
+        result = plugin.execute(self, ctx)
+        mutations = dict(result.mutations or {})
+        status = str(mutations.get("status") or result.status or "").strip().upper() or "APPROVED"
+        r_out = {
+            "status": status,
+            "result": mutations,
+            "current_decision_id": str(mutations.get("decision_id") or f"composition-r-{repair_attempts}"),
+            "current_skill_id": str(mutations.get("skill_id") or "composition-repair"),
+        }
+        ctx.state.metadata["composition_repair_phase_status"] = status
+        ctx.state.metadata["composition_repair_phase_mutations"] = mutations
+        self.engine._add_step_to_history(
+            ctx.state,
+            "R",
+            metadata={
+                "status": "executed",
+                "decision_id": r_out["current_decision_id"],
+                "skill_id": r_out["current_skill_id"],
+                "attempt": repair_attempts,
+                "composition_phase": True,
+            },
         )
         return r_out
 
@@ -684,6 +728,18 @@ class PipelineRepairMixin:
         self.engine._add_step_to_history(
             ctx.state, "R", metadata={"status": "executed", "decision_id": r_dec_id, "skill_id": "dry-run-repair", "attempt": 1, "dry_run_mode": True}
         )
+
+        a_out = self._run_composition_audit_phase(
+            ctx,
+            {
+                "status": "APPROVED",
+                "result": {"dry_run_mode": True},
+                "current_decision_id": r_dec_id,
+                "current_skill_id": "dry-run-repair",
+            },
+        )
+        if a_out is not None and not bool(a_out.get("audit_success")):
+            return False
 
         ctx.state.current_phase = "A"
         a_dec_id = self._register_phase_decision(ctx, "A", "audit-review")

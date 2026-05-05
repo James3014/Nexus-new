@@ -237,7 +237,7 @@ class NexusPipeline(
             return {}
 
     def _register_phase_executors(self, phase_executors: Dict[str, PhaseExecutor]) -> None:
-        for name in ("P", "X", "D", "A"):
+        for name in ("P", "X", "D", "R", "A"):
             executor = phase_executors.get(name)
             if executor is not None:
                 self.registry.register(_PhaseExecutorPlugin(name, executor))

@@ -9,10 +9,18 @@ from nexus.engine.phase_plugin import PhaseResult
 from nexus.engine.pipeline import NexusPipeline
 
 
+class _Span:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+
 class FakeExecutor:
     def __init__(self, name: str, mutations: dict):
         self.name = name
-        self.priority = {"P": 10, "X": 20, "D": 25, "A": 40}[name]
+        self.priority = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40}[name]
         self.mutations = mutations
         self.calls = 0
 
@@ -85,6 +93,48 @@ def test_pipeline_registers_audit_phase_executor(tmp_path):
     assert "A" in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
 
 
+def test_repair_audit_loop_runs_composed_r_phase_when_registered(tmp_path, monkeypatch):
+    executors = {
+        "R": FakeExecutor(
+            "R",
+            {
+                "status": "APPROVED",
+                "patch_generated": True,
+                "patch_apply_success": True,
+                "decision_id": "dec-r",
+                "skill_id": "composition-repair",
+            },
+        )
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-repair",
+        task_desc="fix composed repair",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        accumulator=SimpleNamespace(record=lambda *_args, **_kwargs: None),
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-repair"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: _Span())
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(pipeline, "_evaluate_audit_result", lambda *_args, **_kwargs: {"audit_success": True, "status": "APPROVED", "phantom_reason": ""})
+    monkeypatch.setattr(
+        pipeline,
+        "_prepare_repair_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy repair context should not run before composed R")),
+    )
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is True
+    assert executors["R"].calls == 1
+    assert ctx.state.metadata["composition_repair_phase_status"] == "APPROVED"
+
+
 def test_repair_audit_loop_runs_composed_a_phase_before_legacy_audit(tmp_path, monkeypatch):
     executors = {"A": FakeExecutor("A", {"fail": True, "reason": "composition_rejected"})}
     pipeline = NexusPipeline(_engine(tmp_path, executors))
@@ -122,3 +172,22 @@ def test_repair_audit_loop_runs_composed_a_phase_before_legacy_audit(tmp_path, m
     assert pipeline._repair_audit_loop(ctx, tracer) is False
     assert executors["A"].calls == 1
     assert ctx.state.metadata["composition_audit_phase_rejection"] == "composition_rejected"
+
+
+def test_dry_run_repair_respects_composed_a_rejection(tmp_path):
+    executors = {"A": FakeExecutor("A", {"fail": True, "reason": "dry_run_audit_rejected"})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    ctx = SimpleNamespace(
+        dry_run=True,
+        task_id="dry-run-audit",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="dry-run-audit"),
+    )
+
+    assert pipeline._execute_dry_run_repair(ctx) is False
+    assert ctx.state.metadata["composition_audit_phase_rejection"] == "dry_run_audit_rejected"
