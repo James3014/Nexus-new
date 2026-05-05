@@ -38,9 +38,16 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     from nexus.research.wisdom.wisdom_vault import WisdomVault
     from nexus.core.belief_engine import BeliefEngine
     from nexus.core.context_hub import ContextDependencies, ContextHub
+    from nexus.core.knowledge_injector import KnowledgeInjector
     from nexus.core.commander import Commander
     from nexus.engine.battle_swarm import BattleSwarm
     from nexus.engine.reflex_loop import ReflexLoop
+    from nexus.engine.phase_executors import (
+        build_diagnose_executor,
+        build_plan_executor,
+        build_research_executor,
+    )
+    from nexus.services.prompt_builder import PromptBuilder
 
     state_io = StateIO(project_root, run_dir=run_dir)
     workspace_mgr = WorkspaceManager(project_root)
@@ -53,6 +60,12 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     
     registry_path = project_root / ".nexus" / "registry" / "shared_skills.db"
     skill_registry = SkillRegistry(registry_path) if registry_path.exists() else None
+    prompt_builder = PromptBuilder(str(project_root))
+    knowledge_injector = KnowledgeInjector(
+        skill_registry=skill_registry,
+        mem_palace=mem_palace,
+        wisdom_vault=wisdom_vault,
+    )
     
     context_hub = kwargs.get("context_hub") or ContextHub(
         str(project_root),
@@ -63,7 +76,10 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
             memory_service=memory,
             wisdom_vault=wisdom_vault,
             belief_engine=belief_engine,
+            knowledge_injector=knowledge_injector,
+            prompt_builder=prompt_builder,
         ),
+        strict_deps=True,
     )
     
     commander = kwargs.get("commander")
@@ -77,6 +93,12 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         
     if not hasattr(hub, "assemble_feature_pack"):
         hub.assemble_feature_pack = context_hub.assemble_feature_pack
+
+    phase_executors = kwargs.get("phase_executors") or {
+        "P": build_plan_executor(project_root, run_dir),
+        "X": build_research_executor(project_root, run_dir),
+        "D": build_diagnose_executor(project_root, run_dir, hub=hub),
+    }
 
     components = {
         "run_dir": run_dir,
@@ -98,11 +120,14 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         "mem_palace": mem_palace,
         "skill_registry": skill_registry,
         "wisdom_vault": wisdom_vault,
+        "prompt_builder": prompt_builder,
+        "knowledge_injector": knowledge_injector,
         "context_hub": context_hub,
         "commander": commander,
         "battle_swarm": BattleSwarm(str(project_root), run_dir=str(run_dir)),
         "reflex_loop": ReflexLoop(str(project_root), memory_service=memory),
         "reporter": kwargs.get("reporter", hub),
+        "phase_executors": phase_executors,
         "phases": kwargs.get("phases", {"P": "Planner", "D": "Diagnose", "R": "Repair", "X": "Research"}),
         "federation": FederationLayer(project_root),
         "vector_cache": VectorCache(project_root / ".nexus" / "vector_db"),

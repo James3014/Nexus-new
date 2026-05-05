@@ -30,7 +30,7 @@ from nexus.learning.cycle_analyzer import analyze_cycle
 from nexus.engine.pipeline_outcome import PipelineOutcome, PipelineTerminalState, HumanReviewHandoff
 from nexus.core.outcome_schema import NexusOutcomeV2
 from nexus.core.handoff_bundle import HandoffBundleWriter
-from nexus.engine.phase_plugin import PhaseRegistry, PhasePlugin, PhaseResult
+from nexus.engine.phase_plugin import PhaseRegistry, PhasePlugin, PhaseResult, PhaseExecutor
 
 # Mixins 導入
 from nexus.engine.pipeline_stages import PipelineStagesMixin
@@ -127,6 +127,11 @@ class NexusPipeline(
 
     def _register_default_plugins(self):
         """Registers standard phases using the core PHASES_MAP (MUSE-PLUGIN-2.0)."""
+        phase_executors = getattr(self.engine, "phase_executors", None)
+        if phase_executors:
+            self._register_phase_executors(phase_executors)
+            return
+
         if not hasattr(self.engine, 'phases') or not self.engine.phases:
             return
             
@@ -185,7 +190,11 @@ class NexusPipeline(
                     return PhaseResult(status="success", mutations={}, events=[])
                 except Exception as e:
                     logger.error(f"❌ Phase {self.name} failed: {e}", exc_info=True)
-                    return PhaseResult(status="FAILED", mutations={}, events=[])
+                    return PhaseResult(status="fail", mutations={}, events=[])
+
+        self._register_phase_executors(self._build_default_phase_executors())
+        if self.registry.get_ordered_plugins():
+            return
 
         # 🛡️ Sprint 15 Logic: 強制 Core 階段映射到 Pipeline Mixins 以維持架構完整性
         core_phases = ["P", "X", "D"]
@@ -203,6 +212,33 @@ class NexusPipeline(
                 self.registry.register(p_handler)
             else:
                 self.registry.register(_LegacyPhaseAdapter(name, p_handler, self))
+
+    def _build_default_phase_executors(self) -> Dict[str, PhaseExecutor]:
+        project_root = getattr(self.engine, "project_root", None)
+        run_dir = getattr(self.engine, "run_dir", None)
+        if project_root is None or run_dir is None:
+            return {}
+        try:
+            from nexus.engine.phase_executors import (
+                build_diagnose_executor,
+                build_plan_executor,
+                build_research_executor,
+            )
+
+            return {
+                "P": build_plan_executor(project_root, run_dir),
+                "X": build_research_executor(project_root, run_dir),
+                "D": build_diagnose_executor(project_root, run_dir, hub=getattr(self.engine, "hub", None)),
+            }
+        except Exception as exc:
+            logger.debug("phase_executor_bootstrap_skipped: %s", exc)
+            return {}
+
+    def _register_phase_executors(self, phase_executors: Dict[str, PhaseExecutor]) -> None:
+        for name in ("P", "X", "D"):
+            executor = phase_executors.get(name)
+            if executor is not None:
+                self.registry.register(_PhaseExecutorPlugin(name, executor))
 
     def run(self, task_desc: str, task_type: str = "bug", context: Optional[Dict] = None, **kwargs) -> bool:
         """EntryPoint for P-X-D-R-A-C pipeline with OTel Tracing wrapper."""
@@ -407,7 +443,7 @@ class NexusPipeline(
                             payload={"status": result.status}
                         ))
                         
-                        if result.status == "FAILED":
+                        if result.status in {"FAILED", "fail"}:
                             logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
                             success = False
                             ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
@@ -453,3 +489,31 @@ class NexusPipeline(
             logger.error(f"Crystallize stage encountered an error (non-fatal): {e}")
             
         return self._finalize_and_report(ctx, success, tracer)
+
+
+class _PhaseExecutorPlugin(PhasePlugin):
+    """Plugin shell that delegates phase behavior to composition executors."""
+
+    def __init__(self, name: str, executor: PhaseExecutor):
+        super().__init__(name, priority=NexusPipeline.PHASE_PRIORITY_MAP.get(name, getattr(executor, "priority", 100)))
+        self.executor = executor
+
+    def should_run(self, ctx: PipelineContext) -> bool:
+        if self.name == "X":
+            nas_aggression = ctx.bayesian_params.get("nas_aggression", 0.5)
+            force = bool(ctx.state.metadata.get("benchmark_force_research"))
+            should = bool(ctx.state.metadata.get("research_route", {}).get("should_research"))
+            if not (force or should or (nas_aggression > 0.8)):
+                return False
+        should_run = getattr(self.executor, "should_run", None)
+        return bool(should_run(ctx)) if callable(should_run) else True
+
+    def execute(self, pipeline: NexusPipeline, ctx: PipelineContext) -> PhaseResult:
+        ctx.event_store.append(NexusEvent(
+            event_id=f"evt_pre_{self.name}_{int(time.time()*1000)}",
+            task_id=ctx.task_id,
+            phase=self.name,
+            event_type="lifecycle_pre",
+            payload={"nas_aggression": ctx.bayesian_params.get("nas_aggression", 0.0)}
+        ))
+        return self.executor.execute(pipeline, ctx)

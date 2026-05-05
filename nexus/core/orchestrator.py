@@ -19,8 +19,20 @@ class _NullPalace:
 
 
 class _NullBeliefGate:
-    def process_audit_outcome(self, _outcome: AuditOutcome) -> dict[str, Any]:
-        return {"status": "skipped", "reason": "belief_gate_unavailable"}
+    unavailable = True
+
+    def process_audit_outcome(self, outcome: AuditOutcome) -> dict[str, Any]:
+        return {
+            "status": "REJECTED",
+            "accepted": False,
+            "task_id": outcome.task_id,
+            "assumption": outcome.assumption,
+            "confidence": 0.0,
+            "reason": "belief_gate_unavailable",
+        }
+
+    def assess_confidence(self, *_args, **_kwargs) -> float:
+        return 0.0
 
 class NexusOrchestrator:
     """
@@ -117,13 +129,14 @@ class NexusOrchestrator:
             except Exception as exc:
                 return False, f"Palace audit error: {exc}"
 
-        if hasattr(self.belief_engine, "assess_confidence"):
-            try:
-                confidence = self.belief_engine.assess_confidence(self.task, summary)
-                if confidence is not None and float(confidence) < 0.5:
-                    return False, "Belief confidence too low"
-            except Exception as exc:
-                return False, f"Belief audit error: {exc}"
+        if not hasattr(self.belief_engine, "assess_confidence"):
+            return False, "Belief gate unavailable"
+        try:
+            confidence = self.belief_engine.assess_confidence(self.task, summary)
+            if confidence is None or float(confidence) < 0.5:
+                return False, "Belief confidence too low"
+        except Exception as exc:
+            return False, f"Belief audit error: {exc}"
 
         from nexus.governance.evidence_guard import NexusEvidenceGuard
         guard = NexusEvidenceGuard(self.project_root, git_hub=self.infra.git if self.infra else None)

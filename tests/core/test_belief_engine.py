@@ -64,6 +64,25 @@ def test_orchestrator_records_audit_failure_through_belief_gate_without_magicmoc
     assert gate.outcomes[0].reason == "missing evidence"
 
 
+def test_orchestrator_rejects_audit_when_belief_gate_unavailable(monkeypatch):
+    class WriteOnlyGate:
+        def process_audit_outcome(self, outcome):
+            return {"accepted": bool(outcome.passed)}
+
+    orch = NexusOrchestrator(
+        OrchestratorConfig(task="task-1", skill_id="s1"),
+        infra=SimpleNamespace(),
+        intel=SimpleNamespace(belief_engine=WriteOnlyGate(), llm=SimpleNamespace(), commander=SimpleNamespace()),
+        gov=SimpleNamespace(),
+    )
+    monkeypatch.setattr(orch.palace, "audit_action", lambda *_args, **_kwargs: True)
+
+    passed, rebuttal = orch._run_adversarial_audit({"summary": "claim with evidence"})
+
+    assert passed is False
+    assert rebuttal == "Belief gate unavailable"
+
+
 def test_context_hub_accepts_injected_dependencies_and_state_view(tmp_path):
     deps = ContextDependencies(
         memory_service=SimpleNamespace(cached_search=lambda _query: {"reminders": []}),
