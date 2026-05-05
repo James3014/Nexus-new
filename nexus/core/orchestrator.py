@@ -7,12 +7,20 @@ from datetime import datetime
 from nexus.core.config import OrchestratorConfig
 from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
 from nexus.core.belief_engine import BeliefEngine
-from nexus.core.belief_contracts import AuditOutcome
+from nexus.core.belief_contracts import AuditOutcome, BeliefGate
 from nexus.core.mem_palace import MemoryPalace
 
-from unittest.mock import MagicMock
-
 logger = logging.getLogger("nexus.orchestrator")
+
+
+class _NullPalace:
+    def audit_action(self, *_args, **_kwargs) -> bool:
+        return True
+
+
+class _NullBeliefGate:
+    def process_audit_outcome(self, _outcome: AuditOutcome) -> dict[str, Any]:
+        return {"status": "skipped", "reason": "belief_gate_unavailable"}
 
 class NexusOrchestrator:
     """
@@ -35,25 +43,25 @@ class NexusOrchestrator:
         self.infra = infra
         self.intel = intel
         self.gov = gov
-        self.palace = getattr(infra, 'palace', MagicMock())
-        self.belief_engine = getattr(intel, 'belief_engine', MagicMock())
+        self.palace = getattr(infra, 'palace', None)
+        self.belief_engine: BeliefGate | Any | None = getattr(intel, 'belief_engine', None)
 
-        self.git = infra.git if infra else None
-        self.llm = intel.llm if intel else None
-        self.commander = intel.commander if intel else None
+        self.git = getattr(infra, "git", None) if infra else None
+        self.llm = getattr(intel, "llm", None) if intel else None
+        self.commander = getattr(intel, "commander", None) if intel else None
         
         self.execution_mode = self.mode
         self.max_strikes = 1 # 簡化測試
-        if isinstance(self.belief_engine, MagicMock):
+        if not hasattr(self.belief_engine, "process_audit_outcome"):
             try:
                 self.belief_engine = BeliefEngine(self.project_root / ".nexus" / "belief_state.json")
             except Exception:
-                self.belief_engine = MagicMock()
-        if isinstance(self.palace, MagicMock):
+                self.belief_engine = _NullBeliefGate()
+        if not hasattr(self.palace, "audit_action"):
             try:
                 self.palace = MemoryPalace(str(self.project_root))
             except Exception:
-                self.palace = MagicMock()
+                self.palace = _NullPalace()
 
     def _do_loop(self) -> bool:
         strike = 0

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Protocol
 """TLS-encrypted Registry Synchronization Server and Client.
 
 Handles secure push/pull requests between Nexus Swarm nodes.
@@ -15,11 +15,76 @@ from nexus.learning.skill_registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
+
+class IncomingMessageHandler(Protocol):
+    def handle(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]: ...
+
+
+class RegistryMessageHandler:
+    def __init__(self, registry: SkillRegistry | None):
+        self.registry = registry
+
+    def handle(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
+        action = req.get("action")
+        if action == "push":
+            return self._handle_push(req, client_id)
+        if action == "heartbeat":
+            return {"status": "alive", "load": 0.5, "skill_count": 0}
+        if action == "pull":
+            return self._handle_pull(req, client_id)
+        if action == "event":
+            return self._handle_event(req, client_id)
+        return {"status": "error", "message": f"Unknown action: {action}"}
+
+    def _handle_push(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
+        if not self.registry:
+            return {"status": "error", "message": "registry_unavailable"}
+        from nexus.learning.skill_schema import SkillFrontmatter, SkillSuccessMetric
+
+        for skill_dict in req.get("payload", []):
+            try:
+                skill_dict = dict(skill_dict)
+                sm_dict = skill_dict.pop("success_metric", {})
+                if isinstance(sm_dict, dict):
+                    skill_dict["success_metric"] = SkillSuccessMetric(
+                        **{k: v for k, v in sm_dict.items() if k in SkillSuccessMetric.__annotations__}
+                    )
+                fm = SkillFrontmatter(
+                    **{k: v for k, v in skill_dict.items() if k in SkillFrontmatter.__annotations__}
+                )
+                self.registry.upsert(fm, origin_node_id=client_id)
+            except Exception as e:
+                logger.warning("mTLS Push hydration failed for node %s: %s", client_id, e)
+        return {"status": "ok"}
+
+    def _handle_pull(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
+        if not self.registry:
+            return {"status": "error", "message": "registry_unavailable"}
+        res = self.registry.search(
+            query_tokens=set(req.get("query_tokens", [])),
+            task_type=req.get("task_type"),
+            exclude_origin=client_id,
+            max_results=req.get("max_results", 5),
+        )
+        return {"status": "ok", "payload": res}
+
+    def _handle_event(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
+        from nexus.events.transport import NexusEventBus
+
+        payload = req.get("payload", {})
+        payload = payload if isinstance(payload, dict) else {}
+        payload["_source_node"] = client_id
+        payload["_is_remote"] = True
+        NexusEventBus.publish(req.get("event_type", "unknown"), payload)
+        return {"status": "ok"}
+
+
 class SecureRegistrySync:
-    def __init__(self, tls: TLSProvider, registry: SkillRegistry, node_registry=None):
+    def __init__(self, tls: TLSProvider, registry: SkillRegistry, node_registry=None, handler: IncomingMessageHandler | None = None):
         self.tls = tls
         self.registry = registry
         self.node_registry = node_registry
+        self.handler = handler or RegistryMessageHandler(registry)
         self._server_sock = None
         self._thread = None
 
@@ -56,7 +121,6 @@ class SecureRegistrySync:
                 logger.warning("Rejecting connection from %s: No client cert", addr)
                 return
                 
-            # Basic Identity Verification (Optional: Implement CN checks)
             client_id = "unknown"
             for sub in cert.get('subject', ()):
                 for k, v in sub:
@@ -64,63 +128,11 @@ class SecureRegistrySync:
                         client_id = v
                         
             logger.debug("mTLS Conn established from %s (Node: %s)", addr, client_id)
-            
-            # Simple line-based JSON protocol
             f = conn.makefile("rwb")
             line = f.readline().decode("utf-8")
             if not line:
                 return
-                
-            req = json.loads(line)
-            action = req.get("action")
-            
-            if action == "push":
-                from nexus.learning.skill_schema import SkillFrontmatter, SkillSuccessMetric
-                for skill_dict in req.get("payload", []):
-                    try:
-                        # Extract success metric if present
-                        sm_dict = skill_dict.pop("success_metric", {})
-                        if isinstance(sm_dict, dict):
-                            skill_dict["success_metric"] = SkillSuccessMetric(**{k: v for k, v in sm_dict.items() if k in SkillSuccessMetric.__annotations__})
-                        
-                        fm = SkillFrontmatter(**{k: v for k, v in skill_dict.items() if k in SkillFrontmatter.__annotations__})
-                        self.registry.upsert(fm, origin_node_id=client_id)
-                    except Exception as e:
-                        logger.warning("mTLS Push hydration failed for node %s: %s", client_id, e)
-                resp = {"status": "ok"}
-                
-            elif action == "heartbeat":
-                resp = {
-                    "status": "alive",
-                    "load": 0.5, # Placeholder real load
-                    "skill_count": 0 # Placeholder for skill registry size
-                }
-                
-            elif action == "pull":
-                query_tokens = set(req.get("query_tokens", []))
-                res = self.registry.search(
-                    query_tokens=query_tokens,
-                    task_type=req.get("task_type"),
-                    exclude_origin=client_id,
-                    max_results=req.get("max_results", 5)
-                )
-                resp = {"status": "ok", "payload": res}
-                
-            elif action == "event":
-                from nexus.events.transport import NexusEventBus
-                event_type = req.get("event_type", "unknown")
-                payload = req.get("payload", {})
-                
-                # Tag as remote to avoid rebroadcast loop
-                payload["_source_node"] = client_id
-                payload["_is_remote"] = True
-                
-                NexusEventBus.publish(event_type, payload)
-                resp = {"status": "ok"}
-                
-            else:
-                resp = {"status": "error", "message": f"Unknown action: {action}"}
-                
+            resp = self.handler.handle(json.loads(line), client_id)
             f.write((json.dumps(resp) + "\n").encode("utf-8"))
             f.flush()
             
@@ -159,34 +171,3 @@ class SecureRegistrySync:
         except Exception as e:
             logger.warning("mTLS pull from %s:%d failed: %s", peer_host, peer_port, e)
             return []
-
-    def broadcast_event(self, event_type: str, payload: Dict[str, Any]) -> None:
-        """Broadcast event to all known peers."""
-        if not self.node_registry:
-            return
-            
-        # Prevent broadcast loop
-        if payload.get("_is_remote"):
-            return
-            
-        peers = self.node_registry.discover()
-        context = self.tls.get_client_context()
-        
-        req = {
-            "action": "event",
-            "event_type": event_type,
-            "payload": payload
-        }
-        req_line = (json.dumps(req) + "\n").encode("utf-8")
-        
-        for peer in peers:
-            # Skip self
-            if peer.node_id == self.tls.node_id:
-                continue
-                
-            try:
-                with socket.create_connection((peer.host, peer.port), timeout=5) as sock:
-                    with context.wrap_socket(sock, server_hostname=peer.host) as ssock:
-                        ssock.sendall(req_line)
-            except Exception as e:
-                logger.debug("mTLS broadcast to %s failed: %s", peer.node_id, e)

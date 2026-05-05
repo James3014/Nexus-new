@@ -4,9 +4,11 @@ from types import SimpleNamespace
 
 from nexus.core.belief_contracts import AuditOutcome
 from nexus.core.belief_engine import BeliefEngine
+from nexus.core.config import OrchestratorConfig
 from nexus.core.context_hub import ContextDependencies, ContextHub, StateView
 from nexus.core.learning_evidence import LearningEvidence
 from nexus.core.learning_steward import GovernanceProfile, LearningSteward
+from nexus.core.orchestrator import NexusOrchestrator
 from nexus.core.state_contracts import NexusState
 
 class TestBeliefEngine(unittest.TestCase):
@@ -33,6 +35,30 @@ def test_belief_engine_processes_structured_audit_outcome(tmp_path):
     assert out["confidence"] == 0.1
     assert engine.get_confidence("task-1", "AUDIT_FAILURE_1") == 0.1
     assert engine.beliefs["AUDIT_FAILURE_1"]["reason"] == "claim missing evidence"
+
+
+def test_orchestrator_records_audit_failure_through_belief_gate_without_magicmock_detection():
+    class FakeGate:
+        def __init__(self):
+            self.outcomes = []
+
+        def process_audit_outcome(self, outcome):
+            self.outcomes.append(outcome)
+            return {"confidence": 0.1}
+
+    gate = FakeGate()
+    orch = NexusOrchestrator(
+        OrchestratorConfig(task="task-1", skill_id="s1"),
+        infra=SimpleNamespace(),
+        intel=SimpleNamespace(belief_engine=gate, llm=SimpleNamespace(), commander=SimpleNamespace()),
+        gov=SimpleNamespace(),
+    )
+
+    orch._record_audit_failure(strike=1, rebuttal="missing evidence")
+
+    assert orch.belief_engine is gate
+    assert gate.outcomes[0].task_id == "task-1"
+    assert gate.outcomes[0].reason == "missing evidence"
 
 
 def test_context_hub_accepts_injected_dependencies_and_state_view(tmp_path):

@@ -22,3 +22,16 @@ class BeliefGate(Protocol):
 
     def process_audit_outcome(self, outcome: AuditOutcome) -> dict[str, Any]:
         ...
+
+
+@dataclass(frozen=True)
+class HealingArtifact:
+    """Portable self-healing recommendation contract for swarm transport."""
+
+    task_id: str
+    artifact_id: str
+    artifact_type: str
+    created_at: str
+    evidence_id: str
+    summary: str
+    metadata: dict[str, Any] = field(default_factory=dict)

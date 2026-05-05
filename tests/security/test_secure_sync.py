@@ -6,7 +6,7 @@ import socket
 import ssl
 from unittest.mock import MagicMock
 from nexus.security.tls_provider import TLSProvider
-from nexus.security.secure_sync import SecureRegistrySync
+from nexus.security.secure_sync import RegistryMessageHandler, SecureRegistrySync
 
 @pytest.fixture
 def certs_dir(tmp_path):
@@ -97,3 +97,28 @@ def test_secure_sync_push_hydration(certs_dir):
     fm = registry.upsert.call_args[0][0]
     assert fm.task_id == "T-101"
     assert fm.success_metric.repair_success is True
+
+
+def test_registry_message_handler_pull_excludes_origin():
+    registry = MagicMock()
+    registry.search.return_value = [{"skill_id": "s1"}]
+    handler = RegistryMessageHandler(registry)
+
+    resp = handler.handle({"action": "pull", "query_tokens": ["repair"], "task_type": "bug", "max_results": 2}, "node-a")
+
+    assert resp == {"status": "ok", "payload": [{"skill_id": "s1"}]}
+    registry.search.assert_called_once_with(
+        query_tokens={"repair"},
+        task_type="bug",
+        exclude_origin="node-a",
+        max_results=2,
+    )
+
+
+def test_registry_message_handler_heartbeat_and_unknown_action():
+    handler = RegistryMessageHandler(MagicMock())
+
+    assert handler.handle({"action": "heartbeat"}, "node-a")["status"] == "alive"
+    resp = handler.handle({"action": "unknown"}, "node-a")
+    assert resp["status"] == "error"
+    assert "Unknown action" in resp["message"]

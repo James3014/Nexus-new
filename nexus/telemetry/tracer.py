@@ -99,3 +99,18 @@ class NexusTracer:
         """在當前 Span 設定 Attribute"""
         span = trace.get_current_span()
         span.set_attribute(key, value)
+
+    @staticmethod
+    def record_belief_shift(task_id: str, old_val: float, new_val: float) -> None:
+        """Record semantic belief movement as a span event."""
+        old_f = float(old_val)
+        new_f = float(new_val)
+        NexusTracer.add_event(
+            "belief.shift",
+            {
+                "nexus.task_id": task_id,
+                "belief.old": old_f,
+                "belief.new": new_f,
+                "belief.delta": new_f - old_f,
+            },
+        )
