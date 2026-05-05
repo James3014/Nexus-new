@@ -4,6 +4,7 @@ import json
 
 from scripts.bench.ab_eval import summarize_capability_coverage
 from scripts.bench.gemini_nexus_report import (
+    main,
     _public_claim_gate,
     _route_quality_gate_from_rows,
     _route_quality_metrics,
@@ -37,6 +38,53 @@ def test_capability_coverage_marks_receipt_required_legacy_as_untrusted():
     assert matrix["ddtree"]["public_safe"] is False
     assert matrix["ultra_review"]["source"] == "legacy_untrusted"
     assert matrix["ultra_review"]["public_safe"] is False
+
+
+def test_main_enforce_public_gate_exits_nonzero_on_gate_failure(tmp_path, monkeypatch):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    output = tmp_path / "report.md"
+    base_row = {
+        "task_id": "t1",
+        "trial_index": 1,
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "token_measured": True,
+        "token_capture_status": "measured",
+        "run_eligible": True,
+        "wall_duration_sec": 1.0,
+        "total_tokens": 10,
+    }
+    without.write_text(json.dumps(base_row) + "\n", encoding="utf-8")
+    with_nexus.write_text(
+        json.dumps(
+            {
+                **base_row,
+                "gemini_uses_nexus": True,
+                "nexus_usage_valid": True,
+                "route_decision_selected_count": 2,
+                "route_decision_invoked_count": 0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "gemini_nexus_report.py",
+            "--without",
+            str(without),
+            "--with-nexus",
+            str(with_nexus),
+            "--output",
+            str(output),
+            "--enforce-public-gate",
+        ],
+    )
+
+    assert main() == 1
+    assert output.exists()
 
 
 def test_public_claim_gate_rejects_rlm_submit_without_a_gate():

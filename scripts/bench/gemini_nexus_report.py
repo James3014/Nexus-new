@@ -1103,6 +1103,25 @@ def render_markdown_report(
     return "\n".join(lines)
 
 
+def evaluate_public_claim_gate(
+    *,
+    without_path: Path,
+    with_path: Path,
+    label_without: str,
+    label_with: str,
+) -> dict[str, Any]:
+    rows_without = load_runs(without_path)
+    rows_with = load_runs(with_path)
+    report = compare_datasets(label_without, rows_without, label_with, rows_with)
+    return _public_claim_gate(
+        rows_without=rows_without,
+        rows_with=rows_with,
+        summary_without=report["a"]["summary"],
+        summary_with=report["b"]["summary"],
+        formal=report["formal_treatment"],
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render Gemini bare vs Gemini+Nexus benchmark markdown.")
     parser.add_argument("--without", required=True, help="Without-Nexus JSON/JSONL/CSV path")
@@ -1111,8 +1130,19 @@ def main() -> int:
     parser.add_argument("--label-with", default="gemini_3_flash_nexus")
     parser.add_argument("--date", default=date.today().isoformat())
     parser.add_argument("--output", required=True, help="Markdown output path")
+    parser.add_argument(
+        "--enforce-public-gate",
+        action="store_true",
+        help="Exit non-zero when the public claim gate is not PASS.",
+    )
     args = parser.parse_args()
 
+    public_gate = evaluate_public_claim_gate(
+        without_path=Path(args.without),
+        with_path=Path(args.with_nexus),
+        label_without=args.label_without,
+        label_with=args.label_with,
+    )
     markdown = render_markdown_report(
         without_path=args.without,
         with_path=args.with_nexus,
@@ -1124,6 +1154,9 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(markdown, encoding="utf-8")
     print(str(out))
+    if args.enforce_public_gate and public_gate.get("verdict") != "PASS":
+        print(f"public_claim_gate={public_gate.get('verdict')} failures={','.join(public_gate.get('failures', []))}")
+        return 1
     return 0
 
 
