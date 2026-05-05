@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 
 from scripts.bench.ab_eval import summarize_capability_coverage
-from scripts.bench.gemini_nexus_report import _public_claim_gate, render_markdown_report
+from scripts.bench.gemini_nexus_report import (
+    _public_claim_gate,
+    _route_quality_gate_from_rows,
+    _route_quality_metrics,
+    render_markdown_report,
+)
 
 
 def test_capability_coverage_marks_receipt_required_legacy_as_untrusted():
@@ -214,6 +219,97 @@ def test_public_claim_gate_rejects_route_quality_funnel_regression():
     assert "route_quality_invoked_to_evidence_below_threshold" in gate["failures"]
     assert "route_quality_evidence_to_outcome_below_threshold" in gate["failures"]
     assert "route_quality_unnecessary_selected_above_threshold" in gate["failures"]
+
+
+def test_route_quality_uses_actionable_receipts_not_planner_markers():
+    report = {
+        "capability_coverage": {
+            "b": {
+                "artifact_gate": {
+                    "selected_count": 1,
+                    "invoked_count": 1,
+                    "evidence_count": 1,
+                    "outcome_count": 1,
+                    "public_safe": True,
+                    "failure_reasons": {},
+                },
+                "acceptance_check": {
+                    "selected_count": 1,
+                    "invoked_count": 0,
+                    "evidence_count": 0,
+                    "outcome_count": 0,
+                    "public_safe": False,
+                    "failure_reasons": {},
+                },
+                "ultra_review": {
+                    "selected_count": 1,
+                    "invoked_count": 0,
+                    "evidence_count": 0,
+                    "outcome_count": 0,
+                    "public_safe": False,
+                    "failure_reasons": {"feature_flag_disabled": 1},
+                },
+                "autoreason": {
+                    "selected_count": 1,
+                    "invoked_count": 0,
+                    "evidence_count": 0,
+                    "outcome_count": 0,
+                    "public_safe": False,
+                    "failure_reasons": {"selected_without_invocation": 1},
+                },
+            }
+        }
+    }
+
+    quality = _route_quality_metrics(report, "b")
+
+    assert quality["selected_to_invoked_rate"] == 0.5
+    assert quality["unnecessary_selected_rate"] == 0.5
+
+
+def test_route_quality_gate_derives_counts_from_actionable_receipts():
+    failures = _route_quality_gate_from_rows(
+        [
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "route_decision_selected_count": 18,
+                "route_decision_invoked_count": 0,
+                "route_decision_evidence_count": 0,
+                "route_decision_outcome_count": 0,
+                "capability_receipts": [
+                    {
+                        "name": "artifact_gate",
+                        "selected": True,
+                        "invoked": True,
+                        "evidence_present": True,
+                        "gate_passed": True,
+                        "outcome_contributed": True,
+                        "public_claim_safe": True,
+                    },
+                    {
+                        "name": "acceptance_check",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                    },
+                    {
+                        "name": "ultra_review",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                        "failure_reason": "feature_flag_disabled",
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert failures == []
 
 
 def test_public_claim_gate_rejects_research_selected_without_evidence_gate():

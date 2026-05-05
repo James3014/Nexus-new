@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scripts.bench.gemini_nexus_report import _row_route_quality_counts
+
 
 @dataclass(frozen=True)
 class SmokeSuite:
@@ -159,10 +161,17 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
         coverage = row.get("expected_capability_receipt_coverage") or {}
         expected.update(str(item) for item in coverage.get("expected", []) or [])
         public_safe.update(str(item) for item in coverage.get("public_safe", []) or [])
-        selected_total += int(row.get("route_decision_selected_count", 0) or 0)
-        invoked_total += int(row.get("route_decision_invoked_count", 0) or 0)
-        evidence_total += int(row.get("route_decision_evidence_count", 0) or 0)
-        outcome_total += int(row.get("route_decision_outcome_count", 0) or 0)
+        route_quality_counts = _row_route_quality_counts(row)
+        if route_quality_counts is None:
+            selected_total += int(row.get("route_decision_selected_count", 0) or 0)
+            invoked_total += int(row.get("route_decision_invoked_count", 0) or 0)
+            evidence_total += int(row.get("route_decision_evidence_count", 0) or 0)
+            outcome_total += int(row.get("route_decision_outcome_count", 0) or 0)
+        else:
+            selected_total += route_quality_counts["selected"]
+            invoked_total += route_quality_counts["invoked"]
+            evidence_total += route_quality_counts["evidence"]
+            outcome_total += route_quality_counts["outcome"]
         row_failures: list[str] = []
         if row.get("status") != "SUCCESS":
             row_failures.append("status_not_success")

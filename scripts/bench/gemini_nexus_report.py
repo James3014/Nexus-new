@@ -157,6 +157,24 @@ def _safe_ratio(num: float, den: float) -> float:
     return num / den
 
 
+def _route_quality_ignored_reasons(name: str) -> set[str]:
+    return _NON_ACTIONABLE_CAPABILITY_REASONS | _CAPABILITY_NON_ACTIONABLE_REASONS.get(str(name), set())
+
+
+def _coverage_route_quality_actionable(name: str, item: dict[str, Any]) -> bool:
+    if bool(item.get("public_safe")):
+        return True
+    if any(float(item.get(f"{key}_count", 0) or 0) > 0 for key in ("invoked", "evidence", "gate", "outcome")):
+        return True
+    if str(name) not in _PUBLIC_CLAIM_CAPABILITIES:
+        return False
+    if float(item.get("selected_count", 0) or 0) <= 0:
+        return False
+    failure_reasons = item.get("failure_reasons", {})
+    reasons = {str(reason) for reason in failure_reasons if str(reason).strip()} if isinstance(failure_reasons, dict) else set()
+    return not (reasons and reasons <= _route_quality_ignored_reasons(str(name)))
+
+
 def _route_quality_metrics(report: dict[str, Any], arm: str) -> dict[str, float]:
     coverage = ((report.get("capability_coverage") or {}).get(arm) or {})
     if not isinstance(coverage, dict) or not coverage:
@@ -170,8 +188,10 @@ def _route_quality_metrics(report: dict[str, Any], arm: str) -> dict[str, float]
     invoked = 0.0
     evidence = 0.0
     outcome = 0.0
-    for item in coverage.values():
+    for name, item in coverage.items():
         if not isinstance(item, dict):
+            continue
+        if not _coverage_route_quality_actionable(str(name), item):
             continue
         selected += float(item.get("selected_count", 0) or 0)
         invoked += float(item.get("invoked_count", 0) or 0)
@@ -207,6 +227,46 @@ def _research_receipts(row: dict[str, Any]) -> list[dict[str, Any]]:
         for item in receipts
         if isinstance(item, dict) and str(item.get("name") or item.get("capability") or "") == "research"
     ]
+
+
+def _receipt_route_quality_actionable(receipt: dict[str, Any]) -> bool:
+    name = str(receipt.get("name") or receipt.get("capability") or "").strip()
+    if not name:
+        return False
+    if bool(receipt.get("public_claim_safe")):
+        return True
+    if any(bool(receipt.get(key)) for key in ("invoked", "evidence_present", "evidence", "gate_passed", "gate", "outcome_contributed")):
+        return True
+    if name not in _PUBLIC_CLAIM_CAPABILITIES:
+        return False
+    if not bool(receipt.get("selected", False)):
+        return False
+    reason = str(receipt.get("failure_reason") or "").strip()
+    return not (reason and reason in _route_quality_ignored_reasons(name))
+
+
+def _row_route_quality_counts(row: dict[str, Any]) -> dict[str, int] | None:
+    receipts = _jsonish(row.get("capability_receipts"), [])
+    if not isinstance(receipts, list) or not receipts:
+        return None
+    selected = invoked = evidence = outcome = 0
+    for receipt in receipts:
+        if not isinstance(receipt, dict) or not _receipt_route_quality_actionable(receipt):
+            continue
+        if bool(receipt.get("selected", False)):
+            selected += 1
+        if bool(receipt.get("invoked", False)):
+            invoked += 1
+        if bool(receipt.get("evidence_present") or receipt.get("evidence")):
+            evidence += 1
+        if bool(receipt.get("outcome_contributed", False)):
+            outcome += 1
+    return {
+        "selected": selected,
+        "invoked": invoked,
+        "evidence": evidence,
+        "outcome": outcome,
+    }
 
 
 def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -492,10 +552,17 @@ def _route_quality_gate_from_rows(rows_with: list[dict[str, Any]]) -> list[str]:
     evidence = 0.0
     outcome = 0.0
     for row in rows_with:
-        selected += float(row.get("route_decision_selected_count", 0) or 0)
-        invoked += float(row.get("route_decision_invoked_count", 0) or 0)
-        evidence += float(row.get("route_decision_evidence_count", 0) or 0)
-        outcome += float(row.get("route_decision_outcome_count", 0) or 0)
+        counts = _row_route_quality_counts(row)
+        if counts is None:
+            selected += float(row.get("route_decision_selected_count", 0) or 0)
+            invoked += float(row.get("route_decision_invoked_count", 0) or 0)
+            evidence += float(row.get("route_decision_evidence_count", 0) or 0)
+            outcome += float(row.get("route_decision_outcome_count", 0) or 0)
+            continue
+        selected += float(counts["selected"])
+        invoked += float(counts["invoked"])
+        evidence += float(counts["evidence"])
+        outcome += float(counts["outcome"])
     if selected <= 0:
         return []
     selected_to_invoked = invoked / selected
