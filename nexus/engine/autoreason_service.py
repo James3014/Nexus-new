@@ -77,6 +77,7 @@ class AutoreasonService:
         if not parsed:
             return {
                 "schema": "nexus_autoreason_result_v1",
+                "enabled": False,
                 "status": "NO_CANDIDATES",
                 "task_desc": task_desc,
                 "winner": None,
@@ -99,6 +100,7 @@ class AutoreasonService:
         stop_reason = "a_streak_met" if winning_votes >= cfg.a_streak_threshold else "budget_submit"
         return {
             "schema": "nexus_autoreason_result_v1",
+            "enabled": True,
             "status": "SUCCESS",
             "task_desc": task_desc,
             "winner": winner.candidate_id,

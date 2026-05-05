@@ -116,7 +116,7 @@ class AutoreasonReceiptAdapter:
         winner = payload.get("winner") or payload.get("winner_id")
         status = str(payload.get("status") or "").strip().upper()
         disabled = status in {"DISABLED", "FEATURE_FLAG_DISABLED", "SKIPPED", "NOOP"}
-        invoked = bool(payload.get("enabled") and not disabled)
+        invoked = bool((payload.get("enabled") or status == "SUCCESS") and not disabled)
         refs: list[Any] = []
         if invoked:
             refs = [winner] + [str(item) for item in (payload.get("judge_votes", []) or payload.get("judge_scores", []) or [])]

@@ -2126,9 +2126,12 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     )
 
     ar = payload["nexus_usage_trace"]["autoreason"]
+    assert ar["enabled"] is True
     assert ar["status"] == "SUCCESS"
     assert ar["winner"] == "candidate-2"
     assert isinstance(ar["borda_scores"], dict)
+    receipts = {item["name"]: item for item in payload["nexus_usage_trace"]["capability_receipts"]}
+    assert receipts["autoreason"]["public_claim_safe"] is True
     assert payload["research_preflight"]["present"] is True
     assert payload["research_preflight"]["requires_evidence"] is False
     assert payload["research_preflight"]["decision"] == "allow_with_research_receipt"

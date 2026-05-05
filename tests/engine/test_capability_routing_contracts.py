@@ -679,6 +679,30 @@ def test_autoreason_receipt_requires_winner_and_exposes_tournament_context():
     assert "stop_reason:a_streak_converged" in with_winner["autoreason"].evidence_refs
 
 
+def test_autoreason_success_status_counts_as_invoked_for_public_receipt():
+    plan = {
+        "selected_capabilities": ["autoreason"],
+    }
+
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            autoreason={
+                "status": "SUCCESS",
+                "winner": "candidate-b",
+                "judge_votes": [{"ranking": ["candidate-b", "candidate-a"]}],
+                "stop_reason": "a_streak_met",
+            },
+        )
+    }
+
+    receipt = receipts["autoreason"]
+    assert receipt.invoked is True
+    assert receipt.public_claim_safe is True
+
+
 def test_ddtree_receipt_requires_real_candidate_pruning():
     plan = {
         "selected_capabilities": ["ddtree"],

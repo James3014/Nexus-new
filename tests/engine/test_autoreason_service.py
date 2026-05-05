@@ -12,6 +12,7 @@ def test_autoreason_selects_evidence_backed_candidate():
     )
 
     assert out["schema"] == "nexus_autoreason_result_v1"
+    assert out["enabled"] is True
     assert out["status"] == "SUCCESS"
     assert out["winner"] == "b"
     assert out["stop_reason"] == "a_streak_met"
@@ -23,6 +24,7 @@ def test_autoreason_handles_empty_candidates():
     out = AutoreasonService().run([])
 
     assert out["status"] == "NO_CANDIDATES"
+    assert out["enabled"] is False
     assert out["winner"] is None
     assert out["stop_reason"] == "no_candidates"
 
