@@ -1566,6 +1566,86 @@ def test_detect_plateau_not_detected_when_family_changes():
     assert out["detected"] is False
 
 
+def test_plateau_hard_pivot_blocks_history_forced_baseline(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+    history_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-history.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    flow_key = f"{target}|{test_file}"
+    history_path.write_text(
+        json.dumps(
+            {
+                flow_key: [
+                    {
+                        "flow": "hyper_sprint",
+                        "status": "FAILED",
+                        "reason": "stage1_no_passing_candidate",
+                        "asi_record": {
+                            "status": "discard",
+                            "family": "flow:retry_delay",
+                            "metric": 0.41,
+                            "rollback_reason": "timeout_retry_plateau",
+                        },
+                    }
+                    for _ in range(4)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="VALUE = 2\n",
+            winner_source="local",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=1,
+            model_calls=0,
+            total_tokens=0,
+            token_capture_status="not_applicable_local_only",
+            learning_trace={},
+            candidates=[],
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Fix repeated retry timeout plateau across architecture boundary",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="cross_module_refactor",
+        candidate_count=2,
+        root_cause_confidence=0.5,
+        findings_query="",
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=2.0,
+        baseline_fast_sec=99.0,
+        history_window=4,
+        history_fail_threshold=1,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow=None,
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+    )
+
+    assert payload["chosen_flow"] == "hyper_sprint"
+    assert payload["strategy"]["path"] == "hyper_direct_plateau_distant_scout"
+    assert payload["guard"]["history_forced_baseline"] is False
+    assert payload["guard"]["plateau_hard_pivot"] is True
+    assert payload["route"]["route_features"]["route_pivot"] == "distant_scout"
+    assert payload["strategy"]["distant_scout_plan"]["recommended_family"] != "flow:retry_delay"
+
+
 def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text(

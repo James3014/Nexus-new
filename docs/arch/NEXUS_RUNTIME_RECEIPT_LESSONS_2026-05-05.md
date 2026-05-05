@@ -9,6 +9,7 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Flash A/B timeout rows are not valid route-quality evidence. A run that exits before Nexus emits `nexus_usage_trace` must be classified as infra/runtime invalid, then rerun with an adequate gateway/subprocess budget before claiming route improvement.
 - Provider seams that call local helper methods must be unit-tested through the provider boundary. A static/injected fetch provider failed when `_best_line` was called as an instance method from a provider, so fetched external evidence disappeared silently behind the fail-closed provider wrapper.
 - `external_doc_scout` must not become public-safe from rejected claims alone. A runtime receipt needs at least one verified external source count, otherwise claim-scout selection can be mistaken for external fact verification.
+- Route/runtime tests may need explicit cache access because `uv` resolves through `/Users/jameschen/.cache/uv`. A sandbox denial is infrastructure noise, not a product regression, and should be retried with the approved `uv run pytest` path before changing code.
 
 ## Applied Fixes
 - Added late plateau replan before execution.
@@ -16,6 +17,7 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Decoupled `semantic_searcher` fixture evidence from the local swarm executor flag.
 - Renamed the preferred semantic judge route capability to `judge_panel` while preserving `llm_judge_panel` compatibility keys for existing reports.
 - Added provider/cache/source-count metadata to DocScout receipts and made the external DocScout gate require verified sources.
+- Made plateau hard-pivot testing distinguish runtime regressions from sandbox cache access failures.
 
 ## Remaining Debt
 - `swarm_quiet_moment` Flash path still needs a bounded non-timeout LLM profile before public A/B claims can include it.

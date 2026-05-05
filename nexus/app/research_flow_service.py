@@ -2122,9 +2122,10 @@ def run_auto_flow(
     recent = list(history_data.get(flow_key, []))
     asi_ledger = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
     plateau = _detect_plateau(asi_ledger)
+    plateau_hard_pivot = bool(force_flow is None and plateau.get("detected"))
     if bool(plateau.get("detected")):
         route_features = route.get("route_features", {}) if isinstance(route.get("route_features"), dict) else {}
-        route_features = {**route_features, "plateau_detected": True}
+        route_features = {**route_features, "plateau_detected": True, "route_pivot": "distant_scout"}
         context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
         risk_flags = list(context.get("risk_flags", []) or [])
         blocked_assumptions = list(context.get("blocked_assumptions", []) or [])
@@ -2137,10 +2138,12 @@ def run_auto_flow(
             "risk_flags": risk_flags,
             "blocked_assumptions": blocked_assumptions,
             "next_action_hint": "switch_to_architecture_scout_and_change_family",
+            "route_pivot": "distant_scout",
         }
         route_features["blocked_assumptions_count"] = len(blocked_assumptions)
         route["route_features"] = route_features
         route["research_context"] = context
+        route["distant_scout_plan"] = DistantScoutPlanner().plan(task_desc=task_desc, plateau=plateau, asi_ledger=asi_ledger)
         capability_plan, route_decision = _build_capability_plan_and_decision(
             task_desc=task_desc,
             task_type=task_type,
@@ -2161,7 +2164,12 @@ def run_auto_flow(
     )
     nightshift_recommended = bool(recent_hyper_fails >= 2 or stage1_fail_signals >= 1)
     history_forced_baseline = False
-    if force_flow is None and chosen_flow == "hyper_sprint" and recent_hyper_fails >= max(1, history_fail_threshold):
+    if (
+        force_flow is None
+        and not plateau_hard_pivot
+        and chosen_flow == "hyper_sprint"
+        and recent_hyper_fails >= max(1, history_fail_threshold)
+    ):
         chosen_flow = "baseline"
         history_forced_baseline = True
     phase_wall_sec["D"] = round(time.monotonic() - phase_started_at, 4)
@@ -2546,7 +2554,7 @@ def run_auto_flow(
     else:
         direct_hyper = bool(execution_profile.get("prefer_direct_hyper", False))
         forced_hyper = force_flow == "hyper_sprint"
-        if forced_hyper or (
+        if plateau_hard_pivot or forced_hyper or (
             force_flow is None
             and execution_profile["is_hard_task"]
             and (skip_baseline_probe_for_hard or direct_hyper)
@@ -2561,6 +2569,8 @@ def run_auto_flow(
                 result = _run_original_verification_rescue(result)
             if forced_hyper:
                 strategy_path = "hyper_direct_forced"
+            elif plateau_hard_pivot:
+                strategy_path = "hyper_direct_plateau_distant_scout"
             else:
                 strategy_path = "hyper_direct_hard_skip_probe" if skip_baseline_probe_for_hard else "hyper_direct_cross_module"
         else:
@@ -3071,6 +3081,7 @@ def run_auto_flow(
             "max_time_ratio_guard": max_time_ratio_guard,
             "baseline_probe_skipped": baseline_probe_skipped,
             "baseline_probe": baseline_probe_for_report,
+            "plateau_hard_pivot": plateau_hard_pivot,
         },
         "learn_phase_slo": {
             "phase_slo_pass": bool(learn_phase_slo.get("phase_slo_pass", False)),
@@ -3091,6 +3102,7 @@ def run_auto_flow(
             "learn_gate_blocked": bool(learn_gate_blocked),
             "baseline_probe_skipped": baseline_probe_skipped,
             "plateau": plateau,
+            "distant_scout_plan": route.get("distant_scout_plan", {}),
         },
         "artifact_summary": artifact_summary,
         "success_criteria": {
