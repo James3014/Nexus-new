@@ -5,8 +5,12 @@ from datetime import datetime, timezone
 from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore
 
 class LanceDBStorage(MemoryStorage):
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, tenant_id: str | None = None):
         self.project_root = project_root
+        self.tenant_id = tenant_id
+
+    def scoped_access(self, tenant_id: str) -> "LanceDBStorage":
+        return LanceDBStorage(self.project_root, tenant_id=str(tenant_id))
 
     def store(self, tenant_id: str, artifact_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
         tenant_dir = self.project_root / ".nexus" / "tenants" / tenant_id
@@ -26,7 +30,12 @@ class LanceDBStorage(MemoryStorage):
         """🛡️ Fallback: Keyword search across tenant JSONL backups."""
         results = []
         limit = kwargs.get("limit", 10)
-        tenant_dirs = list((self.project_root / ".nexus" / "tenants").glob("*/lancedb/*.jsonl"))
+        tenant_id = str(kwargs.get("tenant_id") or self.tenant_id or "")
+        tenants_root = self.project_root / ".nexus" / "tenants"
+        if tenant_id:
+            tenant_dirs = list((tenants_root / tenant_id / "lancedb").glob("*.jsonl"))
+        else:
+            tenant_dirs = list(tenants_root.glob("*/lancedb/*.jsonl"))
         
         for jsonl_path in tenant_dirs:
             try:
@@ -41,14 +50,8 @@ class LanceDBStorage(MemoryStorage):
         return results
 
     def search(self, query: str, table: str = "default", limit: int = 5) -> List[Dict[str, Any]]:
-        """🚀 Semantic Search: Delegates to MemoryRepository FTS."""
-        from nexus.services.memory_repository import MemoryRepository
-        repo = MemoryRepository(self.project_root / ".nexus" / "knowledge" / "lancedb")
-        try:
-            df = repo.search_fts(table_name=table, query=query, limit=limit)
-            return df.to_dict("records") if not df.empty else []
-        except Exception:
-            return []
+        """Keyword search fallback kept infra-pure; semantic search belongs in services."""
+        return self.retrieve(query, artifact_type=table, limit=limit)
 
 class LocalCacheStore(CacheStore):
     def __init__(self):

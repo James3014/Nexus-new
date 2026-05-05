@@ -36,7 +36,7 @@ class MemoryService:
     負責聚合與快取跨階段的背景知識與歷史記錄。
     重構版：將 LanceDB 邏輯抽離至 MemoryRepository。
     """
-    def __init__(self, project_root: str, run_dir: Optional[str] = None):
+    def __init__(self, project_root: str, run_dir: Optional[str] = None, repo: Any = None, redis_client: Any = None):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if run_dir else None
         db_path_override = os.environ.get("NEXUS_MEMORY_DB_PATH")
@@ -44,13 +44,16 @@ class MemoryService:
         self.fault_lessons_jsonl = self.project_root / ".nexus" / "knowledge" / "fault_lessons.jsonl"
         self.policy_memory_jsonl = self.project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
         self.coordinator = MemoryCoordinator()
-        self.repo = MemoryRepository(self.db_path)
+        self.repo = repo or MemoryRepository(self.db_path)
         self.bootstrap_status = "pending"
         
         try:
-            if redis is None:
+            if redis_client is not None:
+                self.redis = redis_client
+            elif redis is None:
                 raise ModuleNotFoundError("redis")
-            self.redis = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+            else:
+                self.redis = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
             self.redis.ping()
             self.redis_available = True
         except (ConnectionError, TimeoutError, ModuleNotFoundError, Exception) as e:

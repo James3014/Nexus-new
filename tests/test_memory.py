@@ -75,6 +75,19 @@ class TestMemoryService(unittest.TestCase):
             service = MemoryService(project_root=str(self.project_root))
         self.assertEqual(service.db_path, override)
 
+    def test_memory_service_accepts_injected_repo_and_redis_client(self):
+        repo = MagicMock()
+        repo.search_fts.return_value.empty = True
+        redis_client = MagicMock()
+        redis_client.ping.return_value = True
+        redis_client.get.return_value = None
+
+        service = MemoryService(project_root=str(self.project_root), repo=repo, redis_client=redis_client)
+
+        self.assertIs(service.repo, repo)
+        self.assertIs(service.redis, redis_client)
+        self.assertTrue(service.redis_available)
+
     def test_memory_auto_init_can_fail_open_for_benchmark_subprocesses(self):
         with patch.dict(os.environ, {"NEXUS_MEMORY_AUTO_INIT": "0"}):
             with patch.object(MemoryService, "_auto_init_tables") as auto_init:

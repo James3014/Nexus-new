@@ -53,3 +53,17 @@ def test_ensure_table_tolerates_concurrent_create_race(repo):
     repo.ensure_table("policy", [{"condition": "x"}], fts_column="condition")
 
     mock_db.create_table.assert_called_once()
+
+
+def test_update_table_replaces_existing_rows(repo):
+    mock_db = MagicMock()
+    mock_table = MagicMock()
+    mock_db.list_tables.return_value = ["policy"]
+    mock_db.open_table.return_value = mock_table
+    repo._db = mock_db
+    df = pd.DataFrame([{"rule_id": "POL-1", "confidence": 0.9}])
+
+    repo.update_table("policy", df)
+
+    mock_table.delete.assert_called_once()
+    mock_table.add.assert_called_once_with([{"rule_id": "POL-1", "confidence": 0.9}])

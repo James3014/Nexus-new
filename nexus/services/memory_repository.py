@@ -183,6 +183,27 @@ class MemoryRepository:
                 if "updated_at" not in row: row["updated_at"] = time.time()
             table.add(rows)
 
+    def update_table(self, table_name: str, data: Any) -> None:
+        """Replace a table with dataframe/list records for learning-weight updates."""
+        rows = data.to_dict("records") if hasattr(data, "to_dict") else list(data or [])
+        if not rows:
+            return
+        db = self._get_db()
+        if db is None:
+            return
+        if table_name not in db.list_tables():
+            self.ensure_table(table_name, initial_data=rows)
+            return
+        table = db.open_table(table_name)
+        try:
+            table.delete("true")
+        except Exception:
+            try:
+                table.delete("1 = 1")
+            except Exception:
+                logger.debug("LanceDB full-table delete skipped for %s", table_name)
+        table.add(rows)
+
     def get_all_rows(self, table_name: str) -> pd.DataFrame:
         db = self._get_db()
         if db is None or table_name not in db.list_tables():
