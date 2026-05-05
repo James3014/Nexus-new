@@ -29,7 +29,7 @@ from nexus.engine.autoreason_service import AutoreasonService
 from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
 from nexus.core.event_bus import NexusEventBus
 from nexus.research.architecture_scout import DistantScoutPlanner
-from nexus.research.doc_scout_adapter import DocScoutAdapter
+from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
 from nexus.research.formal_report_service import FormalReportService
 from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
 from nexus.research.research_runtime_contracts import build_claim_probe, build_research_doctor
@@ -812,7 +812,13 @@ def _build_research_context(
     route_features: dict[str, Any],
     historical_hints: list[str],
 ) -> dict[str, Any]:
-    doc_scout = DocScoutAdapter(repo_root).search(task_desc, limit=4)
+    external_providers = build_external_scout_providers_from_env()
+    include_external = bool(external_providers)
+    doc_scout = DocScoutAdapter(repo_root, external_providers=external_providers).search(
+        task_desc,
+        limit=4,
+        include_external=include_external,
+    )
     doc_hits = int(doc_scout.get("hits_count", 0) or 0)
     task_lower = f"{task_desc} {task_type}".lower()
     claim_like_task = any(token in task_lower for token in ("api", "sdk", "parameter", "flag", "contract", "claim", "verify", "evidence"))
@@ -1938,6 +1944,11 @@ def _augment_semantic_runtime_capabilities(
                 refs.append(ref)
         verified = _stringify_claims(research_context.get("verified_claims", []) or [])
         rejected = _stringify_claims(research_context.get("rejected_claims", []) or [])
+        external_meta = doc_scout.get("external_metadata", {}) if isinstance(doc_scout.get("external_metadata"), dict) else {}
+        providers_used = [str(item) for item in external_meta.get("providers_used", []) or [] if str(item).strip()]
+        provider_errors = [str(item) for item in external_meta.get("provider_errors", []) or [] if str(item).strip()]
+        verified_source_count = int(external_meta.get("verified_source_count", len(set(refs))) or 0)
+        cache_status = str(external_meta.get("cache_status") or "disabled")
         if refs or verified or rejected:
             report = {
                 "schema": "nexus_external_doc_scout_receipt_v1",
@@ -1945,11 +1956,19 @@ def _augment_semantic_runtime_capabilities(
                 "external_doc_refs": refs,
                 "verified_claims": verified,
                 "rejected_claims": rejected,
+                "providers_used": providers_used,
+                "provider_errors": provider_errors,
+                "cache_status": cache_status,
+                "verified_source_count": verified_source_count,
             }
             capabilities["external_doc_scout_used"] = True
             capabilities["external_doc_refs"] = list(dict.fromkeys(refs))
             capabilities["verified_claims"] = verified
             capabilities["rejected_claims"] = rejected
+            capabilities["external_doc_scout_providers_used"] = providers_used
+            capabilities["external_doc_scout_provider_errors"] = provider_errors
+            capabilities["external_doc_scout_cache_status"] = cache_status
+            capabilities["external_doc_scout_verified_source_count"] = verified_source_count
             capabilities["external_doc_scout_report_path"] = _write_runtime_receipt_json(
                 repo_root,
                 category="external_doc_scout",

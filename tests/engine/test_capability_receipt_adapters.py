@@ -177,6 +177,9 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
                 "external_doc_scout_used": True,
                 "external_doc_refs": ["https://github.example/issues/42"],
                 "verified_claims": ["timeout race known"],
+                "external_doc_scout_providers_used": ["github_issue_fetch"],
+                "external_doc_scout_cache_status": "miss",
+                "external_doc_scout_verified_source_count": 1,
                 "external_doc_scout_gate_passed": True,
                 "formal_report_path": ".nexus/reports/formal/report.md",
                 "formal_report_schema_version": "nexus_formal_report_v1",
@@ -193,6 +196,27 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
     for name, receipt in proven.items():
         assert receipt.public_claim_safe is True, name
         assert receipt.evidence_refs
+    assert "verified_sources:1" in proven["external_doc_scout"].evidence_refs
+
+
+def test_external_doc_scout_gate_requires_verified_source_count():
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["external_doc_scout"]},
+            capabilities={
+                "claim_verified": True,
+                "external_doc_scout_used": True,
+                "external_doc_refs": ["https://github.example/issues/42"],
+                "verified_claims": ["timeout race known"],
+                "external_doc_scout_gate_passed": True,
+                "external_doc_scout_verified_source_count": 0,
+            },
+        )
+    }
+
+    assert receipts["external_doc_scout"].public_claim_safe is False
+    assert receipts["external_doc_scout"].failure_reason == "evidence_without_gate_pass"
 
 
 def test_legacy_llm_judge_panel_selected_capability_canonicalizes_to_judge_panel():

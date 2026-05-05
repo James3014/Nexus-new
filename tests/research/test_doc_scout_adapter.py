@@ -79,6 +79,10 @@ def test_doc_scout_external_provider_rejects_unverified_sources_and_caches(tmp_p
 
     assert [hit["source_url"] for hit in first["hits"]] == ["https://github.example/issues/42"]
     assert second["hits"] == first["hits"]
+    assert first["external_metadata"]["cache_status"] == "miss"
+    assert second["external_metadata"]["cache_status"] == "hit"
+    assert second["external_metadata"]["providers_used"] == ["github_issue"]
+    assert second["external_metadata"]["verified_source_count"] == 1
     assert list((tmp_path / ".nexus" / "cache" / "doc_scout").glob("*.json"))
 
 
@@ -118,3 +122,23 @@ def test_doc_scout_fetched_provider_is_opt_in_and_uses_injected_fetcher(tmp_path
     assert disabled["external_enabled"] is False
     assert calls == [("https://spec.example/sdk", 1.5)]
     assert enabled["hits"][0]["source_url"] == "https://spec.example/sdk"
+    assert enabled["external_metadata"]["providers_used"] == ["spec_fetch"]
+    assert enabled["external_metadata"]["cache_status"] == "disabled"
+    assert enabled["external_metadata"]["verified_source_count"] == 1
+
+
+def test_doc_scout_external_provider_failure_is_measured_not_silent(tmp_path: Path):
+    class BrokenProvider:
+        name = "broken_spec"
+
+        def search(self, query: str, *, tokens: list[str], limit: int):
+            raise TimeoutError("boom")
+
+    out = DocScoutAdapter(tmp_path, external_providers=[BrokenProvider()], cache_ttl_sec=0).search(
+        "sdk timeout race",
+        include_external=True,
+    )
+
+    assert out["external_enabled"] is True
+    assert out["external_metadata"]["provider_errors"] == ["broken_spec:TimeoutError"]
+    assert out["external_metadata"]["verified_source_count"] == 0

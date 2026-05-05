@@ -633,10 +633,25 @@ class ExternalDocScoutReceiptAdapter:
         refs = _as_refs(payload.get("external_doc_refs"))
         verified = _as_refs(payload.get("verified_claims"))
         rejected = _as_refs(payload.get("rejected_claims"))
+        providers = _as_refs(payload.get("external_doc_scout_providers_used") or payload.get("providers_used"))
+        cache_status = str(payload.get("external_doc_scout_cache_status") or payload.get("cache_status") or "").strip()
+        verified_source_count = as_int(
+            payload.get("external_doc_scout_verified_source_count", payload.get("verified_source_count", 0))
+        )
         refs.extend(f"verified_claim:{item}" for item in verified)
         refs.extend(f"rejected_claim:{item}" for item in rejected)
+        refs.extend(f"provider:{item}" for item in providers)
+        if cache_status:
+            refs.append(f"cache:{cache_status}")
+        if verified_source_count > 0:
+            refs.append(f"verified_sources:{verified_source_count}")
         invoked = bool(payload.get("external_doc_scout_used") or refs)
-        gate_passed = bool(invoked and refs and _as_bool(payload.get("external_doc_scout_gate_passed", False)))
+        gate_passed = bool(
+            invoked
+            and refs
+            and verified_source_count > 0
+            and _as_bool(payload.get("external_doc_scout_gate_passed", False))
+        )
         return merge_capability_receipt(
             name=self.name,
             selected=True,

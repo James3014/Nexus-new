@@ -2228,6 +2228,18 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
         ),
         encoding="utf-8",
     )
+    monkeypatch.setenv(
+        "NEXUS_DOC_SCOUT_EXTERNAL_ROWS_JSON",
+        json.dumps(
+            [
+                {
+                    "title": "SDK API claim evidence for retry timeout plateau",
+                    "source_url": "https://github.example/issues/sdk-api-claim-timeout",
+                    "snippet": "Produce public report for sdk api claim evidence after repeated retry timeout plateau.",
+                }
+            ]
+        ),
+    )
 
     def fake_hyper(*, repo_root, config):
         return SimpleNamespace(
@@ -2310,6 +2322,9 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
     assert capabilities["llm_judge_panel_report_path"]
     assert capabilities["architecture_scout_report_path"]
     assert capabilities["external_doc_scout_report_path"]
+    assert capabilities["external_doc_scout_cache_status"] in {"disabled", "hit", "miss"}
+    assert capabilities["external_doc_scout_verified_source_count"] >= 1
+    assert capabilities["external_doc_scout_gate_passed"] is True
 
 
 def test_auto_flow_writes_explicit_output_file(tmp_path: Path):

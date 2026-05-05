@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Protocol
 import re
@@ -108,6 +109,35 @@ class FetchedExternalScoutProvider:
             return response.read(200_000).decode("utf-8", errors="ignore")
 
 
+def _split_env_urls(value: str) -> list[str]:
+    return [item.strip() for item in re.split(r"[\n,]+", value or "") if item.strip()]
+
+
+def build_external_scout_providers_from_env(env: dict[str, str] | None = None) -> list[ExternalScoutProvider]:
+    """Build opt-in external providers without making network access implicit."""
+    source_env = env if env is not None else os.environ
+    providers: list[ExternalScoutProvider] = []
+    provider_specs = (
+        ("NEXUS_DOC_SCOUT_GITHUB_ISSUE_URLS", "github_issue_fetch", "github_issue"),
+        ("NEXUS_DOC_SCOUT_ARXIV_URLS", "arxiv_fetch", "arxiv"),
+        ("NEXUS_DOC_SCOUT_SPEC_URLS", "spec_url_fetch", "spec"),
+    )
+    for env_key, name, source in provider_specs:
+        urls = _split_env_urls(str(source_env.get(env_key, "") or ""))
+        if urls:
+            providers.append(FetchedExternalScoutProvider(name=name, source=source, urls=urls))
+
+    rows_text = str(source_env.get("NEXUS_DOC_SCOUT_EXTERNAL_ROWS_JSON", "") or "").strip()
+    if rows_text:
+        try:
+            rows_payload = json.loads(rows_text)
+        except json.JSONDecodeError:
+            rows_payload = []
+        if isinstance(rows_payload, list):
+            providers.append(StaticExternalScoutProvider(name="external_rows", source="external", rows=rows_payload))
+    return providers
+
+
 class DocScoutAdapter:
     """Lightweight local doc scout for research-stage context retrieval."""
 
@@ -128,6 +158,14 @@ class DocScoutAdapter:
             return self._empty(query)
 
         hits: list[DocScoutHit] = []
+        external_hits: list[DocScoutHit] = []
+        external_meta: dict[str, Any] = {
+            "providers_configured": [str(getattr(provider, "name", "external")) for provider in self.external_providers],
+            "providers_used": [],
+            "provider_errors": [],
+            "cache_status": "disabled",
+            "verified_source_count": 0,
+        }
         docs_roots = [
             self.project_root / "docs",
             self.project_root / "nexus_wiki_vault",
@@ -159,15 +197,23 @@ class DocScoutAdapter:
 
         external_enabled = bool(include_external and self.external_providers)
         if external_enabled:
-            hits.extend(self._scan_external(query, tokens, limit=limit))
+            external_hits, external_meta = self._scan_external(query, tokens, limit=limit)
+            hits.extend(external_hits)
 
         ranked = sorted(hits, key=lambda item: item.score, reverse=True)[: max(1, int(limit))]
         retrieval_hints = [f"{item.source}:{Path(item.path).name}" for item in ranked]
         confidence = min(1.0, round(sum(item.score for item in ranked) / max(1.0, len(tokens) * 3.0), 4))
+        ranked_external_urls = {
+            str(item.source_url).strip()
+            for item in ranked
+            if str(item.source_url).strip()
+        }
+        external_meta["verified_source_count"] = len(ranked_external_urls)
         return {
             "query": query,
             "status": "SUCCESS",
             "external_enabled": external_enabled,
+            "external_metadata": external_meta,
             "hits_count": len(ranked),
             "confidence": confidence,
             "retrieval_hints": retrieval_hints,
@@ -183,15 +229,27 @@ class DocScoutAdapter:
             ],
         }
 
-    def _scan_external(self, query: str, tokens: list[str], *, limit: int) -> list[DocScoutHit]:
+    def _scan_external(self, query: str, tokens: list[str], *, limit: int) -> tuple[list[DocScoutHit], dict[str, Any]]:
+        meta: dict[str, Any] = {
+            "providers_configured": [str(getattr(provider, "name", "external")) for provider in self.external_providers],
+            "providers_used": [],
+            "provider_errors": [],
+            "cache_status": "disabled" if self.cache_ttl_sec <= 0 else "miss",
+            "verified_source_count": 0,
+        }
         cached = self._read_external_cache(query, tokens=tokens, limit=limit)
         if cached is not None:
-            return cached
+            meta["cache_status"] = "hit"
+            meta["providers_used"] = sorted({hit.source for hit in cached if str(hit.source).strip()})
+            meta["verified_source_count"] = len({hit.source_url for hit in cached if str(hit.source_url).strip()})
+            return cached, meta
         hits: list[DocScoutHit] = []
         for provider in self.external_providers:
+            provider_name = str(getattr(provider, "name", "external"))
             try:
                 rows = provider.search(query, tokens=tokens, limit=limit)
-            except Exception:
+            except Exception as exc:
+                meta["provider_errors"].append(f"{provider_name}:{type(exc).__name__}")
                 continue
             for row in rows or []:
                 if not isinstance(row, dict):
@@ -211,8 +269,11 @@ class DocScoutAdapter:
                         source_url=source_url,
                     )
                 )
+                if provider_name not in meta["providers_used"]:
+                    meta["providers_used"].append(provider_name)
         self._write_external_cache(query, tokens=tokens, limit=limit, hits=hits)
-        return hits
+        meta["verified_source_count"] = len({hit.source_url for hit in hits if str(hit.source_url).strip()})
+        return hits, meta
 
     def _source_url_verified(self, source_url: str) -> bool:
         return bool(re.match(r"^https?://", source_url))
@@ -316,6 +377,13 @@ class DocScoutAdapter:
             "query": query,
             "status": "EMPTY_QUERY",
             "external_enabled": False,
+            "external_metadata": {
+                "providers_configured": [],
+                "providers_used": [],
+                "provider_errors": [],
+                "cache_status": "disabled",
+                "verified_source_count": 0,
+            },
             "hits_count": 0,
             "confidence": 0.0,
             "retrieval_hints": [],
