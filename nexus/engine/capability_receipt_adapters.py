@@ -146,6 +146,57 @@ class AutoreasonReceiptAdapter:
         )
 
 
+class LlmJudgePanelReceiptAdapter:
+    name = "llm_judge_panel"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        votes = payload.get("llm_judge_panel_votes", []) or payload.get("panel_votes", []) or []
+        winner = payload.get("llm_judge_panel_winner") or payload.get("winner")
+        report = str(payload.get("llm_judge_panel_report_path") or payload.get("judge_report") or "").strip()
+        invoked = bool(payload.get("llm_judge_panel_used") or votes or winner or report)
+        refs = [report] if report else []
+        if winner:
+            refs.append(f"winner:{winner}")
+        if votes:
+            refs.append(f"panel_votes:{len(votes)}")
+        gate_passed = bool(invoked and refs and _as_bool(payload.get("llm_judge_panel_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
+class ASIConstraintExtractorReceiptAdapter:
+    name = "asi_constraint_extractor"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        constraints = payload.get("asi_constraints", []) or []
+        blocked = payload.get("blocked_assumptions", []) or []
+        report = str(payload.get("asi_constraint_report_path") or "").strip()
+        invoked = bool(report or constraints or blocked)
+        refs = [report] if report else []
+        if constraints:
+            refs.append(f"extracted_constraints:{len(constraints)}")
+        refs.extend(f"blocked:{item}" for item in blocked if str(item).strip())
+        gate_passed = bool(invoked and refs and _as_bool(payload.get("asi_constraint_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
 class DDTreeReceiptAdapter:
     name = "ddtree"
 
@@ -546,6 +597,73 @@ class SwarmQuietMomentReceiptAdapter:
         )
 
 
+class ArchitectureScoutReceiptAdapter:
+    name = "architecture_scout"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        report = str(payload.get("architecture_scout_report_path") or "").strip()
+        refs = [report] if report else []
+        refs.extend(_as_refs(payload.get("architecture_refs")))
+        refs.extend(f"blast_radius:{item}" for item in _as_refs(payload.get("blast_radius_refs")))
+        invoked = bool(payload.get("architecture_scout_used") or refs)
+        gate_passed = bool(invoked and refs and _as_bool(payload.get("architecture_scout_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
+class ExternalDocScoutReceiptAdapter:
+    name = "external_doc_scout"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("external_doc_refs"))
+        verified = _as_refs(payload.get("verified_claims"))
+        rejected = _as_refs(payload.get("rejected_claims"))
+        refs.extend(f"verified_claim:{item}" for item in verified)
+        refs.extend(f"rejected_claim:{item}" for item in rejected)
+        invoked = bool(payload.get("external_doc_scout_used") or refs)
+        gate_passed = bool(invoked and refs and _as_bool(payload.get("external_doc_scout_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
+class FormalReportReceiptAdapter:
+    name = "formal_report"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        report = str(payload.get("formal_report_path") or "").strip()
+        schema = str(payload.get("formal_report_schema_version") or "").strip()
+        summary = str(payload.get("verification_summary_ref") or "").strip()
+        refs = [item for item in (report, schema, summary) if item]
+        invoked = bool(refs)
+        gate_passed = bool(invoked and report and schema == "nexus_formal_report_v1" and _as_bool(payload.get("formal_report_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
 class DroneReceiptAdapter:
     name = "drone"
 
@@ -641,6 +759,8 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
     for adapter in (
         CodeIntelReceiptAdapter(),
         AutoreasonReceiptAdapter(),
+        LlmJudgePanelReceiptAdapter(),
+        ASIConstraintExtractorReceiptAdapter(),
         DDTreeReceiptAdapter(),
         HyperReceiptAdapter(),
         UltraReviewReceiptAdapter(),
@@ -656,6 +776,9 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
         ResearchReceiptAdapter(),
         LanceDBReceiptAdapter(),
         SemanticSearcherReceiptAdapter(),
+        ArchitectureScoutReceiptAdapter(),
+        ExternalDocScoutReceiptAdapter(),
+        FormalReportReceiptAdapter(),
         SwarmQuietMomentReceiptAdapter(),
         RepairLoopReceiptAdapter(),
     )

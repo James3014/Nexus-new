@@ -51,6 +51,29 @@ def test_capability_nodes_include_runtime_callable_search_and_swarm_pause():
     assert "rollback" in nodes["swarm_quiet_moment"].evidence_outputs
 
 
+def test_capability_nodes_include_semantic_research_runtime_capabilities():
+    nodes = default_capability_nodes()
+
+    expected = {
+        "llm_judge_panel",
+        "asi_constraint_extractor",
+        "architecture_scout",
+        "external_doc_scout",
+        "formal_report",
+    }
+    assert expected <= set(nodes)
+    assert nodes["llm_judge_panel"].dependencies == ("artifact_gate", "claim_gate")
+    assert "panel_votes" in nodes["llm_judge_panel"].evidence_outputs
+    assert nodes["asi_constraint_extractor"].dependencies == ("mempalace_gate",)
+    assert "extracted_constraints" in nodes["asi_constraint_extractor"].evidence_outputs
+    assert nodes["architecture_scout"].dependencies == ("codeintel",)
+    assert "blast_radius" in nodes["architecture_scout"].evidence_outputs
+    assert nodes["external_doc_scout"].dependencies == ("research",)
+    assert "citations" in nodes["external_doc_scout"].evidence_outputs
+    assert nodes["formal_report"].dependencies == ("delivery_gate", "claim_gate")
+    assert "formal_report_path" in nodes["formal_report"].evidence_outputs
+
+
 def test_capability_planner_selects_runtime_callable_search_and_swarm_pause():
     plan = CapabilityPlanner().plan(
         task_desc="Cross-module swarm repair with semantic retrieval evidence",
@@ -67,6 +90,35 @@ def test_capability_planner_selects_runtime_callable_search_and_swarm_pause():
 
     selected = set(plan["selected_capabilities"])
     assert {"semantic_searcher", "swarm", "swarm_quiet_moment"} <= selected
+
+
+def test_capability_planner_selects_semantic_research_runtime_capabilities():
+    plan = CapabilityPlanner().plan(
+        task_desc="Produce formal public report for repeated timeout plateau with external API uncertainty",
+        task_type="public_report_bug_repair",
+        route={
+            "should_research": True,
+            "route_features": {
+                "adjusted_root_cause_confidence": 0.45,
+                "candidate_count": 3,
+                "claim_uncertainty": True,
+                "doc_scout_hits": 2,
+                "blocked_assumptions_count": 2,
+                "plateau_detected": True,
+                "benchmark_required": True,
+            },
+            "research_context": {"role": "architecture_scout"},
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {
+        "llm_judge_panel",
+        "asi_constraint_extractor",
+        "architecture_scout",
+        "external_doc_scout",
+        "formal_report",
+    } <= selected
 
 
 def test_capability_planner_downgrades_optional_cost_but_keeps_gates():

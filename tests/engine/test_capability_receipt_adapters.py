@@ -127,3 +127,68 @@ def test_swarm_quiet_moment_receipt_requires_non_mutating_event():
 
     assert receipts["swarm_quiet_moment"].public_claim_safe is True
     assert "observe:observed" in receipts["swarm_quiet_moment"].evidence_refs
+
+
+def test_semantic_research_runtime_receipts_require_evidence_and_gate():
+    plan = {
+        "selected_capabilities": [
+            "llm_judge_panel",
+            "asi_constraint_extractor",
+            "architecture_scout",
+            "external_doc_scout",
+            "formal_report",
+        ]
+    }
+
+    missing = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={
+                "claim_verified": True,
+                "llm_judge_panel_used": True,
+                "asi_constraints": [],
+                "architecture_scout_used": True,
+                "external_doc_scout_used": True,
+            },
+        )
+    }
+    proven = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={
+                "claim_verified": True,
+                "llm_judge_panel_used": True,
+                "llm_judge_panel_votes": [{"judge": "fake", "ranking": ["B", "A"]}],
+                "llm_judge_panel_winner": "B",
+                "llm_judge_panel_report_path": ".nexus/reports/judge/panel.json",
+                "llm_judge_panel_gate_passed": True,
+                "asi_constraints": [{"blocked_pattern": "flow:retry_delay"}],
+                "blocked_assumptions": ["flow:retry_delay"],
+                "asi_constraint_report_path": ".nexus/reports/asi/constraints.json",
+                "asi_constraint_gate_passed": True,
+                "architecture_scout_used": True,
+                "architecture_scout_report_path": ".nexus/reports/architecture/scout.json",
+                "architecture_refs": ["component:timeout_policy"],
+                "blast_radius_refs": ["nexus/app/research_flow_service.py"],
+                "architecture_scout_gate_passed": True,
+                "external_doc_scout_used": True,
+                "external_doc_refs": ["https://github.example/issues/42"],
+                "verified_claims": ["timeout race known"],
+                "external_doc_scout_gate_passed": True,
+                "formal_report_path": ".nexus/reports/formal/report.md",
+                "formal_report_schema_version": "nexus_formal_report_v1",
+                "verification_summary_ref": "pytest:PASS",
+                "formal_report_gate_passed": True,
+            },
+        )
+    }
+
+    for name, receipt in missing.items():
+        assert receipt.public_claim_safe is False, name
+        assert receipt.failure_reason in {"invoked_without_evidence", "selected_without_invocation", "evidence_without_gate_pass"}
+
+    for name, receipt in proven.items():
+        assert receipt.public_claim_safe is True, name
+        assert receipt.evidence_refs

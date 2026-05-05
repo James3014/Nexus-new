@@ -28,6 +28,8 @@ def apply_signal_policies(
         or signals.governance_signal
     ):
         enable("autoreason", "low_confidence_or_multi_candidate_or_history")
+    if signals.confidence < 0.75 or signals.candidate_count >= 2 or signals.evidence_signal or signals.governance_signal:
+        enable("llm_judge_panel", "semantic_judge_required_for_uncertain_or_multi_candidate_route")
     if signals.confidence < 0.8 or "belief" in task_lower or "confidence" in task_lower or "budget" in task_lower:
         enable("belief", "confidence_control_needed")
     if signals.memory_hits or signals.findings_hits:
@@ -40,6 +42,11 @@ def apply_signal_policies(
         enable("semantic_searcher", "runtime_semantic_search_signal")
     if signals.claim_uncertainty:
         enable("research", "claim_uncertainty_requires_research")
+        enable("external_doc_scout", "claim_uncertainty_requires_external_fact_check")
+    if signals.doc_scout_hits > 0:
+        enable("external_doc_scout", "doc_scout_hits_available_for_external_verification")
+    if signals.blocked_assumptions_count > 0 or "constraint" in task_lower or "blocked assumption" in task_lower:
+        enable("asi_constraint_extractor", "blocked_assumptions_require_cross_task_constraint_check")
     if signals.research_role == "claim_scout":
         enable("research", "claim_scout_role_selected")
     if signals.research_role == "failure_historian":
@@ -48,12 +55,15 @@ def apply_signal_policies(
     if signals.research_role == "architecture_scout":
         enable("research", "architecture_scout_role_selected")
         enable("codeintel", "architecture_scout_requires_blast_radius")
+        enable("architecture_scout", "architecture_scout_runtime_plan_required")
     if signals.research_role == "benchmark_framer" or signals.benchmark_required:
         enable("benchmark", "benchmark_framer_role_selected")
         enable("acceptance_check", "benchmark_framer_requires_checks")
     if signals.plateau_detected:
         enable("research", "plateau_detected_requires_new_hypothesis")
         enable("ultra_review", "plateau_detected_requires_governance")
+        enable("asi_constraint_extractor", "plateau_detected_requires_constraint_extraction")
+        enable("architecture_scout", "plateau_detected_requires_architecture_pivot")
     if "ddtree" in signals.acceleration_seed or (hyper_selected and (signals.candidate_count >= 3 or signals.repair_signal)):
         enable("ddtree", "candidate_space_pruning")
     if signals.repair_signal:
@@ -84,6 +94,8 @@ def apply_signal_policies(
         enable("plan_quality_gate", "plan_review_required")
     if signals.acceptance_signal or signals.benchmark_signal or signals.evidence_signal:
         enable("acceptance_check", "acceptance_or_public_claim_signal")
+    if signals.acceptance_signal or signals.benchmark_signal or signals.benchmark_required or "formal report" in task_lower or "public report" in task_lower:
+        enable("formal_report", "formal_or_public_report_requires_evidence_report")
     if signals.forecast_signal or signals.risk_score >= 80 or signals.confidence < 0.6:
         enable("forecast_gate", "forecast_or_high_uncertainty_signal")
     if signals.xray_signal or (signals.cross_module and signals.risk_score >= 60):
