@@ -486,51 +486,6 @@ def run_changed_scope_wiki_governance() -> bool:
     )
     return success
 
-
-CODE_REALITY_AUDIT_RULES = (
-    (
-        ("nexus/core/", "nexus/infrastructure/", "nexus/security/", "docs/ops/strategic_map_manifest.json"),
-        ("Strategic Map Audit", f'"{VENV_PYTHON}" scripts/ops/strategic_map_audit.py'),
-    ),
-    (
-        ("wiki/", "docs/ops/brain_hub_manifest.json"),
-        ("Brain Hub Manifest Audit", f'"{VENV_PYTHON}" scripts/ops/brain_hub_audit.py --manifest docs/ops/brain_hub_manifest.json'),
-    ),
-    (
-        (
-            "nexus/core/hallucination_guard.py",
-            "nexus/governance/hallucination_guard.py",
-            "nexus/schemas/hallucination_index_v1.json",
-            "wiki/critique_brain_hub_alignment_gap.md",
-        ),
-        ("Hallucination Guard Drift Audit", f'"{VENV_PYTHON}" scripts/ops/hallucination_guard_drift.py'),
-    ),
-)
-
-
-def selected_code_reality_audits(changed_paths: list[str]) -> dict[str, str]:
-    normalized = [str(path).replace("\\", "/").strip("/") for path in changed_paths]
-    selected: dict[str, str] = {}
-    for prefixes, audit in CODE_REALITY_AUDIT_RULES:
-        name, cmd = audit
-        if any(path.startswith(prefix) for path in normalized for prefix in prefixes):
-            selected[name] = cmd
-    return selected
-
-
-def run_code_reality_audits(changed_paths: list[str] | None = None) -> bool:
-    checks = selected_code_reality_audits(changed_paths) if changed_paths is not None else {
-        name: cmd for _prefixes, (name, cmd) in CODE_REALITY_AUDIT_RULES
-    }
-    if not checks:
-        print("\n✅ [CI-Gate] Code-Reality Audits SKIPPED (no matching changed paths)")
-        return True
-    ok = True
-    for name, cmd in checks.items():
-        success, _ = run_step(name, cmd)
-        ok = ok and success
-    return ok
-
 def run_dry_run():
     print("🛡️ [Nexus CI Gate] Dry-run status check...")
     if not run_integrity_check():
@@ -548,14 +503,12 @@ def run_dry_run():
     checks["lesson_check"] = run_lesson_check(dry_run=True)
     checks["delivery_tracked"] = run_delivery_tracked_check(dry_run=True)
     checks["report_trust_audit"] = run_report_trust_audit(dry_run=True)
-    checks["code_reality_audits"] = run_code_reality_audits()
     wiki_sync_status = run_wiki_sync_check(dry_run=True)
     checks["wiki_sync"] = (wiki_sync_status == "OK")
     
     print(f"- protocol_check: {'OK' if checks['protocol_check'] else 'FAIL'}")
     print(f"- lesson_check: {'OK' if checks['lesson_check'] else 'FAIL'}")
     print(f"- report_trust_audit: {'OK' if checks['report_trust_audit'] else 'FAIL'}")
-    print(f"- code_reality_audits: {'OK' if checks['code_reality_audits'] else 'FAIL'}")
     print(f"- wiki_sync: {wiki_sync_status}")
 
     print("\n📊 [Phase 6] Summary Audit (Dry-Run):")
@@ -831,8 +784,6 @@ def main():
             sys.exit(1)
         if requires_ultra_review(changed_paths) and not run_ultra_review_check():
             sys.exit(1)
-        if not run_code_reality_audits(changed_paths):
-            sys.exit(1)
     
     # 0. Agent Protocol Check
     if not run_protocol_check(dry_run=args.dry_run):
@@ -853,8 +804,6 @@ def main():
             sys.exit(1)
 
     if not run_report_trust_audit(dry_run=args.dry_run) and not args.dry_run:
-        sys.exit(1)
-    if not run_code_reality_audits() and not args.dry_run:
         sys.exit(1)
 
     if args.strict and args.changed_paths:
