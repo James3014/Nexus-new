@@ -16,6 +16,36 @@ def _safe_session_id(value: str) -> str:
     return slug[:80] or f"research-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
 
 
+_VALID_LOG_STATUSES = {"keep", "discard", "crash", "checks_failed"}
+
+
+def _normalize_status(value: str) -> str:
+    return value if value in _VALID_LOG_STATUSES else "checks_failed"
+
+
+def _normalize_asi(*, status: str, description: str, packet: dict[str, Any], asi: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = dict(asi or {})
+    normalized.setdefault("hypothesis", description)
+    normalized.setdefault("evidence", str(packet.get("semantic_status", "")))
+    normalized.setdefault("rollback_reason", "" if status == "keep" else "not_kept")
+    normalized.setdefault("next_action_hint", "recommend-next")
+    normalized.setdefault("family", "research-session")
+    normalized.setdefault("metric", (packet.get("metrics") or {}).get("winner") if isinstance(packet.get("metrics"), dict) else None)
+    normalized["status"] = status
+    return normalized
+
+
+def _lesson_writeback_for(*, status: str, packet_path: Path, asi: dict[str, Any]) -> dict[str, Any]:
+    existing = asi.get("lesson_writeback") if isinstance(asi.get("lesson_writeback"), dict) else {}
+    required = status != "keep"
+    return {
+        "required": required,
+        "status": str(existing.get("status") or ("not_required" if not required else "pending")),
+        "reason": str(existing.get("reason") or ("" if not required else f"{status}_requires_lesson_writeback")),
+        "evidence_path": str(existing.get("evidence_path") or packet_path),
+    }
+
+
 @dataclass(frozen=True)
 class ResearchSessionLoopService:
     repo_root: Path
@@ -146,7 +176,9 @@ class ResearchSessionLoopService:
                 "logged": False,
                 "reason": "last_packet_missing",
             }
+        status = _normalize_status(status)
         packet = json.loads(packet_path.read_text(encoding="utf-8"))
+        normalized_asi = _normalize_asi(status=status, description=description, packet=packet, asi=asi)
         entry = {
             "schema": "nexus_research_ledger_entry_v1",
             "logged_at": _now(),
@@ -154,12 +186,8 @@ class ResearchSessionLoopService:
             "packet_id": packet.get("packet_id", ""),
             "status": status,
             "description": description,
-            "asi": asi or {
-                "hypothesis": description,
-                "evidence": str(packet.get("semantic_status", "")),
-                "rollback_reason": "" if status == "keep" else "not_kept",
-                "next_action_hint": "recommend-next",
-            },
+            "asi": normalized_asi,
+            "lesson_writeback": _lesson_writeback_for(status=status, packet_path=packet_path, asi=normalized_asi),
             "packet": packet,
         }
         with self._ledger_path(manifest["session_id"]).open("a", encoding="utf-8") as handle:
@@ -178,15 +206,31 @@ class ResearchSessionLoopService:
             if line.strip()
         ] if ledger_path.exists() else []
         keeps = [entry for entry in entries if entry.get("status") == "keep"]
+        status_counts = {status: 0 for status in sorted(_VALID_LOG_STATUSES)}
+        for entry in entries:
+            entry_status = _normalize_status(str(entry.get("status") or "checks_failed"))
+            status_counts[entry_status] = status_counts.get(entry_status, 0) + 1
+        lesson_writeback_pending_count = sum(
+            1
+            for entry in entries
+            if isinstance(entry.get("lesson_writeback"), dict)
+            and entry["lesson_writeback"].get("required")
+            and entry["lesson_writeback"].get("status") != "recorded"
+        )
         last_packet_exists = self._last_packet_path(manifest["session_id"]).exists()
         last_packet_logged = bool(entries and entries[-1].get("packet_id"))
+        warnings = [] if keeps else ["no_kept_packets"]
+        if lesson_writeback_pending_count:
+            warnings.append("lesson_writeback_pending")
         return {
             "schema": "nexus_research_finalize_preview_v1",
             "session_id": manifest["session_id"],
             "ready": bool(keeps and (not last_packet_exists or last_packet_logged)),
             "keep_count": len(keeps),
             "entry_count": len(entries),
-            "warnings": [] if keeps else ["no_kept_packets"],
+            "status_counts": status_counts,
+            "lesson_writeback_pending_count": lesson_writeback_pending_count,
+            "warnings": warnings,
             "manifest": manifest,
         }
 

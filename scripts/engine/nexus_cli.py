@@ -1705,6 +1705,107 @@ def _read_json_file(path_value: str | None) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _research_session_preflight(
+    *,
+    session_id: str,
+    task_desc: str,
+    task_type: str,
+    candidate_count: int,
+    root_cause_confidence: float,
+    findings_query: str | None,
+    target_file: str | None = None,
+    scope: list[str] | None = None,
+    enforce_gate: bool = False,
+) -> dict:
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    route = research_flow_service.build_route(
+        repo_root=repo_root,
+        task_desc=task_desc,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        root_cause_confidence=root_cause_confidence,
+        findings_query=findings_query,
+        target_file=target_file,
+    )
+    svc = ResearchSessionLoopService(repo_root)
+    manifest = svc.load_manifest(session_id)
+    if not manifest.get("goal"):
+        manifest = svc.onboarding(
+            session_id=session_id,
+            goal=task_desc,
+            scope=list(scope or ([target_file] if target_file else [])),
+        )
+    recommendation = svc.recommend_next(session_id=session_id, route=route)
+    research_context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
+    risk_flags = set(research_context.get("risk_flags", []) or [])
+    blocked_assumptions = set(research_context.get("blocked_assumptions", []) or [])
+    blocked = bool(
+        enforce_gate
+        and (
+            "claim_uncertainty" in risk_flags
+            or "api_contract_not_verified" in blocked_assumptions
+        )
+    )
+    next_action = str(research_context.get("next_action_hint") or recommendation["nextStep"]["nextAction"].get("reason") or "recommend-next")
+    return {
+        "schema": "nexus_research_preflight_v1",
+        "session_id": manifest["session_id"],
+        "blocked": blocked,
+        "block_reasons": ["claim_uncertainty_requires_research"] if blocked else [],
+        "next_action": next_action,
+        "route": route,
+        "recommendation": recommendation,
+    }
+
+
+def _research_preflight_block_payload(*, command_name: str, task_name: str, preflight: dict) -> dict:
+    payload = build_completion_envelope(
+        command_name=command_name,
+        task_name=task_name,
+        runtime_ok=False,
+        execution_path=f"cli->{command_name}->research_session_preflight",
+        semantic_failures=preflight.get("block_reasons", []),
+        blocker_type="research_preflight",
+        semantic_status="BLOCKED",
+        retryable=False,
+        next_action=str(preflight.get("next_action") or "recommend-next"),
+    )
+    payload.update(
+        {
+            "status": "blocked",
+            "research_preflight": preflight,
+        }
+    )
+    return payload
+
+
+def _attach_research_session_result(*, session_id: str, report_payload: dict, preflight: dict | None = None) -> dict:
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    svc = ResearchSessionLoopService(repo_root)
+    route = preflight.get("route", {}) if isinstance(preflight, dict) else {}
+    packet = svc.packet(session_id=session_id, report=report_payload, route=route)
+    status = "keep" if report_payload.get("semantic_status") == "VERIFIED" else "checks_failed"
+    logged = svc.log_from_last(
+        session_id=session_id,
+        status=status,
+        description=str(report_payload.get("task_name") or report_payload.get("run_id") or "research session result"),
+        asi={
+            "hypothesis": str(report_payload.get("task_name") or report_payload.get("run_id") or ""),
+            "evidence": str(report_payload.get("semantic_status") or ""),
+            "rollback_reason": "" if status == "keep" else str(report_payload.get("blocker_type") or "not_verified"),
+            "next_action_hint": str(report_payload.get("next_action") or "none"),
+        },
+    )
+    return {
+        "session_id": session_id,
+        "packet_id": packet.get("packet_id"),
+        "status": status,
+        "logged": bool(logged.get("logged")),
+    }
+
+
 @nexus_group.command(name="research:onboarding")
 @click.option("--session-id", default="research-session", show_default=True)
 @click.option("--goal", required=True)
@@ -1867,6 +1968,8 @@ def research_human_report_cmd(session_id, output):
 @click.option("--explain-route", is_flag=True)
 @click.option("--output-file", type=click.Path(path_type=Path, dir_okay=False), default=None, help="Optional explicit JSON output file.")
 @click.option("--task-id", default=None, help="Optional stable task id for capability receipt artifacts.")
+@click.option("--research-session-id", default="", help="Opt-in research session id for route preflight and packet ledger.")
+@click.option("--research-gate", is_flag=True, help="Block execution when research preflight finds unverified claim uncertainty.")
 def research_auto_flow(
     task_desc,
     target_file,
@@ -1893,6 +1996,8 @@ def research_auto_flow(
     explain_route,
     output_file,
     task_id,
+    research_session_id,
+    research_gate,
 ):
     if explain_route:
         out = research_flow_service.build_route(repo_root=repo_root, 
@@ -1906,6 +2011,31 @@ def research_auto_flow(
         click.echo("--- ROUTE EXPLANATION ---")
         click.echo(json.dumps(out["explain_payload"], indent=2))
         return
+
+    research_preflight = None
+    if research_session_id:
+        research_preflight = _research_session_preflight(
+            session_id=research_session_id,
+            task_desc=task_desc,
+            task_type=task_type,
+            candidate_count=candidate_count,
+            root_cause_confidence=root_cause_confidence,
+            findings_query=findings_query,
+            target_file=target_file,
+            scope=[target_file],
+            enforce_gate=research_gate,
+        )
+        if research_preflight["blocked"]:
+            block_payload = _research_preflight_block_payload(
+                command_name="research:auto-flow",
+                task_name=task_desc,
+                preflight=research_preflight,
+            )
+            blocked_report_path = (repo_root / report_file).resolve()
+            blocked_report_path.parent.mkdir(parents=True, exist_ok=True)
+            blocked_report_path.write_text(json.dumps(block_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            click.echo(json.dumps(block_payload, indent=2, ensure_ascii=False))
+            raise SystemExit(1)
 
     payload, out_path = research_flow_service.run_auto_flow(repo_root=repo_root, 
         task_desc=task_desc,
@@ -1950,6 +2080,13 @@ def research_auto_flow(
         semantic_failures=semantic_failures,
     )
     response_payload = _merge_completion_payload(payload, completion_payload)
+    if research_session_id:
+        response_payload["research_preflight"] = research_preflight
+        response_payload["research_session"] = _attach_research_session_result(
+            session_id=research_session_id,
+            report_payload={**response_payload, "status": result_payload.get("status"), "report_file": str(out_path)},
+            preflight=research_preflight,
+        )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(response_payload, indent=2, ensure_ascii=False), encoding="utf-8")
     if output_json:
@@ -2015,6 +2152,11 @@ def ultra_review(task, dry_run, report_file, sandbox_root, output_json):
 @click.option("--timeout-sec", default=600, type=int, show_default=True)
 @click.option("--retain-last-n", default=20, type=int, show_default=True)
 @click.option("--disk-watermark-gb", default=5.0, type=float, show_default=True)
+@click.option("--research-session-id", default="", help="Opt-in research session id for route preflight and packet ledger.")
+@click.option("--research-gate", is_flag=True, help="Block execution when research preflight finds unverified claim uncertainty.")
+@click.option("--task-type", default="bug", show_default=True, help="Task type used by research route preflight.")
+@click.option("--root-cause-confidence", default=1.0, type=float, show_default=True)
+@click.option("--findings-query")
 def research_run(
     run_id,
     candidate_id,
@@ -2033,6 +2175,11 @@ def research_run(
     timeout_sec,
     retain_last_n,
     disk_watermark_gb,
+    research_session_id,
+    research_gate,
+    task_type,
+    root_cause_confidence,
+    findings_query,
 ):
     """🧬 Run research control-plane loop: schedule -> evaluate -> select/promote -> rollback."""
     from nexus.research.experiment_scheduler import ExperimentScheduler
@@ -2043,6 +2190,30 @@ def research_run(
     start_ts = datetime.now(timezone.utc).isoformat()
     run_id = run_id or f"research-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     scope_list = list(scope) if scope else ["nexus/research", "tests/research", "docs/research"]
+    report_path = (repo_root / report_file).resolve()
+    research_preflight = None
+    if research_session_id:
+        research_preflight = _research_session_preflight(
+            session_id=research_session_id,
+            task_desc=hypothesis,
+            task_type=task_type,
+            candidate_count=candidate_count,
+            root_cause_confidence=root_cause_confidence,
+            findings_query=findings_query,
+            scope=scope_list,
+            enforce_gate=research_gate,
+        )
+        if research_preflight["blocked"]:
+            block_payload = _research_preflight_block_payload(
+                command_name="research:run",
+                task_name=hypothesis,
+                preflight=research_preflight,
+            )
+            block_payload.update({"run_id": run_id, "report_file": str(report_path)})
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(block_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            click.echo(json.dumps(block_payload, indent=2, ensure_ascii=False))
+            raise SystemExit(1)
     scheduler = ExperimentScheduler(repo_root)
     evaluator = UnifiedEvaluator(budget_limit=budget_limit, min_score_threshold=min_score_threshold)
     selector = SelectorRollback(repo_root)
@@ -2246,8 +2417,6 @@ def research_run(
             status = "failed"
             decision_log.append("select: no_candidates_passed")
 
-    report_path = (repo_root / report_file).resolve()
-    
     # Retention logic
     def _apply_retention_policy() -> dict:
         summary = {"retain_last_n": retain_last_n, "cleaned": {"reports": 0, "experiments": 0, "backups": 0}}
@@ -2396,6 +2565,13 @@ def research_run(
         next_action=next_action,
     )
     report_payload = _merge_completion_payload(report_payload, completion_payload)
+    if research_session_id:
+        report_payload["research_preflight"] = research_preflight
+        report_payload["research_session"] = _attach_research_session_result(
+            session_id=research_session_id,
+            report_payload={**report_payload, "status": status, "report_file": str(report_path)},
+            preflight=research_preflight,
+        )
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
@@ -2461,6 +2637,14 @@ def research_run(
                 continuation_cmd.append("--dry-run")
             for one_scope in scope_list:
                 continuation_cmd.extend(["--scope", str(one_scope)])
+            if research_session_id:
+                continuation_cmd.extend(["--research-session-id", research_session_id])
+            if research_gate:
+                continuation_cmd.append("--research-gate")
+            continuation_cmd.extend(["--task-type", task_type])
+            continuation_cmd.extend(["--root-cause-confidence", str(root_cause_confidence)])
+            if findings_query:
+                continuation_cmd.extend(["--findings-query", findings_query])
 
             continuation_proc = subprocess.run(
                 continuation_cmd,

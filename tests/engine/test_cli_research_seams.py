@@ -89,6 +89,88 @@ def test_research_auto_flow_emits_completion_contract(monkeypatch, tmp_path):
     assert report["execution_path"] == "cli->research_flow_service"
 
 
+def test_research_auto_flow_gate_blocks_unverified_claim_before_execution(monkeypatch, tmp_path):
+    called = False
+
+    def _fake_run_auto_flow(**kwargs):
+        nonlocal called
+        called = True
+        return ({}, tmp_path / "unused.json")
+
+    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
+    monkeypatch.setattr("nexus.app.research_flow_service.run_auto_flow", _fake_run_auto_flow)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:auto-flow",
+            "--task-desc",
+            "Verify SDK API parameter before editing call site",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+            "--research-session-id",
+            "claim-gate",
+            "--research-gate",
+            "--output-json",
+        ],
+    )
+
+    assert res.exit_code == 1, res.output
+    assert called is False
+    payload = json.loads(res.output)
+    assert payload["semantic_status"] == "BLOCKED"
+    assert payload["blocker_type"] == "research_preflight"
+    assert payload["next_action"] == "verify_contract_before_editing"
+    assert payload["research_preflight"]["route"]["research_context"]["role"] == "claim_scout"
+
+
+def test_research_auto_flow_session_logs_success_packet(monkeypatch, tmp_path):
+    report_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-report.json"
+
+    def _fake_run_auto_flow(**kwargs):
+        return (
+            {
+                "chosen_flow": "baseline",
+                "result": {"status": "SUCCESS", "elapsed_sec": 0.1},
+                "io": {"output_written": False, "output_path": None},
+            },
+            report_path,
+        )
+
+    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
+    monkeypatch.setattr("nexus.app.research_flow_service.run_auto_flow", _fake_run_auto_flow)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:auto-flow",
+            "--task-desc",
+            "fix race condition",
+            "--target-file",
+            "demo.py",
+            "--test-file",
+            "tests/test_demo.py",
+            "--research-session-id",
+            "auto-log",
+            "--output-json",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["research_session"]["logged"] is True
+    assert payload["research_session"]["status"] == "keep"
+    ledger = tmp_path / ".nexus" / "research_sessions" / "auto-log.jsonl"
+    assert ledger.exists()
+    assert '"status": "keep"' in ledger.read_text(encoding="utf-8")
+
+
 def test_research_session_loop_cli_drives_route_packet_and_ledger(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
 
@@ -162,6 +244,83 @@ def test_research_session_loop_cli_drives_route_packet_and_ledger(monkeypatch, t
     report = runner.invoke(cli_mod.nexus, ["nexus", "research:human-report", "--session-id", "demo"])
     assert report.exit_code == 0, report.output
     assert "Research Session demo" in report.output
+
+
+def test_research_session_loop_marks_failure_lessons_pending(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
+    runner = CliRunner()
+
+    assert runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:onboarding",
+            "--session-id",
+            "lesson-demo",
+            "--goal",
+            "capture failed research lesson",
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        cli_mod.nexus,
+        ["nexus", "research:packet", "--session-id", "lesson-demo"],
+    ).exit_code == 0
+    logged = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:log-from-last",
+            "--session-id",
+            "lesson-demo",
+            "--status",
+            "checks_failed",
+            "--description",
+            "gate failed after route claim",
+            "--output-json",
+        ],
+    )
+    assert logged.exit_code == 0, logged.output
+    entry = json.loads(logged.output)["entry"]
+    assert entry["asi"]["status"] == "checks_failed"
+    assert entry["lesson_writeback"]["required"] is True
+    assert entry["lesson_writeback"]["status"] == "pending"
+
+    preview = runner.invoke(
+        cli_mod.nexus,
+        ["nexus", "research:finalize-preview", "--session-id", "lesson-demo", "--output-json"],
+    )
+    assert preview.exit_code == 0, preview.output
+    payload = json.loads(preview.output)
+    assert payload["status_counts"]["checks_failed"] == 1
+    assert payload["lesson_writeback_pending_count"] == 1
+    assert "lesson_writeback_pending" in payload["warnings"]
+
+
+def test_research_run_gate_blocks_unverified_claim_before_candidates(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
+    runner = CliRunner()
+
+    res = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:run",
+            "--hypothesis",
+            "Verify SDK API parameter before editing route",
+            "--scope",
+            "nexus/research",
+            "--research-session-id",
+            "run-gate",
+            "--research-gate",
+        ],
+    )
+
+    assert res.exit_code == 1, res.output
+    payload = json.loads(res.output)
+    assert payload["semantic_status"] == "BLOCKED"
+    assert payload["blocker_type"] == "research_preflight"
+    assert payload["next_action"] == "verify_contract_before_editing"
+    assert payload["research_preflight"]["route"]["research_context"]["role"] == "claim_scout"
 
 
 def test_research_benchmark_cli_uses_service_seam(monkeypatch, tmp_path):
