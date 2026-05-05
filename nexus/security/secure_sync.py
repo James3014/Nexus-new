@@ -103,11 +103,18 @@ class RegistryMessageHandler:
 
 
 class SecureRegistrySync:
-    def __init__(self, tls: TLSProvider, registry: SkillRegistry, node_registry=None, handler: IncomingMessageHandler | None = None):
+    def __init__(
+        self,
+        tls: TLSProvider,
+        registry: SkillRegistry,
+        node_registry=None,
+        handler: IncomingMessageHandler | None = None,
+        allowed_actions: Dict[str, set[str]] | None = None,
+    ):
         self.tls = tls
         self.registry = registry
         self.node_registry = node_registry
-        self.handler = handler or RegistryMessageHandler(registry)
+        self.handler = handler or RegistryMessageHandler(registry, allowed_actions=allowed_actions)
         self._server_sock = None
         self._thread = None
 

@@ -133,6 +133,25 @@ def test_registry_message_handler_denies_unauthorized_action():
     assert resp == {"status": "error", "message": "unauthorized_action", "action": "push"}
 
 
+def test_secure_sync_denies_unauthorized_action_over_socket(certs_dir):
+    registry = MagicMock()
+    server_tls = TLSProvider(certs_dir, node_id="server")
+    sync = SecureRegistrySync(server_tls, registry, allowed_actions={"client": {"heartbeat"}})
+    sync.serve(host="127.0.0.1", port=0)
+    port = sync._server_sock.getsockname()[1]
+
+    client_tls = TLSProvider(certs_dir, node_id="client")
+    client_ctx = client_tls.get_client_context()
+
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        with client_ctx.wrap_socket(sock, server_hostname="127.0.0.1") as ssock:
+            ssock.sendall((json.dumps({"action": "push", "payload": []}) + "\n").encode())
+            data = json.loads(ssock.makefile("r").readline())
+
+    assert data == {"status": "error", "message": "unauthorized_action", "action": "push"}
+    registry.upsert.assert_not_called()
+
+
 def test_decode_sync_request_rejects_invalid_and_oversized_messages():
     assert decode_sync_request(b"{bad-json\n")[1] == {"status": "error", "message": "invalid_json"}
     assert decode_sync_request(b"[]\n")[1] == {"status": "error", "message": "invalid_request"}

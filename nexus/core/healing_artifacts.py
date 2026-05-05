@@ -41,3 +41,16 @@ def artifact_from_packet(packet: dict) -> HealingArtifact:
     if not isinstance(payload, dict):
         raise ValueError("healing artifact packet payload must be an object")
     return HealingArtifact(**payload)
+
+
+def healing_artifact_report_entry(path: str | Path) -> dict:
+    """Read a persisted artifact into a report-safe citation row."""
+    artifact = read_healing_artifact(path)
+    return {
+        "artifact_id": artifact.artifact_id,
+        "task_id": artifact.task_id,
+        "artifact_type": artifact.artifact_type,
+        "evidence_id": artifact.evidence_id,
+        "summary": artifact.summary,
+        "path": str(path),
+    }
