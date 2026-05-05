@@ -742,6 +742,42 @@ def _infer_research_role(*, task_desc: str, task_type: str, route_features: dict
     return "general"
 
 
+_CLAIM_GENERIC_TOKENS = {
+    "api",
+    "sdk",
+    "parameter",
+    "flag",
+    "contract",
+    "claim",
+    "verify",
+    "evidence",
+    "before",
+    "editing",
+    "call",
+    "site",
+    "supports",
+}
+
+
+def _doc_scout_supports_specific_claim(*, task_desc: str, doc_scout: dict[str, Any]) -> bool:
+    hits = doc_scout.get("hits", []) if isinstance(doc_scout.get("hits"), list) else []
+    if not hits:
+        return False
+    specific_tokens = [
+        token
+        for token in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{3,}", task_desc.lower())
+        if token not in _CLAIM_GENERIC_TOKENS
+    ][:4]
+    if not specific_tokens:
+        return True
+    evidence_text = " ".join(
+        f"{item.get('snippet', '')} {item.get('path', '')}"
+        for item in hits
+        if isinstance(item, dict)
+    ).lower()
+    return all(token in evidence_text for token in specific_tokens)
+
+
 def _build_research_context(
     *,
     repo_root: Path,
@@ -753,9 +789,11 @@ def _build_research_context(
     doc_scout = DocScoutAdapter(repo_root).search(task_desc, limit=4)
     doc_hits = int(doc_scout.get("hits_count", 0) or 0)
     task_lower = f"{task_desc} {task_type}".lower()
+    claim_like_task = any(token in task_lower for token in ("api", "sdk", "parameter", "flag", "contract", "claim", "verify", "evidence"))
+    doc_supports_claim = _doc_scout_supports_specific_claim(task_desc=task_desc, doc_scout=doc_scout)
     claim_uncertainty = bool(
-        doc_hits <= 0
-        and any(token in task_lower for token in ("api", "sdk", "parameter", "flag", "contract", "claim", "verify", "evidence"))
+        claim_like_task
+        and (doc_hits <= 0 or not doc_supports_claim)
     )
     benchmark_required = bool(
         task_type.startswith("public_")
@@ -784,7 +822,7 @@ def _build_research_context(
         rejected_claims.append(
             {
                 "claim": "unverified_api_contract",
-                "reason": "doc_scout_no_supporting_hits",
+                "reason": "doc_scout_no_specific_support",
             }
         )
     if bool(enriched_features.get("plateau_detected", False)):

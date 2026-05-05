@@ -75,6 +75,26 @@ def test_build_route_research_context_uses_doc_scout_hits(tmp_path: Path):
     assert out["research_context"]["verified_claims"]
 
 
+def test_build_route_keeps_claim_uncertainty_when_docs_do_not_support_specific_token(tmp_path: Path):
+    docs = tmp_path / "docs"
+    docs.mkdir(parents=True)
+    (docs / "sdk.md").write_text("The SDK API supports timeout parameter evidence.\n", encoding="utf-8")
+
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Verify SDK API zz_nonexistent_flag parameter before editing call site",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+        target_file="nexus/client.py",
+    )
+
+    assert out["route_features"]["doc_scout_hits"] >= 1
+    assert out["route_features"]["claim_uncertainty"] is True
+    assert "api_contract_not_verified" in out["research_context"]["blocked_assumptions"]
+
+
 def test_ultra_review_gate_report_path_is_task_scoped(tmp_path: Path, monkeypatch):
     class _FakeUltraReviewService:
         def __init__(self, _repo_root):

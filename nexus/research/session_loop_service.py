@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -232,6 +233,85 @@ class ResearchSessionLoopService:
             "lesson_writeback_pending_count": lesson_writeback_pending_count,
             "warnings": warnings,
             "manifest": manifest,
+        }
+
+    def writeback_pending_lessons(self, *, session_id: str) -> dict[str, Any]:
+        from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+
+        manifest = self.load_manifest(session_id)
+        ledger_path = self._ledger_path(manifest["session_id"])
+        entries = [
+            json.loads(line)
+            for line in ledger_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ] if ledger_path.exists() else []
+        store = FindingsMemoryStore(Path(self.repo_root))
+        written: list[dict[str, Any]] = []
+        changed = False
+        for entry in entries:
+            lesson = entry.get("lesson_writeback") if isinstance(entry.get("lesson_writeback"), dict) else {}
+            if not lesson.get("required") or lesson.get("status") == "recorded":
+                continue
+            asi = entry.get("asi") if isinstance(entry.get("asi"), dict) else {}
+            packet = entry.get("packet") if isinstance(entry.get("packet"), dict) else {}
+            raw_id = f"{manifest['session_id']}:{entry.get('packet_id', '')}:{entry.get('status', '')}"
+            card_id = hashlib.sha1(raw_id.encode("utf-8")).hexdigest()[:8]
+            evidence_path = str(lesson.get("evidence_path") or self._last_packet_path(manifest["session_id"]))
+            card = FindingsCard(
+                id=card_id,
+                kind="episodes",
+                title=f"Research Lesson: {manifest['session_id']}:{entry.get('status', 'unknown')}",
+                scope="task",
+                tags=["research-session", "lesson-writeback", str(entry.get("status") or "unknown")],
+                stage="lesson",
+                confidence="low" if entry.get("status") == "crash" else "medium",
+                evidence_paths=[evidence_path],
+                retrieval_hints=[
+                    hint
+                    for hint in [
+                        str(asi.get("hypothesis") or ""),
+                        str(asi.get("rollback_reason") or ""),
+                        str(asi.get("next_action_hint") or ""),
+                    ]
+                    if hint
+                ],
+                body="\n".join(
+                    [
+                        f"Status: {entry.get('status', '')}",
+                        f"Description: {entry.get('description', '')}",
+                        f"Hypothesis: {asi.get('hypothesis', '')}",
+                        f"Evidence: {asi.get('evidence', '')}",
+                        f"Rollback Reason: {asi.get('rollback_reason', '')}",
+                        f"Next Action: {asi.get('next_action_hint', '')}",
+                    ]
+                ),
+                task_id=manifest["session_id"],
+                extra={
+                    "session_id": manifest["session_id"],
+                    "packet_id": entry.get("packet_id", ""),
+                    "command_identity": packet.get("command_identity", ""),
+                    "lesson_writeback_reason": lesson.get("reason", ""),
+                },
+            )
+            memory_path = store.write(card)
+            entry["lesson_writeback"] = {
+                **lesson,
+                "status": "recorded",
+                "memory_path": memory_path,
+                "recorded_at": _now(),
+            }
+            written.append({"packet_id": entry.get("packet_id", ""), "memory_path": memory_path, "card_id": card.id})
+            changed = True
+        if changed:
+            ledger_path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
+            manifest["stage"] = "lessons_recorded"
+            manifest["updated_at"] = _now()
+            self._manifest_path(manifest["session_id"]).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return {
+            "schema": "nexus_research_lesson_writeback_v1",
+            "session_id": manifest["session_id"],
+            "written_count": len(written),
+            "written": written,
         }
 
     def human_report(self, *, session_id: str) -> str:

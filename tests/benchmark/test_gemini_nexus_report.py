@@ -216,6 +216,106 @@ def test_public_claim_gate_rejects_route_quality_funnel_regression():
     assert "route_quality_unnecessary_selected_above_threshold" in gate["failures"]
 
 
+def test_public_claim_gate_rejects_research_selected_without_evidence_gate():
+    gate = _public_claim_gate(
+        rows_without=[{"task_id": "a", "trial_index": 1, "token_measured": True}],
+        rows_with=[
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "token_measured": True,
+                "route_decision_schema_version": "nexus_route_decision_v1",
+                "route_decision_selected_count": 1,
+                "route_decision_invoked_count": 1,
+                "route_decision_evidence_count": 1,
+                "route_decision_outcome_count": 1,
+                "capability_receipts": [
+                    {
+                        "name": "research",
+                        "selected": True,
+                        "invoked": True,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                    }
+                ],
+            }
+        ],
+        summary_without={"token_measured_rate": 1.0},
+        summary_with={
+            "token_measured_rate": 1.0,
+            "model_uses_nexus_rate": 1.0,
+            "gemini_uses_nexus_rate": 1.0,
+            "nexus_usage_valid_rate": 1.0,
+            "phase_completion_rate": 1.0,
+            "claim_verified_rate": 1.0,
+        },
+        formal={"valid_rate": 1.0},
+    )
+
+    assert gate["verdict"] == "FAIL"
+    assert "research_evidence_missing" in gate["failures"]
+
+
+def test_render_markdown_report_includes_research_preflight_metrics(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    base = {
+        "task_id": "a",
+        "trial_index": 1,
+        "semantic_status": "VERIFIED",
+        "wall_duration_sec": 10,
+        "model_calls": 1,
+        "total_tokens": 100,
+        "token_capture_status": "measured",
+        "run_eligible": True,
+    }
+    without.write_text(json.dumps(base) + "\n", encoding="utf-8")
+    with_nexus.write_text(
+        json.dumps(
+            {
+                **base,
+                "gemini_uses_nexus": True,
+                "model_uses_nexus": True,
+                "nexus_usage_valid": True,
+                "capability_claim_verified": True,
+                "phase_p": "route_built",
+                "phase_x": "retrieval_checked",
+                "phase_d": "guard_decision",
+                "phase_r": "hyper_executed",
+                "phase_a": "artifact_verified",
+                "phase_c": "closure_written",
+                "route_decision_schema_version": "nexus_route_decision_v1",
+                "research_preflight": {
+                    "blocked": True,
+                    "route": {
+                        "research_context": {
+                            "risk_flags": ["claim_uncertainty"],
+                            "blocked_assumptions": ["api_contract_not_verified"],
+                        }
+                    },
+                },
+                "research_session": {"logged": True},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-05-05",
+    )
+
+    assert "Research preflight present" in out
+    assert "| Research preflight present | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Research preflight blocked | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Claim uncertainty caught | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Session ledger logged | 0.0% | 100.0% | 100.0% |" in out
+
+
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"

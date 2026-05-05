@@ -189,6 +189,74 @@ def _route_quality_metrics(report: dict[str, Any], arm: str) -> dict[str, float]
     }
 
 
+def _jsonish(value: Any, fallback: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+    return value if value is not None else fallback
+
+
+def _research_receipts(row: dict[str, Any]) -> list[dict[str, Any]]:
+    receipts = _jsonish(row.get("capability_receipts"), [])
+    if not isinstance(receipts, list):
+        return []
+    return [
+        item
+        for item in receipts
+        if isinstance(item, dict) and str(item.get("name") or item.get("capability") or "") == "research"
+    ]
+
+
+def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
+    total = len(rows)
+    if total <= 0:
+        return {
+            "preflight_present_rate": 0.0,
+            "preflight_blocked_rate": 0.0,
+            "claim_uncertainty_caught_rate": 0.0,
+            "research_evidence_present_rate": 0.0,
+            "research_gate_passed_rate": 0.0,
+            "session_ledger_logged_rate": 0.0,
+        }
+    present = 0
+    blocked = 0
+    claim_uncertainty = 0
+    evidence_present = 0
+    gate_passed = 0
+    session_logged = 0
+    for row in rows:
+        preflight = _jsonish(row.get("research_preflight"), {})
+        preflight = preflight if isinstance(preflight, dict) else {}
+        route = preflight.get("route") if isinstance(preflight.get("route"), dict) else {}
+        context = route.get("research_context") if isinstance(route.get("research_context"), dict) else {}
+        risk_flags = set(context.get("risk_flags", []) or [])
+        blocked_assumptions = set(context.get("blocked_assumptions", []) or [])
+        receipts = _research_receipts(row)
+        if preflight or bool(row.get("research_preflight_present")) or bool(row.get("research_used")):
+            present += 1
+        if bool(preflight.get("blocked")) or bool(row.get("research_preflight_blocked")):
+            blocked += 1
+        if "claim_uncertainty" in risk_flags or "api_contract_not_verified" in blocked_assumptions or bool(row.get("claim_uncertainty")):
+            claim_uncertainty += 1
+        if bool(row.get("research_evidence_present")) or any(bool(item.get("evidence_present") or item.get("evidence")) for item in receipts):
+            evidence_present += 1
+        if bool(row.get("research_gate_passed")) or any(bool(item.get("gate_passed") or item.get("gate")) for item in receipts):
+            gate_passed += 1
+        session = _jsonish(row.get("research_session"), {})
+        if (isinstance(session, dict) and bool(session.get("logged"))) or bool(row.get("research_session_logged")):
+            session_logged += 1
+    return {
+        "preflight_present_rate": present / total,
+        "preflight_blocked_rate": blocked / total,
+        "claim_uncertainty_caught_rate": claim_uncertainty / total,
+        "research_evidence_present_rate": evidence_present / total,
+        "research_gate_passed_rate": gate_passed / total,
+        "session_ledger_logged_rate": session_logged / total,
+    }
+
+
 def _activation_status(item: dict[str, Any]) -> str:
     selected = int(item.get("selected_count", 0) or 0)
     invoked = int(item.get("invoked_count", 0) or 0)
@@ -443,6 +511,21 @@ def _route_quality_gate_from_rows(rows_with: list[dict[str, Any]]) -> list[str]:
         failures.append("route_quality_evidence_to_outcome_below_threshold")
     if unnecessary_selected > _ROUTE_QUALITY_GATE_THRESHOLDS["unnecessary_selected_rate_max"]:
         failures.append("route_quality_unnecessary_selected_above_threshold")
+    for row in rows_with:
+        preflight = _jsonish(row.get("research_preflight"), {})
+        preflight = preflight if isinstance(preflight, dict) else {}
+        status = str(row.get("semantic_status") or row.get("status") or "").upper()
+        if bool(preflight.get("blocked")) and status in {"SUCCESS", "VERIFIED"}:
+            failures.append("research_preflight_blocked_but_claimed_success")
+        for receipt in _research_receipts(row):
+            selected = bool(receipt.get("selected", receipt.get("selected_count", 0)))
+            invoked = bool(receipt.get("invoked", receipt.get("invoked_count", 0)))
+            evidence = bool(receipt.get("evidence_present") or receipt.get("evidence") or receipt.get("evidence_count", 0))
+            gate = bool(receipt.get("gate_passed") or receipt.get("gate") or receipt.get("gate_count", 0))
+            if selected and invoked and not evidence:
+                failures.append("research_evidence_missing")
+            if evidence and not gate:
+                failures.append("research_gate_missing")
     return failures
 
 
@@ -579,6 +662,8 @@ def render_markdown_report(
     capability_gate = _per_capability_public_gate(report)
     route_quality_without = _route_quality_metrics(report, "a")
     route_quality_with = _route_quality_metrics(report, "b")
+    research_preflight_without = _research_preflight_metrics(rows_without)
+    research_preflight_with = _research_preflight_metrics(rows_with)
     claim_gates = _claim_gate_breakdown(
         public_gate=public_gate,
         capability_gate=capability_gate,
@@ -709,6 +794,12 @@ def render_markdown_report(
         f"| Invoked -> Evidence | {_pct(route_quality_without['invoked_to_evidence_rate'])} | {_pct(route_quality_with['invoked_to_evidence_rate'])} | {_pct(route_quality_with['invoked_to_evidence_rate'] - route_quality_without['invoked_to_evidence_rate'])} | Higher means execution is evidenced |",
         f"| Evidence -> Outcome | {_pct(route_quality_without['evidence_to_outcome_rate'])} | {_pct(route_quality_with['evidence_to_outcome_rate'])} | {_pct(route_quality_with['evidence_to_outcome_rate'] - route_quality_without['evidence_to_outcome_rate'])} | Higher means evidence contributes to verified outcomes |",
         f"| Unnecessary Selected | {_pct(route_quality_without['unnecessary_selected_rate'])} | {_pct(route_quality_with['unnecessary_selected_rate'])} | {_pct(route_quality_with['unnecessary_selected_rate'] - route_quality_without['unnecessary_selected_rate'])} | Lower means less over-selection friction |",
+        f"| Research preflight present | {_pct(research_preflight_without['preflight_present_rate'])} | {_pct(research_preflight_with['preflight_present_rate'])} | {_pct(research_preflight_with['preflight_present_rate'] - research_preflight_without['preflight_present_rate'])} | Route emitted a research preflight decision |",
+        f"| Research preflight blocked | {_pct(research_preflight_without['preflight_blocked_rate'])} | {_pct(research_preflight_with['preflight_blocked_rate'])} | {_pct(research_preflight_with['preflight_blocked_rate'] - research_preflight_without['preflight_blocked_rate'])} | Fail-closed before editing an unverified claim |",
+        f"| Claim uncertainty caught | {_pct(research_preflight_without['claim_uncertainty_caught_rate'])} | {_pct(research_preflight_with['claim_uncertainty_caught_rate'])} | {_pct(research_preflight_with['claim_uncertainty_caught_rate'] - research_preflight_without['claim_uncertainty_caught_rate'])} | Research identified an assumption that needs evidence |",
+        f"| Research evidence present | {_pct(research_preflight_without['research_evidence_present_rate'])} | {_pct(research_preflight_with['research_evidence_present_rate'])} | {_pct(research_preflight_with['research_evidence_present_rate'] - research_preflight_without['research_evidence_present_rate'])} | Research capability produced evidence |",
+        f"| Research gate passed | {_pct(research_preflight_without['research_gate_passed_rate'])} | {_pct(research_preflight_with['research_gate_passed_rate'])} | {_pct(research_preflight_with['research_gate_passed_rate'] - research_preflight_without['research_gate_passed_rate'])} | Research evidence passed a route gate |",
+        f"| Session ledger logged | {_pct(research_preflight_without['session_ledger_logged_rate'])} | {_pct(research_preflight_with['session_ledger_logged_rate'])} | {_pct(research_preflight_with['session_ledger_logged_rate'] - research_preflight_without['session_ledger_logged_rate'])} | Research session packet was logged for audit |",
         "",
         "## Capability Activation Details",
         "",

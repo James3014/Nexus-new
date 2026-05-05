@@ -295,6 +295,24 @@ def test_research_session_loop_marks_failure_lessons_pending(monkeypatch, tmp_pa
     assert payload["lesson_writeback_pending_count"] == 1
     assert "lesson_writeback_pending" in payload["warnings"]
 
+    writeback = runner.invoke(
+        cli_mod.nexus,
+        ["nexus", "research:writeback-lessons", "--session-id", "lesson-demo", "--output-json"],
+    )
+    assert writeback.exit_code == 0, writeback.output
+    writeback_payload = json.loads(writeback.output)
+    assert writeback_payload["written_count"] == 1
+    assert Path(writeback_payload["written"][0]["memory_path"]).exists()
+
+    preview_after = runner.invoke(
+        cli_mod.nexus,
+        ["nexus", "research:finalize-preview", "--session-id", "lesson-demo", "--output-json"],
+    )
+    assert preview_after.exit_code == 0, preview_after.output
+    after_payload = json.loads(preview_after.output)
+    assert after_payload["lesson_writeback_pending_count"] == 0
+    assert "lesson_writeback_pending" not in after_payload["warnings"]
+
 
 def test_research_run_gate_blocks_unverified_claim_before_candidates(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "repo_root", tmp_path)

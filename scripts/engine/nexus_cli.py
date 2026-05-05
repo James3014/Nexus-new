@@ -1921,6 +1921,20 @@ def research_finalize_preview_cmd(session_id, output_json):
         click.echo(f"Keeps: {payload['keep_count']}")
 
 
+@nexus_group.command(name="research:writeback-lessons")
+@click.option("--session-id", default="research-session", show_default=True)
+@click.option("--output-json", is_flag=True)
+def research_writeback_lessons_cmd(session_id, output_json):
+    """Record pending failed research lessons into FindingsMemory."""
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    payload = ResearchSessionLoopService(repo_root).writeback_pending_lessons(session_id=session_id)
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"Lessons written: {payload['written_count']}")
+
+
 @nexus_group.command(name="research:human-report")
 @click.option("--session-id", default="research-session", show_default=True)
 @click.option("--output", type=click.Path(path_type=Path))
