@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from scripts.bench.gemini_nexus_report import _row_route_quality_counts
 
 
@@ -91,7 +95,9 @@ ROUTE_QUALITY_THRESHOLDS = {
 
 def build_command(repo_root: Path, suite: SmokeSuite) -> list[str]:
     cmd = [
-        sys.executable,
+        "uv",
+        "run",
+        "python",
         "scripts/bench/capability_ab_runner.py",
         "--tasks-file",
         suite.manifest,
