@@ -32,6 +32,10 @@ _CAPABILITY_NON_ACTIONABLE_REASONS = {
     "ddtree": {"selected_without_invocation"},
 }
 
+_CAPABILITY_PUBLIC_GATE_NON_ACTIONABLE_REASONS = {
+    "autoreason": {"selected_without_invocation"},
+}
+
 _ROUTE_QUALITY_GATE_THRESHOLDS = {
     "selected_to_invoked_rate": 0.70,
     "invoked_to_evidence_rate": 0.95,
@@ -444,7 +448,11 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
             failure_reasons = item.get("failure_reasons", {})
             if isinstance(failure_reasons, dict):
                 reasons = {str(reason) for reason in failure_reasons if str(reason).strip()}
-                ignored = _NON_ACTIONABLE_CAPABILITY_REASONS | _CAPABILITY_NON_ACTIONABLE_REASONS.get(str(name), set())
+                ignored = (
+                    _NON_ACTIONABLE_CAPABILITY_REASONS
+                    | _CAPABILITY_NON_ACTIONABLE_REASONS.get(str(name), set())
+                    | _CAPABILITY_PUBLIC_GATE_NON_ACTIONABLE_REASONS.get(str(name), set())
+                )
                 if reasons and reasons <= ignored:
                     continue
             missing = [

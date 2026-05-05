@@ -1290,6 +1290,15 @@ def test_render_markdown_report_does_not_fail_gate_for_non_actionable_selected_o
                 "capability_claim_verified": True,
                 "capability_receipts": [
                     {
+                        "name": "autoreason",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                        "failure_reason": "selected_without_invocation",
+                    },
+                    {
                         "name": "ddtree",
                         "selected": True,
                         "invoked": False,
@@ -1332,6 +1341,7 @@ def test_render_markdown_report_does_not_fail_gate_for_non_actionable_selected_o
 
     assert "Per-capability public gate: PASS" in out
     assert "Capability-specific claim gate: PASS" in out
+    assert "| autoreason | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
     assert "| ddtree | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
     assert "| ultra_review | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
     assert "| research_route | selected_only |" not in out
