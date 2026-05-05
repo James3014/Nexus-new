@@ -37,7 +37,9 @@ class HandlerPhaseExecutor:
         mutations = dict(result or {})
         if self.result_binder is not None:
             self.result_binder(ctx, mutations)
-        return PhaseResult(status="success", mutations=mutations, events=[])
+        status_text = str(mutations.get("status") or "").strip().upper()
+        status = "fail" if mutations.get("fail") or status_text in {"FAILED", "REJECTED"} else "success"
+        return PhaseResult(status=status, mutations=mutations, events=[])
 
 
 def _bind_plan(ctx: Any, mutations: dict[str, Any]) -> None:

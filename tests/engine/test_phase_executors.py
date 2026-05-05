@@ -17,6 +17,14 @@ class FakeHandler:
         return PhaseResult(status="success", mutations={"planned": True}, events=[])
 
 
+class LegacyFailHandler:
+    name = "A"
+    priority = 40
+
+    def run(self, _state, _pack):
+        return {"status": "FAILED", "fail": True, "reason": "hallucination_gate_rejected"}
+
+
 def test_handler_phase_executor_adapts_legacy_handler_shape():
     executor = HandlerPhaseExecutor(FakeHandler())
     ctx = SimpleNamespace(kwargs={})
@@ -32,3 +40,13 @@ def test_handler_phase_executor_honors_should_run():
     ctx = SimpleNamespace(kwargs={"skip": True})
 
     assert executor.should_run(ctx) is False
+
+
+def test_handler_phase_executor_maps_legacy_fail_dict_to_phase_failure():
+    executor = HandlerPhaseExecutor(LegacyFailHandler())
+    ctx = SimpleNamespace(kwargs={}, state=SimpleNamespace(), pack={})
+
+    result = executor.execute(None, ctx)
+
+    assert result.status == "fail"
+    assert result.mutations["reason"] == "hallucination_gate_rejected"

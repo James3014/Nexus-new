@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from nexus.core.state_contracts import NexusState
 from nexus.engine.phase_plugin import PhaseResult
 from nexus.engine.pipeline import NexusPipeline
 
@@ -82,3 +83,42 @@ def test_pipeline_registers_audit_phase_executor(tmp_path):
     pipeline = NexusPipeline(_engine(tmp_path, executors))
 
     assert "A" in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
+
+
+def test_repair_audit_loop_runs_composed_a_phase_before_legacy_audit(tmp_path, monkeypatch):
+    executors = {"A": FakeExecutor("A", {"fail": True, "reason": "composition_rejected"})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-audit",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-audit"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(
+        pipeline,
+        "_execute_single_repair",
+        lambda *_args, **_kwargs: {
+            "status": "APPROVED",
+            "result": {"patch_generated": True, "patch_apply_success": True},
+            "current_decision_id": "dec-r",
+            "current_skill_id": "repair",
+        },
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_evaluate_audit_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy audit should be blocked by A plugin")),
+    )
+    monkeypatch.setattr(pipeline, "_build_hallucination_evidence_bundle", lambda _ctx: {"code_artifacts": ["x.py"]})
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is False
+    assert executors["A"].calls == 1
+    assert ctx.state.metadata["composition_audit_phase_rejection"] == "composition_rejected"

@@ -429,6 +429,37 @@ class PipelineRepairMixin:
 
         return {"audit_success": audit_success, "status": status, "phantom_reason": phantom_reason}
 
+    def _run_composition_audit_phase(self, ctx: PipelineContextProtocol, r_out: dict) -> dict | None:
+        """Run the composed A phase as a fail-closed pre-audit gate when registered."""
+        registry = getattr(self, "registry", None)
+        if registry is None:
+            return None
+        plugin = next((item for item in registry.get_ordered_plugins() if item.name == "A"), None)
+        if plugin is None or not plugin.should_run(ctx):
+            return None
+
+        original_pack = dict(ctx.pack or {})
+        evidence_bundle = self._build_hallucination_evidence_bundle(ctx)
+        ctx.pack.update(
+            {
+                "summary": str(r_out.get("status") or ctx.state.metadata.get("task_description") or ctx.task_id),
+                "response_text": str(r_out.get("status") or ""),
+                "evidence_bundle": evidence_bundle,
+            }
+        )
+        try:
+            result = plugin.execute(self, ctx)
+        finally:
+            ctx.pack = original_pack
+
+        ctx.state.metadata["composition_audit_phase_status"] = result.status
+        ctx.state.metadata["composition_audit_phase_mutations"] = result.mutations
+        if result.status in {"fail", "FAILED"} or bool((result.mutations or {}).get("fail")):
+            reason = str((result.mutations or {}).get("reason") or "composition_audit_failed")
+            ctx.state.metadata["composition_audit_phase_rejection"] = reason
+            return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
+        return None
+
     def _update_meta_counter(self, ctx: PipelineContextProtocol, key: str, increment: int = 1) -> None:
         """Safely updates an integer counter in metadata."""
         current = ctx.state.metadata.get(key, 0)
@@ -600,7 +631,7 @@ class PipelineRepairMixin:
                 current_decision_id=r_out["current_decision_id"],
                 current_skill_id=r_out["current_skill_id"]
             )
-            a_out = self._evaluate_audit_result(ctx, eval_ctx)
+            a_out = self._run_composition_audit_phase(ctx, r_out) or self._evaluate_audit_result(ctx, eval_ctx)
             if rlm_loop is not None:
                 rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
                 budget_state = rlm_loop.consume_iteration()
