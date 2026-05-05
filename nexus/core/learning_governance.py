@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from .learning_evidence import LearningEvidence
+from .learning_steward import GovernanceProfile, LearningSteward
 from .state_contracts import NexusState
 
 
@@ -26,55 +27,22 @@ class LearningGovernance:
 
     @classmethod
     def evaluate(cls, state: NexusState, evidence: LearningEvidence) -> LearningDecision:
-        reasons: List[str] = []
-        freeze = False
-        metadata = state.metadata
-
-        if cls._requires_physical_proof(evidence):
-            if not evidence.proof_present:
-                freeze = True
-                reasons.append("missing_physical_proof_evidence")
-            elif evidence.proof_type.lower() not in cls.VALID_PROOF_TYPES:
-                freeze = True
-                reasons.append("invalid_physical_proof_type")
-
-        if bool(metadata.get("sir_veto_learning", False)):
-            freeze = True
-            reasons.append("sir_veto")
-
-        novelty = cls._novelty(evidence)
-        failure_history = cls._failure_history(metadata)
-        feedback_reward = cls._feedback_reward(state)
-        curiosity_score = (
-            (cls.ALPHA * novelty)
-            + (cls.GAMMA * feedback_reward)
-            - (cls.BETA * failure_history)
-        )
-        if curiosity_score < 0.0:
-            freeze = True
-            reasons.append("curiosity_negative")
-
-        token_budget = float(metadata.get("curiosity_token_budget", cls.DEFAULT_TOKEN_BUDGET))
-        if float(state.total_token_usage or 0.0) > token_budget:
-            freeze = True
-            reasons.append("token_budget_exceeded")
-
-        canary_reasons = cls._evaluate_canary(metadata)
-        if canary_reasons:
-            freeze = True
-            reasons.extend(canary_reasons)
-
-        metadata["curiosity_score"] = round(curiosity_score, 2)
-        metadata["curiosity_novelty"] = round(novelty, 2)
-        metadata["curiosity_failure_penalty"] = round(failure_history, 2)
-        metadata["curiosity_feedback_reward"] = round(feedback_reward, 2)
-        metadata["learning_frozen"] = freeze
-        metadata["learning_freeze_reasons"] = reasons
-
+        token_budget = float(state.metadata.get("curiosity_token_budget", cls.DEFAULT_TOKEN_BUDGET))
+        decision = LearningSteward(
+            GovernanceProfile(
+                alpha=cls.ALPHA,
+                beta=cls.BETA,
+                gamma=cls.GAMMA,
+                token_budget=token_budget,
+                memory_health_baseline=cls.DEFAULT_MEMORY_HEALTH_BASELINE,
+                valid_proof_types=frozenset(cls.VALID_PROOF_TYPES),
+            )
+        ).decide(state, evidence)
+        state.metadata["learning_action"] = decision.action
         return LearningDecision(
-            freeze_learning=freeze,
-            curiosity_score=round(curiosity_score, 2),
-            reasons=reasons,
+            freeze_learning=decision.freeze_learning,
+            curiosity_score=decision.curiosity_score,
+            reasons=decision.reasons,
         )
 
     @staticmethod

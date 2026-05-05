@@ -72,3 +72,17 @@ def test_event_bus_legacy_signal_queue_assignment_still_works(tmp_path):
     drained = NexusEventBus.drain_signals("STOP")
     assert len(drained) == 1
     assert drained[0]["payload"]["reason"] == "legacy"
+
+
+def test_event_bus_typed_domain_emitters_preserve_publish_contract(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    handler = MagicMock()
+    NexusEventBus.subscribe("audit_failed", handler)
+
+    NexusEventBus.emit_audit_failure(task_id="task-1", reason="missing evidence", evidence_id="EV-1")
+
+    handler.assert_called_once()
+    payload = handler.call_args[0][0]
+    assert payload["task_id"] == "task-1"
+    assert payload["reason"] == "missing evidence"
+    assert payload["evidence_id"] == "EV-1"

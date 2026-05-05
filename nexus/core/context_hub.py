@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
+from dataclasses import dataclass
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
 from nexus.services.memory import MemoryService
@@ -13,6 +14,23 @@ from nexus.core.brain_de_entropy import prune_dialogue
 from nexus.core.context_compression import ToonRenderer, ContextScorer
 
 logger = logging.getLogger("nexus.context_hub")
+
+
+@dataclass(frozen=True)
+class StateView:
+    metadata: Dict[str, Any]
+    conversation_metadata: Dict[str, Any] | None = None
+
+    def get_conversation_metadata(self) -> Dict[str, Any]:
+        return dict(self.conversation_metadata or {})
+
+
+@dataclass(frozen=True)
+class ContextDependencies:
+    memory_service: Any | None = None
+    wisdom_vault: Any | None = None
+    belief_engine: Any | None = None
+    knowledge_injector: Any | None = None
 
 class ContextHub:
     """
@@ -28,43 +46,49 @@ class ContextHub:
         nexus_fs: Optional[Any] = None,
         skill_registry: Optional[Any] = None,
         mem_palace: Optional[Any] = None,
+        deps: ContextDependencies | None = None,
     ):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
         self.state_io = StateIO(project_root, run_dir=run_dir)
-        self.memory_service = memory_service or MemoryService(
-            project_root, run_dir=run_dir
-        )
+        deps = deps or ContextDependencies()
+        self.memory_service = deps.memory_service or memory_service or MemoryService(project_root, run_dir=run_dir)
         self.nexus_fs = nexus_fs
         self.skill_registry = skill_registry
         self.mem_palace = mem_palace
-        self.wisdom_vault = None  # Will be injected in coordinator or by DI
+        self.wisdom_vault = deps.wisdom_vault  # Will be injected in coordinator or by DI
         from nexus.services.prompt_builder import PromptBuilder
 
         self.prompt_builder = PromptBuilder(project_root)
         
         # 🟢 [Fix-3] WisdomVault Auto-Injection
-        try:
-            from nexus.research.wisdom.wisdom_vault import WisdomVault
-            db_path = str(self.project_root / ".nexus" / "knowledge" / "lancedb")
-            self.wisdom_vault = WisdomVault(db_path=db_path)
-        except Exception as e:
-            logger.warning(f"⚠️ [ContextHub] WisdomVault auto-injection skipped: {e}")
-            self.wisdom_vault = None
+        if self.wisdom_vault is None:
+            try:
+                from nexus.research.wisdom.wisdom_vault import WisdomVault
+                db_path = str(self.project_root / ".nexus" / "knowledge" / "lancedb")
+                self.wisdom_vault = WisdomVault(db_path=db_path)
+            except Exception as e:
+                logger.warning(f"⚠️ [ContextHub] WisdomVault auto-injection skipped: {e}")
+                self.wisdom_vault = None
             
         # 🟢 [Fix-1] BeliefEngine Auto-Injection 
-        try:
-            from nexus.core.belief_engine import BeliefEngine
-            self.belief_engine = BeliefEngine(self.project_root / ".nexus" / "belief_state.json")
-        except Exception as e:
-            self.belief_engine = None
+        self.belief_engine = deps.belief_engine
+        if self.belief_engine is None:
+            try:
+                from nexus.core.belief_engine import BeliefEngine
+                self.belief_engine = BeliefEngine(self.project_root / ".nexus" / "belief_state.json")
+            except Exception:
+                self.belief_engine = None
             
-        from nexus.core.knowledge_injector import KnowledgeInjector
-        self.knowledge_injector = KnowledgeInjector(
-            skill_registry=self.skill_registry,
-            mem_palace=self.mem_palace,
-            wisdom_vault=self.wisdom_vault
-        )
+        if deps.knowledge_injector is not None:
+            self.knowledge_injector = deps.knowledge_injector
+        else:
+            from nexus.core.knowledge_injector import KnowledgeInjector
+            self.knowledge_injector = KnowledgeInjector(
+                skill_registry=self.skill_registry,
+                mem_palace=self.mem_palace,
+                wisdom_vault=self.wisdom_vault
+            )
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
         """讀取 AutoResearch 規則文件。"""
@@ -76,13 +100,19 @@ class ContextHub:
         except Exception as e:
             return f"# Error loading rules: {e}"
 
-    def make_pre_routing_decision(self, task_id: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+    def make_pre_routing_decision(
+        self,
+        task_id: str,
+        context: Optional[Dict] = None,
+        *,
+        state_view: StateView | NexusState | None = None,
+    ) -> Dict[str, Any]:
         """🧠 Pre-routing: 決定是否需要外部 research、特定模式或審核層級。"""
         context = context or {}
         if self._is_benchmark_run(context):
             return {"external_needed": False, "mode": "benchmark", "priority": "normal", "audit_level": "full", "nas_autotune_needed": False}
             
-        state = self.state_io.load_global_state()
+        state = state_view or self.state_io.load_global_state()
         task_type = state.metadata.get("task_type", "standard")
         
         # 🧪 [Wisdom Layer] 動態判斷是否需要 NAS 自動調優

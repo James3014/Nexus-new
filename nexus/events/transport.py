@@ -87,6 +87,27 @@ class NexusEventBus:
                 logger.error("Remote broadcast error for %s: %s", event_type, e)
 
     @classmethod
+    def emit_audit_failure(cls, *, task_id: str, reason: str, evidence_id: str = "") -> None:
+        cls.publish(
+            "audit_failed",
+            {"task_id": task_id, "reason": reason, "evidence_id": evidence_id},
+        )
+
+    @classmethod
+    def emit_learning_decision(cls, *, task_id: str, action: str, reasons: List[str] | None = None) -> None:
+        cls.publish(
+            "learning_decision",
+            {"task_id": task_id, "action": action, "reasons": list(reasons or [])},
+        )
+
+    @classmethod
+    def emit_evidence_accepted(cls, *, task_id: str, evidence_id: str, evidence_type: str = "") -> None:
+        cls.publish(
+            "evidence_accepted",
+            {"task_id": task_id, "evidence_id": evidence_id, "evidence_type": evidence_type},
+        )
+
+    @classmethod
     def inject_signal(cls, signal_type: str, payload: Dict[str, Any]) -> None:
         """外部注入信號（由 bot/人工/Pilot Friend 呼叫）"""
         cls._sync_signal_queue_from_legacy()

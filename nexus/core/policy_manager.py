@@ -37,8 +37,11 @@ class PolicyManager:
             float(self.episode_repository.coordinator.wait_p95_ms()), 2
         )
         LearningScorer.apply(state, evidence)
-        if bool(state.metadata.get("learning_frozen", False)):
+        learning_action = str(state.metadata.get("learning_action") or "").upper()
+        if learning_action == "FREEZE" or bool(state.metadata.get("learning_frozen", False)):
             state.metadata["learning_ingest_status"] = "skipped_frozen"
+        elif learning_action == "DISCARD":
+            state.metadata["learning_ingest_status"] = "discarded"
         else:
             try:
                 self.memory_service.ingest_episode(episode)

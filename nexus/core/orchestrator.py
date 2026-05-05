@@ -7,6 +7,7 @@ from datetime import datetime
 from nexus.core.config import OrchestratorConfig
 from nexus.core.hubs import NexusInfraHub, NexusIntelHub, NexusGovHub
 from nexus.core.belief_engine import BeliefEngine
+from nexus.core.belief_contracts import AuditOutcome
 from nexus.core.mem_palace import MemoryPalace
 
 from unittest.mock import MagicMock
@@ -76,15 +77,27 @@ class NexusOrchestrator:
                 else:
                     logger.warning("🛑 [Audit] REJECTED: %s", rebuttal)
                     
-                    # 🕵️ 修正為 4 參數對準核心：task_id, assumption, confidence, evidence_id
-                    self.belief_engine.update_belief(
-                        task_id=self.task,
-                        assumption=f"AUDIT_FAILURE_{strike}",
-                        confidence=0.1,
-                        evidence_id=f"REBUTTAL_{datetime.now().strftime('%H%M%S')}"
-                    ) 
+                    self._record_audit_failure(strike=strike, rebuttal=rebuttal)
                     continue
         return False
+
+    def _record_audit_failure(self, *, strike: int, rebuttal: str) -> None:
+        outcome = AuditOutcome(
+            task_id=self.task,
+            assumption=f"AUDIT_FAILURE_{strike}",
+            passed=False,
+            evidence_id=f"REBUTTAL_{datetime.now().strftime('%H%M%S')}",
+            reason=rebuttal,
+        )
+        if hasattr(self.belief_engine, "process_audit_outcome"):
+            self.belief_engine.process_audit_outcome(outcome)
+            return
+        self.belief_engine.update_belief(
+            task_id=outcome.task_id,
+            assumption=outcome.assumption,
+            confidence=outcome.confidence if outcome.confidence is not None else 0.1,
+            evidence_id=outcome.evidence_id,
+        )
 
     def _run_adversarial_audit(self, response_data: dict) -> Tuple[bool, str]:
         summary = response_data.get("summary", "")
@@ -98,7 +111,7 @@ class NexusOrchestrator:
 
         if hasattr(self.belief_engine, "assess_confidence"):
             try:
-                confidence = self.belief_engine.assess_confidence(summary)
+                confidence = self.belief_engine.assess_confidence(self.task, summary)
                 if confidence is not None and float(confidence) < 0.5:
                     return False, "Belief confidence too low"
             except Exception as exc:
