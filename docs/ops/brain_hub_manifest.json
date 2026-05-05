@@ -17,7 +17,7 @@
     {"path": "wiki/refactor_healing_protocol_spec.md", "status": "partial", "runtime_refs": ["nexus/core/healing_artifacts.py", "nexus/security/secure_sync.py"], "test_refs": ["tests/core/test_healing_artifacts.py", "tests/security/test_secure_sync.py"]},
     {"path": "wiki/NEXUS_EVOLUTION_MANIFESTO_v25.5.md", "status": "partial", "runtime_refs": ["docs/ops/brain_hub_manifest.json"], "test_refs": ["tests/ops/test_brain_hub_audit.py"]},
     {"path": "wiki/NEXUS_GOVERNANCE_EXECUTION_PROTOCOL.md", "status": "partial", "runtime_refs": ["nexus/engine/pipeline.py"], "test_refs": ["tests/engine/test_pipeline_stage_flow.py"]},
-    {"path": "wiki/NEXUS_EVOLUTION_ONTOLOGY.md", "status": "partial", "runtime_refs": ["docs/ops/brain_hub_manifest.json"], "test_refs": ["tests/ops/test_brain_hub_audit.py"]},
-    {"path": "wiki/NEXUS_SWARM_EVOLUTION_PROTOCOL.md", "status": "partial", "runtime_refs": ["nexus/core/healing_artifacts.py", "nexus/security/secure_sync.py"], "test_refs": ["tests/core/test_healing_artifacts.py", "tests/security/test_secure_sync.py"]}
+    {"path": "wiki/NEXUS_EVOLUTION_ONTOLOGY.md", "status": "partial", "runtime_refs": ["nexus/core/evolution_protocols.py", "docs/ops/brain_hub_manifest.json"], "test_refs": ["tests/core/test_evolution_protocols.py", "tests/ops/test_brain_hub_audit.py"]},
+    {"path": "wiki/NEXUS_SWARM_EVOLUTION_PROTOCOL.md", "status": "partial", "runtime_refs": ["nexus/core/evolution_protocols.py", "nexus/core/healing_artifacts.py", "nexus/security/secure_sync.py"], "test_refs": ["tests/core/test_evolution_protocols.py", "tests/core/test_healing_artifacts.py", "tests/security/test_secure_sync.py"]}
   ]
 }

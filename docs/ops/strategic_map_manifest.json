@@ -36,6 +36,12 @@
       "kind": "fragile_supply_line",
       "runtime_refs": ["nexus/infrastructure/storage_implementations.py", "nexus/infrastructure/storage_interfaces.py", "nexus/services/memory.py"],
       "test_refs": ["tests/infrastructure/test_storage_implementations.py", "tests/test_memory.py"]
+    },
+    {
+      "name": "evolution_swarm_boundary",
+      "kind": "fragile_supply_line",
+      "runtime_refs": ["nexus/core/evolution_protocols.py", "nexus/core/healing_artifacts.py", "nexus/security/secure_sync.py"],
+      "test_refs": ["tests/core/test_evolution_protocols.py", "tests/core/test_healing_artifacts.py", "tests/security/test_secure_sync.py"]
     }
   ],
   "boundary_rules": [
