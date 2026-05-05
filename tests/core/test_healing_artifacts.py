@@ -3,6 +3,8 @@ from nexus.core.healing_artifacts import (
     artifact_from_packet,
     artifact_to_packet,
     healing_artifact_report_entry,
+    quiet_moment_healing_packet,
+    quiet_moment_report_entry,
     read_healing_artifact,
     write_healing_artifact,
 )
@@ -59,3 +61,35 @@ def test_healing_artifact_report_entry_cites_persisted_artifact(tmp_path):
     assert row["artifact_id"] == "heal-1"
     assert row["evidence_id"] == "EV-1"
     assert row["path"] == str(path)
+
+
+def test_quiet_moment_healing_packet_is_report_safe_and_non_mutating():
+    packet = quiet_moment_healing_packet(
+        reason="swarm divergence",
+        affected_nodes=["node-a"],
+        resume_after_seconds=30,
+        evidence_id="EV-QM-1",
+    )
+
+    row = quiet_moment_report_entry(packet)
+
+    assert packet["production_writes_allowed"] is False
+    assert packet["event"]["production_writes_allowed"] is False
+    assert row == {
+        "schema_version": "nexus_quiet_moment_report_entry.v1",
+        "evidence_id": "EV-QM-1",
+        "reason": "swarm divergence",
+        "affected_nodes": ["node-a"],
+        "resume_after_seconds": 30,
+        "production_writes_allowed": False,
+        "allowed_actions": ["observe", "report", "rollback"],
+    }
+
+
+def test_quiet_moment_report_entry_rejects_wrong_packet_type():
+    try:
+        quiet_moment_report_entry({"type": "healing_artifact"})
+    except ValueError as exc:
+        assert "not a quiet moment" in str(exc)
+    else:
+        raise AssertionError("quiet_moment_report_entry should reject wrong packets")
