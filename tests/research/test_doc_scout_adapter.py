@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from nexus.research.doc_scout_adapter import ArxivScoutProvider, DocScoutAdapter, ExternalScoutProvider, GitHubIssueScoutProvider, SpecUrlScoutProvider
+from nexus.research.doc_scout_adapter import (
+    ArxivScoutProvider,
+    DocScoutAdapter,
+    ExternalScoutProvider,
+    FetchedExternalScoutProvider,
+    GitHubIssueScoutProvider,
+    SpecUrlScoutProvider,
+)
 
 
 class FakeIssueProvider:
@@ -85,3 +92,29 @@ def test_doc_scout_has_named_opt_in_external_provider_types(tmp_path: Path):
     out = DocScoutAdapter(tmp_path, external_providers=providers).search("timeout sdk", limit=5, include_external=True)
 
     assert {hit["source"] for hit in out["hits"]} == {"github_issue", "arxiv", "spec"}
+
+
+def test_doc_scout_fetched_provider_is_opt_in_and_uses_injected_fetcher(tmp_path: Path):
+    calls = []
+
+    def fake_fetch(url: str, *, timeout_sec: float):
+        calls.append((url, timeout_sec))
+        return "The upstream SDK fixed timeout cancellation race in version 2."
+
+    provider = FetchedExternalScoutProvider(
+        name="spec_fetch",
+        source="spec",
+        urls=["https://spec.example/sdk", "file:///tmp/not-allowed"],
+        fetcher=fake_fetch,
+        timeout_sec=1.5,
+    )
+
+    disabled = DocScoutAdapter(tmp_path, external_providers=[provider]).search("sdk timeout race", include_external=False)
+    enabled = DocScoutAdapter(tmp_path, external_providers=[provider], cache_ttl_sec=0).search(
+        "sdk timeout race",
+        include_external=True,
+    )
+
+    assert disabled["external_enabled"] is False
+    assert calls == [("https://spec.example/sdk", 1.5)]
+    assert enabled["hits"][0]["source_url"] == "https://spec.example/sdk"

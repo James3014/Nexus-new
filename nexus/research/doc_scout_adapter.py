@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Protocol
 import re
 import time
+import urllib.request
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,54 @@ class ArxivScoutProvider(StaticExternalScoutProvider):
 class SpecUrlScoutProvider(StaticExternalScoutProvider):
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         super().__init__(name="spec_url", source="spec", rows=rows)
+
+
+class FetchedExternalScoutProvider:
+    """Opt-in external fetch provider with injectable fetcher for deterministic tests."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        source: str,
+        urls: list[str],
+        fetcher: Any | None = None,
+        timeout_sec: float = 5.0,
+    ) -> None:
+        self.name = name
+        self.source = source
+        self.urls = [str(url).strip() for url in urls if str(url).strip()]
+        self.fetcher = fetcher or self._urlopen_fetcher
+        self.timeout_sec = max(0.1, float(timeout_sec or 5.0))
+
+    def search(self, query: str, *, tokens: list[str], limit: int) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for url in self.urls[: max(1, int(limit))]:
+            if not re.match(r"^https?://", url):
+                continue
+            try:
+                text = str(self.fetcher(url, timeout_sec=self.timeout_sec) or "")
+            except Exception:
+                continue
+            score = float(sum(1 for token in tokens if token in text.lower()))
+            if score <= 0:
+                continue
+            rows.append(
+                {
+                    "path": url,
+                    "source_url": url,
+                    "source": self.source,
+                    "score": score,
+                    "snippet": DocScoutAdapter._best_line(text, tokens),
+                }
+            )
+        return sorted(rows, key=lambda item: float(item.get("score", 0.0) or 0.0), reverse=True)[: max(1, int(limit))]
+
+    @staticmethod
+    def _urlopen_fetcher(url: str, *, timeout_sec: float) -> str:
+        request = urllib.request.Request(url, headers={"User-Agent": "nexus-doc-scout/1.0"})
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+            return response.read(200_000).decode("utf-8", errors="ignore")
 
 
 class DocScoutAdapter:
@@ -236,7 +285,8 @@ class DocScoutAdapter:
                 score += 1.0
         return score
 
-    def _best_line(self, text: str, tokens: list[str]) -> str:
+    @staticmethod
+    def _best_line(text: str, tokens: list[str]) -> str:
         best = ""
         best_score = -1
         for raw_line in text.splitlines():

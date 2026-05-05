@@ -29,7 +29,7 @@ def apply_signal_policies(
     ):
         enable("autoreason", "low_confidence_or_multi_candidate_or_history")
     if signals.confidence < 0.75 or signals.candidate_count >= 2 or signals.evidence_signal or signals.governance_signal:
-        enable("llm_judge_panel", "semantic_judge_required_for_uncertain_or_multi_candidate_route")
+        enable("judge_panel", "evidence_quality_judge_required_for_uncertain_or_multi_candidate_route")
     if signals.confidence < 0.8 or "belief" in task_lower or "confidence" in task_lower or "budget" in task_lower:
         enable("belief", "confidence_control_needed")
     if signals.memory_hits or signals.findings_hits:

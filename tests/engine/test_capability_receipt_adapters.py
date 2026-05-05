@@ -132,7 +132,7 @@ def test_swarm_quiet_moment_receipt_requires_non_mutating_event():
 def test_semantic_research_runtime_receipts_require_evidence_and_gate():
     plan = {
         "selected_capabilities": [
-            "llm_judge_panel",
+            "judge_panel",
             "asi_constraint_extractor",
             "architecture_scout",
             "external_doc_scout",
@@ -146,7 +146,7 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
             plan=plan,
             capabilities={
                 "claim_verified": True,
-                "llm_judge_panel_used": True,
+                "judge_panel_used": True,
                 "asi_constraints": [],
                 "architecture_scout_used": True,
                 "external_doc_scout_used": True,
@@ -159,11 +159,12 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
             plan=plan,
             capabilities={
                 "claim_verified": True,
-                "llm_judge_panel_used": True,
-                "llm_judge_panel_votes": [{"judge": "fake", "ranking": ["B", "A"]}],
-                "llm_judge_panel_winner": "B",
-                "llm_judge_panel_report_path": ".nexus/reports/judge/panel.json",
-                "llm_judge_panel_gate_passed": True,
+                "judge_panel_used": True,
+                "judge_panel_votes": [{"judge": "fake", "ranking": ["B", "A"]}],
+                "judge_panel_winner": "B",
+                "judge_panel_mode": "deterministic_evidence_quality",
+                "judge_panel_report_path": ".nexus/reports/judge/panel.json",
+                "judge_panel_gate_passed": True,
                 "asi_constraints": [{"blocked_pattern": "flow:retry_delay"}],
                 "blocked_assumptions": ["flow:retry_delay"],
                 "asi_constraint_report_path": ".nexus/reports/asi/constraints.json",

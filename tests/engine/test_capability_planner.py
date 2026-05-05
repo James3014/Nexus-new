@@ -55,6 +55,7 @@ def test_capability_nodes_include_semantic_research_runtime_capabilities():
     nodes = default_capability_nodes()
 
     expected = {
+        "judge_panel",
         "llm_judge_panel",
         "asi_constraint_extractor",
         "architecture_scout",
@@ -62,8 +63,9 @@ def test_capability_nodes_include_semantic_research_runtime_capabilities():
         "formal_report",
     }
     assert expected <= set(nodes)
-    assert nodes["llm_judge_panel"].dependencies == ("artifact_gate", "claim_gate")
-    assert "panel_votes" in nodes["llm_judge_panel"].evidence_outputs
+    assert nodes["judge_panel"].dependencies == ("artifact_gate", "claim_gate")
+    assert nodes["llm_judge_panel"].maturity == "legacy_alias"
+    assert "panel_votes" in nodes["judge_panel"].evidence_outputs
     assert nodes["asi_constraint_extractor"].dependencies == ("mempalace_gate",)
     assert "extracted_constraints" in nodes["asi_constraint_extractor"].evidence_outputs
     assert nodes["architecture_scout"].dependencies == ("codeintel",)
@@ -113,7 +115,7 @@ def test_capability_planner_selects_semantic_research_runtime_capabilities():
 
     selected = set(plan["selected_capabilities"])
     assert {
-        "llm_judge_panel",
+        "judge_panel",
         "asi_constraint_extractor",
         "architecture_scout",
         "external_doc_scout",

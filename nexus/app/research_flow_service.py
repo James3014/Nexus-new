@@ -1842,28 +1842,39 @@ def _augment_semantic_runtime_capabilities(
     capabilities = nexus_usage_trace.setdefault("capabilities", {})
     research_context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
 
-    if "llm_judge_panel" in selected_capabilities:
+    if {"judge_panel", "llm_judge_panel"} & selected_capabilities:
         autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}
         votes = autoreason.get("judge_votes", []) if isinstance(autoreason.get("judge_votes"), list) else []
         winner = str(autoreason.get("winner") or "").strip()
+        judge_mode = str(autoreason.get("judge_mode") or autoreason.get("mode") or "deterministic_evidence_quality").strip()
         if votes and winner:
             report = {
-                "schema": "nexus_llm_judge_panel_receipt_v1",
+                "schema": "nexus_judge_panel_receipt_v1",
                 "task_id": task_id or receipt_slug,
                 "winner": winner,
                 "votes": votes,
                 "borda_scores": autoreason.get("borda_scores", {}),
+                "judge_mode": judge_mode,
                 "status": autoreason.get("status", ""),
             }
-            capabilities["llm_judge_panel_used"] = True
-            capabilities["llm_judge_panel_votes"] = votes
-            capabilities["llm_judge_panel_winner"] = winner
-            capabilities["llm_judge_panel_report_path"] = _write_runtime_receipt_json(
+            report_path = _write_runtime_receipt_json(
                 repo_root,
-                category="llm_judge_panel",
+                category="judge_panel",
                 receipt_slug=receipt_slug,
                 payload=report,
             )
+            capabilities["judge_panel_used"] = True
+            capabilities["judge_panel_votes"] = votes
+            capabilities["judge_panel_winner"] = winner
+            capabilities["judge_panel_mode"] = judge_mode
+            capabilities["judge_panel_report_path"] = report_path
+            capabilities["judge_panel_gate_passed"] = bool(artifact_verified)
+            # Backward-compatible trace keys for older reports and route audits.
+            capabilities["llm_judge_panel_used"] = True
+            capabilities["llm_judge_panel_votes"] = votes
+            capabilities["llm_judge_panel_winner"] = winner
+            capabilities["llm_judge_panel_mode"] = judge_mode
+            capabilities["llm_judge_panel_report_path"] = report_path
             capabilities["llm_judge_panel_gate_passed"] = bool(artifact_verified)
 
     if "asi_constraint_extractor" in selected_capabilities:
@@ -1962,16 +1973,16 @@ def _augment_semantic_runtime_capabilities(
                 "gate_passed": bool(capabilities.get("artifact_gate_passed", False)),
             },
             {
-                "name": "llm_judge_panel",
-                "evidence_present": bool(capabilities.get("llm_judge_panel_report_path")),
-                "gate_passed": bool(capabilities.get("llm_judge_panel_gate_passed", False)),
+                "name": "judge_panel",
+                "evidence_present": bool(capabilities.get("judge_panel_report_path")),
+                "gate_passed": bool(capabilities.get("judge_panel_gate_passed", False)),
             },
         ]
         report = service.build(
             title=f"Nexus Formal Evidence Report: {task_id or receipt_slug}",
             hypothesis=task_desc,
             asi_constraints=capabilities.get("asi_constraints", []) or [],
-            judge_votes=capabilities.get("llm_judge_panel_votes", []) or [],
+            judge_votes=capabilities.get("judge_panel_votes", []) or capabilities.get("llm_judge_panel_votes", []) or [],
             verification=verification,
             route_receipts=route_receipts,
         )

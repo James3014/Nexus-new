@@ -2294,7 +2294,7 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
 
     receipts = {item["name"]: item for item in payload["nexus_usage_trace"]["capability_receipts"]}
     for name in (
-        "llm_judge_panel",
+        "judge_panel",
         "asi_constraint_extractor",
         "architecture_scout",
         "external_doc_scout",
@@ -2305,6 +2305,8 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
     capabilities = payload["nexus_usage_trace"]["capabilities"]
     assert (tmp_path / capabilities["formal_report_path"]).exists()
     assert capabilities["formal_report_schema_version"] == "nexus_formal_report_v1"
+    assert capabilities["judge_panel_report_path"]
+    assert capabilities["judge_panel_mode"] == "deterministic_evidence_quality"
     assert capabilities["llm_judge_panel_report_path"]
     assert capabilities["architecture_scout_report_path"]
     assert capabilities["external_doc_scout_report_path"]

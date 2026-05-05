@@ -115,7 +115,7 @@ def default_capability_nodes() -> dict[str, CapabilityNode]:
             evidence_outputs=("judge_votes", "winner", "stop_reason"),
         ),
         CapabilityNode(
-            "llm_judge_panel",
+            "judge_panel",
             ("D", "R", "A"),
             category="reasoning",
             maturity="beta",
@@ -123,7 +123,18 @@ def default_capability_nodes() -> dict[str, CapabilityNode]:
             cost=3,
             benefit=5,
             risk_reduction=4,
-            evidence_outputs=("panel_votes", "winner", "judge_report", "gate_verdict"),
+            evidence_outputs=("panel_votes", "winner", "judge_mode", "judge_report", "gate_verdict"),
+        ),
+        CapabilityNode(
+            "llm_judge_panel",
+            ("D", "R", "A"),
+            category="reasoning",
+            maturity="legacy_alias",
+            dependencies=("judge_panel",),
+            cost=0,
+            benefit=0,
+            risk_reduction=0,
+            evidence_outputs=("legacy_judge_panel_receipt",),
         ),
         CapabilityNode(
             "ddtree",

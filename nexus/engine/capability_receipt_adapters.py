@@ -146,20 +146,23 @@ class AutoreasonReceiptAdapter:
         )
 
 
-class LlmJudgePanelReceiptAdapter:
-    name = "llm_judge_panel"
+class JudgePanelReceiptAdapter:
+    name = "judge_panel"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        votes = payload.get("llm_judge_panel_votes", []) or payload.get("panel_votes", []) or []
-        winner = payload.get("llm_judge_panel_winner") or payload.get("winner")
-        report = str(payload.get("llm_judge_panel_report_path") or payload.get("judge_report") or "").strip()
-        invoked = bool(payload.get("llm_judge_panel_used") or votes or winner or report)
+        votes = payload.get("judge_panel_votes", []) or payload.get("llm_judge_panel_votes", []) or payload.get("panel_votes", []) or []
+        winner = payload.get("judge_panel_winner") or payload.get("llm_judge_panel_winner") or payload.get("winner")
+        report = str(payload.get("judge_panel_report_path") or payload.get("llm_judge_panel_report_path") or payload.get("judge_report") or "").strip()
+        mode = str(payload.get("judge_panel_mode") or payload.get("llm_judge_panel_mode") or "").strip()
+        invoked = bool(payload.get("judge_panel_used") or payload.get("llm_judge_panel_used") or votes or winner or report)
         refs = [report] if report else []
         if winner:
             refs.append(f"winner:{winner}")
         if votes:
             refs.append(f"panel_votes:{len(votes)}")
-        gate_passed = bool(invoked and refs and _as_bool(payload.get("llm_judge_panel_gate_passed", False)))
+        if mode:
+            refs.append(f"judge_mode:{mode}")
+        gate_passed = bool(invoked and refs and _as_bool(payload.get("judge_panel_gate_passed", payload.get("llm_judge_panel_gate_passed", False))))
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -170,6 +173,10 @@ class LlmJudgePanelReceiptAdapter:
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
+
+
+class LlmJudgePanelReceiptAdapter(JudgePanelReceiptAdapter):
+    name = "llm_judge_panel"
 
 
 class ASIConstraintExtractorReceiptAdapter:
@@ -759,6 +766,7 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
     for adapter in (
         CodeIntelReceiptAdapter(),
         AutoreasonReceiptAdapter(),
+        JudgePanelReceiptAdapter(),
         LlmJudgePanelReceiptAdapter(),
         ASIConstraintExtractorReceiptAdapter(),
         DDTreeReceiptAdapter(),
