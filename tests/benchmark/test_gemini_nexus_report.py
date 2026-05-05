@@ -391,6 +391,10 @@ def test_render_markdown_report_includes_research_preflight_metrics(tmp_path):
                     },
                 },
                 "research_session": {"logged": True},
+                "research_doctor": {"status": "PASS", "score": 1.0},
+                "claim_probe": {"eligible": True, "gate_passed": True},
+                "autoreason_candidate_factory_status": "READY",
+                "autoreason_winner_role": "AB",
             }
         )
         + "\n",
@@ -410,6 +414,10 @@ def test_render_markdown_report_includes_research_preflight_metrics(tmp_path):
     assert "| Research preflight blocked | 0.0% | 100.0% | 100.0% |" in out
     assert "| Claim uncertainty caught | 0.0% | 100.0% | 100.0% |" in out
     assert "| Session ledger logged | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Research doctor pass | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Claim probe gate pass | 100.0% | 100.0% | 0.0% |" in out
+    assert "| Autoreason A/B/AB factory ready | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Autoreason AB winner | 0.0% | 100.0% | 100.0% |" in out
 
 
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):

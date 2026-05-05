@@ -21,6 +21,12 @@ def test_research_stack_route_smoke_passes_with_four_source_receipts(tmp_path: P
                 "semantic_status": "VERIFIED",
                 "research_preflight_present": True,
                 "research_session_logged": True,
+                "research_doctor_status": "PASS",
+                "research_doctor_score": 1.0,
+                "claim_probe_eligible": True,
+                "claim_probe_gate_passed": True,
+                "autoreason_candidate_factory_status": "READY",
+                "autoreason_winner_role": "AB",
                 "research_session": {
                     "logged": True,
                     "source_projects": ["autoresearch", "codex-autoresearch", "AutoResearchClaw", "autoreason"],
@@ -95,6 +101,7 @@ def test_research_stack_route_smoke_fails_when_source_project_missing(tmp_path: 
                 "semantic_status": "VERIFIED",
                 "research_preflight_present": True,
                 "research_session_logged": True,
+                "research_doctor_status": "PASS",
                 "capability_receipts": [
                     {
                         "name": "research",

@@ -68,12 +68,24 @@ def _research_stack_checkpoints(row: dict[str, Any]) -> set[str]:
     return checkpoints
 
 
+def _payload(row: dict[str, Any], key: str) -> dict[str, Any]:
+    payload = row.get(key)
+    if isinstance(payload, dict):
+        return payload
+    trace = row.get("nexus_usage_trace") if isinstance(row.get("nexus_usage_trace"), dict) else {}
+    payload = trace.get(key)
+    return payload if isinstance(payload, dict) else {}
+
+
 def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]:
     rows = _load_jsonl(path)
     failures: list[dict[str, Any]] = []
     selected_total = invoked_total = evidence_total = outcome_total = 0
     preflight_present = session_logged = research_public_safe = 0
     autoreason_selected = autoreason_invoked = 0
+    doctor_pass = 0
+    claim_probe_eligible = claim_probe_gate = 0
+    ab_factory_ready = ab_winner = 0
     sources_seen: set[str] = set()
     checkpoints_seen: set[str] = set()
     for row in rows:
@@ -101,6 +113,24 @@ def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]
                     autoreason_selected += 1
                 if bool(receipt.get("invoked")):
                     autoreason_invoked += 1
+        doctor = _payload(row, "research_doctor")
+        if str(row.get("research_doctor_status") or doctor.get("status") or "").upper() == "PASS":
+            doctor_pass += 1
+        probe = _payload(row, "claim_probe")
+        if bool(row.get("claim_probe_eligible") or probe.get("eligible")):
+            claim_probe_eligible += 1
+            if bool(row.get("claim_probe_gate_passed") or probe.get("gate_passed")):
+                claim_probe_gate += 1
+        factory_status = str(row.get("autoreason_candidate_factory_status") or "").upper()
+        if not factory_status:
+            trace = row.get("nexus_usage_trace") if isinstance(row.get("nexus_usage_trace"), dict) else {}
+            autoreason = trace.get("autoreason") if isinstance(trace.get("autoreason"), dict) else {}
+            factory = autoreason.get("candidate_factory") if isinstance(autoreason.get("candidate_factory"), dict) else {}
+            factory_status = str(factory.get("status") or "").upper()
+        if factory_status == "READY":
+            ab_factory_ready += 1
+        if str(row.get("autoreason_winner_role") or row.get("autoreason_winner") or "") == "AB":
+            ab_winner += 1
         if str(row.get("status") or "").upper() != "SUCCESS":
             row_failures.append("status_not_success")
         if str(row.get("semantic_status") or "").upper() not in {"VERIFIED", "PARTIAL"}:
@@ -121,6 +151,12 @@ def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]
         failures.append({"task_id": "__research_stack__", "row_failures": ["research_public_safe_receipt_missing"]})
     if require_autoreason_invoked and autoreason_selected > 0 and autoreason_invoked <= 0:
         failures.append({"task_id": "__research_stack__", "row_failures": ["autoreason_selected_but_not_invoked"]})
+    if rows and doctor_pass < len(rows):
+        failures.append({"task_id": "__research_stack__", "row_failures": ["research_doctor_not_passed"]})
+    if claim_probe_eligible and claim_probe_gate < claim_probe_eligible:
+        failures.append({"task_id": "__research_stack__", "row_failures": ["claim_probe_gate_failed"]})
+    if require_autoreason_invoked and rows and ab_factory_ready <= 0:
+        failures.append({"task_id": "__research_stack__", "row_failures": ["autoreason_ab_factory_missing"]})
     selected_to_invoked = (invoked_total / selected_total) if selected_total else 0.0
     invoked_to_evidence = (evidence_total / invoked_total) if invoked_total else 0.0
     evidence_to_outcome = (outcome_total / evidence_total) if evidence_total else 0.0
@@ -135,6 +171,11 @@ def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]
             "research_public_safe": research_public_safe,
             "autoreason_selected": autoreason_selected,
             "autoreason_invoked": autoreason_invoked,
+            "research_doctor_pass": doctor_pass,
+            "claim_probe_eligible": claim_probe_eligible,
+            "claim_probe_gate_passed": claim_probe_gate,
+            "autoreason_ab_factory_ready": ab_factory_ready,
+            "autoreason_ab_winner": ab_winner,
             "source_projects_seen": sorted(sources_seen),
             "checkpoints_seen": sorted(checkpoints_seen),
             "route_quality": {

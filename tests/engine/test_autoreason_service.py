@@ -44,4 +44,24 @@ def test_autoreason_candidate_factory_a_b_ab():
     assert out["status"] == "SUCCESS"
     assert out["judge_count"] == 7
     assert out["winner"] == "AB"
+    assert out["winner_role"] == "AB"
     assert len(out["judge_votes"]) == 7
+
+
+def test_autoreason_candidate_factory_from_summaries_emits_a_b_ab_contract():
+    svc = AutoreasonService()
+    factory = svc.candidate_factory_from_summaries(
+        [
+            {"candidate_id": "baseline", "hint": "stable but incomplete", "score": 0.4, "stdout_excerpt": "old tests pass"},
+            {"candidate_id": "patch", "hint": "fixes edge case with tests", "score": 0.8, "stdout_excerpt": "new tests pass"},
+        ],
+        task_desc="fix edge case",
+    )
+
+    assert factory["schema"] == "nexus_autoreason_candidate_factory_v1"
+    assert factory["status"] == "READY"
+    assert factory["candidate_roles"] == {"A": "A", "B": "B", "AB": "AB"}
+
+    out = svc.run(candidates=factory["candidates"], task_desc="fix edge case", judge_count=7)
+
+    assert out["winner"] == "AB"

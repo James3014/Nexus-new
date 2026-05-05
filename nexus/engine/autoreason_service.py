@@ -55,6 +55,78 @@ class AutoreasonService:
             out.append({"candidate_id": "AB", **synthesis})
         return out
 
+    def candidate_factory_from_summaries(
+        self,
+        summaries: list[dict[str, Any]] | None,
+        *,
+        task_desc: str = "",
+    ) -> dict[str, Any]:
+        """Build an auditable A/B/AB tournament from sprint candidate summaries."""
+        candidates = [
+            item
+            for item in (summaries or [])
+            if isinstance(item, dict) and str(item.get("hint") or item.get("source") or "").strip()
+        ]
+        if len(candidates) < 2:
+            return {
+                "schema": "nexus_autoreason_candidate_factory_v1",
+                "status": "SKIPPED",
+                "reason": "insufficient_candidate_summaries",
+                "task_desc": task_desc,
+                "candidates": [],
+                "candidate_roles": {},
+            }
+
+        def _candidate_payload(item: dict[str, Any], role: str, index: int) -> dict[str, Any]:
+            refs = [str(item.get("stdout_excerpt") or "").strip()]
+            refs = [ref for ref in refs if ref]
+            return {
+                "candidate_id": role,
+                "source_candidate_id": str(item.get("candidate_id") or f"candidate-{index + 1}"),
+                "summary": str(item.get("hint") or item.get("source") or ""),
+                "evidence_refs": refs,
+                "score": float(item.get("score", 0.0) or 0.0),
+                "role": role,
+            }
+
+        ranked = sorted(
+            enumerate(candidates),
+            key=lambda pair: (
+                float(pair[1].get("score", 0.0) or 0.0),
+                len(str(pair[1].get("stdout_excerpt") or "")),
+                len(str(pair[1].get("hint") or pair[1].get("source") or "")),
+            ),
+            reverse=True,
+        )
+        best_index, best = ranked[0]
+        challenger_index, challenger = ranked[1]
+        incumbent = _candidate_payload(challenger, "A", challenger_index)
+        revision = _candidate_payload(best, "B", best_index)
+        synthesis = {
+            "candidate_id": "AB",
+            "source_candidate_id": f"{incumbent['source_candidate_id']}+{revision['source_candidate_id']}",
+            "summary": (
+                f"Synthesize incumbent stability from {incumbent['source_candidate_id']} "
+                f"with revision evidence from {revision['source_candidate_id']}: {revision['summary']}"
+            ),
+            "evidence_refs": list(dict.fromkeys([*incumbent["evidence_refs"], *revision["evidence_refs"], "factory:ab_synthesis"])),
+            "score": max(float(incumbent["score"]), float(revision["score"])) + 0.05,
+            "role": "AB",
+        }
+        out = self.candidate_factory(incumbent=incumbent, revision=revision, synthesis=synthesis)
+        return {
+            "schema": "nexus_autoreason_candidate_factory_v1",
+            "status": "READY",
+            "task_desc": task_desc,
+            "candidates": out,
+            "candidate_roles": {item["candidate_id"]: item.get("role", item["candidate_id"]) for item in out},
+            "regression_guard": {
+                "strategy": "blind_borda_a_b_ab",
+                "requires_winner": True,
+                "preferred_winner": "AB",
+            },
+        }
+
     def run(
         self,
         candidates: list[dict[str, Any]] | None = None,
@@ -84,6 +156,11 @@ class AutoreasonService:
                 "judge_votes": [],
                 "borda_scores": {},
                 "stop_reason": "no_candidates",
+                "candidate_factory": {
+                    "schema": "nexus_autoreason_candidate_factory_v1",
+                    "status": "SKIPPED",
+                    "reason": "no_candidates",
+                },
             }
 
         cfg = AutoreasonConfig.from_values(
@@ -108,6 +185,7 @@ class AutoreasonService:
             "judge_count": cfg.judge_count,
             "borda_scores": borda_scores,
             "stop_reason": stop_reason,
+            "winner_role": winner.candidate_id if winner.candidate_id in {"A", "B", "AB"} else "legacy",
         }
 
     def _build_judge_panel(self, judge_count: int) -> list[str]:

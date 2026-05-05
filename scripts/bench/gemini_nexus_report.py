@@ -279,6 +279,12 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
             "research_evidence_present_rate": 0.0,
             "research_gate_passed_rate": 0.0,
             "session_ledger_logged_rate": 0.0,
+            "research_doctor_pass_rate": 0.0,
+            "avg_research_doctor_score": 0.0,
+            "claim_probe_eligible_rate": 0.0,
+            "claim_probe_gate_pass_rate": 0.0,
+            "autoreason_ab_factory_ready_rate": 0.0,
+            "autoreason_ab_winner_rate": 0.0,
         }
     present = 0
     blocked = 0
@@ -286,6 +292,12 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
     evidence_present = 0
     gate_passed = 0
     session_logged = 0
+    doctor_pass = 0
+    doctor_score_total = 0.0
+    claim_probe_eligible = 0
+    claim_probe_gate = 0
+    ab_factory_ready = 0
+    ab_winner = 0
     for row in rows:
         preflight = _jsonish(row.get("research_preflight"), {})
         preflight = preflight if isinstance(preflight, dict) else {}
@@ -307,6 +319,21 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
         session = _jsonish(row.get("research_session"), {})
         if (isinstance(session, dict) and bool(session.get("logged"))) or bool(row.get("research_session_logged")):
             session_logged += 1
+        doctor = _jsonish(row.get("research_doctor"), {})
+        doctor = doctor if isinstance(doctor, dict) else {}
+        if str(row.get("research_doctor_status") or doctor.get("status") or "").upper() == "PASS":
+            doctor_pass += 1
+        doctor_score_total += float(row.get("research_doctor_score") or doctor.get("score") or 0.0)
+        probe = _jsonish(row.get("claim_probe"), {})
+        probe = probe if isinstance(probe, dict) else {}
+        if bool(row.get("claim_probe_eligible") or probe.get("eligible")):
+            claim_probe_eligible += 1
+            if bool(row.get("claim_probe_gate_passed") or probe.get("gate_passed")):
+                claim_probe_gate += 1
+        if str(row.get("autoreason_candidate_factory_status") or "").upper() == "READY":
+            ab_factory_ready += 1
+        if str(row.get("autoreason_winner_role") or row.get("autoreason_winner") or "") == "AB":
+            ab_winner += 1
     return {
         "preflight_present_rate": present / total,
         "preflight_blocked_rate": blocked / total,
@@ -314,6 +341,12 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
         "research_evidence_present_rate": evidence_present / total,
         "research_gate_passed_rate": gate_passed / total,
         "session_ledger_logged_rate": session_logged / total,
+        "research_doctor_pass_rate": doctor_pass / total,
+        "avg_research_doctor_score": doctor_score_total / total,
+        "claim_probe_eligible_rate": claim_probe_eligible / total,
+        "claim_probe_gate_pass_rate": (claim_probe_gate / claim_probe_eligible) if claim_probe_eligible else 1.0,
+        "autoreason_ab_factory_ready_rate": ab_factory_ready / total,
+        "autoreason_ab_winner_rate": ab_winner / total,
     }
 
 
@@ -348,6 +381,8 @@ def _activation_note(status: str) -> str:
 
 def _capability_activation_visible(name: str, item: dict[str, Any]) -> bool:
     if str(name) in _PUBLIC_CLAIM_CAPABILITIES:
+        return True
+    if str(name) in {"artifact_gate", "claim_gate", "delivery_gate", "mempalace_gate"} and bool(item.get("selected_count", 0)):
         return True
     if bool(item.get("public_safe")):
         return True
@@ -877,6 +912,12 @@ def render_markdown_report(
         f"| Research evidence present | {_pct(research_preflight_without['research_evidence_present_rate'])} | {_pct(research_preflight_with['research_evidence_present_rate'])} | {_pct(research_preflight_with['research_evidence_present_rate'] - research_preflight_without['research_evidence_present_rate'])} | Research capability produced evidence |",
         f"| Research gate passed | {_pct(research_preflight_without['research_gate_passed_rate'])} | {_pct(research_preflight_with['research_gate_passed_rate'])} | {_pct(research_preflight_with['research_gate_passed_rate'] - research_preflight_without['research_gate_passed_rate'])} | Research evidence passed a route gate |",
         f"| Session ledger logged | {_pct(research_preflight_without['session_ledger_logged_rate'])} | {_pct(research_preflight_with['session_ledger_logged_rate'])} | {_pct(research_preflight_with['session_ledger_logged_rate'] - research_preflight_without['session_ledger_logged_rate'])} | Research session packet was logged for audit |",
+        f"| Research doctor pass | {_pct(research_preflight_without['research_doctor_pass_rate'])} | {_pct(research_preflight_with['research_doctor_pass_rate'])} | {_pct(research_preflight_with['research_doctor_pass_rate'] - research_preflight_without['research_doctor_pass_rate'])} | Research runtime lint passed |",
+        f"| Research doctor score | {_num(research_preflight_without['avg_research_doctor_score'])} | {_num(research_preflight_with['avg_research_doctor_score'])} | {_num(research_preflight_with['avg_research_doctor_score'] - research_preflight_without['avg_research_doctor_score'])} | Average research runtime lint score |",
+        f"| Claim probe eligible | {_pct(research_preflight_without['claim_probe_eligible_rate'])} | {_pct(research_preflight_with['claim_probe_eligible_rate'])} | {_pct(research_preflight_with['claim_probe_eligible_rate'] - research_preflight_without['claim_probe_eligible_rate'])} | Tasks that required pre-patch claim probing |",
+        f"| Claim probe gate pass | {_pct(research_preflight_without['claim_probe_gate_pass_rate'])} | {_pct(research_preflight_with['claim_probe_gate_pass_rate'])} | {_pct(research_preflight_with['claim_probe_gate_pass_rate'] - research_preflight_without['claim_probe_gate_pass_rate'])} | Eligible probes allowed the patch with evidence |",
+        f"| Autoreason A/B/AB factory ready | {_pct(research_preflight_without['autoreason_ab_factory_ready_rate'])} | {_pct(research_preflight_with['autoreason_ab_factory_ready_rate'])} | {_pct(research_preflight_with['autoreason_ab_factory_ready_rate'] - research_preflight_without['autoreason_ab_factory_ready_rate'])} | Candidate tournament had A/B/AB roles |",
+        f"| Autoreason AB winner | {_pct(research_preflight_without['autoreason_ab_winner_rate'])} | {_pct(research_preflight_with['autoreason_ab_winner_rate'])} | {_pct(research_preflight_with['autoreason_ab_winner_rate'] - research_preflight_without['autoreason_ab_winner_rate'])} | Synthesized candidate won blind Borda |",
         "",
         "## Capability Activation Details",
         "",

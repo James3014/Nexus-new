@@ -28,6 +28,7 @@ from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.autoreason_service import AutoreasonService
 from nexus.research.doc_scout_adapter import DocScoutAdapter
 from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
+from nexus.research.research_runtime_contracts import build_claim_probe, build_research_doctor
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
@@ -2412,21 +2413,12 @@ def run_auto_flow(
     autoreason_payload = hyper_learning_trace.get("autoreason", {}) if isinstance(hyper_learning_trace.get("autoreason", {}), dict) else {}
     should_run_autoreason = str(result.get("flow", "")) == "hyper_sprint" and isinstance(summaries, list) and bool(summaries)
     if should_run_autoreason:
-        candidates = []
-        for idx, item in enumerate(summaries):
-            if not isinstance(item, dict):
-                continue
-            candidates.append(
-                {
-                    "candidate_id": str(item.get("candidate_id") or f"candidate-{idx + 1}"),
-                    "summary": str(item.get("hint") or item.get("source") or ""),
-                    "evidence_refs": [str(item.get("stdout_excerpt", "") or "")],
-                    "score": float(item.get("score", 0.0) or 0.0),
-                }
-            )
+        autoreason_service = AutoreasonService()
+        factory_payload = autoreason_service.candidate_factory_from_summaries(summaries, task_desc=task_desc)
+        candidates = factory_payload.get("candidates", []) if isinstance(factory_payload.get("candidates"), list) else []
         if candidates:
-            autoreason_payload = AutoreasonService().run(
-                candidates,
+            autoreason_payload = autoreason_service.run(
+                candidates=candidates,
                 task_desc=task_desc,
                 stop_threshold=int(
                     ((route.get("capability_stack", {}) if isinstance(route.get("capability_stack"), dict) else {}).get(
@@ -2437,6 +2429,18 @@ def run_auto_flow(
                     ).get("threshold", 2)
                 ),
             )
+            autoreason_payload["candidate_factory"] = factory_payload
+        else:
+            autoreason_payload = {
+                "schema": "nexus_autoreason_result_v1",
+                "enabled": False,
+                "status": "SKIPPED",
+                "winner": None,
+                "stop_reason": "candidate_factory_skipped",
+                "judge_votes": [],
+                "borda_scores": {},
+                "candidate_factory": factory_payload,
+            }
     elif not autoreason_payload:
         autoreason_payload = {
             "schema": "nexus_autoreason_result_v1",
@@ -2561,6 +2565,18 @@ def run_auto_flow(
         "winner_source": winner_source,
         "usage_valid": bool(gemini_invoked and artifact_verified),
     }
+    research_doctor = build_research_doctor(
+        research_preflight=research_preflight,
+        artifact_verified=artifact_verified,
+    )
+    claim_probe = build_claim_probe(task_desc=task_desc, route=route, artifact_verified=artifact_verified)
+    nexus_usage_trace["research_doctor"] = research_doctor
+    nexus_usage_trace["claim_probe"] = claim_probe
+    nexus_usage_trace["capabilities"]["research_doctor_score"] = research_doctor["score"]
+    nexus_usage_trace["capabilities"]["research_doctor_gate_passed"] = research_doctor["status"] == "PASS"
+    nexus_usage_trace["capabilities"]["claim_probe_eligible"] = claim_probe["eligible"]
+    nexus_usage_trace["capabilities"]["claim_probe_invoked"] = claim_probe["invoked"]
+    nexus_usage_trace["capabilities"]["claim_probe_gate_passed"] = claim_probe["gate_passed"]
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
         capability_plan = CapabilityPlanner().plan(
@@ -2725,8 +2741,18 @@ def run_auto_flow(
         route=route,
         research_preflight=research_preflight,
     )
+    research_doctor = build_research_doctor(
+        research_preflight=research_preflight,
+        research_session=research_session,
+        artifact_verified=artifact_verified,
+    )
     payload["research_session"] = research_session
     payload["nexus_usage_trace"]["research_session"] = research_session
+    payload["research_doctor"] = research_doctor
+    payload["claim_probe"] = claim_probe
+    payload["nexus_usage_trace"]["research_doctor"] = research_doctor
+    payload["nexus_usage_trace"]["capabilities"]["research_doctor_score"] = research_doctor["score"]
+    payload["nexus_usage_trace"]["capabilities"]["research_doctor_gate_passed"] = research_doctor["status"] == "PASS"
     recent.append(
         {
             "flow": chosen_flow,

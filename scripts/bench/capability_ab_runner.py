@@ -1721,6 +1721,11 @@ def _extract_record(
     ultra_review = ultra_review if isinstance(ultra_review, dict) else {}
     autoreason = usage_trace.get("autoreason", {}) if isinstance(usage_trace, dict) else {}
     autoreason = autoreason if isinstance(autoreason, dict) else {}
+    autoreason_factory = autoreason.get("candidate_factory", {}) if isinstance(autoreason.get("candidate_factory"), dict) else {}
+    research_doctor = payload.get("research_doctor") or usage_trace.get("research_doctor") or {}
+    research_doctor = research_doctor if isinstance(research_doctor, dict) else {}
+    claim_probe = payload.get("claim_probe") or usage_trace.get("claim_probe") or {}
+    claim_probe = claim_probe if isinstance(claim_probe, dict) else {}
     research_preflight = payload.get("research_preflight") or usage_trace.get("research_preflight") or {}
     research_preflight = research_preflight if isinstance(research_preflight, dict) else {}
     research_session = payload.get("research_session") or usage_trace.get("research_session") or {}
@@ -1954,6 +1959,15 @@ def _extract_record(
         "research_session_logged": bool(research_session.get("logged", False)),
         "research_session_status": str(research_session.get("status") or ""),
         "research_session_lane": str(research_session.get("lane") or ""),
+        "research_doctor": research_doctor,
+        "research_doctor_status": str(research_doctor.get("status") or ""),
+        "research_doctor_score": float(research_doctor.get("score", 0.0) or 0.0),
+        "research_doctor_failures": list(research_doctor.get("failures", []) or []),
+        "claim_probe": claim_probe,
+        "claim_probe_eligible": bool(claim_probe.get("eligible", False)),
+        "claim_probe_invoked": bool(claim_probe.get("invoked", False)),
+        "claim_probe_gate_passed": bool(claim_probe.get("gate_passed", False)),
+        "claim_probe_decision": str(claim_probe.get("decision") or ""),
         "expected_capability_receipt_coverage": _expected_capability_receipt_coverage(
             task.expected_capabilities,
             [item for item in capability_receipts if isinstance(item, dict)],
@@ -1966,6 +1980,9 @@ def _extract_record(
         "autoreason_enabled": bool(autoreason.get("enabled", False)),
         "autoreason_status": str(autoreason.get("status") or ""),
         "autoreason_winner": str(autoreason.get("winner") or ""),
+        "autoreason_winner_role": str(autoreason.get("winner_role") or ""),
+        "autoreason_candidate_factory_status": str(autoreason_factory.get("status") or ""),
+        "autoreason_candidate_roles": dict(autoreason_factory.get("candidate_roles", {}) or {}),
         "autoreason_stop_reason": str(autoreason.get("stop_reason") or ""),
         "autoreason_judge_votes_count": len(autoreason.get("judge_votes", []) or []),
         "autoreason_borda_scores": autoreason.get("borda_scores", {}),
