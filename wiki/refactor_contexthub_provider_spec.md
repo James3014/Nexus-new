@@ -5,14 +5,14 @@
 
 ## 2. 重構要點
 
-### 2.1 移除主動導入 (Lazy Imports)
-*   移除 `__init__` 中對 `WisdomVault`, `BeliefEngine`, `KnowledgeInjector` 的 `try-import` 邏輯。
+### 2.1 移除主動導入 (Lazy Imports) [DONE]
+*   移除 `__init__` 中對 `WisdomVault`, `BeliefEngine`, `KnowledgeInjector` 的 `try-import` 邏輯。（註：現已改為有 deps 傳入時跳過）
 
-### 2.2 定義注入接口
+### 2.2 定義注入接口 [DONE]
 *   定義 `ContextDependencies` 資料類別或 Protocol。
 *   `ContextHub` 應接收這些預先實例化好的對象，而非自行建立。
 
-### 2.3 分離決策邏輯 (Pre-routing)
+### 2.3 分離決策邏輯 (Pre-routing) [DONE]
 *   `make_pre_routing_decision` 應改為接受一個 `StateView` 對象，而非在內部調用 `state_io.load_global_state()`。
 
 ## 3. 實作範例 (偽代碼)

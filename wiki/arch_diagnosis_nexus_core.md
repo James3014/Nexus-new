@@ -22,6 +22,13 @@
 *   **目標**：建立獨立的 `Gatekeeper` 模組，隱藏所有 Bayesian 計算與信心評估細節。
 *   **好處**：建立「深度模組」，方便未來更換評估算法而不影響主流程。
 
+## 3. 實作進度 (v25.5 Update)
+
+### [大部分完成] 建議三：抽象化對抗性審核層 (Belief Engine)
+*   **進度**：已實作 `BeliefEngine.process_audit_outcome` 並引入 `AuditOutcome` 強類型契約。
+*   **現狀**：核心信心決策已封裝，移除了 `Orchestrator` 中的硬編碼邏輯。
+*   **待辦**：尚未完全移除 `Orchestrator` 對 `MagicMock` 的顯式檢查。
+
 ---
 *存檔日期：2026-05-04*
 *執行代理：Gemini Nexus Engineer*

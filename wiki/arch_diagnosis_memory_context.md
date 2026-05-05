@@ -28,6 +28,16 @@
 *   **目標**：修正 `MemoryPalace` 的繼承關係。
 *   **方案**：在 Core 定義 `MemoryVault` 協議，Service 則負責實作該協議。
 
+## 3. 實作進度 (v25.5 Update)
+
+### [已完成] 建議一：導入提供者模式 (ContextHub)
+*   **進度**：`ContextHub` 已實作 `ContextDependencies` 注入機制。
+*   **現狀**：決策邏輯已與實體狀態解耦，支援透過 `StateView` 進行測試。
+
+### [進行中] 建議三：定義核心記憶契約 (Memory Contract)
+*   **進度**：`storage_interfaces.py` 已建立基礎協議。
+*   **待辦**：尚待修正 `MemoryPalace` 的繼承關係。
+
 ---
 *存檔日期：2026-05-04*
 *執行代理：Gemini Nexus Engineer*

@@ -8,16 +8,16 @@
 
 ## 2. 重構方案：顯式信念契約 (The Belief Contract)
 
-### 2.1 引入強類型事件
+### 2.1 引入強類型事件 [DONE]
 建議定義 `AuditOutcome` 資料類別，將審核結果封裝為不可變對象。
 
-### 2.2 介面深化 (Module Deepening)
+### 2.2 介面深化 (Module Deepening) [DONE]
 *   **移除**：`BeliefEngine.update_belief(task_id, assumption, confidence, ...)`
 *   **新增**：`BeliefEngine.process_audit_outcome(outcome: AuditOutcome)`
     *   **邏輯封裝**：內部的貝式信心更新、證據記錄與持久化邏輯應對外隱藏。
     *   **自主決策**：引擎應根據 `outcome` 自動計算信心增減幅度。
 
-### 2.3 介面隔離 (Interface Segregation)
+### 2.3 介面隔離 (Interface Segregation) [PENDING]
 建議定義 `BeliefGate` Protocol（或抽象類別），使 `Orchestrator` 僅依賴於抽象介面，從而徹底移除代碼中的 `MagicMock` 檢查邏輯。
 
 ## 3. 預期效益
