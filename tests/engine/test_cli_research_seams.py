@@ -89,6 +89,81 @@ def test_research_auto_flow_emits_completion_contract(monkeypatch, tmp_path):
     assert report["execution_path"] == "cli->research_flow_service"
 
 
+def test_research_session_loop_cli_drives_route_packet_and_ledger(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_mod, "repo_root", tmp_path)
+
+    runner = CliRunner()
+    onboard = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:onboarding",
+            "--session-id",
+            "demo",
+            "--goal",
+            "make research improve code routing",
+            "--scope",
+            "nexus/app",
+            "--output-json",
+        ],
+    )
+    assert onboard.exit_code == 0, onboard.output
+    manifest = json.loads(onboard.output)
+    assert manifest["session_id"] == "demo"
+
+    recommend = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:recommend-next",
+            "--session-id",
+            "demo",
+            "--task-desc",
+            "Verify the SDK API parameter before editing the route",
+            "--output-json",
+        ],
+    )
+    assert recommend.exit_code == 0, recommend.output
+    recommendation = json.loads(recommend.output)
+    assert recommendation["route"]["research_context"]["role"] == "claim_scout"
+    assert "research" in recommendation["nextStep"]["nextAction"]["recommended_capabilities"]
+
+    packet = runner.invoke(
+        cli_mod.nexus,
+        ["nexus", "research:packet", "--session-id", "demo", "--output-json"],
+    )
+    assert packet.exit_code == 0, packet.output
+    assert json.loads(packet.output)["schema"] == "nexus_research_packet_v1"
+
+    logged = runner.invoke(
+        cli_mod.nexus,
+        [
+            "nexus",
+            "research:log-from-last",
+            "--session-id",
+            "demo",
+            "--status",
+            "keep",
+            "--description",
+            "route contract kept",
+            "--output-json",
+        ],
+    )
+    assert logged.exit_code == 0, logged.output
+    assert json.loads(logged.output)["logged"] is True
+
+    preview = runner.invoke(
+        cli_mod.nexus,
+        ["nexus", "research:finalize-preview", "--session-id", "demo", "--output-json"],
+    )
+    assert preview.exit_code == 0, preview.output
+    assert json.loads(preview.output)["ready"] is True
+
+    report = runner.invoke(cli_mod.nexus, ["nexus", "research:human-report", "--session-id", "demo"])
+    assert report.exit_code == 0, report.output
+    assert "Research Session demo" in report.output
+
+
 def test_research_benchmark_cli_uses_service_seam(monkeypatch, tmp_path):
     captured = {}
 

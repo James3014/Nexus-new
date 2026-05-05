@@ -36,6 +36,45 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert out["should_research"] is True
 
 
+def test_build_route_uses_research_context_for_api_uncertainty(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Verify SDK API parameter before editing call site",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+        target_file="nexus/client.py",
+    )
+
+    assert out["research_context"]["role"] == "claim_scout"
+    assert out["route_features"]["claim_uncertainty"] is True
+    assert out["route_features"]["blocked_assumptions_count"] >= 1
+    assert "research" in out["capability_plan"]["selected_capabilities"]
+    assert "codeintel" in out["capability_plan"]["selected_capabilities"]
+
+
+def test_build_route_research_context_uses_doc_scout_hits(tmp_path: Path):
+    docs = tmp_path / "docs"
+    docs.mkdir(parents=True)
+    (docs / "sdk.md").write_text("The SDK API supports timeout parameter evidence.\n", encoding="utf-8")
+
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Verify SDK API timeout parameter before editing call site",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+        target_file="nexus/client.py",
+    )
+
+    assert out["research_context"]["role"] == "claim_scout"
+    assert out["route_features"]["doc_scout_hits"] >= 1
+    assert out["route_features"]["claim_uncertainty"] is False
+    assert out["research_context"]["verified_claims"]
+
+
 def test_ultra_review_gate_report_path_is_task_scoped(tmp_path: Path, monkeypatch):
     class _FakeUltraReviewService:
         def __init__(self, _repo_root):
@@ -207,6 +246,7 @@ def test_build_route_public_contract_exact_keys(tmp_path: Path):
         "recommended_reason",
         "explain_payload",
         "route_features",
+        "research_context",
         "capability_stack",
         "capability_plan",
         "route_decision",
@@ -349,6 +389,12 @@ def test_decide_flow_payload_schema_keys(tmp_path: Path):
         "router_hint_mode",
         "router_hint_complexity",
         "router_hint_confidence",
+        "research_role",
+        "claim_uncertainty",
+        "benchmark_required",
+        "plateau_detected",
+        "doc_scout_hits",
+        "blocked_assumptions_count",
     }
     assert set(payload["consensus"]) == {"votes", "reasons", "winner"}
     assert set(payload["explain_payload"]["history"]) == {"findings_hits", "memory_hits", "hints_count"}

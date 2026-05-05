@@ -1695,6 +1695,148 @@ def research_report_cmd(input_dir, rolling, output):
     out_p.write_text(json.dumps(summary, indent=2))
     click.echo(f"Unified rolling report written to {output}")
 
+
+def _read_json_file(path_value: str | None) -> dict:
+    if not path_value:
+        return {}
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = repo_root / path
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@nexus_group.command(name="research:onboarding")
+@click.option("--session-id", default="research-session", show_default=True)
+@click.option("--goal", required=True)
+@click.option("--benchmark", default="", show_default=True)
+@click.option("--metric", default="", show_default=True)
+@click.option("--scope", multiple=True)
+@click.option("--output-json", is_flag=True)
+def research_onboarding_cmd(session_id, goal, benchmark, metric, scope, output_json):
+    """Create a governed research session manifest."""
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    payload = ResearchSessionLoopService(repo_root).onboarding(
+        session_id=session_id,
+        goal=goal,
+        benchmark=benchmark,
+        metric=metric,
+        scope=list(scope),
+    )
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"Research session: {payload['session_id']}")
+        click.echo(f"Ledger: {payload['ledger_path']}")
+
+
+@nexus_group.command(name="research:recommend-next")
+@click.option("--session-id", default="research-session", show_default=True)
+@click.option("--task-desc", required=True)
+@click.option("--task-type", default="bug", show_default=True)
+@click.option("--candidate-count", default=1, type=int, show_default=True)
+@click.option("--root-cause-confidence", default=1.0, type=float, show_default=True)
+@click.option("--findings-query")
+@click.option("--output-json", is_flag=True)
+def research_recommend_next_cmd(session_id, task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json):
+    """Recommend the next governed research action using the current route."""
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    route = research_flow_service.build_route(
+        repo_root=repo_root,
+        task_desc=task_desc,
+        task_type=task_type,
+        candidate_count=candidate_count,
+        root_cause_confidence=root_cause_confidence,
+        findings_query=findings_query,
+    )
+    payload = ResearchSessionLoopService(repo_root).recommend_next(session_id=session_id, route=route)
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        next_action = payload["nextStep"]["nextAction"]
+        click.echo(f"Next: {next_action['stage']}")
+        click.echo(f"Flow: {next_action['recommended_flow']}")
+        click.echo(f"Reason: {next_action['reason']}")
+
+
+@nexus_group.command(name="research:packet")
+@click.option("--session-id", default="research-session", show_default=True)
+@click.option("--report-file", type=click.Path())
+@click.option("--route-file", type=click.Path())
+@click.option("--output-json", is_flag=True)
+def research_packet_cmd(session_id, report_file, route_file, output_json):
+    """Persist the latest research packet for ledger review."""
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    payload = ResearchSessionLoopService(repo_root).packet(
+        session_id=session_id,
+        report=_read_json_file(report_file),
+        route=_read_json_file(route_file),
+    )
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"Research packet: {payload['packet_id']}")
+
+
+@nexus_group.command(name="research:log-from-last")
+@click.option("--session-id", default="research-session", show_default=True)
+@click.option("--status", required=True, type=click.Choice(["keep", "discard", "crash", "checks_failed"]))
+@click.option("--description", required=True)
+@click.option("--asi-file", type=click.Path())
+@click.option("--output-json", is_flag=True)
+def research_log_from_last_cmd(session_id, status, description, asi_file, output_json):
+    """Append the last research packet to the session ledger."""
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    payload = ResearchSessionLoopService(repo_root).log_from_last(
+        session_id=session_id,
+        status=status,
+        description=description,
+        asi=_read_json_file(asi_file),
+    )
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    elif payload["logged"]:
+        click.echo(f"Logged: {payload['entry']['packet_id']}")
+    else:
+        click.echo(f"Not logged: {payload['reason']}")
+
+
+@nexus_group.command(name="research:finalize-preview")
+@click.option("--session-id", default="research-session", show_default=True)
+@click.option("--output-json", is_flag=True)
+def research_finalize_preview_cmd(session_id, output_json):
+    """Preview whether the session is ready to finalize."""
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    payload = ResearchSessionLoopService(repo_root).finalize_preview(session_id=session_id)
+    if output_json:
+        click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        click.echo(f"Ready: {payload['ready']}")
+        click.echo(f"Entries: {payload['entry_count']}")
+        click.echo(f"Keeps: {payload['keep_count']}")
+
+
+@nexus_group.command(name="research:human-report")
+@click.option("--session-id", default="research-session", show_default=True)
+@click.option("--output", type=click.Path(path_type=Path))
+def research_human_report_cmd(session_id, output):
+    """Render a concise human handoff report for a research session."""
+    from nexus.research.session_loop_service import ResearchSessionLoopService
+
+    report = ResearchSessionLoopService(repo_root).human_report(session_id=session_id)
+    if output:
+        output_path = output if output.is_absolute() else repo_root / output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report, encoding="utf-8")
+        click.echo(f"Human report: {output_path}")
+    else:
+        click.echo(report)
+
+
 @nexus_group.command(name="research:auto-flow")
 @click.option("--task-desc", required=True)
 @click.option("--target-file", required=True)

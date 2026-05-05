@@ -36,6 +36,22 @@ def apply_signal_policies(
         enable("memory", "context_contract_memory_needed")
     if signals.lancedb_hits or "lancedb" in task_lower or "retrieval" in task_lower or "vector hit" in task_lower:
         enable("lancedb", "semantic_memory_or_retrieval_signal_available")
+    if signals.claim_uncertainty:
+        enable("research", "claim_uncertainty_requires_research")
+    if signals.research_role == "claim_scout":
+        enable("research", "claim_scout_role_selected")
+    if signals.research_role == "failure_historian":
+        enable("memory", "failure_historian_role_selected")
+        enable("autoreason", "failure_historian_prefers_evidence_backed_selection")
+    if signals.research_role == "architecture_scout":
+        enable("research", "architecture_scout_role_selected")
+        enable("codeintel", "architecture_scout_requires_blast_radius")
+    if signals.research_role == "benchmark_framer" or signals.benchmark_required:
+        enable("benchmark", "benchmark_framer_role_selected")
+        enable("acceptance_check", "benchmark_framer_requires_checks")
+    if signals.plateau_detected:
+        enable("research", "plateau_detected_requires_new_hypothesis")
+        enable("ultra_review", "plateau_detected_requires_governance")
     if "ddtree" in signals.acceleration_seed or (hyper_selected and (signals.candidate_count >= 3 or signals.repair_signal)):
         enable("ddtree", "candidate_space_pruning")
     if signals.repair_signal:

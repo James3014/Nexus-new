@@ -69,6 +69,8 @@ def build_capability_signals(
     pillars = pillars or {}
     codeintel = codeintel or {}
     route_features = route.get("route_features", {}) if isinstance(route, dict) else {}
+    research_context = route.get("research_context", {}) if isinstance(route, dict) else {}
+    research_context = research_context if isinstance(research_context, dict) else {}
     route_decision = route.get("route_decision", {}) if isinstance(route, dict) else {}
     route_decision = route_decision if isinstance(route_decision, dict) else {}
     autonomic = route.get("autonomic_signals", {}) if isinstance(route, dict) else {}
@@ -146,6 +148,12 @@ def build_capability_signals(
         hazard_forced_l3=bool(route_features.get("hazard_forced_l3", False)),
         routing_tier_hint=str(route_features.get("routing_tier", "") or ""),
         routing_tier_reason=str(route_features.get("routing_tier_reason", "") or ""),
+        research_role=str(research_context.get("role", route_features.get("research_role", "")) or ""),
+        claim_uncertainty=bool(route_features.get("claim_uncertainty", False)),
+        benchmark_required=bool(route_features.get("benchmark_required", False)),
+        plateau_detected=bool(route_features.get("plateau_detected", False)),
+        doc_scout_hits=_as_int(route_features.get("doc_scout_hits"), 0),
+        blocked_assumptions_count=_as_int(route_features.get("blocked_assumptions_count"), 0),
     )
 
 

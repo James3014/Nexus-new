@@ -26,6 +26,7 @@ from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.autoreason_service import AutoreasonService
+from nexus.research.doc_scout_adapter import DocScoutAdapter
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
@@ -92,6 +93,12 @@ class RouteFeatures(TypedDict):
     memory_hits: int
     adjusted_root_cause_confidence: float
     risk_score: int
+    research_role: str
+    claim_uncertainty: bool
+    benchmark_required: bool
+    plateau_detected: bool
+    doc_scout_hits: int
+    blocked_assumptions_count: int
 
 
 class RouteConsensusPayload(TypedDict):
@@ -720,6 +727,118 @@ def _hitl_payload(*, route_confidence: float, route: dict[str, Any], task_id: st
     }
 
 
+def _infer_research_role(*, task_desc: str, task_type: str, route_features: dict[str, Any]) -> str:
+    task_lower = f"{task_desc} {task_type}".lower()
+    if any(token in task_lower for token in ("benchmark", "latency", "throughput", "public report", "solve rate", "p99")):
+        return "benchmark_framer"
+    if bool(route_features.get("claim_uncertainty", False)) or any(
+        token in task_lower for token in ("api", "sdk", "parameter", "flag", "contract", "claim", "verify", "evidence")
+    ):
+        return "claim_scout"
+    if bool(route_features.get("plateau_detected", False)) or bool(route_features.get("is_cross_module_task", False)):
+        return "architecture_scout"
+    if int(route_features.get("memory_hits", 0) or 0) > 0 or int(route_features.get("findings_hits", 0) or 0) > 0:
+        return "failure_historian"
+    return "general"
+
+
+def _build_research_context(
+    *,
+    repo_root: Path,
+    task_desc: str,
+    task_type: str,
+    route_features: dict[str, Any],
+    historical_hints: list[str],
+) -> dict[str, Any]:
+    doc_scout = DocScoutAdapter(repo_root).search(task_desc, limit=4)
+    doc_hits = int(doc_scout.get("hits_count", 0) or 0)
+    task_lower = f"{task_desc} {task_type}".lower()
+    claim_uncertainty = bool(
+        doc_hits <= 0
+        and any(token in task_lower for token in ("api", "sdk", "parameter", "flag", "contract", "claim", "verify", "evidence"))
+    )
+    benchmark_required = bool(
+        task_type.startswith("public_")
+        or any(token in task_lower for token in ("benchmark", "latency", "throughput", "public report", "solve rate", "p99"))
+    )
+    enriched_features = dict(route_features)
+    enriched_features["claim_uncertainty"] = claim_uncertainty
+    enriched_features["benchmark_required"] = benchmark_required
+    enriched_features["plateau_detected"] = bool(route_features.get("plateau_detected", False))
+    enriched_features["doc_scout_hits"] = doc_hits
+    role = _infer_research_role(task_desc=task_desc, task_type=task_type, route_features=enriched_features)
+
+    verified_claims = [
+        {
+            "claim": str(item.get("snippet", "") or ""),
+            "evidence_refs": [str(item.get("path", "") or "")],
+            "source": str(item.get("source", "") or ""),
+        }
+        for item in (doc_scout.get("hits", []) or [])[:2]
+        if str(item.get("snippet", "") or "").strip()
+    ]
+    rejected_claims = []
+    blocked_assumptions: list[str] = []
+    if claim_uncertainty:
+        blocked_assumptions.append("api_contract_not_verified")
+        rejected_claims.append(
+            {
+                "claim": "unverified_api_contract",
+                "reason": "doc_scout_no_supporting_hits",
+            }
+        )
+    if bool(enriched_features.get("plateau_detected", False)):
+        blocked_assumptions.append("local_micro_tuning_is_enough")
+        rejected_claims.append(
+            {
+                "claim": "continue_same_family_patching",
+                "reason": "plateau_detected",
+            }
+        )
+
+    recommended_capabilities: list[str] = []
+    if role in {"claim_scout", "architecture_scout"}:
+        recommended_capabilities.extend(["research", "codeintel"])
+    if role == "failure_historian":
+        recommended_capabilities.extend(["autoreason", "research"])
+    if role == "benchmark_framer":
+        recommended_capabilities.extend(["benchmark", "acceptance_check"])
+    if claim_uncertainty:
+        recommended_capabilities.append("research")
+    if bool(enriched_features.get("plateau_detected", False)):
+        recommended_capabilities.extend(["research", "ultra_review"])
+    recommended_capabilities = list(dict.fromkeys(recommended_capabilities))
+
+    next_action_hint = historical_hints[0] if historical_hints else ""
+    if bool(enriched_features.get("plateau_detected", False)):
+        next_action_hint = "switch_to_architecture_scout_and_change_family"
+    elif claim_uncertainty:
+        next_action_hint = "verify_contract_before_editing"
+
+    confidence = float(doc_scout.get("confidence", 0.0) or 0.0)
+    if int(enriched_features.get("memory_hits", 0) or 0) > 0:
+        confidence = max(confidence, 0.55)
+
+    return {
+        "schema": "nexus_research_context_v1",
+        "role": role,
+        "hypothesis": task_desc,
+        "verified_claims": verified_claims,
+        "rejected_claims": rejected_claims,
+        "retrieval_refs": list(doc_scout.get("retrieval_hints", []) or []) + list(historical_hints or []),
+        "risk_flags": [flag for flag, enabled in {
+            "claim_uncertainty": claim_uncertainty,
+            "plateau_detected": bool(enriched_features.get("plateau_detected", False)),
+            "high_risk": int(enriched_features.get("risk_score", 0) or 0) >= 70,
+        }.items() if enabled],
+        "recommended_capabilities": recommended_capabilities,
+        "blocked_assumptions": blocked_assumptions,
+        "next_action_hint": next_action_hint,
+        "confidence": round(max(0.0, min(1.0, confidence)), 4),
+        "doc_scout": doc_scout,
+    }
+
+
 def _asi_record(
     *,
     run_id: int,
@@ -862,19 +981,23 @@ def compose_capability_plan(
     task_type: str,
     recommended_flow: str,
     route_features: dict[str, Any],
+    research_context: dict[str, Any] | None = None,
     target_file: str | None = None,
 ) -> dict[str, Any]:
     """Compose a compatibility capability_stack from the planner seam."""
     task_lower = f"{task_desc} {task_type}".lower()
     seed_selected = ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]
     seed_acceleration = ["ddtree"] if "repair" in task_lower or "timeout" in task_lower or "flaky" in task_lower else []
+    research_context = research_context if isinstance(research_context, dict) else {}
+    recommended_caps = {str(item) for item in (research_context.get("recommended_capabilities", []) or []) if str(item)}
     seed_route = {
         "recommended_flow": recommended_flow,
         "route_features": route_features,
+        "research_context": research_context,
         "route_decision": {
-            "selected_capabilities": seed_selected,
+            "selected_capabilities": seed_selected + (["autoreason"] if "autoreason" in recommended_caps else []),
             "acceleration_layers": seed_acceleration,
-            "governance_layers": [],
+            "governance_layers": ["ultra_review"] if "ultra_review" in recommended_caps else [],
         },
     }
     plan = CapabilitySelector().select(
@@ -1182,6 +1305,12 @@ def _decide_flow(
         "router_hint_mode": hint_mode,
         "router_hint_complexity": hint_complexity,
         "router_hint_confidence": hint_confidence,
+        "research_role": "general",
+        "claim_uncertainty": False,
+        "benchmark_required": False,
+        "plateau_detected": False,
+        "doc_scout_hits": 0,
+        "blocked_assumptions_count": 0,
     }
 
     explain = {
@@ -1248,11 +1377,27 @@ def build_route(
     decision = signals["decision"]
     route_features = decision_payload["route_features"]
     recommended_flow = decision_payload["recommended_flow"]
+    research_context = _build_research_context(
+        repo_root=repo_root,
+        task_desc=task_desc,
+        task_type=task_type,
+        route_features=route_features,
+        historical_hints=list(dict.fromkeys(historical_hints))[:3],
+    )
+    route_features = {
+        **route_features,
+        "research_role": str(research_context.get("role", "general") or "general"),
+        "claim_uncertainty": "claim_uncertainty" in set(research_context.get("risk_flags", []) or []),
+        "benchmark_required": str(research_context.get("role", "")) == "benchmark_framer",
+        "doc_scout_hits": int(((research_context.get("doc_scout") or {}).get("hits_count", 0)) or 0),
+        "blocked_assumptions_count": len(research_context.get("blocked_assumptions", []) or []),
+    }
     capability_stack = compose_capability_plan(
         task_desc=task_desc,
         task_type=task_type,
         recommended_flow=recommended_flow,
         route_features=route_features,
+        research_context=research_context,
         target_file=target_file,
     )
 
@@ -1271,6 +1416,7 @@ def build_route(
         "recommended_reason": decision_payload["recommended_reason"],
         "explain_payload": decision_payload["explain_payload"],
         "route_features": route_features,
+        "research_context": research_context,
         "capability_stack": capability_stack,
         "consensus": decision_payload["consensus"],
     }

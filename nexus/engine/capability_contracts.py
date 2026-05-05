@@ -164,6 +164,12 @@ class CapabilitySignalSet:
     hazard_forced_l3: bool = False
     routing_tier_hint: str = ""
     routing_tier_reason: str = ""
+    research_role: str = ""
+    claim_uncertainty: bool = False
+    benchmark_required: bool = False
+    plateau_detected: bool = False
+    doc_scout_hits: int = 0
+    blocked_assumptions_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
