@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import asdict, is_dataclass
+import json
+from pathlib import Path
 from typing import Any
 
 
@@ -64,3 +66,52 @@ class ASIConstraintExtractor:
         for reason in reasons:
             counts[reason] = counts.get(reason, 0) + 1
         return max(counts, key=lambda item: (counts[item], len(item)))
+
+
+class ASIConstraintStore:
+    """Small JSONL store for cross-task ASI constraints."""
+
+    def __init__(self, repo_root: Path, *, rel_path: str = ".nexus/reports/asi/global_constraints.jsonl") -> None:
+        self.repo_root = Path(repo_root)
+        self.path = self.repo_root / rel_path
+
+    def append_constraints(self, constraints: list[dict[str, Any]]) -> str:
+        rows = [dict(item) for item in constraints or [] if isinstance(item, dict)]
+        if not rows:
+            return str(self.path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        existing = {(row.get("blocked_pattern"), row.get("failure_signature")) for row in self.load_constraints()}
+        with self.path.open("a", encoding="utf-8") as handle:
+            for row in rows:
+                key = (row.get("blocked_pattern"), row.get("failure_signature"))
+                if key in existing:
+                    continue
+                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                existing.add(key)
+        return str(self.path)
+
+    def load_constraints(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+        return rows
+
+    def match(self, task_desc: str, *, limit: int = 5) -> list[dict[str, Any]]:
+        text = task_desc.lower()
+        matches: list[dict[str, Any]] = []
+        for row in self.load_constraints():
+            blocked = str(row.get("blocked_pattern") or "").lower()
+            signature = str(row.get("failure_signature") or "").lower()
+            tokens = [token for token in f"{blocked} {signature}".replace(":", " ").replace("_", " ").split() if len(token) >= 4]
+            if any(token in text for token in tokens):
+                matches.append(row)
+        return matches[: max(1, int(limit or 5))]

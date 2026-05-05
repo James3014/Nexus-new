@@ -75,6 +75,34 @@ def test_build_route_research_context_uses_doc_scout_hits(tmp_path: Path):
     assert out["research_context"]["verified_claims"]
 
 
+def test_build_route_applies_global_asi_constraints(tmp_path: Path):
+    store_path = tmp_path / ".nexus" / "reports" / "asi" / "global_constraints.jsonl"
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_text(
+        json.dumps(
+            {
+                "schema": "nexus_asi_constraint_v1",
+                "blocked_pattern": "flow:retry_delay",
+                "failure_signature": "timeout still races",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Fix websocket timeout without another retry delay",
+        task_type="bug",
+        candidate_count=1,
+        root_cause_confidence=0.8,
+        findings_query=None,
+    )
+
+    assert "flow:retry_delay" in out["research_context"]["blocked_assumptions"]
+    assert out["research_context"]["global_constraints"][0]["blocked_pattern"] == "flow:retry_delay"
+
+
 def test_build_route_keeps_claim_uncertainty_when_docs_do_not_support_specific_token(tmp_path: Path):
     docs = tmp_path / "docs"
     docs.mkdir(parents=True)

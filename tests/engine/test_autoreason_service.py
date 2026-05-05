@@ -36,6 +36,9 @@ def test_autoreason_selects_evidence_backed_candidate():
     assert out["stop_reason"] == "a_streak_met"
     assert len(out["judge_votes"]) == 3
     assert out["judge_count"] == 3
+    assert out["judge_mode"] == "deterministic_evidence_quality"
+    assert out["semantic_judged"] is False
+    assert "rubric" in out["judge_votes"][0]
 
 
 def test_autoreason_handles_empty_candidates():
@@ -110,3 +113,29 @@ def test_autoreason_semantic_judge_can_beat_evidence_count_heuristic():
     assert out["judge_mode"] == "semantic"
     assert out["semantic_judged"] is True
     assert out["judge_votes"][0]["rubric"]["semantic_fit"] == 0.95
+
+
+def test_autoreason_deterministic_judge_prefers_quality_over_evidence_count():
+    out = AutoreasonService().run(
+        [
+            {
+                "candidate_id": "noisy",
+                "summary": "generic patch with many logs but unclear risk",
+                "score": 0.8,
+                "evidence_refs": ["log1", "log2", "log3", "log4", "log5"],
+            },
+            {
+                "candidate_id": "targeted",
+                "summary": "fix timeout race boundary with regression test",
+                "score": 0.55,
+                "evidence_refs": ["tests/test_timeout.py::test_race passed"],
+            },
+        ],
+        task_desc="fix timeout race without regression",
+        stop_threshold=2,
+        judge_count=3,
+    )
+
+    assert out["winner"] == "targeted"
+    assert out["judge_mode"] == "deterministic_evidence_quality"
+    assert all(vote["ranking"][0] == "targeted" for vote in out["judge_votes"])

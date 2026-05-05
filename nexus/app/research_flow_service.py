@@ -26,7 +26,7 @@ from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.autoreason_service import AutoreasonService
-from nexus.engine.asi_constraints import ASIConstraintExtractor
+from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
 from nexus.core.event_bus import NexusEventBus
 from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter
@@ -843,6 +843,7 @@ def _build_research_context(
     ]
     rejected_claims = []
     blocked_assumptions: list[str] = []
+    global_constraints = ASIConstraintStore(repo_root).match(task_desc, limit=4)
     if claim_uncertainty:
         blocked_assumptions.append("api_contract_not_verified")
         rejected_claims.append(
@@ -851,6 +852,16 @@ def _build_research_context(
                 "reason": "doc_scout_no_specific_support",
             }
         )
+    for constraint in global_constraints:
+        blocked = str(constraint.get("blocked_pattern") or "").strip()
+        if blocked and blocked not in blocked_assumptions:
+            blocked_assumptions.append(blocked)
+            rejected_claims.append(
+                {
+                    "claim": f"reuse_blocked_pattern:{blocked}",
+                    "reason": str(constraint.get("failure_signature") or "global_asi_constraint_match"),
+                }
+            )
     if bool(enriched_features.get("plateau_detected", False)):
         blocked_assumptions.append("local_micro_tuning_is_enough")
         rejected_claims.append(
@@ -897,6 +908,7 @@ def _build_research_context(
         }.items() if enabled],
         "recommended_capabilities": recommended_capabilities,
         "blocked_assumptions": blocked_assumptions,
+        "global_constraints": global_constraints,
         "next_action_hint": next_action_hint,
         "confidence": round(max(0.0, min(1.0, confidence)), 4),
         "doc_scout": doc_scout,
@@ -1859,11 +1871,13 @@ def _augment_semantic_runtime_capabilities(
         constraints = constraints_packet.get("constraints", []) if isinstance(constraints_packet.get("constraints"), list) else []
         blocked = [str(item) for item in (research_context.get("blocked_assumptions", []) or []) if str(item).strip()]
         if constraints or blocked:
+            constraint_store_path = ASIConstraintStore(repo_root).append_constraints(constraints)
             report = {
                 "schema": "nexus_asi_constraint_runtime_receipt_v1",
                 "task_id": task_id or receipt_slug,
                 "constraints_packet": constraints_packet,
                 "blocked_assumptions": blocked,
+                "global_constraint_store_path": constraint_store_path,
             }
             capabilities["asi_constraints"] = constraints
             capabilities["blocked_assumptions"] = blocked

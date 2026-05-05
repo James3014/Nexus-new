@@ -176,9 +176,9 @@ class AutoreasonService:
             a_streak_threshold=stop_threshold,
         )
         judge_votes = self._semantic_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
-        judge_mode = "semantic" if judge_votes else "heuristic_fallback"
+        judge_mode = "semantic" if judge_votes else "deterministic_evidence_quality"
         if not judge_votes:
-            judge_votes = [self._vote(judge, parsed) for judge in self._build_judge_panel(cfg.judge_count)]
+            judge_votes = self._evidence_quality_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
         borda_scores = {candidate.candidate_id: 0 for candidate in parsed}
         for vote in judge_votes:
             for rank, candidate_id in enumerate(vote["ranking"]):
@@ -212,6 +212,70 @@ class AutoreasonService:
             "stability",
         ]
         return strategies[: max(3, min(7, judge_count))]
+
+    def _evidence_quality_votes(
+        self,
+        *,
+        task_desc: str,
+        candidates: list[AutoreasonCandidate],
+        judge_count: int,
+    ) -> list[dict[str, Any]]:
+        judges = [
+            ("correctness", {"tests": 0.45, "semantic_fit": 0.25, "regression": 0.15, "minimality": 0.1, "score": 0.05}),
+            ("regression", {"tests": 0.3, "semantic_fit": 0.15, "regression": 0.35, "minimality": 0.1, "score": 0.1}),
+            ("semantic_fit", {"tests": 0.2, "semantic_fit": 0.45, "regression": 0.15, "minimality": 0.1, "score": 0.1}),
+            ("minimality", {"tests": 0.2, "semantic_fit": 0.2, "regression": 0.15, "minimality": 0.35, "score": 0.1}),
+            ("coverage", {"tests": 0.35, "semantic_fit": 0.2, "regression": 0.25, "minimality": 0.05, "score": 0.15}),
+            ("risk", {"tests": 0.25, "semantic_fit": 0.15, "regression": 0.3, "minimality": 0.2, "score": 0.1}),
+            ("stability", {"tests": 0.25, "semantic_fit": 0.2, "regression": 0.3, "minimality": 0.1, "score": 0.15}),
+        ][: max(3, min(7, int(judge_count or 3)))]
+        votes: list[dict[str, Any]] = []
+        for judge, weights in judges:
+            scored = [(candidate, self._quality_score(candidate, task_desc=task_desc, weights=weights)) for candidate in candidates]
+            ranked = sorted(scored, key=lambda item: (item[1]["total"], item[0].score, item[0].candidate_id), reverse=True)
+            votes.append(
+                {
+                    "judge": judge,
+                    "ranking": [candidate.candidate_id for candidate, _score in ranked],
+                    "reason": f"ranked_by_{judge}_evidence_quality",
+                    "rubric": {candidate.candidate_id: score for candidate, score in ranked},
+                }
+            )
+        return votes
+
+    def _quality_score(self, candidate: AutoreasonCandidate, *, task_desc: str, weights: dict[str, float]) -> dict[str, Any]:
+        text = f"{candidate.summary} {' '.join(candidate.evidence_refs)}".lower()
+        task_tokens = {
+            token
+            for token in task_desc.lower().replace("_", " ").split()
+            if len(token) >= 4 and token not in {"with", "when", "from", "this", "that", "only"}
+        }
+        semantic_hits = sum(1 for token in task_tokens if token in text)
+        tests = self._signal_score(text, positive=("pytest", "test_", "passed", "regression", "::test", "assert"))
+        regression = self._signal_score(text, positive=("regression", "edge", "boundary", "timeout", "race", "rollback", "source_id"))
+        semantic_fit = min(1.0, semantic_hits / max(1, min(5, len(task_tokens))))
+        generic_noise = self._signal_score(text, positive=("generic", "log", "maybe", "guess", "unclear"))
+        minimality = max(0.0, 1.0 - min(1.0, max(0, len(candidate.summary) - 180) / 600.0) - generic_noise * 0.15)
+        base_score = max(0.0, min(1.0, float(candidate.score or 0.0)))
+        total = (
+            tests * weights["tests"]
+            + semantic_fit * weights["semantic_fit"]
+            + regression * weights["regression"]
+            + minimality * weights["minimality"]
+            + base_score * weights["score"]
+        )
+        return {
+            "total": round(total, 4),
+            "tests": round(tests, 4),
+            "semantic_fit": round(semantic_fit, 4),
+            "regression": round(regression, 4),
+            "minimality": round(minimality, 4),
+            "base_score": round(base_score, 4),
+        }
+
+    def _signal_score(self, text: str, *, positive: tuple[str, ...]) -> float:
+        hits = sum(1 for token in positive if token in text)
+        return min(1.0, hits / max(1, min(3, len(positive))))
 
     def _semantic_votes(
         self,

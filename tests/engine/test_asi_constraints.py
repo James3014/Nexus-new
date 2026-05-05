@@ -1,4 +1,4 @@
-from nexus.engine.asi_constraints import ASIConstraintExtractor
+from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
 from nexus.engine.pipeline_outcome import ASIRecord
 
 
@@ -52,3 +52,20 @@ def test_asi_constraint_extractor_ignores_single_failure_noise():
 
     assert out["constraints_count"] == 0
     assert out["constraints"] == []
+
+
+def test_asi_constraint_store_persists_and_matches_cross_task_constraints(tmp_path):
+    constraint = {
+        "schema": "nexus_asi_constraint_v1",
+        "blocked_pattern": "flow:retry_delay",
+        "failure_signature": "timeout still races",
+        "preferred_pattern": "change_family_or_architecture_seam",
+    }
+    store = ASIConstraintStore(tmp_path)
+
+    path = store.append_constraints([constraint, constraint])
+    matches = store.match("Fix websocket timeout without another retry delay")
+
+    assert path.endswith(".nexus/reports/asi/global_constraints.jsonl")
+    assert len(store.load_constraints()) == 1
+    assert matches[0]["blocked_pattern"] == "flow:retry_delay"
