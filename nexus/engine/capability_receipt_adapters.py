@@ -185,12 +185,20 @@ class ASIConstraintExtractorReceiptAdapter:
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         constraints = payload.get("asi_constraints", []) or []
         blocked = payload.get("blocked_assumptions", []) or []
+        lookup_refs = _as_refs(payload.get("asi_constraint_lookup_refs"))
+        lookup_count = as_int(payload.get("asi_constraint_lookup_matched_count", 0))
+        lookup_store = str(payload.get("asi_constraint_lookup_store_path") or "").strip()
         report = str(payload.get("asi_constraint_report_path") or "").strip()
         invoked = bool(report or constraints or blocked)
         refs = [report] if report else []
         if constraints:
             refs.append(f"extracted_constraints:{len(constraints)}")
         refs.extend(f"blocked:{item}" for item in blocked if str(item).strip())
+        refs.extend(f"lookup:{item}" for item in lookup_refs)
+        if lookup_count > 0:
+            refs.append(f"lookup_matches:{lookup_count}")
+        if lookup_store:
+            refs.append(f"lookup_store:{lookup_store}")
         gate_passed = bool(invoked and refs and _as_bool(payload.get("asi_constraint_gate_passed", False)))
         return merge_capability_receipt(
             name=self.name,

@@ -69,3 +69,9 @@ def test_asi_constraint_store_persists_and_matches_cross_task_constraints(tmp_pa
     assert path.endswith(".nexus/reports/asi/global_constraints.jsonl")
     assert len(store.load_constraints()) == 1
     assert matches[0]["blocked_pattern"] == "flow:retry_delay"
+
+    receipt = store.lookup_receipt("Fix websocket timeout without another retry delay", matches=matches)
+    assert receipt["schema"] == "nexus_asi_constraint_lookup_v1"
+    assert receipt["matched_count"] == 1
+    assert receipt["constraint_refs"]
+    assert receipt["applied_blocked_patterns"] == ["flow:retry_delay"]

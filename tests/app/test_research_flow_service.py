@@ -101,6 +101,9 @@ def test_build_route_applies_global_asi_constraints(tmp_path: Path):
 
     assert "flow:retry_delay" in out["research_context"]["blocked_assumptions"]
     assert out["research_context"]["global_constraints"][0]["blocked_pattern"] == "flow:retry_delay"
+    lookup = out["research_context"]["constraint_lookup_receipt"]
+    assert lookup["matched_count"] == 1
+    assert lookup["constraint_refs"]
 
 
 def test_build_route_keeps_claim_uncertainty_when_docs_do_not_support_specific_token(tmp_path: Path):

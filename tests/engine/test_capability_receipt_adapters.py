@@ -167,6 +167,9 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
                 "judge_panel_gate_passed": True,
                 "asi_constraints": [{"blocked_pattern": "flow:retry_delay"}],
                 "blocked_assumptions": ["flow:retry_delay"],
+                "asi_constraint_lookup_refs": ["abc123"],
+                "asi_constraint_lookup_matched_count": 1,
+                "asi_constraint_lookup_store_path": ".nexus/reports/asi/global_constraints.jsonl",
                 "asi_constraint_report_path": ".nexus/reports/asi/constraints.json",
                 "asi_constraint_gate_passed": True,
                 "architecture_scout_used": True,
@@ -196,6 +199,7 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
     for name, receipt in proven.items():
         assert receipt.public_claim_safe is True, name
         assert receipt.evidence_refs
+    assert "lookup_matches:1" in proven["asi_constraint_extractor"].evidence_refs
     assert "verified_sources:1" in proven["external_doc_scout"].evidence_refs
 
 

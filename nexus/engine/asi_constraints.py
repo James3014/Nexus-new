@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import asdict, is_dataclass
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -115,3 +116,36 @@ class ASIConstraintStore:
             if any(token in text for token in tokens):
                 matches.append(row)
         return matches[: max(1, int(limit or 5))]
+
+    def lookup_receipt(
+        self,
+        task_desc: str,
+        *,
+        matches: list[dict[str, Any]] | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        matched = matches if matches is not None else self.match(task_desc, limit=limit)
+        refs = [self._constraint_ref(row) for row in matched if isinstance(row, dict)]
+        return {
+            "schema": "nexus_asi_constraint_lookup_v1",
+            "store_path": str(self.path),
+            "matched_count": len(refs),
+            "constraint_refs": refs,
+            "applied_blocked_patterns": [
+                str(row.get("blocked_pattern") or "").strip()
+                for row in matched
+                if isinstance(row, dict) and str(row.get("blocked_pattern") or "").strip()
+            ],
+        }
+
+    def _constraint_ref(self, row: dict[str, Any]) -> str:
+        raw = json.dumps(
+            {
+                "blocked_pattern": row.get("blocked_pattern"),
+                "failure_signature": row.get("failure_signature"),
+                "preferred_pattern": row.get("preferred_pattern"),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

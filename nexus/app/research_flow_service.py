@@ -849,7 +849,13 @@ def _build_research_context(
     ]
     rejected_claims = []
     blocked_assumptions: list[str] = []
-    global_constraints = ASIConstraintStore(repo_root).match(task_desc, limit=4)
+    constraint_store = ASIConstraintStore(repo_root)
+    global_constraints = constraint_store.match(task_desc, limit=4)
+    constraint_lookup_receipt = constraint_store.lookup_receipt(
+        task_desc,
+        matches=global_constraints,
+        limit=4,
+    )
     if claim_uncertainty:
         blocked_assumptions.append("api_contract_not_verified")
         rejected_claims.append(
@@ -915,6 +921,7 @@ def _build_research_context(
         "recommended_capabilities": recommended_capabilities,
         "blocked_assumptions": blocked_assumptions,
         "global_constraints": global_constraints,
+        "constraint_lookup_receipt": constraint_lookup_receipt,
         "next_action_hint": next_action_hint,
         "confidence": round(max(0.0, min(1.0, confidence)), 4),
         "doc_scout": doc_scout,
@@ -1887,6 +1894,8 @@ def _augment_semantic_runtime_capabilities(
         constraints_packet = ASIConstraintExtractor().extract(asi_ledger, task_id=task_id or receipt_slug)
         constraints = constraints_packet.get("constraints", []) if isinstance(constraints_packet.get("constraints"), list) else []
         blocked = [str(item) for item in (research_context.get("blocked_assumptions", []) or []) if str(item).strip()]
+        lookup = research_context.get("constraint_lookup_receipt", {}) if isinstance(research_context.get("constraint_lookup_receipt"), dict) else {}
+        lookup_refs = [str(item) for item in lookup.get("constraint_refs", []) or [] if str(item).strip()]
         if constraints or blocked:
             constraint_store_path = ASIConstraintStore(repo_root).append_constraints(constraints)
             report = {
@@ -1894,10 +1903,14 @@ def _augment_semantic_runtime_capabilities(
                 "task_id": task_id or receipt_slug,
                 "constraints_packet": constraints_packet,
                 "blocked_assumptions": blocked,
+                "constraint_lookup_receipt": lookup,
                 "global_constraint_store_path": constraint_store_path,
             }
             capabilities["asi_constraints"] = constraints
             capabilities["blocked_assumptions"] = blocked
+            capabilities["asi_constraint_lookup_refs"] = lookup_refs
+            capabilities["asi_constraint_lookup_matched_count"] = int(lookup.get("matched_count", len(lookup_refs)) or 0)
+            capabilities["asi_constraint_lookup_store_path"] = str(lookup.get("store_path") or "")
             capabilities["asi_constraint_report_path"] = _write_runtime_receipt_json(
                 repo_root,
                 category="asi_constraint_extractor",
