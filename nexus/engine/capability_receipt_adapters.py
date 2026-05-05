@@ -171,7 +171,7 @@ class DDTreeReceiptAdapter:
         gate_passed = bool(saved_steps > 0 and claim_verified)
         if not payload.get("enabled"):
             failure_reason = "feature_flag_disabled"
-        elif payload.get("eligible") and not invoked:
+        elif not payload.get("eligible") or not invoked:
             failure_reason = "no_pruning_opportunity"
         else:
             failure_reason = selected_failure_reason(

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 from datetime import datetime, timezone
-from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore
+from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore, JsonlStore, BeliefStore, ConfigStore
 
 class LanceDBStorage(MemoryStorage):
     def __init__(self, project_root: Path, tenant_id: str | None = None):
@@ -64,3 +64,77 @@ class LocalCacheStore(CacheStore):
         if key not in self._data: self._data[key] = set()
         self._data[key].update(values)
     def smembers(self, key: str) -> set: return self._data.get(key, set())
+
+
+class FileJsonlStore(JsonlStore):
+    def read_rows(self, path: str) -> List[Dict[str, Any]]:
+        target = Path(path)
+        if not target.exists():
+            return []
+        rows: List[Dict[str, Any]] = []
+        with open(target, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+        return rows
+
+    def append_row(self, path: str, row: Dict[str, Any]) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def write_rows(self, path: str, rows: List[Dict[str, Any]]) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+class LanceBeliefStore(BeliefStore):
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+
+    def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
+        try:
+            import lancedb
+            db_path = self.project_root / ".nexus" / "vector_db"
+            if not db_path.exists():
+                return []
+            db = lancedb.connect(str(db_path))
+            tables = db.list_tables()
+            table_names = tables if isinstance(tables, list) else (tables.tables if hasattr(tables, "tables") else tables)
+            if "nexus_soul_palace" not in table_names:
+                return []
+            df = db.open_table("nexus_soul_palace").to_pandas()
+            if status != "ALL" and "status" in df.columns:
+                df = df[df["status"].str.upper() == status.upper()]
+            return df.to_dict("records")
+        except Exception:
+            return []
+
+
+class FileConfigStore(ConfigStore):
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+
+    def get_router_bias(self) -> List[float] | None:
+        dna_path = self.project_root / "configs" / "federated_dna.yaml"
+        if not dna_path.exists():
+            return None
+        try:
+            import yaml
+            with open(dna_path, "r", encoding="utf-8") as handle:
+                dna = yaml.safe_load(handle)
+            value = dna.get("global_router_bias") if isinstance(dna, dict) else None
+            return list(value) if isinstance(value, list) else None
+        except Exception:
+            return None

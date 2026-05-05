@@ -88,6 +88,32 @@ class TestMemoryService(unittest.TestCase):
         self.assertIs(service.redis, redis_client)
         self.assertTrue(service.redis_available)
 
+    def test_memory_service_uses_injected_jsonl_store_for_fault_lessons(self):
+        repo = MagicMock()
+        redis_client = MagicMock()
+        redis_client.ping.return_value = True
+        jsonl_store = MagicMock()
+        jsonl_store.read_rows.return_value = []
+        service = MemoryService(
+            project_root=str(self.project_root),
+            repo=repo,
+            redis_client=redis_client,
+            jsonl_store=jsonl_store,
+        )
+
+        lesson = FaultLesson(
+            fault_hash="fh",
+            error_type="ValueError",
+            diagnosis_kind="unit",
+            lesson="Use typed store",
+            repair_patch="patch",
+            audit_pass_rate=0.9,
+        )
+        service.record_fault_lesson(lesson)
+
+        jsonl_store.append_row.assert_called_once()
+        repo.add_rows.assert_called_with("fault_lessons", [jsonl_store.append_row.call_args.args[1]])
+
     def test_memory_auto_init_can_fail_open_for_benchmark_subprocesses(self):
         with patch.dict(os.environ, {"NEXUS_MEMORY_AUTO_INIT": "0"}):
             with patch.object(MemoryService, "_auto_init_tables") as auto_init:

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from nexus.core.memory_coordinator import MemoryCoordinator
 from nexus.services.memory_repository import MemoryRepository
+from nexus.infrastructure.storage_implementations import FileJsonlStore
 from nexus.core.errors import NexusError
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ class MemoryService:
     負責聚合與快取跨階段的背景知識與歷史記錄。
     重構版：將 LanceDB 邏輯抽離至 MemoryRepository。
     """
-    def __init__(self, project_root: str, run_dir: Optional[str] = None, repo: Any = None, redis_client: Any = None):
+    def __init__(self, project_root: str, run_dir: Optional[str] = None, repo: Any = None, redis_client: Any = None, jsonl_store: Any = None):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if run_dir else None
         db_path_override = os.environ.get("NEXUS_MEMORY_DB_PATH")
@@ -45,6 +46,7 @@ class MemoryService:
         self.policy_memory_jsonl = self.project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
         self.coordinator = MemoryCoordinator()
         self.repo = repo or MemoryRepository(self.db_path)
+        self.jsonl_store = jsonl_store or FileJsonlStore()
         self.bootstrap_status = "pending"
         
         try:
@@ -84,13 +86,10 @@ class MemoryService:
             if self.fault_lessons_jsonl.exists():
                 fault_data = []
                 try:
-                    with open(self.fault_lessons_jsonl, "r", encoding="utf-8") as f:
-                        for line in f:
-                            if line.strip():
-                                fault_data.append(json.loads(line.strip()))
+                    fault_data = self.jsonl_store.read_rows(str(self.fault_lessons_jsonl))
                     if fault_data:
                         self.repo.ensure_table("fault_lessons", initial_data=fault_data)
-                except (OSError, json.JSONDecodeError) as e:
+                except OSError as e:
                     logger.warning(f"Failed to load fault lessons during init: {e}")
             self.bootstrap_status = "initialized"
         except Exception as e:
@@ -252,22 +251,20 @@ class MemoryService:
             
         reminders: List[Dict[str, Any]] = []
         try:
-            with open(self.fault_lessons_jsonl, "r", encoding="utf-8") as handle:
-                for idx, line in enumerate(handle):
-                    payload = json.loads(line.strip())
-                    if payload.get("fault_hash") == fault_hash:
-                        reminders.append({
-                            "id": f"fault-{idx}",
-                            "content": {
-                                "lesson": payload.get("lesson", ""),
-                                "repair_patch": payload.get("repair_patch", ""),
-                            },
-                            "relevance": float(payload.get("audit_pass_rate", 0.0)),
-                            "source": "jsonl-fault-lessons",
-                        })
-                    if len(reminders) >= limit:
-                        break
-        except (OSError, ValueError, json.JSONDecodeError):
+            for idx, payload in enumerate(self.jsonl_store.read_rows(str(self.fault_lessons_jsonl))):
+                if payload.get("fault_hash") == fault_hash:
+                    reminders.append({
+                        "id": f"fault-{idx}",
+                        "content": {
+                            "lesson": payload.get("lesson", ""),
+                            "repair_patch": payload.get("repair_patch", ""),
+                        },
+                        "relevance": float(payload.get("audit_pass_rate", 0.0)),
+                        "source": "jsonl-fault-lessons",
+                    })
+                if len(reminders) >= limit:
+                    break
+        except (OSError, ValueError):
             pass
         return reminders
 
@@ -288,9 +285,7 @@ class MemoryService:
 
         # Always append JSONL as durable fallback.
         try:
-            self.fault_lessons_jsonl.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.fault_lessons_jsonl, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self.jsonl_store.append_row(str(self.fault_lessons_jsonl), entry)
         except OSError as e:
             logger.error(f"Failed to write fault lesson to JSONL: {e}")
 
@@ -369,19 +364,8 @@ class MemoryService:
     def _load_policy_memory_rows(self) -> List[Dict[str, Any]]:
         if not self.policy_memory_jsonl.exists():
             return []
-        rows: List[Dict[str, Any]] = []
         try:
-            with open(self.policy_memory_jsonl, "r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(payload, dict):
-                        rows.append(payload)
+            rows = self.jsonl_store.read_rows(str(self.policy_memory_jsonl))
         except OSError as e:
             logger.error(f"Failed to load policy memory rows: {e}")
             return []
@@ -389,11 +373,8 @@ class MemoryService:
 
     def _write_policy_memory_rows(self, rows: List[Dict[str, Any]]) -> None:
         try:
-            self.policy_memory_jsonl.parent.mkdir(parents=True, exist_ok=True)
             with self.coordinator.lock(self.policy_memory_jsonl):
-                with open(self.policy_memory_jsonl, "w", encoding="utf-8") as handle:
-                    for row in rows:
-                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                self.jsonl_store.write_rows(str(self.policy_memory_jsonl), rows)
         except OSError as e:
             logger.error(f"Failed to write policy memory rows: {e}")
 

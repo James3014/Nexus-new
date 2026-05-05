@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
-from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore
-from nexus.infrastructure.storage_implementations import LanceDBStorage, LocalCacheStore
+from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore, BeliefStore, ConfigStore
+from nexus.infrastructure.storage_implementations import LanceDBStorage, LocalCacheStore, LanceBeliefStore, FileConfigStore
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +14,14 @@ class MemPalace:
     
     def __init__(self, project_root: str = str(__import__("pathlib").Path(__file__).resolve().parents[2]), 
                  storage: MemoryStorage = None, 
-                 cache: CacheStore = None):
+                 cache: CacheStore = None,
+                 belief_store: BeliefStore = None,
+                 config_store: ConfigStore = None):
         self.project_root = Path(project_root)
         self.storage = storage or LanceDBStorage(self.project_root)
         self.cache = cache or LocalCacheStore()
+        self.belief_store = belief_store or LanceBeliefStore(self.project_root)
+        self.config_store = config_store or FileConfigStore(self.project_root)
 
     def ingest_to_shards(self, tenant_id: str, artifact_type: str, data: Dict[str, Any]):
         """🏛️ v25.5 Physical Sharding & AAAK 30x Compression."""
@@ -104,19 +108,7 @@ class MemPalace:
     def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]:
         """🕍 列出指定狀態的所有信念節點。"""
         try:
-            import lancedb
-            db_path = self.project_root / ".nexus" / "vector_db"
-            if not db_path.exists(): return []
-            db = lancedb.connect(str(db_path))
-            res = db.list_tables()
-            tables = res if isinstance(res, list) else (res.tables if hasattr(res, "tables") else res)
-            if "nexus_soul_palace" not in tables:
-                return []
-            table = db.open_table("nexus_soul_palace")
-            df = table.to_pandas()
-            if status != "ALL" and "status" in df.columns:
-                df = df[df["status"].str.upper() == status.upper()]
-            return df.to_dict("records")
+            return self.belief_store.list_beliefs(status=status)
         except Exception as e:
             logger.warning(f"🕍 [MemPalace] list_beliefs failed: {e}")
             return []
@@ -132,14 +124,8 @@ class MemPalace:
 
     def get_router_bias(self) -> Optional[List[float]]:
         """🕍 取得最新的 v0.9 FedAvg global_router_bias。"""
-        dna_path = self.project_root / "configs" / "federated_dna.yaml"
-        if not dna_path.exists():
-            return None
         try:
-            import yaml
-            with open(dna_path, "r") as f:
-                dna = yaml.safe_load(f)
-            return dna.get("global_router_bias")
+            return self.config_store.get_router_bias()
         except Exception as e:
             logger.warning(f"🕍 [MemPalace] get_router_bias failed: {e}")
             return None
