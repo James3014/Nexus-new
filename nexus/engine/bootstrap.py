@@ -43,6 +43,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     from nexus.engine.battle_swarm import BattleSwarm
     from nexus.engine.reflex_loop import ReflexLoop
     from nexus.engine.phase_executors import (
+        build_audit_executor,
         build_diagnose_executor,
         build_plan_executor,
         build_research_executor,
@@ -98,6 +99,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         "P": build_plan_executor(project_root, run_dir),
         "X": build_research_executor(project_root, run_dir),
         "D": build_diagnose_executor(project_root, run_dir, hub=hub),
+        "A": build_audit_executor(project_root, run_dir),
     }
 
     components = {

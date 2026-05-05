@@ -11,7 +11,7 @@ from nexus.engine.pipeline import NexusPipeline
 class FakeExecutor:
     def __init__(self, name: str, mutations: dict):
         self.name = name
-        self.priority = {"P": 10, "X": 20, "D": 25}[name]
+        self.priority = {"P": 10, "X": 20, "D": 25, "A": 40}[name]
         self.mutations = mutations
         self.calls = 0
 
@@ -70,3 +70,15 @@ def test_pipeline_prefers_phase_executor_composition_over_mixin_methods(tmp_path
     assert executors["P"].calls == 1
     assert executors["X"].calls == 1
     assert executors["D"].calls == 1
+
+
+def test_pipeline_registers_audit_phase_executor(tmp_path):
+    executors = {
+        "P": FakeExecutor("P", {"plan": "ok"}),
+        "X": FakeExecutor("X", {"findings": ["ok"]}),
+        "D": FakeExecutor("D", {"diagnosis": "ok"}),
+        "A": FakeExecutor("A", {"audit": "ok"}),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+
+    assert "A" in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}

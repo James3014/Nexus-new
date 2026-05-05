@@ -85,3 +85,9 @@ def build_repair_executor(project_root: Any, run_dir: Any, **kwargs: Any) -> Pha
     from nexus.engine.phases.repair import RepairPhaseHandler
 
     return HandlerPhaseExecutor(RepairPhaseHandler(project_root, run_dir, **kwargs))
+
+
+def build_audit_executor(project_root: Any, run_dir: Any) -> PhaseExecutor:
+    from nexus.engine.phases.audit import AuditPhaseHandler
+
+    return HandlerPhaseExecutor(AuditPhaseHandler(project_root, run_dir, name="A", priority=40))

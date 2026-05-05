@@ -22,3 +22,4 @@ def test_bootstrap_builds_all_required_components(tmp_path: Path):
     assert components["context_hub"].prompt_builder is components["prompt_builder"]
     assert components["context_hub"].knowledge_injector is components["knowledge_injector"]
     assert components["context_hub"].knowledge_injector.wisdom_vault is components["wisdom_vault"]
+    assert {"P", "X", "D", "A"} <= set(components["phase_executors"])

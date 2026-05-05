@@ -220,6 +220,7 @@ class NexusPipeline(
             return {}
         try:
             from nexus.engine.phase_executors import (
+                build_audit_executor,
                 build_diagnose_executor,
                 build_plan_executor,
                 build_research_executor,
@@ -229,13 +230,14 @@ class NexusPipeline(
                 "P": build_plan_executor(project_root, run_dir),
                 "X": build_research_executor(project_root, run_dir),
                 "D": build_diagnose_executor(project_root, run_dir, hub=getattr(self.engine, "hub", None)),
+                "A": build_audit_executor(project_root, run_dir),
             }
         except Exception as exc:
             logger.debug("phase_executor_bootstrap_skipped: %s", exc)
             return {}
 
     def _register_phase_executors(self, phase_executors: Dict[str, PhaseExecutor]) -> None:
-        for name in ("P", "X", "D"):
+        for name in ("P", "X", "D", "A"):
             executor = phase_executors.get(name)
             if executor is not None:
                 self.registry.register(_PhaseExecutorPlugin(name, executor))

@@ -36,6 +36,8 @@ def apply_signal_policies(
         enable("memory", "context_contract_memory_needed")
     if signals.lancedb_hits or "lancedb" in task_lower or "retrieval" in task_lower or "vector hit" in task_lower:
         enable("lancedb", "semantic_memory_or_retrieval_signal_available")
+    if signals.lancedb_hits or "semantic" in task_lower or "retrieval" in task_lower:
+        enable("semantic_searcher", "runtime_semantic_search_signal")
     if signals.claim_uncertainty:
         enable("research", "claim_uncertainty_requires_research")
     if signals.research_role == "claim_scout":
@@ -90,6 +92,7 @@ def apply_signal_policies(
         enable("research_control_plane", "research_control_or_experiment_signal")
     if signals.swarm_signal or (signals.cross_module and signals.risk_score >= 70):
         enable("swarm", "cross_module_high_risk_review")
+        enable("swarm_quiet_moment", "swarm_write_boundary_required")
     if signals.drone_signal or (signals.cross_module and signals.candidate_count >= 2):
         enable("drone", "parallelizable_subtask_signal")
     if signals.multi_agent_signal or (signals.cross_module and signals.risk_score >= 60):

@@ -42,6 +42,33 @@ def test_capability_planner_builds_constrained_composition_trace():
     assert any(item["phase"] == "A" and "claim_and_artifact_fail_closed" in item["replan_reasons"] for item in plan["replan_trace"])
 
 
+def test_capability_nodes_include_runtime_callable_search_and_swarm_pause():
+    nodes = default_capability_nodes()
+
+    assert nodes["semantic_searcher"].dependencies == ("lancedb",)
+    assert "semantic_refs" in nodes["semantic_searcher"].evidence_outputs
+    assert nodes["swarm_quiet_moment"].dependencies == ("swarm",)
+    assert "rollback" in nodes["swarm_quiet_moment"].evidence_outputs
+
+
+def test_capability_planner_selects_runtime_callable_search_and_swarm_pause():
+    plan = CapabilityPlanner().plan(
+        task_desc="Cross-module swarm repair with semantic retrieval evidence",
+        task_type="cross_module_refactor_swarm",
+        route={
+            "route_features": {
+                "risk_score": 75,
+                "is_cross_module_task": True,
+                "candidate_count": 2,
+            },
+        },
+        pillars={"lancedb": {"hits": 2}},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"semantic_searcher", "swarm", "swarm_quiet_moment"} <= selected
+
+
 def test_capability_planner_downgrades_optional_cost_but_keeps_gates():
     plan = CapabilityPlanner().plan(
         task_desc="Fix long cross-module timeout",

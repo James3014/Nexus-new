@@ -416,6 +416,31 @@ class LanceDBReceiptAdapter:
         )
 
 
+class SemanticSearcherReceiptAdapter:
+    name = "semantic_searcher"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        hits = as_int(payload.get("semantic_searcher_hits", payload.get("semantic_hits", 0)))
+        refs = _as_refs(payload.get("semantic_searcher_refs") or payload.get("semantic_refs"))
+        invoked = bool(hits > 0 or refs or payload.get("semantic_searcher_used"))
+        gate_passed = bool(refs and _as_bool(payload.get("semantic_searcher_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
 class UltraReviewReceiptAdapter:
     name = "ultra_review"
 
@@ -474,6 +499,49 @@ class SwarmReceiptAdapter:
                 invoked=invoked,
                 evidence_refs=refs,
                 gate_passed=gate_passed,
+            ),
+        )
+
+
+class SwarmQuietMomentReceiptAdapter:
+    name = "swarm_quiet_moment"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        quiet = payload.get("quiet_moment") if isinstance(payload.get("quiet_moment"), dict) else {}
+        if not quiet:
+            report = payload.get("swarm_report") if isinstance(payload.get("swarm_report"), dict) else {}
+            quiet = report.get("quiet_moment") if isinstance(report.get("quiet_moment"), dict) else {}
+        invoked = bool(quiet)
+        allowed = quiet.get("allowed_actions") if isinstance(quiet, dict) else []
+        observe = quiet.get("observe") if isinstance(quiet.get("observe"), dict) else {}
+        rollback = quiet.get("rollback") if isinstance(quiet.get("rollback"), dict) else {}
+        non_mutating = bool(
+            quiet.get("schema_version") == "nexus_quiet_moment.v1"
+            and quiet.get("production_writes_allowed") is False
+            and allowed == ["observe", "report", "rollback"]
+            and observe.get("status")
+            and rollback.get("status")
+        )
+        refs = []
+        if invoked:
+            refs.append("quiet_moment:nexus_quiet_moment.v1")
+            if observe.get("status"):
+                refs.append(f"observe:{observe.get('status')}")
+            if rollback.get("status"):
+                refs.append(f"rollback:{rollback.get('status')}")
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=non_mutating,
+            outcome_contributed=bool(non_mutating and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=non_mutating,
             ),
         )
 
@@ -587,6 +655,8 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
         BeliefReceiptAdapter(),
         ResearchReceiptAdapter(),
         LanceDBReceiptAdapter(),
+        SemanticSearcherReceiptAdapter(),
+        SwarmQuietMomentReceiptAdapter(),
         RepairLoopReceiptAdapter(),
     )
 }
