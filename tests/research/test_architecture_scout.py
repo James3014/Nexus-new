@@ -24,6 +24,10 @@ def test_distant_scout_planner_changes_family_after_plateau():
     assert out["recommended_family"] != "flow:retry_delay"
     assert "verification_commands" in out
     assert out["architecture_actions"]
+    assert out["target_boundary"] == "repair_timeout_policy"
+    assert out["bounded_refactor"]["requires_rollback_plan"] is True
+    assert out["rollback_plan"]["restore_points"]
+    assert out["gate_passed"] is True
 
 
 def test_distant_scout_planner_skips_without_plateau():
