@@ -404,7 +404,7 @@ def _brain_hub_guidance_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     audit_passed = 0
     document_count = 0
     failure_count = 0
-    phases: set[str] = set()
+    phases: list[str] = []
     for row in rows:
         payload = _jsonish(row.get("brain_hub_guidance"), {})
         payload = payload if isinstance(payload, dict) else {}
@@ -419,8 +419,14 @@ def _brain_hub_guidance_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
             failure_count += len(failures)
         row_phases = row.get("brain_hub_guidance_phases")
         if isinstance(row_phases, list):
-            phases.update(str(item) for item in row_phases if str(item))
-        phases.update(str(item) for item in guidance.keys() if str(item))
+            for item in row_phases:
+                phase = str(item)
+                if phase and phase not in phases:
+                    phases.append(phase)
+        for item in guidance.keys():
+            phase = str(item)
+            if phase and phase not in phases:
+                phases.append(phase)
     return {
         "present_rate": present / total,
         "audit_passed_rate": audit_passed / total,
@@ -428,6 +434,106 @@ def _brain_hub_guidance_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "phases": sorted(phases),
         "failure_count": failure_count,
     }
+
+
+def _brain_hub_payload(row: dict[str, Any], key: str) -> dict[str, Any]:
+    nested_aliases = {
+        "brain_hub_manifest": ("manifest", "brain_hub_manifest"),
+        "strategic_map": ("strategic_map",),
+        "evolution_boundary": ("evolution_boundary",),
+    }
+    guidance = _jsonish(row.get("brain_hub_guidance"), {})
+    guidance = guidance if isinstance(guidance, dict) else {}
+    payload = {}
+    for alias in nested_aliases.get(key, (key,)):
+        candidate = guidance.get(alias)
+        if isinstance(candidate, dict):
+            payload = candidate
+            break
+    if not isinstance(payload, dict):
+        payload = row.get(key)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _evidence_summary(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    total = len(rows)
+    present = 0
+    pass_count = 0
+    ids: set[str] = set()
+    versions: set[str] = set()
+    statuses: set[str] = set()
+    phases: list[str] = []
+    failures = 0
+    documents = 0
+    for row in rows:
+        payload = _brain_hub_payload(row, key)
+        if not payload:
+            continue
+        present += 1
+        identifier = payload.get("id") or payload.get("name") or payload.get("schema_version")
+        if identifier:
+            ids.add(str(identifier))
+        version = payload.get("version") or payload.get("schema_version")
+        if version:
+            versions.add(str(version))
+        status = str(payload.get("status") or payload.get("boundary_status") or "").strip()
+        if status:
+            statuses.add(status)
+        if bool(payload.get("passed")) or status.lower() in {"pass", "passed", "ready", "ok"}:
+            pass_count += 1
+        for phase in payload.get("phases", []) or []:
+            phase_text = str(phase)
+            if phase_text and phase_text not in phases:
+                phases.append(phase_text)
+        failures_payload = payload.get("failures", payload.get("violations", []))
+        if isinstance(failures_payload, list):
+            failures += len(failures_payload)
+        documents += int(payload.get("document_count", payload.get("documents", 0)) or 0)
+    return {
+        "present_rate": (present / total) if total else 0.0,
+        "pass_rate": (pass_count / present) if present else 0.0,
+        "ids": sorted(ids),
+        "versions": sorted(versions),
+        "statuses": sorted(statuses),
+        "phases": phases,
+        "failure_count": failures,
+        "document_avg_count": (documents / total) if total else 0.0,
+    }
+
+
+def _maybe_brain_hub_evidence_sections(
+    rows_without: list[dict[str, Any]],
+    rows_with: list[dict[str, Any]],
+) -> list[str]:
+    sections: list[str] = []
+    specs = (
+        ("brain_hub_manifest", "Brain Hub Manifest Evidence", "Manifest"),
+        ("strategic_map", "Strategic Map Evidence", "Strategic map"),
+        ("evolution_boundary", "Evolution Boundary Evidence", "Boundary"),
+    )
+    for key, title, label in specs:
+        without = _evidence_summary(rows_without, key)
+        with_nexus = _evidence_summary(rows_with, key)
+        if without["present_rate"] <= 0 and with_nexus["present_rate"] <= 0:
+            continue
+        sections.extend(
+            [
+                f"## {title}",
+                "",
+                "| Metric | Without Nexus | With Nexus |",
+                "| --- | ---: | ---: |",
+                f"| {label} present | {_pct(without['present_rate'])} | {_pct(with_nexus['present_rate'])} |",
+                f"| {label} pass | {_pct(without['pass_rate'])} | {_pct(with_nexus['pass_rate'])} |",
+                f"| {label} IDs | {', '.join(without['ids']) or 'none'} | {', '.join(with_nexus['ids']) or 'none'} |",
+                f"| {label} versions | {', '.join(without['versions']) or 'none'} | {', '.join(with_nexus['versions']) or 'none'} |",
+                f"| {label} statuses | {', '.join(without['statuses']) or 'none'} | {', '.join(with_nexus['statuses']) or 'none'} |",
+                f"| {label} phases | {', '.join(without['phases']) or 'none'} | {', '.join(with_nexus['phases']) or 'none'} |",
+                f"| {label} avg documents | {_num(without['document_avg_count'])} | {_num(with_nexus['document_avg_count'])} |",
+                f"| {label} failure count | {_num(without['failure_count'], 0)} | {_num(with_nexus['failure_count'], 0)} |",
+                "",
+            ]
+        )
+    return sections
 
 
 def _activation_status(item: dict[str, Any]) -> str:
@@ -868,6 +974,7 @@ def render_markdown_report(
     research_preflight_with = _research_preflight_metrics(rows_with)
     brain_hub_without = _brain_hub_guidance_metrics(rows_without)
     brain_hub_with = _brain_hub_guidance_metrics(rows_with)
+    brain_hub_evidence_sections = _maybe_brain_hub_evidence_sections(rows_without, rows_with)
     claim_gates = _claim_gate_breakdown(
         public_gate=public_gate,
         capability_gate=capability_gate,
@@ -994,6 +1101,7 @@ def render_markdown_report(
         f"| Audit failure count | {_num(brain_hub_without['failure_count'], 0)} | {_num(brain_hub_with['failure_count'], 0)} | {_num(brain_hub_with['failure_count'] - brain_hub_without['failure_count'], 0)} | Lower means fewer doc-code reality gaps |",
         f"| Guidance phases | {', '.join(brain_hub_without['phases']) or 'none'} | {', '.join(brain_hub_with['phases']) or 'none'} | n/a | Phase guidance exposed to route |",
         "",
+        *brain_hub_evidence_sections,
         "## Capability Coverage Matrix",
         "",
         "| Capability | Selected | Invoked | Evidence | Gate | Outcome | Public safe | Source | Failure reasons |",
