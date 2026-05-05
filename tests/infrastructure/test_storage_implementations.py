@@ -37,6 +37,13 @@ def test_lancedb_storage_scoped_access_keeps_tenants_isolated(tmp_path):
     tenant_a = storage.scoped_access("tenant-a")
     tenant_b = storage.scoped_access("tenant-b")
 
-    assert tenant_a.search("alpha", table="lesson", limit=5)
-    assert tenant_a.search("beta", table="lesson", limit=5) == []
-    assert tenant_b.search("beta", table="lesson", limit=5)
+    assert tenant_a.retrieve("alpha", artifact_type="lesson", limit=5)
+    assert tenant_a.retrieve("beta", artifact_type="lesson", limit=5) == []
+    assert tenant_b.retrieve("beta", artifact_type="lesson", limit=5)
+
+
+def test_memory_storage_protocol_does_not_include_search():
+    from nexus.infrastructure.storage_interfaces import MemoryStorage, SearchProvider
+
+    assert "search" not in MemoryStorage.__dict__
+    assert "search" in SearchProvider.__dict__

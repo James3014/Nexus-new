@@ -7,6 +7,7 @@ import socket
 from nexus.services.reviewer import GatewayReviewLoop
 from nexus.security.tls_provider import TLSProvider
 from nexus.security.secure_sync import SecureRegistrySync
+from nexus.core.evolution_protocols import build_quiet_moment_event
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,8 @@ class NexusSwarmOrchestrator:
         
         # 2. Consensus Phase (Architect + Reviewer)
         plan = self._consensus_plan(analysis)
+
+        quiet_moment = self._enter_quiet_moment(plan)
         
         # 3. Execution Phase (Gladiator - Coder)
         repair_result = self._repair(plan)
@@ -72,8 +75,34 @@ class NexusSwarmOrchestrator:
             "status": final_status,
             "analysis": analysis,
             "plan": plan,
+            "quiet_moment": quiet_moment,
             "tokens_used": self.total_tokens
         }
+
+    def _enter_quiet_moment(self, plan: str) -> Dict[str, Any]:
+        event = build_quiet_moment_event(
+            reason="swarm_pre_repair_mutation_boundary",
+            affected_nodes=[self.node_id, "repair"],
+            resume_after_seconds=0,
+        )
+        event["plan_preview"] = plan[:200]
+        observe = self._observe_quiet_moment(event)
+        rollback = self._rollback_quiet_moment(event)
+        event["observe"] = observe
+        event["rollback"] = rollback
+        return event
+
+    def _observe_quiet_moment(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        observer = getattr(self.engine, "swarm_observer", None)
+        if callable(observer):
+            return dict(observer(event) or {})
+        return {"status": "observed", "production_writes_allowed": False}
+
+    def _rollback_quiet_moment(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        rollback = getattr(self.engine, "swarm_rollback", None)
+        if callable(rollback):
+            return dict(rollback(event) or {})
+        return {"status": "armed", "production_writes_allowed": False}
 
     def _scout(self) -> str:
         print("🔭 [Swarm:Scout] Performing deep intelligence scouting (LanceDB RAG)...")

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from nexus.core.memory_coordinator import MemoryCoordinator
 from nexus.services.memory_repository import MemoryRepository
+from nexus.services.semantic_searcher import SemanticSearcher
 from nexus.infrastructure.storage_implementations import FileJsonlStore
 from nexus.core.errors import NexusError
 
@@ -46,6 +47,7 @@ class MemoryService:
         self.policy_memory_jsonl = self.project_root / ".nexus" / "knowledge" / "policy_memory.jsonl"
         self.coordinator = MemoryCoordinator()
         self.repo = repo or MemoryRepository(self.db_path)
+        self.searcher = SemanticSearcher(self.repo)
         self.jsonl_store = jsonl_store or FileJsonlStore()
         self.bootstrap_status = "pending"
         
@@ -98,31 +100,13 @@ class MemoryService:
 
     def semantic_search(self, query: str, table_name: str = "policy", limit: int = 3) -> List[Dict]:
         """🧬 語義檢索實作 (M2-Active)"""
-        try:
-            results = self.repo.search_fts(
-                table_name=table_name,
-                query=query,
-                limit=limit,
-                fallback_columns=["condition", "action"]
-            )
-            
-            if results.empty:
-                return []
-
-            reminders = []
-            for _, row in results.iterrows():
-                score = float(getattr(row, "_score", 1.0))
-                confidence = min(1.0, score / 1.0) 
-                reminders.append({
-                    "id": str(row.get("rule_id", "unknown")),
-                    "content": str(row.get("action", row.get("condition", "No Content"))),
-                    "relevance": round(confidence, 2),
-                    "source": "lancedb-fts" if "_score" in row.index else "lancedb-fallback"
-                })
-            return reminders
-        except Exception as e:
-            logger.error(f"Semantic search failed on {table_name}: {e}")
-            return []
+        self.searcher.repository = self.repo
+        return self.searcher.search(
+            query=query,
+            table_name=table_name,
+            limit=limit,
+            fallback_columns=["condition", "action"],
+        )
 
     def _load_local_crystal_lessons(self, limit: int = 3) -> List[Dict[str, Any]]:
         """Fallback lessons from local JSONL when vector DB is unavailable."""

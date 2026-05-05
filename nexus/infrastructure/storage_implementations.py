@@ -49,10 +49,6 @@ class LanceDBStorage(MemoryStorage):
                 continue
         return results
 
-    def search(self, query: str, table: str = "default", limit: int = 5) -> List[Dict[str, Any]]:
-        """Keyword search fallback kept infra-pure; semantic search belongs in services."""
-        return self.retrieve(query, artifact_type=table, limit=limit)
-
 class LocalCacheStore(CacheStore):
     def __init__(self):
         self._data = {}
