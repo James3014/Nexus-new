@@ -390,6 +390,46 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
+def _brain_hub_guidance_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(rows)
+    if total <= 0:
+        return {
+            "present_rate": 0.0,
+            "audit_passed_rate": 0.0,
+            "document_avg_count": 0.0,
+            "phases": [],
+            "failure_count": 0,
+        }
+    present = 0
+    audit_passed = 0
+    document_count = 0
+    failure_count = 0
+    phases: set[str] = set()
+    for row in rows:
+        payload = _jsonish(row.get("brain_hub_guidance"), {})
+        payload = payload if isinstance(payload, dict) else {}
+        guidance = payload.get("guidance") if isinstance(payload.get("guidance"), dict) else {}
+        if bool(row.get("brain_hub_guidance_present")) or guidance:
+            present += 1
+        if bool(row.get("brain_hub_guidance_audit_passed")) or bool(payload.get("audit_passed")):
+            audit_passed += 1
+        document_count += int(payload.get("document_count", 0) or 0)
+        failures = payload.get("failures", [])
+        if isinstance(failures, list):
+            failure_count += len(failures)
+        row_phases = row.get("brain_hub_guidance_phases")
+        if isinstance(row_phases, list):
+            phases.update(str(item) for item in row_phases if str(item))
+        phases.update(str(item) for item in guidance.keys() if str(item))
+    return {
+        "present_rate": present / total,
+        "audit_passed_rate": audit_passed / total,
+        "document_avg_count": document_count / total,
+        "phases": sorted(phases),
+        "failure_count": failure_count,
+    }
+
+
 def _activation_status(item: dict[str, Any]) -> str:
     selected = int(item.get("selected_count", 0) or 0)
     invoked = int(item.get("invoked_count", 0) or 0)
@@ -727,6 +767,12 @@ def _public_claim_gate(
         if not str(row.get("route_decision_schema_version") or "").strip():
             task_id = str(row.get("task_id") or "unknown")
             failures.append(f"route_decision_missing:{task_id}")
+        if "brain_hub_guidance_present" in row and not bool(row.get("brain_hub_guidance_present", False)):
+            task_id = str(row.get("task_id") or "unknown")
+            failures.append(f"brain_hub_guidance_missing:{task_id}")
+        if "brain_hub_guidance_audit_passed" in row and not bool(row.get("brain_hub_guidance_audit_passed", False)):
+            task_id = str(row.get("task_id") or "unknown")
+            failures.append(f"brain_hub_guidance_audit_failed:{task_id}")
     rlm_rows = [row for row in rows_with if row.get("rlm_trace_present")]
     for row in rlm_rows:
         submit_count = int(row.get("rlm_submit_count", 0) or 0)
@@ -820,6 +866,8 @@ def render_markdown_report(
     route_quality_with = _route_quality_metrics(report, "b")
     research_preflight_without = _research_preflight_metrics(rows_without)
     research_preflight_with = _research_preflight_metrics(rows_with)
+    brain_hub_without = _brain_hub_guidance_metrics(rows_without)
+    brain_hub_with = _brain_hub_guidance_metrics(rows_with)
     claim_gates = _claim_gate_breakdown(
         public_gate=public_gate,
         capability_gate=capability_gate,
@@ -935,6 +983,16 @@ def render_markdown_report(
         f"| Capability plan score | {_num(a['avg_capability_plan_score'])} | {_num(b['avg_capability_plan_score'])} | {_num(delta['avg_capability_plan_score_delta'])} | benefit-risk-cost score |",
         f"| RLM trace present | {_pct(a['rlm_trace_present_rate'])} | {_pct(b['rlm_trace_present_rate'])} | {_pct(delta['rlm_trace_present_rate_delta'])} | recursive trace emitted |",
         f"| RLM trace quality | {_num(a['avg_rlm_trace_quality_score'])} | {_num(b['avg_rlm_trace_quality_score'])} | {_num(delta['avg_rlm_trace_quality_score_delta'])} | trace has submit/A-gate/evidence signal |",
+        "",
+        "## Brain Hub Guidance",
+        "",
+        "| Metric | Without Nexus | With Nexus | Delta | Meaning |",
+        "| --- | ---: | ---: | ---: | --- |",
+        f"| Guidance present | {_pct(brain_hub_without['present_rate'])} | {_pct(brain_hub_with['present_rate'])} | {_pct(brain_hub_with['present_rate'] - brain_hub_without['present_rate'])} | Route row includes Brain Hub guidance receipt |",
+        f"| Reality audit passed | {_pct(brain_hub_without['audit_passed_rate'])} | {_pct(brain_hub_with['audit_passed_rate'])} | {_pct(brain_hub_with['audit_passed_rate'] - brain_hub_without['audit_passed_rate'])} | Brain Hub doc/runtime audit passed before claim |",
+        f"| Avg documents indexed | {_num(brain_hub_without['document_avg_count'])} | {_num(brain_hub_with['document_avg_count'])} | {_num(brain_hub_with['document_avg_count'] - brain_hub_without['document_avg_count'])} | Average Brain Hub documents available to route |",
+        f"| Audit failure count | {_num(brain_hub_without['failure_count'], 0)} | {_num(brain_hub_with['failure_count'], 0)} | {_num(brain_hub_with['failure_count'] - brain_hub_without['failure_count'], 0)} | Lower means fewer doc-code reality gaps |",
+        f"| Guidance phases | {', '.join(brain_hub_without['phases']) or 'none'} | {', '.join(brain_hub_with['phases']) or 'none'} | n/a | Phase guidance exposed to route |",
         "",
         "## Capability Coverage Matrix",
         "",

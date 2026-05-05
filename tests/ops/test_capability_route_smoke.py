@@ -319,6 +319,25 @@ def test_route_quality_gate_fails_on_over_selection_and_low_funnel():
     assert "route_quality_unnecessary_selected_above_threshold" in codes
 
 
+def test_brain_hub_guidance_gate_fails_when_missing_or_audit_failed():
+    failures = capability_route_smoke.validate_brain_hub_guidance_gate(
+        [
+            {
+                "suite": "route_oracles",
+                "tasks": 2,
+                "brain_hub_guidance": {
+                    "present_total": 1,
+                    "audit_passed_total": 0,
+                },
+            }
+        ]
+    )
+
+    codes = {code for item in failures for code in (item.get("row_failures") or [])}
+    assert "brain_hub_guidance_missing" in codes
+    assert "brain_hub_guidance_audit_failed" in codes
+
+
 def test_nine_capability_identity_union_fails_when_belief_missing():
     summaries = [
         {

@@ -427,6 +427,42 @@ def validate_route_quality_gate(summaries: list[dict[str, Any]]) -> list[dict[st
     return failures
 
 
+def validate_brain_hub_guidance_gate(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for summary in summaries:
+        tasks = int(summary.get("tasks", 0) or 0)
+        if tasks <= 0:
+            continue
+        guidance = summary.get("brain_hub_guidance") or {}
+        guidance = guidance if isinstance(guidance, dict) else {}
+        present = int(guidance.get("present_total", 0) or 0)
+        audit_passed = int(guidance.get("audit_passed_total", 0) or 0)
+        row_failures: list[str] = []
+        if present < tasks:
+            row_failures.append("brain_hub_guidance_missing")
+        if audit_passed < tasks:
+            row_failures.append("brain_hub_guidance_audit_failed")
+        if row_failures:
+            failures.append(
+                {
+                    "task_id": "__brain_hub_guidance__",
+                    "suite": summary.get("suite"),
+                    "status": "SUMMARY",
+                    "semantic_status": "SUMMARY",
+                    "missing": [],
+                    "failure_reasons": {
+                        "brain_hub_guidance": {
+                            "tasks": tasks,
+                            "present_total": present,
+                            "audit_passed_total": audit_passed,
+                        }
+                    },
+                    "row_failures": row_failures,
+                }
+            )
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the fixed Nexus capability route smoke suite.")
     parser.add_argument("--repo-root", default=".", help="Repository root.")
@@ -441,6 +477,7 @@ def main(argv: list[str] | None = None) -> int:
         if not any(bool(summary.get("infra_invalid")) for summary in summaries):
             failures.extend(validate_nine_capability_identity(summaries))
             failures.extend(validate_route_quality_gate(summaries))
+            failures.extend(validate_brain_hub_guidance_gate(summaries))
     payload = {
         "schema_version": "nexus_capability_route_smoke.v1",
         "diagnostic_type": "receipt_diagnostic",
