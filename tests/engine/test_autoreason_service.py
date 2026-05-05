@@ -1,6 +1,24 @@
 from nexus.engine.autoreason_service import AutoreasonService
 
 
+class FakeSemanticJudge:
+    name = "fake_semantic"
+
+    def rank(self, *, task_desc, candidates):
+        return {
+            "judge": self.name,
+            "ranking": ["b", "a"],
+            "reason": "semantic_evidence_matches_failure",
+            "rubric": {
+                "correctness": 0.95,
+                "regression_risk": 0.1,
+                "evidence_quality": 0.9,
+                "minimality": 0.8,
+                "semantic_fit": 0.95,
+            },
+        }
+
+
 def test_autoreason_selects_evidence_backed_candidate():
     out = AutoreasonService().run(
         [
@@ -65,3 +83,30 @@ def test_autoreason_candidate_factory_from_summaries_emits_a_b_ab_contract():
     out = svc.run(candidates=factory["candidates"], task_desc="fix edge case", judge_count=7)
 
     assert out["winner"] == "AB"
+
+
+def test_autoreason_semantic_judge_can_beat_evidence_count_heuristic():
+    out = AutoreasonService(judge_providers=[FakeSemanticJudge()]).run(
+        [
+            {
+                "candidate_id": "a",
+                "summary": "long patch with many generic logs",
+                "score": 0.8,
+                "evidence_refs": ["log1", "log2", "log3", "log4"],
+            },
+            {
+                "candidate_id": "b",
+                "summary": "fixes timeout race with targeted regression test",
+                "score": 0.6,
+                "evidence_refs": ["tests/test_timeout.py::test_race"],
+            },
+        ],
+        task_desc="fix timeout race without regression",
+        stop_threshold=1,
+        judge_count=3,
+    )
+
+    assert out["winner"] == "b"
+    assert out["judge_mode"] == "semantic"
+    assert out["semantic_judged"] is True
+    assert out["judge_votes"][0]["rubric"]["semantic_fit"] == 0.95

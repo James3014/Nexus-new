@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 import re
 
 
@@ -12,15 +12,24 @@ class DocScoutHit:
     score: float
     source: str
     snippet: str
+    source_url: str = ""
+
+
+class ExternalScoutProvider(Protocol):
+    name: str
+
+    def search(self, query: str, *, tokens: list[str], limit: int) -> list[dict[str, Any]]:
+        ...
 
 
 class DocScoutAdapter:
     """Lightweight local doc scout for research-stage context retrieval."""
 
-    def __init__(self, project_root: Path) -> None:
+    def __init__(self, project_root: Path, *, external_providers: list[ExternalScoutProvider] | None = None) -> None:
         self.project_root = Path(project_root).resolve()
+        self.external_providers = list(external_providers or [])
 
-    def search(self, query: str, *, limit: int = 8) -> dict[str, Any]:
+    def search(self, query: str, *, limit: int = 8, include_external: bool = False) -> dict[str, Any]:
         tokens = self._tokens(query)
         if not tokens:
             return self._empty(query)
@@ -55,12 +64,17 @@ class DocScoutAdapter:
                         )
                     )
 
+        external_enabled = bool(include_external and self.external_providers)
+        if external_enabled:
+            hits.extend(self._scan_external(query, tokens, limit=limit))
+
         ranked = sorted(hits, key=lambda item: item.score, reverse=True)[: max(1, int(limit))]
         retrieval_hints = [f"{item.source}:{Path(item.path).name}" for item in ranked]
         confidence = min(1.0, round(sum(item.score for item in ranked) / max(1.0, len(tokens) * 3.0), 4))
         return {
             "query": query,
             "status": "SUCCESS",
+            "external_enabled": external_enabled,
             "hits_count": len(ranked),
             "confidence": confidence,
             "retrieval_hints": retrieval_hints,
@@ -70,10 +84,35 @@ class DocScoutAdapter:
                     "score": round(item.score, 4),
                     "source": item.source,
                     "snippet": item.snippet,
+                    "source_url": item.source_url,
                 }
                 for item in ranked
             ],
         }
+
+    def _scan_external(self, query: str, tokens: list[str], *, limit: int) -> list[DocScoutHit]:
+        hits: list[DocScoutHit] = []
+        for provider in self.external_providers:
+            try:
+                rows = provider.search(query, tokens=tokens, limit=limit)
+            except Exception:
+                continue
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                source_url = str(row.get("source_url") or row.get("url") or row.get("path") or "").strip()
+                if not source_url:
+                    continue
+                hits.append(
+                    DocScoutHit(
+                        path=str(row.get("path") or source_url),
+                        score=float(row.get("score", 0.0) or 0.0),
+                        source=str(row.get("source") or getattr(provider, "name", "external")),
+                        snippet=str(row.get("snippet") or "")[:220],
+                        source_url=source_url,
+                    )
+                )
+        return hits
 
     def _scan_markdown(self, root: Path, tokens: list[str]) -> list[DocScoutHit]:
         if not root.exists():
@@ -136,6 +175,7 @@ class DocScoutAdapter:
         return {
             "query": query,
             "status": "EMPTY_QUERY",
+            "external_enabled": False,
             "hits_count": 0,
             "confidence": 0.0,
             "retrieval_hints": [],

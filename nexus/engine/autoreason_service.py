@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -33,11 +33,19 @@ class AutoreasonConfig:
         return cls(judge_count=safe_judge, a_streak_threshold=safe_streak)
 
 
+class JudgeProvider(Protocol):
+    name: str
+
+    def rank(self, *, task_desc: str, candidates: list[AutoreasonCandidate]) -> dict[str, Any]:
+        ...
+
+
 class AutoreasonService:
     """Deterministic autoreason engine with candidate factory + blind Borda panel."""
 
-    def __init__(self, *, judge_count: int = 3) -> None:
+    def __init__(self, *, judge_count: int = 3, judge_providers: list[JudgeProvider] | None = None) -> None:
         self.config = AutoreasonConfig.from_values(judge_count=judge_count, a_streak_threshold=2)
+        self.judge_providers = list(judge_providers or [])
 
     def candidate_factory(
         self,
@@ -167,7 +175,10 @@ class AutoreasonService:
             judge_count=self.config.judge_count if judge_count is None else judge_count,
             a_streak_threshold=stop_threshold,
         )
-        judge_votes = [self._vote(judge, parsed) for judge in self._build_judge_panel(cfg.judge_count)]
+        judge_votes = self._semantic_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
+        judge_mode = "semantic" if judge_votes else "heuristic_fallback"
+        if not judge_votes:
+            judge_votes = [self._vote(judge, parsed) for judge in self._build_judge_panel(cfg.judge_count)]
         borda_scores = {candidate.candidate_id: 0 for candidate in parsed}
         for vote in judge_votes:
             for rank, candidate_id in enumerate(vote["ranking"]):
@@ -183,6 +194,8 @@ class AutoreasonService:
             "winner": winner.candidate_id,
             "judge_votes": judge_votes,
             "judge_count": cfg.judge_count,
+            "judge_mode": judge_mode,
+            "semantic_judged": judge_mode == "semantic",
             "borda_scores": borda_scores,
             "stop_reason": stop_reason,
             "winner_role": winner.candidate_id if winner.candidate_id in {"A", "B", "AB"} else "legacy",
@@ -199,6 +212,38 @@ class AutoreasonService:
             "stability",
         ]
         return strategies[: max(3, min(7, judge_count))]
+
+    def _semantic_votes(
+        self,
+        *,
+        task_desc: str,
+        candidates: list[AutoreasonCandidate],
+        judge_count: int,
+    ) -> list[dict[str, Any]]:
+        if not self.judge_providers:
+            return []
+        votes: list[dict[str, Any]] = []
+        safe_count = max(1, min(7, int(judge_count or 3)))
+        valid_ids = {item.candidate_id for item in candidates}
+        for index in range(safe_count):
+            provider = self.judge_providers[index % len(self.judge_providers)]
+            try:
+                vote = provider.rank(task_desc=task_desc, candidates=list(candidates))
+            except Exception:
+                return []
+            ranking = [str(item) for item in vote.get("ranking", []) if str(item) in valid_ids]
+            for candidate in candidates:
+                if candidate.candidate_id not in ranking:
+                    ranking.append(candidate.candidate_id)
+            votes.append(
+                {
+                    "judge": str(vote.get("judge") or getattr(provider, "name", f"semantic-{index + 1}")),
+                    "ranking": ranking,
+                    "reason": str(vote.get("reason") or "semantic_blind_rank"),
+                    "rubric": vote.get("rubric") if isinstance(vote.get("rubric"), dict) else {},
+                }
+            )
+        return votes
 
     def _vote(self, judge: str, candidates: list[AutoreasonCandidate]) -> dict[str, Any]:
         if judge == "evidence":
