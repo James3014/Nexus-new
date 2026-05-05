@@ -125,6 +125,8 @@ class ContextHub:
             
         state = state_view or self.state_io.load_global_state()
         task_type = state.metadata.get("task_type", "standard")
+        receipt_summary = self._receipt_summary(state)
+        receipt_gap_reason = self._receipt_gap_reason(state, receipt_summary)
         
         # 🧪 [Wisdom Layer] 動態判斷是否需要 NAS 自動調優
         complexity_score = context.get("complexity_score", 0.0)
@@ -135,9 +137,52 @@ class ContextHub:
             "mode": task_type, 
             "priority": "high" if autotune_needed else "normal",
             "audit_level": self._determine_audit_level(task_type, state),
-            "nas_autotune_needed": autotune_needed
+            "nas_autotune_needed": autotune_needed,
+            "receipt_summary": receipt_summary,
         }
+        if receipt_gap_reason:
+            decision["audit_level"] = "full"
+            decision["receipt_gap_reason"] = receipt_gap_reason
         return decision
+
+    def _receipt_summary(self, state: Any) -> Dict[str, int]:
+        if hasattr(state, "receipt_summary"):
+            try:
+                summary = state.receipt_summary()
+            except Exception:
+                summary = {}
+            if isinstance(summary, dict):
+                return {key: int(summary.get(key, 0) or 0) for key in ("selected", "invoked", "evidence", "gate")}
+        return {"selected": 0, "invoked": 0, "evidence": 0, "gate": 0}
+
+    def _receipt_gap_reason(self, state: Any, summary: Dict[str, int]) -> str:
+        receipts = list(getattr(state, "route_receipts", None) or []) + list(getattr(state, "report_receipts", None) or [])
+        non_actionable = {"feature_flag_disabled", "recommended_without_invocation", "pending_executor"}
+        for receipt in receipts:
+            if not isinstance(receipt, dict):
+                continue
+            reason = str(receipt.get("failure_reason") or receipt.get("reason") or receipt.get("status_reason") or "")
+            if reason in non_actionable:
+                continue
+            if bool(receipt.get("selected")) and not bool(receipt.get("invoked")):
+                return "selected_without_invocation"
+            if bool(receipt.get("invoked")) and not bool(receipt.get("evidence_present")):
+                return "invoked_without_evidence"
+            if bool(receipt.get("evidence_present")) and not bool(receipt.get("gate_passed")):
+                return "evidence_without_gate"
+        if receipts:
+            return ""
+        selected = int(summary.get("selected", 0) or 0)
+        invoked = int(summary.get("invoked", 0) or 0)
+        evidence = int(summary.get("evidence", 0) or 0)
+        gate = int(summary.get("gate", 0) or 0)
+        if selected > invoked:
+            return "selected_without_invocation"
+        if invoked > evidence:
+            return "invoked_without_evidence"
+        if evidence > gate:
+            return "evidence_without_gate"
+        return ""
 
     def _is_benchmark_run(self, context: Dict) -> bool:
         return bool(context.get("benchmark_run"))

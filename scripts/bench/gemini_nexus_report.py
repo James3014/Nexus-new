@@ -289,6 +289,11 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
             "claim_probe_gate_pass_rate": 0.0,
             "autoreason_ab_factory_ready_rate": 0.0,
             "autoreason_ab_winner_rate": 0.0,
+            "governance_event_present_rate": 0.0,
+            "governance_event_avg_count": 0.0,
+            "evidence_accepted_event_rate": 0.0,
+            "learning_decision_event_rate": 0.0,
+            "audit_failed_event_rate": 0.0,
         }
     present = 0
     blocked = 0
@@ -302,6 +307,11 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
     claim_probe_gate = 0
     ab_factory_ready = 0
     ab_winner = 0
+    governance_event_present = 0
+    governance_event_count = 0
+    evidence_accepted_event = 0
+    learning_decision_event = 0
+    audit_failed_event = 0
     for row in rows:
         preflight = _jsonish(row.get("research_preflight"), {})
         preflight = preflight if isinstance(preflight, dict) else {}
@@ -338,6 +348,27 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
             ab_factory_ready += 1
         if str(row.get("autoreason_winner_role") or row.get("autoreason_winner") or "") == "AB":
             ab_winner += 1
+        governance_events = _jsonish(row.get("governance_events"), [])
+        governance_events = governance_events if isinstance(governance_events, list) else []
+        governance_types = {
+            str(item.get("event_type") or "")
+            for item in governance_events
+            if isinstance(item, dict) and str(item.get("event_type") or "")
+        }
+        if not governance_types:
+            row_types = _jsonish(row.get("governance_event_types"), [])
+            if isinstance(row_types, list):
+                governance_types = {str(item) for item in row_types if str(item)}
+        count = int(row.get("governance_event_count") or len(governance_events) or len(governance_types))
+        governance_event_count += count
+        if count > 0 or governance_types:
+            governance_event_present += 1
+        if "evidence_accepted" in governance_types:
+            evidence_accepted_event += 1
+        if "learning_decision" in governance_types:
+            learning_decision_event += 1
+        if "audit_failed" in governance_types:
+            audit_failed_event += 1
     return {
         "preflight_present_rate": present / total,
         "preflight_blocked_rate": blocked / total,
@@ -351,6 +382,11 @@ def _research_preflight_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
         "claim_probe_gate_pass_rate": (claim_probe_gate / claim_probe_eligible) if claim_probe_eligible else 1.0,
         "autoreason_ab_factory_ready_rate": ab_factory_ready / total,
         "autoreason_ab_winner_rate": ab_winner / total,
+        "governance_event_present_rate": governance_event_present / total,
+        "governance_event_avg_count": governance_event_count / total,
+        "evidence_accepted_event_rate": evidence_accepted_event / total,
+        "learning_decision_event_rate": learning_decision_event / total,
+        "audit_failed_event_rate": audit_failed_event / total,
     }
 
 
@@ -926,6 +962,11 @@ def render_markdown_report(
         f"| Claim probe gate pass | {_pct(research_preflight_without['claim_probe_gate_pass_rate'])} | {_pct(research_preflight_with['claim_probe_gate_pass_rate'])} | {_pct(research_preflight_with['claim_probe_gate_pass_rate'] - research_preflight_without['claim_probe_gate_pass_rate'])} | Eligible probes allowed the patch with evidence |",
         f"| Autoreason A/B/AB factory ready | {_pct(research_preflight_without['autoreason_ab_factory_ready_rate'])} | {_pct(research_preflight_with['autoreason_ab_factory_ready_rate'])} | {_pct(research_preflight_with['autoreason_ab_factory_ready_rate'] - research_preflight_without['autoreason_ab_factory_ready_rate'])} | Candidate tournament had A/B/AB roles |",
         f"| Autoreason AB winner | {_pct(research_preflight_without['autoreason_ab_winner_rate'])} | {_pct(research_preflight_with['autoreason_ab_winner_rate'])} | {_pct(research_preflight_with['autoreason_ab_winner_rate'] - research_preflight_without['autoreason_ab_winner_rate'])} | Synthesized candidate won blind Borda |",
+        f"| Governance event present | {_pct(research_preflight_without['governance_event_present_rate'])} | {_pct(research_preflight_with['governance_event_present_rate'])} | {_pct(research_preflight_with['governance_event_present_rate'] - research_preflight_without['governance_event_present_rate'])} | Typed governance events reached benchmark rows |",
+        f"| Governance event count | {_num(research_preflight_without['governance_event_avg_count'])} | {_num(research_preflight_with['governance_event_avg_count'])} | {_num(research_preflight_with['governance_event_avg_count'] - research_preflight_without['governance_event_avg_count'])} | Average typed governance events per row |",
+        f"| Evidence accepted event | {_pct(research_preflight_without['evidence_accepted_event_rate'])} | {_pct(research_preflight_with['evidence_accepted_event_rate'])} | {_pct(research_preflight_with['evidence_accepted_event_rate'] - research_preflight_without['evidence_accepted_event_rate'])} | Verified artifacts emit evidence_accepted |",
+        f"| Learning decision event | {_pct(research_preflight_without['learning_decision_event_rate'])} | {_pct(research_preflight_with['learning_decision_event_rate'])} | {_pct(research_preflight_with['learning_decision_event_rate'] - research_preflight_without['learning_decision_event_rate'])} | LearningSteward decision is visible to reports |",
+        f"| Audit failed event | {_pct(research_preflight_without['audit_failed_event_rate'])} | {_pct(research_preflight_with['audit_failed_event_rate'])} | {_pct(research_preflight_with['audit_failed_event_rate'] - research_preflight_without['audit_failed_event_rate'])} | Failed evidence paths emit audit_failed |",
         "",
         "## Capability Activation Details",
         "",

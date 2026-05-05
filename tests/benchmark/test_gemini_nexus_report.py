@@ -395,6 +395,11 @@ def test_render_markdown_report_includes_research_preflight_metrics(tmp_path):
                 "claim_probe": {"eligible": True, "gate_passed": True},
                 "autoreason_candidate_factory_status": "READY",
                 "autoreason_winner_role": "AB",
+                "governance_events": [
+                    {"event_type": "evidence_accepted", "evidence_id": "artifact:a:tests_passed"},
+                    {"event_type": "learning_decision", "action": "INGEST"},
+                ],
+                "governance_event_count": 2,
             }
         )
         + "\n",
@@ -418,6 +423,10 @@ def test_render_markdown_report_includes_research_preflight_metrics(tmp_path):
     assert "| Claim probe gate pass | 100.0% | 100.0% | 0.0% |" in out
     assert "| Autoreason A/B/AB factory ready | 0.0% | 100.0% | 100.0% |" in out
     assert "| Autoreason AB winner | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Governance event present | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Governance event count | 0.00 | 2.00 | 2.00 |" in out
+    assert "| Evidence accepted event | 0.0% | 100.0% | 100.0% |" in out
+    assert "| Learning decision event | 0.0% | 100.0% | 100.0% |" in out
 
 
 def test_render_markdown_report_includes_lift_and_wearing_evidence(tmp_path):

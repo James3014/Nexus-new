@@ -55,6 +55,7 @@ def test_context_hub_accepts_injected_dependencies_and_state_view(tmp_path):
     assert hub.belief_engine is deps.belief_engine
     assert decision["mode"] == "conversation"
     assert decision["audit_level"] == "skip"
+    assert decision["receipt_summary"] == {"selected": 0, "invoked": 0, "evidence": 0, "gate": 0}
 
 
 def test_state_view_summarizes_route_and_report_receipts():
@@ -65,6 +66,58 @@ def test_state_view_summarizes_route_and_report_receipts():
     )
 
     assert view.receipt_summary() == {"selected": 2, "invoked": 1, "evidence": 1, "gate": 1}
+
+
+def test_context_hub_promotes_audit_when_receipts_have_actionable_gap(tmp_path):
+    hub = ContextHub(
+        str(tmp_path),
+        deps=ContextDependencies(
+            memory_service=SimpleNamespace(cached_search=lambda _query: {"reminders": []}),
+            wisdom_vault=SimpleNamespace(),
+            belief_engine=SimpleNamespace(),
+            knowledge_injector=SimpleNamespace(),
+        ),
+    )
+
+    decision = hub.make_pre_routing_decision(
+        "receipt-gap-task",
+        {},
+        state_view=StateView(
+            metadata={"task_type": "conversation"},
+            conversation_metadata={},
+            route_receipts=[{"selected": True, "invoked": False}],
+        ),
+    )
+
+    assert decision["receipt_summary"] == {"selected": 1, "invoked": 0, "evidence": 0, "gate": 0}
+    assert decision["audit_level"] == "full"
+    assert decision["receipt_gap_reason"] == "selected_without_invocation"
+
+
+def test_context_hub_ignores_non_actionable_receipt_gap(tmp_path):
+    hub = ContextHub(
+        str(tmp_path),
+        deps=ContextDependencies(
+            memory_service=SimpleNamespace(cached_search=lambda _query: {"reminders": []}),
+            wisdom_vault=SimpleNamespace(),
+            belief_engine=SimpleNamespace(),
+            knowledge_injector=SimpleNamespace(),
+        ),
+    )
+
+    decision = hub.make_pre_routing_decision(
+        "non-actionable-gap",
+        {},
+        state_view=StateView(
+            metadata={"task_type": "conversation"},
+            conversation_metadata={},
+            route_receipts=[{"selected": True, "invoked": False, "reason": "feature_flag_disabled"}],
+        ),
+    )
+
+    assert decision["receipt_summary"] == {"selected": 1, "invoked": 0, "evidence": 0, "gate": 0}
+    assert decision["audit_level"] == "skip"
+    assert "receipt_gap_reason" not in decision
 
 
 def test_learning_steward_emits_single_learning_action():

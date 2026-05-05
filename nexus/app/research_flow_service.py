@@ -26,6 +26,7 @@ from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.autoreason_service import AutoreasonService
+from nexus.core.event_bus import NexusEventBus
 from nexus.research.doc_scout_adapter import DocScoutAdapter
 from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
 from nexus.research.research_runtime_contracts import build_claim_probe, build_research_doctor
@@ -979,6 +980,83 @@ def _research_session_packet(
         "preflight_decision": str(research_preflight.get("decision") or ""),
         "source_projects": list(RESEARCH_SOURCE_PROJECTS),
         "research_stack": research_stack_contract(),
+    }
+
+
+def _governance_events_packet(
+    *,
+    repo_root: Path,
+    task_id: str | None,
+    receipt_slug: str,
+    artifact_verified: bool,
+    claim_probe: dict[str, Any],
+) -> dict[str, Any]:
+    task_ref = task_id or receipt_slug
+    events: list[dict[str, Any]] = []
+    reasons: list[str] = []
+    if not artifact_verified:
+        reasons.append("artifact_unverified")
+    if bool(claim_probe.get("eligible")) and not bool(claim_probe.get("gate_passed")):
+        reasons.append("claim_probe_gate_failed")
+
+    if artifact_verified:
+        events.append(
+            {
+                "event_type": "evidence_accepted",
+                "task_id": task_ref,
+                "evidence_id": f"artifact:{receipt_slug}:tests_passed",
+                "evidence_type": "artifact",
+            }
+        )
+    else:
+        events.append(
+            {
+                "event_type": "audit_failed",
+                "task_id": task_ref,
+                "reason": ",".join(reasons) or "artifact_unverified",
+                "evidence_id": "",
+            }
+        )
+    events.append(
+        {
+            "event_type": "learning_decision",
+            "task_id": task_ref,
+            "action": "INGEST" if artifact_verified else "DISCARD",
+            "reasons": reasons,
+        }
+    )
+
+    try:
+        NexusEventBus.configure(repo_root)
+        for event in events:
+            event_type = str(event.get("event_type") or "")
+            if event_type == "evidence_accepted":
+                NexusEventBus.emit_evidence_accepted(
+                    task_id=task_ref,
+                    evidence_id=str(event.get("evidence_id") or ""),
+                    evidence_type=str(event.get("evidence_type") or ""),
+                )
+            elif event_type == "audit_failed":
+                NexusEventBus.emit_audit_failure(
+                    task_id=task_ref,
+                    reason=str(event.get("reason") or ""),
+                    evidence_id=str(event.get("evidence_id") or ""),
+                )
+            elif event_type == "learning_decision":
+                NexusEventBus.emit_learning_decision(
+                    task_id=task_ref,
+                    action=str(event.get("action") or ""),
+                    reasons=list(event.get("reasons", []) or []),
+                )
+    except Exception:
+        pass
+
+    return {
+        "events": events,
+        "summary": {
+            "event_count": len(events),
+            "event_types": sorted({str(item.get("event_type") or "") for item in events if item.get("event_type")}),
+        },
     }
 
 
@@ -2572,6 +2650,15 @@ def run_auto_flow(
     claim_probe = build_claim_probe(task_desc=task_desc, route=route, artifact_verified=artifact_verified)
     nexus_usage_trace["research_doctor"] = research_doctor
     nexus_usage_trace["claim_probe"] = claim_probe
+    governance_events = _governance_events_packet(
+        repo_root=repo_root,
+        task_id=task_id,
+        receipt_slug=receipt_slug,
+        artifact_verified=artifact_verified,
+        claim_probe=claim_probe,
+    )
+    nexus_usage_trace["governance_events"] = governance_events["events"]
+    nexus_usage_trace["governance_event_summary"] = governance_events["summary"]
     nexus_usage_trace["capabilities"]["research_doctor_score"] = research_doctor["score"]
     nexus_usage_trace["capabilities"]["research_doctor_gate_passed"] = research_doctor["status"] == "PASS"
     nexus_usage_trace["capabilities"]["claim_probe_eligible"] = claim_probe["eligible"]

@@ -2128,7 +2128,8 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     ar = payload["nexus_usage_trace"]["autoreason"]
     assert ar["enabled"] is True
     assert ar["status"] == "SUCCESS"
-    assert ar["winner"] == "candidate-2"
+    assert ar["winner"] == "AB"
+    assert ar["winner_role"] == "AB"
     assert isinstance(ar["borda_scores"], dict)
     receipts = {item["name"]: item for item in payload["nexus_usage_trace"]["capability_receipts"]}
     assert receipts["autoreason"]["public_claim_safe"] is True
@@ -2146,6 +2147,12 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert payload["research_session"]["status"] == "keep"
     assert payload["research_session"]["research_stack"]["checkpoints"][0]["id"] == "fixed_budget_metric_contract"
     assert payload["nexus_usage_trace"]["research_session"]["logged"] is True
+    governance_events = payload["nexus_usage_trace"]["governance_events"]
+    governance_event_types = {item["event_type"] for item in governance_events}
+    assert governance_event_types == {"evidence_accepted", "learning_decision"}
+    assert payload["nexus_usage_trace"]["governance_event_summary"]["event_count"] == 2
+    event_log = tmp_path / ".nexus" / "events" / "event_log.jsonl"
+    assert "evidence_accepted" in event_log.read_text(encoding="utf-8")
 
 
 def test_auto_flow_writes_explicit_output_file(tmp_path: Path):
