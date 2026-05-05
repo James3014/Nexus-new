@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from nexus.engine.capability_aliases import normalize_capability_name
 from scripts.bench.ab_eval import compare_datasets, load_runs
 
 
@@ -15,6 +16,7 @@ _PUBLIC_CLAIM_CAPABILITIES = {
     "codeintel",
     "ddtree",
     "drone",
+    "judge_panel",
     "nightshift",
     "swarm",
     "ultra_review",
@@ -170,13 +172,14 @@ def _coverage_route_quality_actionable(name: str, item: dict[str, Any]) -> bool:
         return True
     if any(float(item.get(f"{key}_count", 0) or 0) > 0 for key in ("invoked", "evidence", "gate", "outcome")):
         return True
-    if str(name) not in _PUBLIC_CLAIM_CAPABILITIES:
+    canonical_name = normalize_capability_name(name)
+    if canonical_name not in _PUBLIC_CLAIM_CAPABILITIES:
         return False
     if float(item.get("selected_count", 0) or 0) <= 0:
         return False
     failure_reasons = item.get("failure_reasons", {})
     reasons = {str(reason) for reason in failure_reasons if str(reason).strip()} if isinstance(failure_reasons, dict) else set()
-    return not (reasons and reasons <= _route_quality_ignored_reasons(str(name)))
+    return not (reasons and reasons <= _route_quality_ignored_reasons(canonical_name))
 
 
 def _route_quality_metrics(report: dict[str, Any], arm: str) -> dict[str, float]:
@@ -234,7 +237,7 @@ def _research_receipts(row: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _receipt_route_quality_actionable(receipt: dict[str, Any]) -> bool:
-    name = str(receipt.get("name") or receipt.get("capability") or "").strip()
+    name = normalize_capability_name(receipt.get("name") or receipt.get("capability"))
     if not name:
         return False
     if bool(receipt.get("public_claim_safe")):
@@ -510,7 +513,8 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(item, dict):
             failures.append(f"{name}:invalid_coverage")
             continue
-        if str(name) not in _PUBLIC_CLAIM_CAPABILITIES:
+        canonical_name = normalize_capability_name(name)
+        if canonical_name not in _PUBLIC_CLAIM_CAPABILITIES:
             continue
         selected = float(item.get("selected_rate", 0.0) or 0.0)
         if selected <= 0:
@@ -519,7 +523,7 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
             failures.append(f"{name}:receipt_source_missing")
             continue
         if item.get("public_safe"):
-            public_safe.append(str(name))
+            public_safe.append(canonical_name)
         else:
             failure_reasons = item.get("failure_reasons", {})
             if isinstance(failure_reasons, dict):
@@ -635,7 +639,7 @@ def _row_public_safe_capabilities(row: dict[str, Any]) -> set[str]:
         if not isinstance(receipt, dict):
             continue
         if receipt.get("public_claim_safe"):
-            name = str(receipt.get("name") or "").strip()
+            name = normalize_capability_name(receipt.get("name"))
             if name:
                 names.add(name)
     return names

@@ -471,6 +471,13 @@ def test_all_core_receipts_explain_unproven_selection():
         assert receipts[name].failure_reason
 
 
+def test_capability_receipts_canonicalize_legacy_aliases():
+    receipts = {item.name: item for item in build_trace_receipts(plan={"selected_capabilities": ["llm_judge_panel"]}, capabilities={})}
+
+    assert set(receipts) == {"judge_panel"}
+    assert receipts["judge_panel"].failure_reason == "selected_without_invocation"
+
+
 def test_core_gate_receipts_require_specific_evidence_before_public_claim():
     plan = {
         "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"],

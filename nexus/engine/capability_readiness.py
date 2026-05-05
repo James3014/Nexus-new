@@ -17,6 +17,7 @@ CORE_CAPABILITIES = (
     "drone",
     "ultra_review",
     "autoreason",
+    "judge_panel",
     "ddtree",
     "memory",
     "lancedb",

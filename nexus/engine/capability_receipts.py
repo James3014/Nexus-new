@@ -2,17 +2,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from nexus.engine.capability_aliases import normalize_capability_name, normalize_capability_names
 from nexus.engine.capability_contracts import CapabilityPlan, CapabilityReceipt, SkillReceipt
 from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS, merge_capability_receipt
 
 
 def _selected_capabilities(plan: CapabilityPlan | dict[str, Any]) -> list[str]:
-    return plan.selected_capabilities if isinstance(plan, CapabilityPlan) else plan.get("selected_capabilities", []) or []
+    selected = plan.selected_capabilities if isinstance(plan, CapabilityPlan) else plan.get("selected_capabilities", []) or []
+    return normalize_capability_names(selected)
 
 
 def _pending_capabilities(plan: CapabilityPlan | dict[str, Any]) -> set[str]:
     pending = plan.pending_capabilities if isinstance(plan, CapabilityPlan) else plan.get("pending_capabilities", []) or []
-    return {str(name) for name in pending}
+    return set(normalize_capability_names(pending))
 
 
 def _pending_receipt(name: str, receipt: CapabilityReceipt | None = None) -> CapabilityReceipt:
@@ -32,7 +34,7 @@ def selected_receipts(plan: CapabilityPlan | dict[str, Any]) -> list[CapabilityR
     pending = _pending_capabilities(plan)
     receipts = []
     for name in _selected_capabilities(plan):
-        capability = str(name)
+        capability = normalize_capability_name(name)
         receipts.append(_pending_receipt(capability) if capability in pending else CapabilityReceipt(name=capability, selected=True))
     return receipts
 
@@ -57,6 +59,7 @@ def build_trace_receipts(
     receipts: list[CapabilityReceipt] = []
 
     for name in sorted(selected):
+        name = normalize_capability_name(name)
         adapter = RECEIPT_ADAPTERS.get(name)
         if adapter:
             payload = {

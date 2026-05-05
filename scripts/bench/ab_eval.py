@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.contracts import RuleLifecycleEvidence, recommend_rule_state
+from nexus.engine.capability_aliases import normalize_capability_name, normalize_capability_receipt
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -274,7 +275,11 @@ def _row_capability_receipts(row: dict[str, Any]) -> list[dict[str, Any]]:
             return []
     if not isinstance(payload, list):
         return []
-    return [item for item in payload if isinstance(item, dict) and str(item.get("name") or "").strip()]
+    return [
+        normalize_capability_receipt(item)
+        for item in payload
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
 
 
 def _coverage_from_receipts(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -283,7 +288,7 @@ def _coverage_from_receipts(rows: list[dict[str, Any]]) -> dict[str, Any] | None
     total = len(rows)
     capabilities = sorted(
         {
-            str(receipt.get("name"))
+            normalize_capability_name(receipt.get("name"))
             for row in rows
             for receipt in _row_capability_receipts(row)
             if str(receipt.get("name") or "").strip()

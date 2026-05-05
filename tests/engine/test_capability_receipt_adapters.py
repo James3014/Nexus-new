@@ -193,3 +193,24 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
     for name, receipt in proven.items():
         assert receipt.public_claim_safe is True, name
         assert receipt.evidence_refs
+
+
+def test_legacy_llm_judge_panel_selected_capability_canonicalizes_to_judge_panel():
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["llm_judge_panel", "judge_panel"]},
+            capabilities={
+                "claim_verified": True,
+                "llm_judge_panel_used": True,
+                "llm_judge_panel_votes": [{"judge": "legacy", "ranking": ["B", "A"]}],
+                "llm_judge_panel_winner": "B",
+                "llm_judge_panel_mode": "deterministic_evidence_quality",
+                "llm_judge_panel_report_path": ".nexus/reports/judge/legacy.json",
+                "llm_judge_panel_gate_passed": True,
+            },
+        )
+    }
+
+    assert "llm_judge_panel" not in receipts
+    assert receipts["judge_panel"].public_claim_safe is True

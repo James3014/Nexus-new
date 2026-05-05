@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from nexus.engine.capability_aliases import normalize_capability_names
 from nexus.engine.capability_contracts import (
     CapabilityConstraints,
     CapabilitySignalSet,
@@ -77,9 +78,9 @@ def build_capability_signals(
     autonomic = autonomic if isinstance(autonomic, dict) else {}
     msa = route.get("msa_routing", {}) if isinstance(route, dict) else {}
     msa = msa if isinstance(msa, dict) else {}
-    decision_selected = route_decision.get("selected_capabilities", []) or []
-    decision_acceleration = route_decision.get("acceleration_layers", []) or []
-    decision_governance = route_decision.get("governance_layers", []) or []
+    decision_selected = normalize_capability_names(route_decision.get("selected_capabilities", []) or [])
+    decision_acceleration = normalize_capability_names(route_decision.get("acceleration_layers", []) or [])
+    decision_governance = normalize_capability_names(route_decision.get("governance_layers", []) or [])
     task_lower = f"{task_desc} {task_type}".lower()
     skill_signals = build_skill_signals(skills)
     risk = normalize_risk_score(route_features.get("risk_score"))

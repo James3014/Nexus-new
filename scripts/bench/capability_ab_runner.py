@@ -32,6 +32,7 @@ from nexus.app.research_flow_service import (
     build_route_executor_flags,
     run_auto_flow,
 )
+from nexus.engine.capability_aliases import normalize_capability_name, normalize_capability_names, normalize_capability_receipt
 from nexus.engine.capability_readiness import CORE_CAPABILITIES, build_benchmark_capability_readiness
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipts import build_trace_receipts
@@ -248,14 +249,14 @@ def _expected_capability_receipt_coverage(
     capability_receipts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     receipts = {
-        str(item.get("name") or ""): item
+        normalize_capability_name(item.get("name")): normalize_capability_receipt(item)
         for item in capability_receipts
         if isinstance(item, dict) and str(item.get("name") or "").strip()
     }
     public_safe: list[str] = []
     missing: list[str] = []
     failure_reasons: dict[str, str] = {}
-    for capability in expected_capabilities:
+    for capability in normalize_capability_names(expected_capabilities):
         receipt = receipts.get(capability)
         if not receipt:
             missing.append(capability)
@@ -267,7 +268,7 @@ def _expected_capability_receipt_coverage(
         missing.append(capability)
         failure_reasons[capability] = str(receipt.get("failure_reason") or "receipt_not_public_safe")
     return {
-        "expected": list(expected_capabilities),
+        "expected": normalize_capability_names(expected_capabilities),
         "public_safe": public_safe,
         "missing": missing,
         "failure_reasons": failure_reasons,
@@ -282,14 +283,14 @@ def _ensure_expected_capability_receipts(
     codeintel: dict[str, Any],
 ) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = [
-        dict(item) for item in capability_receipts if isinstance(item, dict)
+        normalize_capability_receipt(item) for item in capability_receipts if isinstance(item, dict)
     ]
     receipt_names = {
-        str(item.get("name") or "").strip()
+        normalize_capability_name(item.get("name"))
         for item in normalized
         if isinstance(item, dict)
     }
-    expected = {str(name).strip() for name in expected_capabilities if str(name).strip()}
+    expected = set(normalize_capability_names(expected_capabilities))
     if (
         "codeintel" in expected
         and "codeintel" not in receipt_names
@@ -330,7 +331,7 @@ def _codex_public_plan_subset(
 ) -> dict[str, Any]:
     """Keep Codex public claims aligned with capabilities it actually evidenced."""
 
-    selected = {str(item) for item in task.expected_capabilities if str(item).strip()}
+    selected = set(normalize_capability_names(task.expected_capabilities))
     selected.update({"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"})
     if codeintel:
         selected.add("codeintel")
@@ -1866,7 +1867,7 @@ def _extract_record(
         "repo": task.repo,
         "repo_ref": task.repo_ref,
         "manifest_hash": task.manifest_hash,
-        "expected_capabilities": list(task.expected_capabilities),
+        "expected_capabilities": normalize_capability_names(task.expected_capabilities),
         "capability_activation_contract": task.capability_activation_contract,
         "hidden_oracle_kind": task.hidden_oracle_kind,
         "difficulty": task.difficulty,
