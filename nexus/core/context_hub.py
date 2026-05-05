@@ -42,6 +42,7 @@ class ContextDependencies:
     wisdom_vault: Any | None = None
     belief_engine: Any | None = None
     knowledge_injector: Any | None = None
+    prompt_builder: Any | None = None
 
 class ContextHub:
     """
@@ -58,22 +59,31 @@ class ContextHub:
         skill_registry: Optional[Any] = None,
         mem_palace: Optional[Any] = None,
         deps: ContextDependencies | None = None,
+        strict_deps: bool = False,
     ):
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
         self.state_io = StateIO(project_root, run_dir=run_dir)
+        if strict_deps and deps is None:
+            raise ValueError("strict_deps_requires_context_dependencies")
         deps = deps or ContextDependencies()
-        self.memory_service = deps.memory_service or memory_service or MemoryService(project_root, run_dir=run_dir)
+        self.memory_service = deps.memory_service or memory_service
+        if self.memory_service is None and not strict_deps:
+            self.memory_service = MemoryService(project_root, run_dir=run_dir)
         self.nexus_fs = nexus_fs
         self.skill_registry = skill_registry
         self.mem_palace = mem_palace
         self.wisdom_vault = deps.wisdom_vault  # Will be injected in coordinator or by DI
-        from nexus.services.prompt_builder import PromptBuilder
-
-        self.prompt_builder = PromptBuilder(project_root)
+        if deps.prompt_builder is not None:
+            self.prompt_builder = deps.prompt_builder
+        elif strict_deps:
+            self.prompt_builder = None
+        else:
+            from nexus.services.prompt_builder import PromptBuilder
+            self.prompt_builder = PromptBuilder(project_root)
         
         # 🟢 [Fix-3] WisdomVault Auto-Injection
-        if self.wisdom_vault is None:
+        if self.wisdom_vault is None and not strict_deps:
             try:
                 from nexus.research.wisdom.wisdom_vault import WisdomVault
                 db_path = str(self.project_root / ".nexus" / "knowledge" / "lancedb")
@@ -84,7 +94,7 @@ class ContextHub:
             
         # 🟢 [Fix-1] BeliefEngine Auto-Injection 
         self.belief_engine = deps.belief_engine
-        if self.belief_engine is None:
+        if self.belief_engine is None and not strict_deps:
             try:
                 from nexus.core.belief_engine import BeliefEngine
                 self.belief_engine = BeliefEngine(self.project_root / ".nexus" / "belief_state.json")
@@ -93,6 +103,8 @@ class ContextHub:
             
         if deps.knowledge_injector is not None:
             self.knowledge_injector = deps.knowledge_injector
+        elif strict_deps:
+            self.knowledge_injector = None
         else:
             from nexus.core.knowledge_injector import KnowledgeInjector
             self.knowledge_injector = KnowledgeInjector(

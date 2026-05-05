@@ -84,3 +84,4 @@ class PipelineMetadata(TypedDict, total=False):
     
     # --- Context & Chat (Phase 10) ---
     chat_history: List[Dict[str, Any]]
+    conversation: Dict[str, Any]
