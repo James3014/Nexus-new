@@ -346,6 +346,14 @@ def _activation_note(status: str) -> str:
     return "Not selected in this run."
 
 
+def _capability_activation_visible(name: str, item: dict[str, Any]) -> bool:
+    if str(name) in _PUBLIC_CLAIM_CAPABILITIES:
+        return True
+    if bool(item.get("public_safe")):
+        return True
+    return any(float(item.get(f"{key}_count", 0) or 0) > 0 for key in ("invoked", "evidence", "gate", "outcome"))
+
+
 def _capability_activation_rows(report: dict[str, Any]) -> list[str]:
     coverage = ((report.get("capability_coverage") or {}).get("b") or {})
     total = int(((report.get("b") or {}).get("summary") or {}).get("total_runs", 0) or 0)
@@ -354,6 +362,8 @@ def _capability_activation_rows(report: dict[str, Any]) -> list[str]:
     rows: list[str] = []
     for name in sorted(coverage):
         item = coverage.get(name) or {}
+        if not _capability_activation_visible(str(name), item):
+            continue
         status = _activation_status(item)
         rows.append(
             "| "
@@ -372,7 +382,7 @@ def _capability_activation_rows(report: dict[str, Any]) -> list[str]:
             )
             + " |"
         )
-    return rows
+    return rows or ["| none | not_selected | 0/0 | 0/0 | 0/0 | 0/0 | 0/0 | none | Not selected in this run. |"]
 
 
 def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:

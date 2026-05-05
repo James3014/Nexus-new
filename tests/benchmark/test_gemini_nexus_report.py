@@ -1299,6 +1299,14 @@ def test_render_markdown_report_does_not_fail_gate_for_non_actionable_selected_o
                         "outcome_contributed": False,
                         "failure_reason": "feature_flag_disabled",
                     },
+                    {
+                        "name": "research_route",
+                        "selected": True,
+                        "invoked": False,
+                        "evidence_present": False,
+                        "gate_passed": False,
+                        "outcome_contributed": False,
+                    },
                 ],
             }
         )
@@ -1318,6 +1326,7 @@ def test_render_markdown_report_does_not_fail_gate_for_non_actionable_selected_o
     assert "Capability-specific claim gate: PASS" in out
     assert "| ddtree | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
     assert "| ultra_review | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out
+    assert "| research_route | selected_only |" not in out
 
 
 def test_render_markdown_report_prefers_incomplete_receipts_over_legacy_capability_flags(tmp_path):
