@@ -42,6 +42,10 @@
       "check": "verified_claim_without_evidence",
       "force_rejected": true,
       "word_boundary": false
+    },
+    "historical_hallucination_pattern": {
+      "weight": 2,
+      "source": "learn_mode_citations"
     }
   },
   "thresholds": {"VERIFIED": 2, "PARTIAL": 5, "REJECTED": 6},

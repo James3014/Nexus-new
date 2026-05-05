@@ -241,8 +241,10 @@ class HallucinationGuard:
             svc = LearnModeService(root)
             halluc_hints = svc.ask(topic="hallucination-patterns", question=response_text[:300], top_k=2)
             if halluc_hints.get("citations"):
-                self.score += 2.0
-                self.triggers.append("Claims: historical_hallucination_pattern_matched (+2.0)")
+                metric = self.schema.get("metrics", {}).get("historical_hallucination_pattern", {})
+                weight = float(metric.get("weight", 0.0)) if isinstance(metric, dict) else 0.0
+                if weight > 0:
+                    self._apply_trigger("historical_hallucination_pattern", weight, "learn_mode_citations")
         except Exception:
             pass
 
