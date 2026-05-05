@@ -1,0 +1,23 @@
+{
+  "schema_version": "nexus_brain_hub_manifest.v1",
+  "documents": [
+    {"path": "wiki/arch_diagnosis_brain_hub.md", "status": "audit", "runtime_refs": ["scripts/ops/brain_hub_audit.py"], "test_refs": ["tests/ops/test_brain_hub_audit.py"]},
+    {"path": "wiki/critique_brain_hub_alignment_gap.md", "status": "audit", "runtime_refs": ["nexus/governance/hallucination_guard.py", "nexus/schemas/hallucination_index_v1.json"], "test_refs": ["tests/core/test_hallucination_guard.py"]},
+    {"path": "wiki/critique_brain_hub_layer3_alignment.md", "status": "partial", "runtime_refs": ["nexus/engine/pipeline.py", "nexus/engine/phase_executors.py"], "test_refs": ["tests/engine/test_pipeline_stage_flow.py", "tests/engine/test_phase_executors.py"]},
+    {"path": "wiki/arch_diagnosis_nexus_core.md", "status": "partial", "runtime_refs": ["nexus/core/orchestrator.py", "nexus/core/belief_engine.py"], "test_refs": ["tests/core/test_belief_engine.py"]},
+    {"path": "wiki/refactor_belief_contract_spec.md", "status": "implemented", "runtime_refs": ["nexus/core/belief_contracts.py", "nexus/core/belief_engine.py"], "test_refs": ["tests/core/test_belief_contracts.py", "tests/core/test_belief_engine.py"]},
+    {"path": "wiki/refactor_pipeline_composition_spec.md", "status": "partial", "runtime_refs": ["nexus/engine/phase_plugin.py", "nexus/engine/phase_executors.py"], "test_refs": ["tests/engine/test_phase_plugin.py", "tests/engine/test_phase_executors.py"]},
+    {"path": "wiki/arch_diagnosis_memory_context.md", "status": "partial", "runtime_refs": ["nexus/core/context_hub.py", "nexus/services/memory.py"], "test_refs": ["tests/core/test_belief_engine.py", "tests/test_memory.py"]},
+    {"path": "wiki/refactor_contexthub_provider_spec.md", "status": "partial", "runtime_refs": ["nexus/core/context_hub.py"], "test_refs": ["tests/core/test_belief_engine.py"]},
+    {"path": "wiki/arch_diagnosis_governance_events.md", "status": "partial", "runtime_refs": ["nexus/events/transport.py", "nexus/core/learning_steward.py"], "test_refs": ["tests/core/test_event_bus.py", "tests/core/test_belief_engine.py"]},
+    {"path": "wiki/refactor_governance_steward_spec.md", "status": "partial", "runtime_refs": ["nexus/core/learning_steward.py"], "test_refs": ["tests/core/test_belief_engine.py"]},
+    {"path": "wiki/arch_diagnosis_infra_services.md", "status": "partial", "runtime_refs": ["nexus/infrastructure/storage_implementations.py", "nexus/infrastructure/storage_interfaces.py"], "test_refs": ["tests/infrastructure/test_storage_implementations.py"]},
+    {"path": "wiki/refactor_storage_decoupling_spec.md", "status": "partial", "runtime_refs": ["nexus/infrastructure/storage_implementations.py", "nexus/services/memory.py"], "test_refs": ["tests/infrastructure/test_storage_implementations.py", "tests/test_memory.py"]},
+    {"path": "wiki/arch_diagnosis_safety_telemetry.md", "status": "partial", "runtime_refs": ["nexus/security/secure_sync.py", "nexus/telemetry/tracer.py"], "test_refs": ["tests/security/test_secure_sync.py", "tests/telemetry/test_tracer.py"]},
+    {"path": "wiki/refactor_healing_protocol_spec.md", "status": "partial", "runtime_refs": ["nexus/core/healing_artifacts.py", "nexus/security/secure_sync.py"], "test_refs": ["tests/core/test_healing_artifacts.py", "tests/security/test_secure_sync.py"]},
+    {"path": "wiki/NEXUS_EVOLUTION_MANIFESTO_v25.5.md", "status": "partial", "runtime_refs": ["docs/ops/brain_hub_manifest.json"], "test_refs": ["tests/ops/test_brain_hub_audit.py"]},
+    {"path": "wiki/NEXUS_GOVERNANCE_EXECUTION_PROTOCOL.md", "status": "partial", "runtime_refs": ["nexus/engine/pipeline.py"], "test_refs": ["tests/engine/test_pipeline_stage_flow.py"]},
+    {"path": "wiki/NEXUS_EVOLUTION_ONTOLOGY.md", "status": "partial", "runtime_refs": ["docs/ops/brain_hub_manifest.json"], "test_refs": ["tests/ops/test_brain_hub_audit.py"]},
+    {"path": "wiki/NEXUS_SWARM_EVOLUTION_PROTOCOL.md", "status": "partial", "runtime_refs": ["nexus/core/healing_artifacts.py", "nexus/security/secure_sync.py"], "test_refs": ["tests/core/test_healing_artifacts.py", "tests/security/test_secure_sync.py"]}
+  ]
+}

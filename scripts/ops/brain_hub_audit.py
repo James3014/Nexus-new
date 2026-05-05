@@ -31,6 +31,9 @@ class HubDocument:
     title: str
     phases: list[str] = field(default_factory=list)
     code_refs: list[str] = field(default_factory=list)
+    runtime_refs: list[str] = field(default_factory=list)
+    test_refs: list[str] = field(default_factory=list)
+    manifest_status: str = ""
     physical_status: str = ""
     critical_markers: list[str] = field(default_factory=list)
 
@@ -68,34 +71,72 @@ def _critical_markers(text: str) -> list[str]:
     return markers
 
 
-def _scan_doc(root: Path, path: Path) -> HubDocument:
+def _scan_doc(root: Path, path: Path, manifest_entry: dict[str, Any] | None = None) -> HubDocument:
     text = path.read_text(encoding="utf-8")
     rel = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
     status_match = STATUS_RE.search(text)
     refs = sorted({match.group(1) for match in CODE_REF_RE.finditer(text)})
+    entry = manifest_entry or {}
+    runtime_refs = sorted(str(item) for item in entry.get("runtime_refs", []) if str(item))
+    test_refs = sorted(str(item) for item in entry.get("test_refs", []) if str(item))
     return HubDocument(
         path=rel,
         title=_title_for(text, path),
         phases=_detect_phases(text),
         code_refs=refs,
+        runtime_refs=runtime_refs,
+        test_refs=test_refs,
+        manifest_status=str(entry.get("status") or ""),
         physical_status=status_match.group(1).strip() if status_match else "",
         critical_markers=_critical_markers(text),
     )
 
 
-def scan_brain_hub(root: Path, paths: list[Path]) -> HubAudit:
+def _manifest_entries(root: Path, manifest_path: Path | None) -> list[dict[str, Any]]:
+    if manifest_path is None:
+        return []
+    target = manifest_path if manifest_path.is_absolute() else root / manifest_path
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != "nexus_brain_hub_manifest.v1":
+        raise ValueError("unsupported brain hub manifest schema")
+    docs = payload.get("documents", [])
+    if not isinstance(docs, list):
+        raise ValueError("brain hub manifest documents must be a list")
+    return [item for item in docs if isinstance(item, dict)]
+
+
+def scan_brain_hub(root: Path, paths: list[Path], *, manifest_path: Path | None = None) -> HubAudit:
     docs: list[HubDocument] = []
     failures: list[dict[str, Any]] = []
+    manifest_entries = _manifest_entries(root, manifest_path)
+    if manifest_path is not None:
+        paths = [Path(str(item.get("path") or "")) for item in manifest_entries]
+    entries_by_path = {str(item.get("path") or ""): item for item in manifest_entries}
     for base in paths:
         base_path = base if base.is_absolute() else root / base
         candidates = [base_path] if base_path.is_file() else sorted(base_path.glob("*.md"))
+        if not base_path.exists():
+            failures.append({"path": str(base), "reason": "manifest_document_missing"})
+            continue
         for path in candidates:
             if path.suffix.lower() != ".md" or not path.exists():
                 continue
-            doc = _scan_doc(root, path)
+            rel = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
+            doc = _scan_doc(root, path, entries_by_path.get(rel))
             docs.append(doc)
+            if manifest_path is not None:
+                if not doc.manifest_status:
+                    failures.append({"path": doc.path, "reason": "manifest_status_missing"})
+                if not doc.runtime_refs:
+                    failures.append({"path": doc.path, "reason": "runtime_refs_missing"})
+                if not doc.test_refs:
+                    failures.append({"path": doc.path, "reason": "test_refs_missing"})
+                for ref in doc.runtime_refs + doc.test_refs:
+                    if not (root / ref).exists():
+                        failures.append({"path": doc.path, "reason": "manifest_ref_missing", "ref": ref})
             status = doc.physical_status.upper()
-            if status == "PRODUCTION" and not any(ref.startswith(("nexus/", "scripts/", "tests/")) for ref in doc.code_refs):
+            refs_for_status = set(doc.code_refs) | set(doc.runtime_refs) | set(doc.test_refs)
+            if status == "PRODUCTION" and not any(ref.startswith(("nexus/", "scripts/", "tests/")) for ref in refs_for_status):
                 failures.append(
                     {
                         "path": doc.path,
@@ -128,11 +169,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit Brain Hub docs against runtime references.")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--path", action="append", default=[])
+    parser.add_argument("--manifest", default="")
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root).resolve()
+    manifest = Path(args.manifest) if args.manifest else None
     paths = [Path(item) for item in args.path] if args.path else default_paths(root)
-    audit = scan_brain_hub(root, paths)
+    audit = scan_brain_hub(root, paths, manifest_path=manifest)
     payload = {"schema_version": "nexus_brain_hub_audit.v1", "passed": audit.passed, **asdict(audit)}
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0 if audit.passed else 1

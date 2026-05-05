@@ -39,3 +39,56 @@ def test_brain_hub_reality_gate_fails_production_doc_without_runtime_ref(tmp_pat
             "physical_status": "PRODUCTION",
         }
     ]
+
+
+def test_brain_hub_manifest_requires_status_and_existing_refs(tmp_path: Path):
+    root = tmp_path
+    wiki = root / "wiki"
+    wiki.mkdir()
+    (wiki / "guide.md").write_text("# Guide\n\nPhase S cold-start.\n", encoding="utf-8")
+    (root / "scripts" / "ops").mkdir(parents=True)
+    (root / "tests" / "ops").mkdir(parents=True)
+    (root / "scripts" / "ops" / "brain_hub_audit.py").write_text("# runtime\n", encoding="utf-8")
+    (root / "tests" / "ops" / "test_brain_hub_audit.py").write_text("# tests\n", encoding="utf-8")
+    manifest = root / "docs" / "ops" / "brain_hub_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        """{
+          "schema_version": "nexus_brain_hub_manifest.v1",
+          "documents": [
+            {
+              "path": "wiki/guide.md",
+              "status": "audit",
+              "runtime_refs": ["scripts/ops/brain_hub_audit.py"],
+              "test_refs": ["tests/ops/test_brain_hub_audit.py"]
+            }
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    audit = scan_brain_hub(root, [], manifest_path=manifest)
+
+    assert audit.passed is True
+    assert audit.documents[0].manifest_status == "audit"
+    assert audit.documents[0].runtime_refs == ["scripts/ops/brain_hub_audit.py"]
+    assert audit.guidance["S"] == ["wiki/guide.md"]
+
+
+def test_brain_hub_manifest_fails_missing_document_and_refs(tmp_path: Path):
+    root = tmp_path
+    manifest = root / "manifest.json"
+    manifest.write_text(
+        """{
+          "schema_version": "nexus_brain_hub_manifest.v1",
+          "documents": [
+            {"path": "wiki/missing.md", "status": "", "runtime_refs": ["missing.py"], "test_refs": []}
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    audit = scan_brain_hub(root, [], manifest_path=manifest)
+
+    assert audit.passed is False
+    assert audit.failures == [{"path": "wiki/missing.md", "reason": "manifest_document_missing"}]
