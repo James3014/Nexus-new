@@ -43,6 +43,8 @@ def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_
             "route_decision_invoked_count": 3,
             "route_decision_evidence_count": 3,
             "route_decision_outcome_count": 3,
+            "brain_hub_guidance_present": True,
+            "brain_hub_guidance_audit_passed": True,
             "expected_capability_receipt_coverage": {
                 "expected": ["hyper"],
                 "public_safe": ["hyper"],
@@ -78,6 +80,8 @@ def test_summarize_jsonl_requires_success_verified_and_public_safe_receipts(tmp_
     assert out["public_safe_capabilities"] == ["hyper"]
     assert out["route_quality"]["selected_total"] == 6
     assert out["route_quality"]["invoked_total"] == 5
+    assert out["brain_hub_guidance"]["present_total"] == 1
+    assert out["brain_hub_guidance"]["audit_passed_total"] == 1
     assert out["failures"] == [
         {
             "task_id": "missing",

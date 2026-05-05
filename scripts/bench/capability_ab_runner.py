@@ -1684,6 +1684,28 @@ def _extract_record(
     success_criteria_payload = success_criteria_payload if isinstance(success_criteria_payload, dict) else {}
     usage_trace = payload.get("nexus_usage_trace", {}) if isinstance(payload, dict) else {}
     usage_trace = usage_trace if isinstance(usage_trace, dict) else {}
+    brain_hub_guidance = usage_trace.get("brain_hub_guidance") if isinstance(usage_trace.get("brain_hub_guidance"), dict) else {}
+    if mode == "with_nexus" and not brain_hub_guidance:
+        try:
+            from scripts.ops.brain_hub_audit import default_paths, scan_brain_hub
+
+            root = Path.cwd()
+            audit = scan_brain_hub(root, default_paths(root))
+            brain_hub_guidance = {
+                "schema_version": "nexus_brain_hub_guidance.v1",
+                "audit_passed": audit.passed,
+                "document_count": len(audit.documents),
+                "guidance": audit.guidance,
+                "failures": audit.failures,
+            }
+        except Exception as exc:
+            brain_hub_guidance = {
+                "schema_version": "nexus_brain_hub_guidance.v1",
+                "audit_passed": False,
+                "document_count": 0,
+                "guidance": {},
+                "failures": [{"reason": "brain_hub_guidance_error", "error": str(exc)}],
+            }
     timing = payload.get("timing", {}) if isinstance(payload, dict) else {}
     timing = timing if isinstance(timing, dict) else {}
     timing_breakdown = timing.get("breakdown_sec", {}) if isinstance(timing, dict) else {}
@@ -1947,6 +1969,10 @@ def _extract_record(
         "route_decision_forbidden": list(route_decision.get("forbidden_capabilities", []) or []),
         "legacy_override_detected": bool(route.get("legacy_override_detected", False)),
         "legacy_override_reason": str(route.get("legacy_override_reason") or ""),
+        "brain_hub_guidance": brain_hub_guidance,
+        "brain_hub_guidance_present": bool(brain_hub_guidance.get("guidance")),
+        "brain_hub_guidance_audit_passed": bool(brain_hub_guidance.get("audit_passed", False)),
+        "brain_hub_guidance_phases": sorted((brain_hub_guidance.get("guidance") or {}).keys()),
         "forecast_gate_shadow_schema": str(forecast_gate_shadow.get("schema") or ""),
         "forecast_gate_shadow_mode": bool(forecast_gate_shadow.get("shadow_mode", False)),
         "forecast_gate_suggested_tier": str(forecast_gate_shadow.get("suggested_tier") or ""),

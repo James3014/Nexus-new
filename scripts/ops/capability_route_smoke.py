@@ -179,6 +179,8 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
     invoked_total = 0
     evidence_total = 0
     outcome_total = 0
+    brain_hub_guidance_present = 0
+    brain_hub_guidance_audit_passed = 0
     for row in rows:
         coverage = row.get("expected_capability_receipt_coverage") or {}
         expected.update(str(item) for item in coverage.get("expected", []) or [])
@@ -209,6 +211,10 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
             row_failures.append("route_decision_empty")
         if bool(row.get("legacy_override_detected", False)):
             row_failures.append("legacy_override_detected")
+        if bool(row.get("brain_hub_guidance_present", False)):
+            brain_hub_guidance_present += 1
+        if bool(row.get("brain_hub_guidance_audit_passed", False)):
+            brain_hub_guidance_audit_passed += 1
         if row_failures:
             failures.append(
                 {
@@ -238,6 +244,12 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
             "invoked_to_evidence_rate": invoked_to_evidence_rate,
             "evidence_to_outcome_rate": evidence_to_outcome_rate,
             "unnecessary_selected_rate": unnecessary_selected_rate,
+        },
+        "brain_hub_guidance": {
+            "present_total": brain_hub_guidance_present,
+            "audit_passed_total": brain_hub_guidance_audit_passed,
+            "present_rate": (brain_hub_guidance_present / len(rows)) if rows else 0.0,
+            "audit_passed_rate": (brain_hub_guidance_audit_passed / len(rows)) if rows else 0.0,
         },
         "failures": failures,
     }
