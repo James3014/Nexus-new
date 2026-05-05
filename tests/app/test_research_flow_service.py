@@ -2136,8 +2136,15 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert payload["research_preflight"]["requires_evidence"] is False
     assert payload["research_preflight"]["decision"] == "allow_with_research_receipt"
     assert payload["research_preflight"]["blocked"] is False
+    assert payload["research_preflight"]["research_stack"]["source_projects"] == [
+        "autoresearch",
+        "codex-autoresearch",
+        "AutoResearchClaw",
+        "autoreason",
+    ]
     assert payload["research_session"]["logged"] is True
     assert payload["research_session"]["status"] == "keep"
+    assert payload["research_session"]["research_stack"]["checkpoints"][0]["id"] == "fixed_budget_metric_contract"
     assert payload["nexus_usage_trace"]["research_session"]["logged"] is True
 
 

@@ -24,6 +24,14 @@ def test_research_stack_route_smoke_passes_with_four_source_receipts(tmp_path: P
                 "research_session": {
                     "logged": True,
                     "source_projects": ["autoresearch", "codex-autoresearch", "AutoResearchClaw", "autoreason"],
+                    "research_stack": {
+                        "checkpoints": [
+                            {"id": "fixed_budget_metric_contract"},
+                            {"id": "packet_session_ledger"},
+                            {"id": "claim_citation_verification"},
+                            {"id": "candidate_tournament_receipt"},
+                        ]
+                    },
                 },
                 "capability_receipts": [
                     {
@@ -35,6 +43,14 @@ def test_research_stack_route_smoke_passes_with_four_source_receipts(tmp_path: P
                         "outcome_contributed": True,
                         "public_claim_safe": True,
                         "source_projects": ["autoresearch", "codex-autoresearch", "AutoResearchClaw", "autoreason"],
+                        "research_stack": {
+                            "checkpoints": [
+                                {"id": "fixed_budget_metric_contract"},
+                                {"id": "packet_session_ledger"},
+                                {"id": "claim_citation_verification"},
+                                {"id": "candidate_tournament_receipt"},
+                            ]
+                        },
                     },
                     {
                         "name": "autoreason",
@@ -58,6 +74,12 @@ def test_research_stack_route_smoke_passes_with_four_source_receipts(tmp_path: P
         "autoresearch",
         "autoresearchclaw",
         "codex-autoresearch",
+    ]
+    assert summary["metrics"]["checkpoints_seen"] == [
+        "candidate_tournament_receipt",
+        "claim_citation_verification",
+        "fixed_budget_metric_contract",
+        "packet_session_ledger",
     ]
     assert summary["metrics"]["route_quality"]["selected_to_invoked_rate"] == 1.0
 
@@ -83,6 +105,7 @@ def test_research_stack_route_smoke_fails_when_source_project_missing(tmp_path: 
                         "outcome_contributed": True,
                         "public_claim_safe": True,
                         "source_projects": ["autoresearch"],
+                        "research_stack": {"checkpoints": [{"id": "fixed_budget_metric_contract"}]},
                     }
                 ],
             }

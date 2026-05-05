@@ -27,10 +27,11 @@ from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.autoreason_service import AutoreasonService
 from nexus.research.doc_scout_adapter import DocScoutAdapter
+from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
-RESEARCH_SOURCE_PROJECTS = ("autoresearch", "codex-autoresearch", "AutoResearchClaw", "autoreason")
+RESEARCH_SOURCE_PROJECTS = tuple(research_stack_source_projects())
 
 
 def _write_source_text(path: Path, text: str) -> None:
@@ -943,6 +944,7 @@ def _research_preflight_packet(*, route: dict[str, Any], route_confidence: float
         "blocked": False,
         "requires_evidence": requires_evidence,
         "source_projects": list(RESEARCH_SOURCE_PROJECTS),
+        "research_stack": research_stack_contract(),
         "route": {
             "recommended_flow": str(route.get("recommended_flow") or ""),
             "recommended_reason": str(route.get("recommended_reason") or ""),
@@ -975,6 +977,7 @@ def _research_session_packet(
         "lane": "distant-scout" if "plateau_detected" in set(context.get("risk_flags", []) or []) else "research-runtime",
         "preflight_decision": str(research_preflight.get("decision") or ""),
         "source_projects": list(RESEARCH_SOURCE_PROJECTS),
+        "research_stack": research_stack_contract(),
     }
 
 
@@ -2631,6 +2634,7 @@ def run_auto_flow(
     for receipt in nexus_usage_trace["capability_receipts"]:
         if isinstance(receipt, dict) and receipt.get("name") == "research":
             receipt["source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
+            receipt["research_stack"] = research_stack_contract()
 
     payload = {
         "schema_version": "1.0",

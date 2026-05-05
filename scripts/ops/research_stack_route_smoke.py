@@ -12,9 +12,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.bench.gemini_nexus_report import _row_route_quality_counts
+from nexus.research.research_stack_contract import research_stack_checkpoint_ids, research_stack_source_projects
 
 
-REQUIRED_STACK = frozenset({"autoreason", "codex-autoresearch", "autoresearch", "autoresearchclaw"})
+REQUIRED_STACK = frozenset(source.lower() for source in research_stack_source_projects())
+REQUIRED_CHECKPOINTS = frozenset(research_stack_checkpoint_ids())
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -49,6 +51,23 @@ def _research_stack_sources(row: dict[str, Any]) -> set[str]:
     return {source for source in sources if source}
 
 
+def _research_stack_checkpoints(row: dict[str, Any]) -> set[str]:
+    checkpoints: set[str] = set()
+    stack_payloads: list[dict[str, Any]] = []
+    for receipt in _receipts(row):
+        if str(receipt.get("name") or "") == "research" and isinstance(receipt.get("research_stack"), dict):
+            stack_payloads.append(receipt["research_stack"])
+    for key in ("research_preflight", "research_session"):
+        payload = row.get(key)
+        if isinstance(payload, dict) and isinstance(payload.get("research_stack"), dict):
+            stack_payloads.append(payload["research_stack"])
+    for stack in stack_payloads:
+        for checkpoint in stack.get("checkpoints", []) or []:
+            if isinstance(checkpoint, dict) and str(checkpoint.get("id") or "").strip():
+                checkpoints.add(str(checkpoint["id"]).strip())
+    return checkpoints
+
+
 def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]:
     rows = _load_jsonl(path)
     failures: list[dict[str, Any]] = []
@@ -56,6 +75,7 @@ def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]
     preflight_present = session_logged = research_public_safe = 0
     autoreason_selected = autoreason_invoked = 0
     sources_seen: set[str] = set()
+    checkpoints_seen: set[str] = set()
     for row in rows:
         row_failures: list[str] = []
         counts = _row_route_quality_counts(row)
@@ -70,6 +90,7 @@ def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]
             session_logged += 1
         row_sources = _research_stack_sources(row)
         sources_seen.update(row_sources)
+        checkpoints_seen.update(_research_stack_checkpoints(row))
         receipts = _receipts(row)
         for receipt in receipts:
             name = str(receipt.get("name") or "")
@@ -89,6 +110,9 @@ def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]
     missing_sources = sorted(REQUIRED_STACK - sources_seen)
     if missing_sources:
         failures.append({"task_id": "__research_stack__", "row_failures": ["source_project_missing"], "missing": missing_sources})
+    missing_checkpoints = sorted(REQUIRED_CHECKPOINTS - checkpoints_seen)
+    if missing_checkpoints:
+        failures.append({"task_id": "__research_stack__", "row_failures": ["checkpoint_missing"], "missing": missing_checkpoints})
     if rows and preflight_present < len(rows):
         failures.append({"task_id": "__research_stack__", "row_failures": ["research_preflight_missing"]})
     if rows and session_logged < len(rows):
@@ -112,6 +136,7 @@ def summarize(path: Path, *, require_autoreason_invoked: bool) -> dict[str, Any]
             "autoreason_selected": autoreason_selected,
             "autoreason_invoked": autoreason_invoked,
             "source_projects_seen": sorted(sources_seen),
+            "checkpoints_seen": sorted(checkpoints_seen),
             "route_quality": {
                 "selected_total": selected_total,
                 "invoked_total": invoked_total,
