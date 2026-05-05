@@ -6,12 +6,14 @@
 
 import re
 import os
+from pathlib import Path
 from typing import Any, Dict, List
 import json
 
 
 class HallucinationGuard:
-    def __init__(self):
+    def __init__(self, schema_path: str | Path | None = None):
+        self.schema_path = Path(schema_path) if schema_path is not None else Path(__file__).resolve().parents[1] / "schemas" / "hallucination_index_v1.json"
         self.schema = self.load_schema()
         self.score = 0
         self.triggers: List[str] = []
@@ -20,24 +22,10 @@ class HallucinationGuard:
         self.evidence_bundle = {}
 
     def load_schema(self) -> Dict:
-        path = os.path.join(os.path.dirname(__file__), "../schemas/hallucination_index_v1.json")
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        # Fallback if file missing
-        return {
-            "metrics": {
-                "restricted_claims": {"weight": 5, "keywords": ["solved", "fixed"]},
-                "evidence_gap": {"weight": 7, "check": "no_code_or_log_attached"},
-                "completion_claim_with_unmet_benchmark_threshold": {
-                    "weight": 9,
-                    "check": "completion_claim_with_unmet_benchmark_threshold",
-                    "force_rejected": True,
-                },
-            },
-            "thresholds": {"VERIFIED": 2, "PARTIAL": 5, "REJECTED": 6},
-            "output_template": "\n## 🧠 幻覺指數: {score}/10 ({status}) - {verdict}"
-        }
+        if not self.schema_path.exists():
+            raise FileNotFoundError(f"hallucination schema missing: {self.schema_path}")
+        with open(self.schema_path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
     def _iter_artifact_values(self) -> List[str]:
         values: List[str] = []
@@ -170,6 +158,21 @@ class HallucinationGuard:
         evidence_blob = "\n".join(self._iter_artifact_values()).lower()
         fail_markers = (" fail", "failed", "error", "traceback", "returncode\": 1", "returncode=1", "exit code: 1", "exit_code\": 1")
         return any(marker in evidence_blob for marker in fail_markers)
+
+    def _check_logic_mismatch(self) -> bool:
+        mismatches = self.evidence_bundle.get("logic_mismatches", []) if isinstance(self.evidence_bundle, dict) else []
+        if isinstance(mismatches, list) and mismatches:
+            return True
+        evidence_blob = "\n".join(self._iter_artifact_values()).lower()
+        return "logic mismatch" in evidence_blob or "expected != actual" in evidence_blob
+
+    def _check_verified_claim_without_evidence(self) -> bool:
+        text = self.response_text.lower()
+        claims_verified = bool(re.search(r"\bverified\b|\bvalidated\b|已驗證|驗證完成", self.response_text, re.I))
+        if not claims_verified:
+            return False
+        verified_claims = self.evidence_bundle.get("verified_claims", []) if isinstance(self.evidence_bundle, dict) else []
+        return not bool(verified_claims) and not self._has_any_artifact()
 
     def _check_claim_completion_with_low_success(self) -> bool:
         """

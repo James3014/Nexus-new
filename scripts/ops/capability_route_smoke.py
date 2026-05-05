@@ -154,6 +154,22 @@ def latest_with_nexus_file(output_dir: Path, *, exclude: set[Path] | None = None
     return candidates[-1]
 
 
+def classify_suite_infra_invalid(result: subprocess.CompletedProcess[str], *, output_dir: Path) -> str | None:
+    """Classify runner failures that prevented route evidence from being generated."""
+    if result.returncode == 0:
+        return None
+    combined = "\n".join(
+        part for part in (getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or "") if part
+    )
+    if "Operation not permitted" in combined and "/.cache/uv/" in combined:
+        return "uv_cache_permission_denied"
+    if "Operation not permitted" in combined and "sdists" in combined:
+        return "uv_cache_permission_denied"
+    if not list(output_dir.glob("with_nexus_*.jsonl")):
+        return "route_smoke_no_evidence_jsonl"
+    return None
+
+
 def summarize_jsonl(path: Path) -> dict[str, Any]:
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     failures: list[dict[str, Any]] = []
@@ -233,21 +249,39 @@ def run_suite(repo_root: Path, suite: SmokeSuite, *, print_only: bool) -> dict[s
         return {"suite": suite.name, "command": cmd}
     output_dir = repo_root / suite.output_dir
     before = {path.resolve() for path in output_dir.glob("with_nexus_*.jsonl")}
-    result = subprocess.run(cmd, cwd=repo_root, env=smoke_env(repo_root), text=True, check=False)
+    result = subprocess.run(cmd, cwd=repo_root, env=smoke_env(repo_root), text=True, check=False, capture_output=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
     try:
         summary = summarize_jsonl(latest_with_nexus_file(output_dir, exclude=before))
     except FileNotFoundError as exc:
+        infra_reason = classify_suite_infra_invalid(result, output_dir=output_dir) or "route_smoke_no_evidence_jsonl"
         summary = {
             "file": "",
             "tasks": 0,
             "expected_capabilities": [],
             "public_safe_capabilities": [],
-            "failures": [{"suite": suite.name, "error": str(exc)}],
+            "infra_invalid": True,
+            "infra_invalid_reason": infra_reason,
+            "failures": [
+                {
+                    "suite": suite.name,
+                    "error": str(exc),
+                    "infra_invalid_reason": infra_reason,
+                    "row_failures": ["route_smoke_infra_invalid"],
+                }
+            ],
         }
     summary["suite"] = suite.name
     summary["returncode"] = result.returncode
     if result.returncode != 0:
-        summary["failures"].append({"suite": suite.name, "returncode": result.returncode})
+        failure = {"suite": suite.name, "returncode": result.returncode}
+        if summary.get("infra_invalid_reason"):
+            failure["infra_invalid_reason"] = summary["infra_invalid_reason"]
+            failure["row_failures"] = ["route_smoke_infra_invalid"]
+        summary["failures"].append(failure)
     return summary
 
 
@@ -392,8 +426,9 @@ def main(argv: list[str] | None = None) -> int:
     summaries = [run_suite(repo_root, suite, print_only=args.print_only) for suite in SMOKE_SUITES]
     failures = [failure for summary in summaries for failure in summary.get("failures", [])]
     if not args.print_only:
-        failures.extend(validate_nine_capability_identity(summaries))
-        failures.extend(validate_route_quality_gate(summaries))
+        if not any(bool(summary.get("infra_invalid")) for summary in summaries):
+            failures.extend(validate_nine_capability_identity(summaries))
+            failures.extend(validate_route_quality_gate(summaries))
     payload = {
         "schema_version": "nexus_capability_route_smoke.v1",
         "diagnostic_type": "receipt_diagnostic",

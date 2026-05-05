@@ -95,3 +95,41 @@ def test_analyze_exposes_trigger_details():
     analysis = guard.analyze("I fixed this.", {"code_artifacts": []})
     assert isinstance(analysis.get("trigger_details"), list)
     assert analysis["trigger_details"]
+
+
+def test_schema_missing_fails_closed(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        HallucinationGuard(schema_path=tmp_path / "missing.json")
+
+
+def test_logic_mismatch_forces_rejected():
+    guard = HallucinationGuard()
+    analysis = guard.analyze(
+        "The implementation is correct.",
+        {
+            "code_artifacts": ["target.py"],
+            "logic_mismatches": [{"expected": "stable order", "actual": "random order"}],
+        },
+    )
+
+    assert analysis["status"] == "REJECTED"
+    assert "logic_mismatch" in analysis["triggers"]
+
+
+def test_verified_claim_without_evidence_forces_rejected():
+    guard = HallucinationGuard()
+    analysis = guard.analyze("This fix is verified.", {"code_artifacts": [], "test_artifacts": []})
+
+    assert analysis["status"] == "REJECTED"
+    assert "verified_claim_without_evidence" in analysis["triggers"]
+
+
+def test_schema_checks_are_backed_by_runtime_methods():
+    guard = HallucinationGuard()
+    missing = []
+    for rule in guard.schema["metrics"].values():
+        check_name = rule.get("check")
+        if check_name and not hasattr(guard, f"_check_{check_name}"):
+            missing.append(check_name)
+
+    assert missing == []

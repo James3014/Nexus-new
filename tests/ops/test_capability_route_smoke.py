@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.ops import capability_route_smoke
 
@@ -203,6 +204,30 @@ def test_latest_with_nexus_file_excludes_stale_outputs(tmp_path: Path):
     new.write_text("{}\n", encoding="utf-8")
 
     assert capability_route_smoke.latest_with_nexus_file(tmp_path, exclude={old}) == new
+
+
+def test_run_suite_marks_uv_cache_permission_as_infra_invalid(tmp_path: Path, monkeypatch):
+    suite = capability_route_smoke.SmokeSuite(
+        name="route_oracles",
+        manifest="manifest.json",
+        output_dir="out",
+        task_ids=("t1",),
+    )
+
+    def fake_run(*_args, **_kwargs):
+        return SimpleNamespace(
+            returncode=2,
+            stdout="",
+            stderr="error: failed to open file `/Users/a/.cache/uv/sdists-v9/.git`: Operation not permitted",
+        )
+
+    monkeypatch.setattr(capability_route_smoke.subprocess, "run", fake_run)
+
+    summary = capability_route_smoke.run_suite(tmp_path, suite, print_only=False)
+
+    assert summary["infra_invalid"] is True
+    assert summary["infra_invalid_reason"] == "uv_cache_permission_denied"
+    assert summary["failures"][0]["row_failures"] == ["route_smoke_infra_invalid"]
 
 
 def test_smoke_env_adds_repo_root_to_pythonpath(tmp_path: Path, monkeypatch):

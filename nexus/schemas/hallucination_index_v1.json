@@ -30,6 +30,18 @@
       "weight": 9,
       "check": "contradiction_with_failed_artifacts",
       "force_rejected": true
+    },
+    "logic_mismatch": {
+      "weight": 8,
+      "check": "logic_mismatch",
+      "force_rejected": true
+    },
+    "verified_claim_without_evidence": {
+      "weight": 8,
+      "keywords": ["verified", "validated", "已驗證", "驗證完成"],
+      "check": "verified_claim_without_evidence",
+      "force_rejected": true,
+      "word_boundary": false
     }
   },
   "thresholds": {"VERIFIED": 2, "PARTIAL": 5, "REJECTED": 6},
