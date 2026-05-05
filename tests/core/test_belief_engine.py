@@ -57,6 +57,16 @@ def test_context_hub_accepts_injected_dependencies_and_state_view(tmp_path):
     assert decision["audit_level"] == "skip"
 
 
+def test_state_view_summarizes_route_and_report_receipts():
+    view = StateView(
+        metadata={},
+        route_receipts=[{"selected": True, "invoked": True, "evidence_present": True}],
+        report_receipts=[{"selected": True, "gate_passed": True}],
+    )
+
+    assert view.receipt_summary() == {"selected": 2, "invoked": 1, "evidence": 1, "gate": 1}
+
+
 def test_learning_steward_emits_single_learning_action():
     state = NexusState(task_id="learn-steward")
     state.metadata["sir_veto_learning"] = True
@@ -81,3 +91,4 @@ def test_learning_steward_emits_single_learning_action():
     assert decision.freeze_learning is True
     assert "sir_veto" in decision.reasons
     assert state.metadata["learning_frozen"] is True
+    assert state.metadata["learning_action"] == "FREEZE"

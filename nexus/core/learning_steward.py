@@ -77,6 +77,7 @@ class LearningSteward:
         metadata["learning_freeze_reasons"] = reasons
 
         action = "FREEZE" if freeze else ("INGEST" if evidence.success else "DISCARD")
+        metadata["learning_action"] = action
         return LearningDecision(
             freeze_learning=freeze,
             curiosity_score=round(curiosity_score, 2),

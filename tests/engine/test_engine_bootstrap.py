@@ -16,3 +16,6 @@ def test_bootstrap_builds_all_required_components(tmp_path: Path):
         assert components[key] is not None
         
     assert components["run_dir"].exists()
+    assert components["context_hub"].belief_engine is components["belief_engine"]
+    assert components["context_hub"].memory_service is components["memory"]
+    assert components["context_hub"].wisdom_vault is components["wisdom_vault"]

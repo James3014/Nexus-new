@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.contracts import RLMBudget, RLMBudgetState, RLMTraceEvent, RLMTraceWriter
+from nexus.core.belief_contracts import AuditOutcome
 from nexus.core.belief_engine import BeliefEngine
 from nexus.governance.capability_gate import CapabilityGate
 from nexus.engine.rlm_rollout_policy import decide_rlm_rollout_for_context
@@ -39,6 +40,14 @@ def _budget_from_context(ctx: Any, max_iterations: int) -> RLMBudget:
         payload.setdefault("max_iterations", max_iterations)
         return RLMBudget.from_dict(payload)
     return RLMBudget(max_iterations=max_iterations)
+
+
+def _belief_engine_from_context(ctx: Any, project_root: Path) -> Any:
+    context_hub = getattr(ctx, "__dict__", {}).get("context_hub")
+    belief_engine = getattr(context_hub, "belief_engine", None)
+    if belief_engine is not None:
+        return belief_engine
+    return BeliefEngine(project_root / ".nexus" / "belief_state.json")
 
 
 class RecursiveRepairLoop:
@@ -97,7 +106,7 @@ class RecursiveRepairLoop:
             allowed_tools = []
 
         try:
-            confidence = BeliefEngine(project_root / ".nexus" / "belief_state.json").assess_confidence(
+            confidence = _belief_engine_from_context(ctx, project_root).assess_confidence(
                 self.task_id,
                 action,
             )
@@ -170,6 +179,19 @@ class RecursiveRepairLoop:
                 stop_reason=stop_reason,
             )
         )
+        try:
+            project_root = self.trace_path.parents[3]
+            BeliefEngine(project_root / ".nexus" / "belief_state.json").process_audit_outcome(
+                AuditOutcome(
+                    task_id=self.task_id,
+                    assumption=f"RLM_AUDIT_{iteration}",
+                    passed=audit_success,
+                    evidence_id=f"rlm:{self.trace_path.name}:a-{iteration}",
+                    reason=phantom_reason or status,
+                )
+            )
+        except Exception:
+            pass
 
     def consume_iteration(self, *, llm_calls: int = 1, tool_calls: int = 0, output_chars: int = 0) -> RLMBudgetState:
         self.state = self.state.consume(

@@ -36,7 +36,8 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     from nexus.engine.policies.research_policy import ResearchPolicy
     from nexus.services.mem_palace import MemPalace
     from nexus.research.wisdom.wisdom_vault import WisdomVault
-    from nexus.core.context_hub import ContextHub
+    from nexus.core.belief_engine import BeliefEngine
+    from nexus.core.context_hub import ContextDependencies, ContextHub
     from nexus.core.commander import Commander
     from nexus.engine.battle_swarm import BattleSwarm
     from nexus.engine.reflex_loop import ReflexLoop
@@ -48,18 +49,22 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     hub = NexusHub(project_root)
     mem_palace = MemPalace(str(project_root))
     wisdom_vault = WisdomVault(str(project_root))
+    belief_engine = BeliefEngine(project_root / ".nexus" / "belief_state.json")
     
     registry_path = project_root / ".nexus" / "registry" / "shared_skills.db"
     skill_registry = SkillRegistry(registry_path) if registry_path.exists() else None
     
     context_hub = kwargs.get("context_hub") or ContextHub(
         str(project_root),
-        memory_service=memory,
         run_dir=str(run_dir),
         skill_registry=skill_registry,
-        mem_palace=mem_palace
+        mem_palace=mem_palace,
+        deps=ContextDependencies(
+            memory_service=memory,
+            wisdom_vault=wisdom_vault,
+            belief_engine=belief_engine,
+        ),
     )
-    context_hub.wisdom_vault = wisdom_vault
     
     commander = kwargs.get("commander")
     if commander is None:
@@ -84,6 +89,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
         "latent_forecaster": get_latent_forecaster(str(project_root)),
         "ash_selector": get_self_healing_selector(str(project_root), env=env),
         "memory": memory,
+        "belief_engine": belief_engine,
         "hub": hub,
         "policy_manager": PolicyManager(str(project_root), run_dir=str(run_dir)),
         "accumulator": TokenAccumulator(),

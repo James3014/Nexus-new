@@ -187,6 +187,44 @@ def test_recursive_repair_policy_records_gate_and_low_belief(tmp_path: Path, mon
     assert ctx.state.metadata["rlm_policy_reason"] == "low_belief_confidence"
 
 
+def test_recursive_repair_uses_injected_context_hub_belief_engine(tmp_path: Path, monkeypatch):
+    class FakeGate:
+        def get_tools(self, phase):
+            return ["read_file", "write_to_file"]
+
+    class FakeBelief:
+        def __init__(self):
+            self.calls = []
+
+        def assess_confidence(self, task_id, assumption):
+            self.calls.append((task_id, assumption))
+            return 0.2
+
+    class FakePalace:
+        def __init__(self, project_root):
+            pass
+
+        def audit_action(self, phase, action):
+            return True
+
+    fake_belief = FakeBelief()
+    monkeypatch.setattr("nexus.engine.recursive_repair_loop.CapabilityGate", FakeGate)
+    monkeypatch.setattr("nexus.engine.recursive_repair_loop.MemPalace", FakePalace)
+    engine = DummyRepairEngine(tmp_path)
+    engine._execute_single_repair = MagicMock(return_value=_approved_repair())
+    engine._evaluate_audit_result = MagicMock(
+        return_value={"audit_success": True, "status": "APPROVED", "phantom_reason": None}
+    )
+    ctx = _ctx(enabled=True)
+    ctx.context_hub = MagicMock()
+    ctx.context_hub.belief_engine = fake_belief
+
+    assert engine._repair_audit_loop(ctx, DummyTracer()) is True
+
+    assert fake_belief.calls
+    assert ctx.state.metadata["belief_confidence"] == 0.2
+
+
 def test_recursive_repair_policy_block_fails_closed_before_repair(tmp_path: Path, monkeypatch):
     class FakePalace:
         def __init__(self, project_root):

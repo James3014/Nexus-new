@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .learning_evidence import LearningEvidence
 from .learning_steward import GovernanceProfile, LearningSteward
 from .state_contracts import NexusState
+from nexus.core.event_bus import NexusEventBus
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,14 @@ class LearningGovernance:
             )
         ).decide(state, evidence)
         state.metadata["learning_action"] = decision.action
+        try:
+            NexusEventBus.emit_learning_decision(
+                task_id=state.task_id,
+                action=decision.action,
+                reasons=decision.reasons,
+            )
+        except Exception:
+            pass
         return LearningDecision(
             freeze_learning=decision.freeze_learning,
             curiosity_score=decision.curiosity_score,

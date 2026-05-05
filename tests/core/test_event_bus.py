@@ -76,13 +76,26 @@ def test_event_bus_legacy_signal_queue_assignment_still_works(tmp_path):
 
 def test_event_bus_typed_domain_emitters_preserve_publish_contract(tmp_path):
     NexusEventBus.configure(tmp_path)
-    handler = MagicMock()
-    NexusEventBus.subscribe("audit_failed", handler)
+    audit_handler = MagicMock()
+    learning_handler = MagicMock()
+    evidence_handler = MagicMock()
+    NexusEventBus.subscribe("audit_failed", audit_handler)
+    NexusEventBus.subscribe("learning_decision", learning_handler)
+    NexusEventBus.subscribe("evidence_accepted", evidence_handler)
 
     NexusEventBus.emit_audit_failure(task_id="task-1", reason="missing evidence", evidence_id="EV-1")
+    NexusEventBus.emit_learning_decision(task_id="task-1", action="FREEZE", reasons=["sir_veto"])
+    NexusEventBus.emit_evidence_accepted(task_id="task-1", evidence_id="EV-2", evidence_type="git_diff")
 
-    handler.assert_called_once()
-    payload = handler.call_args[0][0]
-    assert payload["task_id"] == "task-1"
-    assert payload["reason"] == "missing evidence"
-    assert payload["evidence_id"] == "EV-1"
+    audit_handler.assert_called_once()
+    learning_handler.assert_called_once()
+    evidence_handler.assert_called_once()
+    assert audit_handler.call_args[0][0]["_trace_id"]
+    assert audit_handler.call_args[0][0]["reason"] == "missing evidence"
+    assert learning_handler.call_args[0][0]["action"] == "FREEZE"
+    assert learning_handler.call_args[0][0]["reasons"] == ["sir_veto"]
+    assert evidence_handler.call_args[0][0]["evidence_type"] == "git_diff"
+    content = (tmp_path / ".nexus" / "events" / "event_log.jsonl").read_text()
+    assert "audit_failed" in content
+    assert "learning_decision" in content
+    assert "evidence_accepted" in content
