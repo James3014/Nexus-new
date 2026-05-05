@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import MagicMock
-from nexus.engine.phase_plugin import PhasePlugin, PhaseRegistry, PhaseResult, ErrorAction
+from typing import cast
+
+from nexus.engine.phase_plugin import PhaseExecutor, PhasePlugin, PhaseRegistry, PhaseResult, ErrorAction
 
 class MockPlugin(PhasePlugin):
     def should_run(self, ctx):
@@ -34,3 +36,10 @@ def test_phase_plugin_default_error_action():
     plugin = MockPlugin(name="Test")
     action = plugin.on_error(None, Exception("fail"))
     assert action == ErrorAction.ABORT
+
+
+def test_phase_executor_protocol_accepts_plugin_shape():
+    plugin = cast(PhaseExecutor, MockPlugin(name="S", priority=1))
+
+    assert plugin.should_run(None) is True
+    assert plugin.execute(None, None).status == "success"

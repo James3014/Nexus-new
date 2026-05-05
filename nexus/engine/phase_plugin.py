@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Protocol, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -38,6 +38,17 @@ class PhasePlugin(ABC):
     def on_error(self, ctx: Any, error: Exception) -> ErrorAction:
         """Handles errors occurring during phase execution."""
         return ErrorAction.ABORT
+
+
+class PhaseExecutor(Protocol):
+    """Composition-first phase seam used while legacy mixins are retired."""
+
+    name: str
+    priority: int
+
+    def should_run(self, ctx: Any) -> bool: ...
+
+    def execute(self, pipeline: Any, ctx: Any) -> PhaseResult: ...
 
 class PhaseRegistry:
     """Registry for managing and ordering PhasePlugins."""

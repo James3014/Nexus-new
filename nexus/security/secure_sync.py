@@ -35,11 +35,14 @@ class IncomingMessageHandler(Protocol):
 
 
 class RegistryMessageHandler:
-    def __init__(self, registry: SkillRegistry | None):
+    def __init__(self, registry: SkillRegistry | None, allowed_actions: Dict[str, set[str]] | None = None):
         self.registry = registry
+        self.allowed_actions = allowed_actions or {}
 
     def handle(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
         action = req.get("action")
+        if not self._action_allowed(str(action), client_id):
+            return {"status": "error", "message": "unauthorized_action", "action": action}
         if action == "push":
             return self._handle_push(req, client_id)
         if action == "heartbeat":
@@ -49,6 +52,12 @@ class RegistryMessageHandler:
         if action == "event":
             return self._handle_event(req, client_id)
         return {"status": "error", "message": f"Unknown action: {action}"}
+
+    def _action_allowed(self, action: str, client_id: str) -> bool:
+        if not self.allowed_actions:
+            return True
+        allowed = self.allowed_actions.get(client_id, self.allowed_actions.get("*", set()))
+        return action in allowed
 
     def _handle_push(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
         if not self.registry:

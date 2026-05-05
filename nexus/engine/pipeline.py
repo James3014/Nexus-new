@@ -39,6 +39,16 @@ from nexus.engine.pipeline_crystal import PipelineCrystalMixin
 from nexus.engine.pipeline_research import PipelineResearchMixin
 
 logger = logging.getLogger(__name__)
+CANONICAL_STAGE_FLOW = ["S", "P", "X", "D", "R", "A", "C"]
+STAGE_DESCRIPTIONS = {
+    "S": "cold_start_seed",
+    "P": "plan",
+    "X": "research_xray",
+    "D": "diagnose",
+    "R": "repair",
+    "A": "audit_acceptance",
+    "C": "crystallize",
+}
 
 @dataclass
 class PipelineContext:
@@ -71,6 +81,18 @@ class PipelineContext:
     pack: dict = field(default_factory=dict)
     event_store: Any = None  # Atomic Sinking (R16)
     outcome_v2: Optional[NexusOutcomeV2] = None
+    decision_journal: list[dict[str, Any]] = field(default_factory=list)
+
+    def append_journal(self, *, origin_phase: str, event_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Append-only blackboard event with provenance."""
+        event = {
+            "origin_phase": origin_phase,
+            "event_type": event_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": dict(payload or {}),
+        }
+        self.decision_journal.append(event)
+        return event
 
 class NexusPipeline(
     PipelineStagesMixin, 
@@ -95,9 +117,9 @@ class NexusPipeline(
         self._register_default_plugins()
 
     def _init_stage_status(self, state: NexusState) -> None:
-        stage_flow = ["S", "P", "X", "D", "R", "A", "C"]
-        state.metadata.setdefault("stage_flow", stage_flow)
-        state.metadata.setdefault("stage_status", {stage: "pending" for stage in stage_flow})
+        state.metadata.setdefault("stage_flow", list(CANONICAL_STAGE_FLOW))
+        state.metadata.setdefault("stage_descriptions", dict(STAGE_DESCRIPTIONS))
+        state.metadata.setdefault("stage_status", {stage: "pending" for stage in CANONICAL_STAGE_FLOW})
 
     def _mark_stage(self, state: NexusState, stage: str, status: str) -> None:
         self._init_stage_status(state)

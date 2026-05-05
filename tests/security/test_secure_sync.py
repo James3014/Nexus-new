@@ -124,6 +124,15 @@ def test_registry_message_handler_heartbeat_and_unknown_action():
     assert "Unknown action" in resp["message"]
 
 
+def test_registry_message_handler_denies_unauthorized_action():
+    handler = RegistryMessageHandler(MagicMock(), allowed_actions={"node-a": {"heartbeat"}})
+
+    assert handler.handle({"action": "heartbeat"}, "node-a")["status"] == "alive"
+    resp = handler.handle({"action": "push", "payload": []}, "node-a")
+
+    assert resp == {"status": "error", "message": "unauthorized_action", "action": "push"}
+
+
 def test_decode_sync_request_rejects_invalid_and_oversized_messages():
     assert decode_sync_request(b"{bad-json\n")[1] == {"status": "error", "message": "invalid_json"}
     assert decode_sync_request(b"[]\n")[1] == {"status": "error", "message": "invalid_request"}

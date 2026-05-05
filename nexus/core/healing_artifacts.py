@@ -21,3 +21,23 @@ def write_healing_artifact(project_root: str | Path, artifact: HealingArtifact) 
 def read_healing_artifact(path: str | Path) -> HealingArtifact:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     return HealingArtifact(**payload)
+
+
+def artifact_to_packet(artifact: HealingArtifact) -> dict:
+    """Serialize healing advice for safe swarm transport without executing it."""
+    return {
+        "type": "healing_artifact",
+        "schema_version": "nexus_healing_artifact.v1",
+        "payload": asdict(artifact),
+    }
+
+
+def artifact_from_packet(packet: dict) -> HealingArtifact:
+    if packet.get("type") != "healing_artifact":
+        raise ValueError("not a healing artifact packet")
+    if packet.get("schema_version") != "nexus_healing_artifact.v1":
+        raise ValueError("unsupported healing artifact schema")
+    payload = packet.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("healing artifact packet payload must be an object")
+    return HealingArtifact(**payload)

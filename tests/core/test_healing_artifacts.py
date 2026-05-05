@@ -1,5 +1,5 @@
 from nexus.core.belief_contracts import HealingArtifact
-from nexus.core.healing_artifacts import read_healing_artifact, write_healing_artifact
+from nexus.core.healing_artifacts import artifact_from_packet, artifact_to_packet, read_healing_artifact, write_healing_artifact
 
 
 def test_healing_artifact_roundtrip_persists_json(tmp_path):
@@ -18,3 +18,20 @@ def test_healing_artifact_roundtrip_persists_json(tmp_path):
 
     assert path.name == "heal-unsafe-id.json"
     assert loaded == artifact
+
+
+def test_healing_artifact_packet_roundtrip_is_transport_only():
+    artifact = HealingArtifact(
+        task_id="task-1",
+        artifact_id="heal-1",
+        artifact_type="repair_plan",
+        created_at="2026-05-05T00:00:00Z",
+        evidence_id="EV-1",
+        summary="Diagnose here, execute elsewhere after validation.",
+    )
+
+    packet = artifact_to_packet(artifact)
+
+    assert packet["type"] == "healing_artifact"
+    assert packet["schema_version"] == "nexus_healing_artifact.v1"
+    assert artifact_from_packet(packet) == artifact
