@@ -1386,6 +1386,26 @@ def test_extract_record_maps_semantic_fields():
                 "unmatched_path_rate": 0.0,
                 "predictive_saved_runtime_sec": 12.5,
             },
+            "research_preflight": {
+                "schema": "nexus_research_preflight_v1",
+                "present": True,
+                "blocked": False,
+                "requires_evidence": True,
+                "decision": "requires_evidence",
+                "route": {
+                    "recommended_flow": "hyper_sprint",
+                    "research_context": {
+                        "risk_flags": ["claim_uncertainty"],
+                        "blocked_assumptions": ["api_contract_not_verified"],
+                    },
+                },
+            },
+            "research_session": {
+                "schema": "nexus_research_session_v1",
+                "logged": True,
+                "status": "keep",
+                "lane": "research-runtime",
+            },
             "capability_plan": {
                 "schema_version": "nexus_capability_plan_v1",
                 "planner_mode": "dry_run",
@@ -1527,6 +1547,13 @@ def test_extract_record_maps_semantic_fields():
     assert out["jit_ranking_mode"] == "static"
     assert out["jit_promotion_verdict"] == "HOLD"
     assert out["jit_predictive_saved_runtime_sec"] == 12.5
+    assert out["research_preflight_present"] is True
+    assert out["research_preflight_requires_evidence"] is True
+    assert out["research_preflight_blocked"] is False
+    assert out["claim_uncertainty"] is True
+    assert out["research_session_logged"] is True
+    assert out["research_session_status"] == "keep"
+    assert out["research_session_lane"] == "research-runtime"
     assert out["capability_plan_trace_present"] is True
     assert out["capability_plan_schema_version"] == "nexus_capability_plan_v1"
     assert out["capability_plan_mode"] == "dry_run"
@@ -2769,6 +2796,25 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
             },
             "capabilities": {"claim_verified": True},
             "capability_receipts": receipts,
+            "research_preflight": {
+                "schema": "nexus_research_preflight_v1",
+                "present": True,
+                "blocked": False,
+                "requires_evidence": True,
+                "decision": "requires_evidence",
+                "route": {
+                    "research_context": {
+                        "risk_flags": ["claim_uncertainty"],
+                        "blocked_assumptions": ["api_contract_not_verified"],
+                    },
+                },
+            },
+            "research_session": {
+                "schema": "nexus_research_session_v1",
+                "logged": True,
+                "status": "keep",
+                "lane": "research-runtime",
+            },
         },
         "result": {
             "elapsed_sec": 0.1,
@@ -2815,6 +2861,13 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
     assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
     assert out["capability_receipts"] == receipts
     assert json.loads(out["capability_receipts_json"]) == receipts
+    assert out["research_preflight_present"] is True
+    assert out["research_preflight_requires_evidence"] is True
+    assert out["research_preflight_blocked"] is False
+    assert out["claim_uncertainty"] is True
+    assert out["research_session_logged"] is True
+    assert out["research_session_status"] == "keep"
+    assert out["research_session_lane"] == "research-runtime"
     assert out["expected_capabilities"] == ["autoreason", "ddtree", "ultra_review"]
     assert out["capability_activation_contract"] == "required"
     assert out["hidden_oracle_kind"] == "trace_receipt"

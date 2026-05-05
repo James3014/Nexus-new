@@ -2129,6 +2129,13 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert ar["status"] == "SUCCESS"
     assert ar["winner"] == "candidate-2"
     assert isinstance(ar["borda_scores"], dict)
+    assert payload["research_preflight"]["present"] is True
+    assert payload["research_preflight"]["requires_evidence"] is False
+    assert payload["research_preflight"]["decision"] == "allow_with_research_receipt"
+    assert payload["research_preflight"]["blocked"] is False
+    assert payload["research_session"]["logged"] is True
+    assert payload["research_session"]["status"] == "keep"
+    assert payload["nexus_usage_trace"]["research_session"]["logged"] is True
 
 
 def test_auto_flow_writes_explicit_output_file(tmp_path: Path):

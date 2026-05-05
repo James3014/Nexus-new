@@ -1721,6 +1721,20 @@ def _extract_record(
     ultra_review = ultra_review if isinstance(ultra_review, dict) else {}
     autoreason = usage_trace.get("autoreason", {}) if isinstance(usage_trace, dict) else {}
     autoreason = autoreason if isinstance(autoreason, dict) else {}
+    research_preflight = payload.get("research_preflight") or usage_trace.get("research_preflight") or {}
+    research_preflight = research_preflight if isinstance(research_preflight, dict) else {}
+    research_session = payload.get("research_session") or usage_trace.get("research_session") or {}
+    research_session = research_session if isinstance(research_session, dict) else {}
+    research_preflight_route = (
+        research_preflight.get("route", {}) if isinstance(research_preflight.get("route"), dict) else {}
+    )
+    research_context = (
+        research_preflight_route.get("research_context", {})
+        if isinstance(research_preflight_route.get("research_context"), dict)
+        else {}
+    )
+    research_risk_flags = set(research_context.get("risk_flags", []) or [])
+    research_blocked_assumptions = set(research_context.get("blocked_assumptions", []) or [])
     ddtree = usage_trace.get("ddtree", {}) if isinstance(usage_trace, dict) else {}
     ddtree = ddtree if isinstance(ddtree, dict) else {}
     codeintel = usage_trace.get("codeintel", payload.get("codeintel", {})) if isinstance(payload, dict) else {}
@@ -1931,6 +1945,15 @@ def _extract_record(
         "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),
         "capability_receipts": capability_receipts,
         "capability_receipts_json": json.dumps(capability_receipts, ensure_ascii=False, sort_keys=True),
+        "research_preflight": research_preflight,
+        "research_preflight_present": bool(research_preflight.get("present") or research_preflight),
+        "research_preflight_blocked": bool(research_preflight.get("blocked", False)),
+        "research_preflight_requires_evidence": bool(research_preflight.get("requires_evidence", False)),
+        "claim_uncertainty": bool("claim_uncertainty" in research_risk_flags or research_blocked_assumptions),
+        "research_session": research_session,
+        "research_session_logged": bool(research_session.get("logged", False)),
+        "research_session_status": str(research_session.get("status") or ""),
+        "research_session_lane": str(research_session.get("lane") or ""),
         "expected_capability_receipt_coverage": _expected_capability_receipt_coverage(
             task.expected_capabilities,
             [item for item in capability_receipts if isinstance(item, dict)],

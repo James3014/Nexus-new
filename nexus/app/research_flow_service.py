@@ -30,6 +30,9 @@ from nexus.research.doc_scout_adapter import DocScoutAdapter
 from nexus.services.codeintel import analyze_impact, scan_codebase
 
 
+RESEARCH_SOURCE_PROJECTS = ("autoresearch", "codex-autoresearch", "AutoResearchClaw", "autoreason")
+
+
 def _write_source_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
     if path.suffix != ".py":
@@ -925,6 +928,53 @@ def _detect_plateau(asi_ledger: list[dict[str, Any]]) -> dict[str, Any]:
         "family": families[0],
         "metric_span": metric_span,
         "next_lane": "DISTANT_SCOUT",
+    }
+
+
+def _research_preflight_packet(*, route: dict[str, Any], route_confidence: float, task_id: str | None) -> dict[str, Any]:
+    context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
+    risk_flags = list(context.get("risk_flags", []) or [])
+    blocked_assumptions = list(context.get("blocked_assumptions", []) or [])
+    requires_evidence = bool("claim_uncertainty" in risk_flags or blocked_assumptions)
+    return {
+        "schema": "nexus_research_preflight_v1",
+        "task_id": task_id or _safe_trace_slug(str(route.get("recommended_reason") or "task")),
+        "present": True,
+        "blocked": False,
+        "requires_evidence": requires_evidence,
+        "source_projects": list(RESEARCH_SOURCE_PROJECTS),
+        "route": {
+            "recommended_flow": str(route.get("recommended_flow") or ""),
+            "recommended_reason": str(route.get("recommended_reason") or ""),
+            "research_context": context,
+        },
+        "route_confidence": round(float(route_confidence), 4),
+        "decision": "requires_evidence" if requires_evidence else "allow_with_research_receipt",
+    }
+
+
+def _research_session_packet(
+    *,
+    task_id: str | None,
+    status: str,
+    asi_record: dict[str, Any],
+    route: dict[str, Any],
+    research_preflight: dict[str, Any],
+) -> dict[str, Any]:
+    context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
+    return {
+        "schema": "nexus_research_session_v1",
+        "logged": True,
+        "task_id": task_id or _safe_trace_slug(str(asi_record.get("hypothesis") or "task")),
+        "status": str(asi_record.get("status") or ("keep" if str(status).upper() == "SUCCESS" else "discard")),
+        "hypothesis": str(asi_record.get("hypothesis") or ""),
+        "family": str(asi_record.get("family") or ""),
+        "evidence": str(asi_record.get("evidence") or ""),
+        "rollback_reason": str(asi_record.get("rollback_reason") or ""),
+        "next_action_hint": str(asi_record.get("next_action_hint") or context.get("next_action_hint") or ""),
+        "lane": "distant-scout" if "plateau_detected" in set(context.get("risk_flags", []) or []) else "research-runtime",
+        "preflight_decision": str(research_preflight.get("decision") or ""),
+        "source_projects": list(RESEARCH_SOURCE_PROJECTS),
     }
 
 
@@ -2342,6 +2392,7 @@ def run_auto_flow(
     route_decision_payload = route.get("route_decision", {}) if isinstance(route.get("route_decision"), dict) else {}
     route_selected_capabilities = {str(item) for item in route_decision_payload.get("selected_capabilities", []) or []}
     route_confidence = float(route.get("adjusted_root_cause_confidence", root_cause_confidence) or root_cause_confidence)
+    research_preflight = _research_preflight_packet(route=route, route_confidence=route_confidence, task_id=task_id)
     claim_check = _claim_check_summary(
         task_desc=task_desc,
         tests_passed=tests_passed,
@@ -2353,6 +2404,7 @@ def run_auto_flow(
         capability_evidence["research_used"] = True
         capability_evidence["research_refs"] = [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
+    capability_evidence["research_source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
     summaries = result_report.get("candidate_summaries", [])
     autoreason_payload = hyper_learning_trace.get("autoreason", {}) if isinstance(hyper_learning_trace.get("autoreason", {}), dict) else {}
     should_run_autoreason = str(result.get("flow", "")) == "hyper_sprint" and isinstance(summaries, list) and bool(summaries)
@@ -2498,6 +2550,7 @@ def run_auto_flow(
         "ultra_review": ultra_review_evidence,
         "claim_check": claim_check,
         "hitl": hitl,
+        "research_preflight": research_preflight,
         "route_confidence": route_confidence,
         "codeintel": codeintel_evidence,
         "gemini_patch_status": "passed" if tests_passed and gemini_invoked and not nexus_rescued else ("failed" if gemini_invoked else "missing"),
@@ -2575,6 +2628,9 @@ def run_auto_flow(
             codeintel=nexus_usage_trace["codeintel"],
         )
     ]
+    for receipt in nexus_usage_trace["capability_receipts"]:
+        if isinstance(receipt, dict) and receipt.get("name") == "research":
+            receipt["source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
 
     payload = {
         "schema_version": "1.0",
@@ -2611,6 +2667,8 @@ def run_auto_flow(
         "result": result,
         "claim_check": claim_check,
         "hitl": hitl,
+        "research_preflight": research_preflight,
+        "research_session": {},
         "route_confidence": route_confidence,
         "strategy": {
             "path": strategy_path,
@@ -2647,6 +2705,24 @@ def run_auto_flow(
         # keep report + output payload in sync
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     phase_started_at = time.monotonic()
+    asi_record = _asi_record(
+        run_id=len(recent) + 1,
+        task_desc=task_desc,
+        recommended_flow=str(route.get("recommended_flow", "")),
+        chosen_flow=chosen_flow,
+        status=str(result.get("status", "")),
+        error=str(result.get("error", "")),
+        route_confidence=route_confidence,
+    )
+    research_session = _research_session_packet(
+        task_id=task_id,
+        status=str(result.get("status", "")),
+        asi_record=asi_record,
+        route=route,
+        research_preflight=research_preflight,
+    )
+    payload["research_session"] = research_session
+    payload["nexus_usage_trace"]["research_session"] = research_session
     recent.append(
         {
             "flow": chosen_flow,
@@ -2656,15 +2732,7 @@ def run_auto_flow(
             "task_desc": task_desc[:200],
             "route_recommended_flow": str(route.get("recommended_flow", "")),
             "ts": datetime.now(timezone.utc).isoformat(),
-            "asi_record": _asi_record(
-                run_id=len(recent) + 1,
-                task_desc=task_desc,
-                recommended_flow=str(route.get("recommended_flow", "")),
-                chosen_flow=chosen_flow,
-                status=str(result.get("status", "")),
-                error=str(result.get("error", "")),
-                route_confidence=route_confidence,
-            ),
+            "asi_record": asi_record,
         }
     )
     payload["asi_ledger"] = [item.get("asi_record") for item in recent if isinstance(item, dict) and isinstance(item.get("asi_record"), dict)]
