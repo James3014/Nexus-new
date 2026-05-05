@@ -1,0 +1,48 @@
+{
+  "schema_version": "nexus_strategic_map.v1",
+  "zones": [
+    {
+      "name": "state_contracts",
+      "kind": "core_fort",
+      "runtime_refs": ["nexus/core/state_contracts.py", "nexus/core/pipeline_metadata.py"],
+      "test_refs": ["tests/core/test_state_contracts.py"]
+    },
+    {
+      "name": "orchestrator",
+      "kind": "core_fort",
+      "runtime_refs": ["nexus/core/orchestrator.py"],
+      "test_refs": ["tests/core/test_orchestrator_pentad_integration.py"]
+    },
+    {
+      "name": "hallucination_guard",
+      "kind": "hazard_zone",
+      "runtime_refs": ["nexus/governance/hallucination_guard.py", "nexus/schemas/hallucination_index_v1.json"],
+      "test_refs": ["tests/core/test_hallucination_guard.py", "tests/ops/test_hallucination_guard_drift.py"]
+    },
+    {
+      "name": "context_hub",
+      "kind": "hazard_zone",
+      "runtime_refs": ["nexus/core/context_hub.py"],
+      "test_refs": ["tests/core/test_context_hub_strict_deps.py"]
+    },
+    {
+      "name": "belief_orchestrator_supply_line",
+      "kind": "fragile_supply_line",
+      "runtime_refs": ["nexus/core/belief_contracts.py", "nexus/core/belief_engine.py", "nexus/core/orchestrator.py"],
+      "test_refs": ["tests/core/test_belief_contracts.py", "tests/core/test_belief_engine.py"]
+    },
+    {
+      "name": "storage_service_supply_line",
+      "kind": "fragile_supply_line",
+      "runtime_refs": ["nexus/infrastructure/storage_implementations.py", "nexus/infrastructure/storage_interfaces.py", "nexus/services/memory.py"],
+      "test_refs": ["tests/infrastructure/test_storage_implementations.py", "tests/test_memory.py"]
+    }
+  ],
+  "boundary_rules": [
+    {
+      "name": "infrastructure_must_not_import_services",
+      "source_globs": ["nexus/infrastructure/*.py"],
+      "forbidden_import_prefixes": ["nexus.services"]
+    }
+  ]
+}
