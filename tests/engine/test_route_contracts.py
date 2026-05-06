@@ -89,6 +89,12 @@ def test_route_decision_adapter_preserves_full_capability_space():
     assert {"swarm", "drone", "nightshift"} <= set(decision["pending_capabilities"])
     assert "ddtree" in decision["acceleration_layers"]
     assert "ultra_review" in decision["governance_layers"]
+    assert decision["stop_policy"]["tactical_sequence"][0] == "hyper_sprint"
+    assert "autoreason" in decision["stop_policy"]["tactical_sequence"]
+    assert any(
+        item["capability"] == "autoreason" and item["evidence_required"]
+        for item in decision["stop_policy"]["tactical_tool_map"]
+    )
     assert decision["executor_controls"]["enable_autoreason_executor"] is True
     assert decision["executor_controls"]["enable_swarm"] is False
     assert decision["executor_controls"]["enable_drone"] is False

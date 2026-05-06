@@ -31,3 +31,22 @@ Closure:
 
 - `_route_tactical_tool_map` now falls through to `route_tactical_tool_map_json` when
   the direct list is absent or empty.
+
+### Tactical policy must be generated at the canonical route decision seam
+
+Failure:
+
+- A Flash 2x1 run passed delivery/cost gates but reported `route_tactical_tool_count=0`
+  for with-Nexus rows.
+- The tactical map existed in the compatibility `CapabilityRouter` facade, but actual
+  auto-flow rows use `build_route_decision()` from `route_decision_adapter`.
+
+Lesson:
+
+- Report-only telemetry is not enough. Tactical routing must be emitted from the same
+  canonical route decision seam used by runtime and benchmark extraction.
+
+Closure:
+
+- `build_route_decision()` now fills `stop_policy.tactical_sequence` and
+  `stop_policy.tactical_tool_map` by default when callers do not provide one.
