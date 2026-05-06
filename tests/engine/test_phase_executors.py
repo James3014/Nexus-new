@@ -52,6 +52,23 @@ def test_handler_phase_executor_maps_legacy_fail_dict_to_phase_failure():
     assert result.mutations["reason"] == "hallucination_gate_rejected"
 
 
+def test_handler_phase_executor_maps_red_test_rejection_to_phase_failure():
+    class RedTestRejectedHandler:
+        name = "R"
+        priority = 30
+
+        def run(self, _state, _pack):
+            return {"status": "REJECTED_NO_RED_TEST", "reason": "missing_red_test"}
+
+    executor = HandlerPhaseExecutor(RedTestRejectedHandler())
+    ctx = SimpleNamespace(kwargs={}, state=SimpleNamespace(), pack={})
+
+    result = executor.execute(None, ctx)
+
+    assert result.status == "fail"
+    assert result.mutations["reason"] == "missing_red_test"
+
+
 def test_crystallize_executor_wraps_existing_rich_pipeline_method(tmp_path):
     calls = []
 

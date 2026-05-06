@@ -15,6 +15,8 @@ from nexus.engine.recursive_repair_loop import RecursiveRepairLoop, recursive_re
 
 logger = logging.getLogger(__name__)
 
+REJECTED_REPAIR_STATUSES = frozenset({"FAIL", "FAILED", "REJECTED", "REJECTED_NO_RED_TEST"})
+
 @dataclass
 class AuditEvalContext:
     """Encapsulation of audit evaluation parameters for Phase A."""
@@ -27,6 +29,10 @@ class AuditEvalContext:
 
 class PipelineRepairMixin:
     """🛠️ Mixin for Repair/Audit loop logic in NexusPipeline."""
+
+    @staticmethod
+    def _is_rejected_repair_status(status: Any) -> bool:
+        return str(status or "").strip().upper() in REJECTED_REPAIR_STATUSES
 
     def _is_mock_engine_environment(self) -> bool:
         try:
@@ -71,11 +77,11 @@ class PipelineRepairMixin:
         r_out = self._process_repair_response(ctx, res, repair_attempts)
         
         # 🚀 [v24.0] Immediate Intra-loop learning trigger
-        if r_out["status"] == "REJECTED":
+        if self._is_rejected_repair_status(r_out["status"]):
             self._record_intra_loop_trauma(ctx, r_out)
 
         # CLI Pregate validation
-        if r_out["status"] != "REJECTED":
+        if not self._is_rejected_repair_status(r_out["status"]):
             r_out["status"] = self._run_pregate_if_needed(ctx, r_out["status"], r_out["result"])
             
             # === NEW: T11 產生 Evidence Bundle 給 Verifier ===
@@ -114,9 +120,21 @@ class PipelineRepairMixin:
         result = plugin.execute(self, ctx)
         mutations = dict(result.mutations or {})
         status = str(mutations.get("status") or result.status or "").strip().upper() or "APPROVED"
+        result_object = mutations.get("result_object")
+        result_object = dict(result_object) if isinstance(result_object, dict) else mutations
+        ctx.state.metadata["last_review_status"] = status
+        self._map_repair_metadata(ctx, result_object)
+        if self._is_rejected_repair_status(status):
+            self._record_intra_loop_trauma(ctx, {"status": status, "result": result_object})
+        else:
+            status = self._run_pregate_if_needed(ctx, status, result_object)
+            try:
+                self._write_hallucination_evidence_bundle(ctx)
+            except Exception as e:
+                logger.warning("evidence_bundle_generation_failed: %s", e)
         r_out = {
             "status": status,
-            "result": mutations,
+            "result": result_object,
             "current_decision_id": str(mutations.get("decision_id") or f"composition-r-{repair_attempts}"),
             "current_skill_id": str(mutations.get("skill_id") or "composition-repair"),
         }

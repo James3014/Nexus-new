@@ -5,6 +5,8 @@ from typing import Any, Callable
 
 from nexus.engine.phase_plugin import PhaseExecutor, PhaseResult
 
+FAIL_STATUSES = frozenset({"FAIL", "FAILED", "REJECTED", "REJECTED_NO_RED_TEST"})
+
 
 @dataclass
 class HandlerPhaseExecutor:
@@ -38,7 +40,7 @@ class HandlerPhaseExecutor:
         if self.result_binder is not None:
             self.result_binder(ctx, mutations)
         status_text = str(mutations.get("status") or "").strip().upper()
-        status = "fail" if mutations.get("fail") or status_text in {"FAILED", "REJECTED"} else "success"
+        status = "fail" if mutations.get("fail") or status_text in FAIL_STATUSES else "success"
         return PhaseResult(status=status, mutations=mutations, events=[])
 
 
