@@ -253,7 +253,27 @@ def validate_brain_hub_coverage_gate(repo_root: Path) -> list[dict[str, Any]]:
     return [_fail("brain_hub_coverage_gate", "brain_hub_coverage_gate_failed", **gate)]
 
 
-def validate_openseeker_autodata_smoke(repo_root: Path) -> list[dict[str, Any]]:
+def _data_forge_manifest_summary(
+    path: Path,
+    rows: list[DataForgeManifestRow],
+    *,
+    write_manifest: bool,
+) -> dict[str, Any]:
+    if write_manifest:
+        summary = write_data_forge_manifest(path, rows)
+        summary["written"] = True
+        return summary
+    return {
+        "schema_version": "nexus_autodata_forge_manifest_write.v1",
+        "path": str(path),
+        "row_count": len(rows),
+        "gold_count": sum(1 for row in rows if row.label.label == "GOLD"),
+        "training_eligible_count": sum(1 for row in rows if row.to_dict()["eligible_for_training"]),
+        "written": False,
+    }
+
+
+def validate_openseeker_autodata_smoke(repo_root: Path, *, write_manifest: bool = False) -> list[dict[str, Any]]:
     receipts = [
         {"name": "semantic_searcher", "invoked": True, "evidence_refs": ["semantic:route:doc"]},
         {"name": "belief", "invoked": True, "evidence_refs": ["belief:route:confidence:0.8"]},
@@ -275,7 +295,11 @@ def validate_openseeker_autodata_smoke(repo_root: Path) -> list[dict[str, Any]]:
         evidence_refs=tuple(ref for receipt in receipts for ref in receipt["evidence_refs"]),
         trajectory_step_count=max(10, int(trace["trajectory_step_count"])),
     )
-    summary = write_data_forge_manifest(repo_root / ".nexus" / "reports" / "pre_flash_autodata_manifest.json", [row])
+    summary = _data_forge_manifest_summary(
+        repo_root / ".nexus" / "reports" / "pre_flash_autodata_manifest.json",
+        [row],
+        write_manifest=write_manifest,
+    )
     if trace.get("action_catalog_schema_version") != "nexus_openseeker_action_catalog.v1":
         return [_fail("openseeker_autodata_smoke", "action_catalog_missing", trace=trace)]
     if summary.get("training_eligible_count") != 1:
@@ -488,6 +512,7 @@ def build_payload(
     output_dir: str,
     repair_timeout_sec: float = 1200.0,
     strict_event_contracts: bool | None = None,
+    write_artifacts: bool = False,
 ) -> dict[str, Any]:
     checks = [
         *validate_repair_factory_skipped_routes(repo_root),
@@ -496,7 +521,7 @@ def build_payload(
         *validate_event_contracts(repo_root, strict_raw=strict_event_contracts),
         *validate_codex_nexus_smoke_plan(),
         *validate_brain_hub_coverage_gate(repo_root),
-        *validate_openseeker_autodata_smoke(repo_root),
+        *validate_openseeker_autodata_smoke(repo_root, write_manifest=write_artifacts),
     ]
     if run_repair:
         checks.append(run_repair_subset(repo_root, output_dir, timeout_sec=repair_timeout_sec))
@@ -515,6 +540,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quick", action="store_true", help="Run deterministic local route/receipt checks only.")
     parser.add_argument("--run-repair-subset", action="store_true", help="Run two-task Flash-style Nexus-only repair subset.")
     parser.add_argument("--strict-event-contracts", action="store_true", help="Fail the gate when legacy raw transition events are present.")
+    parser.add_argument("--write-artifacts", action="store_true", help="Persist generated pre-Flash smoke artifacts.")
     parser.add_argument("--output-dir", default=".nexus/reports/bench_flash_repair_pruning_prefash")
     parser.add_argument("--repair-timeout-sec", type=float, default=1200.0)
     args = parser.parse_args(argv)
@@ -526,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         repair_timeout_sec=args.repair_timeout_sec,
         strict_event_contracts=True if args.strict_event_contracts else None,
+        write_artifacts=bool(args.write_artifacts or not args.quick),
     )
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0 if payload["passed"] else 1

@@ -165,6 +165,17 @@ def test_quick_payload_includes_openseeker_autodata_smoke(tmp_path: Path):
     assert check["passed"] is True
     assert check["details"]["action_catalog_count"] >= 1
     assert check["details"]["autodata_manifest"]["training_eligible_count"] == 1
+    assert check["details"]["autodata_manifest"]["written"] is False
+    assert not (tmp_path / ".nexus" / "reports" / "pre_flash_autodata_manifest.json").exists()
+
+
+def test_openseeker_autodata_smoke_writes_manifest_only_when_explicit(tmp_path: Path):
+    check = nexus_pre_flash_gate.validate_openseeker_autodata_smoke(tmp_path, write_manifest=True)[0]
+    manifest = tmp_path / ".nexus" / "reports" / "pre_flash_autodata_manifest.json"
+
+    assert check["passed"] is True
+    assert check["details"]["autodata_manifest"]["written"] is True
+    assert manifest.exists()
 
 
 def test_repair_subset_command_uses_flash_style_nexus_only_path():
