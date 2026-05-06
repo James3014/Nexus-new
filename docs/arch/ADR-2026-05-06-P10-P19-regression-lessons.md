@@ -15,6 +15,8 @@ P10-P19 added runtime guardrails for Brain Hub alignment, route receipts, candid
 5. Targeted pytest commands must be discovered with `rg "def test_"` before use; a wrong node id can produce zero product evidence while looking like a quick verification attempt.
 6. Receipt adapters must distinguish diagnostics from evidence. Rejected-claim-only DocScout output is useful for audit, but must not count as external-doc invocation evidence without a verified external source.
 7. Helper functions used in low-level benchmark timing code should avoid dependencies defined later in the module; direct `os.environ` parsing is safer for import-time callable utilities.
+8. Public benchmark gate logic must be shared between markdown and evidence bundles. If one path enforces token telemetry completeness and the other does not, the report will create contradictory public-claim evidence.
+9. Benchmark artifact regeneration should use exported helpers or an inline parser for JSONL. Do not assume private helper names exist when repairing evidence after a benchmark run.
 
 ## Decision
 
@@ -23,3 +25,5 @@ P10-P19 added runtime guardrails for Brain Hub alignment, route receipts, candid
 - Use targeted tests before Flash so same-model A/B is not asked to discover deterministic contract breaks.
 - Require Flash public reports to state model lock and hidden-verifier status from `evidence_bundle.json`, not only markdown prose.
 - Keep rejected-only claim uncertainty as a diagnostic path, not a public-safe capability receipt.
+- Keep evidence-bundle public gate failures aligned with markdown public gate failures before treating a Flash report as public-safe.
+- Regenerate benchmark artifacts with known public helpers after gate logic changes, then inspect the structured gate before reporting.

@@ -3579,6 +3579,8 @@ def write_evidence_bundle(
     nexus_usage_valid_rate = _rate_for(with_rows, "nexus_usage_valid")
     claim_verified_rate = _rate_for(with_rows, "capability_claim_verified")
     route_decision_present_rate = _rate_for(with_rows, "route_decision_schema_version")
+    token_measured_rate_with = _rate_for(with_rows, "token_measured")
+    token_measured_rate_without = _rate_for(without_rows, "token_measured")
     eligibility_complete = len(eligible_with) == len(with_rows) and len(eligible_without) == len(without_rows)
     gate_failures = []
     if config.get("parallel_arms") == "smoke-only":
@@ -3609,6 +3611,10 @@ def write_evidence_bundle(
         gate_failures.append("claim_verified_below_threshold")
     if route_decision_present_rate < 1.0:
         gate_failures.append("route_decision_missing")
+    if token_measured_rate_with < 0.8:
+        gate_failures.append("with_token_measured_below_threshold")
+    if token_measured_rate_without < 0.8:
+        gate_failures.append("without_token_measured_below_threshold")
     if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
         gate_failures.append("manifest_missing")
     if not config.get("runner_command"):
@@ -3670,8 +3676,8 @@ def write_evidence_bundle(
             "infra_invalid_without_nexus": len(without_rows) - len(eligible_without),
         },
         "telemetry_completeness": {
-            "token_measured_rate_without": _rate_for(without_rows, "token_measured"),
-            "token_measured_rate_with": _rate_for(with_rows, "token_measured"),
+            "token_measured_rate_without": token_measured_rate_without,
+            "token_measured_rate_with": token_measured_rate_with,
             "gateway_stats_source_rate_without": _rate_for(without_rows, "gateway_stats_present"),
             "gateway_stats_source_rate_with": _rate_for(with_rows, "gateway_stats_present"),
         },
@@ -3704,6 +3710,8 @@ def write_evidence_bundle(
                 "nexus_usage_valid_rate": nexus_usage_valid_rate,
                 "claim_verified_rate": claim_verified_rate,
                 "route_decision_present_rate": route_decision_present_rate,
+                "token_measured_rate_with": token_measured_rate_with,
+                "token_measured_rate_without": token_measured_rate_without,
                 "runner_command_present": bool(config.get("runner_command")),
                 "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
                 "raw_file_hashes_present": True,

@@ -1087,6 +1087,62 @@ def test_write_evidence_bundle_fails_gate_when_route_decision_missing(tmp_path: 
     assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 0.0
 
 
+def test_write_evidence_bundle_fails_gate_when_with_token_measured_low(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_row = {
+        "mode": "with_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "token_measured": False,
+        "gateway_stats_present": False,
+        "nexus_wearing_valid": True,
+        "model_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "capability_claim_verified": True,
+        "route_decision_schema_version": "nexus_route_decision_v1",
+    }
+    without_row = {
+        "mode": "without_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "token_measured": True,
+        "gateway_stats_present": True,
+    }
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [without_row])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row, without_row],
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 1,
+            "runner_command": "capability_ab_runner.py --tasks-file tasks.json",
+            "hidden_verifier_mode": True,
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+        },
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+
+    assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert "with_token_measured_below_threshold" in payload["public_claim_gate"]["failures"]
+    assert payload["public_claim_gate"]["checks"]["token_measured_rate_with"] == 0.0
+
+
 def test_write_evidence_bundle_v2_fails_gate_for_missing_hidden_verifier_and_trust_mismatch(tmp_path: Path):
     with_path = tmp_path / "with.jsonl"
     without_path = tmp_path / "without.jsonl"
