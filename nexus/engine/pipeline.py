@@ -141,7 +141,6 @@ class NexusPipeline(
             METHOD_MAP = {
                 "P": "_stage_plan",
                 "X": "_stage_research",
-                "D": "_stage_diagnose",
                 "C": "_stage_crystallize",
             }
 
@@ -197,8 +196,11 @@ class NexusPipeline(
         if self.registry.get_ordered_plugins():
             return
 
-        # 🛡️ Sprint 15 Logic: 強制 Core 階段映射到 Pipeline Mixins 以維持架構完整性
-        core_phases = ["P", "X", "D"]
+        # Keep only phases that still have an accepted legacy fallback. Diagnose is
+        # intentionally composition-only so executor bootstrap failures do not
+        # silently re-enable the old mixin path.
+        core_phases = ["P", "X"]
+        composition_only_phases = {"D"}
         for name in core_phases:
             p_handler = self.engine.phases.get(name)
             if p_handler:
@@ -206,7 +208,7 @@ class NexusPipeline(
 
         # 註冊其餘階段（包括 C 結晶階段）
         for name, p_handler in self.engine.phases.items():
-            if name in core_phases or not p_handler:
+            if name in core_phases or name in composition_only_phases or not p_handler:
                 continue
             
             if isinstance(p_handler, PhasePlugin):
