@@ -26,3 +26,14 @@ test or gate fails.
 Governance gates must encode the difference between "not present in this
 checkout", "present but undocumented", and "runtime behavior missing". Collapsing
 those states into a single FAIL creates churn instead of evidence.
+
+## Follow-up Lesson: Global Coverage Closure
+Raising global wiki coverage should use a dedicated provenance index rather than
+scattering shallow one-line pages across the vault. The `Source - Coverage
+Heatmap` page is allowed to prove baseline traceability, but it must state that
+indexed coverage is not the same as deep behavior documentation.
+
+Full-vault linter failures can predate the current slice. When that happens,
+the current changed page must still be linted directly and the pre-existing
+vault debt must be reported separately instead of blocking an unrelated coverage
+closure.

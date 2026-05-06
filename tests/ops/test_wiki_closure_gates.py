@@ -62,3 +62,27 @@ def test_wiki_slo_dashboard_reads_nested_coverage_report():
     )
 
     assert snapshot == {"global": 39.74, "keypath": 100.0}
+
+
+def test_wiki_global_coverage_meets_closure_threshold():
+    audit = importlib.import_module("scripts.ops.wiki_coverage_audit")
+
+    files = audit.get_code_files()
+    mentions = audit.get_covered_files_from_wiki()
+    basename_to_rels = {}
+    for path in files:
+        basename_to_rels.setdefault(path.rsplit("/", 1)[-1], []).append(path)
+
+    covered_count = 0
+    for path in files:
+        basename = path.rsplit("/", 1)[-1]
+        if path in mentions:
+            covered_count += 1
+            continue
+        if basename in mentions and len(basename_to_rels.get(basename, [])) == 1:
+            covered_count += 1
+            continue
+        if any(match == path or match.endswith(path) or path.endswith(match) for match in mentions):
+            covered_count += 1
+
+    assert covered_count / len(files) >= 0.85
