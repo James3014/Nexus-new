@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from nexus.app.research_flow_service import _runtime_receipt_plan_payload, build_route
+from nexus.events.transport import NexusEventBus
 from scripts.ops.brain_hub_audit import scan_brain_hub
 from scripts.ops.hallucination_guard_drift import audit_drift
 
@@ -176,6 +177,30 @@ def validate_brain_hub_alignment(repo_root: Path) -> list[dict[str, Any]]:
             )
         )
     return checks
+
+
+def validate_event_contracts(repo_root: Path) -> list[dict[str, Any]]:
+    NexusEventBus.configure(repo_root)
+    audit = NexusEventBus.audit_event_contracts()
+    if audit.get("passed"):
+        return [
+            _ok(
+                "event_contract_audit",
+                events_scanned=audit.get("events_scanned", 0),
+                semantic_event_count=audit.get("semantic_event_count", 0),
+                raw_event_count=audit.get("raw_event_count", 0),
+                transition_status=audit.get("transition_status", ""),
+                unknown_event_types=audit.get("unknown_event_types", []),
+            )
+        ]
+    return [
+        _fail(
+            "event_contract_audit",
+            "unknown_event_types_present",
+            events_scanned=audit.get("events_scanned", 0),
+            unknown_event_types=audit.get("unknown_event_types", []),
+        )
+    ]
 
 
 def repair_subset_command(output_dir: str) -> list[str]:
@@ -374,6 +399,7 @@ def build_payload(repo_root: Path, *, run_repair: bool, output_dir: str, repair_
         *validate_repair_factory_skipped_routes(repo_root),
         *validate_runtime_receipt_reconcile(),
         *validate_brain_hub_alignment(repo_root),
+        *validate_event_contracts(repo_root),
     ]
     if run_repair:
         checks.append(run_repair_subset(repo_root, output_dir, timeout_sec=repair_timeout_sec))

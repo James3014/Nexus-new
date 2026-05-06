@@ -248,9 +248,27 @@ class NexusPipeline(
         ctx.state.metadata["pipeline_success"] = success
         plugin = next((item for item in self.registry.get_ordered_plugins() if item.name == "C"), None)
         if plugin is not None and plugin.should_run(ctx):
-            plugin.execute(self, ctx)
+            result = plugin.execute(self, ctx)
+            mutations = dict(getattr(result, "mutations", None) or {})
+            ctx.state.metadata["composition_crystallize_phase_status"] = str(getattr(result, "status", ""))
+            ctx.state.metadata["composition_crystallize_phase_mutations"] = mutations
+            if self._crystallize_side_effects_present(ctx):
+                ctx.state.metadata["composition_crystallize_side_effects_verified"] = True
+                return
+            ctx.state.metadata["composition_crystallize_side_effects_verified"] = False
+            ctx.state.metadata["composition_crystallize_fallback_reason"] = "missing_terminal_outcome_side_effects"
+            self._stage_crystallize(ctx, success, tracer)
             return
         self._stage_crystallize(ctx, success, tracer)
+
+    @staticmethod
+    def _crystallize_side_effects_present(ctx: PipelineContext) -> bool:
+        metadata = ctx.state.metadata
+        return bool(
+            metadata.get("pipeline_terminal_state")
+            and metadata.get("pipeline_outcome")
+            and metadata.get("nexus_outcome_v2")
+        )
 
     def run(self, task_desc: str, task_type: str = "bug", context: Optional[Dict] = None, **kwargs) -> bool:
         """EntryPoint for P-X-D-R-A-C pipeline with OTel Tracing wrapper."""

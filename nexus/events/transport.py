@@ -11,7 +11,16 @@ from nexus.events.signal_queue_service import SignalQueueService
 logger = logging.getLogger(__name__)
 
 SEMANTIC_EVENT_TYPES = frozenset({"audit_failed", "learning_decision", "evidence_accepted"})
-RAW_EVENT_TYPES = frozenset({"phase_start", "phase_end", "lifecycle_pre", "external_signal_injected"})
+RAW_EVENT_TYPES = frozenset(
+    {
+        "phase_start",
+        "phase_end",
+        "lifecycle_pre",
+        "external_signal_injected",
+        "persist_event",
+        "test_event",
+    }
+)
 
 
 class NexusEventBus:

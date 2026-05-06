@@ -38,6 +38,9 @@ class FakeExecutor:
             ctx.pack = self.mutations
         elif self.name == "C":
             ctx.pack["crystallize"] = self.mutations
+            metadata_updates = self.mutations.get("metadata_updates")
+            if isinstance(metadata_updates, dict):
+                ctx.state.metadata.update(metadata_updates)
         return PhaseResult(status="success", mutations=self.mutations, events=[])
 
 
@@ -107,7 +110,7 @@ def test_pipeline_registers_crystallize_phase_executor(tmp_path):
     assert "C" in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
 
 
-def test_pipeline_runs_composed_c_phase_instead_of_direct_crystallize(tmp_path, monkeypatch):
+def test_pipeline_falls_back_when_composed_c_lacks_terminal_side_effects(tmp_path, monkeypatch):
     executors = {
         "P": FakeExecutor("P", {"plan": "ok"}),
         "X": FakeExecutor("X", {"findings": ["ok"]}),
@@ -116,15 +119,45 @@ def test_pipeline_runs_composed_c_phase_instead_of_direct_crystallize(tmp_path, 
     }
     pipeline = NexusPipeline(_engine(tmp_path, executors))
     monkeypatch.setattr(pipeline, "_repair_audit_loop", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(
-        pipeline,
-        "_stage_crystallize",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("direct C stage should not run when composed C exists")),
-    )
+    fallback_calls = []
+    monkeypatch.setattr(pipeline, "_stage_crystallize", lambda ctx, success, _tracer: fallback_calls.append((ctx.task_id, success)))
     monkeypatch.setattr(pipeline, "_finalize_and_report", lambda _ctx, success, _tracer: success)
 
     assert pipeline.run("repair vague runtime behavior", task_id="composition-c") is True
     assert executors["C"].calls == 1
+    assert fallback_calls == [("composition-c", True)]
+
+
+def test_pipeline_accepts_composed_c_only_when_terminal_side_effects_exist(tmp_path, monkeypatch):
+    executors = {
+        "P": FakeExecutor("P", {"plan": "ok"}),
+        "X": FakeExecutor("X", {"findings": ["ok"]}),
+        "D": FakeExecutor("D", {"diagnosis": "ok"}),
+        "C": FakeExecutor(
+            "C",
+            {
+                "status": "COMPLETED",
+                "metadata_updates": {
+                    "pipeline_terminal_state": "SUCCESS",
+                    "pipeline_outcome": {"terminal_state": "SUCCESS"},
+                    "nexus_outcome_v2": {"terminal_state": "SUCCESS"},
+                },
+            },
+        ),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    monkeypatch.setattr(pipeline, "_repair_audit_loop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        pipeline,
+        "_stage_crystallize",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("verified composed C must not fallback to legacy C")),
+    )
+    seen = {}
+    monkeypatch.setattr(pipeline, "_finalize_and_report", lambda ctx, success, _tracer: seen.update(ctx.state.metadata) or success)
+
+    assert pipeline.run("repair vague runtime behavior", task_id="composition-c-verified") is True
+    assert executors["C"].calls == 1
+    assert seen["composition_crystallize_side_effects_verified"] is True
 
 
 def test_repair_audit_loop_runs_composed_r_phase_when_registered(tmp_path, monkeypatch):

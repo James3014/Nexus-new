@@ -2481,6 +2481,11 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
     assert capabilities["external_doc_scout_latency_ms"] >= 0
     assert capabilities["external_doc_scout_cache_age_sec"] >= 0
     assert capabilities["external_doc_scout_gate_passed"] is True
+    openseeker = payload["nexus_usage_trace"]["openseeker_alignment"]
+    assert openseeker["schema_version"] == "nexus_openseeker_alignment.v1"
+    assert openseeker["trajectory_step_count"] >= 1
+    assert isinstance(openseeker["low_step_filtered"], bool)
+    assert payload["nexus_usage_trace"]["capabilities"]["trajectory_step_count"] == openseeker["trajectory_step_count"]
 
 
 def test_auto_flow_keeps_external_doc_scout_rejected_only_diagnostic(tmp_path: Path, monkeypatch):

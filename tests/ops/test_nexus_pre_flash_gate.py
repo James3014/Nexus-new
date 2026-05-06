@@ -44,6 +44,7 @@ def test_quick_payload_skips_flash_style_repair_subset():
         "runtime_receipt_reconcile",
         "hallucination_guard_drift",
         "brain_hub_audit",
+        "event_contract_audit",
     }.issubset({item["name"] for item in payload["checks"]})
 
 
@@ -56,7 +57,28 @@ def test_quick_payload_includes_brain_hub_alignment_gate():
         "runtime_receipt_reconcile",
         "hallucination_guard_drift",
         "brain_hub_audit",
+        "event_contract_audit",
     }.issubset(names)
+
+
+def test_quick_payload_fails_when_event_contract_audit_fails(monkeypatch):
+    monkeypatch.setattr(
+        nexus_pre_flash_gate,
+        "validate_event_contracts",
+        lambda _repo_root: [
+            {
+                "name": "event_contract_audit",
+                "passed": False,
+                "reason": "unknown_event_types_present",
+                "details": {"unknown_event_types": ["legacy_blob"]},
+            }
+        ],
+    )
+
+    payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir="unused")
+
+    assert payload["passed"] is False
+    assert any(item["name"] == "event_contract_audit" and not item["passed"] for item in payload["checks"])
 
 
 def test_quick_payload_fails_when_brain_hub_audit_fails(monkeypatch):
