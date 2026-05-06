@@ -48,6 +48,11 @@ def runtime_receipt_plan_payload(
         if status in {"SKIPPED", "DISABLED", "FEATURE_FLAG_DISABLED", "NOOP"} or stop_reason:
             remove_selected("autoreason", stop_reason or status.lower() or "runtime_autoreason_not_executable")
 
+    hyper_used = bool(capabilities.get("hyper_used", False))
+    if hyper_used and "hyper" not in selected:
+        selected.append("hyper")
+        plan["selected_capabilities"] = selected
+
     if pruned:
         plan["selected_capabilities"] = selected
         capabilities["runtime_pruned_capabilities"] = pruned

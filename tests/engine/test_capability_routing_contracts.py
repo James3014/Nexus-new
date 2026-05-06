@@ -535,6 +535,35 @@ def test_core_gate_receipts_require_specific_evidence_before_public_claim():
     assert proven["delivery_gate"].outcome_contributed is True
 
 
+def test_core_gate_failed_receipts_count_as_fail_closed_outcomes_not_public_safe():
+    plan = {
+        "selected_capabilities": ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"],
+    }
+
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={
+                "claim_verified": False,
+                "mempalace_gate_passed": False,
+                "artifact_gate_passed": False,
+                "claim_gate_invoked": False,
+                "delivery_gate_passed": False,
+            },
+        )
+    }
+
+    for name in ("mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"):
+        assert receipts[name].selected is True
+        assert receipts[name].invoked is True
+        assert receipts[name].evidence_present is True
+        assert receipts[name].gate_passed is False
+        assert receipts[name].outcome_contributed is True
+        assert receipts[name].public_claim_safe is False
+        assert receipts[name].failure_reason == "evidence_without_gate_pass"
+
+
 def test_knowledge_receipts_keep_signals_separate_from_public_evidence():
     plan = {
         "selected_capabilities": ["memory", "belief", "research", "lancedb"],

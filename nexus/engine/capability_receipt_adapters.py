@@ -79,6 +79,16 @@ def _as_refs(value: Any) -> list[str]:
     return [text] if text else []
 
 
+def _explicit_bool(payload: dict[str, Any], key: str) -> bool:
+    return key in payload and payload.get(key) is not None
+
+
+def _fail_closed_ref(payload: dict[str, Any], key: str, ref: str) -> list[str]:
+    if _explicit_bool(payload, key) and not _as_bool(payload.get(key)):
+        return [ref]
+    return []
+
+
 def _pillar_present(payload: dict[str, Any], *names: str) -> bool:
     pillars = payload.get("pillars") if isinstance(payload.get("pillars"), dict) else {}
     for name in names:
@@ -311,7 +321,8 @@ class MemPalaceGateReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         refs = _as_refs(payload.get("mempalace_audit_ref") or payload.get("mempalace_refs"))
-        invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or refs)
+        refs = refs or _fail_closed_ref(payload, "mempalace_gate_passed", "mempalace:gate_failed")
+        invoked = bool(_pillar_present(payload, "mempalace", "mempalace_gate") or refs or _explicit_bool(payload, "mempalace_gate_passed"))
         gate_passed = bool(refs and _as_bool(payload.get("mempalace_gate_passed", True)))
         return merge_capability_receipt(
             name=self.name,
@@ -319,7 +330,7 @@ class MemPalaceGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "mempalace_gate_passed"))),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -334,8 +345,9 @@ class ArtifactGateReceiptAdapter:
     name = "artifact_gate"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        invoked = bool(_pillar_present(payload, "artifact", "artifact_gate") or payload.get("artifact_refs"))
         refs = _as_refs(payload.get("artifact_refs") or payload.get("artifact_ref"))
+        refs = refs or _fail_closed_ref(payload, "artifact_gate_passed", "artifact:gate_failed")
+        invoked = bool(_pillar_present(payload, "artifact", "artifact_gate") or refs or _explicit_bool(payload, "artifact_gate_passed"))
         gate_passed = bool(refs and _as_bool(payload.get("artifact_gate_passed", True)))
         return merge_capability_receipt(
             name=self.name,
@@ -343,7 +355,7 @@ class ArtifactGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "artifact_gate_passed"))),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -359,7 +371,8 @@ class ClaimGateReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         refs = _as_refs(payload.get("claim_refs") or payload.get("claim_ref"))
-        invoked = bool(claim_verified or refs or payload.get("claim_gate_invoked"))
+        refs = refs or _fail_closed_ref(payload, "claim_gate_invoked", "claim:gate_failed")
+        invoked = bool(claim_verified or refs or _explicit_bool(payload, "claim_gate_invoked"))
         gate_passed = bool(refs and claim_verified)
         return merge_capability_receipt(
             name=self.name,
@@ -367,7 +380,7 @@ class ClaimGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=gate_passed,
+            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "claim_gate_invoked"))),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -383,6 +396,7 @@ class DeliveryGateReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         refs = _as_refs(payload.get("delivery_refs") or payload.get("delivery_ref") or payload.get("evidence_bundle_path"))
+        refs = refs or _fail_closed_ref(payload, "delivery_gate_passed", "delivery:gate_failed")
         invoked = bool(payload.get("delivery_gate_passed") is not None or refs or payload.get("delivery_gate_invoked") or claim_verified)
         gate_passed = bool(refs and _as_bool(payload.get("delivery_gate_passed", claim_verified)))
         return merge_capability_receipt(
@@ -391,7 +405,7 @@ class DeliveryGateReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=bool(refs and (gate_passed or _explicit_bool(payload, "delivery_gate_passed"))),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,

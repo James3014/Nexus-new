@@ -31,7 +31,11 @@ from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
 from nexus.research.formal_report_service import FormalReportService
 from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
-from nexus.research.research_runtime_contracts import build_claim_probe, build_research_doctor
+from nexus.research.research_runtime_contracts import (
+    build_claim_probe,
+    build_nexus_failure_analysis,
+    build_research_doctor,
+)
 from nexus.services.codeintel import analyze_impact, scan_codebase
 from nexus.app.research_autoreason_runtime import build_autoreason_payload
 from nexus.app.research_receipt_runtime import build_capability_receipt_payloads, runtime_receipt_plan_payload
@@ -3055,8 +3059,20 @@ def run_auto_flow(
         artifact_verified=artifact_verified,
     )
     claim_probe = build_claim_probe(task_desc=task_desc, route=route, artifact_verified=artifact_verified)
+    nexus_failure_analysis = build_nexus_failure_analysis(
+        artifact_verified=artifact_verified,
+        tests_passed=tests_passed,
+        artifact_summary=artifact_summary,
+        research_doctor=research_doctor,
+        claim_probe=claim_probe,
+        gemini_invoked=gemini_invoked,
+        nexus_context_delivered=True,
+        self_heal_used=self_heal_used,
+        result_report=result_report,
+    )
     nexus_usage_trace["research_doctor"] = research_doctor
     nexus_usage_trace["claim_probe"] = claim_probe
+    nexus_usage_trace["nexus_failure_analysis"] = nexus_failure_analysis
     governance_events = _governance_events_packet(
         repo_root=repo_root,
         task_id=task_id,
@@ -3273,7 +3289,20 @@ def run_auto_flow(
     payload["nexus_usage_trace"]["research_session"] = research_session
     payload["research_doctor"] = research_doctor
     payload["claim_probe"] = claim_probe
+    nexus_failure_analysis = build_nexus_failure_analysis(
+        artifact_verified=artifact_verified,
+        tests_passed=tests_passed,
+        artifact_summary=artifact_summary,
+        research_doctor=research_doctor,
+        claim_probe=claim_probe,
+        gemini_invoked=gemini_invoked,
+        nexus_context_delivered=bool(payload["nexus_usage_trace"].get("nexus_context_delivered", False)),
+        self_heal_used=self_heal_used,
+        result_report=result_report,
+    )
+    payload["nexus_failure_analysis"] = nexus_failure_analysis
     payload["nexus_usage_trace"]["research_doctor"] = research_doctor
+    payload["nexus_usage_trace"]["nexus_failure_analysis"] = nexus_failure_analysis
     payload["nexus_usage_trace"]["capabilities"]["research_doctor_score"] = research_doctor["score"]
     payload["nexus_usage_trace"]["capabilities"]["research_doctor_gate_passed"] = research_doctor["status"] == "PASS"
     recent.append(

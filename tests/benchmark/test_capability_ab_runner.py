@@ -2832,6 +2832,80 @@ def test_run_with_nexus_can_opt_into_llm_self_heal(tmp_path: Path, monkeypatch):
     assert captured["env"]["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "1"
 
 
+def test_run_with_nexus_surfaces_failure_analysis(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="pub-routing-failure-analysis",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix routing-sensitive public bug",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    payload = {
+        "status": "FAILED",
+        "semantic_status": "UNVERIFIED",
+        "nexus_failure_analysis": {
+            "schema": "nexus_failure_analysis_v1",
+            "status": "ACTION_REQUIRED",
+            "primary_cause": "flash_no_verified_mutation",
+            "owner": "nexus_retry_policy",
+            "nexus_gap": "bounded_self_heal_not_triggered",
+            "recoverable": True,
+            "nexus_blocked_unsafe_delivery": True,
+            "self_heal_status": "not_triggered",
+            "reasons": ["required_mutation_missing", "claim_probe_blocked_patch"],
+            "next_action": "trigger_bounded_self_heal_before_accepting_flash_failure",
+        },
+        "nexus_usage_trace": {
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "usage_valid": False,
+            "pillars": {},
+            "phase_trace": {},
+            "capabilities": {},
+        },
+        "result": {
+            "elapsed_sec": 0.1,
+            "report": {
+                "attempt_count": 1,
+                "model_calls": 1,
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": False,
+                "total_tokens": 10,
+                "token_capture_status": "ok",
+            },
+        },
+    }
+
+    class _Proc:
+        stdout = json.dumps(payload)
+        stderr = ""
+        returncode = 1
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", lambda _cmd, **_kwargs: _Proc())
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert out["nexus_failure_status"] == "ACTION_REQUIRED"
+    assert out["nexus_failure_primary_cause"] == "flash_no_verified_mutation"
+    assert out["nexus_failure_owner"] == "nexus_retry_policy"
+    assert out["nexus_failure_gap"] == "bounded_self_heal_not_triggered"
+    assert out["nexus_failure_recoverable"] is True
+    assert out["nexus_blocked_unsafe_delivery"] is True
+    assert out["nexus_failure_next_action"] == "trigger_bounded_self_heal_before_accepting_flash_failure"
+
+
 def test_run_with_nexus_can_enable_ultra_dry_gate_without_llm(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-routing-no-llm",
@@ -3461,6 +3535,91 @@ def test_hidden_verifier_overrides_successful_nexus_row(tmp_path: Path, monkeypa
     assert out["semantic_completed"] is False
     assert out["hidden_verifier_passed"] is False
     assert out["report_trust_mismatch"] is True
+
+
+def test_hidden_verifier_failure_retries_with_failure_evidence_when_self_heal_env_enabled(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="rlm-v2-hidden-retry-001",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix hidden governance task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="rlm_harder_v2_governance_guard",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    captured_cmds: list[list[str]] = []
+
+    def nexus_payload() -> str:
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "nexus_failure_analysis": {
+                    "schema": "nexus_failure_analysis_v1",
+                    "status": "PASS",
+                    "primary_cause": "verified_delivery",
+                    "nexus_gap": "",
+                    "recoverable": False,
+                },
+                "nexus_usage_trace": {
+                    "gemini_uses_nexus": True,
+                    "nexus_context_delivered": True,
+                    "usage_valid": True,
+                    "pillars": {},
+                    "phase_trace": {},
+                    "capabilities": {},
+                },
+                "result": {
+                    "elapsed_sec": 0.1,
+                    "report": {
+                        "model_calls": 1,
+                        "model_name": "gemini-3-flash-preview",
+                        "model_patch_generated": True,
+                        "total_tokens": 10,
+                        "token_capture_status": "ok",
+                    },
+                },
+            }
+        )
+
+    state = {"verify_calls": 0}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured_cmds.append(list(cmd))
+        if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=nexus_payload(), stderr="")
+        state["verify_calls"] += 1
+        if state["verify_calls"] == 1:
+            return subprocess.CompletedProcess(cmd, 1, stdout="hidden failed: delete_file must be blocked", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="hidden passed", stderr="")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow="hyper_sprint",
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    retry_cmds = [cmd for cmd in captured_cmds if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]]
+    assert len(retry_cmds) == 2
+    retry_desc = retry_cmds[-1][retry_cmds[-1].index("--task-desc") + 1]
+    assert "[Hidden verifier failure]" in retry_desc
+    assert "delete_file must be blocked" in retry_desc
+    assert out["hidden_retry_used"] is True
+    assert out["hidden_retry_reason"] == "hidden_verifier_failure_bounded_nexus_retry"
+    assert out["hidden_verifier_passed"] is True
+    assert out["status"] == "SUCCESS"
 
 
 def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeypatch):

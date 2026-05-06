@@ -1829,6 +1829,8 @@ def _extract_record(
     research_doctor = research_doctor if isinstance(research_doctor, dict) else {}
     claim_probe = payload.get("claim_probe") or usage_trace.get("claim_probe") or {}
     claim_probe = claim_probe if isinstance(claim_probe, dict) else {}
+    nexus_failure_analysis = payload.get("nexus_failure_analysis") or usage_trace.get("nexus_failure_analysis") or {}
+    nexus_failure_analysis = nexus_failure_analysis if isinstance(nexus_failure_analysis, dict) else {}
     governance_events = payload.get("governance_events") or usage_trace.get("governance_events") or []
     governance_events = governance_events if isinstance(governance_events, list) else []
     governance_event_types = sorted(
@@ -2093,6 +2095,17 @@ def _extract_record(
         "claim_probe_invoked": bool(claim_probe.get("invoked", False)),
         "claim_probe_gate_passed": bool(claim_probe.get("gate_passed", False)),
         "claim_probe_decision": str(claim_probe.get("decision") or ""),
+        "nexus_failure_analysis": nexus_failure_analysis,
+        "nexus_failure_analysis_json": json.dumps(nexus_failure_analysis, ensure_ascii=False, sort_keys=True),
+        "nexus_failure_status": str(nexus_failure_analysis.get("status") or ""),
+        "nexus_failure_primary_cause": str(nexus_failure_analysis.get("primary_cause") or ""),
+        "nexus_failure_owner": str(nexus_failure_analysis.get("owner") or ""),
+        "nexus_failure_gap": str(nexus_failure_analysis.get("nexus_gap") or ""),
+        "nexus_failure_recoverable": bool(nexus_failure_analysis.get("recoverable", False)),
+        "nexus_failure_next_action": str(nexus_failure_analysis.get("next_action") or ""),
+        "nexus_failure_reasons": list(nexus_failure_analysis.get("reasons", []) or []),
+        "nexus_blocked_unsafe_delivery": bool(nexus_failure_analysis.get("nexus_blocked_unsafe_delivery", False)),
+        "nexus_failure_self_heal_status": str(nexus_failure_analysis.get("self_heal_status") or ""),
         "governance_events": governance_events,
         "governance_events_json": json.dumps(governance_events, ensure_ascii=False, sort_keys=True),
         "governance_event_count": len(governance_events),
@@ -2889,6 +2902,8 @@ def run_with_nexus(
     skip_llm_baseline: bool = False,
     strict_llm_baseline: bool = False,
 ) -> dict[str, Any]:
+    env_self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "").strip().lower() in {"1", "true", "yes"}
+    effective_llm_self_heal = bool(enable_llm_self_heal or env_self_heal_enabled)
     enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
     test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file
@@ -2973,7 +2988,7 @@ def run_with_nexus(
             env["NEXUS_GATEWAY_TIMEOUT_SEC"] = _benchmark_gateway_timeout_sec(
                 _benchmark_gateway_timeout_for_task(timeout_sec)
             )
-            env["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] = "1" if enable_llm_self_heal else "0"
+            env["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] = "1" if effective_llm_self_heal else "0"
             env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
         if enable_swarm_bench_executor:
             env["NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR"] = "1"
@@ -3020,15 +3035,40 @@ def run_with_nexus(
                 row["report_trust_mismatch"] = False
             else:
                 row["report_trust_mismatch"] = True
+                retryable_nexus_gap = str(row.get("nexus_failure_gap") or "") in {
+                    "",
+                    "bounded_self_heal_not_triggered",
+                    "self_heal_failed",
+                }
                 should_retry_hidden = bool(
                     llm_enabled
-                    and enable_llm_self_heal
+                    and effective_llm_self_heal
                     and runner_mode == "subprocess"
-                    and task.task_type == "public_docs_code_sync"
-                    and str(row.get("route_recommended_flow") or "") == "baseline"
+                    and retryable_nexus_gap
+                    and int(row.get("model_calls", 0) or 0) > 0
                 )
                 if should_retry_hidden:
                     retry_args = list(args)
+                    failure_tail = "\n".join(
+                        item
+                        for item in (
+                            str(row.get("hidden_verifier_stdout_tail") or "").strip(),
+                            str(row.get("hidden_verifier_stderr_tail") or "").strip(),
+                        )
+                        if item
+                    )
+                    hidden_retry_task_desc = (
+                        f"{_nexus_task_desc(task)}\n\n"
+                        "[Hidden verifier failure]\n"
+                        f"{failure_tail[-1600:]}\n\n"
+                        "Repair the patch against this hidden verifier evidence. "
+                        "Keep the full Nexus governance/evidence gates active."
+                    )
+                    if "--task-desc" in retry_args:
+                        retry_args[retry_args.index("--task-desc") + 1] = hidden_retry_task_desc
+                    if "--candidate-count" in retry_args:
+                        idx = retry_args.index("--candidate-count") + 1
+                        retry_args[idx] = str(max(2, min(3, int(retry_args[idx]) + 1)))
                     if "--force-flow" not in retry_args:
                         retry_args.extend(["--force-flow", "hyper_sprint"])
                     retry_cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *retry_args]
@@ -3063,7 +3103,7 @@ def run_with_nexus(
                         retry_row["hidden_verifier_stdout_tail"] = _tail_text(retry_verify.stdout, max_chars=1000)
                         retry_row["hidden_verifier_stderr_tail"] = _tail_text(retry_verify.stderr, max_chars=1000)
                         retry_row["hidden_retry_used"] = True
-                        retry_row["hidden_retry_reason"] = "docs_code_sync_hidden_fail_promoted_to_hyper"
+                        retry_row["hidden_retry_reason"] = "hidden_verifier_failure_bounded_nexus_retry"
                         if retry_hidden_passed:
                             row = retry_row
                             recovered_on_retry = True

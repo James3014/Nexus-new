@@ -1,5 +1,10 @@
 from nexus.research.research_stack_contract import research_stack_checkpoint_ids, research_stack_contract, research_stack_source_projects
-from nexus.research.research_runtime_contracts import build_claim_probe, build_research_doctor
+from nexus.app.research_receipt_runtime import build_capability_receipt_payloads
+from nexus.research.research_runtime_contracts import (
+    build_claim_probe,
+    build_nexus_failure_analysis,
+    build_research_doctor,
+)
 
 
 def test_research_stack_contract_covers_four_external_projects():
@@ -44,3 +49,56 @@ def test_claim_probe_blocks_uncertain_claim_without_artifact_evidence():
     assert out["invoked"] is True
     assert out["gate_passed"] is False
     assert out["decision"] == "block_patch"
+
+
+def test_nexus_failure_analysis_requires_root_cause_after_flash_fail():
+    out = build_nexus_failure_analysis(
+        artifact_verified=False,
+        tests_passed=False,
+        artifact_summary={"changed": False, "mutation_required": True},
+        research_doctor={"status": "FAIL", "failures": ["artifact_not_verified"]},
+        claim_probe={"decision": "block_patch"},
+        gemini_invoked=True,
+        nexus_context_delivered=True,
+        self_heal_used=False,
+        result_report={"model_patch_generated": False},
+    )
+
+    assert out["schema"] == "nexus_failure_analysis_v1"
+    assert out["status"] == "ACTION_REQUIRED"
+    assert out["primary_cause"] == "flash_no_verified_mutation"
+    assert out["owner"] == "nexus_retry_policy"
+    assert out["nexus_gap"] == "bounded_self_heal_not_triggered"
+    assert out["nexus_blocked_unsafe_delivery"] is True
+    assert out["next_action"] == "trigger_bounded_self_heal_before_accepting_flash_failure"
+    assert set(out["reasons"]) >= {
+        "required_mutation_missing",
+        "model_patch_not_generated",
+        "claim_probe_blocked_patch",
+    }
+
+
+def test_hyper_runtime_usage_backfills_receipt_when_planner_omits_hyper():
+    receipts = build_capability_receipt_payloads(
+        {
+            "selected_capabilities": ["research", "delivery_gate"],
+        },
+        {
+            "capabilities": {
+                "claim_verified": True,
+                "research_used": True,
+                "research_refs": ["research:task:route_selected"],
+                "research_gate_passed": True,
+                "delivery_refs": ["delivery:task:artifact_tests_passed"],
+                "delivery_gate_passed": True,
+                "hyper_used": True,
+                "winner_source": "llm",
+                "attempt_count": 1,
+            }
+        },
+    )
+
+    hyper = next(item for item in receipts if item["name"] == "hyper")
+    assert hyper["invoked"] is True
+    assert hyper["public_claim_safe"] is True
+    assert "llm" in hyper["evidence_refs"]
