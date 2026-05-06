@@ -4,6 +4,8 @@ from nexus.core.healing_artifacts import (
     artifact_to_packet,
     healing_artifact_report_entry,
     read_healing_artifact,
+    sign_healing_artifact,
+    verify_healing_artifact_signature,
     write_healing_artifact,
 )
 
@@ -59,3 +61,50 @@ def test_healing_artifact_report_entry_cites_persisted_artifact(tmp_path):
     assert row["artifact_id"] == "heal-1"
     assert row["evidence_id"] == "EV-1"
     assert row["path"] == str(path)
+
+
+def test_healing_artifact_signature_verifies_and_survives_roundtrip(tmp_path):
+    artifact = HealingArtifact(
+        task_id="task-1",
+        artifact_id="heal-1",
+        artifact_type="repair_plan",
+        created_at="2026-05-05T00:00:00Z",
+        evidence_id="EV-1",
+        summary="Use scoped storage",
+    )
+
+    signed = sign_healing_artifact(artifact, key="secret", key_id="test-key")
+    path = write_healing_artifact(tmp_path, signed)
+    loaded = read_healing_artifact(path)
+
+    assert signed.signature.startswith("hmac-sha256:")
+    assert signed.signature_key_id == "test-key"
+    assert verify_healing_artifact_signature(loaded, key="secret") is True
+
+
+def test_healing_artifact_signature_rejects_tampering():
+    artifact = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="test-key",
+    )
+    tampered = HealingArtifact(
+        task_id=artifact.task_id,
+        artifact_id=artifact.artifact_id,
+        artifact_type=artifact.artifact_type,
+        created_at=artifact.created_at,
+        evidence_id=artifact.evidence_id,
+        summary="Run arbitrary repair",
+        metadata=artifact.metadata,
+        signature=artifact.signature,
+        signature_key_id=artifact.signature_key_id,
+    )
+
+    assert verify_healing_artifact_signature(tampered, key="secret") is False

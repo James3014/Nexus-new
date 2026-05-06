@@ -56,3 +56,11 @@ A direct `research:auto-flow --explain-route` invocation only prints the route a
 Decision: wear-Nexus smoke must run without `--explain-route` before Flash. The deterministic local normalize repair now derives the actual argument name from the function signature instead of hard-coding `text`.
 
 Prevention: local mutator tests now cover both `normalize_flag(text)` and `normalize_flag(value)` so Flash is not the first detector for simple local repair regressions.
+
+## P1080 Lesson: Healing Artifacts Need Tamper Evidence Before Swarm Promotion
+
+The safety telemetry diagnosis calls out unsigned `HealingArtifact` packets as a cross-node repair risk. A packet can be transport-only and still dangerous if another node cannot tell whether the artifact body changed in transit.
+
+Decision: `HealingArtifact` now carries optional `signature` and `signature_key_id` fields. The core healing artifact module provides deterministic HMAC-SHA256 signing and verification over a canonical JSON body that excludes signature fields.
+
+Prevention: tests cover valid signature verification and tamper rejection, so Flash is not the first place where cross-node healing evidence trust is exercised.

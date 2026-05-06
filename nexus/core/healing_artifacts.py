@@ -1,10 +1,53 @@
 from __future__ import annotations
 
 import json
+import hmac
+import hashlib
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from nexus.core.belief_contracts import HealingArtifact
+
+
+SIGNATURE_ALGORITHM = "hmac-sha256"
+
+
+def _canonical_artifact_payload(artifact: HealingArtifact) -> dict[str, Any]:
+    payload = asdict(artifact)
+    payload.pop("signature", None)
+    payload.pop("signature_key_id", None)
+    return payload
+
+
+def _canonical_artifact_bytes(artifact: HealingArtifact) -> bytes:
+    return json.dumps(
+        _canonical_artifact_payload(artifact),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def sign_healing_artifact(artifact: HealingArtifact, *, key: str | bytes, key_id: str = "local") -> HealingArtifact:
+    """Return a signed copy of a healing artifact without mutating the original."""
+    key_bytes = key.encode("utf-8") if isinstance(key, str) else bytes(key)
+    signature = hmac.new(key_bytes, _canonical_artifact_bytes(artifact), hashlib.sha256).hexdigest()
+    return HealingArtifact(
+        **{
+            **_canonical_artifact_payload(artifact),
+            "signature": f"{SIGNATURE_ALGORITHM}:{signature}",
+            "signature_key_id": key_id,
+        }
+    )
+
+
+def verify_healing_artifact_signature(artifact: HealingArtifact, *, key: str | bytes) -> bool:
+    """Verify artifact body integrity using the embedded HMAC signature."""
+    if not artifact.signature.startswith(f"{SIGNATURE_ALGORITHM}:"):
+        return False
+    expected = sign_healing_artifact(artifact, key=key, key_id=artifact.signature_key_id).signature
+    return hmac.compare_digest(expected, artifact.signature)
 
 
 def write_healing_artifact(project_root: str | Path, artifact: HealingArtifact) -> Path:

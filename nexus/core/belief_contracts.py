@@ -35,3 +35,5 @@ class HealingArtifact:
     evidence_id: str
     summary: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    signature: str = ""
+    signature_key_id: str = ""
