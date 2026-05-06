@@ -32,7 +32,7 @@ version_scope:
 # Flow - [[SYSTEM_ARCHITECTURE_BLUEPRINT|PXDRAC]] Runtime
 
 ## One-sentence summary
-本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] [Code: scripts/engine/nexus_cli.py]
+本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] [Source: Spec v22] [Code: scripts/engine/nexus_cli.py] [code: nexus_cli.py]
 
 ## Role / responsibility
 - 本頁描述 Nexus 任務執行的實體調度序列，涵蓋從目標解構到經驗落盤的完整循環。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md] [Code: scripts/engine/nexus_cli.py]

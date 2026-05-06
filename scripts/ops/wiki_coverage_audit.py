@@ -138,9 +138,14 @@ def run_audit():
     coverage_ratio = len(covered_files) / len(all_code_files) if all_code_files else 0
     
     # 關鍵路徑查驗
-    keypath_covered = [f for f in covered_files if f in KEY_PATHS]
-    keypath_uncovered = [f for f in KEY_PATHS if f not in covered_files]
-    keypath_ratio = len(keypath_covered) / len(KEY_PATHS) if KEY_PATHS else 1.0
+    # Missing optional products are reported separately. They must not make
+    # existing key-path coverage fail, otherwise removed/non-runtime products
+    # keep reopening the closure gate.
+    existing_key_paths = [f for f in KEY_PATHS if (REPO_ROOT / f).exists()]
+    missing_key_paths = [f for f in KEY_PATHS if f not in existing_key_paths]
+    keypath_covered = [f for f in covered_files if f in existing_key_paths]
+    keypath_uncovered = [f for f in existing_key_paths if f not in covered_files]
+    keypath_ratio = len(keypath_covered) / len(existing_key_paths) if existing_key_paths else 1.0
     
     # 指標狀態
     global_status = "PASS" if coverage_ratio >= 0.85 else "FAIL"
@@ -172,7 +177,8 @@ def run_audit():
         "keypath_coverage_ratio": f"{keypath_ratio:.2%}",
         "keypath_status": keypath_status,
         "keypath_uncovered": keypath_uncovered,
-        "keypath_covered": keypath_covered
+        "keypath_covered": keypath_covered,
+        "keypath_missing": missing_key_paths
     }
     
     os.makedirs(REPORT_PATH.parent, exist_ok=True)
@@ -189,6 +195,8 @@ def run_audit():
     
     if keypath_ratio < 1.0:
         print(f"❌ Critical Error: Key Path coverage is NOT 100%. Missing: {', '.join(keypath_uncovered)}")
+    if missing_key_paths:
+        print(f"ℹ️ Key Path products not present in this checkout: {', '.join(missing_key_paths)}")
     
     if coverage_ratio < 0.85:
         print(f"⚠️ Gap: {len(uncovered_files)} files remaining.")

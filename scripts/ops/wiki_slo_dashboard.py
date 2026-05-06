@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +19,24 @@ def load_json(path):
     try:
         with open(path, "r") as f: return json.load(f)
     except: return {}
+
+def _percent_value(value):
+    if isinstance(value, str):
+        return float(value.rstrip("%"))
+    if isinstance(value, (int, float)):
+        return float(value) * 100.0 if 0 <= float(value) <= 1 else float(value)
+    return 0.0
+
+def _coverage_snapshot(coverage):
+    summary = coverage.get("summary", {})
+    return {
+        "global": _percent_value(
+            coverage.get("global_coverage", summary.get("coverage_ratio", summary.get("coverage_ratio_float", 0.0)))
+        ),
+        "keypath": _percent_value(
+            coverage.get("keypath_coverage", summary.get("keypath_coverage_ratio", 0.0))
+        ),
+    }
 
 def generate_slo():
     print("🛡️ WS-R: Generating Governance SLO Dashboard...")
@@ -46,10 +65,7 @@ def generate_slo():
             "p2": drift.get("summary", {}).get("p2_count", 0),
             "total": drift.get("summary", {}).get("total_drifts", 0)
         },
-        "coverage": {
-            "global": coverage.get("global_coverage", 0.0),
-            "keypath": coverage.get("keypath_coverage", 0.0)
-        },
+        "coverage": _coverage_snapshot(coverage),
         "truth": {
             "mismatch": truth.get("summary", {}).get("mismatch_count", 0),
             "infra_error": truth.get("summary", {}).get("infra_error_count", 0),

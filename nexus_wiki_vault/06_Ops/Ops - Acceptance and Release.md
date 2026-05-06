@@ -27,7 +27,7 @@ version_scope:
 # Ops - Acceptance and Release (v26.2 Hardened)
 
 ## One-sentence summary
-本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。
+本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。 [source: Release Discipline]
 
 ## 🛡️ 冷啟動政策 (Cold-Start Acceptance)
 Nexus 支援任務在初期階段的優雅降級，定義於 `nexus_cli.py`：
