@@ -59,6 +59,8 @@ def test_flash_baseline_summary_reports_rates_route_quality_and_public_safe(tmp_
     assert summary["route_quality"]["selected_to_invoked_rate"] == 1.0
     assert summary["runtime_pruning"]["with_nexus"] == 1.0
     assert summary["runtime_pruning"]["avg_with_nexus"] == 1.0
+    assert summary["runtime_pruning"]["warnings"] == ["runtime_pruning_above_warning_threshold"]
+    assert summary["runtime_pruning"]["target_failures"] == ["runtime_pruning_above_target_threshold"]
     assert summary["infra_invalid"]["with_nexus"] == 0
 
 

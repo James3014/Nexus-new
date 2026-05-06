@@ -48,6 +48,28 @@ def _promotion_status(*, gate_valid: bool, infra_invalid: bool, semantic_delta: 
     return "NO_UPLIFT"
 
 
+def _runtime_pruning_summary(summary_without: dict[str, Any], summary_with: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
+    with_rate = float(summary_with.get("runtime_pruned_capability_rate", 0.0) or 0.0)
+    warnings = []
+    target_failures = []
+    if with_rate > 0.30:
+        warnings.append("runtime_pruning_above_warning_threshold")
+    if with_rate > 0.15:
+        target_failures.append("runtime_pruning_above_target_threshold")
+    return {
+        "without_nexus": summary_without.get("runtime_pruned_capability_rate", 0.0),
+        "with_nexus": with_rate,
+        "delta": delta.get("runtime_pruned_capability_rate_delta", 0.0),
+        "avg_without_nexus": summary_without.get("avg_runtime_pruned_capability_count", 0.0),
+        "avg_with_nexus": summary_with.get("avg_runtime_pruned_capability_count", 0.0),
+        "avg_delta": delta.get("avg_runtime_pruned_capability_count_delta", 0.0),
+        "warning_threshold": 0.30,
+        "target_threshold": 0.15,
+        "warnings": warnings,
+        "target_failures": target_failures,
+    }
+
+
 def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
     without_path = _latest_jsonl(output_dir, "without_nexus")
     with_path = _latest_jsonl(output_dir, "with_nexus")
@@ -100,14 +122,7 @@ def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
             "delta": semantic_delta,
         },
         "route_quality": route_quality,
-        "runtime_pruning": {
-            "without_nexus": summary_without.get("runtime_pruned_capability_rate", 0.0),
-            "with_nexus": summary_with.get("runtime_pruned_capability_rate", 0.0),
-            "delta": report["delta"].get("runtime_pruned_capability_rate_delta", 0.0),
-            "avg_without_nexus": summary_without.get("avg_runtime_pruned_capability_count", 0.0),
-            "avg_with_nexus": summary_with.get("avg_runtime_pruned_capability_count", 0.0),
-            "avg_delta": report["delta"].get("avg_runtime_pruned_capability_count_delta", 0.0),
-        },
+        "runtime_pruning": _runtime_pruning_summary(summary_without, summary_with, report["delta"]),
         "public_safe": public_safe,
         "infra_invalid": {
             "without_nexus": infra_without["count"],
