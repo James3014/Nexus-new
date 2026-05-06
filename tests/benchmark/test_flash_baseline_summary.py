@@ -33,6 +33,9 @@ def test_flash_baseline_summary_reports_rates_route_quality_and_public_safe(tmp_
             "model_name": "gemini-3-flash-preview",
             "runtime_pruned_capabilities": {"autoreason": "candidate_factory_skipped"},
             "runtime_pruned_capability_count": 1,
+            "openseeker_schema_version": "nexus_openseeker_alignment.v1",
+            "route_tactical_tool_count": 4,
+            "route_evidence_required_count": 3,
             "capability_receipts": [
                 {
                     "name": "judge_panel",
@@ -57,6 +60,9 @@ def test_flash_baseline_summary_reports_rates_route_quality_and_public_safe(tmp_
     assert summary["semantic_verified_rate"]["delta"] == 1.0
     assert summary["public_safe"]["public_safe"] == ["judge_panel"]
     assert summary["route_quality"]["selected_to_invoked_rate"] == 1.0
+    assert summary["route_tactical"]["trace_present_rate"] == 1.0
+    assert summary["route_tactical"]["avg_route_tactical_tool_count"] == 4.0
+    assert summary["route_tactical"]["avg_route_evidence_required_count"] == 3.0
     assert summary["runtime_pruning"]["with_nexus"] == 1.0
     assert summary["runtime_pruning"]["avg_with_nexus"] == 1.0
     assert summary["runtime_pruning"]["warnings"] == ["runtime_pruning_above_warning_threshold"]

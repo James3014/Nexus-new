@@ -11,6 +11,7 @@ from scripts.bench.gemini_nexus_report import (
     _per_capability_public_gate,
     _route_quality_gate_from_rows,
     _route_quality_metrics,
+    _route_tactical_metrics,
 )
 
 
@@ -79,6 +80,7 @@ def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
     public_safe = _per_capability_public_gate(report)
     route_quality = _route_quality_metrics(report, "b")
     route_quality["gate_failures"] = _route_quality_gate_from_rows(rows_with)
+    route_tactical = _route_tactical_metrics(rows_with)
     evidence_bundle = _load_optional_json(output_dir / "evidence_bundle.json")
     model_names = sorted(
         {
@@ -122,6 +124,7 @@ def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
             "delta": semantic_delta,
         },
         "route_quality": route_quality,
+        "route_tactical": route_tactical,
         "runtime_pruning": _runtime_pruning_summary(summary_without, summary_with, report["delta"]),
         "public_safe": public_safe,
         "infra_invalid": {

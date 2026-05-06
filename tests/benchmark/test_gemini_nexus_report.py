@@ -1213,6 +1213,9 @@ def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_p
                 "phase_a": "artifact_verified",
                 "phase_c": "closure_written",
                 "capability_claim_verified": True,
+                "openseeker_schema_version": "nexus_openseeker_alignment.v1",
+                "route_tactical_tool_count": 4,
+                "route_evidence_required_count": 3,
                 "runtime_pruned_capabilities": {"judge_panel": "candidate_factory_skipped"},
                 "runtime_pruned_capability_count": 1,
                 "capability_receipts": [
@@ -1254,6 +1257,9 @@ def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_p
     assert "Per-capability public-safe capabilities: autoreason" in out
     assert "| autoreason | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | YES | capability_receipts | none |" in out
     assert "| Runtime pruned capabilities | 0.0% | 100.0% | 100.0% | Selected capabilities removed from public receipts because runtime executor readiness was absent |" in out
+    assert "| Tactical trace present | 0.0% | 100.0% | 100.0% | Route tactical sequence is exported into OpenSeeker telemetry |" in out
+    assert "| Avg tactical tools | 0.00 | 4.00 | 4.00 | Planned tactical tool actions per traced row |" in out
+    assert "| Avg evidence-required tools | 0.00 | 3.00 | 3.00 | Tactical tools that must emit evidence receipts |" in out
     assert "| Avg runtime pruned capabilities | 0.00 | 1.00 | 1.00 | Lower means fewer planner/runtime mismatches |" in out
     assert "## Capability Activation Details" in out
     assert "| autoreason | public_safe | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 | capability_receipts | Can claim: selected, invoked, evidenced, and gated. |" in out

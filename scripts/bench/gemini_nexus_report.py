@@ -216,6 +216,30 @@ def _route_quality_metrics(report: dict[str, Any], arm: str) -> dict[str, float]
     }
 
 
+def _route_tactical_metrics(rows: list[dict[str, Any]]) -> dict[str, float]:
+    eligible = [row for row in rows if bool(row.get("run_eligible", True))]
+    traced = [
+        row
+        for row in eligible
+        if str(row.get("openseeker_schema_version") or "").strip()
+        and (
+            int(row.get("route_tactical_tool_count", 0) or 0) > 0
+            or int(row.get("route_evidence_required_count", 0) or 0) > 0
+        )
+    ]
+
+    def _mean(key: str) -> float:
+        if not traced:
+            return 0.0
+        return sum(float(row.get(key, 0.0) or 0.0) for row in traced) / len(traced)
+
+    return {
+        "trace_present_rate": len(traced) / len(eligible) if eligible else 0.0,
+        "avg_route_tactical_tool_count": _mean("route_tactical_tool_count"),
+        "avg_route_evidence_required_count": _mean("route_evidence_required_count"),
+    }
+
+
 def _jsonish(value: Any, fallback: Any) -> Any:
     if isinstance(value, str):
         try:
@@ -868,6 +892,8 @@ def render_markdown_report(
     capability_gate = _per_capability_public_gate(report)
     route_quality_without = _route_quality_metrics(report, "a")
     route_quality_with = _route_quality_metrics(report, "b")
+    route_tactical_without = _route_tactical_metrics(rows_without)
+    route_tactical_with = _route_tactical_metrics(rows_with)
     research_preflight_without = _research_preflight_metrics(rows_without)
     research_preflight_with = _research_preflight_metrics(rows_with)
     brain_hub_without = _brain_hub_guidance_metrics(rows_without)
@@ -1012,6 +1038,9 @@ def render_markdown_report(
         f"| Invoked -> Evidence | {_pct(route_quality_without['invoked_to_evidence_rate'])} | {_pct(route_quality_with['invoked_to_evidence_rate'])} | {_pct(route_quality_with['invoked_to_evidence_rate'] - route_quality_without['invoked_to_evidence_rate'])} | Higher means execution is evidenced |",
         f"| Evidence -> Outcome | {_pct(route_quality_without['evidence_to_outcome_rate'])} | {_pct(route_quality_with['evidence_to_outcome_rate'])} | {_pct(route_quality_with['evidence_to_outcome_rate'] - route_quality_without['evidence_to_outcome_rate'])} | Higher means evidence contributes to verified outcomes |",
         f"| Unnecessary Selected | {_pct(route_quality_without['unnecessary_selected_rate'])} | {_pct(route_quality_with['unnecessary_selected_rate'])} | {_pct(route_quality_with['unnecessary_selected_rate'] - route_quality_without['unnecessary_selected_rate'])} | Lower means less over-selection friction |",
+        f"| Tactical trace present | {_pct(route_tactical_without['trace_present_rate'])} | {_pct(route_tactical_with['trace_present_rate'])} | {_pct(route_tactical_with['trace_present_rate'] - route_tactical_without['trace_present_rate'])} | Route tactical sequence is exported into OpenSeeker telemetry |",
+        f"| Avg tactical tools | {_num(route_tactical_without['avg_route_tactical_tool_count'])} | {_num(route_tactical_with['avg_route_tactical_tool_count'])} | {_num(route_tactical_with['avg_route_tactical_tool_count'] - route_tactical_without['avg_route_tactical_tool_count'])} | Planned tactical tool actions per traced row |",
+        f"| Avg evidence-required tools | {_num(route_tactical_without['avg_route_evidence_required_count'])} | {_num(route_tactical_with['avg_route_evidence_required_count'])} | {_num(route_tactical_with['avg_route_evidence_required_count'] - route_tactical_without['avg_route_evidence_required_count'])} | Tactical tools that must emit evidence receipts |",
         f"| Runtime pruned capabilities | {_pct(a['runtime_pruned_capability_rate'])} | {_pct(b['runtime_pruned_capability_rate'])} | {_pct(delta['runtime_pruned_capability_rate_delta'])} | Selected capabilities removed from public receipts because runtime executor readiness was absent |",
         f"| Avg runtime pruned capabilities | {_num(a['avg_runtime_pruned_capability_count'])} | {_num(b['avg_runtime_pruned_capability_count'])} | {_num(delta['avg_runtime_pruned_capability_count_delta'])} | Lower means fewer planner/runtime mismatches |",
         f"| Research preflight present | {_pct(research_preflight_without['preflight_present_rate'])} | {_pct(research_preflight_with['preflight_present_rate'])} | {_pct(research_preflight_with['preflight_present_rate'] - research_preflight_without['preflight_present_rate'])} | Route emitted a research preflight decision |",
