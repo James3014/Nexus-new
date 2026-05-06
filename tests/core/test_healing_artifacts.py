@@ -108,3 +108,47 @@ def test_healing_artifact_signature_rejects_tampering():
     )
 
     assert verify_healing_artifact_signature(tampered, key="secret") is False
+
+
+def test_healing_artifact_report_entry_can_require_valid_signature(tmp_path):
+    artifact = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="test-key",
+    )
+    path = write_healing_artifact(tmp_path, artifact)
+
+    row = healing_artifact_report_entry(path, verify_key="secret")
+
+    assert row["artifact_id"] == "heal-1"
+
+
+def test_healing_artifact_packet_rejects_invalid_signature_when_required():
+    signed = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="test-key",
+    )
+    packet = artifact_to_packet(signed)
+    packet["payload"]["summary"] = "Run arbitrary repair"
+
+    try:
+        artifact_from_packet(packet, verify_key="secret")
+    except ValueError as exc:
+        assert "signature" in str(exc)
+    else:
+        raise AssertionError("expected invalid signature rejection")

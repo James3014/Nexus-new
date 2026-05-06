@@ -27,15 +27,18 @@ class LanceDBStorage(MemoryStorage):
         return compressed
 
     def retrieve(self, query: str, **kwargs) -> List[Dict[str, Any]]:
-        """🛡️ Fallback: Keyword search across tenant JSONL backups."""
+        """Keyword search scoped to one tenant unless global search is explicit."""
         results = []
         limit = kwargs.get("limit", 10)
         tenant_id = str(kwargs.get("tenant_id") or self.tenant_id or "")
+        include_all_tenants = bool(kwargs.get("include_all_tenants", False))
         tenants_root = self.project_root / ".nexus" / "tenants"
         if tenant_id:
             tenant_dirs = list((tenants_root / tenant_id / "lancedb").glob("*.jsonl"))
-        else:
+        elif include_all_tenants:
             tenant_dirs = list(tenants_root.glob("*/lancedb/*.jsonl"))
+        else:
+            return []
         
         for jsonl_path in tenant_dirs:
             try:

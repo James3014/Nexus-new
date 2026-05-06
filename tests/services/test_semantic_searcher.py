@@ -13,7 +13,7 @@ class FakeRepository:
     def search_fts(self, **kwargs):
         self.calls.append(kwargs)
         return pd.DataFrame(
-            [{"rule_id": "r1", "condition": "bug", "action": "run targeted pytest", "_score": 0.8}]
+            [{"rule_id": "r1", "condition": "bug", "action": "run targeted pytest", "_score": 0.8, "confidence": 0.91}]
         )
 
 
@@ -30,6 +30,9 @@ def test_semantic_searcher_wraps_repository_search():
             "id": "r1",
             "content": "run targeted pytest",
             "relevance": 0.8,
+            "confidence": 0.91,
+            "confidence_source": "row",
+            "evidence_ref": "semantic:policy:r1",
             "source": "lancedb-fts",
         }
     ]

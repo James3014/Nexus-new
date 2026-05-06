@@ -44,6 +44,14 @@ def test_lancedb_storage_scoped_access_keeps_tenants_isolated(tmp_path):
     assert tenant_b.retrieve("beta", artifact_type="lesson", limit=5)
 
 
+def test_lancedb_storage_unscoped_retrieve_is_fail_closed(tmp_path):
+    storage = LanceDBStorage(tmp_path)
+    storage.store("tenant-a", "lesson", {"content": "alpha secret"})
+
+    assert storage.retrieve("alpha", artifact_type="lesson", limit=5) == []
+    assert storage.retrieve("alpha", artifact_type="lesson", limit=5, include_all_tenants=True)
+
+
 def test_memory_storage_protocol_does_not_include_search():
     from nexus.infrastructure.storage_interfaces import MemoryStorage, SearchProvider
 

@@ -61,9 +61,12 @@ def write_healing_artifact(project_root: str | Path, artifact: HealingArtifact) 
     return out_path
 
 
-def read_healing_artifact(path: str | Path) -> HealingArtifact:
+def read_healing_artifact(path: str | Path, *, verify_key: str | bytes | None = None) -> HealingArtifact:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    return HealingArtifact(**payload)
+    artifact = HealingArtifact(**payload)
+    if verify_key is not None and not verify_healing_artifact_signature(artifact, key=verify_key):
+        raise ValueError("invalid healing artifact signature")
+    return artifact
 
 
 def artifact_to_packet(artifact: HealingArtifact) -> dict:
@@ -75,7 +78,7 @@ def artifact_to_packet(artifact: HealingArtifact) -> dict:
     }
 
 
-def artifact_from_packet(packet: dict) -> HealingArtifact:
+def artifact_from_packet(packet: dict, *, verify_key: str | bytes | None = None) -> HealingArtifact:
     if packet.get("type") != "healing_artifact":
         raise ValueError("not a healing artifact packet")
     if packet.get("schema_version") != "nexus_healing_artifact.v1":
@@ -83,12 +86,15 @@ def artifact_from_packet(packet: dict) -> HealingArtifact:
     payload = packet.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("healing artifact packet payload must be an object")
-    return HealingArtifact(**payload)
+    artifact = HealingArtifact(**payload)
+    if verify_key is not None and not verify_healing_artifact_signature(artifact, key=verify_key):
+        raise ValueError("invalid healing artifact signature")
+    return artifact
 
 
-def healing_artifact_report_entry(path: str | Path) -> dict:
+def healing_artifact_report_entry(path: str | Path, *, verify_key: str | bytes | None = None) -> dict:
     """Read a persisted artifact into a report-safe citation row."""
-    artifact = read_healing_artifact(path)
+    artifact = read_healing_artifact(path, verify_key=verify_key)
     return {
         "artifact_id": artifact.artifact_id,
         "task_id": artifact.task_id,
