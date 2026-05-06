@@ -10,6 +10,7 @@ from nexus.engine.capability_contracts import CapabilityPlan, RouteDecision
 from nexus.engine.capability_executor_controls import build_execution_plan
 from nexus.engine.route_forecast_policy import build_forecast_gate_shadow, build_pillar_signal_summary
 from nexus.engine.route_tactical_policy import build_tactical_stop_policy
+from nexus.engine.route_tier_policy import build_route_derivation_meta, resolve_route_tier
 
 
 def _hash_task_desc(task_desc: str) -> str:
@@ -33,28 +34,16 @@ def build_route_decision(
     signal_snapshot = dict(plan.signal_snapshot)
     signal_snapshot["pillar_signals"] = build_pillar_signal_summary(plan)
     forecast_gate_shadow = build_forecast_gate_shadow(plan)
-    routing_tier = str(signal_snapshot.get("routing_tier", "") or "")
-    routing_tier_reason = str(signal_snapshot.get("routing_tier_reason", "") or "")
-    routing_tier_fallback_used = False
-    if not routing_tier:
-        routing_tier_fallback_used = True
-        routing_tier = str(forecast_gate_shadow.get("suggested_tier", "L2_context_governed"))
-        routing_tier_reason = str(forecast_gate_shadow.get("suggested_tier_reason", "forecast_gate_default"))
+    resolved_tier = resolve_route_tier(signal_snapshot=signal_snapshot, forecast_gate_shadow=forecast_gate_shadow)
     hazard_hits = tuple(str(item) for item in (signal_snapshot.get("hazard_hits", []) or []) if str(item))
     hazard_forced_l3 = bool(signal_snapshot.get("hazard_forced_l3", False))
     policy_loaded_count = int(signal_snapshot.get("policy_loaded_count", 0) or 0)
     policy_pruned_count = int(signal_snapshot.get("policy_pruned_count", 0) or 0)
-    early_exit_used = bool(forecast_gate_shadow.get("early_exit_candidate", False) and routing_tier == "L1_green_lane")
-    plan_recommended_flow = str(signal_snapshot.get("recommended_flow", "") or "")
-    recommended_flow_mismatch = bool(plan_recommended_flow and plan_recommended_flow != recommended_flow)
-    derivation_meta = {
-        "routing_tier_fallback_used": routing_tier_fallback_used,
-        "recommended_flow_mismatch": recommended_flow_mismatch,
-        "recommended_flow_param": recommended_flow,
-        "recommended_flow_plan": plan_recommended_flow,
-        "acceleration_layers_rule": "selected_capabilities_intersection_ddtree",
-        "governance_layers_rule": "selected_capabilities_intersection_ultra_mempalace_artifact_claim",
-    }
+    derivation_meta = build_route_derivation_meta(
+        signal_snapshot=signal_snapshot,
+        recommended_flow=recommended_flow,
+        routing_tier_fallback_used=resolved_tier.routing_tier_fallback_used,
+    )
     resolved_stop_policy = build_tactical_stop_policy(
         plan=plan,
         recommended_flow=recommended_flow,
@@ -85,11 +74,11 @@ def build_route_decision(
         receipt_requirements=("invoked", "evidence_present", "gate_passed", "outcome_contributed"),
         fallback_policy="fail_closed",
         forecast_gate_shadow=forecast_gate_shadow,
-        routing_tier=routing_tier,
-        routing_tier_reason=routing_tier_reason,
+        routing_tier=resolved_tier.routing_tier,
+        routing_tier_reason=resolved_tier.routing_tier_reason,
         hazard_hits=hazard_hits,
         hazard_forced_l3=hazard_forced_l3,
-        early_exit_used=early_exit_used,
+        early_exit_used=resolved_tier.early_exit_used,
         policy_loaded_count=policy_loaded_count,
         policy_pruned_count=policy_pruned_count,
         tuning_snapshot=tuning_snapshot or {},
