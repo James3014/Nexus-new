@@ -2040,6 +2040,47 @@ def _augment_semantic_runtime_capabilities(
         capabilities["formal_report_gate_passed"] = bool(report.get("status") == "READY" and artifact_verified)
 
 
+def _runtime_receipt_plan_payload(
+    capability_plan_payload: dict[str, Any],
+    nexus_usage_trace: dict[str, Any],
+) -> dict[str, Any]:
+    plan = dict(capability_plan_payload)
+    selected = [str(item).strip() for item in (plan.get("selected_capabilities", []) or []) if str(item).strip()]
+    if not selected:
+        return plan
+
+    capabilities = nexus_usage_trace.get("capabilities", {}) if isinstance(nexus_usage_trace.get("capabilities"), dict) else {}
+    autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}
+    pruned: dict[str, str] = {}
+
+    def _remove_selected(name: str, reason: str) -> None:
+        aliases = {name}
+        if name == "judge_panel":
+            aliases.add("llm_judge_panel")
+        removed = [item for item in selected if item in aliases]
+        if not removed:
+            return
+        selected[:] = [item for item in selected if item not in aliases]
+        for item in removed:
+            pruned[item] = reason
+
+    judge_selected = bool({"judge_panel", "llm_judge_panel"} & set(selected))
+    judge_used = bool(capabilities.get("judge_panel_used") or capabilities.get("llm_judge_panel_used"))
+    if judge_selected and not judge_used:
+        status = str(autoreason.get("status") or "").strip().upper()
+        stop_reason = str(autoreason.get("stop_reason") or "").strip()
+        if status in {"SKIPPED", "DISABLED", "FEATURE_FLAG_DISABLED", "NOOP"} or stop_reason:
+            _remove_selected("judge_panel", stop_reason or status.lower() or "runtime_judge_not_executable")
+
+    if pruned:
+        plan["selected_capabilities"] = selected
+        existing = capabilities.get("runtime_pruned_capabilities", {})
+        merged = dict(existing) if isinstance(existing, dict) else {}
+        merged.update(pruned)
+        capabilities["runtime_pruned_capabilities"] = merged
+    return plan
+
+
 
 
 def run_auto_flow(
@@ -3057,10 +3098,11 @@ def run_auto_flow(
         )
         nexus_usage_trace["capabilities"]["rlm_trace_path"] = nexus_usage_trace["rlm_trace_path"]
         nexus_usage_trace["capabilities"]["rlm_trace_present"] = bool(nexus_usage_trace["rlm_trace_path"])
+    runtime_receipt_plan = _runtime_receipt_plan_payload(capability_plan_payload, nexus_usage_trace)
     nexus_usage_trace["capability_receipts"] = [
         item.to_dict()
         for item in build_trace_receipts(
-            plan=capability_plan_payload,
+            plan=runtime_receipt_plan,
             capabilities=nexus_usage_trace["capabilities"],
             autoreason=nexus_usage_trace["autoreason"],
             ddtree=nexus_usage_trace["ddtree"],

@@ -2427,6 +2427,37 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
     assert capabilities["external_doc_scout_gate_passed"] is True
 
 
+def test_runtime_receipt_plan_prunes_unexecuted_judge_panel():
+    capabilities = {}
+    plan = research_flow_service._runtime_receipt_plan_payload(
+        {
+            "selected_capabilities": [
+                "hyper_sprint",
+                "autoreason",
+                "judge_panel",
+                "llm_judge_panel",
+                "formal_report",
+            ]
+        },
+        {
+            "capabilities": capabilities,
+            "autoreason": {
+                "status": "SKIPPED",
+                "stop_reason": "candidate_factory_skipped",
+                "judge_votes": [],
+            },
+        },
+    )
+
+    assert "judge_panel" not in plan["selected_capabilities"]
+    assert "llm_judge_panel" not in plan["selected_capabilities"]
+    assert "autoreason" in plan["selected_capabilities"]
+    assert capabilities["runtime_pruned_capabilities"] == {
+        "judge_panel": "candidate_factory_skipped",
+        "llm_judge_panel": "candidate_factory_skipped",
+    }
+
+
 def test_auto_flow_writes_explicit_output_file(tmp_path: Path):
     target = tmp_path / "target.py"
     target.write_text("def normalize_flag(text):\n    return text\n", encoding="utf-8")

@@ -10,6 +10,7 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Provider seams that call local helper methods must be unit-tested through the provider boundary. A static/injected fetch provider failed when `_best_line` was called as an instance method from a provider, so fetched external evidence disappeared silently behind the fail-closed provider wrapper.
 - `external_doc_scout` must not become public-safe from rejected claims alone. A runtime receipt needs at least one verified external source count, otherwise claim-scout selection can be mistaken for external fact verification.
 - Route/runtime tests may need explicit cache access because `uv` resolves through `/Users/jameschen/.cache/uv`. A sandbox denial is infrastructure noise, not a product regression, and should be retried with the approved `uv run pytest` path before changing code.
+- Flash 4x1 can show real solve uplift while still failing promotion if a planned semantic judge is not executable at runtime. Runtime receipts must prune and record selected capabilities that were skipped by candidate-factory readiness, otherwise public-safe gates mistake planner intent for a capability claim.
 
 ## Applied Fixes
 - Added late plateau replan before execution.
@@ -18,6 +19,7 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Renamed the preferred semantic judge route capability to `judge_panel` while preserving `llm_judge_panel` compatibility keys for existing reports.
 - Added provider/cache/source-count metadata to DocScout receipts and made the external DocScout gate require verified sources.
 - Made plateau hard-pivot testing distinguish runtime regressions from sandbox cache access failures.
+- Added runtime receipt plan pruning for unexecuted `judge_panel`/`llm_judge_panel` when Autoreason is skipped by candidate-factory readiness.
 
 ## Remaining Debt
 - `swarm_quiet_moment` Flash path still needs a bounded non-timeout LLM profile before public A/B claims can include it.
