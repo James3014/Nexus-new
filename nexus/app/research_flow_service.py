@@ -1963,6 +1963,10 @@ def _augment_semantic_runtime_capabilities(
         providers_used = [str(item) for item in external_meta.get("providers_used", []) or [] if str(item).strip()]
         provider_errors = [str(item) for item in external_meta.get("provider_errors", []) or [] if str(item).strip()]
         verified_source_count = int(external_meta.get("verified_source_count", len(set(refs))) or 0)
+        source_count = int(external_meta.get("source_count", verified_source_count) or 0)
+        error_count = int(external_meta.get("error_count", len(provider_errors)) or 0)
+        latency_ms = float(external_meta.get("latency_ms", 0.0) or 0.0)
+        cache_age_sec = float(external_meta.get("cache_age_sec", 0.0) or 0.0)
         cache_status = str(external_meta.get("cache_status") or "disabled")
         if refs or verified or rejected:
             report = {
@@ -1975,6 +1979,10 @@ def _augment_semantic_runtime_capabilities(
                 "provider_errors": provider_errors,
                 "cache_status": cache_status,
                 "verified_source_count": verified_source_count,
+                "source_count": source_count,
+                "error_count": error_count,
+                "latency_ms": latency_ms,
+                "cache_age_sec": cache_age_sec,
             }
             capabilities["external_doc_scout_used"] = True
             capabilities["external_doc_refs"] = list(dict.fromkeys(refs))
@@ -1984,6 +1992,10 @@ def _augment_semantic_runtime_capabilities(
             capabilities["external_doc_scout_provider_errors"] = provider_errors
             capabilities["external_doc_scout_cache_status"] = cache_status
             capabilities["external_doc_scout_verified_source_count"] = verified_source_count
+            capabilities["external_doc_scout_source_count"] = source_count
+            capabilities["external_doc_scout_error_count"] = error_count
+            capabilities["external_doc_scout_latency_ms"] = latency_ms
+            capabilities["external_doc_scout_cache_age_sec"] = cache_age_sec
             capabilities["external_doc_scout_report_path"] = _write_runtime_receipt_json(
                 repo_root,
                 category="external_doc_scout",

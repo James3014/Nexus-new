@@ -183,6 +183,10 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
                 "external_doc_scout_providers_used": ["github_issue_fetch"],
                 "external_doc_scout_cache_status": "miss",
                 "external_doc_scout_verified_source_count": 1,
+                "external_doc_scout_source_count": 1,
+                "external_doc_scout_error_count": 0,
+                "external_doc_scout_latency_ms": 2.5,
+                "external_doc_scout_cache_age_sec": 0.0,
                 "external_doc_scout_gate_passed": True,
                 "formal_report_path": ".nexus/reports/formal/report.md",
                 "formal_report_schema_version": "nexus_formal_report_v1",
@@ -201,6 +205,8 @@ def test_semantic_research_runtime_receipts_require_evidence_and_gate():
         assert receipt.evidence_refs
     assert "lookup_matches:1" in proven["asi_constraint_extractor"].evidence_refs
     assert "verified_sources:1" in proven["external_doc_scout"].evidence_refs
+    assert "sources:1" in proven["external_doc_scout"].evidence_refs
+    assert "errors:0" in proven["external_doc_scout"].evidence_refs
 
 
 def test_external_doc_scout_gate_requires_verified_source_count():

@@ -2420,6 +2420,10 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
     assert capabilities["external_doc_scout_report_path"]
     assert capabilities["external_doc_scout_cache_status"] in {"disabled", "hit", "miss"}
     assert capabilities["external_doc_scout_verified_source_count"] >= 1
+    assert capabilities["external_doc_scout_source_count"] >= 1
+    assert capabilities["external_doc_scout_error_count"] == 0
+    assert capabilities["external_doc_scout_latency_ms"] >= 0
+    assert capabilities["external_doc_scout_cache_age_sec"] >= 0
     assert capabilities["external_doc_scout_gate_passed"] is True
 
 

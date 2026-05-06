@@ -44,6 +44,10 @@ def test_doc_scout_adapter_handles_empty_query(tmp_path: Path):
     out = DocScoutAdapter(tmp_path).search("", limit=3)
     assert out["status"] == "EMPTY_QUERY"
     assert out["hits_count"] == 0
+    assert out["external_metadata"]["source_count"] == 0
+    assert out["external_metadata"]["error_count"] == 0
+    assert out["external_metadata"]["latency_ms"] == 0.0
+    assert out["external_metadata"]["cache_age_sec"] == 0.0
 
 
 def test_doc_scout_adapter_supports_external_provider_with_traceable_source(tmp_path: Path):
@@ -80,7 +84,11 @@ def test_doc_scout_external_provider_rejects_unverified_sources_and_caches(tmp_p
     assert [hit["source_url"] for hit in first["hits"]] == ["https://github.example/issues/42"]
     assert second["hits"] == first["hits"]
     assert first["external_metadata"]["cache_status"] == "miss"
+    assert first["external_metadata"]["source_count"] == 1
+    assert first["external_metadata"]["error_count"] == 0
+    assert first["external_metadata"]["latency_ms"] >= 0
     assert second["external_metadata"]["cache_status"] == "hit"
+    assert second["external_metadata"]["cache_age_sec"] >= 0
     assert second["external_metadata"]["providers_used"] == ["github_issue"]
     assert second["external_metadata"]["verified_source_count"] == 1
     assert list((tmp_path / ".nexus" / "cache" / "doc_scout").glob("*.json"))
@@ -125,6 +133,7 @@ def test_doc_scout_fetched_provider_is_opt_in_and_uses_injected_fetcher(tmp_path
     assert enabled["external_metadata"]["providers_used"] == ["spec_fetch"]
     assert enabled["external_metadata"]["cache_status"] == "disabled"
     assert enabled["external_metadata"]["verified_source_count"] == 1
+    assert enabled["external_metadata"]["source_count"] == 1
 
 
 def test_doc_scout_external_provider_failure_is_measured_not_silent(tmp_path: Path):
@@ -142,3 +151,6 @@ def test_doc_scout_external_provider_failure_is_measured_not_silent(tmp_path: Pa
     assert out["external_enabled"] is True
     assert out["external_metadata"]["provider_errors"] == ["broken_spec:TimeoutError"]
     assert out["external_metadata"]["verified_source_count"] == 0
+    assert out["external_metadata"]["source_count"] == 0
+    assert out["external_metadata"]["error_count"] == 1
+    assert out["external_metadata"]["latency_ms"] >= 0

@@ -165,6 +165,10 @@ class DocScoutAdapter:
             "provider_errors": [],
             "cache_status": "disabled",
             "verified_source_count": 0,
+            "source_count": 0,
+            "error_count": 0,
+            "latency_ms": 0.0,
+            "cache_age_sec": 0.0,
         }
         docs_roots = [
             self.project_root / "docs",
@@ -209,6 +213,7 @@ class DocScoutAdapter:
             if str(item.source_url).strip()
         }
         external_meta["verified_source_count"] = len(ranked_external_urls)
+        external_meta["source_count"] = len(ranked_external_urls)
         return {
             "query": query,
             "status": "SUCCESS",
@@ -236,13 +241,23 @@ class DocScoutAdapter:
             "provider_errors": [],
             "cache_status": "disabled" if self.cache_ttl_sec <= 0 else "miss",
             "verified_source_count": 0,
+            "source_count": 0,
+            "error_count": 0,
+            "latency_ms": 0.0,
+            "cache_age_sec": 0.0,
         }
+        started_at = time.perf_counter()
         cached = self._read_external_cache(query, tokens=tokens, limit=limit)
         if cached is not None:
+            cached_hits, cache_age_sec = cached
             meta["cache_status"] = "hit"
-            meta["providers_used"] = sorted({hit.source for hit in cached if str(hit.source).strip()})
-            meta["verified_source_count"] = len({hit.source_url for hit in cached if str(hit.source_url).strip()})
-            return cached, meta
+            meta["providers_used"] = sorted({hit.source for hit in cached_hits if str(hit.source).strip()})
+            source_count = len({hit.source_url for hit in cached_hits if str(hit.source_url).strip()})
+            meta["verified_source_count"] = source_count
+            meta["source_count"] = source_count
+            meta["cache_age_sec"] = round(max(0.0, cache_age_sec), 4)
+            meta["latency_ms"] = round((time.perf_counter() - started_at) * 1000, 4)
+            return cached_hits, meta
         hits: list[DocScoutHit] = []
         for provider in self.external_providers:
             provider_name = str(getattr(provider, "name", "external"))
@@ -272,7 +287,11 @@ class DocScoutAdapter:
                 if provider_name not in meta["providers_used"]:
                     meta["providers_used"].append(provider_name)
         self._write_external_cache(query, tokens=tokens, limit=limit, hits=hits)
-        meta["verified_source_count"] = len({hit.source_url for hit in hits if str(hit.source_url).strip()})
+        source_count = len({hit.source_url for hit in hits if str(hit.source_url).strip()})
+        meta["verified_source_count"] = source_count
+        meta["source_count"] = source_count
+        meta["error_count"] = len(meta["provider_errors"])
+        meta["latency_ms"] = round((time.perf_counter() - started_at) * 1000, 4)
         return hits, meta
 
     def _source_url_verified(self, source_url: str) -> bool:
@@ -284,7 +303,7 @@ class DocScoutAdapter:
         digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
         return self.project_root / ".nexus" / "cache" / "doc_scout" / f"{digest}.json"
 
-    def _read_external_cache(self, query: str, *, tokens: list[str], limit: int) -> list[DocScoutHit] | None:
+    def _read_external_cache(self, query: str, *, tokens: list[str], limit: int) -> tuple[list[DocScoutHit], float] | None:
         if self.cache_ttl_sec <= 0:
             return None
         path = self._cache_path(query, tokens=tokens, limit=limit)
@@ -294,13 +313,14 @@ class DocScoutAdapter:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        if time.time() - float(payload.get("created_at", 0.0) or 0.0) > self.cache_ttl_sec:
+        cache_age_sec = time.time() - float(payload.get("created_at", 0.0) or 0.0)
+        if cache_age_sec > self.cache_ttl_sec:
             return None
         hits = []
         for row in payload.get("hits", []) or []:
             if isinstance(row, dict) and self._source_url_verified(str(row.get("source_url") or "")):
                 hits.append(DocScoutHit(**row))
-        return hits
+        return hits, cache_age_sec
 
     def _write_external_cache(self, query: str, *, tokens: list[str], limit: int, hits: list[DocScoutHit]) -> None:
         if self.cache_ttl_sec <= 0:
@@ -383,6 +403,10 @@ class DocScoutAdapter:
                 "provider_errors": [],
                 "cache_status": "disabled",
                 "verified_source_count": 0,
+                "source_count": 0,
+                "error_count": 0,
+                "latency_ms": 0.0,
+                "cache_age_sec": 0.0,
             },
             "hits_count": 0,
             "confidence": 0.0,
