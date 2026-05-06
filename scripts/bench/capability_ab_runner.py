@@ -36,6 +36,7 @@ from nexus.engine.capability_aliases import normalize_capability_name, normalize
 from nexus.engine.capability_readiness import CORE_CAPABILITIES, build_benchmark_capability_readiness
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_receipts import build_trace_receipts
+from nexus.engine.capability_receipt_policy import expected_capability_receipt_coverage
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.services.gemini_cli import (
@@ -277,32 +278,10 @@ def _expected_capability_receipt_coverage(
     expected_capabilities: tuple[str, ...],
     capability_receipts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    receipts = {
-        normalize_capability_name(item.get("name")): normalize_capability_receipt(item)
-        for item in capability_receipts
-        if isinstance(item, dict) and str(item.get("name") or "").strip()
-    }
-    public_safe: list[str] = []
-    missing: list[str] = []
-    failure_reasons: dict[str, str] = {}
-    for capability in normalize_capability_names(expected_capabilities):
-        receipt = receipts.get(capability)
-        if not receipt:
-            missing.append(capability)
-            failure_reasons[capability] = "missing_receipt"
-            continue
-        if bool(receipt.get("public_claim_safe")):
-            public_safe.append(capability)
-            continue
-        missing.append(capability)
-        failure_reasons[capability] = str(receipt.get("failure_reason") or "receipt_not_public_safe")
-    return {
-        "expected": normalize_capability_names(expected_capabilities),
-        "public_safe": public_safe,
-        "missing": missing,
-        "failure_reasons": failure_reasons,
-        "all_public_safe": bool(expected_capabilities) and not missing,
-    }
+    return expected_capability_receipt_coverage(
+        expected_capabilities=expected_capabilities,
+        capability_receipts=capability_receipts,
+    )
 
 
 def _ensure_expected_capability_receipts(

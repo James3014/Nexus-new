@@ -8,35 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from nexus.engine.capability_aliases import normalize_capability_name
+from nexus.engine.capability_receipt_policy import (
+    is_public_claim_capability,
+    is_route_quality_actionable_receipt,
+    public_gate_ignored_reasons,
+    public_safe_receipt_names,
+    route_quality_ignored_reasons,
+)
 from scripts.bench.ab_eval import compare_datasets, load_runs
 
-
-_PUBLIC_CLAIM_CAPABILITIES = {
-    "autoreason",
-    "codeintel",
-    "ddtree",
-    "drone",
-    "judge_panel",
-    "nightshift",
-    "swarm",
-    "ultra_review",
-}
-
-_NON_ACTIONABLE_CAPABILITY_REASONS = {
-    "direct_codex_no_ultra_review_report",
-    "feature_flag_disabled",
-    "no_pruning_opportunity",
-    "pending_executor",
-    "recommended_without_invocation",
-}
-
-_CAPABILITY_NON_ACTIONABLE_REASONS = {
-    "ddtree": {"selected_without_invocation"},
-}
-
-_CAPABILITY_PUBLIC_GATE_NON_ACTIONABLE_REASONS = {
-    "autoreason": {"selected_without_invocation"},
-}
 
 _ROUTE_QUALITY_GATE_THRESHOLDS = {
     "selected_to_invoked_rate": 0.70,
@@ -164,7 +144,7 @@ def _safe_ratio(num: float, den: float) -> float:
 
 
 def _route_quality_ignored_reasons(name: str) -> set[str]:
-    return _NON_ACTIONABLE_CAPABILITY_REASONS | _CAPABILITY_NON_ACTIONABLE_REASONS.get(str(name), set())
+    return route_quality_ignored_reasons(name)
 
 
 def _coverage_route_quality_actionable(name: str, item: dict[str, Any]) -> bool:
@@ -173,7 +153,7 @@ def _coverage_route_quality_actionable(name: str, item: dict[str, Any]) -> bool:
     if any(float(item.get(f"{key}_count", 0) or 0) > 0 for key in ("invoked", "evidence", "gate", "outcome")):
         return True
     canonical_name = normalize_capability_name(name)
-    if canonical_name not in _PUBLIC_CLAIM_CAPABILITIES:
+    if not is_public_claim_capability(canonical_name):
         return False
     if float(item.get("selected_count", 0) or 0) <= 0:
         return False
@@ -261,19 +241,7 @@ def _research_receipts(row: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _receipt_route_quality_actionable(receipt: dict[str, Any]) -> bool:
-    name = normalize_capability_name(receipt.get("name") or receipt.get("capability"))
-    if not name:
-        return False
-    if bool(receipt.get("public_claim_safe")):
-        return True
-    if any(bool(receipt.get(key)) for key in ("invoked", "evidence_present", "evidence", "gate_passed", "gate", "outcome_contributed")):
-        return True
-    if name not in _PUBLIC_CLAIM_CAPABILITIES:
-        return False
-    if not bool(receipt.get("selected", False)):
-        return False
-    reason = str(receipt.get("failure_reason") or "").strip()
-    return not (reason and reason in _route_quality_ignored_reasons(name))
+    return is_route_quality_actionable_receipt(receipt)
 
 
 def _route_tactical_tool_map(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -522,7 +490,7 @@ def _activation_note(status: str) -> str:
 
 
 def _capability_activation_visible(name: str, item: dict[str, Any]) -> bool:
-    if str(name) in _PUBLIC_CLAIM_CAPABILITIES:
+    if is_public_claim_capability(name):
         return True
     if str(name) in {"artifact_gate", "claim_gate", "delivery_gate", "mempalace_gate"} and bool(item.get("selected_count", 0)):
         return True
@@ -573,7 +541,7 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
             failures.append(f"{name}:invalid_coverage")
             continue
         canonical_name = normalize_capability_name(name)
-        if canonical_name not in _PUBLIC_CLAIM_CAPABILITIES:
+        if not is_public_claim_capability(canonical_name):
             continue
         selected = float(item.get("selected_rate", 0.0) or 0.0)
         if selected <= 0:
@@ -587,11 +555,7 @@ def _per_capability_public_gate(report: dict[str, Any]) -> dict[str, Any]:
             failure_reasons = item.get("failure_reasons", {})
             if isinstance(failure_reasons, dict):
                 reasons = {str(reason) for reason in failure_reasons if str(reason).strip()}
-                ignored = (
-                    _NON_ACTIONABLE_CAPABILITY_REASONS
-                    | _CAPABILITY_NON_ACTIONABLE_REASONS.get(str(name), set())
-                    | _CAPABILITY_PUBLIC_GATE_NON_ACTIONABLE_REASONS.get(str(name), set())
-                )
+                ignored = public_gate_ignored_reasons(name)
                 if reasons and reasons <= ignored:
                     continue
             missing = [
@@ -693,15 +657,7 @@ def _row_public_safe_capabilities(row: dict[str, Any]) -> set[str]:
             receipts = []
     if not isinstance(receipts, list):
         return set()
-    names: set[str] = set()
-    for receipt in receipts:
-        if not isinstance(receipt, dict):
-            continue
-        if receipt.get("public_claim_safe"):
-            name = normalize_capability_name(receipt.get("name"))
-            if name:
-                names.add(name)
-    return names
+    return public_safe_receipt_names(receipts)
 
 
 def _pillar_win_rows(

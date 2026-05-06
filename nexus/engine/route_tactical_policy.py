@@ -4,6 +4,7 @@ from typing import Any
 
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import default_capability_nodes
+from nexus.engine.capability_receipt_policy import is_receipt_backed_capability
 
 
 PREFERRED_TACTICAL_ORDER = (
@@ -35,32 +36,6 @@ EVIDENCE_GATHERING_CAPABILITIES = {
     "codeintel",
 }
 
-RECEIPT_BACKED_CAPABILITIES = {
-    "artifact_gate",
-    "asi_constraint_extractor",
-    "autoreason",
-    "belief",
-    "claim_gate",
-    "codeintel",
-    "ddtree",
-    "delivery_gate",
-    "drone",
-    "formal_report",
-    "hyper",
-    "judge_panel",
-    "lancedb",
-    "llm_judge_panel",
-    "memory",
-    "mempalace_gate",
-    "nightshift",
-    "research",
-    "semantic_searcher",
-    "swarm",
-    "swarm_quiet_moment",
-    "ultra_review",
-}
-
-
 def build_tactical_stop_policy(
     *,
     plan: CapabilityPlan,
@@ -85,7 +60,7 @@ def build_tactical_stop_policy(
                 "capability": name,
                 "after": tactical_sequence[index - 1] if index else None,
                 "purpose": "gather_evidence" if name in EVIDENCE_GATHERING_CAPABILITIES else "verify_or_govern",
-                "evidence_required": bool(node and node.evidence_outputs and name in RECEIPT_BACKED_CAPABILITIES),
+                "evidence_required": bool(node and node.evidence_outputs and is_receipt_backed_capability(name)),
             }
         )
     policy.setdefault("tactical_sequence", tactical_sequence)

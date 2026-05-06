@@ -15,6 +15,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.bench.gemini_nexus_report import _row_route_quality_counts
+from nexus.engine.capability_receipt_policy import (
+    REQUIRED_NINE_CAPABILITIES,
+    REQUIRED_ROUTE_RUNTIME_CAPABILITIES,
+    ROUTE_QUALITY_THRESHOLDS,
+)
 
 
 @dataclass(frozen=True)
@@ -79,35 +84,6 @@ SMOKE_SUITES: tuple[SmokeSuite, ...] = (
         ),
     ),
 )
-
-REQUIRED_NINE_CAPABILITIES = frozenset(
-    {
-        "autoreason",
-        "ddtree",
-        "ultra_review",
-        "research",
-        "lancedb",
-        "swarm",
-        "drone",
-        "nightshift",
-        "belief",
-    }
-)
-REQUIRED_ROUTE_RUNTIME_CAPABILITIES = frozenset(
-    {
-        *REQUIRED_NINE_CAPABILITIES,
-        "semantic_searcher",
-        "swarm_quiet_moment",
-    }
-)
-
-ROUTE_QUALITY_THRESHOLDS = {
-    "selected_to_invoked_rate": 0.70,
-    "invoked_to_evidence_rate": 0.95,
-    "evidence_to_outcome_rate": 0.90,
-    "unnecessary_selected_rate_max": 0.30,
-}
-
 
 def build_command(repo_root: Path, suite: SmokeSuite) -> list[str]:
     cmd = [
