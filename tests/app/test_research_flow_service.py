@@ -1779,6 +1779,24 @@ def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: P
         assert phase in payload["timing"]["phase_wall_sec"]
 
 
+def test_build_codeintel_evidence_reuses_run_cache_graph(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text("import target\n", encoding="utf-8")
+    cache_dir = tmp_path / ".nexus" / "reports" / "bench_runtime" / "codeintel" / "run-1"
+    monkeypatch.setenv("NEXUS_CODEINTEL_CACHE_SCOPE", "run")
+    monkeypatch.setenv("NEXUS_CODEINTEL_RUN_CACHE_DIR", str(cache_dir))
+
+    first = research_flow_service._build_codeintel_evidence(tmp_path, target_file=str(target), task_desc="cache task one")
+    second = research_flow_service._build_codeintel_evidence(tmp_path, target_file=str(target), task_desc="cache task two")
+
+    assert first["cache_status"] == "miss"
+    assert second["cache_status"] == "hit"
+    assert first["graph_index_path"] == second["graph_index_path"]
+    assert Path(second["scan_report_path"]).exists()
+    assert Path(second["impact_report_path"]).exists()
+
+
 def test_run_auto_flow_writes_rlm_trace_when_enabled(tmp_path: Path, monkeypatch):
     target = tmp_path / "target.py"
     target.write_text(

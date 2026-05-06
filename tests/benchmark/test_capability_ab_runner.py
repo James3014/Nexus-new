@@ -1680,6 +1680,8 @@ def test_extract_record_maps_semantic_fields():
     assert out["codeintel_claim_bundle_present"] is True
     assert out["codeintel_scan_report_path"] == ".nexus/reports/codeintel/scan.json"
     assert out["codeintel_impact_report_path"] == ".nexus/reports/codeintel/impact.json"
+    assert out["codeintel_graph_index_path"] == ""
+    assert out["codeintel_cache_status"] == ""
     assert out["codeintel_risk_score"] == 35
     assert out["codeintel_impacted_files_count"] == 3
     assert out["jit_ranking_mode"] == "static"
@@ -2537,6 +2539,8 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
     )
 
     assert captured["env"]["NEXUS_MEMORY_AUTO_INIT"] == "0"
+    assert captured["env"]["NEXUS_CODEINTEL_CACHE_SCOPE"] == "run"
+    assert captured["env"]["NEXUS_CODEINTEL_RUN_CACHE_DIR"].endswith("/.nexus/reports/bench_runtime/codeintel/default")
     assert captured["env"]["NEXUS_FINDINGS_LANCEDB_SYNC"] == "0"
     assert captured["env"]["NEXUS_LEARN_CLOSURE_WRITEBACK"] == "0"
     assert captured["env"]["NEXUS_GEMINI_MODEL_NAME"] == "gemini-3.1-pro-preview"
@@ -3859,6 +3863,46 @@ def test_benchmark_rows_mark_unhelpful_local_fallback():
 
     assert row["local_fallback_unhelpful"] is True
     assert summary["with_nexus"]["local_fallback_unhelpful_rate"] == 1.0
+
+
+def test_benchmark_row_classifies_model_timeout_with_local_fallback():
+    row = {
+        "mode": "with_nexus",
+        "run_eligible": True,
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 2.0,
+        "total_tokens": 0,
+        "model_calls": 1,
+        "token_capture_status": "unknown",
+        "gateway_error_category": "timeout",
+        "fallback_used": True,
+        "nexus_winner_source": "local_only",
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "hyper_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+    }
+
+    _annotate_benchmark_eligibility(row, provider="gemini", model_required=True, nexus_required=True)
+    summary = _summarize_benchmark_rows([row])
+
+    assert row["model_timeout_local_fallback"] is True
+    assert row["public_cost_evidence"] is False
+    assert row["rescue_cost_status"] == "local_after_model_timeout"
+    assert row["token_reliable"] is False
+    assert row["token_unreliable_reason"] == "model_timeout_with_local_fallback"
+    assert summary["with_nexus"]["token_unreliable_reasons"] == ["model_timeout_with_local_fallback"]
 
 
 def test_benchmark_row_splits_model_tokens_from_local_rescue():

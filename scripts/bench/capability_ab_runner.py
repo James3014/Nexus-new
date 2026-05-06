@@ -174,6 +174,37 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
     return None
 
 
+def _classify_token_unreliable_reason(
+    row: dict[str, Any],
+    *,
+    token_status: str,
+    total_tokens: int,
+) -> str | None:
+    model_calls = int(row.get("model_calls", 0) or 0)
+    gateway_error = str(row.get("gateway_error_category") or row.get("baseline_gateway_error_category") or "").lower()
+    winner_source = str(row.get("nexus_winner_source") or row.get("source") or "").lower()
+    model_timeout_local_fallback = bool(
+        model_calls > 0
+        and row.get("fallback_used", False)
+        and "timeout" in gateway_error
+        and (winner_source.startswith("local") or token_status == "not_applicable_local_only")
+    )
+    if model_timeout_local_fallback:
+        return "model_timeout_with_local_fallback"
+    if model_calls > 0 and total_tokens <= 0:
+        return "model_call_without_tokens"
+    if token_status in {"estimated", "fallback_est", "unknown", ""}:
+        return "estimated_tokens" if token_status == "estimated" else "unknown_token_capture"
+    if token_status == "not_applicable_local_only" and model_calls > 0:
+        return "local_only_rescue_not_model_comparable"
+    if (
+        str(row.get("gateway_token_source") or "") == "stats"
+        and total_tokens > max(200000, int(row.get("gateway_total_chars", 0) or 0) * 40)
+    ):
+        return "stats_outlier_possible_cumulative"
+    return None
+
+
 def _annotate_benchmark_eligibility(
     row: dict[str, Any],
     *,
@@ -216,20 +247,13 @@ def _annotate_benchmark_eligibility(
         "local_only" if bool(row.get("nexus_rescued", False)) or token_status == "not_applicable_local_only" else "not_rescue"
     )
     row["rescue_cost_status"] = str(row.get("rescue_cost_status") or default_rescue_cost_status)
-    token_unreliable_reason = None
-    if model_calls > 0 and total_tokens <= 0:
-        token_unreliable_reason = "model_call_without_tokens"
-    elif token_status in {"estimated", "fallback_est", "unknown", ""}:
-        token_unreliable_reason = "estimated_tokens" if token_status == "estimated" else "unknown_token_capture"
-    elif token_status == "not_applicable_local_only" and model_calls > 0:
-        token_unreliable_reason = "local_only_rescue_not_model_comparable"
-    elif (
-        str(row.get("gateway_token_source") or "") == "stats"
-        and total_tokens > max(200000, int(row.get("gateway_total_chars", 0) or 0) * 40)
-    ):
-        token_unreliable_reason = "stats_outlier_possible_cumulative"
+    token_unreliable_reason = _classify_token_unreliable_reason(row, token_status=token_status, total_tokens=total_tokens)
+    row["model_timeout_local_fallback"] = token_unreliable_reason == "model_timeout_with_local_fallback"
+    if row["model_timeout_local_fallback"]:
+        row["rescue_cost_status"] = "local_after_model_timeout"
     row["token_reliable"] = token_unreliable_reason is None
     row["token_unreliable_reason"] = token_unreliable_reason
+    row["public_cost_evidence"] = bool(row.get("token_measured", False) and row["token_reliable"])
     winner_source = str(row.get("nexus_winner_source") or "")
     gateway_error_category = str(row.get("gateway_error_category") or "")
     row["local_fallback_unhelpful"] = bool(
@@ -2123,6 +2147,8 @@ def _extract_record(
         "codeintel_claim_bundle_present": bool(codeintel.get("claim_bundle_present", False)),
         "codeintel_scan_report_path": str(codeintel.get("scan_report_path") or ""),
         "codeintel_impact_report_path": str(codeintel.get("impact_report_path") or ""),
+        "codeintel_graph_index_path": str(codeintel.get("graph_index_path") or ""),
+        "codeintel_cache_status": str(codeintel.get("cache_status") or ""),
         "codeintel_risk_score": int(codeintel.get("risk_score", 0) or 0),
         "codeintel_impacted_files_count": int(codeintel.get("impacted_files_count", 0) or 0),
         "jit_ranking_mode": str(jit.get("ranking_mode") or "static"),
@@ -2929,6 +2955,11 @@ def run_with_nexus(
         cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
         env = os.environ.copy()
         env["NEXUS_MEMORY_DB_PATH"] = str(_benchmark_memory_db_path(repo_root, task, start_wall).resolve())
+        codeintel_cache_key = task.manifest_hash or "default"
+        env["NEXUS_CODEINTEL_RUN_CACHE_DIR"] = str(
+            (repo_root / ".nexus" / "reports" / "bench_runtime" / "codeintel" / codeintel_cache_key).resolve()
+        )
+        env["NEXUS_CODEINTEL_CACHE_SCOPE"] = "run"
         env["NEXUS_MEMORY_AUTO_INIT"] = "0"
         env["NEXUS_FINDINGS_LANCEDB_SYNC"] = "0"
         env["NEXUS_LEARN_CLOSURE_WRITEBACK"] = "0"

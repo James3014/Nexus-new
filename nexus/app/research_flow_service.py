@@ -335,16 +335,51 @@ def _rel_path_for_report(repo_root: Path, path_text: str) -> str:
         return str(path)
 
 
+def _codeintel_run_cache_graph_path(repo_root: Path) -> Path | None:
+    if os.environ.get("NEXUS_CODEINTEL_CACHE_SCOPE", "").strip().lower() != "run":
+        return None
+    cache_dir = os.environ.get("NEXUS_CODEINTEL_RUN_CACHE_DIR", "").strip()
+    if not cache_dir:
+        return None
+    path = Path(cache_dir)
+    if not path.is_absolute():
+        path = repo_root / path
+    return path / "code_graph.json"
+
+
+def _load_codeintel_graph(path: Path) -> dict[str, Any] | None:
+    try:
+        graph = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(graph, dict) and isinstance(graph.get("nodes"), list) and isinstance(graph.get("edges"), list):
+        return graph
+    return None
+
+
 def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: str) -> dict[str, Any]:
     slug = _safe_trace_slug(task_desc)
     report_dir = repo_root / ".nexus" / "reports" / "codeintel"
-    graph_path = report_dir / f"{slug}_code_graph.json"
+    graph_path = _codeintel_run_cache_graph_path(repo_root) or report_dir / f"{slug}_code_graph.json"
     scan_report_path = report_dir / f"{slug}_scan.json"
     impact_report_path = report_dir / f"{slug}_impact.json"
     changed_file = _rel_path_for_report(repo_root, target_file)
     try:
-        scan = scan_codebase(repo_root, index_path=graph_path).to_dict()
+        cached_graph = _load_codeintel_graph(graph_path) if graph_path.exists() else None
+        if cached_graph is None:
+            scan = scan_codebase(repo_root, index_path=graph_path).to_dict()
+            cache_status = "miss"
+        else:
+            scan = {
+                "nodes_count": len(cached_graph.get("nodes", []) or []),
+                "edges_count": len(cached_graph.get("edges", []) or []),
+                "languages": ["python"] if cached_graph.get("nodes") else [],
+                "index_path": str(graph_path),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            cache_status = "hit"
         scan["report_path"] = str(scan_report_path)
+        scan["cache_status"] = cache_status
         scan_report_path.parent.mkdir(parents=True, exist_ok=True)
         scan_report_path.write_text(json.dumps(scan, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         impact = analyze_impact(repo_root, [changed_file], index_path=graph_path).to_dict()
@@ -363,6 +398,7 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
             "scan_report_path": str(scan_report_path),
             "impact_report_path": str(impact_report_path),
             "graph_index_path": str(graph_path),
+            "cache_status": cache_status,
             "nodes_count": int(scan.get("nodes_count", 0) or 0),
             "edges_count": int(scan.get("edges_count", 0) or 0),
             "risk_score": int(impact.get("risk_score", 0) or 0),
