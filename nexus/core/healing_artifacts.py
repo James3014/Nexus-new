@@ -74,6 +74,8 @@ def artifact_to_packet(artifact: HealingArtifact) -> dict:
     return {
         "type": "healing_artifact",
         "schema_version": "nexus_healing_artifact.v1",
+        "production_writes_allowed": False,
+        "allowed_actions": ["observe", "report"],
         "payload": asdict(artifact),
     }
 
@@ -83,6 +85,8 @@ def artifact_from_packet(packet: dict, *, verify_key: str | bytes | None = None)
         raise ValueError("not a healing artifact packet")
     if packet.get("schema_version") != "nexus_healing_artifact.v1":
         raise ValueError("unsupported healing artifact schema")
+    if packet.get("production_writes_allowed", False):
+        raise ValueError("healing artifact packets must not allow production writes")
     payload = packet.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("healing artifact packet payload must be an object")

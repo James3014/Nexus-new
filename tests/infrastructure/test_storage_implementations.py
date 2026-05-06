@@ -1,7 +1,7 @@
 import ast
 from pathlib import Path
 
-from nexus.infrastructure.storage_implementations import LanceDBStorage, LocalCacheStore
+from nexus.infrastructure.storage_implementations import LanceBeliefStore, LanceDBStorage, LocalCacheStore
 
 
 def test_local_cache_store_roundtrip_sets():
@@ -72,3 +72,11 @@ def test_memory_storage_protocol_does_not_include_search():
 
     assert "search" not in MemoryStorage.__dict__
     assert "search" in SearchProvider.__dict__
+
+
+def test_belief_store_exposes_semantic_weight_without_storage_ranking(tmp_path):
+    store = LanceBeliefStore(tmp_path)
+
+    weight = store.semantic_weight_for(["semantic:task:doc", ".nexus/reports/codeintel/impact.json"])
+
+    assert weight == 0.55

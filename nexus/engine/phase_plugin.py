@@ -65,11 +65,8 @@ class PhaseRegistry:
     def get_ordered_plugins(self) -> List[PhasePlugin]:
         """Returns plugins sorted by priority."""
         def _safe_priority(p):
-            # Handle MagicMock in tests
             try:
                 prio = p.priority
-                if hasattr(prio, "assert_called"):
-                    return 0
                 return int(prio)
             except (AttributeError, TypeError, ValueError):
                 return 100

@@ -130,6 +130,14 @@ class LanceBeliefStore(BeliefStore):
         except Exception:
             return []
 
+    def semantic_weight_for(self, evidence_refs: List[str]) -> float:
+        refs = [str(item).lower() for item in evidence_refs if str(item).strip()]
+        if not refs:
+            return 0.0
+        semantic_refs = sum(1 for ref in refs if ref.startswith("semantic:") or "semantic_searcher" in ref)
+        code_refs = sum(1 for ref in refs if "codeintel" in ref or ref.endswith(".py"))
+        return min(1.0, round((semantic_refs * 0.35) + (code_refs * 0.2), 4))
+
 
 class FileConfigStore(ConfigStore):
     def __init__(self, project_root: Path):

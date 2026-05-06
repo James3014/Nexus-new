@@ -21,6 +21,7 @@ class CacheStore(Protocol):
 @runtime_checkable
 class BeliefStore(Protocol):
     def list_beliefs(self, status: str = "ACTIVE") -> List[Dict[str, Any]]: ...
+    def semantic_weight_for(self, evidence_refs: List[str]) -> float: ...
 
 @runtime_checkable
 class ConfigStore(Protocol):

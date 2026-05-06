@@ -42,6 +42,8 @@ def test_healing_artifact_packet_roundtrip_is_transport_only():
 
     assert packet["type"] == "healing_artifact"
     assert packet["schema_version"] == "nexus_healing_artifact.v1"
+    assert packet["production_writes_allowed"] is False
+    assert packet["allowed_actions"] == ["observe", "report"]
     assert artifact_from_packet(packet) == artifact
 
 
@@ -152,3 +154,23 @@ def test_healing_artifact_packet_rejects_invalid_signature_when_required():
         assert "signature" in str(exc)
     else:
         raise AssertionError("expected invalid signature rejection")
+
+
+def test_healing_artifact_packet_rejects_production_write_permission():
+    artifact = HealingArtifact(
+        task_id="task-1",
+        artifact_id="heal-1",
+        artifact_type="repair_plan",
+        created_at="2026-05-05T00:00:00Z",
+        evidence_id="EV-1",
+        summary="Use scoped storage",
+    )
+    packet = artifact_to_packet(artifact)
+    packet["production_writes_allowed"] = True
+
+    try:
+        artifact_from_packet(packet)
+    except ValueError as exc:
+        assert "production writes" in str(exc)
+    else:
+        raise AssertionError("expected production write rejection")
