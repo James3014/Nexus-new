@@ -22,10 +22,8 @@ from nexus.research.sprint_service import SprintConfig, run_hyper_sprint, LLMCan
 from nexus.contracts import RLMTraceEvent, RLMTraceWriter
 from nexus.engine.capability_executor_controls import build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
-from nexus.engine.capability_receipts import build_trace_receipts
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
-from nexus.engine.autoreason_service import AutoreasonService
 from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
 from nexus.core.event_bus import NexusEventBus
 from nexus.research.architecture_scout import DistantScoutPlanner
@@ -34,6 +32,8 @@ from nexus.research.formal_report_service import FormalReportService
 from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
 from nexus.research.research_runtime_contracts import build_claim_probe, build_research_doctor
 from nexus.services.codeintel import analyze_impact, scan_codebase
+from nexus.app.research_autoreason_runtime import build_autoreason_payload
+from nexus.app.research_receipt_runtime import build_capability_receipt_payloads, runtime_receipt_plan_payload
 
 
 RESEARCH_SOURCE_PROJECTS = tuple(research_stack_source_projects())
@@ -2054,53 +2054,7 @@ def _runtime_receipt_plan_payload(
     capability_plan_payload: dict[str, Any],
     nexus_usage_trace: dict[str, Any],
 ) -> dict[str, Any]:
-    plan = dict(capability_plan_payload)
-    selected = [str(item).strip() for item in (plan.get("selected_capabilities", []) or []) if str(item).strip()]
-    if not selected:
-        return plan
-
-    capabilities = nexus_usage_trace.get("capabilities", {}) if isinstance(nexus_usage_trace.get("capabilities"), dict) else {}
-    autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}
-    pruned: dict[str, str] = {}
-
-    def _remove_selected(name: str, reason: str) -> None:
-        aliases = {name}
-        if name == "judge_panel":
-            aliases.add("llm_judge_panel")
-        removed = [item for item in selected if item in aliases]
-        if not removed:
-            return
-        selected[:] = [item for item in selected if item not in aliases]
-        for item in removed:
-            pruned[item] = reason
-
-    judge_selected = bool({"judge_panel", "llm_judge_panel"} & set(selected))
-    judge_used = bool(capabilities.get("judge_panel_used") or capabilities.get("llm_judge_panel_used"))
-    if judge_selected and not judge_used:
-        status = str(autoreason.get("status") or "").strip().upper()
-        stop_reason = str(autoreason.get("stop_reason") or "").strip()
-        if status in {"SKIPPED", "DISABLED", "FEATURE_FLAG_DISABLED", "NOOP"} or stop_reason:
-            _remove_selected("judge_panel", stop_reason or status.lower() or "runtime_judge_not_executable")
-    autoreason_selected = "autoreason" in selected
-    autoreason_used = bool(autoreason.get("enabled") or str(autoreason.get("status") or "").strip().upper() == "SUCCESS")
-    if autoreason_used and not autoreason_selected:
-        selected.append("autoreason")
-        plan["selected_capabilities"] = selected
-    if autoreason_selected and not autoreason_used:
-        status = str(autoreason.get("status") or "").strip().upper()
-        stop_reason = str(autoreason.get("stop_reason") or "").strip()
-        if status in {"SKIPPED", "DISABLED", "FEATURE_FLAG_DISABLED", "NOOP"} or stop_reason:
-            _remove_selected("autoreason", stop_reason or status.lower() or "runtime_autoreason_not_executable")
-
-    if pruned:
-        plan["selected_capabilities"] = selected
-        existing = capabilities.get("runtime_pruned_capabilities", {})
-        merged = dict(existing) if isinstance(existing, dict) else {}
-        merged.update(pruned)
-        capabilities["runtime_pruned_capabilities"] = merged
-    return plan
-
-
+    return runtime_receipt_plan_payload(capability_plan_payload, nexus_usage_trace)
 
 
 def run_auto_flow(
@@ -2857,47 +2811,13 @@ def run_auto_flow(
         capability_evidence["research_refs"] = [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
     capability_evidence["research_source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
-    summaries = result_report.get("candidate_summaries", [])
-    autoreason_payload = hyper_learning_trace.get("autoreason", {}) if isinstance(hyper_learning_trace.get("autoreason", {}), dict) else {}
-    should_run_autoreason = str(result.get("flow", "")) == "hyper_sprint" and isinstance(summaries, list) and bool(summaries)
-    if should_run_autoreason:
-        autoreason_service = AutoreasonService()
-        factory_payload = autoreason_service.candidate_factory_from_summaries(summaries, task_desc=task_desc)
-        candidates = factory_payload.get("candidates", []) if isinstance(factory_payload.get("candidates"), list) else []
-        if candidates:
-            autoreason_payload = autoreason_service.run(
-                candidates=candidates,
-                task_desc=task_desc,
-                stop_threshold=int(
-                    ((route.get("capability_stack", {}) if isinstance(route.get("capability_stack"), dict) else {}).get(
-                        "stop_policy",
-                        {},
-                    )
-                    or {}
-                    ).get("threshold", 2)
-                ),
-            )
-            autoreason_payload["candidate_factory"] = factory_payload
-        else:
-            autoreason_payload = {
-                "schema": "nexus_autoreason_result_v1",
-                "enabled": False,
-                "status": "SKIPPED",
-                "winner": None,
-                "stop_reason": "candidate_factory_skipped",
-                "judge_votes": [],
-                "borda_scores": {},
-                "candidate_factory": factory_payload,
-            }
-    elif not autoreason_payload:
-        autoreason_payload = {
-            "schema": "nexus_autoreason_result_v1",
-            "status": "SKIPPED",
-            "winner": None,
-            "stop_reason": "candidate_summaries_missing",
-            "judge_votes": [],
-            "borda_scores": {},
-        }
+    autoreason_payload = build_autoreason_payload(
+        result=result,
+        result_report=result_report,
+        hyper_learning_trace=hyper_learning_trace,
+        route=route,
+        task_desc=task_desc,
+    )
     ultra_review_evidence = _ultra_review_gate_evidence(
         repo_root=repo_root,
         task_desc=task_desc,
@@ -3118,18 +3038,7 @@ def run_auto_flow(
         )
         nexus_usage_trace["capabilities"]["rlm_trace_path"] = nexus_usage_trace["rlm_trace_path"]
         nexus_usage_trace["capabilities"]["rlm_trace_present"] = bool(nexus_usage_trace["rlm_trace_path"])
-    runtime_receipt_plan = _runtime_receipt_plan_payload(capability_plan_payload, nexus_usage_trace)
-    nexus_usage_trace["capability_receipts"] = [
-        item.to_dict()
-        for item in build_trace_receipts(
-            plan=runtime_receipt_plan,
-            capabilities=nexus_usage_trace["capabilities"],
-            autoreason=nexus_usage_trace["autoreason"],
-            ddtree=nexus_usage_trace["ddtree"],
-            ultra_review=nexus_usage_trace["ultra_review"],
-            codeintel=nexus_usage_trace["codeintel"],
-        )
-    ]
+    nexus_usage_trace["capability_receipts"] = build_capability_receipt_payloads(capability_plan_payload, nexus_usage_trace)
     for receipt in nexus_usage_trace["capability_receipts"]:
         if isinstance(receipt, dict) and receipt.get("name") == "research":
             receipt["source_projects"] = list(RESEARCH_SOURCE_PROJECTS)

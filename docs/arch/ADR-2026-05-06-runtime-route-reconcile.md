@@ -16,3 +16,11 @@ Planner estimates and runtime facts are different evidence classes. Flash should
 
 - Route payload self-test: repair + `candidate_factory.status=SKIPPED` no longer selects `autoreason` or `judge_panel`.
 - Receipt self-test: actual runtime `autoreason.status=SUCCESS` adds an `autoreason` receipt even when the initial route estimate skipped ranking layers.
+
+## P846 Lesson: Receipt Public Safety Requires Claim Verification
+
+During the Autoreason/Receipt runtime seam extraction, a unit test initially treated `autoreason.status=SUCCESS` plus a winner as enough to mark the receipt `public_claim_safe`. The receipt adapter correctly failed that expectation because Autoreason evidence is only public-safe when the surrounding claim is verified.
+
+Decision: runtime receipt tests must include `capabilities.claim_verified=true` before expecting public-safe Autoreason output. Raw runtime success can prove invocation and evidence, but not public claim safety by itself.
+
+Prevention: seam tests now keep the adapter's fail-closed behavior visible: route reconciliation may add an executed capability, but the receipt still requires evidence and gate state before it can support public benchmark claims.
