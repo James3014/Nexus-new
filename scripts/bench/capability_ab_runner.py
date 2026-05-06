@@ -2118,6 +2118,8 @@ def _extract_record(
         "evidence_hop_count": int(openseeker.get("evidence_hop_count", 0) or 0),
         "evidence_source_count": int(openseeker.get("evidence_source_count", 0) or 0),
         "tool_action_count": int(openseeker.get("tool_action_count", 0) or 0),
+        "route_tactical_tool_count": int(openseeker.get("route_tactical_tool_count", 0) or 0),
+        "route_evidence_required_count": int(openseeker.get("route_evidence_required_count", 0) or 0),
         "low_step_filtered": bool(openseeker.get("low_step_filtered", False)),
         "long_horizon_ready": bool(openseeker.get("long_horizon_ready", False)),
         "expected_capability_receipt_coverage": _expected_capability_receipt_coverage(
@@ -3609,6 +3611,8 @@ def _openseeker_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "trace_present_rate": round(len(traced) / len(eligible), 4) if eligible else 0.0,
             "avg_trajectory_step_count": mean([number(row, "trajectory_step_count") for row in traced]),
             "avg_tool_action_count": mean([number(row, "tool_action_count") for row in traced]),
+            "avg_route_tactical_tool_count": mean([number(row, "route_tactical_tool_count") for row in traced]),
+            "avg_route_evidence_required_count": mean([number(row, "route_evidence_required_count") for row in traced]),
             "avg_evidence_hop_count": mean([number(row, "evidence_hop_count") for row in traced]),
             "avg_evidence_source_count": mean([number(row, "evidence_source_count") for row in traced]),
             "low_step_filtered_rate": _rate_for(traced, "low_step_filtered"),

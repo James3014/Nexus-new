@@ -1051,6 +1051,8 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "evidence_source_count": 3,
         "low_step_filtered": False,
         "long_horizon_ready": True,
+        "route_tactical_tool_count": 4,
+        "route_evidence_required_count": 3,
     }
     evidence = _write_trial_evidence(
         evidence_root=tmp_path / "evidence",
@@ -1121,6 +1123,8 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["product_kpis"]["arms"]["without_nexus"]["fail_closed_block_rate"] == 1.0
     assert payload["openseeker_alignment"]["schema"] == "nexus_openseeker_benchmark_kpis_v1"
     assert payload["openseeker_alignment"]["arms"]["with_nexus"]["avg_trajectory_step_count"] == 12.0
+    assert payload["openseeker_alignment"]["arms"]["with_nexus"]["avg_route_tactical_tool_count"] == 4.0
+    assert payload["openseeker_alignment"]["arms"]["with_nexus"]["avg_route_evidence_required_count"] == 3.0
     assert payload["openseeker_alignment"]["arms"]["with_nexus"]["long_horizon_ready_rate"] == 1.0
 
 
@@ -1603,6 +1607,8 @@ def test_extract_record_maps_semantic_fields():
                 "evidence_hop_count": 4,
                 "evidence_source_count": 3,
                 "tool_action_count": 5,
+                "route_tactical_tool_count": 5,
+                "route_evidence_required_count": 4,
                 "low_step_filtered": False,
                 "long_horizon_ready": True,
             },
@@ -1742,6 +1748,8 @@ def test_extract_record_maps_semantic_fields():
     assert out["evidence_hop_count"] == 4
     assert out["evidence_source_count"] == 3
     assert out["tool_action_count"] == 5
+    assert out["route_tactical_tool_count"] == 5
+    assert out["route_evidence_required_count"] == 4
     assert out["low_step_filtered"] is False
     assert out["long_horizon_ready"] is True
     assert out["semantic_completed"] is False
