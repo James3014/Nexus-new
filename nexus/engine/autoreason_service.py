@@ -92,9 +92,32 @@ class AutoreasonService:
                 "candidate_roles": {},
             }
 
+        def _collect_evidence(item: dict[str, Any]) -> tuple[list[str], list[str]]:
+            source_fields = {
+                "stdout_excerpt": "artifact",
+                "evidence_refs": "artifact",
+                "semantic_refs": "semantic",
+                "external_refs": "external",
+                "code_refs": "code",
+                "report_refs": "report",
+                "artifact_refs": "artifact",
+                "asi_refs": "asi",
+            }
+            refs: list[str] = []
+            kinds: list[str] = []
+            for field, kind in source_fields.items():
+                raw = item.get(field)
+                values = raw if isinstance(raw, (list, tuple, set)) else [raw]
+                for value in values:
+                    text = str(value or "").strip()
+                    if not text:
+                        continue
+                    refs.append(text)
+                    kinds.append(kind)
+            return list(dict.fromkeys(refs)), list(dict.fromkeys(kinds))
+
         def _candidate_payload(item: dict[str, Any], role: str, index: int) -> dict[str, Any]:
-            refs = [str(item.get("stdout_excerpt") or "").strip()]
-            refs = [ref for ref in refs if ref]
+            refs, source_kinds = _collect_evidence(item)
             source_id = str(item.get("candidate_id") or f"candidate-{index + 1}")
             critiques = list((critique_context or {}).get(source_id, [])) + list((critique_context or {}).get(role, []))
             return {
@@ -102,6 +125,8 @@ class AutoreasonService:
                 "source_candidate_id": source_id,
                 "summary": str(item.get("hint") or item.get("source") or ""),
                 "evidence_refs": refs,
+                "evidence_source_kinds": source_kinds,
+                "multi_hop_ready": len(source_kinds) >= 2,
                 "score": float(item.get("score", 0.0) or 0.0),
                 "role": role,
                 "critiques": critiques,
@@ -129,6 +154,13 @@ class AutoreasonService:
                 f"with revision evidence from {revision['source_candidate_id']}: {revision['summary']}"
             ),
             "evidence_refs": list(dict.fromkeys([*incumbent["evidence_refs"], *revision["evidence_refs"], "factory:ab_synthesis"])),
+            "evidence_source_kinds": list(
+                dict.fromkeys([*incumbent.get("evidence_source_kinds", []), *revision.get("evidence_source_kinds", []), "synthesis"])
+            ),
+            "multi_hop_ready": len(
+                set([*incumbent.get("evidence_source_kinds", []), *revision.get("evidence_source_kinds", [])])
+            )
+            >= 2,
             "score": max(float(incumbent["score"]), float(revision["score"])) + 0.05,
             "role": "AB",
             "critiques": [],

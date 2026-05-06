@@ -96,6 +96,40 @@ def test_autoreason_candidate_factory_from_summaries_emits_a_b_ab_contract():
     assert out["winner"] == "AB"
 
 
+def test_autoreason_candidate_factory_stitches_multi_hop_evidence():
+    svc = AutoreasonService()
+    factory = svc.candidate_factory_from_summaries(
+        [
+            {
+                "candidate_id": "baseline",
+                "hint": "stable local patch",
+                "score": 0.4,
+                "stdout_excerpt": "old tests pass",
+                "code_refs": ["nexus/core/state_contracts.py"],
+            },
+            {
+                "candidate_id": "patch",
+                "hint": "fixes route drift with external and semantic proof",
+                "score": 0.8,
+                "stdout_excerpt": "new tests pass",
+                "semantic_refs": ["semantic:route:drift"],
+                "external_refs": ["external:spec:route-oracle"],
+                "report_refs": [".nexus/reports/formal/route.md"],
+                "asi_refs": ["asi:constraint:no_silent_global_search"],
+            },
+        ],
+        task_desc="fix route drift with multi-hop evidence",
+    )
+
+    candidates = {item["candidate_id"]: item for item in factory["candidates"]}
+
+    assert candidates["B"]["multi_hop_ready"] is True
+    assert candidates["B"]["evidence_source_kinds"] == ["artifact", "semantic", "external", "report", "asi"]
+    assert "semantic:route:drift" in candidates["AB"]["evidence_refs"]
+    assert "external:spec:route-oracle" in candidates["AB"]["evidence_refs"]
+    assert candidates["AB"]["multi_hop_ready"] is True
+
+
 def test_autoreason_candidate_factory_carries_critiques_into_ab_defense():
     svc = AutoreasonService()
     factory = svc.candidate_factory_from_summaries(

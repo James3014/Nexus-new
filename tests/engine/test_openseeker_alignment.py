@@ -43,3 +43,24 @@ def test_receipt_metrics_count_only_invoked_tool_actions():
     assert out["schema_version"] == "nexus_openseeker_receipt_metrics.v1"
     assert out["tool_action_count"] == 1
     assert out["evidence_hop_count"] == 1
+
+
+def test_openseeker_trace_records_belief_confidence_without_reasoning_text():
+    trace = build_openseeker_trace(
+        usage_trace={
+            "route_decision": {
+                "selected_capabilities": ["semantic_searcher", "belief"],
+                "signal_snapshot": {"confidence": 0.42},
+            },
+            "capabilities": {"claim_verified": True},
+        },
+        capability_receipts=[
+            {"name": "semantic_searcher", "evidence_refs": ["semantic:policy:r1"]},
+            {"name": "belief", "evidence_refs": ["belief:policy:confidence:0.42"]},
+        ],
+    )
+
+    assert trace["belief_confidence_at_decision"] == 0.42
+    assert trace["belief_confidence_source"] == "route_decision.signal_snapshot.confidence"
+    assert trace["belief_low_confidence"] is True
+    assert "reasoning" not in trace

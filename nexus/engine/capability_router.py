@@ -68,6 +68,7 @@ class CapabilityRouter:
             },
         )
         planned = set(plan.selected_capabilities)
+        planned_order = [name for name in plan.selected_capabilities if isinstance(name, str) and name.strip()]
         selected = ["hyper_sprint"] if "hyper" in planned else ["baseline"]
         if "autoreason" in planned:
             selected.append("autoreason")
@@ -79,6 +80,60 @@ class CapabilityRouter:
                 if item.get("capability") == capability:
                     return list(item.get("reasons", []) or [])
             return []
+
+        def _tactical_sequence() -> list[str]:
+            deep_route = bool(
+                candidate_factory_ready
+                or route_features.get("has_hard_signal")
+                or float(route_features.get("risk_score", 0.0) or 0.0) >= 40.0
+                or route_features.get("is_cross_module_task")
+            )
+            if route_features.get("is_doc_fix") and not deep_route:
+                return ["baseline"]
+            preferred = [
+                "pregate",
+                "memory",
+                "lancedb",
+                "semantic_searcher",
+                "research",
+                "external_doc_scout",
+                "autoreason",
+                "judge_panel",
+                "llm_judge_panel",
+                "ddtree",
+                "belief",
+                "ultra_review",
+                "formal_report",
+                "delivery_gate",
+                "claim_gate",
+                "swarm_quiet_moment",
+            ]
+            ordered = ["hyper_sprint" if recommended_flow == "hyper_sprint" else "baseline"]
+            ordered.extend(name for name in preferred if name in planned)
+            ordered.extend(name for name in planned_order if name not in ordered)
+            return list(dict.fromkeys(ordered))
+
+        tactical_sequence = _tactical_sequence()
+        tactical_tool_map = [
+            {
+                "capability": name,
+                "after": tactical_sequence[index - 1] if index else None,
+                "purpose": "gather_evidence" if name in {"semantic_searcher", "external_doc_scout", "research", "lancedb"} else "verify_or_govern",
+                "evidence_required": name
+                in {
+                    "semantic_searcher",
+                    "external_doc_scout",
+                    "autoreason",
+                    "judge_panel",
+                    "llm_judge_panel",
+                    "belief",
+                    "formal_report",
+                    "delivery_gate",
+                    "claim_gate",
+                },
+            }
+            for index, name in enumerate(tactical_sequence)
+        ]
 
         explain = [
             {
@@ -115,5 +170,7 @@ class CapabilityRouter:
                 "type": "a_streak" if "autoreason" in planned else "budget",
                 "threshold": 2 if "autoreason" in planned else 1,
                 "budget_guard": "fail_closed",
+                "tactical_sequence": tactical_sequence,
+                "tactical_tool_map": tactical_tool_map,
             },
         )

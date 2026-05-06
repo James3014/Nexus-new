@@ -31,6 +31,21 @@ def _source_kind(ref: str) -> str:
     return "artifact"
 
 
+def _belief_confidence(usage_trace: dict[str, Any]) -> tuple[float | None, str]:
+    capabilities = usage_trace.get("capabilities", {}) if isinstance(usage_trace.get("capabilities"), dict) else {}
+    if capabilities.get("belief_confidence") is not None:
+        return float(capabilities.get("belief_confidence") or 0.0), "capabilities.belief_confidence"
+    route_decision = usage_trace.get("route_decision", {}) if isinstance(usage_trace.get("route_decision"), dict) else {}
+    signal_snapshot = route_decision.get("signal_snapshot", {}) if isinstance(route_decision.get("signal_snapshot"), dict) else {}
+    if signal_snapshot.get("confidence") is not None:
+        return float(signal_snapshot.get("confidence") or 0.0), "route_decision.signal_snapshot.confidence"
+    pillars = usage_trace.get("pillars", {}) if isinstance(usage_trace.get("pillars"), dict) else {}
+    belief = pillars.get("belief", {}) if isinstance(pillars.get("belief"), dict) else {}
+    if belief.get("confidence") is not None:
+        return float(belief.get("confidence") or 0.0), "pillars.belief.confidence"
+    return None, ""
+
+
 def build_openseeker_trace(
     *,
     usage_trace: dict[str, Any],
@@ -45,6 +60,7 @@ def build_openseeker_trace(
         selected = list(capability_plan.get("selected_capabilities", []) or [])
     refs = _refs_from_receipts([item for item in capability_receipts if isinstance(item, dict)])
     source_kinds = sorted({_source_kind(ref) for ref in refs})
+    belief_confidence, belief_source = _belief_confidence(usage_trace)
     action_sequence = [f"phase:{phase}" for phase, status in sorted(phase_trace.items()) if str(status).strip()]
     action_sequence.extend(f"capability:{name}" for name in selected if str(name).strip())
     trace = {
@@ -59,6 +75,10 @@ def build_openseeker_trace(
         "low_step_filtered": len(action_sequence) < MIN_EVOLUTION_STEPS,
         "single_source_claim": bool(capabilities.get("claim_verified", False) and len(source_kinds) < 2),
     }
+    if belief_confidence is not None:
+        trace["belief_confidence_at_decision"] = max(0.0, min(1.0, belief_confidence))
+        trace["belief_confidence_source"] = belief_source
+        trace["belief_low_confidence"] = trace["belief_confidence_at_decision"] < 0.6
     trace["long_horizon_ready"] = bool(
         not trace["low_step_filtered"]
         and trace["evidence_hop_count"] >= 2

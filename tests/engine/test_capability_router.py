@@ -25,6 +25,8 @@ def test_capability_router_stacks_hyper_autoreason_ddtree_and_ultra():
     assert payload["acceleration_layers"] == ["ddtree"]
     assert payload["governance_layers"] == ["ultra_review"]
     assert payload["stop_policy"]["type"] == "a_streak"
+    assert payload["stop_policy"]["tactical_sequence"].index("autoreason") < payload["stop_policy"]["tactical_sequence"].index("ddtree")
+    assert payload["stop_policy"]["tactical_sequence"].index("belief") < payload["stop_policy"]["tactical_sequence"].index("ultra_review")
     assert payload["explain_caps"][0]["capability"] == "hyper_sprint"
     assert any(item["capability"] == "autoreason" and item["enabled"] for item in payload["explain_caps"])
     assert any(item["capability"] == "ultra_review" and item["enabled"] for item in payload["explain_caps"])
@@ -51,6 +53,7 @@ def test_capability_router_keeps_simple_doc_fix_light():
     assert payload["acceleration_layers"] == []
     assert payload["governance_layers"] == []
     assert payload["stop_policy"]["type"] == "budget"
+    assert payload["stop_policy"]["tactical_sequence"] == ["baseline"]
 
 
 def test_capability_router_maps_governance_and_repair_semantics():
@@ -96,3 +99,4 @@ def test_capability_router_uses_candidate_factory_readiness_for_ranking_layers()
     assert "autoreason" in ready["selected_capabilities"]
     assert ready["acceleration_layers"] == ["ddtree"]
     assert ready["stop_policy"]["type"] == "a_streak"
+    assert any(item["capability"] == "autoreason" and item["evidence_required"] for item in ready["stop_policy"]["tactical_tool_map"])
