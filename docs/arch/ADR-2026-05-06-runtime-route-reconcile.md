@@ -24,3 +24,11 @@ During the Autoreason/Receipt runtime seam extraction, a unit test initially tre
 Decision: runtime receipt tests must include `capabilities.claim_verified=true` before expecting public-safe Autoreason output. Raw runtime success can prove invocation and evidence, but not public claim safety by itself.
 
 Prevention: seam tests now keep the adapter's fail-closed behavior visible: route reconciliation may add an executed capability, but the receipt still requires evidence and gate state before it can support public benchmark claims.
+
+## P875 Lesson: Semantic Judge Is Opt-In, Not Assumed
+
+A selected `llm_judge_panel` capability is only a planning request until a configured provider returns a valid ranking. Nexus must not infer semantic judging from Autoreason's deterministic Borda fallback.
+
+Decision: LLM judge providers are loaded only from explicit environment configuration. Gemini/Codex adapters use local command contracts, and missing commands produce no provider. If a provider errors or returns invalid output, Autoreason falls back to deterministic evidence quality and reports `semantic_judged=false`.
+
+Prevention: tests cover opt-in fake provider wiring, command JSON round-trip, missing command exclusion, provider failure fallback, and runtime Autoreason semantic mode only when the provider is explicitly configured.

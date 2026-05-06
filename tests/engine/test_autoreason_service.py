@@ -19,6 +19,13 @@ class FakeSemanticJudge:
         }
 
 
+class FailingSemanticJudge:
+    name = "failing_semantic"
+
+    def rank(self, *, task_desc, candidates):
+        raise RuntimeError("provider unavailable")
+
+
 def test_autoreason_selects_evidence_backed_candidate():
     out = AutoreasonService().run(
         [
@@ -113,6 +120,21 @@ def test_autoreason_semantic_judge_can_beat_evidence_count_heuristic():
     assert out["judge_mode"] == "semantic"
     assert out["semantic_judged"] is True
     assert out["judge_votes"][0]["rubric"]["semantic_fit"] == 0.95
+
+
+def test_autoreason_falls_back_when_semantic_provider_unavailable():
+    out = AutoreasonService(judge_providers=[FailingSemanticJudge()]).run(
+        [
+            {"candidate_id": "a", "summary": "generic log", "score": 0.9, "evidence_refs": ["log1", "log2"]},
+            {"candidate_id": "b", "summary": "targeted regression test", "score": 0.6, "evidence_refs": ["pytest passed"]},
+        ],
+        task_desc="fix regression",
+        stop_threshold=2,
+    )
+
+    assert out["status"] == "SUCCESS"
+    assert out["judge_mode"] == "deterministic_evidence_quality"
+    assert out["semantic_judged"] is False
 
 
 def test_autoreason_deterministic_judge_prefers_quality_over_evidence_count():

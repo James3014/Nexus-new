@@ -25,6 +25,27 @@ def test_build_autoreason_payload_runs_candidate_factory_tournament():
     assert payload["judge_mode"] == "deterministic_evidence_quality"
 
 
+def test_build_autoreason_payload_uses_opt_in_semantic_provider(monkeypatch):
+    monkeypatch.setenv("NEXUS_LLM_JUDGE_PROVIDERS", "fake")
+
+    payload = build_autoreason_payload(
+        result={"flow": "hyper_sprint"},
+        result_report={
+            "candidate_summaries": [
+                {"candidate_id": "one", "hint": "baseline keeps race", "stdout_excerpt": "pytest failed", "score": 0.2},
+                {"candidate_id": "two", "hint": "fixes timeout race", "stdout_excerpt": "pytest passed", "score": 0.9},
+            ]
+        },
+        hyper_learning_trace={},
+        route={},
+        task_desc="Fix flaky websocket timeout race",
+    )
+
+    assert payload["status"] == "SUCCESS"
+    assert payload["semantic_judged"] is True
+    assert payload["judge_mode"] == "semantic"
+
+
 def test_build_autoreason_payload_skips_without_summaries():
     payload = build_autoreason_payload(
         result={"flow": "hyper_sprint"},

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from nexus.engine.autoreason_service import AutoreasonService
+from nexus.engine.llm_judge_providers import build_judge_providers_from_env
 
 
 def _existing_autoreason_payload(hyper_learning_trace: dict[str, Any]) -> dict[str, Any]:
@@ -58,7 +59,7 @@ def build_autoreason_payload(
     if not should_run:
         return existing or skipped_autoreason_payload(stop_reason="candidate_summaries_missing")
 
-    autoreason_service = service or AutoreasonService()
+    autoreason_service = service or AutoreasonService(judge_providers=build_judge_providers_from_env())
     factory_payload = autoreason_service.candidate_factory_from_summaries(summaries, task_desc=task_desc)
     candidates = factory_payload.get("candidates", []) if isinstance(factory_payload.get("candidates"), list) else []
     if not candidates:
