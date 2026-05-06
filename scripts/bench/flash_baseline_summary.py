@@ -38,6 +38,16 @@ def _infra_invalid(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"count": len(reasons), "reasons": sorted(set(reasons))}
 
 
+def _promotion_status(*, gate_valid: bool, infra_invalid: bool, semantic_delta: float) -> str:
+    if infra_invalid or not gate_valid:
+        return "INFRA_INVALID"
+    if semantic_delta > 0:
+        return "PASS"
+    if semantic_delta < 0:
+        return "REGRESSION"
+    return "NO_UPLIFT"
+
+
 def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
     without_path = _latest_jsonl(output_dir, "without_nexus")
     with_path = _latest_jsonl(output_dir, "with_nexus")
@@ -60,12 +70,18 @@ def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
     infra_without = _infra_invalid(rows_without)
     infra_with = _infra_invalid(rows_with)
     infra_reasons = sorted(set(infra_without["reasons"]) | set(infra_with["reasons"]))
-    status = "PASS" if not route_quality["gate_failures"] and public_safe.get("verdict") == "PASS" else "FAIL"
-    if infra_without["count"] or infra_with["count"]:
-        status = "INFRA_INVALID"
+    semantic_delta = float(report["delta"].get("semantic_verified_rate_delta", 0.0) or 0.0)
+    gate_valid = bool(not route_quality["gate_failures"] and public_safe.get("verdict") == "PASS")
+    has_infra_invalid = bool(infra_without["count"] or infra_with["count"])
+    status = _promotion_status(
+        gate_valid=gate_valid,
+        infra_invalid=has_infra_invalid,
+        semantic_delta=semantic_delta,
+    )
     return {
         "schema": "nexus_flash_baseline_summary_v1",
         "status": status,
+        "promotion_status": status,
         "model": model_names[0] if len(model_names) == 1 else ",".join(model_names),
         "scope": scope or f"{len(rows_with)}x1",
         "files": {
@@ -81,7 +97,7 @@ def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
         "semantic_verified_rate": {
             "without_nexus": summary_without.get("semantic_verified_rate", 0.0),
             "with_nexus": summary_with.get("semantic_verified_rate", 0.0),
-            "delta": report["delta"].get("semantic_verified_rate_delta", 0.0),
+            "delta": semantic_delta,
         },
         "route_quality": route_quality,
         "public_safe": public_safe,

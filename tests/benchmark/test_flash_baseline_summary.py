@@ -50,6 +50,7 @@ def test_flash_baseline_summary_reports_rates_route_quality_and_public_safe(tmp_
     summary = build_summary(output_dir=tmp_path, scope="1x1")
 
     assert summary["status"] == "PASS"
+    assert summary["promotion_status"] == "PASS"
     assert summary["solve_rate"]["with_nexus"] == 1.0
     assert summary["semantic_verified_rate"]["delta"] == 1.0
     assert summary["public_safe"]["public_safe"] == ["judge_panel"]
@@ -90,5 +91,64 @@ def test_flash_baseline_summary_marks_infra_invalid_rows(tmp_path: Path):
     summary = build_summary(output_dir=tmp_path, scope="1x1")
 
     assert summary["status"] == "INFRA_INVALID"
+    assert summary["promotion_status"] == "INFRA_INVALID"
     assert summary["infra_invalid"]["without_nexus"] == 1
     assert summary["infra_invalid"]["reasons"] == ["quota_exhausted"]
+
+
+def test_flash_baseline_summary_marks_no_uplift(tmp_path: Path):
+    row = {
+        "task_id": "t1",
+        "trial_index": 1,
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "run_eligible": True,
+        "model_name": "gemini-3-flash-preview",
+        "token_measured": True,
+        "token_capture_status": "measured",
+        "capability_receipts": [
+            {
+                "name": "judge_panel",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": True,
+            }
+        ],
+    }
+    _write_jsonl(tmp_path / "without_nexus_1.jsonl", [{**row, "mode": "without_nexus"}])
+    _write_jsonl(tmp_path / "with_nexus_1.jsonl", [{**row, "mode": "with_nexus"}])
+
+    summary = build_summary(output_dir=tmp_path, scope="1x1")
+
+    assert summary["status"] == "NO_UPLIFT"
+    assert summary["semantic_verified_rate"]["delta"] == 0.0
+
+
+def test_flash_baseline_summary_marks_regression(tmp_path: Path):
+    without = {
+        "task_id": "t1",
+        "trial_index": 1,
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "run_eligible": True,
+        "model_name": "gemini-3-flash-preview",
+        "token_measured": True,
+        "token_capture_status": "measured",
+    }
+    with_row = {
+        **without,
+        "mode": "with_nexus",
+        "status": "FAILED",
+        "semantic_status": "FAILED",
+        "capability_receipts": [],
+    }
+    _write_jsonl(tmp_path / "without_nexus_1.jsonl", [{**without, "mode": "without_nexus"}])
+    _write_jsonl(tmp_path / "with_nexus_1.jsonl", [with_row])
+
+    summary = build_summary(output_dir=tmp_path, scope="1x1")
+
+    assert summary["status"] == "REGRESSION"
+    assert summary["semantic_verified_rate"]["delta"] == -1.0
