@@ -18,14 +18,22 @@ class _Span:
 
 
 class FakeExecutor:
-    def __init__(self, name: str, mutations: dict):
+    def __init__(self, name: str, mutations: dict, required: tuple[str, ...] = (), provided: tuple[str, ...] = ()):
         self.name = name
         self.priority = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40, "C": 50}[name]
         self.mutations = mutations
+        self.required = required
+        self.provided = provided
         self.calls = 0
 
     def should_run(self, _ctx):
         return True
+
+    def required_artifacts(self):
+        return self.required
+
+    def provided_artifacts(self):
+        return self.provided
 
     def execute(self, _pipeline, ctx):
         self.calls += 1
@@ -84,6 +92,38 @@ def test_pipeline_prefers_phase_executor_composition_over_mixin_methods(tmp_path
     assert executors["P"].calls == 1
     assert executors["X"].calls == 1
     assert executors["D"].calls == 1
+
+
+def test_pipeline_fails_fast_when_phase_handshake_artifact_is_missing(tmp_path, monkeypatch):
+    executors = {
+        "P": FakeExecutor("P", {"plan": "ok"}),
+        "D": FakeExecutor("D", {"diagnosis": "ok"}, required=("impact_map",)),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    monkeypatch.setattr(pipeline, "_repair_audit_loop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(pipeline, "_stage_crystallize", lambda *_args, **_kwargs: None)
+    seen = {}
+    monkeypatch.setattr(pipeline, "_finalize_and_report", lambda ctx, success, _tracer: seen.update(ctx.state.metadata) or success)
+
+    assert pipeline.run("repair vague runtime behavior", task_id="missing-handshake") is False
+    assert executors["D"].calls == 0
+    assert seen["pipeline_terminal_state"] == "FAILED"
+
+
+def test_pipeline_records_phase_artifacts_on_blackboard(tmp_path, monkeypatch):
+    executors = {
+        "P": FakeExecutor("P", {"impact_map": {"target.py": {"risk": "HIGH"}}}, provided=("impact_map",)),
+        "D": FakeExecutor("D", {"diagnosis": "ok"}, required=("impact_map",)),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    monkeypatch.setattr(pipeline, "_repair_audit_loop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(pipeline, "_stage_crystallize", lambda *_args, **_kwargs: None)
+    seen = {}
+    monkeypatch.setattr(pipeline, "_finalize_and_report", lambda ctx, success, _tracer: seen.update(blackboard=ctx.blackboard.view()) or success)
+
+    assert pipeline.run("repair vague runtime behavior", task_id="blackboard-handshake") is True
+    assert executors["D"].calls == 1
+    assert seen["blackboard"]["latest"]["impact_map"]["target.py"]["risk"] == "HIGH"
 
 
 def test_pipeline_default_bootstrap_uses_diagnose_executor_not_stage_mixin(tmp_path, monkeypatch):

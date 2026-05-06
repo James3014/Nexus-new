@@ -30,6 +30,14 @@ class HandlerPhaseExecutor:
             ctx.state.metadata["research_skipped_reason"] = "phase_executor_should_run_false"
         return result
 
+    def required_artifacts(self) -> tuple[str, ...]:
+        provider = getattr(self.handler, "required_artifacts", None)
+        return tuple(provider() or ()) if callable(provider) else ()
+
+    def provided_artifacts(self) -> tuple[str, ...]:
+        provider = getattr(self.handler, "provided_artifacts", None)
+        return tuple(provider() or ()) if callable(provider) else ()
+
     def execute(self, pipeline: Any, ctx: Any) -> PhaseResult:
         execute = getattr(self.handler, "execute", None)
         if callable(execute):
@@ -61,6 +69,12 @@ class PipelineMethodPhaseExecutor:
 
     def should_run(self, ctx: Any) -> bool:
         return self.name not in set(ctx.kwargs.get("skip_phases", [])) if hasattr(ctx, "kwargs") else True
+
+    def required_artifacts(self) -> tuple[str, ...]:
+        return ()
+
+    def provided_artifacts(self) -> tuple[str, ...]:
+        return ()
 
     def execute(self, pipeline: Any, ctx: Any) -> PhaseResult:
         method = getattr(pipeline, self.method_name)

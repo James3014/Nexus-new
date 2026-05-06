@@ -42,12 +42,7 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     from nexus.core.commander import Commander
     from nexus.engine.battle_swarm import BattleSwarm
     from nexus.engine.reflex_loop import ReflexLoop
-    from nexus.engine.phase_executors import (
-        build_audit_executor,
-        build_diagnose_executor,
-        build_plan_executor,
-        build_research_executor,
-    )
+    from nexus.engine.phase_factory import PhaseFactory
     from nexus.services.prompt_builder import PromptBuilder
 
     state_io = StateIO(project_root, run_dir=run_dir)
@@ -95,11 +90,9 @@ def build_engine_components(config: Any, kwargs: Dict[str, Any]) -> Dict[str, An
     if not hasattr(hub, "assemble_feature_pack"):
         hub.assemble_feature_pack = context_hub.assemble_feature_pack
 
+    phase_factory = PhaseFactory(project_root=project_root, run_dir=run_dir, hub=hub)
     phase_executors = kwargs.get("phase_executors") or {
-        "P": build_plan_executor(project_root, run_dir),
-        "X": build_research_executor(project_root, run_dir),
-        "D": build_diagnose_executor(project_root, run_dir, hub=hub),
-        "A": build_audit_executor(project_root, run_dir),
+        phase: phase_factory.create_phase(phase) for phase in ("P", "X", "D", "A")
     }
 
     components = {

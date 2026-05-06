@@ -30,7 +30,9 @@ from nexus.learning.cycle_analyzer import analyze_cycle
 from nexus.engine.pipeline_outcome import PipelineOutcome, PipelineTerminalState, HumanReviewHandoff
 from nexus.core.outcome_schema import NexusOutcomeV2
 from nexus.core.handoff_bundle import HandoffBundleWriter
+from nexus.core.blackboard import Blackboard
 from nexus.engine.phase_plugin import PhaseRegistry, PhasePlugin, PhaseResult, PhaseExecutor
+from nexus.engine.phase_handshake import record_phase_artifacts, validate_required_artifacts
 
 # Mixins 導入
 from nexus.engine.pipeline_stages import PipelineStagesMixin
@@ -79,6 +81,7 @@ class PipelineContext:
     researcher: Any = None
     repairer: Any = None
     pack: dict = field(default_factory=dict)
+    blackboard: Blackboard = field(default_factory=Blackboard)
     event_store: Any = None  # Atomic Sinking (R16)
     outcome_v2: Optional[NexusOutcomeV2] = None
     decision_journal: list[dict[str, Any]] = field(default_factory=list)
@@ -91,6 +94,7 @@ class PipelineContext:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": dict(payload or {}),
         }
+        self.blackboard.append(origin_phase, event_type, event)
         self.decision_journal.append(event)
         return event
 
@@ -219,23 +223,9 @@ class NexusPipeline(
         if project_root is None or run_dir is None:
             return {}
         try:
-            from nexus.engine.phase_executors import (
-                build_audit_executor,
-                build_crystallize_executor,
-                build_diagnose_executor,
-                build_plan_executor,
-                build_repair_executor,
-                build_research_executor,
-            )
+            from nexus.engine.phase_factory import PhaseFactory
 
-            return {
-                "P": build_plan_executor(project_root, run_dir),
-                "X": build_research_executor(project_root, run_dir),
-                "D": build_diagnose_executor(project_root, run_dir, hub=getattr(self.engine, "hub", None)),
-                "R": build_repair_executor(project_root, run_dir),
-                "A": build_audit_executor(project_root, run_dir),
-                "C": build_crystallize_executor(project_root, run_dir),
-            }
+            return PhaseFactory(project_root=Path(project_root), run_dir=Path(run_dir), hub=getattr(self.engine, "hub", None)).create_all()
         except Exception as exc:
             logger.debug("phase_executor_bootstrap_skipped: %s", exc)
             return {}
@@ -466,7 +456,9 @@ class NexusPipeline(
                     )
                     
                     try:
+                        validate_required_artifacts(phase=plugin, blackboard=ctx.blackboard)
                         result = plugin.execute(self, ctx)
+                        record_phase_artifacts(phase=plugin, result=result, blackboard=ctx.blackboard)
                         
                         ctx.event_store.append(
                             build_phase_transition_event(
@@ -484,6 +476,13 @@ class NexusPipeline(
                             break
                     except RuntimeError as veto_err:
                         veto_str = str(veto_err)
+                        if veto_str.startswith("SEMANTIC_HANDSHAKE_MISSING_ARTIFACT"):
+                            logger.error("🛑 [Pipeline] Semantic handshake failed: %s", veto_err)
+                            success = False
+                            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
+                            ctx.state.metadata["semantic_handshake_failed"] = True
+                            ctx.state.metadata["semantic_handshake_reason"] = veto_str
+                            break
                         if "VETO" in veto_str and pxd_attempts < MAX_PXD_RETRIES:
                             logger.warning("🔄 [Pipeline] D-Stage VETO → Feeding back to P-Stage for replan (Attempt %d/%d)", pxd_attempts, MAX_PXD_RETRIES)
                             ctx.kwargs["veto_feedback"] = veto_str
@@ -551,3 +550,11 @@ class _PhaseExecutorPlugin(PhasePlugin):
             )
         )
         return self.executor.execute(pipeline, ctx)
+
+    def required_artifacts(self) -> tuple[str, ...]:
+        provider = getattr(self.executor, "required_artifacts", None)
+        return tuple(provider() or ()) if callable(provider) else ()
+
+    def provided_artifacts(self) -> tuple[str, ...]:
+        provider = getattr(self.executor, "provided_artifacts", None)
+        return tuple(provider() or ()) if callable(provider) else ()
