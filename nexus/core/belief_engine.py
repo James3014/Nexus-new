@@ -5,6 +5,14 @@ from typing import Dict, Any
 from nexus.core.belief_contracts import AuditOutcome
 from nexus.telemetry.tracer import NexusTracer
 
+
+def blend_semantic_confidence(audit_confidence: float, semantic_confidence: float, *, semantic_weight: float = 0.3) -> float:
+    """Blend audit confidence with semantic-search evidence without letting retrieval dominate."""
+    audit = max(0.0, min(1.0, float(audit_confidence)))
+    semantic = max(0.0, min(1.0, float(semantic_confidence)))
+    weight = max(0.0, min(1.0, float(semantic_weight)))
+    return round((audit * (1.0 - weight)) + (semantic * weight), 4)
+
 class BeliefEngine:
     """維護當前的邏輯假設與信心度 (Subjective Trust)。"""
     def __init__(self, state_file: Path = Path(".nexus/belief_state.json")):
@@ -43,6 +51,11 @@ class BeliefEngine:
         if confidence is None:
             confidence = 0.9 if outcome.passed else 0.1
         confidence = max(0.0, min(1.0, float(confidence)))
+        semantic_raw = outcome.metadata.get("semantic_searcher_confidence")
+        semantic_confidence = None
+        if semantic_raw is not None:
+            semantic_confidence = max(0.0, min(1.0, float(semantic_raw)))
+            confidence = blend_semantic_confidence(confidence, semantic_confidence)
         self.update_belief(
             task_id=outcome.task_id,
             assumption=outcome.assumption,
@@ -58,6 +71,9 @@ class BeliefEngine:
         confidence_source = str(outcome.metadata.get("semantic_searcher_confidence_source") or "").strip()
         if confidence_source:
             self.beliefs[outcome.assumption]["semantic_confidence_source"] = confidence_source
+        if semantic_confidence is not None:
+            self.beliefs[outcome.assumption]["semantic_searcher_confidence"] = semantic_confidence
+            self.beliefs[outcome.assumption]["confidence_policy"] = "audit_semantic_weighted"
         with open(self.state_file, "w") as f:
             json.dump(self.beliefs, f, indent=2)
         NexusTracer.record_belief_shift(outcome.task_id, old_confidence, confidence)

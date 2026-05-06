@@ -39,6 +39,23 @@ def build_coverage(repo_root: Path, *, manifest: Path) -> dict[str, Any]:
     }
 
 
+def validate_coverage_gate(payload: dict[str, Any]) -> dict[str, Any]:
+    counts = payload.get("status_counts", {}) if isinstance(payload.get("status_counts"), dict) else {}
+    failures: list[str] = []
+    if int(counts.get("implemented", 0)) <= 0:
+        failures.append("implemented_coverage_missing")
+    if int(counts.get("contradicted", 0)) > 0:
+        failures.append("contradicted_coverage_present")
+    if not payload.get("audit_passed"):
+        failures.append("brain_hub_audit_failed")
+    return {
+        "schema_version": "nexus_brain_hub_coverage_gate.v1",
+        "passed": not failures,
+        "status_counts": counts,
+        "failures": failures,
+    }
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Brain Hub Code-Reality Coverage",
@@ -76,8 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     output = root / args.output
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_markdown(payload), encoding="utf-8")
-    print(json.dumps({"passed": payload["audit_passed"], "output": str(output), "status_counts": payload["status_counts"]}, indent=2))
-    return 0 if payload["audit_passed"] else 1
+    gate = validate_coverage_gate(payload)
+    print(json.dumps({"passed": gate["passed"], "output": str(output), "status_counts": payload["status_counts"], "failures": gate["failures"]}, indent=2))
+    return 0 if gate["passed"] else 1
 
 
 if __name__ == "__main__":

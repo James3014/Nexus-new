@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from nexus.core.belief_contracts import AuditOutcome
-from nexus.core.belief_engine import BeliefEngine
+from nexus.core.belief_engine import BeliefEngine, blend_semantic_confidence
 from nexus.core.config import OrchestratorConfig
 from nexus.core.context_hub import ContextDependencies, ContextHub, StateView
 from nexus.core.learning_evidence import LearningEvidence
@@ -278,3 +278,22 @@ def test_belief_engine_promotes_semantic_searcher_refs_to_first_class_fields(tmp
     belief = stored["semantic evidence supports fix"]
     assert belief["semantic_evidence_refs"] == ["semantic:policy:r1"]
     assert belief["semantic_confidence_source"] == "semantic_searcher:policy:r1"
+
+
+def test_belief_engine_blends_semantic_searcher_confidence_conservatively(tmp_path):
+    engine = BeliefEngine(tmp_path / "belief.json")
+
+    out = engine.process_audit_outcome(
+        AuditOutcome(
+            task_id="task-1",
+            assumption="semantic confidence supports fix",
+            passed=True,
+            evidence_id="EV-1",
+            confidence=0.6,
+            metadata={"semantic_searcher_confidence": 1.0},
+        )
+    )
+
+    assert blend_semantic_confidence(0.6, 1.0) == 0.72
+    assert out["confidence"] == 0.72
+    assert engine.beliefs["semantic confidence supports fix"]["confidence_policy"] == "audit_semantic_weighted"

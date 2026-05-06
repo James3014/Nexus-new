@@ -16,6 +16,7 @@ DEFAULT_TASK_IDS = (
     "rlm-harder-v2-belief-001",
     "rlm-harder-v2-memory-001",
 )
+MAX_PREFLIGHT_TASKS = 4
 
 
 def benchmark_env(model: str) -> dict[str, str]:
@@ -91,6 +92,8 @@ def build_command(*, output_dir: str, task_ids: tuple[str, ...], preflight_only:
 
 def validate_smoke_plan(*, cmd: list[str], env: dict[str, str], task_ids: tuple[str, ...]) -> dict[str, Any]:
     reasons: list[str] = []
+    if len(task_ids) > MAX_PREFLIGHT_TASKS:
+        reasons.append("task_count_exceeds_preflight_limit")
     if env.get("NEXUS_VALUE_HIDDEN_VERIFIER") != "1":
         reasons.append("hidden_verifier_disabled")
     if env.get("NEXUS_CODEX_MODEL_NAME") != env.get("NEXUS_DIRECT_CODEX_MODEL"):
@@ -115,6 +118,7 @@ def validate_smoke_plan(*, cmd: list[str], env: dict[str, str], task_ids: tuple[
         "passed": not reasons,
         "reason_codes": reasons,
         "task_count": len(task_ids),
+        "max_preflight_tasks": MAX_PREFLIGHT_TASKS,
         "same_model": env.get("NEXUS_CODEX_MODEL_NAME") == env.get("NEXUS_DIRECT_CODEX_MODEL"),
         "preflight_only": "--preflight-only" in cmd,
     }

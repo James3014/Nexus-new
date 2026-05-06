@@ -21,6 +21,7 @@ from nexus.events.transport import NexusEventBus
 from scripts.ops.codex_nexus_ab_smoke import benchmark_env as codex_smoke_env
 from scripts.ops.codex_nexus_ab_smoke import build_command as codex_smoke_command
 from scripts.ops.codex_nexus_ab_smoke import validate_smoke_plan as validate_codex_smoke_plan
+from scripts.ops.render_brain_hub_coverage import build_coverage, validate_coverage_gate
 from scripts.ops.brain_hub_audit import scan_brain_hub
 from scripts.ops.hallucination_guard_drift import audit_drift
 
@@ -236,6 +237,14 @@ def validate_codex_nexus_smoke_plan() -> list[dict[str, Any]]:
     if payload.get("passed"):
         return [_ok("codex_nexus_smoke_plan", **payload)]
     return [_fail("codex_nexus_smoke_plan", "codex_nexus_smoke_plan_invalid", **payload)]
+
+
+def validate_brain_hub_coverage_gate(repo_root: Path) -> list[dict[str, Any]]:
+    payload = build_coverage(repo_root, manifest=repo_root / "docs" / "ops" / "brain_hub_manifest.json")
+    gate = validate_coverage_gate(payload)
+    if gate.get("passed"):
+        return [_ok("brain_hub_coverage_gate", **gate)]
+    return [_fail("brain_hub_coverage_gate", "brain_hub_coverage_gate_failed", **gate)]
 
 
 def validate_openseeker_autodata_smoke(repo_root: Path) -> list[dict[str, Any]]:
@@ -480,6 +489,7 @@ def build_payload(
         *validate_brain_hub_alignment(repo_root),
         *validate_event_contracts(repo_root, strict_raw=strict_event_contracts),
         *validate_codex_nexus_smoke_plan(),
+        *validate_brain_hub_coverage_gate(repo_root),
         *validate_openseeker_autodata_smoke(repo_root),
     ]
     if run_repair:

@@ -46,6 +46,7 @@ def test_quick_payload_skips_flash_style_repair_subset():
         "brain_hub_audit",
         "event_contract_audit",
         "codex_nexus_smoke_plan",
+        "brain_hub_coverage_gate",
         "openseeker_autodata_smoke",
     }.issubset({item["name"] for item in payload["checks"]})
 
@@ -61,6 +62,7 @@ def test_quick_payload_includes_brain_hub_alignment_gate():
         "brain_hub_audit",
         "event_contract_audit",
         "codex_nexus_smoke_plan",
+        "brain_hub_coverage_gate",
         "openseeker_autodata_smoke",
     }.issubset(names)
 
@@ -119,6 +121,14 @@ def test_quick_payload_includes_codex_nexus_smoke_plan():
     assert checks[0]["passed"] is True
     assert checks[0]["details"]["same_model"] is True
     assert checks[0]["details"]["preflight_only"] is True
+
+
+def test_quick_payload_includes_brain_hub_coverage_gate():
+    checks = nexus_pre_flash_gate.validate_brain_hub_coverage_gate(Path(".").resolve())
+
+    assert checks[0]["name"] == "brain_hub_coverage_gate"
+    assert checks[0]["passed"] is True
+    assert checks[0]["details"]["status_counts"]["implemented"] >= 1
 
 
 def test_quick_payload_fails_when_brain_hub_audit_fails(monkeypatch):

@@ -47,6 +47,7 @@ def test_validate_smoke_plan_requires_preflight_and_receipt_flags():
     assert payload["passed"] is True
     assert payload["same_model"] is True
     assert payload["preflight_only"] is True
+    assert payload["max_preflight_tasks"] == 4
     assert payload["reason_codes"] == []
 
 
@@ -66,3 +67,17 @@ def test_validate_smoke_plan_fails_closed_on_model_or_task_drift():
     assert "same_model_lock_missing" in payload["reason_codes"]
     assert "task_id_filter_mismatch" in payload["reason_codes"]
     assert "preflight_guard_missing" in payload["reason_codes"]
+
+
+def test_validate_smoke_plan_fails_closed_when_preflight_task_count_is_large():
+    task_ids = ("a", "b", "c", "d", "e")
+    cmd = codex_nexus_ab_smoke.build_command(
+        output_dir=".nexus/reports/test",
+        task_ids=task_ids,
+        preflight_only=True,
+    )
+
+    payload = codex_nexus_ab_smoke.validate_smoke_plan(cmd=cmd, env=codex_nexus_ab_smoke.benchmark_env("gpt-5.5"), task_ids=task_ids)
+
+    assert payload["passed"] is False
+    assert "task_count_exceeds_preflight_limit" in payload["reason_codes"]
