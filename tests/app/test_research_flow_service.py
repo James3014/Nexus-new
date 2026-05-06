@@ -2406,7 +2406,10 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
     monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
     payload, _ = research_flow_service.run_auto_flow(
         repo_root=tmp_path,
-        task_desc="Produce public report for sdk api claim evidence after repeated retry timeout plateau",
+        task_desc=(
+            "Produce public report for sdk api claim evidence after repeated retry timeout plateau "
+            "and use semantic_searcher refs for belief confidence."
+        ),
         target_file=str(target),
         test_file=str(test_file),
         task_type="public_cross_module_bug",
@@ -2440,6 +2443,12 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
         assert receipts[name]["public_claim_safe"] is True, receipts[name]
         assert receipts[name]["evidence_refs"]
     capabilities = payload["nexus_usage_trace"]["capabilities"]
+    assert receipts["semantic_searcher"]["public_claim_safe"] is True
+    assert receipts["belief"]["public_claim_safe"] is True
+    semantic_ref = capabilities["semantic_searcher_refs"][0]
+    assert semantic_ref.startswith("semantic:")
+    assert semantic_ref in receipts["semantic_searcher"]["evidence_refs"]
+    assert semantic_ref in receipts["belief"]["evidence_refs"]
     assert (tmp_path / capabilities["formal_report_path"]).exists()
     assert capabilities["formal_report_schema_version"] == "nexus_formal_report_v1"
     assert capabilities["judge_panel_report_path"]
@@ -2454,6 +2463,76 @@ def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, mon
     assert capabilities["external_doc_scout_latency_ms"] >= 0
     assert capabilities["external_doc_scout_cache_age_sec"] >= 0
     assert capabilities["external_doc_scout_gate_passed"] is True
+
+
+def test_auto_flow_keeps_external_doc_scout_rejected_only_diagnostic(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    test_file = tmp_path / "test_target.py"
+    test_file.write_text("def test_existing_contract():\n    assert True\n", encoding="utf-8")
+    monkeypatch.delenv("NEXUS_DOC_SCOUT_EXTERNAL_ROWS_JSON", raising=False)
+
+    def fake_hyper(*, repo_root, config):
+        return SimpleNamespace(
+            status="SUCCESS",
+            reason="stage1_pass",
+            patch="VALUE = 2\n",
+            winner_source="llm",
+            error_codes=[],
+            rejection_summary={},
+            attempt_count=1,
+            model_calls=1,
+            total_tokens=11,
+            token_capture_status="measured",
+            learning_trace={},
+            candidates=[
+                SimpleNamespace(
+                    seed=1,
+                    score=0.9,
+                    source="llm",
+                    hint="llm",
+                    error="",
+                    stdout="pytest passed",
+                    candidate_code="VALUE = 2\n",
+                    elapsed_sec=0.2,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(research_flow_service, "run_hyper_sprint", fake_hyper)
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Use external_doc_scout for unverified sdk api claim contract without verified source.",
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="public_docs_code_sync",
+        candidate_count=2,
+        root_cause_confidence=0.5,
+        findings_query="",
+        llm_mode=True,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=20,
+        max_time_ratio_guard=2.0,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=9999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=12,
+        force_flow="hyper_sprint",
+        report_file=".nexus/reports/research/test-auto-flow.json",
+        output_file=None,
+        task_id="external-doc-rejected-only",
+    )
+
+    capabilities = payload["nexus_usage_trace"]["capabilities"]
+    receipts = {item["name"]: item for item in payload["nexus_usage_trace"]["capability_receipts"]}
+
+    assert capabilities["external_doc_scout_diagnostic_path"]
+    assert "external_doc_scout_report_path" not in capabilities
+    assert capabilities["external_doc_scout_diagnostic_rejected_claims"]
+    assert receipts["external_doc_scout"]["public_claim_safe"] is False
+    assert receipts["external_doc_scout"]["failure_reason"] == "selected_without_invocation"
 
 
 def test_runtime_receipt_plan_prunes_unexecuted_judge_panel():
