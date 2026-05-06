@@ -221,6 +221,7 @@ class NexusPipeline(
         try:
             from nexus.engine.phase_executors import (
                 build_audit_executor,
+                build_crystallize_executor,
                 build_diagnose_executor,
                 build_plan_executor,
                 build_research_executor,
@@ -231,16 +232,25 @@ class NexusPipeline(
                 "X": build_research_executor(project_root, run_dir),
                 "D": build_diagnose_executor(project_root, run_dir, hub=getattr(self.engine, "hub", None)),
                 "A": build_audit_executor(project_root, run_dir),
+                "C": build_crystallize_executor(project_root, run_dir),
             }
         except Exception as exc:
             logger.debug("phase_executor_bootstrap_skipped: %s", exc)
             return {}
 
     def _register_phase_executors(self, phase_executors: Dict[str, PhaseExecutor]) -> None:
-        for name in ("P", "X", "D", "R", "A"):
+        for name in ("P", "X", "D", "R", "A", "C"):
             executor = phase_executors.get(name)
             if executor is not None:
                 self.registry.register(_PhaseExecutorPlugin(name, executor))
+
+    def _run_crystallize_phase(self, ctx: PipelineContext, success: bool, tracer: Any) -> None:
+        ctx.state.metadata["pipeline_success"] = success
+        plugin = next((item for item in self.registry.get_ordered_plugins() if item.name == "C"), None)
+        if plugin is not None and plugin.should_run(ctx):
+            plugin.execute(self, ctx)
+            return
+        self._stage_crystallize(ctx, success, tracer)
 
     def run(self, task_desc: str, task_type: str = "bug", context: Optional[Dict] = None, **kwargs) -> bool:
         """EntryPoint for P-X-D-R-A-C pipeline with OTel Tracing wrapper."""
@@ -484,9 +494,8 @@ class NexusPipeline(
         
         # 3. 執行結晶與結案
         # --- C Stage: Crystallize ---
-        ctx.state.metadata["pipeline_success"] = success
         try:
-            self._stage_crystallize(ctx, success, tracer)
+            self._run_crystallize_phase(ctx, success, tracer)
         except Exception as e:
             logger.error(f"Crystallize stage encountered an error (non-fatal): {e}")
             

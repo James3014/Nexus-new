@@ -209,6 +209,8 @@ def test_report_model_label_uses_configured_gemini_model(monkeypatch):
 
 def test_benchmark_gateway_timeout_has_short_default_and_override(monkeypatch):
     monkeypatch.delenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", raising=False)
+    monkeypatch.delenv("NEXUS_GEMINI_MODEL_NAME", raising=False)
+    monkeypatch.delenv("NEXUS_DIRECT_GEMINI_MODEL", raising=False)
     assert _benchmark_gateway_timeout_sec() == "30"
     monkeypatch.setenv("NEXUS_BENCH_GATEWAY_TIMEOUT_SEC", "12")
     assert _benchmark_gateway_timeout_sec() == "12"
@@ -217,10 +219,20 @@ def test_benchmark_gateway_timeout_has_short_default_and_override(monkeypatch):
 
 
 def test_benchmark_gateway_timeout_scales_with_task_budget():
+    os.environ.pop("NEXUS_GEMINI_MODEL_NAME", None)
+    os.environ.pop("NEXUS_DIRECT_GEMINI_MODEL", None)
     assert _benchmark_gateway_timeout_for_task(10) == 30
     assert _benchmark_gateway_timeout_for_task(120) == 90
     assert _benchmark_gateway_timeout_for_task(180) == 150
     assert _benchmark_gateway_timeout_for_task(300) == 220
+
+
+def test_flash_benchmark_gateway_timeout_is_capped_unless_long_gateway(monkeypatch):
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.delenv("NEXUS_BENCH_LONG_GATEWAY", raising=False)
+    assert _benchmark_gateway_timeout_for_task(420) == 120
+    monkeypatch.setenv("NEXUS_BENCH_LONG_GATEWAY", "1")
+    assert _benchmark_gateway_timeout_for_task(420) == 220
 
 
 def test_remaining_task_timeout_uses_shared_deadline(monkeypatch):
@@ -3777,6 +3789,42 @@ def test_benchmark_row_splits_model_tokens_from_local_rescue():
     assert row["gateway_timeout_sec"] == 60
     assert row["token_reliable"] is False
     assert row["token_unreliable_reason"] == "local_only_rescue_not_model_comparable"
+
+
+def test_stats_token_outlier_is_not_public_reliable():
+    row = {
+        "mode": "with_nexus",
+        "run_eligible": True,
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 2.0,
+        "total_tokens": 816217,
+        "model_calls": 1,
+        "token_capture_status": "measured",
+        "gateway_stats_present": True,
+        "gateway_usage_metadata_present": False,
+        "gateway_token_source": "stats",
+        "gateway_total_chars": 2055,
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "hyper_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+    }
+
+    _annotate_benchmark_eligibility(row, provider="gemini", model_required=True, nexus_required=True)
+
+    assert row["token_reliable"] is False
+    assert row["token_unreliable_reason"] == "stats_outlier_possible_cumulative"
 
 
 def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):

@@ -671,21 +671,24 @@ class ExternalDocScoutReceiptAdapter:
         error_count = as_int(payload.get("external_doc_scout_error_count", payload.get("error_count", 0)))
         latency_ms = str(payload.get("external_doc_scout_latency_ms", payload.get("latency_ms", ""))).strip()
         cache_age_sec = str(payload.get("external_doc_scout_cache_age_sec", payload.get("cache_age_sec", ""))).strip()
-        refs.extend(f"verified_claim:{item}" for item in verified)
-        refs.extend(f"rejected_claim:{item}" for item in rejected)
-        refs.extend(f"provider:{item}" for item in providers)
-        if cache_status:
-            refs.append(f"cache:{cache_status}")
-        if verified_source_count > 0:
-            refs.append(f"verified_sources:{verified_source_count}")
-        if source_count > 0:
-            refs.append(f"sources:{source_count}")
-        refs.append(f"errors:{error_count}")
-        if latency_ms:
-            refs.append(f"latency_ms:{latency_ms}")
-        if cache_age_sec:
-            refs.append(f"cache_age_sec:{cache_age_sec}")
-        invoked = bool(payload.get("external_doc_scout_used") or refs)
+        verified_external = bool(refs and verified_source_count > 0)
+        if verified_external:
+            refs.extend(f"verified_claim:{item}" for item in verified)
+            refs.extend(f"rejected_claim:{item}" for item in rejected)
+            refs.extend(f"provider:{item}" for item in providers)
+        invoked = bool(payload.get("external_doc_scout_used") or verified_external)
+        if invoked and (refs or verified_source_count > 0 or source_count > 0):
+            if cache_status:
+                refs.append(f"cache:{cache_status}")
+            if verified_source_count > 0:
+                refs.append(f"verified_sources:{verified_source_count}")
+            if source_count > 0:
+                refs.append(f"sources:{source_count}")
+            refs.append(f"errors:{error_count}")
+            if latency_ms:
+                refs.append(f"latency_ms:{latency_ms}")
+            if cache_age_sec:
+                refs.append(f"cache_age_sec:{cache_age_sec}")
         gate_passed = bool(
             invoked
             and refs

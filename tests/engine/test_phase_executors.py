@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from nexus.engine.phase_executors import HandlerPhaseExecutor
+from nexus.engine.phase_executors import HandlerPhaseExecutor, build_crystallize_executor
 from nexus.engine.phase_plugin import PhaseResult
 
 
@@ -50,3 +50,28 @@ def test_handler_phase_executor_maps_legacy_fail_dict_to_phase_failure():
 
     assert result.status == "fail"
     assert result.mutations["reason"] == "hallucination_gate_rejected"
+
+
+def test_crystallize_executor_wraps_existing_rich_pipeline_method(tmp_path):
+    calls = []
+
+    class Pipeline:
+        def _stage_crystallize(self, ctx, success, tracer):
+            calls.append((ctx.task_id, success, tracer))
+            ctx.state.metadata["rich_crystallize_ran"] = True
+
+    ctx = SimpleNamespace(
+        task_id="c-wrap",
+        kwargs={},
+        tracer=object(),
+        pack={},
+        state=SimpleNamespace(metadata={"pipeline_success": True}),
+    )
+    executor = build_crystallize_executor(tmp_path, tmp_path / ".nexus" / "runs")
+
+    result = executor.execute(Pipeline(), ctx)
+
+    assert result.status == "success"
+    assert calls == [("c-wrap", True, ctx.tracer)]
+    assert ctx.state.metadata["rich_crystallize_ran"] is True
+    assert ctx.pack["crystallize"]["status"] == "COMPLETED"

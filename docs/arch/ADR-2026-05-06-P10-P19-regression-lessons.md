@@ -12,6 +12,9 @@ P10-P19 added runtime guardrails for Brain Hub alignment, route receipts, candid
 2. Route regression tests must capture the actual subprocess command, not only the environment. Candidate-count degradation is a command-line contract and cannot be proven by `NEXUS_LLM_CANDIDATE_CAP` alone.
 3. Long Flash benchmark commands can fail inside sandboxed `uv` cache access before reaching product logic. Treat that as environment failure and rerun through the approved `uv run` path rather than interpreting it as Nexus behavior.
 4. If generated markdown and `evidence_bundle.json` disagree on public-claim gate state, the bundle is the authority because it carries the structured gate checks and raw file hashes.
+5. Targeted pytest commands must be discovered with `rg "def test_"` before use; a wrong node id can produce zero product evidence while looking like a quick verification attempt.
+6. Receipt adapters must distinguish diagnostics from evidence. Rejected-claim-only DocScout output is useful for audit, but must not count as external-doc invocation evidence without a verified external source.
+7. Helper functions used in low-level benchmark timing code should avoid dependencies defined later in the module; direct `os.environ` parsing is safer for import-time callable utilities.
 
 ## Decision
 
@@ -19,3 +22,4 @@ P10-P19 added runtime guardrails for Brain Hub alignment, route receipts, candid
 - Keep candidate-count regression as an explicit command assertion.
 - Use targeted tests before Flash so same-model A/B is not asked to discover deterministic contract breaks.
 - Require Flash public reports to state model lock and hidden-verifier status from `evidence_bundle.json`, not only markdown prose.
+- Keep rejected-only claim uncertainty as a diagnostic path, not a public-safe capability receipt.

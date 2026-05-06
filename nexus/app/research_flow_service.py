@@ -1978,6 +1978,7 @@ def _augment_semantic_runtime_capabilities(
         latency_ms = float(external_meta.get("latency_ms", 0.0) or 0.0)
         cache_age_sec = float(external_meta.get("cache_age_sec", 0.0) or 0.0)
         cache_status = str(external_meta.get("cache_status") or "disabled")
+        verified_external = bool(refs and verified_source_count > 0)
         if refs or verified or rejected:
             report = {
                 "schema": "nexus_external_doc_scout_receipt_v1",
@@ -1994,25 +1995,29 @@ def _augment_semantic_runtime_capabilities(
                 "latency_ms": latency_ms,
                 "cache_age_sec": cache_age_sec,
             }
-            capabilities["external_doc_scout_used"] = True
-            capabilities["external_doc_refs"] = list(dict.fromkeys(refs))
-            capabilities["verified_claims"] = verified
-            capabilities["rejected_claims"] = rejected
-            capabilities["external_doc_scout_providers_used"] = providers_used
-            capabilities["external_doc_scout_provider_errors"] = provider_errors
-            capabilities["external_doc_scout_cache_status"] = cache_status
-            capabilities["external_doc_scout_verified_source_count"] = verified_source_count
-            capabilities["external_doc_scout_source_count"] = source_count
-            capabilities["external_doc_scout_error_count"] = error_count
-            capabilities["external_doc_scout_latency_ms"] = latency_ms
-            capabilities["external_doc_scout_cache_age_sec"] = cache_age_sec
-            capabilities["external_doc_scout_report_path"] = _write_runtime_receipt_json(
+            report_path = _write_runtime_receipt_json(
                 repo_root,
                 category="external_doc_scout",
                 receipt_slug=receipt_slug,
                 payload=report,
             )
-            capabilities["external_doc_scout_gate_passed"] = bool(artifact_verified)
+            capabilities["external_doc_scout_diagnostic_path"] = report_path
+            capabilities["external_doc_scout_diagnostic_rejected_claims"] = rejected
+            if verified_external:
+                capabilities["external_doc_scout_used"] = True
+                capabilities["external_doc_refs"] = list(dict.fromkeys(refs))
+                capabilities["verified_claims"] = verified
+                capabilities["rejected_claims"] = rejected
+                capabilities["external_doc_scout_providers_used"] = providers_used
+                capabilities["external_doc_scout_provider_errors"] = provider_errors
+                capabilities["external_doc_scout_cache_status"] = cache_status
+                capabilities["external_doc_scout_verified_source_count"] = verified_source_count
+                capabilities["external_doc_scout_source_count"] = source_count
+                capabilities["external_doc_scout_error_count"] = error_count
+                capabilities["external_doc_scout_latency_ms"] = latency_ms
+                capabilities["external_doc_scout_cache_age_sec"] = cache_age_sec
+                capabilities["external_doc_scout_report_path"] = report_path
+                capabilities["external_doc_scout_gate_passed"] = bool(artifact_verified and verified_external)
 
     if "formal_report" in selected_capabilities:
         service = FormalReportService()

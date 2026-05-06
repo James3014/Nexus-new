@@ -229,6 +229,25 @@ def test_external_doc_scout_gate_requires_verified_source_count():
     assert receipts["external_doc_scout"].failure_reason == "evidence_without_gate_pass"
 
 
+def test_external_doc_scout_rejected_only_payload_is_not_invoked_evidence():
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["external_doc_scout"]},
+            capabilities={
+                "claim_verified": True,
+                "rejected_claims": ["unverified_api_contract"],
+                "external_doc_scout_cache_status": "disabled",
+                "external_doc_scout_error_count": 0,
+            },
+        )
+    }
+
+    assert receipts["external_doc_scout"].invoked is False
+    assert receipts["external_doc_scout"].evidence_present is False
+    assert receipts["external_doc_scout"].failure_reason == "selected_without_invocation"
+
+
 def test_legacy_llm_judge_panel_selected_capability_canonicalizes_to_judge_panel():
     receipts = {
         item.name: item

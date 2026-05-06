@@ -223,6 +223,11 @@ def _annotate_benchmark_eligibility(
         token_unreliable_reason = "estimated_tokens" if token_status == "estimated" else "unknown_token_capture"
     elif token_status == "not_applicable_local_only" and model_calls > 0:
         token_unreliable_reason = "local_only_rescue_not_model_comparable"
+    elif (
+        str(row.get("gateway_token_source") or "") == "stats"
+        and total_tokens > max(200000, int(row.get("gateway_total_chars", 0) or 0) * 40)
+    ):
+        token_unreliable_reason = "stats_outlier_possible_cumulative"
     row["token_reliable"] = token_unreliable_reason is None
     row["token_unreliable_reason"] = token_unreliable_reason
     winner_source = str(row.get("nexus_winner_source") or "")
@@ -3755,6 +3760,10 @@ def _benchmark_gateway_timeout_sec(default_sec: int = 30) -> str:
 
 def _benchmark_gateway_timeout_for_task(timeout_sec: int) -> int:
     # Give Gemini enough room to answer while preserving subprocess budget for Nexus verification.
+    flash_model = "flash" in _report_model_label().lower()
+    long_gateway = os.environ.get("NEXUS_BENCH_LONG_GATEWAY", "").strip().lower() in {"1", "true", "yes"}
+    if flash_model and not long_gateway:
+        return min(120, max(30, int(timeout_sec) - 30))
     return min(220, max(30, int(timeout_sec) - 30))
 
 

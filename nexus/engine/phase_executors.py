@@ -42,6 +42,26 @@ class HandlerPhaseExecutor:
         return PhaseResult(status=status, mutations=mutations, events=[])
 
 
+@dataclass
+class PipelineMethodPhaseExecutor:
+    """Composition seam for rich pipeline methods that are not safe to replace yet."""
+
+    name: str
+    priority: int
+    method_name: str
+
+    def should_run(self, ctx: Any) -> bool:
+        return self.name not in set(ctx.kwargs.get("skip_phases", [])) if hasattr(ctx, "kwargs") else True
+
+    def execute(self, pipeline: Any, ctx: Any) -> PhaseResult:
+        method = getattr(pipeline, self.method_name)
+        success = bool(getattr(ctx, "state").metadata.get("pipeline_success", False))
+        method(ctx, success, getattr(ctx, "tracer", None))
+        mutations = {"status": "COMPLETED", "pipeline_success": success}
+        ctx.pack["crystallize"] = mutations
+        return PhaseResult(status="success", mutations=mutations, events=[])
+
+
 def _bind_plan(ctx: Any, mutations: dict[str, Any]) -> None:
     ctx.prediction = mutations
     ctx.pack["prediction"] = mutations
@@ -93,3 +113,7 @@ def build_audit_executor(project_root: Any, run_dir: Any) -> PhaseExecutor:
     from nexus.engine.phases.audit import AuditPhaseHandler
 
     return HandlerPhaseExecutor(AuditPhaseHandler(project_root, run_dir, name="A", priority=40))
+
+
+def build_crystallize_executor(project_root: Any, run_dir: Any) -> PhaseExecutor:
+    return PipelineMethodPhaseExecutor(name="C", priority=50, method_name="_stage_crystallize")

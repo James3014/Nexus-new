@@ -20,7 +20,7 @@ class _Span:
 class FakeExecutor:
     def __init__(self, name: str, mutations: dict):
         self.name = name
-        self.priority = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40}[name]
+        self.priority = {"P": 10, "X": 20, "D": 25, "R": 30, "A": 40, "C": 50}[name]
         self.mutations = mutations
         self.calls = 0
 
@@ -36,6 +36,8 @@ class FakeExecutor:
             ctx.research_pack = self.mutations
         elif self.name == "D":
             ctx.pack = self.mutations
+        elif self.name == "C":
+            ctx.pack["crystallize"] = self.mutations
         return PhaseResult(status="success", mutations=self.mutations, events=[])
 
 
@@ -91,6 +93,38 @@ def test_pipeline_registers_audit_phase_executor(tmp_path):
     pipeline = NexusPipeline(_engine(tmp_path, executors))
 
     assert "A" in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
+
+
+def test_pipeline_registers_crystallize_phase_executor(tmp_path):
+    executors = {
+        "P": FakeExecutor("P", {"plan": "ok"}),
+        "X": FakeExecutor("X", {"findings": ["ok"]}),
+        "D": FakeExecutor("D", {"diagnosis": "ok"}),
+        "C": FakeExecutor("C", {"status": "COMPLETED"}),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+
+    assert "C" in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
+
+
+def test_pipeline_runs_composed_c_phase_instead_of_direct_crystallize(tmp_path, monkeypatch):
+    executors = {
+        "P": FakeExecutor("P", {"plan": "ok"}),
+        "X": FakeExecutor("X", {"findings": ["ok"]}),
+        "D": FakeExecutor("D", {"diagnosis": "ok"}),
+        "C": FakeExecutor("C", {"status": "COMPLETED"}),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    monkeypatch.setattr(pipeline, "_repair_audit_loop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        pipeline,
+        "_stage_crystallize",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("direct C stage should not run when composed C exists")),
+    )
+    monkeypatch.setattr(pipeline, "_finalize_and_report", lambda _ctx, success, _tracer: success)
+
+    assert pipeline.run("repair vague runtime behavior", task_id="composition-c") is True
+    assert executors["C"].calls == 1
 
 
 def test_repair_audit_loop_runs_composed_r_phase_when_registered(tmp_path, monkeypatch):
