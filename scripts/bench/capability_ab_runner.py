@@ -1442,12 +1442,26 @@ def _task_uses_materialized_fixture(task: CapabilityTask, *, materialize_missing
 
 def _nexus_task_desc(task: CapabilityTask) -> str:
     desc = task.task_desc
+    expected = set(normalize_capability_names(task.expected_capabilities))
     desc += (
         "\n\nNexus wearing contract:"
         "\n- MemPalace: keep the solution inside the task scope and enforce explicit governance constraints."
         "\n- Belief: when evidence is incomplete or confidence is low, prefer a conservative fix backed by tests."
         "\n- Artifact/Claim: treat completion claims as valid only when backed by concrete artifacts or passing checks."
     )
+    if task.capability_activation_contract == "required" and expected:
+        desc += (
+            "\n\nNexus route oracle contract:"
+            f"\n- Expected capability receipts: {', '.join(sorted(expected))}."
+            "\n- If the matching executor flag is available, the route must select and invoke the expected capability."
+        )
+    if "autoreason" in expected or "ddtree" in expected:
+        desc += (
+            "\n- Candidate factory is READY with three candidate branches; preserve A/B/AB tournament evidence."
+            "\n- Do not treat the task as single-candidate repair."
+        )
+    if "ddtree" in expected:
+        desc += "\n- DDTree must prune candidate branches and emit saved-step evidence."
     if task.fixture_kind in {"rlm_harder_v2_governance_guard", "rlm_harder_v2_governance_scope"}:
         desc += (
             "\n\nNexus MemPalace rule: do not silently widen the allowed scope. "
@@ -2871,6 +2885,8 @@ def run_with_nexus(
         str(history_window),
         "--history-fail-threshold",
         str(history_fail_threshold),
+        "--candidate-count",
+        str(max(1, int(llm_candidate_cap))),
         "--timeout-sec",
         str(timeout_sec),
         "--output-json",

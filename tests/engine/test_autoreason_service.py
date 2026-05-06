@@ -89,10 +89,28 @@ def test_autoreason_candidate_factory_from_summaries_emits_a_b_ab_contract():
     assert factory["schema"] == "nexus_autoreason_candidate_factory_v1"
     assert factory["status"] == "READY"
     assert factory["candidate_roles"] == {"A": "A", "B": "B", "AB": "AB"}
+    assert factory["regression_guard"]["strategy"] == "blind_borda_a_b_ab"
 
     out = svc.run(candidates=factory["candidates"], task_desc="fix edge case", judge_count=7)
 
     assert out["winner"] == "AB"
+
+
+def test_autoreason_candidate_factory_carries_critiques_into_ab_defense():
+    svc = AutoreasonService()
+    factory = svc.candidate_factory_from_summaries(
+        [
+            {"candidate_id": "baseline", "hint": "stable but incomplete", "score": 0.4, "stdout_excerpt": "old tests pass"},
+            {"candidate_id": "patch", "hint": "fixes edge case with tests", "score": 0.8, "stdout_excerpt": "new tests pass"},
+        ],
+        task_desc="fix edge case",
+        critique_context={"patch": ["risk:missing_boundary_assertion"]},
+    )
+
+    candidates = {item["candidate_id"]: item for item in factory["candidates"]}
+
+    assert candidates["B"]["critiques"] == ["risk:missing_boundary_assertion"]
+    assert candidates["AB"]["defenses"] == ["risk:missing_boundary_assertion"]
 
 
 def test_autoreason_semantic_judge_can_beat_evidence_count_heuristic():
@@ -161,3 +179,27 @@ def test_autoreason_deterministic_judge_prefers_quality_over_evidence_count():
     assert out["winner"] == "targeted"
     assert out["judge_mode"] == "deterministic_evidence_quality"
     assert all(vote["ranking"][0] == "targeted" for vote in out["judge_votes"])
+
+
+def test_autoreason_discriminator_excludes_fatal_candidate():
+    out = AutoreasonService().run(
+        [
+            {
+                "candidate_id": "unsafe",
+                "summary": "fix timeout race by disabling test and ignoring failure",
+                "score": 0.99,
+                "evidence_refs": ["many logs"],
+            },
+            {
+                "candidate_id": "safe",
+                "summary": "fix timeout race with regression test",
+                "score": 0.55,
+                "evidence_refs": ["pytest tests/test_timeout.py::test_race passed"],
+            },
+        ],
+        task_desc="fix timeout race without regression",
+    )
+
+    assert out["winner"] == "safe"
+    assert out["adversarial_critique"]["unsafe"]["fatal"] is True
+    assert out["judge_votes"][0]["rubric"]["unsafe"]["discriminator_penalty"] == 1.0

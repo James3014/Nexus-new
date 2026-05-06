@@ -64,3 +64,11 @@ The safety telemetry diagnosis calls out unsigned `HealingArtifact` packets as a
 Decision: `HealingArtifact` now carries optional `signature` and `signature_key_id` fields. The core healing artifact module provides deterministic HMAC-SHA256 signing and verification over a canonical JSON body that excludes signature fields.
 
 Prevention: tests cover valid signature verification and tamper rejection, so Flash is not the first place where cross-node healing evidence trust is exercised.
+
+## P1090 Lesson: Discriminators Need Variant Coverage
+
+The first adversarial Autoreason test expected a candidate that proposed "disabling test" to be marked fatal, but the initial hard-token list only matched "disable test". That let a validation-bypass phrase slip through the discriminator even though the intent was fail-closed.
+
+Decision: the deterministic discriminator now covers variant wording for validation bypasses and reports fatal candidates through `adversarial_critique` with a full `discriminator_penalty`.
+
+Prevention: Autoreason tests now include a high-score unsafe candidate that tries to disable tests and ignore failures; it must lose to a lower-score candidate with regression evidence.

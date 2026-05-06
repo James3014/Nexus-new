@@ -24,6 +24,36 @@ def _stop_threshold(route: dict[str, Any]) -> int:
         return 2
 
 
+def _list_values(payload: dict[str, Any], key: str) -> set[str]:
+    values = payload.get(key, []) if isinstance(payload, dict) else []
+    if not isinstance(values, list):
+        return set()
+    return {str(item) for item in values}
+
+
+def _autoreason_route_enabled(route: dict[str, Any]) -> bool:
+    """Fail closed unless the planner explicitly selected autoreason."""
+    if not isinstance(route, dict):
+        return False
+    route_decision = route.get("route_decision", {})
+    if isinstance(route_decision, dict):
+        controls = route_decision.get("executor_controls", {})
+        if isinstance(controls, dict) and controls.get("enable_autoreason_executor") is True:
+            return True
+        if "autoreason" in _list_values(route_decision, "selected_capabilities"):
+            return True
+    capability_plan = route.get("capability_plan", {})
+    if isinstance(capability_plan, dict):
+        selected = _list_values(capability_plan, "selected_capabilities")
+        pending = _list_values(capability_plan, "pending_capabilities")
+        if "autoreason" in selected and "autoreason" not in pending:
+            return True
+    capability_stack = route.get("capability_stack", {})
+    if "autoreason" in _list_values(capability_stack, "selected_capabilities"):
+        return True
+    return False
+
+
 def skipped_autoreason_payload(*, stop_reason: str, candidate_factory: dict[str, Any] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema": "nexus_autoreason_result_v1",
@@ -58,6 +88,8 @@ def build_autoreason_payload(
     should_run = str(result.get("flow", "")) == "hyper_sprint" and isinstance(summaries, list) and bool(summaries)
     if not should_run:
         return existing or skipped_autoreason_payload(stop_reason="candidate_summaries_missing")
+    if not _autoreason_route_enabled(route):
+        return existing or skipped_autoreason_payload(stop_reason="route_autoreason_disabled")
 
     autoreason_service = service or AutoreasonService(judge_providers=build_judge_providers_from_env())
     factory_payload = autoreason_service.candidate_factory_from_summaries(summaries, task_desc=task_desc)

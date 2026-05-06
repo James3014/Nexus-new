@@ -13,7 +13,7 @@ def test_build_autoreason_payload_runs_candidate_factory_tournament():
             ]
         },
         hyper_learning_trace={},
-        route={"capability_stack": {"stop_policy": {"threshold": 2}}},
+        route={"capability_stack": {"selected_capabilities": ["hyper_sprint", "autoreason"], "stop_policy": {"threshold": 2}}},
         task_desc="Fix flaky websocket timeout race",
     )
 
@@ -37,7 +37,7 @@ def test_build_autoreason_payload_uses_opt_in_semantic_provider(monkeypatch):
             ]
         },
         hyper_learning_trace={},
-        route={},
+        route={"route_decision": {"executor_controls": {"enable_autoreason_executor": True}}},
         task_desc="Fix flaky websocket timeout race",
     )
 
@@ -64,7 +64,7 @@ def test_build_autoreason_payload_skips_when_factory_has_single_candidate():
         result={"flow": "hyper_sprint"},
         result_report={"candidate_summaries": [{"candidate_id": "one", "hint": "only candidate", "score": 0.4}]},
         hyper_learning_trace={},
-        route={},
+        route={"capability_plan": {"selected_capabilities": ["autoreason"]}},
         task_desc="Fix simple bug",
     )
 
@@ -85,3 +85,22 @@ def test_build_autoreason_payload_preserves_existing_trace_when_not_rerunnable()
     )
 
     assert payload == existing
+
+
+def test_build_autoreason_payload_skips_when_route_did_not_select_autoreason():
+    payload = build_autoreason_payload(
+        result={"flow": "hyper_sprint"},
+        result_report={
+            "candidate_summaries": [
+                {"candidate_id": "one", "hint": "baseline keeps race", "stdout_excerpt": "pytest failed", "score": 0.2},
+                {"candidate_id": "two", "hint": "fixes timeout race", "stdout_excerpt": "pytest passed", "score": 0.9},
+            ]
+        },
+        hyper_learning_trace={},
+        route={"capability_stack": {"selected_capabilities": ["hyper_sprint"]}},
+        task_desc="Fix flaky websocket timeout race",
+    )
+
+    assert payload["status"] == "SKIPPED"
+    assert payload["enabled"] is False
+    assert payload["stop_reason"] == "route_autoreason_disabled"

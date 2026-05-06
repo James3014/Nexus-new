@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 
@@ -10,6 +10,9 @@ class AutoreasonCandidate:
     summary: str
     evidence_refs: list[str]
     score: float = 0.0
+    critiques: list[str] = field(default_factory=list)
+    defenses: list[str] = field(default_factory=list)
+    fatal: bool = False
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any], index: int) -> "AutoreasonCandidate":
@@ -18,6 +21,9 @@ class AutoreasonCandidate:
             summary=str(payload.get("summary") or payload.get("hint") or payload.get("body") or ""),
             evidence_refs=[str(item) for item in payload.get("evidence_refs", []) or []],
             score=float(payload.get("score", 0.0) or 0.0),
+            critiques=[str(item) for item in payload.get("critiques", []) or []],
+            defenses=[str(item) for item in payload.get("defenses", []) or []],
+            fatal=bool(payload.get("fatal", False)),
         )
 
 
@@ -68,6 +74,7 @@ class AutoreasonService:
         summaries: list[dict[str, Any]] | None,
         *,
         task_desc: str = "",
+        critique_context: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         """Build an auditable A/B/AB tournament from sprint candidate summaries."""
         candidates = [
@@ -88,13 +95,17 @@ class AutoreasonService:
         def _candidate_payload(item: dict[str, Any], role: str, index: int) -> dict[str, Any]:
             refs = [str(item.get("stdout_excerpt") or "").strip()]
             refs = [ref for ref in refs if ref]
+            source_id = str(item.get("candidate_id") or f"candidate-{index + 1}")
+            critiques = list((critique_context or {}).get(source_id, [])) + list((critique_context or {}).get(role, []))
             return {
                 "candidate_id": role,
-                "source_candidate_id": str(item.get("candidate_id") or f"candidate-{index + 1}"),
+                "source_candidate_id": source_id,
                 "summary": str(item.get("hint") or item.get("source") or ""),
                 "evidence_refs": refs,
                 "score": float(item.get("score", 0.0) or 0.0),
                 "role": role,
+                "critiques": critiques,
+                "defenses": [],
             }
 
         ranked = sorted(
@@ -120,6 +131,8 @@ class AutoreasonService:
             "evidence_refs": list(dict.fromkeys([*incumbent["evidence_refs"], *revision["evidence_refs"], "factory:ab_synthesis"])),
             "score": max(float(incumbent["score"]), float(revision["score"])) + 0.05,
             "role": "AB",
+            "critiques": [],
+            "defenses": list(dict.fromkeys([*incumbent.get("critiques", []), *revision.get("critiques", [])])),
         }
         out = self.candidate_factory(incumbent=incumbent, revision=revision, synthesis=synthesis)
         return {
@@ -175,6 +188,7 @@ class AutoreasonService:
             judge_count=self.config.judge_count if judge_count is None else judge_count,
             a_streak_threshold=stop_threshold,
         )
+        parsed = self.run_adversarial_critique(candidates=parsed, task_desc=task_desc)
         judge_votes = self._semantic_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
         judge_mode = "semantic" if judge_votes else ("heuristic_fallback" if self.judge_providers else "deterministic_evidence_quality")
         if not judge_votes:
@@ -199,7 +213,75 @@ class AutoreasonService:
             "borda_scores": borda_scores,
             "stop_reason": stop_reason,
             "winner_role": winner.candidate_id if winner.candidate_id in {"A", "B", "AB"} else "legacy",
+            "adversarial_critique": {
+                candidate.candidate_id: {
+                    "fatal": candidate.fatal,
+                    "critiques": candidate.critiques,
+                    "defenses": candidate.defenses,
+                }
+                for candidate in parsed
+                if candidate.fatal or candidate.critiques or candidate.defenses
+            },
         }
+
+    def run_adversarial_critique(
+        self,
+        *,
+        candidates: list[AutoreasonCandidate],
+        task_desc: str,
+    ) -> list[AutoreasonCandidate]:
+        """Apply a deterministic discriminator before Borda voting.
+
+        This is intentionally hard-logic rather than another LLM call: fatal
+        safety/regression smells must be fail-closed and testable.
+        """
+        out: list[AutoreasonCandidate] = []
+        task_text = task_desc.lower()
+        hard_task = any(
+            token in task_text
+            for token in (
+                "race",
+                "timeout",
+                "deadlock",
+                "memory leak",
+                "breaking",
+                "regression",
+                "security",
+                "preserve",
+                "migration",
+            )
+        )
+        fatal_tokens = (
+            "skip test",
+            "disable test",
+            "disabling test",
+            "delete assertion",
+            "remove assertion",
+            "bypass validation",
+            "ignore failure",
+            "turn off",
+        )
+        for candidate in candidates:
+            text = f"{candidate.summary} {' '.join(candidate.evidence_refs)}".lower()
+            critiques = list(candidate.critiques)
+            fatal = bool(candidate.fatal)
+            if any(token in text for token in fatal_tokens):
+                fatal = True
+                critiques.append("fatal:removes_or_bypasses_validation")
+            if hard_task and "test" not in text and "pytest" not in text and "assert" not in text:
+                critiques.append("risk:hard_task_without_regression_evidence")
+            out.append(
+                AutoreasonCandidate(
+                    candidate_id=candidate.candidate_id,
+                    summary=candidate.summary,
+                    evidence_refs=candidate.evidence_refs,
+                    score=candidate.score,
+                    critiques=list(dict.fromkeys(critiques)),
+                    defenses=list(dict.fromkeys(candidate.defenses)),
+                    fatal=fatal,
+                )
+            )
+        return out
 
     def _build_judge_panel(self, judge_count: int) -> list[str]:
         strategies = [
@@ -244,6 +326,17 @@ class AutoreasonService:
         return votes
 
     def _quality_score(self, candidate: AutoreasonCandidate, *, task_desc: str, weights: dict[str, float]) -> dict[str, Any]:
+        if candidate.fatal:
+            return {
+                "total": 0.0,
+                "tests": 0.0,
+                "semantic_fit": 0.0,
+                "regression": 0.0,
+                "minimality": 0.0,
+                "base_score": round(max(0.0, min(1.0, float(candidate.score or 0.0))), 4),
+                "discriminator_penalty": 1.0,
+                "fatal": True,
+            }
         text = f"{candidate.summary} {' '.join(candidate.evidence_refs)}".lower()
         task_tokens = {
             token
@@ -257,12 +350,15 @@ class AutoreasonService:
         generic_noise = self._signal_score(text, positive=("generic", "log", "maybe", "guess", "unclear"))
         minimality = max(0.0, 1.0 - min(1.0, max(0, len(candidate.summary) - 180) / 600.0) - generic_noise * 0.15)
         base_score = max(0.0, min(1.0, float(candidate.score or 0.0)))
-        total = (
+        critique_penalty = min(0.35, max(0, len(candidate.critiques) - len(candidate.defenses)) * 0.12)
+        total = max(
+            0.0,
             tests * weights["tests"]
             + semantic_fit * weights["semantic_fit"]
             + regression * weights["regression"]
             + minimality * weights["minimality"]
             + base_score * weights["score"]
+            - critique_penalty
         )
         return {
             "total": round(total, 4),
@@ -271,6 +367,8 @@ class AutoreasonService:
             "regression": round(regression, 4),
             "minimality": round(minimality, 4),
             "base_score": round(base_score, 4),
+            "discriminator_penalty": round(critique_penalty, 4),
+            "fatal": False,
         }
 
     def _signal_score(self, text: str, *, positive: tuple[str, ...]) -> float:
