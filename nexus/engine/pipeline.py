@@ -139,8 +139,6 @@ class NexusPipeline(
 
         class _LegacyPhaseAdapter(PhasePlugin):
             METHOD_MAP = {
-                "P": "_stage_plan",
-                "X": "_stage_research",
                 "C": "_stage_crystallize",
             }
 
@@ -196,11 +194,10 @@ class NexusPipeline(
         if self.registry.get_ordered_plugins():
             return
 
-        # Keep only phases that still have an accepted legacy fallback. Diagnose is
-        # intentionally composition-only so executor bootstrap failures do not
-        # silently re-enable the old mixin path.
-        core_phases = ["P", "X"]
-        composition_only_phases = {"D"}
+        # Core task phases are composition-only. Executor bootstrap failures must
+        # remain visible instead of silently falling back to mixin methods.
+        core_phases: list[str] = []
+        composition_only_phases = {"P", "X", "D"}
         for name in core_phases:
             p_handler = self.engine.phases.get(name)
             if p_handler:

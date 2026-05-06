@@ -186,3 +186,25 @@ def test_learning_scorer_accepts_injected_governance_evaluator():
     assert FakeGovernanceEvaluator.calls == 1
     assert state.metadata["learning_action"] == "fake_continue"
     assert state.metadata["pattern_reuse_rate"] > 0.0
+
+
+def test_learning_governance_records_event_emit_failure(monkeypatch):
+    from nexus.core.learning_governance import LearningGovernance
+
+    def fail_emit(**_kwargs):
+        raise RuntimeError("event bus unavailable")
+
+    monkeypatch.setattr(
+        "nexus.core.learning_governance.NexusEventBus.emit_learning_decision",
+        fail_emit,
+    )
+    state = NexusState(task_id="learn-event-failure")
+    state.steps_history = [_step("P"), _step("D"), _step("R")]
+    state.metadata["pipeline_success"] = False
+
+    evidence = LearningEvidenceBuilder.build(state)
+    decision = LearningGovernance.evaluate(state, evidence)
+
+    assert isinstance(decision.freeze_learning, bool)
+    assert state.metadata["learning_decision_event_emitted"] is False
+    assert state.metadata["learning_decision_event_error"] == "event bus unavailable"

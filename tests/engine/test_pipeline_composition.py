@@ -126,14 +126,15 @@ def test_pipeline_default_bootstrap_uses_diagnose_executor_not_stage_mixin(tmp_p
     assert built["D"].calls == 1
 
 
-def test_pipeline_does_not_register_legacy_diagnose_fallback_when_executor_bootstrap_fails(tmp_path, monkeypatch):
+def test_pipeline_does_not_register_legacy_core_fallbacks_when_executor_bootstrap_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(NexusPipeline, "_build_default_phase_executors", lambda _self: {})
     engine = _engine(tmp_path, {})
     engine.phase_executors = None
 
     pipeline = NexusPipeline(engine)
 
-    assert "D" not in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
+    registered = {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
+    assert not ({"P", "X", "D"} & registered)
 
 
 def test_pipeline_emits_typed_phase_transition_events(tmp_path, monkeypatch):

@@ -46,8 +46,10 @@ class LearningGovernance:
                 action=decision.action,
                 reasons=decision.reasons,
             )
-        except Exception:
-            pass
+            state.metadata["learning_decision_event_emitted"] = True
+        except Exception as exc:
+            state.metadata["learning_decision_event_emitted"] = False
+            state.metadata["learning_decision_event_error"] = str(exc)
         return LearningDecision(
             freeze_learning=decision.freeze_learning,
             curiosity_score=decision.curiosity_score,
