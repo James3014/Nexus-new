@@ -64,3 +64,32 @@ def test_openseeker_trace_records_belief_confidence_without_reasoning_text():
     assert trace["belief_confidence_source"] == "route_decision.signal_snapshot.confidence"
     assert trace["belief_low_confidence"] is True
     assert "reasoning" not in trace
+
+
+def test_openseeker_trace_counts_route_tactical_tool_map():
+    trace = build_openseeker_trace(
+        usage_trace={
+            "route_decision": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "stop_policy": {
+                    "tactical_sequence": ["hyper_sprint", "semantic_searcher", "autoreason", "belief"],
+                    "tactical_tool_map": [
+                        {"capability": "hyper_sprint", "evidence_required": False},
+                        {"capability": "semantic_searcher", "evidence_required": True},
+                        {"capability": "autoreason", "evidence_required": True},
+                        {"capability": "belief", "evidence_required": True},
+                    ],
+                },
+            },
+        },
+        capability_receipts=[
+            {"name": "semantic_searcher", "evidence_refs": ["semantic:route:r1"]},
+            {"name": "belief", "evidence_refs": ["belief:route:confidence:0.8"]},
+        ],
+    )
+
+    assert trace["route_tactical_sequence"] == ["hyper_sprint", "semantic_searcher", "autoreason", "belief"]
+    assert trace["tool_action_count"] == 4
+    assert trace["route_tactical_tool_count"] == 4
+    assert trace["route_evidence_required_count"] == 3
+    assert "tactical:semantic_searcher" in trace["action_sequence"]
