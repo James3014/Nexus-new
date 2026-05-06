@@ -10,7 +10,7 @@ from nexus.events.signal_queue_service import SignalQueueService
 
 logger = logging.getLogger(__name__)
 
-SEMANTIC_EVENT_TYPES = frozenset({"audit_failed", "learning_decision", "evidence_accepted"})
+SEMANTIC_EVENT_TYPES = frozenset({"audit_failed", "learning_decision", "evidence_accepted", "healing_artifact_announced"})
 RAW_EVENT_TYPES = frozenset(
     {
         "phase_start",
@@ -118,6 +118,25 @@ class NexusEventBus:
             "evidence_accepted",
             {"task_id": task_id, "evidence_id": evidence_id, "evidence_type": evidence_type},
         )
+
+    @classmethod
+    def emit_healing_artifact_announced(cls, *, artifact: Any, policy: Any) -> Dict[str, Any]:
+        """Publish portable healing advice only after signature/key policy passes."""
+        from nexus.core.healing_artifacts import artifact_to_packet, artifact_transport_receipt
+
+        receipt = artifact_transport_receipt(artifact, policy)
+        if not receipt.get("passed"):
+            return receipt
+        cls.publish(
+            "healing_artifact_announced",
+            {
+                "task_id": artifact.task_id,
+                "artifact_id": artifact.artifact_id,
+                "receipt": receipt,
+                "packet": artifact_to_packet(artifact),
+            },
+        )
+        return receipt
 
     @classmethod
     def inject_signal(cls, signal_type: str, payload: Dict[str, Any]) -> None:

@@ -45,6 +45,7 @@ def test_quick_payload_skips_flash_style_repair_subset():
         "hallucination_guard_drift",
         "brain_hub_audit",
         "event_contract_audit",
+        "codex_nexus_smoke_plan",
         "openseeker_autodata_smoke",
     }.issubset({item["name"] for item in payload["checks"]})
 
@@ -59,6 +60,7 @@ def test_quick_payload_includes_brain_hub_alignment_gate():
         "hallucination_guard_drift",
         "brain_hub_audit",
         "event_contract_audit",
+        "codex_nexus_smoke_plan",
         "openseeker_autodata_smoke",
     }.issubset(names)
 
@@ -67,7 +69,7 @@ def test_quick_payload_fails_when_event_contract_audit_fails(monkeypatch):
     monkeypatch.setattr(
         nexus_pre_flash_gate,
         "validate_event_contracts",
-        lambda _repo_root: [
+        lambda _repo_root, **_kwargs: [
             {
                 "name": "event_contract_audit",
                 "passed": False,
@@ -95,6 +97,28 @@ def test_event_contract_gate_can_fail_on_raw_strict_mode(monkeypatch, tmp_path: 
     assert checks[0]["passed"] is False
     assert checks[0]["reason"] == "raw_event_types_present"
     assert checks[0]["details"]["strict_raw_mode"] is True
+
+
+def test_event_contract_gate_accepts_explicit_strict_raw_argument(tmp_path: Path):
+    from nexus.events.transport import NexusEventBus
+
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.publish("phase_start", {"task_id": "task-1", "phase": "P"})
+
+    checks = nexus_pre_flash_gate.validate_event_contracts(tmp_path, strict_raw=True)
+
+    assert checks[0]["passed"] is False
+    assert checks[0]["reason"] == "raw_event_types_present"
+    assert checks[0]["details"]["strict_raw_mode"] is True
+
+
+def test_quick_payload_includes_codex_nexus_smoke_plan():
+    checks = nexus_pre_flash_gate.validate_codex_nexus_smoke_plan()
+
+    assert checks[0]["name"] == "codex_nexus_smoke_plan"
+    assert checks[0]["passed"] is True
+    assert checks[0]["details"]["same_model"] is True
+    assert checks[0]["details"]["preflight_only"] is True
 
 
 def test_quick_payload_fails_when_brain_hub_audit_fails(monkeypatch):

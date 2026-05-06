@@ -3,7 +3,9 @@ import time
 import json
 import pytest
 from unittest.mock import MagicMock, patch
+from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.event_bus import NexusEventBus
+from nexus.core.healing_artifacts import HealingArtifactKeyPolicy, sign_healing_artifact
 
 @pytest.fixture(autouse=True)
 def cleanup_bus():
@@ -99,6 +101,57 @@ def test_event_bus_typed_domain_emitters_preserve_publish_contract(tmp_path):
     assert "audit_failed" in content
     assert "learning_decision" in content
     assert "evidence_accepted" in content
+
+
+def test_event_bus_emits_healing_artifact_only_after_policy_passes(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    handler = MagicMock()
+    NexusEventBus.subscribe("healing_artifact_announced", handler)
+    signed = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="node-a",
+    )
+
+    receipt = NexusEventBus.emit_healing_artifact_announced(
+        artifact=signed,
+        policy=HealingArtifactKeyPolicy(allowed_key_ids=frozenset({"node-a"}), verification_keys={"node-a": "secret"}),
+    )
+
+    assert receipt["passed"] is True
+    handler.assert_called_once()
+    payload = handler.call_args[0][0]
+    assert payload["artifact_id"] == "heal-1"
+    assert payload["packet"]["production_writes_allowed"] is False
+
+
+def test_event_bus_does_not_emit_healing_artifact_when_policy_fails(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    handler = MagicMock()
+    NexusEventBus.subscribe("healing_artifact_announced", handler)
+    unsigned = HealingArtifact(
+        task_id="task-1",
+        artifact_id="heal-1",
+        artifact_type="repair_plan",
+        created_at="2026-05-05T00:00:00Z",
+        evidence_id="EV-1",
+        summary="Use scoped storage",
+    )
+
+    receipt = NexusEventBus.emit_healing_artifact_announced(
+        artifact=unsigned,
+        policy=HealingArtifactKeyPolicy(allowed_key_ids=frozenset({"node-a"}), verification_keys={"node-a": "secret"}),
+    )
+
+    assert receipt["passed"] is False
+    handler.assert_not_called()
 
 
 def test_event_bus_audits_raw_and_semantic_transition_events(tmp_path):

@@ -44,6 +44,15 @@ class ShadowIsolationDecision:
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True)
+class EvolutionMutationDecision:
+    allowed: bool
+    tier: EvolutionTier
+    forgetting: ForgettingDecision
+    warning: L3HardBlockWarning
+    reason_codes: tuple[str, ...]
+
+
 def decide_forgetting(
     tier: EvolutionTier | str,
     *,
@@ -99,6 +108,26 @@ def build_l3_hard_block_warning(
         voice_warning_required=high_tier,
         mtls_binding_required=high_tier,
         warning_message=f"{tier_value.value} mutation requires explicit operator approval and evidence binding.",
+    )
+
+
+def enforce_evolution_mutation(
+    tier: EvolutionTier | str,
+    *,
+    evidence_refs: list[str] | tuple[str, ...] = (),
+    explicit_approval: bool = False,
+    mtls_enabled: bool = False,
+) -> EvolutionMutationDecision:
+    """Single runtime guard for ontology mutations before execution starts."""
+    forgetting = decide_forgetting(tier, evidence_refs=evidence_refs, explicit_approval=explicit_approval)
+    warning = build_l3_hard_block_warning(tier, reason_codes=forgetting.reason_codes, mtls_enabled=mtls_enabled)
+    reasons = tuple(sorted(set((*forgetting.reason_codes, *warning.reason_codes))))
+    return EvolutionMutationDecision(
+        allowed=forgetting.allowed and warning.allowed,
+        tier=EvolutionTier(tier),
+        forgetting=forgetting,
+        warning=warning,
+        reason_codes=reasons,
     )
 
 

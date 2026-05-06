@@ -112,6 +112,21 @@ def artifact_to_packet(artifact: HealingArtifact) -> dict:
     }
 
 
+def artifact_transport_receipt(artifact: HealingArtifact, policy: HealingArtifactKeyPolicy) -> dict[str, Any]:
+    """Build a fail-closed receipt for remote healing transport."""
+    audit = audit_healing_artifact_key_policy(artifact, policy)
+    return {
+        "schema_version": "nexus_healing_artifact_transport_receipt.v1",
+        "artifact_id": artifact.artifact_id,
+        "task_id": artifact.task_id,
+        "event_type": "healing_artifact_announced",
+        "production_writes_allowed": False,
+        "policy_audit": audit,
+        "passed": bool(audit.get("passed")),
+        "failure_reasons": list(audit.get("failures", [])),
+    }
+
+
 def artifact_from_packet(packet: dict, *, verify_key: str | bytes | None = None) -> HealingArtifact:
     if packet.get("type") != "healing_artifact":
         raise ValueError("not a healing artifact packet")

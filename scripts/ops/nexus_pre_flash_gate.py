@@ -18,6 +18,9 @@ from nexus.app.research_flow_service import _runtime_receipt_plan_payload, build
 from nexus.engine.autodata_forge import DataForgeManifestRow, classify_trajectory_quality, write_data_forge_manifest
 from nexus.engine.openseeker_alignment import build_openseeker_trace
 from nexus.events.transport import NexusEventBus
+from scripts.ops.codex_nexus_ab_smoke import benchmark_env as codex_smoke_env
+from scripts.ops.codex_nexus_ab_smoke import build_command as codex_smoke_command
+from scripts.ops.codex_nexus_ab_smoke import validate_smoke_plan as validate_codex_smoke_plan
 from scripts.ops.brain_hub_audit import scan_brain_hub
 from scripts.ops.hallucination_guard_drift import audit_drift
 
@@ -182,9 +185,9 @@ def validate_brain_hub_alignment(repo_root: Path) -> list[dict[str, Any]]:
     return checks
 
 
-def validate_event_contracts(repo_root: Path) -> list[dict[str, Any]]:
+def validate_event_contracts(repo_root: Path, *, strict_raw: bool | None = None) -> list[dict[str, Any]]:
     NexusEventBus.configure(repo_root)
-    strict_raw = os.environ.get("NEXUS_EVENT_RAW_STRICT") == "1"
+    strict_raw = os.environ.get("NEXUS_EVENT_RAW_STRICT") == "1" if strict_raw is None else bool(strict_raw)
     audit = NexusEventBus.audit_event_contracts(fail_on_raw=strict_raw)
     if audit.get("passed"):
         return [
@@ -215,6 +218,24 @@ def validate_event_contracts(repo_root: Path) -> list[dict[str, Any]]:
             failure_reasons=failure_reasons,
         )
     ]
+
+
+def validate_codex_nexus_smoke_plan() -> list[dict[str, Any]]:
+    task_ids = (
+        "rlm-harder-v2-governance-001",
+        "rlm-harder-v2-evidence-001",
+        "rlm-harder-v2-belief-001",
+        "rlm-harder-v2-memory-001",
+    )
+    cmd = codex_smoke_command(
+        output_dir=".nexus/reports/bench_codex55_nexus_local_smoke",
+        task_ids=task_ids,
+        preflight_only=True,
+    )
+    payload = validate_codex_smoke_plan(cmd=cmd, env=codex_smoke_env("gpt-5.5"), task_ids=task_ids)
+    if payload.get("passed"):
+        return [_ok("codex_nexus_smoke_plan", **payload)]
+    return [_fail("codex_nexus_smoke_plan", "codex_nexus_smoke_plan_invalid", **payload)]
 
 
 def validate_openseeker_autodata_smoke(repo_root: Path) -> list[dict[str, Any]]:
@@ -445,12 +466,20 @@ def run_repair_subset(repo_root: Path, output_dir: str, *, timeout_sec: float = 
         )
 
 
-def build_payload(repo_root: Path, *, run_repair: bool, output_dir: str, repair_timeout_sec: float = 1200.0) -> dict[str, Any]:
+def build_payload(
+    repo_root: Path,
+    *,
+    run_repair: bool,
+    output_dir: str,
+    repair_timeout_sec: float = 1200.0,
+    strict_event_contracts: bool | None = None,
+) -> dict[str, Any]:
     checks = [
         *validate_repair_factory_skipped_routes(repo_root),
         *validate_runtime_receipt_reconcile(),
         *validate_brain_hub_alignment(repo_root),
-        *validate_event_contracts(repo_root),
+        *validate_event_contracts(repo_root, strict_raw=strict_event_contracts),
+        *validate_codex_nexus_smoke_plan(),
         *validate_openseeker_autodata_smoke(repo_root),
     ]
     if run_repair:
@@ -469,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--quick", action="store_true", help="Run deterministic local route/receipt checks only.")
     parser.add_argument("--run-repair-subset", action="store_true", help="Run two-task Flash-style Nexus-only repair subset.")
+    parser.add_argument("--strict-event-contracts", action="store_true", help="Fail the gate when legacy raw transition events are present.")
     parser.add_argument("--output-dir", default=".nexus/reports/bench_flash_repair_pruning_prefash")
     parser.add_argument("--repair-timeout-sec", type=float, default=1200.0)
     args = parser.parse_args(argv)
@@ -479,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
         run_repair=run_repair,
         output_dir=args.output_dir,
         repair_timeout_sec=args.repair_timeout_sec,
+        strict_event_contracts=True if args.strict_event_contracts else None,
     )
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0 if payload["passed"] else 1

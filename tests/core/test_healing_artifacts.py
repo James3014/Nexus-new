@@ -2,6 +2,7 @@ from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.healing_artifacts import (
     HealingArtifactKeyPolicy,
     audit_healing_artifact_key_policy,
+    artifact_transport_receipt,
     artifact_from_packet,
     artifact_to_packet,
     healing_artifact_report_entry,
@@ -218,3 +219,21 @@ def test_healing_artifact_key_policy_fails_closed_for_unknown_or_unsigned_artifa
     assert audit["passed"] is False
     assert "missing_signature" in audit["failures"]
     assert "signature_key_id_not_allowed" in audit["failures"]
+
+
+def test_healing_artifact_transport_receipt_is_fail_closed():
+    unsigned = HealingArtifact(
+        task_id="task-1",
+        artifact_id="heal-1",
+        artifact_type="repair_plan",
+        created_at="2026-05-05T00:00:00Z",
+        evidence_id="EV-1",
+        summary="Use scoped storage",
+    )
+
+    receipt = artifact_transport_receipt(unsigned, HealingArtifactKeyPolicy(allowed_key_ids=frozenset({"node-a"})))
+
+    assert receipt["passed"] is False
+    assert receipt["production_writes_allowed"] is False
+    assert receipt["event_type"] == "healing_artifact_announced"
+    assert "missing_signature" in receipt["failure_reasons"]

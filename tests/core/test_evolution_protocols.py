@@ -6,6 +6,7 @@ from nexus.core.evolution_protocols import (
     build_l3_hard_block_warning,
     build_quiet_moment_event,
     decide_forgetting,
+    enforce_evolution_mutation,
     evaluate_shadow_promotion,
 )
 
@@ -47,6 +48,20 @@ def test_l3_hard_block_warning_requires_voice_and_mtls_binding():
     assert "missing_explicit_approval" in warning.reason_codes
 
 
+def test_evolution_mutation_guard_blocks_l3_without_mtls_even_with_evidence():
+    decision = enforce_evolution_mutation(
+        EvolutionTier.L3_SWARM,
+        evidence_refs=["EV-1"],
+        explicit_approval=True,
+        mtls_enabled=False,
+    )
+
+    assert decision.allowed is False
+    assert decision.forgetting.allowed is True
+    assert decision.warning.voice_warning_required is True
+    assert decision.reason_codes == ("missing_mtls_binding",)
+
+
 def test_shadow_isolation_blocks_production_write_targets(tmp_path):
     production = tmp_path / "production"
     shadow = tmp_path / "shadow"
@@ -63,6 +78,23 @@ def test_shadow_isolation_blocks_production_write_targets(tmp_path):
 
     assert decision.isolated is False
     assert decision.production_write_allowed is False
+    assert decision.reason_codes == ("shadow_target_inside_production_root",)
+
+
+def test_shadow_isolation_resolves_symlink_escape_to_production_root(tmp_path):
+    production = tmp_path / "production"
+    shadow = tmp_path / "shadow"
+    production.mkdir()
+    shadow.mkdir()
+    symlink = shadow / "prod-link"
+    symlink.symlink_to(production, target_is_directory=True)
+
+    decision = audit_shadow_isolation(
+        [{"target_path": str(symlink / "live.json")}],
+        production_roots=[str(production)],
+    )
+
+    assert decision.isolated is False
     assert decision.reason_codes == ("shadow_target_inside_production_root",)
 
 
