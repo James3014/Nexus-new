@@ -93,6 +93,8 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
                         "capability_plan_trace_present": True,
                         "capability_plan_node_count": 12,
                         "capability_plan_score": 24,
+                        "runtime_pruned_capabilities": {"autoreason": "candidate_factory_skipped"},
+                        "runtime_pruned_capability_count": 1,
                         "artifact_verification_only": True,
                         "rlm_trace_present": True,
                         "rlm_trace_quality_score": 80,
@@ -170,6 +172,8 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["b"]["summary"]["capability_plan_trace_present_rate"] == 0.5
     assert report["b"]["summary"]["avg_capability_plan_node_count"] == 6.0
     assert report["b"]["summary"]["avg_capability_plan_score"] == 12.0
+    assert report["b"]["summary"]["runtime_pruned_capability_rate"] == 0.5
+    assert report["b"]["summary"]["avg_runtime_pruned_capability_count"] == 0.5
     assert report["b"]["summary"]["patch_success_count"] == 1
     assert report["b"]["summary"]["patch_success_rate"] == 0.5
     assert report["b"]["summary"]["verification_only_rate"] == 0.5
@@ -196,6 +200,8 @@ def test_ab_eval_loads_jsonl_and_compares_semantic_solve_rate(tmp_path):
     assert report["delta"]["capability_plan_trace_present_rate_delta"] == 0.5
     assert report["delta"]["avg_capability_plan_node_count_delta"] == 6.0
     assert report["delta"]["avg_capability_plan_score_delta"] == 12.0
+    assert report["delta"]["runtime_pruned_capability_rate_delta"] == 0.5
+    assert report["delta"]["avg_runtime_pruned_capability_count_delta"] == 0.5
     assert report["delta"]["rlm_trace_present_rate_delta"] == 0.5
     assert report["b"]["summary"]["avg_rlm_trace_quality_score"] == 40.0
     assert report["delta"]["avg_rlm_trace_quality_score_delta"] == 40.0

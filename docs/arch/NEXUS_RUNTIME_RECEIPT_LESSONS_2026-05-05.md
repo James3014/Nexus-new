@@ -11,6 +11,8 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - `external_doc_scout` must not become public-safe from rejected claims alone. A runtime receipt needs at least one verified external source count, otherwise claim-scout selection can be mistaken for external fact verification.
 - Route/runtime tests may need explicit cache access because `uv` resolves through `/Users/jameschen/.cache/uv`. A sandbox denial is infrastructure noise, not a product regression, and should be retried with the approved `uv run pytest` path before changing code.
 - Flash 4x1 can show real solve uplift while still failing promotion if a planned semantic judge is not executable at runtime. Runtime receipts must prune and record selected capabilities that were skipped by candidate-factory readiness, otherwise public-safe gates mistake planner intent for a capability claim.
+- Runtime pruning must be reported as its own metric. Otherwise a PASS can hide planner/runtime mismatches and make route quality look clean without showing how much selection was removed after execution.
+- Targeted pytest node names must be confirmed with `rg` before relying on them as evidence. A wrong node id can exit before running the intended assertions and create false validation confidence.
 
 ## Applied Fixes
 - Added late plateau replan before execution.
@@ -20,6 +22,7 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Added provider/cache/source-count metadata to DocScout receipts and made the external DocScout gate require verified sources.
 - Made plateau hard-pivot testing distinguish runtime regressions from sandbox cache access failures.
 - Added runtime receipt plan pruning for unexecuted `judge_panel`/`llm_judge_panel` when Autoreason is skipped by candidate-factory readiness.
+- Added benchmark row, summary, Flash summary, and Markdown report metrics for runtime-pruned capabilities.
 
 ## Remaining Debt
 - `swarm_quiet_moment` Flash path still needs a bounded non-timeout LLM profile before public A/B claims can include it.

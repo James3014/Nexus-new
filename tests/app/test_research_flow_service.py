@@ -2451,8 +2451,9 @@ def test_runtime_receipt_plan_prunes_unexecuted_judge_panel():
 
     assert "judge_panel" not in plan["selected_capabilities"]
     assert "llm_judge_panel" not in plan["selected_capabilities"]
-    assert "autoreason" in plan["selected_capabilities"]
+    assert "autoreason" not in plan["selected_capabilities"]
     assert capabilities["runtime_pruned_capabilities"] == {
+        "autoreason": "candidate_factory_skipped",
         "judge_panel": "candidate_factory_skipped",
         "llm_judge_panel": "candidate_factory_skipped",
     }

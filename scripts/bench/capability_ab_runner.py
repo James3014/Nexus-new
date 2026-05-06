@@ -1791,6 +1791,8 @@ def _extract_record(
     forecast_gate_shadow = forecast_gate_shadow if isinstance(forecast_gate_shadow, dict) else {}
     capability_receipts = usage_trace.get("capability_receipts", []) if isinstance(usage_trace, dict) else []
     capability_receipts = capability_receipts if isinstance(capability_receipts, list) else []
+    runtime_pruned_capabilities = capabilities.get("runtime_pruned_capabilities", {})
+    runtime_pruned_capabilities = runtime_pruned_capabilities if isinstance(runtime_pruned_capabilities, dict) else {}
     capability_replan_trace = capability_plan.get("replan_trace", []) if isinstance(capability_plan, dict) else []
     capability_replan_trace = capability_replan_trace if isinstance(capability_replan_trace, list) else []
     ultra_review = usage_trace.get("ultra_review", {}) if isinstance(usage_trace, dict) else {}
@@ -2039,6 +2041,8 @@ def _extract_record(
             if isinstance(data, dict) and bool(data.get("active", False))
         ],
         "capability_plan_forbidden": list(capability_plan.get("forbidden_capabilities", []) or []),
+        "runtime_pruned_capabilities": runtime_pruned_capabilities,
+        "runtime_pruned_capability_count": len(runtime_pruned_capabilities),
         "capability_receipts": capability_receipts,
         "capability_receipts_json": json.dumps(capability_receipts, ensure_ascii=False, sort_keys=True),
         "research_preflight": research_preflight,

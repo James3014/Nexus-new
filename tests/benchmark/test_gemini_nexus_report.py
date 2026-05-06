@@ -1213,6 +1213,8 @@ def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_p
                 "phase_a": "artifact_verified",
                 "phase_c": "closure_written",
                 "capability_claim_verified": True,
+                "runtime_pruned_capabilities": {"judge_panel": "candidate_factory_skipped"},
+                "runtime_pruned_capability_count": 1,
                 "capability_receipts": [
                     {
                         "name": "artifact_gate",
@@ -1251,6 +1253,8 @@ def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_p
     assert "Cost claim gate: PASS" in out
     assert "Per-capability public-safe capabilities: autoreason" in out
     assert "| autoreason | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | YES | capability_receipts | none |" in out
+    assert "| Runtime pruned capabilities | 0.0% | 100.0% | 100.0% | Selected capabilities removed from public receipts because runtime executor readiness was absent |" in out
+    assert "| Avg runtime pruned capabilities | 0.00 | 1.00 | 1.00 | Lower means fewer planner/runtime mismatches |" in out
     assert "## Capability Activation Details" in out
     assert "| autoreason | public_safe | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 | capability_receipts | Can claim: selected, invoked, evidenced, and gated. |" in out
     assert "| artifact_gate | selected_only | 1/1 | 0/1 | 0/1 | 0/1 | 0/1 | capability_receipts | Selected but not fully invoked/evidenced/gated. |" in out

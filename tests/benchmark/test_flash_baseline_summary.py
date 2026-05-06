@@ -31,6 +31,8 @@ def test_flash_baseline_summary_reports_rates_route_quality_and_public_safe(tmp_
             "semantic_status": "VERIFIED",
             "run_eligible": True,
             "model_name": "gemini-3-flash-preview",
+            "runtime_pruned_capabilities": {"autoreason": "candidate_factory_skipped"},
+            "runtime_pruned_capability_count": 1,
             "capability_receipts": [
                 {
                     "name": "judge_panel",
@@ -55,6 +57,8 @@ def test_flash_baseline_summary_reports_rates_route_quality_and_public_safe(tmp_
     assert summary["semantic_verified_rate"]["delta"] == 1.0
     assert summary["public_safe"]["public_safe"] == ["judge_panel"]
     assert summary["route_quality"]["selected_to_invoked_rate"] == 1.0
+    assert summary["runtime_pruning"]["with_nexus"] == 1.0
+    assert summary["runtime_pruning"]["avg_with_nexus"] == 1.0
     assert summary["infra_invalid"]["with_nexus"] == 0
 
 

@@ -100,6 +100,14 @@ def build_summary(*, output_dir: Path, scope: str = "") -> dict[str, Any]:
             "delta": semantic_delta,
         },
         "route_quality": route_quality,
+        "runtime_pruning": {
+            "without_nexus": summary_without.get("runtime_pruned_capability_rate", 0.0),
+            "with_nexus": summary_with.get("runtime_pruned_capability_rate", 0.0),
+            "delta": report["delta"].get("runtime_pruned_capability_rate_delta", 0.0),
+            "avg_without_nexus": summary_without.get("avg_runtime_pruned_capability_count", 0.0),
+            "avg_with_nexus": summary_with.get("avg_runtime_pruned_capability_count", 0.0),
+            "avg_delta": report["delta"].get("avg_runtime_pruned_capability_count_delta", 0.0),
+        },
         "public_safe": public_safe,
         "infra_invalid": {
             "without_nexus": infra_without["count"],

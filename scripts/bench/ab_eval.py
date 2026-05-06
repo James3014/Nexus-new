@@ -34,6 +34,24 @@ def _mean(values: list[float]) -> float:
     return statistics.mean(values) if values else 0.0
 
 
+def _runtime_pruned_capability_count(row: dict[str, Any]) -> int:
+    value = row.get("runtime_pruned_capability_count")
+    if value is not None:
+        return _as_int(value, 0)
+    payload = row.get("runtime_pruned_capabilities")
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return 0
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return 0
+    if isinstance(payload, dict):
+        return len(payload)
+    return 0
+
+
 def _load_csv(path: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -482,6 +500,8 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "capability_plan_trace_present_rate": 0.0,
             "avg_capability_plan_node_count": 0.0,
             "avg_capability_plan_score": 0.0,
+            "runtime_pruned_capability_rate": 0.0,
+            "avg_runtime_pruned_capability_count": 0.0,
             "patch_success_count": 0,
             "patch_success_rate": 0.0,
             "verification_only_rate": 0.0,
@@ -624,6 +644,7 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
     no_policy_rows = [row for row in rows if not _has_policy_hit(row)]
     policy_hit_success_rate = _rate(policy_rows, _is_solved)
     no_policy_success_rate = _rate(no_policy_rows, _is_solved)
+    runtime_pruned_counts = [_runtime_pruned_capability_count(row) for row in rows]
 
     return {
         "total_runs": total,
@@ -691,6 +712,8 @@ def summarize_runs(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "capability_plan_trace_present_rate": _rate(rows, lambda r: _is_true(r.get("capability_plan_trace_present"))),
         "avg_capability_plan_node_count": round(_mean([_as_float(r.get("capability_plan_node_count")) for r in rows]), 4),
         "avg_capability_plan_score": round(_mean([_as_float(r.get("capability_plan_score")) for r in rows]), 4),
+        "runtime_pruned_capability_rate": round(sum(1 for count in runtime_pruned_counts if count > 0) / total, 4),
+        "avg_runtime_pruned_capability_count": round(_mean([float(count) for count in runtime_pruned_counts]), 4),
         "patch_success_count": patch_success,
         "patch_success_rate": round(patch_success / total, 4),
         "verification_only_rate": _rate(rows, lambda r: _is_true(r.get("artifact_verification_only"))),
@@ -876,6 +899,12 @@ def compare_datasets(label_a: str, rows_a: list[dict[str, Any]], label_b: str, r
         ),
         "avg_capability_plan_score_delta": round(
             summary_b["avg_capability_plan_score"] - summary_a["avg_capability_plan_score"], 4
+        ),
+        "runtime_pruned_capability_rate_delta": round(
+            summary_b["runtime_pruned_capability_rate"] - summary_a["runtime_pruned_capability_rate"], 4
+        ),
+        "avg_runtime_pruned_capability_count_delta": round(
+            summary_b["avg_runtime_pruned_capability_count"] - summary_a["avg_runtime_pruned_capability_count"], 4
         ),
         "trust_mismatch_rate_delta": round(summary_b["trust_mismatch_rate"] - summary_a["trust_mismatch_rate"], 4),
         "nexus_usage_valid_rate_delta": round(summary_b["nexus_usage_valid_rate"] - summary_a["nexus_usage_valid_rate"], 4),
