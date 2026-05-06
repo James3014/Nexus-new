@@ -10,9 +10,12 @@ P10-P19 added runtime guardrails for Brain Hub alignment, route receipts, candid
 
 1. Brain Hub S-stage audit gates must update test fixtures with the same runtime markers they require in production. Otherwise the audit correctly fails, but the failure reads like product drift instead of fixture incompleteness.
 2. Route regression tests must capture the actual subprocess command, not only the environment. Candidate-count degradation is a command-line contract and cannot be proven by `NEXUS_LLM_CANDIDATE_CAP` alone.
+3. Long Flash benchmark commands can fail inside sandboxed `uv` cache access before reaching product logic. Treat that as environment failure and rerun through the approved `uv run` path rather than interpreting it as Nexus behavior.
+4. If generated markdown and `evidence_bundle.json` disagree on public-claim gate state, the bundle is the authority because it carries the structured gate checks and raw file hashes.
 
 ## Decision
 
 - Keep the S-stage runtime checklist fail-closed when Brain Hub guidance mentions S.
 - Keep candidate-count regression as an explicit command assertion.
 - Use targeted tests before Flash so same-model A/B is not asked to discover deterministic contract breaks.
+- Require Flash public reports to state model lock and hidden-verifier status from `evidence_bundle.json`, not only markdown prose.
