@@ -1,4 +1,5 @@
 from nexus.core.learning_evidence import LearningEvidenceBuilder
+from nexus.core.learning_governance import LearningDecision
 from nexus.core.learning_scorer import LearningScorer
 from nexus.core.state_contracts import NexusState, StepRecord
 from datetime import datetime
@@ -16,12 +17,17 @@ def _step(phase: str) -> StepRecord:
     )
 
 
+def _allow_short_trajectory(state: NexusState) -> None:
+    state.metadata["governance_profile"] = {"min_evolution_steps": 1}
+
+
 def test_learning_scorer_records_episode_signals():
     state = NexusState(task_id="learn-1")
     state.steps_history = [_step("P"), _step("X"), _step("D"), _step("R"), _step("A"), _step("C")]
     state.policy_hit_ids = ["POL-1", "POL-2"]
     state.retry_count = 0
     state.metadata["pipeline_success"] = True
+    _allow_short_trajectory(state)
 
     evidence = LearningEvidenceBuilder.build(state)
     LearningScorer.apply(state, evidence)
@@ -99,6 +105,7 @@ def test_learning_scorer_uses_reviewer_ci_positive_feedback_to_keep_learning():
     state.metadata["last_review_status"] = "APPROVED"
     state.metadata["pipeline_success"] = True
     state.health_metrics.test_pass_rate = 1.0
+    _allow_short_trajectory(state)
 
     evidence = LearningEvidenceBuilder.build(state)
     LearningScorer.apply(state, evidence)
@@ -113,6 +120,7 @@ def test_learning_scorer_ignores_conflicting_reviewer_signal_when_pipeline_succe
     state.steps_history = [_step("P"), _step("X"), _step("D"), _step("R"), _step("A"), _step("C")]
     state.metadata["last_review_status"] = "REJECTED"
     state.metadata["pipeline_success"] = True
+    _allow_short_trajectory(state)
 
     evidence = LearningEvidenceBuilder.build(state)
     LearningScorer.apply(state, evidence)
@@ -149,9 +157,32 @@ def test_learning_scorer_allows_success_patch_with_valid_proof():
     state.metadata["last_patch_apply_success"] = True
     state.metadata["last_proof_type"] = "git_diff_checksum"
     state.metadata["last_proof_value"] = "deadbeef"
+    _allow_short_trajectory(state)
 
     evidence = LearningEvidenceBuilder.build(state)
     LearningScorer.apply(state, evidence)
 
     assert state.metadata["learning_frozen"] is False
     assert state.metadata["pattern_reuse_rate"] >= 70.0
+
+
+def test_learning_scorer_accepts_injected_governance_evaluator():
+    class FakeGovernanceEvaluator:
+        calls = 0
+
+        @classmethod
+        def evaluate(cls, state: NexusState, _evidence):
+            cls.calls += 1
+            state.metadata["learning_action"] = "fake_continue"
+            return LearningDecision(freeze_learning=False, curiosity_score=77.0, reasons=["fake"])
+
+    state = NexusState(task_id="learn-injected-governance")
+    state.steps_history = [_step("P"), _step("D"), _step("R"), _step("A"), _step("C")]
+    state.metadata["pipeline_success"] = True
+
+    evidence = LearningEvidenceBuilder.build(state)
+    LearningScorer.apply(state, evidence, governance_evaluator=FakeGovernanceEvaluator)
+
+    assert FakeGovernanceEvaluator.calls == 1
+    assert state.metadata["learning_action"] == "fake_continue"
+    assert state.metadata["pattern_reuse_rate"] > 0.0

@@ -1,10 +1,15 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 
 from .learning_evidence import LearningEvidence
-from .learning_governance import LearningGovernance
+from .learning_governance import LearningDecision, LearningGovernance
 from .state_contracts import NexusState
+
+
+class LearningGovernanceEvaluator(Protocol):
+    def evaluate(self, state: NexusState, evidence: LearningEvidence) -> LearningDecision:
+        ...
 
 
 class LearningScorer:
@@ -13,10 +18,17 @@ class LearningScorer:
     HISTORY_WINDOW = 10
 
     @classmethod
-    def apply(cls, state: NexusState, evidence: LearningEvidence) -> None:
+    def apply(
+        cls,
+        state: NexusState,
+        evidence: LearningEvidence,
+        *,
+        governance_evaluator: LearningGovernanceEvaluator | None = None,
+    ) -> None:
         metadata = state.metadata
         metadata["episode_count"] = int(metadata.get("episode_count", 0)) + 1
-        decision = LearningGovernance.evaluate(state, evidence)
+        evaluator = governance_evaluator or LearningGovernance
+        decision = evaluator.evaluate(state, evidence)
         if decision.freeze_learning:
             return
 

@@ -28,18 +28,18 @@ class LearningEvidenceBuilder:
 
     @staticmethod
     def build(state: NexusState) -> LearningEvidence:
+        metadata = state.metadata
         phases = [step.phase for step in state.steps_history]
         trajectory_step_count = int(metadata.get("trajectory_step_count", len(phases)) or 0)
         unique_phase_count = len(set(phases))
 
-        pipeline_success = state.metadata.get("pipeline_success")
+        pipeline_success = metadata.get("pipeline_success")
         if isinstance(pipeline_success, bool):
             success = pipeline_success
         else:
-            review_status = str(state.metadata.get("last_review_status", "")).upper()
+            review_status = str(metadata.get("last_review_status", "")).upper()
             success = review_status == "APPROVED" or state.health_score > 80.0
 
-        metadata = state.metadata
         patch_generated = _as_bool(
             metadata.get("last_patch_generated", metadata.get("patch_generated", False))
         )

@@ -81,12 +81,27 @@ def render_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def write_json_artifact(payload: dict[str, Any], gate: dict[str, Any], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps({"coverage": payload, "gate": gate}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render Brain Hub code-reality coverage report.")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--manifest", default="docs/ops/brain_hub_manifest.json")
     parser.add_argument("--output", default=".nexus/reports/brain_hub_coverage.md")
     parser.add_argument("--output-json", action="store_true", help="Compatibility flag; this command always emits JSON.")
+    parser.add_argument(
+        "--json-output",
+        nargs="?",
+        const=".nexus/reports/brain_hub_coverage.json",
+        default=None,
+        help="Write the full coverage payload and gate decision as a JSON artifact.",
+    )
     args = parser.parse_args(argv)
     root = Path(args.repo_root).resolve()
     payload = build_coverage(root, manifest=root / args.manifest)
@@ -94,7 +109,22 @@ def main(argv: list[str] | None = None) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_markdown(payload), encoding="utf-8")
     gate = validate_coverage_gate(payload)
-    print(json.dumps({"passed": gate["passed"], "output": str(output), "status_counts": payload["status_counts"], "failures": gate["failures"]}, indent=2))
+    json_output = None
+    if args.json_output:
+        json_output = root / args.json_output
+        write_json_artifact(payload, gate, json_output)
+    print(
+        json.dumps(
+            {
+                "passed": gate["passed"],
+                "output": str(output),
+                "json_output": str(json_output) if json_output else None,
+                "status_counts": payload["status_counts"],
+                "failures": gate["failures"],
+            },
+            indent=2,
+        )
+    )
     return 0 if gate["passed"] else 1
 
 
