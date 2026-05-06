@@ -50,3 +50,20 @@ Closure:
 
 - `build_route_decision()` now fills `stop_policy.tactical_sequence` and
   `stop_policy.tactical_tool_map` by default when callers do not provide one.
+
+### Tactical-policy tests must use real planner signals
+
+Failure:
+
+- The first `route_tactical_policy` extraction test assumed a high-risk task always
+  selects `belief`.
+- The planner only selects `belief` when confidence/budget signals require it.
+
+Lesson:
+
+- A refactor test must preserve the planner's real selection semantics instead of
+  hard-coding a desired tactical sequence.
+
+Closure:
+
+- The test now supplies low root-cause confidence before asserting belief ordering.

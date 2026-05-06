@@ -8,6 +8,7 @@ from typing import Any
 
 from nexus.engine.capability_contracts import CapabilityPlan, RouteDecision
 from nexus.engine.capability_executor_controls import build_execution_plan
+from nexus.engine.route_tactical_policy import build_tactical_stop_policy
 
 
 def _hash_task_desc(task_desc: str) -> str:
@@ -85,54 +86,6 @@ def build_forecast_gate_shadow(plan: CapabilityPlan) -> dict[str, Any]:
     }
 
 
-def _default_stop_policy(plan: CapabilityPlan, recommended_flow: str, stop_policy: dict[str, Any] | None) -> dict[str, Any]:
-    policy = dict(stop_policy or {"type": "receipt_backed", "budget_guard": "fail_closed"})
-    selected = [str(item) for item in plan.selected_capabilities if str(item).strip()]
-    preferred = [
-        "pregate",
-        "memory",
-        "lancedb",
-        "semantic_searcher",
-        "research",
-        "external_doc_scout",
-        "codeintel",
-        "hyper",
-        "autoreason",
-        "judge_panel",
-        "llm_judge_panel",
-        "ddtree",
-        "belief",
-        "ultra_review",
-        "formal_report",
-        "delivery_gate",
-        "claim_gate",
-        "swarm_quiet_moment",
-    ]
-    first = "hyper_sprint" if recommended_flow == "hyper_sprint" or "hyper" in selected else "baseline"
-    tactical_sequence = [first]
-    tactical_sequence.extend(name for name in preferred if name in selected)
-    tactical_sequence.extend(name for name in selected if name not in tactical_sequence)
-    tactical_sequence = list(dict.fromkeys(tactical_sequence))
-
-    from nexus.engine.capability_planner import default_capability_nodes
-
-    nodes = default_capability_nodes()
-    tactical_tool_map = []
-    for index, name in enumerate(tactical_sequence):
-        node = nodes.get(name)
-        tactical_tool_map.append(
-            {
-                "capability": name,
-                "after": tactical_sequence[index - 1] if index else None,
-                "purpose": "gather_evidence" if name in {"semantic_searcher", "external_doc_scout", "research", "lancedb", "codeintel"} else "verify_or_govern",
-                "evidence_required": bool(node and node.evidence_outputs),
-            }
-        )
-    policy.setdefault("tactical_sequence", tactical_sequence)
-    policy.setdefault("tactical_tool_map", tactical_tool_map)
-    return policy
-
-
 def build_route_decision(
     *,
     task_id: str,
@@ -172,7 +125,11 @@ def build_route_decision(
         "acceleration_layers_rule": "selected_capabilities_intersection_ddtree",
         "governance_layers_rule": "selected_capabilities_intersection_ultra_mempalace_artifact_claim",
     }
-    resolved_stop_policy = _default_stop_policy(plan, recommended_flow, stop_policy)
+    resolved_stop_policy = build_tactical_stop_policy(
+        plan=plan,
+        recommended_flow=recommended_flow,
+        base_policy=stop_policy,
+    )
     return RouteDecision(
         schema_version="nexus_route_decision_v1",
         plan_schema_version=plan.schema_version,
