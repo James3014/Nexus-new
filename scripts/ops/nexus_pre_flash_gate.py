@@ -24,6 +24,7 @@ from scripts.ops.codex_nexus_ab_smoke import validate_smoke_plan as validate_cod
 from scripts.ops.render_brain_hub_coverage import build_coverage, validate_coverage_gate
 from scripts.ops.brain_hub_audit import scan_brain_hub
 from scripts.ops.hallucination_guard_drift import audit_drift
+from scripts.ops.pipeline_composition_inventory import build_inventory
 
 
 REPAIR_TASKS = (
@@ -314,6 +315,25 @@ def validate_openseeker_autodata_smoke(repo_root: Path, *, write_manifest: bool 
     ]
 
 
+def validate_pipeline_composition_gate(repo_root: Path) -> list[dict[str, Any]]:
+    inventory = build_inventory(repo_root)
+    details = {
+        "composition_status": inventory.get("composition_status"),
+        "phase_ownership_status": inventory.get("phase_ownership_status"),
+        "phase_executor_builders": inventory.get("phase_executor_builders", []),
+        "registered_executor_phases": inventory.get("registered_executor_phases", []),
+        "phase_factory_create_all_phases": inventory.get("phase_factory_create_all_phases", []),
+        "runtime_missing_phases": inventory.get("runtime_missing_phases", []),
+        "fallback_debt_phases": inventory.get("fallback_debt_phases", []),
+        "fallback_debt_count": inventory.get("fallback_debt_count", 0),
+        "legacy_mixins": inventory.get("legacy_mixins", []),
+        "failures": inventory.get("failures", []),
+    }
+    if inventory.get("passed"):
+        return [_ok("pipeline_composition_gate", **details)]
+    return [_fail("pipeline_composition_gate", "pipeline_composition_inventory_failed", **details)]
+
+
 def repair_subset_command(output_dir: str) -> list[str]:
     return [
         "uv",
@@ -522,6 +542,7 @@ def build_payload(
         *validate_codex_nexus_smoke_plan(),
         *validate_brain_hub_coverage_gate(repo_root),
         *validate_openseeker_autodata_smoke(repo_root, write_manifest=write_artifacts),
+        *validate_pipeline_composition_gate(repo_root),
     ]
     if run_repair:
         checks.append(run_repair_subset(repo_root, output_dir, timeout_sec=repair_timeout_sec))

@@ -48,6 +48,7 @@ def test_quick_payload_skips_flash_style_repair_subset():
         "codex_nexus_smoke_plan",
         "brain_hub_coverage_gate",
         "openseeker_autodata_smoke",
+        "pipeline_composition_gate",
     }.issubset({item["name"] for item in payload["checks"]})
 
 
@@ -64,6 +65,7 @@ def test_quick_payload_includes_brain_hub_alignment_gate():
         "codex_nexus_smoke_plan",
         "brain_hub_coverage_gate",
         "openseeker_autodata_smoke",
+        "pipeline_composition_gate",
     }.issubset(names)
 
 
@@ -167,6 +169,38 @@ def test_quick_payload_includes_openseeker_autodata_smoke(tmp_path: Path):
     assert check["details"]["autodata_manifest"]["training_eligible_count"] == 1
     assert check["details"]["autodata_manifest"]["written"] is False
     assert not (tmp_path / ".nexus" / "reports" / "pre_flash_autodata_manifest.json").exists()
+
+
+def test_quick_payload_includes_pipeline_composition_gate():
+    check = nexus_pre_flash_gate.validate_pipeline_composition_gate(Path(".").resolve())[0]
+
+    assert check["passed"] is True
+    assert check["name"] == "pipeline_composition_gate"
+    assert check["details"]["phase_ownership_status"] == "executor_owned_with_legacy_mixins_retained"
+    assert check["details"]["runtime_missing_phases"] == []
+    assert check["details"]["fallback_debt_phases"] == ["A", "C"]
+
+
+def test_pipeline_composition_gate_fails_when_inventory_fails(monkeypatch):
+    monkeypatch.setattr(
+        nexus_pre_flash_gate,
+        "build_inventory",
+        lambda _repo_root: {
+            "passed": False,
+            "composition_status": "partial",
+            "phase_ownership_status": "incomplete",
+            "runtime_missing_phases": ["C"],
+            "fallback_debt_phases": ["C"],
+            "fallback_debt_count": 1,
+            "failures": [{"reason": "runtime_owned_phase_missing", "phase": "C"}],
+        },
+    )
+
+    check = nexus_pre_flash_gate.validate_pipeline_composition_gate(Path(".").resolve())[0]
+
+    assert check["passed"] is False
+    assert check["reason"] == "pipeline_composition_inventory_failed"
+    assert check["details"]["runtime_missing_phases"] == ["C"]
 
 
 def test_openseeker_autodata_smoke_writes_manifest_only_when_explicit(tmp_path: Path):
