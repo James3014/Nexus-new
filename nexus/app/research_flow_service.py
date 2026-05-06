@@ -1202,9 +1202,12 @@ def compose_capability_plan(
     target_file: str | None = None,
 ) -> dict[str, Any]:
     """Compose a compatibility capability_stack from the planner seam."""
-    task_lower = f"{task_desc} {task_type}".lower()
     seed_selected = ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]
-    seed_acceleration = ["ddtree"] if "repair" in task_lower or "timeout" in task_lower or "flaky" in task_lower else []
+    readiness = route_features.get("candidate_factory_readiness_estimate", {})
+    readiness = readiness if isinstance(readiness, dict) else {}
+    estimated_candidates = int(readiness.get("estimated_candidates", route_features.get("candidate_count", 1)) or 1)
+    candidate_factory_ready = bool(readiness.get("ready", estimated_candidates >= 2))
+    seed_acceleration = ["ddtree"] if candidate_factory_ready and estimated_candidates >= 3 else []
     research_context = research_context if isinstance(research_context, dict) else {}
     recommended_caps = {str(item) for item in (research_context.get("recommended_capabilities", []) or []) if str(item)}
     seed_route = {
@@ -1528,6 +1531,13 @@ def _decide_flow(
         "plateau_detected": False,
         "doc_scout_hits": 0,
         "blocked_assumptions_count": 0,
+    }
+    candidate_factory_ready = int(candidate_count) >= 2
+    route_features["candidate_factory_readiness_estimate"] = {
+        "ready": candidate_factory_ready,
+        "status": "READY" if candidate_factory_ready else "SKIPPED",
+        "reason": "route_candidate_count_estimate" if candidate_factory_ready else "single_candidate_route_estimate",
+        "estimated_candidates": int(candidate_count),
     }
 
     explain = {

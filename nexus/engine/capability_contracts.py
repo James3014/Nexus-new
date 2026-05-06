@@ -124,6 +124,10 @@ class CapabilitySignalSet:
     risk_band_reason: str = "low_risk:0"
     confidence: float = 1.0
     candidate_count: int = 1
+    candidate_factory_ready_estimate: bool = False
+    candidate_factory_status: str = ""
+    candidate_factory_reason: str = ""
+    candidate_factory_estimated_candidates: int = 0
     memory_hits: int = 0
     findings_hits: int = 0
     lancedb_hits: int = 0

@@ -47,7 +47,11 @@ class CapabilityRouter:
 
         task_lower = f"{task_desc} {task_type}".lower()
         seed_selected = ["hyper_sprint"] if recommended_flow == "hyper_sprint" else ["baseline"]
-        seed_acceleration = ["ddtree"] if "repair" in task_lower or "timeout" in task_lower or "flaky" in task_lower else []
+        readiness = route_features.get("candidate_factory_readiness_estimate", {})
+        readiness = readiness if isinstance(readiness, dict) else {}
+        estimated_candidates = int(readiness.get("estimated_candidates", route_features.get("candidate_count", 1)) or 1)
+        candidate_factory_ready = bool(readiness.get("ready", estimated_candidates >= 2))
+        seed_acceleration = ["ddtree"] if candidate_factory_ready and estimated_candidates >= 3 else []
         if any(str(target_file or "").startswith(prefix) for prefix in self.HIGH_RISK_PREFIXES):
             route_features = {**route_features, "has_hard_signal": True}
         plan = CapabilitySelector().select(

@@ -379,6 +379,30 @@ def test_capability_planner_keeps_autoreason_for_uncertain_or_evidence_repair():
     assert {"autoreason", "judge_panel", "repair_loop"} <= set(evidence_plan["selected_capabilities"])
 
 
+def test_capability_planner_uses_candidate_factory_readiness_for_ranking_layers():
+    plan = CapabilityPlanner().plan(
+        task_desc="Repair competing timeout candidates after A/B alternatives are available.",
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 40,
+                "candidate_count": 3,
+                "candidate_factory_readiness_estimate": {
+                    "ready": True,
+                    "status": "READY",
+                    "estimated_candidates": 3,
+                },
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"autoreason", "judge_panel", "ddtree", "repair_loop"} <= selected
+
+
 def test_capability_planner_selects_memory_belief_and_preflight_governance():
     plan = CapabilityPlanner().plan(
         task_desc="Fix a trust-sensitive regression with prior evidence and low confidence.",

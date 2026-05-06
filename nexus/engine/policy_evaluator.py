@@ -14,7 +14,7 @@ def apply_signal_policies(
     hyper_selected = "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint"
     repair_needs_autoreason = signals.repair_signal and (
         signals.confidence < 0.75
-        or signals.candidate_count >= 2
+        or signals.candidate_factory_ready_estimate
         or signals.memory_hits
         or signals.findings_hits
         or signals.evidence_signal
@@ -28,7 +28,7 @@ def apply_signal_policies(
     if (
         "autoreason" in signals.selected_seed
         or signals.confidence < 0.75
-        or signals.candidate_count >= 2
+        or signals.candidate_factory_ready_estimate
         or signals.memory_hits
         or signals.findings_hits
         or repair_needs_autoreason
@@ -36,7 +36,12 @@ def apply_signal_policies(
         or signals.governance_signal
     ):
         enable("autoreason", "low_confidence_or_multi_candidate_or_history")
-    if signals.confidence < 0.75 or signals.candidate_count >= 2 or signals.evidence_signal or signals.governance_signal:
+    if (
+        signals.confidence < 0.75
+        or signals.candidate_factory_ready_estimate
+        or signals.evidence_signal
+        or signals.governance_signal
+    ):
         enable("judge_panel", "evidence_quality_judge_required_for_uncertain_or_multi_candidate_route")
     if signals.confidence < 0.8 or "belief" in task_lower or "confidence" in task_lower or "budget" in task_lower:
         enable("belief", "confidence_control_needed")
@@ -72,7 +77,9 @@ def apply_signal_policies(
         enable("ultra_review", "plateau_detected_requires_governance")
         enable("asi_constraint_extractor", "plateau_detected_requires_constraint_extraction")
         enable("architecture_scout", "plateau_detected_requires_architecture_pivot")
-    if "ddtree" in signals.acceleration_seed or (hyper_selected and (signals.candidate_count >= 3 or signals.repair_signal)):
+    if "ddtree" in signals.acceleration_seed or (
+        hyper_selected and signals.candidate_factory_ready_estimate and signals.candidate_factory_estimated_candidates >= 3
+    ):
         enable("ddtree", "candidate_space_pruning")
     if signals.repair_signal:
         enable("repair_loop", "repair_or_self_heal_signal")

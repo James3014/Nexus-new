@@ -71,4 +71,28 @@ def test_capability_router_maps_governance_and_repair_semantics():
 
     assert "autoreason" in governance["selected_capabilities"]
     assert governance["governance_layers"] == ["ultra_review"]
-    assert repair["acceleration_layers"] == ["ddtree"]
+    assert repair["acceleration_layers"] == []
+    assert "autoreason" not in repair["selected_capabilities"]
+    assert repair["stop_policy"]["type"] == "budget"
+
+
+def test_capability_router_uses_candidate_factory_readiness_for_ranking_layers():
+    ready = CapabilityRouter().route(
+        task_desc="Repair competing timeout candidates with enough A/B alternatives.",
+        task_type="public_test_repair",
+        recommended_flow="hyper_sprint",
+        route_features={
+            "risk_score": 40,
+            "candidate_count": 3,
+            "candidate_factory_readiness_estimate": {
+                "ready": True,
+                "status": "READY",
+                "estimated_candidates": 3,
+            },
+        },
+        target_file="target.py",
+    ).to_dict()
+
+    assert "autoreason" in ready["selected_capabilities"]
+    assert ready["acceleration_layers"] == ["ddtree"]
+    assert ready["stop_policy"]["type"] == "a_streak"

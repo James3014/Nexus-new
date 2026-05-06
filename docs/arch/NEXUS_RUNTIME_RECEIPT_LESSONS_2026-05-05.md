@@ -13,6 +13,8 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Flash 4x1 can show real solve uplift while still failing promotion if a planned semantic judge is not executable at runtime. Runtime receipts must prune and record selected capabilities that were skipped by candidate-factory readiness, otherwise public-safe gates mistake planner intent for a capability claim.
 - Runtime pruning must be reported as its own metric. Otherwise a PASS can hide planner/runtime mismatches and make route quality look clean without showing how much selection was removed after execution.
 - Targeted pytest node names must be confirmed with `rg` before relying on them as evidence. A wrong node id can exit before running the intended assertions and create false validation confidence.
+- Candidate-ranking capabilities need an explicit readiness estimate before planner selection. A simple repair can solve through `hyper` and `delivery_gate` while lacking enough A/B/AB candidates for `autoreason` or `judge_panel`.
+- When route feature schema expands, schema-shape tests must be updated in the same change. Otherwise correct signal additions appear as regressions even when runtime behavior is unchanged.
 
 ## Applied Fixes
 - Added late plateau replan before execution.
@@ -23,6 +25,7 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Made plateau hard-pivot testing distinguish runtime regressions from sandbox cache access failures.
 - Added runtime receipt plan pruning for unexecuted `judge_panel`/`llm_judge_panel` when Autoreason is skipped by candidate-factory readiness.
 - Added benchmark row, summary, Flash summary, and Markdown report metrics for runtime-pruned capabilities.
+- Added candidate-factory readiness signals and stopped legacy compatibility stacks from seeding ranking layers for single-candidate simple repairs.
 
 ## Remaining Debt
 - `swarm_quiet_moment` Flash path still needs a bounded non-timeout LLM profile before public A/B claims can include it.

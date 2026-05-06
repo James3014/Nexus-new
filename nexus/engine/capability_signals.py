@@ -30,6 +30,21 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _read_candidate_factory_estimate(route_features: dict[str, Any]) -> dict[str, Any]:
+    raw = route_features.get("candidate_factory_readiness_estimate", {})
+    raw = raw if isinstance(raw, dict) else {}
+    estimated = max(0, _as_int(raw.get("estimated_candidates", route_features.get("candidate_count", 1)), 0))
+    ready = bool(raw.get("ready", estimated >= 2))
+    status = str(raw.get("status") or ("READY" if ready else "SKIPPED"))
+    reason = str(raw.get("reason") or ("candidate_count_estimate" if ready else "insufficient_candidate_estimate"))
+    return {
+        "ready": ready,
+        "status": status,
+        "reason": reason,
+        "estimated_candidates": estimated,
+    }
+
+
 def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
     return any(token in text for token in tokens)
 
@@ -84,6 +99,7 @@ def build_capability_signals(
     task_lower = f"{task_desc} {task_type}".lower()
     skill_signals = build_skill_signals(skills)
     risk = normalize_risk_score(route_features.get("risk_score"))
+    candidate_factory = _read_candidate_factory_estimate(route_features)
 
     return CapabilitySignalSet(
         task_desc=task_desc,
@@ -100,6 +116,10 @@ def build_capability_signals(
         risk_band_reason=risk["risk_band_reason"],
         confidence=_as_float(route_features.get("adjusted_root_cause_confidence"), 1.0),
         candidate_count=max(1, _as_int(route_features.get("candidate_count"), 1)),
+        candidate_factory_ready_estimate=bool(candidate_factory["ready"]),
+        candidate_factory_status=str(candidate_factory["status"]),
+        candidate_factory_reason=str(candidate_factory["reason"]),
+        candidate_factory_estimated_candidates=int(candidate_factory["estimated_candidates"]),
         memory_hits=_as_int(route_features.get("memory_hits"), 0),
         findings_hits=_as_int(route_features.get("findings_hits"), 0),
         lancedb_hits=_as_int((pillars.get("lancedb", {}) or {}).get("hits"), 0),

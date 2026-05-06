@@ -21,6 +21,12 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
                 "risk_score": 72,
                 "adjusted_root_cause_confidence": 0.44,
                 "candidate_count": 4,
+                "candidate_factory_readiness_estimate": {
+                    "ready": True,
+                    "status": "READY",
+                    "reason": "fixture_ready",
+                    "estimated_candidates": 4,
+                },
                 "memory_hits": 2,
                 "findings_hits": 1,
                 "is_cross_module_task": True,
@@ -66,6 +72,10 @@ def test_capability_signals_normalize_five_pillar_and_skill_inputs():
     assert signals.msa_rerank_reasons == ("source:lancedb", "sot:code")
     assert signals.repair_signal is True
     assert signals.evidence_signal is True
+    assert signals.candidate_factory_ready_estimate is True
+    assert signals.candidate_factory_status == "READY"
+    assert signals.candidate_factory_reason == "fixture_ready"
+    assert signals.candidate_factory_estimated_candidates == 4
     assert signals.risk_score == 72
     assert signals.risk_score_0_100 == 72
     assert signals.risk_score_0_1 == 0.72

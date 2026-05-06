@@ -10,7 +10,7 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
         repo_root=tmp_path,
         task_desc="Fix flaky timeout",
         task_type="bug",
-        candidate_count=2,
+        candidate_count=3,
         root_cause_confidence=0.4,
         findings_query=None,
     )
@@ -312,6 +312,11 @@ def test_compose_capability_plan_preserves_legacy_stack_shape():
         recommended_flow="hyper_sprint",
         route_features={
             "candidate_count": 3,
+            "candidate_factory_readiness_estimate": {
+                "ready": True,
+                "status": "READY",
+                "estimated_candidates": 3,
+            },
             "risk_score": 80,
             "has_hard_signal": True,
             "adjusted_root_cause_confidence": 0.4,
@@ -324,6 +329,29 @@ def test_compose_capability_plan_preserves_legacy_stack_shape():
     assert out["governance_layers"] == ["ultra_review"]
     assert out["stop_policy"]["type"] == "a_streak"
     assert out["explain_caps"][0]["capability"] == "hyper_sprint"
+
+
+def test_compose_capability_plan_keeps_simple_repair_stack_light():
+    out = research_flow_service.compose_capability_plan(
+        task_desc="Repair a flaky-looking timeout calculation without deleting assertions.",
+        task_type="public_test_repair",
+        recommended_flow="hyper_sprint",
+        route_features={
+            "candidate_count": 1,
+            "candidate_factory_readiness_estimate": {
+                "ready": False,
+                "status": "SKIPPED",
+                "estimated_candidates": 1,
+            },
+            "risk_score": 55,
+            "adjusted_root_cause_confidence": 1.0,
+        },
+        target_file="target.py",
+    )
+
+    assert out["selected_capabilities"] == ["hyper_sprint"]
+    assert out["acceleration_layers"] == []
+    assert out["stop_policy"]["type"] == "budget"
 
 
 def test_collect_route_signals_includes_history_memory_hits(tmp_path: Path):
@@ -431,8 +459,9 @@ def test_decide_flow_payload_schema_keys(tmp_path: Path):
         "has_strong_commercial_signal",
         "is_cross_module_task",
         "is_doc_fix",
-        "candidate_count",
-        "findings_hits",
+            "candidate_count",
+            "candidate_factory_readiness_estimate",
+            "findings_hits",
         "memory_hits",
         "adjusted_root_cause_confidence",
         "risk_score",
