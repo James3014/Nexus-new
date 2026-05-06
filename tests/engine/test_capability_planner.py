@@ -347,9 +347,36 @@ def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
         pillars={"lancedb": {"hits": 0}},
     ).to_dict()
 
-    assert {"autoreason", "repair_loop"} <= set(repair_plan["selected_capabilities"])
+    assert "repair_loop" in set(repair_plan["selected_capabilities"])
+    assert "autoreason" not in set(repair_plan["selected_capabilities"])
     assert "ddtree" not in set(repair_plan["selected_capabilities"])
     assert "autoreason" in set(trust_plan["selected_capabilities"])
+
+
+def test_capability_planner_keeps_autoreason_for_uncertain_or_evidence_repair():
+    uncertain_plan = CapabilityPlanner().plan(
+        task_desc="Repair hidden verifier timeout where root cause is uncertain.",
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10, "candidate_count": 1, "adjusted_root_cause_confidence": 0.5},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+    ).to_dict()
+    evidence_plan = CapabilityPlanner().plan(
+        task_desc="Repair test evidence and public claim verification.",
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 10, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+    ).to_dict()
+
+    assert {"autoreason", "judge_panel", "repair_loop"} <= set(uncertain_plan["selected_capabilities"])
+    assert {"autoreason", "judge_panel", "repair_loop"} <= set(evidence_plan["selected_capabilities"])
 
 
 def test_capability_planner_selects_memory_belief_and_preflight_governance():

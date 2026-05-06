@@ -12,6 +12,14 @@ def apply_signal_policies(
 ) -> None:
     task_lower = f"{task_desc} {task_type}".lower()
     hyper_selected = "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint"
+    repair_needs_autoreason = signals.repair_signal and (
+        signals.confidence < 0.75
+        or signals.candidate_count >= 2
+        or signals.memory_hits
+        or signals.findings_hits
+        or signals.evidence_signal
+        or signals.governance_signal
+    )
 
     if hyper_selected:
         enable("hyper", "route_selected_hyper")
@@ -23,7 +31,7 @@ def apply_signal_policies(
         or signals.candidate_count >= 2
         or signals.memory_hits
         or signals.findings_hits
-        or signals.repair_signal
+        or repair_needs_autoreason
         or signals.evidence_signal
         or signals.governance_signal
     ):
