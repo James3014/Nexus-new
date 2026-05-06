@@ -176,7 +176,7 @@ class AutoreasonService:
             a_streak_threshold=stop_threshold,
         )
         judge_votes = self._semantic_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
-        judge_mode = "semantic" if judge_votes else "deterministic_evidence_quality"
+        judge_mode = "semantic" if judge_votes else ("heuristic_fallback" if self.judge_providers else "deterministic_evidence_quality")
         if not judge_votes:
             judge_votes = self._evidence_quality_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
         borda_scores = {candidate.candidate_id: 0 for candidate in parsed}

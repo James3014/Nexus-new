@@ -133,7 +133,7 @@ def test_autoreason_falls_back_when_semantic_provider_unavailable():
     )
 
     assert out["status"] == "SUCCESS"
-    assert out["judge_mode"] == "deterministic_evidence_quality"
+    assert out["judge_mode"] == "heuristic_fallback"
     assert out["semantic_judged"] is False
 
 

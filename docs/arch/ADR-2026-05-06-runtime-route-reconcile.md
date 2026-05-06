@@ -32,3 +32,11 @@ A selected `llm_judge_panel` capability is only a planning request until a confi
 Decision: LLM judge providers are loaded only from explicit environment configuration. Gemini/Codex adapters use local command contracts, and missing commands produce no provider. If a provider errors or returns invalid output, Autoreason falls back to deterministic evidence quality and reports `semantic_judged=false`.
 
 Prevention: tests cover opt-in fake provider wiring, command JSON round-trip, missing command exclusion, provider failure fallback, and runtime Autoreason semantic mode only when the provider is explicitly configured.
+
+## P890 Lesson: Provider Failure Needs a Distinct Mode
+
+A missing provider and a failed provider are not the same operational state. Without a distinct mode, reports could show deterministic judging while hiding that semantic judging had been requested but could not execute.
+
+Decision: Autoreason now reports `judge_mode=heuristic_fallback` when judge providers were configured but produced no valid semantic votes. `semantic_judged` remains false.
+
+Prevention: provider-unavailable tests assert `heuristic_fallback`, so Flash reports can distinguish true deterministic local mode from failed semantic provider execution.
