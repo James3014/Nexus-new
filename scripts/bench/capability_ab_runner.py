@@ -1858,6 +1858,8 @@ def _extract_record(
     )
     governance_event_summary = payload.get("governance_event_summary") or usage_trace.get("governance_event_summary") or {}
     governance_event_summary = governance_event_summary if isinstance(governance_event_summary, dict) else {}
+    openseeker = usage_trace.get("openseeker_alignment", {}) if isinstance(usage_trace, dict) else {}
+    openseeker = openseeker if isinstance(openseeker, dict) else {}
     research_preflight = payload.get("research_preflight") or usage_trace.get("research_preflight") or {}
     research_preflight = research_preflight if isinstance(research_preflight, dict) else {}
     research_session = payload.get("research_session") or usage_trace.get("research_session") or {}
@@ -2111,6 +2113,13 @@ def _extract_record(
         "governance_event_count": len(governance_events),
         "governance_event_types": governance_event_types,
         "governance_event_summary": governance_event_summary,
+        "openseeker_schema_version": str(openseeker.get("schema_version") or ""),
+        "trajectory_step_count": int(openseeker.get("trajectory_step_count", 0) or 0),
+        "evidence_hop_count": int(openseeker.get("evidence_hop_count", 0) or 0),
+        "evidence_source_count": int(openseeker.get("evidence_source_count", 0) or 0),
+        "tool_action_count": int(openseeker.get("tool_action_count", 0) or 0),
+        "low_step_filtered": bool(openseeker.get("low_step_filtered", False)),
+        "long_horizon_ready": bool(openseeker.get("long_horizon_ready", False)),
         "expected_capability_receipt_coverage": _expected_capability_receipt_coverage(
             task.expected_capabilities,
             [item for item in capability_receipts if isinstance(item, dict)],

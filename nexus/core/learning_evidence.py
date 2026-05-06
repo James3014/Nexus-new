@@ -21,6 +21,7 @@ class LearningEvidence:
     # 🧪 [v24.0] Bayesian & Entropy Tracking
     bayesian_aggression: float
     entropy_score: float
+    trajectory_step_count: int = 0
 
 class LearningEvidenceBuilder:
     _VALID_PROOF_TYPES = {"git_diff", "git_diff_checksum", "checksum"}
@@ -28,6 +29,7 @@ class LearningEvidenceBuilder:
     @staticmethod
     def build(state: NexusState) -> LearningEvidence:
         phases = [step.phase for step in state.steps_history]
+        trajectory_step_count = int(metadata.get("trajectory_step_count", len(phases)) or 0)
         unique_phase_count = len(set(phases))
 
         pipeline_success = state.metadata.get("pipeline_success")
@@ -67,7 +69,8 @@ class LearningEvidenceBuilder:
             proof_type=proof_type,
             proof_value=proof_value,
             bayesian_aggression=bayesian_aggression,
-            entropy_score=entropy_score
+            entropy_score=entropy_score,
+            trajectory_step_count=trajectory_step_count,
         )
 
     @staticmethod
@@ -77,6 +80,7 @@ class LearningEvidenceBuilder:
             "success": evidence.success,
             "cost": state.total_token_usage,
             "phases": evidence.phases,
+            "trajectory_step_count": evidence.trajectory_step_count,
             "policy_hit_ids": list(state.policy_hit_ids),
             "proof": {
                 "required": bool(evidence.success and evidence.patch_generated and evidence.patch_apply_success),

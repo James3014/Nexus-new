@@ -5,6 +5,7 @@ from typing import List
 
 from .learning_evidence import LearningEvidence
 from .state_contracts import NexusState
+from nexus.engine.openseeker_alignment import MIN_EVOLUTION_STEPS
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,7 @@ class GovernanceProfile:
     gamma: float = 1.0
     token_budget: float = 5000.0
     memory_health_baseline: float = 100.0
+    min_evolution_steps: int = MIN_EVOLUTION_STEPS
     valid_proof_types: frozenset[str] = frozenset({"git_diff", "git_diff_checksum", "checksum"})
 
 
@@ -69,12 +71,21 @@ class LearningSteward:
             freeze = True
             reasons.extend(canary_reasons)
 
+        trajectory_steps = int(evidence.trajectory_step_count or len(evidence.phases))
+        low_step_filtered = bool(evidence.success and trajectory_steps < self.profile.min_evolution_steps)
+        if low_step_filtered:
+            freeze = True
+            reasons.append("low_step_trajectory")
+
         metadata["curiosity_score"] = round(curiosity_score, 2)
         metadata["curiosity_novelty"] = round(novelty, 2)
         metadata["curiosity_failure_penalty"] = round(failure_history, 2)
         metadata["curiosity_feedback_reward"] = round(feedback_reward, 2)
         metadata["learning_frozen"] = freeze
         metadata["learning_freeze_reasons"] = reasons
+        metadata["min_evolution_steps"] = self.profile.min_evolution_steps
+        metadata["trajectory_step_count"] = trajectory_steps
+        metadata["low_step_filtered"] = low_step_filtered
 
         action = "FREEZE" if freeze else ("INGEST" if evidence.success else "DISCARD")
         metadata["learning_action"] = action

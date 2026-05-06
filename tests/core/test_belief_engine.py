@@ -193,3 +193,30 @@ def test_learning_steward_emits_single_learning_action():
     assert "sir_veto" in decision.reasons
     assert state.metadata["learning_frozen"] is True
     assert state.metadata["learning_action"] == "FREEZE"
+
+
+def test_learning_steward_filters_successful_low_step_trajectory():
+    state = NexusState(task_id="learn-low-step")
+    evidence = LearningEvidence(
+        success=True,
+        phases=["P", "A"],
+        unique_phase_count=2,
+        retry_count=0,
+        policy_hit_count=0,
+        patch_generated=False,
+        patch_apply_success=False,
+        proof_present=False,
+        proof_type="",
+        proof_value="",
+        bayesian_aggression=0.5,
+        entropy_score=0.0,
+        trajectory_step_count=2,
+    )
+
+    decision = LearningSteward(GovernanceProfile()).decide(state, evidence)
+
+    assert decision.action == "FREEZE"
+    assert decision.freeze_learning is True
+    assert "low_step_trajectory" in decision.reasons
+    assert state.metadata["low_step_filtered"] is True
+    assert state.metadata["min_evolution_steps"] == 10

@@ -25,6 +25,7 @@ from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
+from nexus.engine.openseeker_alignment import build_openseeker_trace
 from nexus.core.event_bus import NexusEventBus
 from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
@@ -3113,6 +3114,15 @@ def run_auto_flow(
         if isinstance(receipt, dict) and receipt.get("name") == "research":
             receipt["source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
             receipt["research_stack"] = research_stack_contract()
+    openseeker_trace = build_openseeker_trace(
+        usage_trace=nexus_usage_trace,
+        capability_receipts=nexus_usage_trace["capability_receipts"],
+    )
+    nexus_usage_trace["openseeker_alignment"] = openseeker_trace
+    nexus_usage_trace["capabilities"]["trajectory_step_count"] = openseeker_trace["trajectory_step_count"]
+    nexus_usage_trace["capabilities"]["evidence_hop_count"] = openseeker_trace["evidence_hop_count"]
+    nexus_usage_trace["capabilities"]["tool_action_count"] = openseeker_trace["tool_action_count"]
+    nexus_usage_trace["capabilities"]["low_step_filtered"] = openseeker_trace["low_step_filtered"]
 
     payload = {
         "schema_version": "1.0",

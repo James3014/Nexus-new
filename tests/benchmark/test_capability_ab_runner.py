@@ -1582,6 +1582,15 @@ def test_extract_record_maps_semantic_fields():
                     "early_exit_policy": "never_skip_mempalace_artifact_claim_delivery_gates",
                 },
             },
+            "openseeker_alignment": {
+                "schema_version": "nexus_openseeker_alignment.v1",
+                "trajectory_step_count": 12,
+                "evidence_hop_count": 4,
+                "evidence_source_count": 3,
+                "tool_action_count": 5,
+                "low_step_filtered": False,
+                "long_horizon_ready": True,
+            },
         },
         "timing": {
             "cli_elapsed_sec": 2.4,
@@ -1713,6 +1722,13 @@ def test_extract_record_maps_semantic_fields():
     assert out["forecast_gate_early_exit_candidate"] is False
     assert out["forecast_gate_early_exit_policy"] == "never_skip_mempalace_artifact_claim_delivery_gates"
     assert out["route_decision_pillars_active"] == ["MemPalace", "Artifact", "Claim"]
+    assert out["openseeker_schema_version"] == "nexus_openseeker_alignment.v1"
+    assert out["trajectory_step_count"] == 12
+    assert out["evidence_hop_count"] == 4
+    assert out["evidence_source_count"] == 3
+    assert out["tool_action_count"] == 5
+    assert out["low_step_filtered"] is False
+    assert out["long_horizon_ready"] is True
     assert out["semantic_completed"] is False
     assert out["nexus_pillars_observed"] == ["lancedb", "memory", "mempalace", "belief", "artifact"]
     assert out["nexus_phases_observed"] == ["P", "X", "D", "R", "A", "C"]
