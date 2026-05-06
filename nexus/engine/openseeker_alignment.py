@@ -4,6 +4,33 @@ from collections.abc import Iterable
 from typing import Any
 
 MIN_EVOLUTION_STEPS = 10
+ACTION_CATALOG_SCHEMA_VERSION = "nexus_openseeker_action_catalog.v1"
+
+
+def _action_catalog(action_sequence: list[str], source_kinds: list[str]) -> list[dict[str, Any]]:
+    catalog = []
+    for index, action in enumerate(action_sequence, start=1):
+        kind, _, name = action.partition(":")
+        catalog.append(
+            {
+                "step": index,
+                "action": action,
+                "kind": kind or "unknown",
+                "name": name or action,
+                "evidence_required": kind in {"tactical", "capability"} and name in {"semantic_searcher", "autoreason", "belief", "external_doc_scout"},
+            }
+        )
+    if source_kinds:
+        catalog.append(
+            {
+                "step": len(catalog) + 1,
+                "action": "evidence:source_diversity",
+                "kind": "evidence",
+                "name": ",".join(source_kinds),
+                "evidence_required": False,
+            }
+        )
+    return catalog
 
 
 def _refs_from_receipts(receipts: Iterable[dict[str, Any]]) -> list[str]:
@@ -74,6 +101,7 @@ def build_openseeker_trace(
     tool_action_names = tactical_sequence or selected
     trace = {
         "schema_version": "nexus_openseeker_alignment.v1",
+        "action_catalog_schema_version": ACTION_CATALOG_SCHEMA_VERSION,
         "min_evolution_steps": MIN_EVOLUTION_STEPS,
         "trajectory_step_count": len(action_sequence),
         "tool_action_count": len(tool_action_names),
@@ -84,6 +112,7 @@ def build_openseeker_trace(
         "evidence_source_count": len(source_kinds),
         "evidence_source_kinds": source_kinds,
         "action_sequence": action_sequence,
+        "action_catalog": _action_catalog(action_sequence, source_kinds),
         "low_step_filtered": len(action_sequence) < MIN_EVOLUTION_STEPS,
         "single_source_claim": bool(capabilities.get("claim_verified", False) and len(source_kinds) < 2),
     }

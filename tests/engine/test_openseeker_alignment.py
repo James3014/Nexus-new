@@ -93,3 +93,5 @@ def test_openseeker_trace_counts_route_tactical_tool_map():
     assert trace["route_tactical_tool_count"] == 4
     assert trace["route_evidence_required_count"] == 3
     assert "tactical:semantic_searcher" in trace["action_sequence"]
+    assert trace["action_catalog_schema_version"] == "nexus_openseeker_action_catalog.v1"
+    assert any(item["action"] == "tactical:semantic_searcher" and item["evidence_required"] for item in trace["action_catalog"])

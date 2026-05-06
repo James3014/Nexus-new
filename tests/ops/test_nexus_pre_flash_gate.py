@@ -45,6 +45,7 @@ def test_quick_payload_skips_flash_style_repair_subset():
         "hallucination_guard_drift",
         "brain_hub_audit",
         "event_contract_audit",
+        "openseeker_autodata_smoke",
     }.issubset({item["name"] for item in payload["checks"]})
 
 
@@ -58,6 +59,7 @@ def test_quick_payload_includes_brain_hub_alignment_gate():
         "hallucination_guard_drift",
         "brain_hub_audit",
         "event_contract_audit",
+        "openseeker_autodata_smoke",
     }.issubset(names)
 
 
@@ -108,6 +110,14 @@ def test_quick_payload_fails_when_brain_hub_audit_fails(monkeypatch):
 
     assert payload["passed"] is False
     assert any(item["name"] == "brain_hub_audit" and not item["passed"] for item in payload["checks"])
+
+
+def test_quick_payload_includes_openseeker_autodata_smoke(tmp_path: Path):
+    check = nexus_pre_flash_gate.validate_openseeker_autodata_smoke(tmp_path)[0]
+
+    assert check["passed"] is True
+    assert check["details"]["action_catalog_count"] >= 1
+    assert check["details"]["autodata_manifest"]["training_eligible_count"] == 1
 
 
 def test_repair_subset_command_uses_flash_style_nexus_only_path():

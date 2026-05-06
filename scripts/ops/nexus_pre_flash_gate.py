@@ -15,6 +15,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from nexus.app.research_flow_service import _runtime_receipt_plan_payload, build_route
+from nexus.engine.autodata_forge import DataForgeManifestRow, classify_trajectory_quality, write_data_forge_manifest
+from nexus.engine.openseeker_alignment import build_openseeker_trace
 from nexus.events.transport import NexusEventBus
 from scripts.ops.brain_hub_audit import scan_brain_hub
 from scripts.ops.hallucination_guard_drift import audit_drift
@@ -211,6 +213,43 @@ def validate_event_contracts(repo_root: Path) -> list[dict[str, Any]]:
             unknown_event_types=audit.get("unknown_event_types", []),
             strict_raw_mode=audit.get("strict_raw_mode", False),
             failure_reasons=failure_reasons,
+        )
+    ]
+
+
+def validate_openseeker_autodata_smoke(repo_root: Path) -> list[dict[str, Any]]:
+    receipts = [
+        {"name": "semantic_searcher", "invoked": True, "evidence_refs": ["semantic:route:doc"]},
+        {"name": "belief", "invoked": True, "evidence_refs": ["belief:route:confidence:0.8"]},
+    ]
+    trace = build_openseeker_trace(
+        usage_trace={
+            "route_decision": {
+                "selected_capabilities": ["semantic_searcher", "belief"],
+                "stop_policy": {"tactical_sequence": ["semantic_searcher", "belief"]},
+            },
+            "capabilities": {"claim_verified": True},
+        },
+        capability_receipts=receipts,
+    )
+    label = classify_trajectory_quality(strong_score=0.85, weak_score=0.55, audit_passed=True)
+    row = DataForgeManifestRow(
+        task_id="pre_flash_smoke",
+        label=label,
+        evidence_refs=tuple(ref for receipt in receipts for ref in receipt["evidence_refs"]),
+        trajectory_step_count=max(10, int(trace["trajectory_step_count"])),
+    )
+    summary = write_data_forge_manifest(repo_root / ".nexus" / "reports" / "pre_flash_autodata_manifest.json", [row])
+    if trace.get("action_catalog_schema_version") != "nexus_openseeker_action_catalog.v1":
+        return [_fail("openseeker_autodata_smoke", "action_catalog_missing", trace=trace)]
+    if summary.get("training_eligible_count") != 1:
+        return [_fail("openseeker_autodata_smoke", "autodata_training_eligibility_missing", summary=summary)]
+    return [
+        _ok(
+            "openseeker_autodata_smoke",
+            trajectory_step_count=trace.get("trajectory_step_count", 0),
+            action_catalog_count=len(trace.get("action_catalog", [])),
+            autodata_manifest=summary,
         )
     ]
 
@@ -412,6 +451,7 @@ def build_payload(repo_root: Path, *, run_repair: bool, output_dir: str, repair_
         *validate_runtime_receipt_reconcile(),
         *validate_brain_hub_alignment(repo_root),
         *validate_event_contracts(repo_root),
+        *validate_openseeker_autodata_smoke(repo_root),
     ]
     if run_repair:
         checks.append(run_repair_subset(repo_root, output_dir, timeout_sec=repair_timeout_sec))

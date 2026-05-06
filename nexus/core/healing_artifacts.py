@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import hmac
 import hashlib
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,15 @@ from nexus.core.belief_contracts import HealingArtifact
 
 
 SIGNATURE_ALGORITHM = "hmac-sha256"
+
+
+@dataclass(frozen=True)
+class HealingArtifactKeyPolicy:
+    """Fail-closed verification policy for portable healing artifact signatures."""
+
+    require_signature: bool = True
+    allowed_key_ids: frozenset[str] = field(default_factory=frozenset)
+    verification_keys: dict[str, str | bytes] = field(default_factory=dict)
 
 
 def _canonical_artifact_payload(artifact: HealingArtifact) -> dict[str, Any]:
@@ -48,6 +57,29 @@ def verify_healing_artifact_signature(artifact: HealingArtifact, *, key: str | b
         return False
     expected = sign_healing_artifact(artifact, key=key, key_id=artifact.signature_key_id).signature
     return hmac.compare_digest(expected, artifact.signature)
+
+
+def audit_healing_artifact_key_policy(artifact: HealingArtifact, policy: HealingArtifactKeyPolicy) -> dict[str, Any]:
+    """Return a report-safe policy audit without raising on unsigned or unknown artifacts."""
+    failures: list[str] = []
+    if policy.require_signature and not artifact.signature:
+        failures.append("missing_signature")
+    if policy.require_signature and not artifact.signature_key_id:
+        failures.append("missing_signature_key_id")
+    if policy.allowed_key_ids and artifact.signature_key_id not in policy.allowed_key_ids:
+        failures.append("signature_key_id_not_allowed")
+    key = policy.verification_keys.get(artifact.signature_key_id)
+    if artifact.signature and policy.verification_keys and key is None:
+        failures.append("verification_key_missing")
+    if artifact.signature and key is not None and not verify_healing_artifact_signature(artifact, key=key):
+        failures.append("invalid_signature")
+    return {
+        "schema_version": "nexus_healing_artifact_key_policy.v1",
+        "artifact_id": artifact.artifact_id,
+        "signature_key_id": artifact.signature_key_id,
+        "passed": not failures,
+        "failures": failures,
+    }
 
 
 def write_healing_artifact(project_root: str | Path, artifact: HealingArtifact) -> Path:

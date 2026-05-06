@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import json
+from pathlib import Path
 
 
 GOLD_GAP_THRESHOLD = 0.20
@@ -19,6 +21,24 @@ class DataForgeLabel:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class DataForgeManifestRow:
+    task_id: str
+    label: DataForgeLabel
+    evidence_refs: tuple[str, ...] = ()
+    trajectory_step_count: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "schema_version": "nexus_autodata_forge_row.v1",
+            "task_id": self.task_id,
+            "label": self.label.to_dict(),
+            "evidence_refs": list(self.evidence_refs),
+            "trajectory_step_count": self.trajectory_step_count,
+            "eligible_for_training": self.label.label == "GOLD" and self.trajectory_step_count >= 10,
+        }
 
 
 def classify_trajectory_quality(
@@ -50,3 +70,20 @@ def classify_trajectory_quality(
         audit_passed=bool(audit_passed),
         reason=reason,
     )
+
+
+def write_data_forge_manifest(path: str | Path, rows: list[DataForgeManifestRow]) -> dict:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "nexus_autodata_forge_manifest.v1",
+        "rows": [row.to_dict() for row in rows],
+    }
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return {
+        "schema_version": "nexus_autodata_forge_manifest_write.v1",
+        "path": str(target),
+        "row_count": len(rows),
+        "gold_count": sum(1 for row in rows if row.label.label == "GOLD"),
+        "training_eligible_count": sum(1 for row in rows if row.to_dict()["eligible_for_training"]),
+    }

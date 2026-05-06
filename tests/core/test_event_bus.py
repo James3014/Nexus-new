@@ -140,3 +140,19 @@ def test_event_bus_audit_can_fail_on_raw_transition_events(tmp_path):
     assert audit["strict_raw_mode"] is True
     assert audit["failure_reasons"] == ["raw_event_types_present"]
     assert audit["raw_event_types"] == ["phase_start"]
+
+
+def test_event_bus_persists_same_timestamp_and_monotonic_sequence_seen_by_handlers(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    seen = []
+    NexusEventBus.subscribe("evidence_accepted", lambda payload: seen.append(payload))
+
+    NexusEventBus.emit_evidence_accepted(task_id="task-1", evidence_id="EV-1", evidence_type="git_diff")
+    NexusEventBus.emit_evidence_accepted(task_id="task-1", evidence_id="EV-2", evidence_type="pytest")
+
+    rows = [row for row in NexusEventBus.get_recent_events(event_type="evidence_accepted", limit=10) if row["payload"].get("task_id") == "task-1"]
+    assert [row["seq"] for row in rows] == sorted(row["seq"] for row in rows)
+    assert len(rows) == 2
+    for row in rows:
+        assert row["timestamp"] == row["payload"]["internal_ts"]
+    assert [item["_seq"] for item in seen] == [row["seq"] for row in rows]

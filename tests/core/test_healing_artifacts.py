@@ -1,5 +1,7 @@
 from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.healing_artifacts import (
+    HealingArtifactKeyPolicy,
+    audit_healing_artifact_key_policy,
     artifact_from_packet,
     artifact_to_packet,
     healing_artifact_report_entry,
@@ -174,3 +176,45 @@ def test_healing_artifact_packet_rejects_production_write_permission():
         assert "production writes" in str(exc)
     else:
         raise AssertionError("expected production write rejection")
+
+
+def test_healing_artifact_key_policy_requires_allowed_valid_signature():
+    artifact = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="node-a",
+    )
+
+    audit = audit_healing_artifact_key_policy(
+        artifact,
+        HealingArtifactKeyPolicy(
+            allowed_key_ids=frozenset({"node-a"}),
+            verification_keys={"node-a": "secret"},
+        ),
+    )
+
+    assert audit["passed"] is True
+    assert audit["failures"] == []
+
+
+def test_healing_artifact_key_policy_fails_closed_for_unknown_or_unsigned_artifacts():
+    unsigned = HealingArtifact(
+        task_id="task-1",
+        artifact_id="heal-1",
+        artifact_type="repair_plan",
+        created_at="2026-05-05T00:00:00Z",
+        evidence_id="EV-1",
+        summary="Use scoped storage",
+    )
+    audit = audit_healing_artifact_key_policy(unsigned, HealingArtifactKeyPolicy(allowed_key_ids=frozenset({"node-a"})))
+
+    assert audit["passed"] is False
+    assert "missing_signature" in audit["failures"]
+    assert "signature_key_id_not_allowed" in audit["failures"]
