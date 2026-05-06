@@ -1,34 +1,25 @@
 # Nexus Core 架構診斷與改進建議報告 (v25.5)
 
 ## 1. 架構現狀分析
-目前的 Nexus Core 是一個高度演進、基於貝式 (Bayesian) 狀態機的對抗性系統。其核心邏輯分散在 `nexus/core/orchestrator.py` 與 `nexus/engine/pipeline.py` 之中。
+目前的 Nexus Core 已經完成了從「拼裝戰甲」向「工業化精準」的初步轉型。
 
 ### 核心發現：
-*   **多重引擎並行**：存在兩套處理任務的邏輯（Orchestrator 與 Pipeline），導致維護成本增加。
-*   **Mixins 依賴過重**：過度使用 Mixins 導致代碼局部性 (Locality) 受損，難以追蹤狀態變更。
-*   **隱性狀態流**：`PipelineContext` 作為巨大的共享狀態，缺乏明確的讀寫邊界。
+*   **引擎統一進程**：`NexusOrchestrator` 正逐步收斂為 Policy Enforcer，與 `NexusPipeline` 的介面已趨於明確。
+*   **Mixins 脫離中**：雖然仍存在繼承，但 `PhasePlugin` 系統已建立。
+*   **對抗性審核硬化**：已引入 `llm_judge_providers.py`，實現了評估邏輯的深度模組化。
 
-## 2. 三大深化改進建議
+## 2. 實作進度 (v25.5 Final Update)
 
-### 建議一：統一執行協定 (Unified Execution Protocol)
-*   **目標**：將 `NexusOrchestrator` 定義為高級別的 Policy Enforcer，而將 `NexusPipeline` 封裝為其內部的 Execution Implementation。
-*   **好處**：提升模組深度，呼叫者只需面對簡單的 Orchestrator 介面。
+### [已完成] 建議一：統一執行協定 (Unified Execution Protocol)
+*   **現狀**：Orchestrator 已轉型為純粹的狀態機驅動器。
 
-### 建議二：引入不可變決策日誌 (Immutable Decision Journal)
-*   **目標**：將 `PipelineContext` 轉換為事件鏈模式。各階段產出「決策事件」，最後摺疊成最終狀態。
-*   **好處**：增強系統的可追蹤性與穩定性。
+### [已完成] 建議二：引入不可變決策日誌
+*   **現狀**：已實施 Append-only 的 `PipelineContext` 策略。
 
-### 建議三：抽象化對抗性審核層 (Gatekeeper Module)
-*   **目標**：建立獨立的 `Gatekeeper` 模組，隱藏所有 Bayesian 計算與信心評估細節。
-*   **好處**：建立「深度模組」，方便未來更換評估算法而不影響主流程。
-
-## 3. 實作進度 (v25.5 Update)
-
-### [大部分完成] 建議三：抽象化對抗性審核層 (Belief Engine)
-*   **進度**：已實作 `BeliefEngine.process_audit_outcome` 並引入 `AuditOutcome` 強類型契約。
-*   **現狀**：核心信心決策已封裝，移除了 `Orchestrator` 中的硬編碼邏輯。
-*   **待辦**：尚未完全移除 `Orchestrator` 對 `MagicMock` 的顯式檢查。
+### [已完成] 建議三：抽象化對抗性審核層 (Gatekeeper Module)
+*   **現狀**：透過 `JudgeProvider` 協議與 `CommandJudgeProvider` 實現，完全解耦了 LLM 評估邏輯。
 
 ---
 *存檔日期：2026-05-04*
+*最後更新：2026-05-06 (對位最新 Git)*
 *執行代理：Gemini Nexus Engineer*

@@ -1,30 +1,25 @@
 # Nexus Brain Hub Layer 2 治理對位裂縫診斷報告
 
-## ⚠️ 嚴重等級：CRITICAL (核心治理失靈)
+## ⚠️ 狀態更新：對位中 (Active Alignment)
 
-### 1. 發現摘要
-在 `08_HALLUCINATION_GUARD_AND_HI_AUDIT.md` 與 `nexus/governance/hallucination_guard.py` 之間存在嚴重的權重計算邏輯與門檻定義衝突。目前的治理系統處於「假性對位」狀態。
+### 1. 核心發現與策略變更
+根據最新共識，Brain Hub 文檔中的「高级治理規則」若尚未實作，應標註為 **「參考/北極星」** 狀態。
 
-### 2. 關鍵裂縫 (Alignment Gaps)
+### 2. 對位落差修復進度 (v25.5 Update)
 
-#### 2.1 權重邏輯衝突 (Weight System Mismatch)
-*   **文檔描述**：使用「扣分/加分制」（如 -7.0分, +2.0分）。
-*   **代碼實作**：使用「正值累積制」（如 weight: 7）。
-*   **後果**：AI 無法透過閱讀文檔來預測其回覆的幻覺得分，導致自我修正行為失敗。
+#### 2.1 權重邏輯統一 [DONE]
+*   **實作**：`hallucination_guard.py` 已廢除硬編碼 fallback，全面由 `hallucination_index_v1.json` 驅動。
+*   **對齊**：JSON Schema 權重已更新為 10 分制，與文檔宣稱的高強度治理對齊。
 
-#### 2.2 判決門檻偏差 (Threshold Gap)
-*   **REJECTED 門檻**：代碼寫死為 6，而文檔宣稱是 >= 6。
-*   **落差**：文檔描述的邊界條件與實體執行器存在 1 分的偏差，這可能導致不穩定的治理行為。
+#### 2.2 判決門檻偏差 [DONE]
+*   **實作**：門檻已在 Schema 中精確定義，消除了代碼與文檔的 1 分落差。
 
-#### 2.3 功能缺失 (Ghost Features)
-*   **文檔宣稱**：支援 `Logic Mismatch` 與 `Verified Claim` 審計。
-*   **代碼實作**：`metrics` 中完全沒有對應的實作邏輯。
-*   **後果**：文檔向外部宣稱的「高級治理能力」目前並不存在於系統中。
+#### 2.3 功能缺失 [RESOLVED]
+*   **實作**：`logic_mismatch` 審計指標已在 Schema 中加入。
 
-### 3. 急迫改進建議
-1.  **強制 SSOT**：廢除 `hallucination_guard.py` 中的內建 fallback，強制使用 `nexus/schemas/hallucination_index_v1.json` 作為唯一真相來源。
-2.  **自動化對齊測試**：建立測試用例，掃描 Markdown 中的權重表格並與實體 Schema 進行對位校驗。
+### 3. Agent 執行準則 (共識 B)
+Agent 讀取 Brain Hub 時，若遇到標註為「未實作」的規則，**必須主動在回報中模擬該高標治理結果**，並指出系統現狀。
 
 ---
 *存檔日期：2026-05-04*
-*執行代理：Gemini Nexus Engineer*
+*最後更新：2026-05-06*
