@@ -35,9 +35,15 @@ class IncomingMessageHandler(Protocol):
 
 
 class RegistryMessageHandler:
-    def __init__(self, registry: SkillRegistry | None, allowed_actions: Dict[str, set[str]] | None = None):
+    def __init__(
+        self,
+        registry: SkillRegistry | None,
+        allowed_actions: Dict[str, set[str]] | None = None,
+        healing_artifact_policy: Any | None = None,
+    ):
         self.registry = registry
         self.allowed_actions = allowed_actions or {}
+        self.healing_artifact_policy = healing_artifact_policy
 
     def handle(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
         action = req.get("action")
@@ -94,12 +100,44 @@ class RegistryMessageHandler:
     def _handle_event(self, req: Dict[str, Any], client_id: str) -> Dict[str, Any]:
         from nexus.events.transport import NexusEventBus
 
+        event_type = req.get("event_type", "unknown")
         payload = req.get("payload", {})
         payload = payload if isinstance(payload, dict) else {}
+        if event_type == "healing_artifact_announced":
+            return self._handle_healing_artifact_event(payload, client_id)
+        payload = dict(payload)
         payload["_source_node"] = client_id
         payload["_is_remote"] = True
-        NexusEventBus.publish(req.get("event_type", "unknown"), payload)
+        NexusEventBus.publish(event_type, payload)
         return {"status": "ok"}
+
+    def _handle_healing_artifact_event(self, payload: Dict[str, Any], client_id: str) -> Dict[str, Any]:
+        from nexus.core.healing_artifacts import artifact_from_packet, artifact_receipt_from_packet
+        from nexus.events.transport import NexusEventBus
+
+        policy = self.healing_artifact_policy
+        if policy is None:
+            from nexus.core.healing_artifacts import HealingArtifactKeyPolicy
+
+            policy = HealingArtifactKeyPolicy()
+        packet = payload.get("packet")
+        packet = packet if isinstance(packet, dict) else {}
+        receipt = artifact_receipt_from_packet(packet, policy)
+        if not receipt.get("passed"):
+            return {"status": "error", "message": "healing_artifact_rejected", "receipt": receipt}
+        artifact = artifact_from_packet(packet)
+        NexusEventBus.publish(
+            "healing_artifact_announced",
+            {
+                "task_id": artifact.task_id,
+                "artifact_id": artifact.artifact_id,
+                "receipt": receipt,
+                "packet": packet,
+                "_source_node": client_id,
+                "_is_remote": True,
+            },
+        )
+        return {"status": "ok", "receipt": receipt}
 
 
 class SecureRegistrySync:

@@ -2,6 +2,7 @@ from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.healing_artifacts import (
     HealingArtifactKeyPolicy,
     audit_healing_artifact_key_policy,
+    artifact_receipt_from_packet,
     artifact_transport_receipt,
     artifact_from_packet,
     artifact_to_packet,
@@ -179,6 +180,26 @@ def test_healing_artifact_packet_rejects_production_write_permission():
         raise AssertionError("expected production write rejection")
 
 
+def test_healing_artifact_packet_rejects_mutating_allowed_actions():
+    artifact = HealingArtifact(
+        task_id="task-1",
+        artifact_id="heal-1",
+        artifact_type="repair_plan",
+        created_at="2026-05-05T00:00:00Z",
+        evidence_id="EV-1",
+        summary="Use scoped storage",
+    )
+    packet = artifact_to_packet(artifact)
+    packet["allowed_actions"] = ["observe", "execute"]
+
+    try:
+        artifact_from_packet(packet)
+    except ValueError as exc:
+        assert "allowed actions" in str(exc)
+    else:
+        raise AssertionError("expected mutating action rejection")
+
+
 def test_healing_artifact_key_policy_requires_allowed_valid_signature():
     artifact = sign_healing_artifact(
         HealingArtifact(
@@ -237,3 +258,31 @@ def test_healing_artifact_transport_receipt_is_fail_closed():
     assert receipt["production_writes_allowed"] is False
     assert receipt["event_type"] == "healing_artifact_announced"
     assert "missing_signature" in receipt["failure_reasons"]
+
+
+def test_healing_artifact_receipt_from_packet_reports_invalid_signature_without_raising():
+    signed = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="node-a",
+    )
+    packet = artifact_to_packet(signed)
+    packet["payload"]["summary"] = "Run arbitrary repair"
+
+    receipt = artifact_receipt_from_packet(
+        packet,
+        HealingArtifactKeyPolicy(
+            allowed_key_ids=frozenset({"node-a"}),
+            verification_keys={"node-a": "secret"},
+        ),
+    )
+
+    assert receipt["passed"] is False
+    assert "invalid_signature" in receipt["failure_reasons"]

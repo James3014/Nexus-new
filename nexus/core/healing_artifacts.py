@@ -127,6 +127,37 @@ def artifact_transport_receipt(artifact: HealingArtifact, policy: HealingArtifac
     }
 
 
+def _packet_error_receipt(packet: dict, reason: str) -> dict[str, Any]:
+    payload = packet.get("payload") if isinstance(packet, dict) else {}
+    payload = payload if isinstance(payload, dict) else {}
+    return {
+        "schema_version": "nexus_healing_artifact_transport_receipt.v1",
+        "artifact_id": str(payload.get("artifact_id") or ""),
+        "task_id": str(payload.get("task_id") or ""),
+        "event_type": "healing_artifact_announced",
+        "production_writes_allowed": False,
+        "policy_audit": {
+            "schema_version": "nexus_healing_artifact_key_policy.v1",
+            "artifact_id": str(payload.get("artifact_id") or ""),
+            "signature_key_id": str(payload.get("signature_key_id") or ""),
+            "passed": False,
+            "failures": [reason],
+        },
+        "passed": False,
+        "failure_reasons": [reason],
+    }
+
+
+def artifact_receipt_from_packet(packet: dict, policy: HealingArtifactKeyPolicy) -> dict[str, Any]:
+    """Validate a remote packet into a report-safe receipt without raising."""
+    try:
+        artifact = artifact_from_packet(packet)
+    except Exception as exc:
+        reason = str(exc).replace(" ", "_") or "invalid_healing_artifact_packet"
+        return _packet_error_receipt(packet if isinstance(packet, dict) else {}, reason)
+    return artifact_transport_receipt(artifact, policy)
+
+
 def artifact_from_packet(packet: dict, *, verify_key: str | bytes | None = None) -> HealingArtifact:
     if packet.get("type") != "healing_artifact":
         raise ValueError("not a healing artifact packet")
@@ -134,6 +165,8 @@ def artifact_from_packet(packet: dict, *, verify_key: str | bytes | None = None)
         raise ValueError("unsupported healing artifact schema")
     if packet.get("production_writes_allowed", False):
         raise ValueError("healing artifact packets must not allow production writes")
+    if packet.get("allowed_actions") != ["observe", "report"]:
+        raise ValueError("healing artifact packets must use transport-safe allowed actions")
     payload = packet.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("healing artifact packet payload must be an object")

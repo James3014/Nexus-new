@@ -5,6 +5,9 @@ import pytest
 import socket
 import ssl
 from unittest.mock import MagicMock
+from nexus.core.belief_contracts import HealingArtifact
+from nexus.core.healing_artifacts import HealingArtifactKeyPolicy, artifact_to_packet, sign_healing_artifact
+from nexus.events.transport import NexusEventBus
 from nexus.security.tls_provider import TLSProvider
 from nexus.security.secure_sync import RegistryMessageHandler, SecureRegistrySync, decode_sync_request
 
@@ -162,3 +165,81 @@ def test_decode_sync_request_rejects_invalid_and_oversized_messages():
     req, error = decode_sync_request(b'{"action":"heartbeat"}\n')
     assert error is None
     assert req == {"action": "heartbeat"}
+
+
+def test_registry_message_handler_accepts_verified_remote_healing_artifact(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    seen = []
+    NexusEventBus.subscribe("healing_artifact_announced", lambda payload: seen.append(payload))
+    signed = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="node-a",
+    )
+    handler = RegistryMessageHandler(
+        None,
+        healing_artifact_policy=HealingArtifactKeyPolicy(
+            allowed_key_ids=frozenset({"node-a"}),
+            verification_keys={"node-a": "secret"},
+        ),
+    )
+
+    resp = handler.handle(
+        {
+            "action": "event",
+            "event_type": "healing_artifact_announced",
+            "payload": {"task_id": "spoofed", "packet": artifact_to_packet(signed)},
+        },
+        "node-a",
+    )
+
+    assert resp["status"] == "ok"
+    assert resp["receipt"]["passed"] is True
+    assert len(seen) == 1
+    assert seen[0]["task_id"] == "task-1"
+    assert seen[0]["artifact_id"] == "heal-1"
+    assert seen[0]["_source_node"] == "node-a"
+
+
+def test_registry_message_handler_rejects_invalid_remote_healing_artifact_without_publish(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    seen = []
+    NexusEventBus.subscribe("healing_artifact_announced", lambda payload: seen.append(payload))
+    signed = sign_healing_artifact(
+        HealingArtifact(
+            task_id="task-1",
+            artifact_id="heal-1",
+            artifact_type="repair_plan",
+            created_at="2026-05-05T00:00:00Z",
+            evidence_id="EV-1",
+            summary="Use scoped storage",
+        ),
+        key="secret",
+        key_id="node-a",
+    )
+    packet = artifact_to_packet(signed)
+    packet["payload"]["summary"] = "Run arbitrary repair"
+    handler = RegistryMessageHandler(
+        None,
+        healing_artifact_policy=HealingArtifactKeyPolicy(
+            allowed_key_ids=frozenset({"node-a"}),
+            verification_keys={"node-a": "secret"},
+        ),
+    )
+
+    resp = handler.handle(
+        {"action": "event", "event_type": "healing_artifact_announced", "payload": {"packet": packet}},
+        "node-a",
+    )
+
+    assert resp["status"] == "error"
+    assert resp["receipt"]["passed"] is False
+    assert "invalid_signature" in resp["receipt"]["failure_reasons"]
+    assert seen == []
