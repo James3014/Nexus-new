@@ -224,6 +224,7 @@ class NexusPipeline(
                 build_crystallize_executor,
                 build_diagnose_executor,
                 build_plan_executor,
+                build_repair_executor,
                 build_research_executor,
             )
 
@@ -231,6 +232,7 @@ class NexusPipeline(
                 "P": build_plan_executor(project_root, run_dir),
                 "X": build_research_executor(project_root, run_dir),
                 "D": build_diagnose_executor(project_root, run_dir, hub=getattr(self.engine, "hub", None)),
+                "R": build_repair_executor(project_root, run_dir),
                 "A": build_audit_executor(project_root, run_dir),
                 "C": build_crystallize_executor(project_root, run_dir),
             }

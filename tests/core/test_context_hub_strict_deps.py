@@ -43,3 +43,10 @@ def test_context_hub_strict_deps_allows_explicit_none_without_fallback(tmp_path)
     assert hub.belief_engine is None
     assert hub.knowledge_injector is None
     assert hub.prompt_builder is None
+
+
+def test_context_hub_strict_deps_can_be_forced_by_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_CONTEXT_STRICT_DEPS", "1")
+
+    with pytest.raises(ValueError, match="strict_deps_requires_context_dependencies"):
+        ContextHub(str(tmp_path))

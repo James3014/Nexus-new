@@ -577,7 +577,7 @@ class PipelineRepairMixin:
             ctx.state.metadata["composition_audit_phase_rejection"] = reason
             self._record_composed_audit_rejection(ctx, r_out, normalized, repair_attempts, reason)
             return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
-        return None
+        return {"audit_success": True, "status": normalized.status or "APPROVED", "phantom_reason": ""}
 
     def _normalize_composed_audit_result(self, ctx: PipelineContextProtocol, result: Any) -> ComposedAuditResult:
         """Normalize composed A output without treating executor success as audit success."""

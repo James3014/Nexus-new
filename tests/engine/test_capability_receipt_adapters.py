@@ -358,3 +358,26 @@ def test_repair_loop_receipt_requires_trace_and_verified_claim():
     assert missing["repair_loop"].failure_reason == "selected_without_invocation"
     assert proven["repair_loop"].public_claim_safe is True
     assert proven["repair_loop"].evidence_refs == (".nexus/reports/rlm/trace.jsonl",)
+
+
+def test_repair_loop_receipt_cites_readable_trace_and_attempt_id(tmp_path):
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text('{"attempt_id":"r1","status":"APPROVED"}\n', encoding="utf-8")
+
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["repair_loop"]},
+            capabilities={
+                "claim_verified": True,
+                "rlm_trace_present": True,
+                "rlm_trace_path": str(trace),
+                "rlm_attempt_id": "r1",
+            },
+        )
+    }
+
+    assert receipts["repair_loop"].public_claim_safe is True
+    assert f"{trace}" in receipts["repair_loop"].evidence_refs
+    assert "rlm_attempt:r1" in receipts["repair_loop"].evidence_refs
+    assert "rlm_trace_status:readable_jsonl" in receipts["repair_loop"].evidence_refs

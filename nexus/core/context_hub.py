@@ -61,6 +61,7 @@ class ContextHub:
         deps: ContextDependencies | None = None,
         strict_deps: bool = False,
     ):
+        strict_deps = bool(strict_deps or os.environ.get("NEXUS_CONTEXT_STRICT_DEPS") == "1")
         self.project_root = Path(project_root)
         self.run_dir = Path(run_dir) if (run_dir and str(run_dir) != "None") else None
         self.state_io = StateIO(project_root, run_dir=run_dir)

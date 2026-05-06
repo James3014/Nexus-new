@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -220,3 +221,25 @@ def test_learning_steward_filters_successful_low_step_trajectory():
     assert "low_step_trajectory" in decision.reasons
     assert state.metadata["low_step_filtered"] is True
     assert state.metadata["min_evolution_steps"] == 10
+
+
+def test_belief_engine_promotes_semantic_searcher_refs_to_first_class_fields(tmp_path):
+    engine = BeliefEngine(tmp_path / "belief.json")
+
+    engine.process_audit_outcome(
+        AuditOutcome(
+            task_id="task-1",
+            assumption="semantic evidence supports fix",
+            passed=True,
+            evidence_id="EV-1",
+            metadata={
+                "semantic_searcher_refs": ["semantic:policy:r1"],
+                "semantic_searcher_confidence_source": "semantic_searcher:policy:r1",
+            },
+        )
+    )
+
+    stored = json.loads((tmp_path / "belief.json").read_text(encoding="utf-8"))
+    belief = stored["semantic evidence supports fix"]
+    assert belief["semantic_evidence_refs"] == ["semantic:policy:r1"]
+    assert belief["semantic_confidence_source"] == "semantic_searcher:policy:r1"

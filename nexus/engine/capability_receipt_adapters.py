@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Protocol
 
 from nexus.engine.capability_contracts import CapabilityReceipt
@@ -797,9 +799,25 @@ class NightshiftReceiptAdapter:
 class RepairLoopReceiptAdapter:
     name = "repair_loop"
 
+    @staticmethod
+    def _trace_readable(path: str) -> bool:
+        target = Path(path)
+        if not target.exists() or not target.is_file():
+            return False
+        try:
+            first = next((line for line in target.read_text(encoding="utf-8").splitlines() if line.strip()), "")
+            return bool(first and isinstance(json.loads(first), dict))
+        except Exception:
+            return False
+
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         trace_path = str(payload.get("rlm_trace_path") or "").strip()
         refs = [trace_path] if trace_path else []
+        attempt_id = str(payload.get("rlm_attempt_id") or "").strip()
+        if attempt_id:
+            refs.append(f"rlm_attempt:{attempt_id}")
+        if trace_path and self._trace_readable(trace_path):
+            refs.append("rlm_trace_status:readable_jsonl")
         invoked = bool(payload.get("rlm_trace_present") or trace_path)
         gate_passed = bool(invoked and claim_verified)
         return merge_capability_receipt(

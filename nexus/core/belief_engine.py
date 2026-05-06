@@ -52,6 +52,12 @@ class BeliefEngine:
         self.beliefs[outcome.assumption]["last_audit_passed"] = bool(outcome.passed)
         self.beliefs[outcome.assumption]["reason"] = outcome.reason
         self.beliefs[outcome.assumption]["metadata"] = dict(outcome.metadata)
+        semantic_refs = list(outcome.metadata.get("semantic_searcher_refs", []) or [])
+        if semantic_refs:
+            self.beliefs[outcome.assumption]["semantic_evidence_refs"] = [str(item) for item in semantic_refs if str(item).strip()]
+        confidence_source = str(outcome.metadata.get("semantic_searcher_confidence_source") or "").strip()
+        if confidence_source:
+            self.beliefs[outcome.assumption]["semantic_confidence_source"] = confidence_source
         with open(self.state_file, "w") as f:
             json.dump(self.beliefs, f, indent=2)
         NexusTracer.record_belief_shift(outcome.task_id, old_confidence, confidence)

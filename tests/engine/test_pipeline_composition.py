@@ -413,6 +413,46 @@ def test_repair_audit_loop_runs_composed_a_phase_before_legacy_audit(tmp_path, m
     assert ctx.state.metadata["phase_skills"]["A"] == "composition-audit"
 
 
+def test_repair_audit_loop_composed_a_accepts_without_legacy_audit(tmp_path, monkeypatch):
+    executors = {"A": FakeExecutor("A", {"status": "APPROVED", "decision_id": "dec-a-pass", "skill_id": "composition-audit"})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-audit-pass",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-audit-pass"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(
+        pipeline,
+        "_execute_single_repair",
+        lambda *_args, **_kwargs: {
+            "status": "APPROVED",
+            "result": {"patch_generated": True, "patch_apply_success": True},
+            "current_decision_id": "dec-r",
+            "current_skill_id": "repair",
+        },
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_evaluate_audit_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy audit should not run")),
+    )
+    monkeypatch.setattr(pipeline, "_build_hallucination_evidence_bundle", lambda _ctx: {"code_artifacts": ["x.py"]})
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is True
+    assert executors["A"].calls == 1
+    assert ctx.state.metadata["composition_audit_phase_status"] == "APPROVED"
+    assert ctx.state.metadata["phase_decisions"]["A"] == "dec-a-pass"
+
+
 def test_repair_audit_loop_composed_a_rejects_status_without_fail_flag(tmp_path, monkeypatch):
     executors = {"A": FakeExecutor("A", {"status": "REJECTED", "reason": "logic_mismatch"})}
     pipeline = NexusPipeline(_engine(tmp_path, executors))
