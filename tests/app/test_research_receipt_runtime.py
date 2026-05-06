@@ -58,3 +58,20 @@ def test_build_capability_receipt_payloads_marks_runtime_autoreason_safe():
     by_name = {item["name"]: item for item in receipts}
     assert by_name["autoreason"]["public_claim_safe"] is True
     assert by_name["autoreason"]["evidence_refs"]
+
+
+def test_build_capability_receipt_payloads_preserves_runtime_repair_loop_receipt():
+    receipts = build_capability_receipt_payloads(
+        {"selected_capabilities": ["repair_loop"]},
+        {
+            "capabilities": {
+                "claim_verified": True,
+                "rlm_trace_present": True,
+                "rlm_trace_path": ".nexus/reports/rlm/trace.jsonl",
+            },
+        },
+    )
+
+    by_name = {item["name"]: item for item in receipts}
+    assert by_name["repair_loop"]["public_claim_safe"] is True
+    assert by_name["repair_loop"]["evidence_refs"] == [".nexus/reports/rlm/trace.jsonl"]

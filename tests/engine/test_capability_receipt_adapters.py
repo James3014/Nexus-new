@@ -332,3 +332,29 @@ def test_belief_receipt_can_cite_semantic_searcher_evidence_ref():
     assert receipts["belief"].public_claim_safe is True
     assert "semantic:policy:r1" in receipts["belief"].evidence_refs
     assert "confidence_source:semantic_searcher:policy:r1" in receipts["belief"].evidence_refs
+
+
+def test_repair_loop_receipt_requires_trace_and_verified_claim():
+    missing = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["repair_loop"]},
+            capabilities={"claim_verified": True},
+        )
+    }
+    proven = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["repair_loop"]},
+            capabilities={
+                "claim_verified": True,
+                "rlm_trace_present": True,
+                "rlm_trace_path": ".nexus/reports/rlm/trace.jsonl",
+            },
+        )
+    }
+
+    assert missing["repair_loop"].public_claim_safe is False
+    assert missing["repair_loop"].failure_reason == "selected_without_invocation"
+    assert proven["repair_loop"].public_claim_safe is True
+    assert proven["repair_loop"].evidence_refs == (".nexus/reports/rlm/trace.jsonl",)

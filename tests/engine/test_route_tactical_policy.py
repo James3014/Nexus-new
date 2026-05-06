@@ -59,3 +59,29 @@ def test_tactical_stop_policy_preserves_caller_budget_fields():
     assert policy["threshold"] == 1
     assert policy["budget_guard"] == "fail_closed"
     assert policy["tactical_sequence"][0] == "baseline"
+
+
+def test_tactical_stop_policy_requires_evidence_for_receipt_backed_research_runtime_tools():
+    plan = CapabilityPlanner().plan(
+        task_desc="Investigate architecture pivot with external doc scout and recursive repair trace.",
+        task_type="public_refactor",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 75,
+                "candidate_count": 3,
+                "plateau_detected": True,
+                "repair_signal": True,
+                "claim_uncertainty": True,
+            },
+            "research_context": {"role": "architecture_scout"},
+        },
+    )
+
+    policy = build_tactical_stop_policy(plan=plan, recommended_flow="hyper_sprint")
+    tool_map = {item["capability"]: item for item in policy["tactical_tool_map"]}
+
+    assert tool_map["external_doc_scout"]["evidence_required"] is True
+    assert tool_map["architecture_scout"]["evidence_required"] is True
+    assert tool_map["repair_loop"]["evidence_required"] is True

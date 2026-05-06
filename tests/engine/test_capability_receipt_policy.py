@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from nexus.engine.capability_receipt_policy import (
+    RECEIPT_BACKED_CAPABILITIES,
     is_public_claim_capability,
     is_receipt_backed_capability,
     is_route_quality_actionable_receipt,
@@ -8,11 +9,21 @@ from nexus.engine.capability_receipt_policy import (
     public_safe_receipt_names,
     route_quality_ignored_reasons,
 )
+from nexus.engine.capability_receipt_adapters import RECEIPT_ADAPTERS
+from nexus.engine.capability_aliases import normalize_capability_name
+
+
+def test_receipt_backed_capabilities_match_adapter_registry_after_alias_normalization():
+    adapter_capabilities = {normalize_capability_name(name) for name in RECEIPT_ADAPTERS}
+
+    assert adapter_capabilities - RECEIPT_BACKED_CAPABILITIES == set()
+    assert RECEIPT_BACKED_CAPABILITIES - adapter_capabilities == set()
 
 
 def test_receipt_policy_normalizes_legacy_judge_panel_alias():
     assert is_public_claim_capability("llm_judge_panel") is True
     assert is_receipt_backed_capability("llm_judge_panel") is True
+    assert "llm_judge_panel" not in RECEIPT_BACKED_CAPABILITIES
 
 
 def test_route_quality_policy_ignores_known_non_actionable_public_capability_reason():

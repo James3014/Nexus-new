@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import json
 
 from nexus.engine.capability_aliases import normalize_capability_name, normalize_capability_names, normalize_capability_receipt
 
@@ -50,6 +51,7 @@ ROUTE_QUALITY_THRESHOLDS = {
 RECEIPT_BACKED_CAPABILITIES = frozenset(
     {
         "artifact_gate",
+        "architecture_scout",
         "asi_constraint_extractor",
         "autoreason",
         "belief",
@@ -58,6 +60,7 @@ RECEIPT_BACKED_CAPABILITIES = frozenset(
         "ddtree",
         "delivery_gate",
         "drone",
+        "external_doc_scout",
         "formal_report",
         "hyper",
         "judge_panel",
@@ -65,6 +68,7 @@ RECEIPT_BACKED_CAPABILITIES = frozenset(
         "memory",
         "mempalace_gate",
         "nightshift",
+        "repair_loop",
         "research",
         "semantic_searcher",
         "swarm",
@@ -146,6 +150,74 @@ def public_safe_receipt_names(receipts: Any) -> set[str]:
         if name:
             names.add(name)
     return names
+
+
+def jsonish(value: Any, fallback: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+    return value if value is not None else fallback
+
+
+def route_tactical_tool_map(row: dict[str, Any]) -> list[dict[str, Any]]:
+    payload = jsonish(row.get("route_tactical_tool_map"), [])
+    if not isinstance(payload, list) or not payload:
+        payload = jsonish(row.get("route_tactical_tool_map_json"), [])
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def route_quality_counts_from_row(row: dict[str, Any]) -> dict[str, int] | None:
+    receipts = jsonish(row.get("capability_receipts"), [])
+    tactical_map = route_tactical_tool_map(row)
+    evidence_required_tools = {
+        normalize_capability_name(item.get("capability") or item.get("name"))
+        for item in tactical_map
+        if bool(item.get("evidence_required"))
+    }
+    evidence_required_tools = {name for name in evidence_required_tools if name}
+    if (not isinstance(receipts, list) or not receipts) and not evidence_required_tools:
+        return None
+    receipts = receipts if isinstance(receipts, list) else []
+    selected = invoked = evidence = outcome = 0
+    counted_names: set[str] = set()
+    receipts_by_name: dict[str, list[dict[str, Any]]] = {}
+    for receipt in receipts:
+        if not isinstance(receipt, dict):
+            continue
+        name = normalize_capability_name(receipt.get("name") or receipt.get("capability"))
+        if name:
+            receipts_by_name.setdefault(name, []).append(receipt)
+        if not is_route_quality_actionable_receipt(receipt):
+            continue
+        if name:
+            counted_names.add(name)
+        if bool(receipt.get("selected", False)):
+            selected += 1
+        if bool(receipt.get("invoked", False)):
+            invoked += 1
+        if bool(receipt.get("evidence_present") or receipt.get("evidence")):
+            evidence += 1
+        if bool(receipt.get("outcome_contributed", False)):
+            outcome += 1
+    for name in sorted(evidence_required_tools - counted_names):
+        selected += 1
+        matching_receipts = receipts_by_name.get(name, [])
+        if any(bool(receipt.get("invoked", False)) for receipt in matching_receipts):
+            invoked += 1
+        if any(bool(receipt.get("evidence_present") or receipt.get("evidence")) for receipt in matching_receipts):
+            evidence += 1
+        if any(bool(receipt.get("outcome_contributed", False)) for receipt in matching_receipts):
+            outcome += 1
+    return {
+        "selected": selected,
+        "invoked": invoked,
+        "evidence": evidence,
+        "outcome": outcome,
+    }
 
 
 def expected_capability_receipt_coverage(
