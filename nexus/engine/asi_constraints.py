@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nexus.engine.openseeker_alignment import MIN_EVOLUTION_STEPS
+
 
 class ASIConstraintExtractor:
     """Crystallize repeated ASI failures into cross-task constraints."""
@@ -19,6 +21,8 @@ class ASIConstraintExtractor:
         for raw in records or []:
             record = self._mapping(raw)
             if str(record.get("status", "")).lower() != "discard":
+                continue
+            if self._is_low_step_noise(record):
                 continue
             family = str(record.get("family") or "").strip()
             if not family:
@@ -59,6 +63,16 @@ class ASIConstraintExtractor:
         if is_dataclass(raw):
             return asdict(raw)
         return {}
+
+    def _is_low_step_noise(self, record: dict[str, Any]) -> bool:
+        raw = record.get("trajectory_step_count")
+        if raw in (None, ""):
+            return False
+        try:
+            steps = int(raw)
+        except (TypeError, ValueError):
+            return False
+        return 0 < steps < MIN_EVOLUTION_STEPS
 
     def _common_reason(self, reasons: list[str]) -> str:
         if not reasons:

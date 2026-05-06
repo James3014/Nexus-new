@@ -1044,6 +1044,13 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+        "openseeker_schema_version": "nexus_openseeker_alignment.v1",
+        "trajectory_step_count": 12,
+        "tool_action_count": 4,
+        "evidence_hop_count": 5,
+        "evidence_source_count": 3,
+        "low_step_filtered": False,
+        "long_horizon_ready": True,
     }
     evidence = _write_trial_evidence(
         evidence_root=tmp_path / "evidence",
@@ -1105,12 +1112,16 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 1.0
     assert payload["public_claim_gate"]["checks"]["route_cost_ledger_schema"] == "nexus_route_cost_ledger_v1"
     assert payload["public_claim_gate"]["checks"]["product_kpis_schema"] == "nexus_product_kpis_v1"
+    assert payload["public_claim_gate"]["checks"]["openseeker_alignment_schema"] == "nexus_openseeker_benchmark_kpis_v1"
     assert payload["route_cost_ledger"]["scope"] == "measured_benchmark_telemetry_not_billing_cost"
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["rows"] == 1
     assert payload["route_cost_ledger"]["arms"]["without_nexus"]["rows"] == 1
     assert payload["product_kpis"]["schema"] == "nexus_product_kpis_v1"
     assert payload["product_kpis"]["arms"]["with_nexus"]["avg_time_to_verified_sec"] == 0.0
     assert payload["product_kpis"]["arms"]["without_nexus"]["fail_closed_block_rate"] == 1.0
+    assert payload["openseeker_alignment"]["schema"] == "nexus_openseeker_benchmark_kpis_v1"
+    assert payload["openseeker_alignment"]["arms"]["with_nexus"]["avg_trajectory_step_count"] == 12.0
+    assert payload["openseeker_alignment"]["arms"]["with_nexus"]["long_horizon_ready_rate"] == 1.0
 
 
 def test_write_evidence_bundle_fails_gate_when_route_decision_missing(tmp_path: Path):

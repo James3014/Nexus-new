@@ -54,6 +54,36 @@ def test_asi_constraint_extractor_ignores_single_failure_noise():
     assert out["constraints"] == []
 
 
+def test_asi_constraint_extractor_ignores_successful_low_step_noise():
+    records = [
+        ASIRecord(
+            run_id=1,
+            hypothesis="minor retry tweak",
+            family="flow:retry_delay",
+            metric=0.0,
+            status="discard",
+            evidence="local smoke failed",
+            rollback_reason="timeout still races",
+            trajectory_step_count=3,
+        ),
+        ASIRecord(
+            run_id=2,
+            hypothesis="another minor retry tweak",
+            family="flow:retry_delay",
+            metric=0.0,
+            status="discard",
+            evidence="local smoke failed again",
+            rollback_reason="timeout still races",
+            trajectory_step_count=4,
+        ),
+    ]
+
+    out = ASIConstraintExtractor(min_failures=2).extract(records, task_id="task-websocket")
+
+    assert out["constraints_count"] == 0
+    assert out["constraints"] == []
+
+
 def test_asi_constraint_store_persists_and_matches_cross_task_constraints(tmp_path):
     constraint = {
         "schema": "nexus_asi_constraint_v1",

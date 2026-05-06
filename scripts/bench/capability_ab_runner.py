@@ -3585,6 +3585,50 @@ def _product_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _openseeker_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def number(row: dict[str, Any], key: str) -> float:
+        value = row.get(key)
+        if value in (None, ""):
+            return 0.0
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def mean(values: list[float]) -> float:
+        return round(sum(values) / len(values), 4) if values else 0.0
+
+    def arm(mode: str) -> dict[str, Any]:
+        arm_rows = [row for row in rows if str(row.get("mode")) == mode]
+        eligible = [row for row in arm_rows if bool(row.get("run_eligible", True))]
+        traced = [row for row in eligible if str(row.get("openseeker_schema_version") or "").strip()]
+        return {
+            "rows": len(arm_rows),
+            "eligible_rows": len(eligible),
+            "traced_rows": len(traced),
+            "trace_present_rate": round(len(traced) / len(eligible), 4) if eligible else 0.0,
+            "avg_trajectory_step_count": mean([number(row, "trajectory_step_count") for row in traced]),
+            "avg_tool_action_count": mean([number(row, "tool_action_count") for row in traced]),
+            "avg_evidence_hop_count": mean([number(row, "evidence_hop_count") for row in traced]),
+            "avg_evidence_source_count": mean([number(row, "evidence_source_count") for row in traced]),
+            "low_step_filtered_rate": _rate_for(traced, "low_step_filtered"),
+            "long_horizon_ready_rate": _rate_for(traced, "long_horizon_ready"),
+        }
+
+    return {
+        "schema": "nexus_openseeker_benchmark_kpis_v1",
+        "scope": "benchmark_row_telemetry",
+        "arms": {
+            "without_nexus": arm("without_nexus"),
+            "with_nexus": arm("with_nexus"),
+        },
+        "claim_boundary": [
+            "OpenSeeker alignment metrics describe trajectory richness, not model training quality.",
+            "Low-step filtering is a learning-data gate and must not be interpreted as task failure by itself.",
+        ],
+    }
+
+
 def write_evidence_bundle(
     *,
     out_dir: Path,
@@ -3661,6 +3705,7 @@ def write_evidence_bundle(
         gate_failures.append("runner_command_missing")
     route_cost_ledger = _route_cost_ledger(rows)
     product_kpis = _product_kpis(rows)
+    openseeker_kpis = _openseeker_kpis(rows)
     payload = {
         "schema": "nexus_public_benchmark_evidence_bundle_v2",
         "created_at_unix": int(time.time()),
@@ -3723,6 +3768,7 @@ def write_evidence_bundle(
         },
         "route_cost_ledger": route_cost_ledger,
         "product_kpis": product_kpis,
+        "openseeker_alignment": openseeker_kpis,
         "nexus_wearing": {
             "valid_rate": nexus_valid_rate,
             "gemini_uses_nexus_rate": legacy_gemini_uses_nexus_rate,
@@ -3760,6 +3806,8 @@ def write_evidence_bundle(
                 "route_cost_ledger_schema": route_cost_ledger.get("schema", ""),
                 "product_kpis_present": bool(product_kpis),
                 "product_kpis_schema": product_kpis.get("schema", ""),
+                "openseeker_alignment_present": bool(openseeker_kpis),
+                "openseeker_alignment_schema": openseeker_kpis.get("schema", ""),
             },
         },
     }

@@ -36,6 +36,7 @@ class ASIRecord:
     metric_name: str = "success_rate"
     decision: str = ""
     route_confidence: float = 0.0
+    trajectory_step_count: int = 0
     schema_version: str = "nexus_asi_record_v1"
 
 @dataclass
