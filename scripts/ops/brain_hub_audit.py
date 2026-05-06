@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -163,7 +164,7 @@ def scan_brain_hub(root: Path, paths: list[Path], *, manifest_path: Path | None 
 
 
 def _runtime_checklist(*, root: Path, guidance: dict[str, list[str]]) -> dict[str, Any]:
-    checklist: dict[str, Any] = {"s_stage_required_checks": {}, "failures": []}
+    checklist: dict[str, Any] = {"s_stage_required_checks": {}, "s_stage_runtime_contract": {}, "failures": []}
     if "S" not in guidance:
         return checklist
     for check, rel_path in S_STAGE_REQUIRED_CHECKS.items():
@@ -172,7 +173,58 @@ def _runtime_checklist(*, root: Path, guidance: dict[str, list[str]]) -> dict[st
         checklist["s_stage_required_checks"][check] = present
         if not present:
             checklist["failures"].append({"path": rel_path, "reason": "s_stage_required_check_missing", "check": check})
+    contract = validate_s_stage_runtime_contract(root)
+    checklist["s_stage_runtime_contract"] = contract["checks"]
+    checklist["failures"].extend(contract["failures"])
     return checklist
+
+
+def _literal_assignment(tree: ast.AST, name: str) -> Any:
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                try:
+                    return ast.literal_eval(node.value)
+                except Exception:
+                    return None
+    return None
+
+
+def validate_s_stage_runtime_contract(root: Path) -> dict[str, Any]:
+    rel_path = "nexus/engine/pipeline.py"
+    path = root / rel_path
+    checks: dict[str, bool] = {
+        "canonical_stage_flow": False,
+        "s_stage_description": False,
+        "stage_status_initializes_s": False,
+        "decision_journal_accepts_s_origin": False,
+    }
+    failures: list[dict[str, Any]] = []
+    if not path.exists():
+        return {
+            "checks": checks,
+            "failures": [{"path": rel_path, "reason": "s_stage_runtime_contract_missing_pipeline"}],
+        }
+    text = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return {
+            "checks": checks,
+            "failures": [{"path": rel_path, "reason": "s_stage_runtime_contract_parse_error", "error": str(exc)}],
+        }
+    stage_flow = _literal_assignment(tree, "CANONICAL_STAGE_FLOW")
+    stage_descriptions = _literal_assignment(tree, "STAGE_DESCRIPTIONS")
+    checks["canonical_stage_flow"] = stage_flow == ["S", "P", "X", "D", "R", "A", "C"]
+    checks["s_stage_description"] = isinstance(stage_descriptions, dict) and stage_descriptions.get("S") == "cold_start_seed"
+    checks["stage_status_initializes_s"] = "stage_status" in text and "CANONICAL_STAGE_FLOW" in text and '"pending"' in text
+    checks["decision_journal_accepts_s_origin"] = "decision_journal" in text and "origin_phase" in text and "event_type" in text
+    for check, passed in checks.items():
+        if not passed:
+            failures.append({"path": rel_path, "reason": "s_stage_runtime_contract_failed", "check": check})
+    return {"checks": checks, "failures": failures}
 
 
 def default_paths(root: Path) -> list[Path]:

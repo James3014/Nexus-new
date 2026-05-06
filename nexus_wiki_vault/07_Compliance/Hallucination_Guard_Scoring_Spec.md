@@ -20,9 +20,9 @@ title: Compliance - Hallucination Guard Scoring Spec
 | :--- | :--- | :--- | :--- |
 | **Evidence Gap** | 宣稱修復但無 Code/Log 證據。 | **-7.0** | YES |
 | **Benchmark Fail**| 宣稱完成但核心測項失敗。 | **-9.0** | **[FORCE_REJECTED]** |
-| **Logic Mismatch**| 變更內容與 Rationale 不符。 | **-4.0** | NO |
+| **Logic Mismatch**| 變更內容與 Rationale 不符。 | **-8.0** | YES |
 | **Punctuation Bypass**| 僅修改標點企圖繞過 Wiki。 | **-3.0** | NO |
-| **Verified Claim** | 具備實體 Tracelog 與引用 ID。| **+2.0** | - |
+| **Verified Claim** | 宣稱已驗證但缺少實體 Tracelog 與引用 ID。| **-8.0** | YES |
 
 ## ⚖️ 判決門檻 (Verdict Thresholds)
 

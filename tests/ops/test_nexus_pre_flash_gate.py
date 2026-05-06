@@ -39,10 +39,39 @@ def test_quick_payload_skips_flash_style_repair_subset():
     payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir="unused")
 
     assert payload["passed"] is True
-    assert {item["name"] for item in payload["checks"]} == {
+    assert {
         "repair_factory_skipped_route",
         "runtime_receipt_reconcile",
-    }
+        "hallucination_guard_drift",
+        "brain_hub_audit",
+    }.issubset({item["name"] for item in payload["checks"]})
+
+
+def test_quick_payload_includes_brain_hub_alignment_gate():
+    payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir="unused")
+
+    names = {item["name"] for item in payload["checks"]}
+    assert {
+        "repair_factory_skipped_route",
+        "runtime_receipt_reconcile",
+        "hallucination_guard_drift",
+        "brain_hub_audit",
+    }.issubset(names)
+
+
+def test_quick_payload_fails_when_brain_hub_audit_fails(monkeypatch):
+    class FailedHubAudit:
+        passed = False
+        documents = []
+        failures = [{"reason": "brain_hub_drift"}]
+        runtime_checklist = {"s_stage_runtime_contract": {"canonical_stage_flow": False}}
+
+    monkeypatch.setattr(nexus_pre_flash_gate, "scan_brain_hub", lambda *_args, **_kwargs: FailedHubAudit())
+
+    payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir="unused")
+
+    assert payload["passed"] is False
+    assert any(item["name"] == "brain_hub_audit" and not item["passed"] for item in payload["checks"])
 
 
 def test_repair_subset_command_uses_flash_style_nexus_only_path():

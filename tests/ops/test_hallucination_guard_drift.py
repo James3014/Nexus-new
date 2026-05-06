@@ -32,7 +32,10 @@ def test_hallucination_guard_drift_fails_schema_without_runtime_backing(tmp_path
     schema_path.write_text(json.dumps(schema), encoding="utf-8")
     doc_path.write_text("# Alignment\n", encoding="utf-8")
 
-    audit = audit_drift(schema_path=schema_path, alignment_doc=doc_path)
+    spec_path = tmp_path / "scoring.md"
+    spec_path.write_text("| **Evidence Gap** | x | **-7.0** | YES |\n", encoding="utf-8")
+
+    audit = audit_drift(schema_path=schema_path, alignment_doc=doc_path, scoring_spec=spec_path)
 
     assert audit.passed is False
     assert {"reason": "schema_check_missing_runtime_method", "check": "ghost_check"} in audit.failures
@@ -55,3 +58,41 @@ def test_hallucination_guard_drift_fails_when_runtime_probe_is_soft(tmp_path: Pa
 
     assert audit.passed is False
     assert {"reason": "runtime_probe_failed", "probe": "logic_mismatch_hard_rejects"} in audit.failures
+
+
+def test_drift_fails_when_scoring_spec_logic_mismatch_hard_block_disagrees(tmp_path: Path):
+    spec_path = tmp_path / "scoring.md"
+    spec_path.write_text(
+        "| **Evidence Gap** | x | **-7.0** | YES |\n"
+        "| **Benchmark Fail** | x | **-9.0** | YES |\n"
+        "| **Logic Mismatch** | x | **-8.0** | NO |\n"
+        "| **Verified Claim** | x | **-8.0** | YES |\n",
+        encoding="utf-8",
+    )
+
+    audit = audit_drift(scoring_spec=spec_path)
+
+    assert audit.passed is False
+    assert any(
+        item["reason"] == "scoring_spec_hard_block_mismatch" and item["rule_id"] == "logic_mismatch"
+        for item in audit.failures
+    )
+
+
+def test_drift_fails_when_scoring_spec_weight_disagrees_with_schema(tmp_path: Path):
+    spec_path = tmp_path / "scoring.md"
+    spec_path.write_text(
+        "| **Evidence Gap** | x | **-7.0** | YES |\n"
+        "| **Benchmark Fail** | x | **-9.0** | YES |\n"
+        "| **Logic Mismatch** | x | **-4.0** | YES |\n"
+        "| **Verified Claim** | x | **-8.0** | YES |\n",
+        encoding="utf-8",
+    )
+
+    audit = audit_drift(scoring_spec=spec_path)
+
+    assert audit.passed is False
+    assert any(
+        item["reason"] == "scoring_spec_weight_mismatch" and item["rule_id"] == "logic_mismatch"
+        for item in audit.failures
+    )

@@ -143,13 +143,52 @@ def test_logic_mismatch_hard_detector_allows_matching_contract():
     assert "logic_mismatch" not in analysis["triggers"]
 
 
+def test_logic_mismatch_structured_reasons_are_reported():
+    guard = HallucinationGuard()
+    analysis = guard.analyze(
+        "The runtime matches the contract.",
+        {
+            "code_artifacts": ["target.py"],
+            "logic_checks": [{"expected": "deny_by_default", "actual": "allow_by_default", "operator": "equals"}],
+        },
+    )
+
+    assert "logic_mismatch" in analysis["triggers"]
+    assert any(
+        detail["rule_id"] == "logic_mismatch"
+        and detail["detail"] == "logic_check_0:expected_actual_mismatch"
+        for detail in analysis["trigger_details"]
+    )
+
+
+def test_logic_mismatch_artifact_expected_actual_match_does_not_false_positive():
+    guard = HallucinationGuard()
+    analysis = guard.analyze(
+        "The runtime matches the contract.",
+        {"test_artifacts": ["expected: deny_by_default\nactual: deny_by_default"]},
+    )
+
+    assert "logic_mismatch" not in analysis["triggers"]
+
+
+def test_logic_mismatch_artifact_explicit_marker_still_rejects():
+    guard = HallucinationGuard()
+    analysis = guard.analyze(
+        "The runtime matches the contract.",
+        {"test_artifacts": ["expected != actual for route safety mode"]},
+    )
+
+    assert analysis["status"] == "REJECTED"
+    assert "logic_mismatch" in analysis["triggers"]
+
+
 @pytest.mark.parametrize(
     "evidence",
     [
         {"logic_mismatches": {"expected": "stable", "actual": "random"}},
         {"logic_mismatches": "expected != actual"},
         {"test_artifacts": ["logic mismatch: expected stable order actual random order"]},
-        {"command_artifacts": ["expected: deny_by_default actual: allow_by_default"]},
+        {"command_artifacts": ["expected != actual: deny_by_default vs allow_by_default"]},
     ],
 )
 def test_logic_mismatch_hard_detector_rejects_common_evidence_shapes(evidence):

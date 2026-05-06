@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -16,6 +17,7 @@ from nexus.core.hallucination_guard import HallucinationGuard
 
 DEFAULT_SCHEMA = REPO_ROOT / "nexus" / "schemas" / "hallucination_index_v1.json"
 DEFAULT_ALIGNMENT_DOC = REPO_ROOT / "wiki" / "critique_brain_hub_alignment_gap.md"
+DEFAULT_SCORING_SPEC = REPO_ROOT / "nexus_wiki_vault" / "07_Compliance" / "Hallucination_Guard_Scoring_Spec.md"
 REQUIRED_CHECKS = {
     "claim_completion_with_low_success",
     "contradiction_with_failed_artifacts",
@@ -26,6 +28,12 @@ DOC_FEATURE_MARKERS = {
     "logic_mismatch": ("logic mismatch", "邏輯", "mismatch"),
     "verified_claim_without_evidence": ("verified claim", "驗證", "evidence"),
 }
+SCORING_SPEC_RULE_MAP = {
+    "evidence gap": "evidence_gap",
+    "benchmark fail": "contradiction_with_failed_artifacts",
+    "logic mismatch": "logic_mismatch",
+    "verified claim": "verified_claim_without_evidence",
+}
 
 
 @dataclass(frozen=True)
@@ -35,6 +43,7 @@ class DriftAudit:
     runtime_probes: dict[str, bool]
     required_checks: list[str]
     doc_features: dict[str, bool]
+    scoring_spec_rules: dict[str, dict[str, Any]]
     failures: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -101,10 +110,87 @@ def _runtime_probes(guard: HallucinationGuard) -> dict[str, bool]:
     }
 
 
+def _parse_boolish_hard_block(text: str) -> bool | None:
+    normalized = text.strip().strip("*[]").lower()
+    if not normalized or normalized == "-":
+        return None
+    if "force_rejected" in normalized or normalized in {"yes", "true", "hard"}:
+        return True
+    if normalized in {"no", "false", "none"}:
+        return False
+    return None
+
+
+def _parse_scoring_spec(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    rules: dict[str, dict[str, Any]] = {}
+    row_re = re.compile(r"^\|\s*\*\*(?P<name>[^*]+)\*\*\s*\|[^|]*\|\s*\*\*(?P<weight>[+-]?[0-9]+(?:\.[0-9]+)?)\*\*\s*\|\s*(?P<hard>[^|]+)\|")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = row_re.match(line)
+        if not match:
+            continue
+        display = match.group("name").strip()
+        rule_id = SCORING_SPEC_RULE_MAP.get(display.lower())
+        if not rule_id:
+            continue
+        hard_block = _parse_boolish_hard_block(match.group("hard"))
+        rules[rule_id] = {
+            "display_name": display,
+            "weight": abs(float(match.group("weight"))),
+            "hard_block": hard_block,
+        }
+    return rules
+
+
+def _scoring_spec_failures(
+    *,
+    schema: dict[str, Any],
+    scoring_spec: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    metrics = schema.get("metrics", {}) if isinstance(schema.get("metrics"), dict) else {}
+    thresholds = schema.get("thresholds", {}) if isinstance(schema.get("thresholds"), dict) else {}
+    rejected_threshold = float(thresholds.get("REJECTED", 6) or 6)
+    for rule_id in sorted(SCORING_SPEC_RULE_MAP.values()):
+        metric = metrics.get(rule_id)
+        spec = scoring_spec.get(rule_id)
+        if not isinstance(metric, dict):
+            failures.append({"reason": "scoring_spec_rule_missing_schema", "rule_id": rule_id})
+            continue
+        if not spec:
+            failures.append({"reason": "schema_rule_missing_scoring_spec", "rule_id": rule_id})
+            continue
+        schema_weight = abs(float(metric.get("weight", 0) or 0))
+        if schema_weight != float(spec.get("weight", 0) or 0):
+            failures.append(
+                {
+                    "reason": "scoring_spec_weight_mismatch",
+                    "rule_id": rule_id,
+                    "schema_weight": schema_weight,
+                    "spec_weight": spec.get("weight"),
+                }
+            )
+        spec_hard = spec.get("hard_block")
+        if spec_hard is not None:
+            schema_hard = bool(metric.get("force_rejected", False) or schema_weight >= rejected_threshold)
+            if bool(spec_hard) != schema_hard:
+                failures.append(
+                    {
+                        "reason": "scoring_spec_hard_block_mismatch",
+                        "rule_id": rule_id,
+                        "schema_hard_block": schema_hard,
+                        "spec_hard_block": spec_hard,
+                    }
+                )
+    return failures
+
+
 def audit_drift(
     *,
     schema_path: Path = DEFAULT_SCHEMA,
     alignment_doc: Path = DEFAULT_ALIGNMENT_DOC,
+    scoring_spec: Path = DEFAULT_SCORING_SPEC,
     guard_factory: Any | None = None,
 ) -> DriftAudit:
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -113,6 +199,7 @@ def audit_drift(
     runtime_checks = _runtime_checks(guard)
     runtime_probes = _runtime_probes(guard)
     doc_features = _doc_features(alignment_doc)
+    scoring_spec_rules = _parse_scoring_spec(scoring_spec)
     failures: list[dict[str, Any]] = []
 
     for check in schema_checks:
@@ -131,6 +218,7 @@ def audit_drift(
     for probe, passed in runtime_probes.items():
         if not passed:
             failures.append({"reason": "runtime_probe_failed", "probe": probe})
+    failures.extend(_scoring_spec_failures(schema=schema, scoring_spec=scoring_spec_rules))
 
     return DriftAudit(
         schema_checks=schema_checks,
@@ -138,6 +226,7 @@ def audit_drift(
         runtime_probes=runtime_probes,
         required_checks=sorted(REQUIRED_CHECKS),
         doc_features=doc_features,
+        scoring_spec_rules=scoring_spec_rules,
         failures=failures,
     )
 
@@ -146,9 +235,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit HallucinationGuard schema/runtime/wiki alignment.")
     parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
     parser.add_argument("--alignment-doc", default=str(DEFAULT_ALIGNMENT_DOC))
+    parser.add_argument("--scoring-spec", default=str(DEFAULT_SCORING_SPEC))
     args = parser.parse_args(argv)
 
-    audit = audit_drift(schema_path=Path(args.schema), alignment_doc=Path(args.alignment_doc))
+    audit = audit_drift(schema_path=Path(args.schema), alignment_doc=Path(args.alignment_doc), scoring_spec=Path(args.scoring_spec))
     print(json.dumps({"schema_version": "nexus_hallucination_guard_drift.v1", "passed": audit.passed, **asdict(audit)}, indent=2, ensure_ascii=False))
     return 0 if audit.passed else 1
 

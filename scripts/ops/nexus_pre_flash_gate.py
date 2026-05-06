@@ -14,6 +14,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from nexus.app.research_flow_service import _runtime_receipt_plan_payload, build_route
+from scripts.ops.brain_hub_audit import scan_brain_hub
+from scripts.ops.hallucination_guard_drift import audit_drift
 
 
 REPAIR_TASKS = (
@@ -133,6 +135,47 @@ def validate_runtime_receipt_reconcile() -> list[dict[str, Any]]:
     if "autoreason" not in selected_restored:
         return [_fail("runtime_receipt_reconcile", "runtime_autoreason_success_not_restored", selected=sorted(selected_restored))]
     return [_ok("runtime_receipt_reconcile", pruned=sorted(selected_pruned), restored=sorted(selected_restored))]
+
+
+def validate_brain_hub_alignment(repo_root: Path) -> list[dict[str, Any]]:
+    drift = audit_drift()
+    hub = scan_brain_hub(repo_root, [], manifest_path=repo_root / "docs" / "ops" / "brain_hub_manifest.json")
+    checks: list[dict[str, Any]] = []
+    if drift.passed:
+        checks.append(
+            _ok(
+                "hallucination_guard_drift",
+                runtime_probes=drift.runtime_probes,
+                scoring_spec_rules=drift.scoring_spec_rules,
+            )
+        )
+    else:
+        checks.append(
+            _fail(
+                "hallucination_guard_drift",
+                "drift_audit_failed",
+                failures=drift.failures,
+                runtime_probes=drift.runtime_probes,
+            )
+        )
+    if hub.passed:
+        checks.append(
+            _ok(
+                "brain_hub_audit",
+                document_count=len(hub.documents),
+                s_stage_runtime_contract=hub.runtime_checklist.get("s_stage_runtime_contract", {}),
+            )
+        )
+    else:
+        checks.append(
+            _fail(
+                "brain_hub_audit",
+                "brain_hub_audit_failed",
+                failures=hub.failures,
+                s_stage_runtime_contract=hub.runtime_checklist.get("s_stage_runtime_contract", {}),
+            )
+        )
+    return checks
 
 
 def repair_subset_command(output_dir: str) -> list[str]:
@@ -330,6 +373,7 @@ def build_payload(repo_root: Path, *, run_repair: bool, output_dir: str, repair_
     checks = [
         *validate_repair_factory_skipped_routes(repo_root),
         *validate_runtime_receipt_reconcile(),
+        *validate_brain_hub_alignment(repo_root),
     ]
     if run_repair:
         checks.append(run_repair_subset(repo_root, output_dir, timeout_sec=repair_timeout_sec))

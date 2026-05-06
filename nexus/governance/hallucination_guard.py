@@ -162,13 +162,34 @@ class HallucinationGuard:
     def _check_logic_mismatch(self) -> bool:
         if self._logic_mismatch_reasons():
             return True
-        mismatches = self.evidence_bundle.get("logic_mismatches", []) if isinstance(self.evidence_bundle, dict) else []
+        return False
+
+    def _logic_mismatch_reasons(self) -> list[str]:
+        if not isinstance(self.evidence_bundle, dict):
+            return []
+        checks = self.evidence_bundle.get("logic_checks", [])
+        reasons: list[str] = []
+        if isinstance(checks, list):
+            for index, item in enumerate(checks):
+                if not isinstance(item, dict):
+                    continue
+                expected = item.get("expected")
+                actual = item.get("actual")
+                operator = str(item.get("operator") or "equals").strip().lower()
+                if operator in {"equals", "=="} and expected != actual:
+                    reasons.append(f"logic_check_{index}:expected_actual_mismatch")
+                elif operator == "contains" and str(expected) not in str(actual):
+                    reasons.append(f"logic_check_{index}:expected_not_contained")
+                elif operator == "not_contains" and str(expected) in str(actual):
+                    reasons.append(f"logic_check_{index}:forbidden_value_present")
+
+        mismatches = self.evidence_bundle.get("logic_mismatches", [])
         if isinstance(mismatches, list) and any(bool(item) for item in mismatches):
-            return True
+            reasons.append("logic_mismatches:list")
         if isinstance(mismatches, dict) and mismatches:
-            return True
+            reasons.append("logic_mismatches:dict")
         if isinstance(mismatches, str) and mismatches.strip():
-            return True
+            reasons.append("logic_mismatches:string")
         evidence_blob = "\n".join(self._iter_artifact_values()).lower()
         markers = (
             "logic mismatch",
@@ -177,32 +198,9 @@ class HallucinationGuard:
             "actual != expected",
             "expected/actual mismatch",
         )
-        if any(marker in evidence_blob for marker in markers):
-            return True
-        return bool(
-            re.search(r"\bexpected\s*[:=].+\bactual\s*[:=]", evidence_blob, re.S)
-            or re.search(r"\bactual\s*[:=].+\bexpected\s*[:=]", evidence_blob, re.S)
-        )
-
-    def _logic_mismatch_reasons(self) -> list[str]:
-        if not isinstance(self.evidence_bundle, dict):
-            return []
-        checks = self.evidence_bundle.get("logic_checks", [])
-        if not isinstance(checks, list):
-            return []
-        reasons: list[str] = []
-        for index, item in enumerate(checks):
-            if not isinstance(item, dict):
-                continue
-            expected = item.get("expected")
-            actual = item.get("actual")
-            operator = str(item.get("operator") or "equals").strip().lower()
-            if operator in {"equals", "=="} and expected != actual:
-                reasons.append(f"logic_check_{index}:expected_actual_mismatch")
-            elif operator == "contains" and str(expected) not in str(actual):
-                reasons.append(f"logic_check_{index}:expected_not_contained")
-            elif operator == "not_contains" and str(expected) in str(actual):
-                reasons.append(f"logic_check_{index}:forbidden_value_present")
+        for marker in markers:
+            if marker in evidence_blob:
+                reasons.append(f"artifact_marker:{marker.replace(' ', '_')}")
         return reasons
 
     def _check_verified_claim_without_evidence(self) -> bool:
@@ -307,7 +305,11 @@ class HallucinationGuard:
             if isinstance(check_name, str) and check_name:
                 check_fn = getattr(self, f"_check_{check_name}", None)
                 if callable(check_fn) and check_fn():
-                    trigger_detail = f"keywords={','.join(hits)}" if hits else f"check={check_name}"
+                    if check_name == "logic_mismatch":
+                        reasons = self._logic_mismatch_reasons()
+                        trigger_detail = ";".join(reasons) if reasons else f"check={check_name}"
+                    else:
+                        trigger_detail = f"keywords={','.join(hits)}" if hits else f"check={check_name}"
                     self._apply_trigger(rule_id, weight, trigger_detail)
                     if bool(metric.get("force_rejected", False)):
                         forced_rejected = True
