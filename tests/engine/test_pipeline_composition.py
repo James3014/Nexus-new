@@ -86,6 +86,28 @@ def test_pipeline_prefers_phase_executor_composition_over_mixin_methods(tmp_path
     assert executors["D"].calls == 1
 
 
+def test_pipeline_emits_typed_phase_transition_events(tmp_path, monkeypatch):
+    executors = {
+        "P": FakeExecutor("P", {"plan": "ok"}),
+        "X": FakeExecutor("X", {"findings": ["ok"]}),
+        "D": FakeExecutor("D", {"diagnosis": "ok"}),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    seen = {}
+    monkeypatch.setattr(pipeline, "_repair_audit_loop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(pipeline, "_stage_crystallize", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "_finalize_and_report", lambda ctx, success, _tracer: seen.update(events=ctx.event_store.get_events()) or success)
+
+    assert pipeline.run("repair vague runtime behavior", task_id="typed-events") is True
+
+    event_types = [event.event_type for event in seen["events"]]
+    assert "phase_transition" in event_types
+    assert "lifecycle_hook" in event_types
+    assert "phase_start" not in event_types
+    assert "phase_end" not in event_types
+    assert "lifecycle_pre" not in event_types
+
+
 def test_pipeline_registers_audit_phase_executor(tmp_path):
     executors = {
         "P": FakeExecutor("P", {"plan": "ok"}),

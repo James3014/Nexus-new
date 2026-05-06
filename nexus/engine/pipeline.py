@@ -22,7 +22,7 @@ from nexus.learning.skill_exchange import SkillExchange
 from nexus.learning.skill_store import SkillStore
 from nexus.events.transport import NexusEventBus
 from nexus.events.store import EventStore
-from nexus.events.contracts import NexusEvent
+from nexus.events.contracts import NexusEvent, build_lifecycle_hook_event, build_phase_transition_event
 from nexus.telemetry.otel_config import init_otel
 from nexus.telemetry.tracer import NexusTracer
 from nexus.engine.cli_pregate import run_cli_pregate, _auto_detect_verify_commands
@@ -167,13 +167,14 @@ class NexusPipeline(
                 
                 try:
                     # 🚀 [v24.0] Pre-Phase Lifecycle Hook
-                    ctx.event_store.append(NexusEvent(
-                        event_id=f"evt_pre_{self.name}_{int(time.time()*1000)}",
-                        task_id=ctx.task_id,
-                        phase=self.name,
-                        event_type="lifecycle_pre",
-                        payload={"nas_aggression": ctx.bayesian_params.get("nas_aggression", 0.0)}
-                    ))
+                    ctx.event_store.append(
+                        build_lifecycle_hook_event(
+                            task_id=ctx.task_id,
+                            phase=self.name,
+                            hook="pre",
+                            payload={"nas_aggression": ctx.bayesian_params.get("nas_aggression", 0.0)},
+                        )
+                    )
 
                     # 🧪 [Round 20] Non-blocking Execution Guard
                     start_ts = time.time()
@@ -456,24 +457,26 @@ class NexusPipeline(
                         
                     logger.info("🚀 [Pipeline] Executing Plugin Phase: %s", plugin.name)
                     
-                    ctx.event_store.append(NexusEvent(
-                        event_id=f"evt_start_{plugin.name}_{int(time.time()*1000)}",
-                        task_id=ctx.task_id,
-                        phase=plugin.name,
-                        event_type="phase_start",
-                        payload={"name": plugin.name}
-                    ))
+                    ctx.event_store.append(
+                        build_phase_transition_event(
+                            task_id=ctx.task_id,
+                            phase=plugin.name,
+                            transition="start",
+                            payload={"name": plugin.name},
+                        )
+                    )
                     
                     try:
                         result = plugin.execute(self, ctx)
                         
-                        ctx.event_store.append(NexusEvent(
-                            event_id=f"evt_end_{plugin.name}_{int(time.time()*1000)}",
-                            task_id=ctx.task_id,
-                            phase=plugin.name,
-                            event_type="phase_end",
-                            payload={"status": result.status}
-                        ))
+                        ctx.event_store.append(
+                            build_phase_transition_event(
+                                task_id=ctx.task_id,
+                                phase=plugin.name,
+                                transition="end",
+                                payload={"status": result.status},
+                            )
+                        )
                         
                         if result.status in {"FAILED", "fail"}:
                             logger.error("❌ Phase %s failed, terminating pipeline.", plugin.name)
@@ -540,11 +543,12 @@ class _PhaseExecutorPlugin(PhasePlugin):
         return bool(should_run(ctx)) if callable(should_run) else True
 
     def execute(self, pipeline: NexusPipeline, ctx: PipelineContext) -> PhaseResult:
-        ctx.event_store.append(NexusEvent(
-            event_id=f"evt_pre_{self.name}_{int(time.time()*1000)}",
-            task_id=ctx.task_id,
-            phase=self.name,
-            event_type="lifecycle_pre",
-            payload={"nas_aggression": ctx.bayesian_params.get("nas_aggression", 0.0)}
-        ))
+        ctx.event_store.append(
+            build_lifecycle_hook_event(
+                task_id=ctx.task_id,
+                phase=self.name,
+                hook="pre",
+                payload={"nas_aggression": ctx.bayesian_params.get("nas_aggression", 0.0)},
+            )
+        )
         return self.executor.execute(pipeline, ctx)

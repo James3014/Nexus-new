@@ -10,7 +10,17 @@ from nexus.events.signal_queue_service import SignalQueueService
 
 logger = logging.getLogger(__name__)
 
-SEMANTIC_EVENT_TYPES = frozenset({"audit_failed", "learning_decision", "evidence_accepted", "healing_artifact_announced"})
+SEMANTIC_EVENT_TYPES = frozenset(
+    {
+        "audit_failed",
+        "learning_decision",
+        "evidence_accepted",
+        "healing_artifact_announced",
+        "lifecycle_hook",
+        "phase_transition",
+        "spec_bind",
+    }
+)
 RAW_EVENT_TYPES = frozenset(
     {
         "phase_start",
@@ -164,8 +174,12 @@ class NexusEventBus:
             return []
 
     @classmethod
-    def audit_event_contracts(cls, limit: int = 100, *, fail_on_raw: bool = False) -> Dict[str, Any]:
+    def audit_event_contracts(cls, limit: int = 100, *, fail_on_raw: bool = False, raw_policy: str | None = None) -> Dict[str, Any]:
         """Report raw-vs-semantic event usage during the migration window."""
+        if raw_policy is None:
+            raw_policy = "block" if fail_on_raw else "warn"
+        if raw_policy not in {"allow", "warn", "block", "strict"}:
+            raise ValueError(f"unsupported raw event policy: {raw_policy}")
         events = cls.get_recent_events(limit=limit)
         semantic = []
         raw = []
@@ -178,12 +192,16 @@ class NexusEventBus:
                 raw.append(event_type)
             else:
                 unknown.append(event_type)
-        passed = not unknown and not (fail_on_raw and raw)
+        fail_raw = raw_policy in {"block", "strict"}
+        passed = not unknown and not (fail_raw and raw)
         failure_reasons = []
+        warning_reasons = []
         if unknown:
             failure_reasons.append("unknown_event_types_present")
-        if fail_on_raw and raw:
+        if fail_raw and raw:
             failure_reasons.append("raw_event_types_present")
+        elif raw_policy == "warn" and raw:
+            warning_reasons.append("raw_event_types_present")
         return {
             "schema_version": "nexus_event_contract_audit.v1",
             "events_scanned": len(events),
@@ -194,7 +212,9 @@ class NexusEventBus:
             "raw_event_types": sorted(set(raw)),
             "unknown_event_types": sorted(set(unknown)),
             "transition_status": "raw_events_present" if raw else "semantic_only",
-            "strict_raw_mode": bool(fail_on_raw),
+            "strict_raw_mode": bool(fail_raw),
+            "raw_policy": raw_policy,
+            "warning_reasons": warning_reasons,
             "failure_reasons": failure_reasons,
             "passed": passed,
         }

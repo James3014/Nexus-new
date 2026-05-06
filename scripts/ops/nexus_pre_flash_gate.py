@@ -186,10 +186,12 @@ def validate_brain_hub_alignment(repo_root: Path) -> list[dict[str, Any]]:
     return checks
 
 
-def validate_event_contracts(repo_root: Path, *, strict_raw: bool | None = None) -> list[dict[str, Any]]:
+def validate_event_contracts(repo_root: Path, *, strict_raw: bool | None = None, raw_policy: str | None = None) -> list[dict[str, Any]]:
     NexusEventBus.configure(repo_root)
     strict_raw = os.environ.get("NEXUS_EVENT_RAW_STRICT") == "1" if strict_raw is None else bool(strict_raw)
-    audit = NexusEventBus.audit_event_contracts(fail_on_raw=strict_raw)
+    if raw_policy is None:
+        raw_policy = os.environ.get("NEXUS_EVENT_RAW_POLICY") or ("block" if strict_raw else "warn")
+    audit = NexusEventBus.audit_event_contracts(raw_policy=raw_policy)
     if audit.get("passed"):
         return [
             _ok(
@@ -199,6 +201,8 @@ def validate_event_contracts(repo_root: Path, *, strict_raw: bool | None = None)
                 raw_event_count=audit.get("raw_event_count", 0),
                 transition_status=audit.get("transition_status", ""),
                 strict_raw_mode=audit.get("strict_raw_mode", False),
+                raw_policy=audit.get("raw_policy", ""),
+                warning_reasons=audit.get("warning_reasons", []),
                 unknown_event_types=audit.get("unknown_event_types", []),
             )
         ]
@@ -216,6 +220,8 @@ def validate_event_contracts(repo_root: Path, *, strict_raw: bool | None = None)
             raw_event_types=audit.get("raw_event_types", []),
             unknown_event_types=audit.get("unknown_event_types", []),
             strict_raw_mode=audit.get("strict_raw_mode", False),
+            raw_policy=audit.get("raw_policy", ""),
+            warning_reasons=audit.get("warning_reasons", []),
             failure_reasons=failure_reasons,
         )
     ]

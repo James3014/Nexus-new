@@ -101,6 +101,19 @@ def test_event_contract_gate_can_fail_on_raw_strict_mode(monkeypatch, tmp_path: 
     assert checks[0]["details"]["strict_raw_mode"] is True
 
 
+def test_event_contract_gate_warns_on_raw_default_mode(tmp_path: Path):
+    from nexus.events.transport import NexusEventBus
+
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.publish("phase_start", {"task_id": "task-1", "phase": "P"})
+
+    checks = nexus_pre_flash_gate.validate_event_contracts(tmp_path)
+
+    assert checks[0]["passed"] is True
+    assert checks[0]["details"]["raw_policy"] == "warn"
+    assert checks[0]["details"]["warning_reasons"] == ["raw_event_types_present"]
+
+
 def test_event_contract_gate_accepts_explicit_strict_raw_argument(tmp_path: Path):
     from nexus.events.transport import NexusEventBus
 
