@@ -67,3 +67,26 @@ Lesson:
 Closure:
 
 - The test now supplies low root-cause confidence before asserting belief ordering.
+
+### Tactical evidence requirements must not treat internal checkpoints as executors
+
+Failure:
+
+- A full local `capability_route_smoke.py` run solved all Nexus-only tasks, but the
+  route-quality gate failed with `selected_to_invoked_rate=0.563` and
+  `unnecessary_selected_rate=0.437`.
+- The tactical map marked every selected node with `evidence_outputs` as
+  `evidence_required`, including internal checkpoints such as `pregate`,
+  `plan_quality_gate`, `sandbox`, and `learn_phase_slo` that do not have independent
+  runtime receipt semantics.
+
+Lesson:
+
+- The route-quality gate should remain strict, but the tactical policy must distinguish
+  receipt-backed runtime capabilities from internal planner/governance checkpoints.
+
+Closure:
+
+- `route_tactical_policy` now marks `evidence_required=true` only for
+  receipt-backed capabilities, while retaining internal checkpoints in the tactical
+  sequence for ordering and audit context.

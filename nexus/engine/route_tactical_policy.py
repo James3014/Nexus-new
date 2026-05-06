@@ -35,6 +35,31 @@ EVIDENCE_GATHERING_CAPABILITIES = {
     "codeintel",
 }
 
+RECEIPT_BACKED_CAPABILITIES = {
+    "artifact_gate",
+    "asi_constraint_extractor",
+    "autoreason",
+    "belief",
+    "claim_gate",
+    "codeintel",
+    "ddtree",
+    "delivery_gate",
+    "drone",
+    "formal_report",
+    "hyper",
+    "judge_panel",
+    "lancedb",
+    "llm_judge_panel",
+    "memory",
+    "mempalace_gate",
+    "nightshift",
+    "research",
+    "semantic_searcher",
+    "swarm",
+    "swarm_quiet_moment",
+    "ultra_review",
+}
+
 
 def build_tactical_stop_policy(
     *,
@@ -60,7 +85,7 @@ def build_tactical_stop_policy(
                 "capability": name,
                 "after": tactical_sequence[index - 1] if index else None,
                 "purpose": "gather_evidence" if name in EVIDENCE_GATHERING_CAPABILITIES else "verify_or_govern",
-                "evidence_required": bool(node and node.evidence_outputs),
+                "evidence_required": bool(node and node.evidence_outputs and name in RECEIPT_BACKED_CAPABILITIES),
             }
         )
     policy.setdefault("tactical_sequence", tactical_sequence)

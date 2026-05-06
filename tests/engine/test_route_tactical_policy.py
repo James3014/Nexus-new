@@ -32,6 +32,14 @@ def test_tactical_stop_policy_orders_and_marks_evidence_required_tools():
         item["capability"] == "research" and item["purpose"] == "gather_evidence"
         for item in policy["tactical_tool_map"]
     )
+    assert any(
+        item["capability"] == "pregate" and not item["evidence_required"]
+        for item in policy["tactical_tool_map"]
+    )
+    assert any(
+        item["capability"] == "plan_quality_gate" and not item["evidence_required"]
+        for item in policy["tactical_tool_map"]
+    )
 
 
 def test_tactical_stop_policy_preserves_caller_budget_fields():
