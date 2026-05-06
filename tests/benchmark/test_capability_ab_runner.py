@@ -1220,8 +1220,12 @@ def test_write_evidence_bundle_fails_gate_when_with_token_measured_low(tmp_path:
     payload = json.loads(bundle.read_text(encoding="utf-8"))
 
     assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert payload["public_delivery_gate"]["verdict"] == "PASS"
+    assert payload["public_cost_claim_gate"]["verdict"] == "FAIL"
     assert "with_token_measured_below_threshold" in payload["public_claim_gate"]["failures"]
+    assert "with_token_measured_below_threshold" in payload["public_cost_claim_gate"]["failures"]
     assert payload["public_claim_gate"]["checks"]["token_measured_rate_with"] == 0.0
+    assert payload["public_cost_claim_gate"]["checks"]["cost_claim_public_safe"] is False
 
 
 def test_write_evidence_bundle_v2_fails_gate_for_missing_hidden_verifier_and_trust_mismatch(tmp_path: Path):

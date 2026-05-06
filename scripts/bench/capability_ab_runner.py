@@ -3666,46 +3666,78 @@ def write_evidence_bundle(
     token_measured_rate_with = _rate_for(with_rows, "token_measured")
     token_measured_rate_without = _rate_for(without_rows, "token_measured")
     eligibility_complete = len(eligible_with) == len(with_rows) and len(eligible_without) == len(without_rows)
-    gate_failures = []
+    delivery_gate_failures = []
+    cost_gate_failures = []
     if config.get("parallel_arms") == "smoke-only":
-        gate_failures.append("parallel_smoke")
+        delivery_gate_failures.append("parallel_smoke")
     if len(with_rows) == 0 or len(without_rows) == 0:
-        gate_failures.append("single_arm_run")
+        delivery_gate_failures.append("single_arm_run")
     if len(with_models) != 1 or len(without_models) != 1 or with_models != without_models:
-        gate_failures.append("model_mismatch")
+        delivery_gate_failures.append("model_mismatch")
     if not same_task_trials:
-        gate_failures.append("task_trial_mismatch")
+        delivery_gate_failures.append("task_trial_mismatch")
     if not hidden_verifier_mode:
-        gate_failures.append("hidden_verifier_disabled")
+        delivery_gate_failures.append("hidden_verifier_disabled")
     if not eligibility_complete:
-        gate_failures.append("run_eligibility_incomplete")
+        delivery_gate_failures.append("run_eligibility_incomplete")
     if with_trust_mismatch_rate > 0.0:
-        gate_failures.append("with_trust_mismatch_above_zero")
+        delivery_gate_failures.append("with_trust_mismatch_above_zero")
     if without_trust_mismatch_rate > 0.0:
-        gate_failures.append("without_trust_mismatch_above_zero")
+        delivery_gate_failures.append("without_trust_mismatch_above_zero")
     if nexus_valid_rate < 1.0:
-        gate_failures.append("nexus_wearing_below_threshold")
+        delivery_gate_failures.append("nexus_wearing_below_threshold")
     if max(model_uses_nexus_rate, legacy_gemini_uses_nexus_rate) < 1.0:
-        gate_failures.append("model_uses_nexus_below_threshold")
+        delivery_gate_failures.append("model_uses_nexus_below_threshold")
     if nexus_context_delivered_rate < 1.0:
-        gate_failures.append("nexus_context_delivered_below_threshold")
+        delivery_gate_failures.append("nexus_context_delivered_below_threshold")
     if nexus_usage_valid_rate < 1.0:
-        gate_failures.append("nexus_usage_valid_below_threshold")
+        delivery_gate_failures.append("nexus_usage_valid_below_threshold")
     if claim_verified_rate < 1.0:
-        gate_failures.append("claim_verified_below_threshold")
+        delivery_gate_failures.append("claim_verified_below_threshold")
     if route_decision_present_rate < 1.0:
-        gate_failures.append("route_decision_missing")
+        delivery_gate_failures.append("route_decision_missing")
     if token_measured_rate_with < 0.8:
-        gate_failures.append("with_token_measured_below_threshold")
+        cost_gate_failures.append("with_token_measured_below_threshold")
     if token_measured_rate_without < 0.8:
-        gate_failures.append("without_token_measured_below_threshold")
+        cost_gate_failures.append("without_token_measured_below_threshold")
     if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
-        gate_failures.append("manifest_missing")
+        delivery_gate_failures.append("manifest_missing")
     if not config.get("runner_command"):
-        gate_failures.append("runner_command_missing")
+        delivery_gate_failures.append("runner_command_missing")
     route_cost_ledger = _route_cost_ledger(rows)
     product_kpis = _product_kpis(rows)
     openseeker_kpis = _openseeker_kpis(rows)
+    delivery_gate_passed = not delivery_gate_failures
+    cost_claim_passed = delivery_gate_passed and not cost_gate_failures
+    public_gate_checks = {
+        "same_model": bool(with_models and without_models and with_models == without_models),
+        "same_task_trials": same_task_trials,
+        "hidden_verifier_mode": hidden_verifier_mode,
+        "run_eligibility_complete": eligibility_complete,
+        "eligible_with_nexus": len(eligible_with),
+        "eligible_without_nexus": len(eligible_without),
+        "trust_mismatch_free": with_trust_mismatch_rate == 0.0 and without_trust_mismatch_rate == 0.0,
+        "with_trust_mismatch_rate": with_trust_mismatch_rate,
+        "without_trust_mismatch_rate": without_trust_mismatch_rate,
+        "nexus_wearing_valid_rate": nexus_valid_rate,
+        "model_uses_nexus_rate": max(model_uses_nexus_rate, legacy_gemini_uses_nexus_rate),
+        "nexus_context_delivered_rate": nexus_context_delivered_rate,
+        "nexus_usage_valid_rate": nexus_usage_valid_rate,
+        "claim_verified_rate": claim_verified_rate,
+        "route_decision_present_rate": route_decision_present_rate,
+        "token_measured_rate_with": token_measured_rate_with,
+        "token_measured_rate_without": token_measured_rate_without,
+        "runner_command_present": bool(config.get("runner_command")),
+        "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
+        "raw_file_hashes_present": True,
+        "artifact_hash_count": len(artifact_files),
+        "route_cost_ledger_present": bool(route_cost_ledger),
+        "route_cost_ledger_schema": route_cost_ledger.get("schema", ""),
+        "product_kpis_present": bool(product_kpis),
+        "product_kpis_schema": product_kpis.get("schema", ""),
+        "openseeker_alignment_present": bool(openseeker_kpis),
+        "openseeker_alignment_schema": openseeker_kpis.get("schema", ""),
+    }
     payload = {
         "schema": "nexus_public_benchmark_evidence_bundle_v2",
         "created_at_unix": int(time.time()),
@@ -3777,38 +3809,27 @@ def write_evidence_bundle(
             "nexus_usage_valid_rate": nexus_usage_valid_rate,
             "claim_verified_rate": claim_verified_rate,
         },
-        "public_claim_gate": {
-            "verdict": "PASS" if not gate_failures else "FAIL",
-            "failures": sorted(set(gate_failures)),
+        "public_delivery_gate": {
+            "verdict": "PASS" if delivery_gate_passed else "FAIL",
+            "failures": sorted(set(delivery_gate_failures)),
+            "checks": public_gate_checks,
+            "claim_scope": "verified_delivery_only",
+        },
+        "public_cost_claim_gate": {
+            "verdict": "PASS" if cost_claim_passed else "FAIL",
+            "failures": sorted(set(cost_gate_failures if delivery_gate_passed else delivery_gate_failures + cost_gate_failures)),
             "checks": {
-                "same_model": bool(with_models and without_models and with_models == without_models),
-                "same_task_trials": same_task_trials,
-                "hidden_verifier_mode": hidden_verifier_mode,
-                "run_eligibility_complete": eligibility_complete,
-                "eligible_with_nexus": len(eligible_with),
-                "eligible_without_nexus": len(eligible_without),
-                "trust_mismatch_free": with_trust_mismatch_rate == 0.0 and without_trust_mismatch_rate == 0.0,
-                "with_trust_mismatch_rate": with_trust_mismatch_rate,
-                "without_trust_mismatch_rate": without_trust_mismatch_rate,
-                "nexus_wearing_valid_rate": nexus_valid_rate,
-                "model_uses_nexus_rate": max(model_uses_nexus_rate, legacy_gemini_uses_nexus_rate),
-                "nexus_context_delivered_rate": nexus_context_delivered_rate,
-                "nexus_usage_valid_rate": nexus_usage_valid_rate,
-                "claim_verified_rate": claim_verified_rate,
-                "route_decision_present_rate": route_decision_present_rate,
-                "token_measured_rate_with": token_measured_rate_with,
-                "token_measured_rate_without": token_measured_rate_without,
-                "runner_command_present": bool(config.get("runner_command")),
-                "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
-                "raw_file_hashes_present": True,
-                "artifact_hash_count": len(artifact_files),
-                "route_cost_ledger_present": bool(route_cost_ledger),
-                "route_cost_ledger_schema": route_cost_ledger.get("schema", ""),
-                "product_kpis_present": bool(product_kpis),
-                "product_kpis_schema": product_kpis.get("schema", ""),
-                "openseeker_alignment_present": bool(openseeker_kpis),
-                "openseeker_alignment_schema": openseeker_kpis.get("schema", ""),
+                **public_gate_checks,
+                "delivery_gate_passed": delivery_gate_passed,
+                "cost_claim_public_safe": cost_claim_passed,
             },
+            "claim_scope": "token_and_cost_claims",
+        },
+        "public_claim_gate": {
+            "verdict": "PASS" if cost_claim_passed else "FAIL",
+            "failures": sorted(set(delivery_gate_failures + cost_gate_failures)),
+            "checks": public_gate_checks,
+            "claim_scope": "legacy_aggregate_delivery_and_cost_gate",
         },
     }
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
