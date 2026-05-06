@@ -125,6 +125,8 @@ def register(nexus_group, REPO_ROOT):
             affected_nodes=list(nodes) or ["local"],
             resume_after_seconds=resume_after,
         )
+        event["observe"] = {"status": "observed", "node_count": len(event["affected_nodes"])}
+        event["rollback"] = {"status": "armed", "allowed": True}
         if output_json:
             print(json.dumps(event, indent=2, ensure_ascii=False))
             return
@@ -132,4 +134,6 @@ def register(nexus_group, REPO_ROOT):
         click.echo(f"Affected nodes: {', '.join(event['affected_nodes'])}")
         click.echo(f"Resume after: {event['resume_after_seconds']}s")
         click.echo("Allowed actions: observe, report, rollback")
+        click.echo("Observe: observed")
+        click.echo("Rollback: armed")
         click.echo("Production writes: blocked")

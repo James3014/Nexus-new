@@ -30,6 +30,10 @@ def test_formal_report_emits_markdown_when_evidence_chain_is_complete():
     assert out["status"] == "READY"
     assert out["claim_status"] == "PASS"
     assert "## Judge Panel" in out["markdown"]
+    assert "## Method" in out["markdown"]
+    assert "## External Citations" in out["markdown"]
+    assert "## Limitations" in out["markdown"]
+    assert "verification_matrix" in out["sections"]
     assert "flow:retry_delay" in out["markdown"]
 
 

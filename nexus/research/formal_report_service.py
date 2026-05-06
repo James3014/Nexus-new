@@ -16,6 +16,8 @@ class FormalReportService:
         judge_votes: list[dict[str, Any]],
         verification: list[dict[str, Any]],
         route_receipts: list[dict[str, Any]],
+        citations: list[dict[str, Any]] | None = None,
+        limitations: list[str] | None = None,
     ) -> dict[str, Any]:
         evidence_ready = self._evidence_ready(
             judge_votes=judge_votes,
@@ -40,17 +42,27 @@ class FormalReportService:
                 "## ASI Constraints",
                 self._bullet_json(asi_constraints),
                 "",
+                "## Method",
+                "Candidate tournament, deterministic hard-judge checks, route receipts, and verification evidence are evaluated before any claim is marked PASS.",
+                "",
+                "## External Citations",
+                self._bullet_json(citations or []),
+                "",
                 "## Verification Matrix",
                 self._bullet_json(verification),
                 "",
                 "## Route Receipts",
                 self._bullet_json(route_receipts),
+                "",
+                "## Limitations",
+                self._bullet_text(limitations or ["runtime report only; PDF/LaTeX export is opt-in and not required for gate"]),
             ]
         )
         return {
             "schema": "nexus_formal_report_v1",
             "status": status,
             "claim_status": claim_status,
+            "sections": ["hypothesis", "evidence_gate", "judge_panel", "asi_constraints", "method", "external_citations", "verification_matrix", "route_receipts", "limitations"],
             "markdown": markdown,
         }
 
@@ -78,6 +90,11 @@ class FormalReportService:
             parts = [f"{key}={value}" for key, value in sorted(row.items())]
             out.append(f"- {'; '.join(parts)}")
         return "\n".join(out)
+
+    def _bullet_text(self, rows: list[str]) -> str:
+        if not rows:
+            return "- none"
+        return "\n".join(f"- {item}" for item in rows if str(item).strip())
 
     def write_markdown(self, *, repo_root: Path, path: str | Path, report: dict[str, Any]) -> str:
         out = Path(path)

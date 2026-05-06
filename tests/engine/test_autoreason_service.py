@@ -171,6 +171,8 @@ def test_autoreason_semantic_judge_can_beat_evidence_count_heuristic():
     assert out["winner"] == "b"
     assert out["judge_mode"] == "semantic"
     assert out["semantic_judged"] is True
+    assert out["quorum_met"] is True
+    assert out["judge_sources"] == ["fake_semantic", "deterministic_hard"]
     assert out["judge_votes"][0]["rubric"]["semantic_fit"] == 0.95
 
 
@@ -187,6 +189,33 @@ def test_autoreason_falls_back_when_semantic_provider_unavailable():
     assert out["status"] == "SUCCESS"
     assert out["judge_mode"] == "heuristic_fallback"
     assert out["semantic_judged"] is False
+    assert out["quorum_met"] is False
+    assert out["provider_unavailable"] == ["failing_semantic"]
+
+
+def test_autoreason_requires_deterministic_hard_judge_for_semantic_claim():
+    out = AutoreasonService(judge_providers=[FakeSemanticJudge()]).run(
+        [
+            {
+                "candidate_id": "unsafe",
+                "summary": "fix by disabling test and bypass validation",
+                "score": 0.99,
+                "evidence_refs": ["pytest skipped"],
+            },
+            {
+                "candidate_id": "safe",
+                "summary": "fix with regression test",
+                "score": 0.5,
+                "evidence_refs": ["pytest passed"],
+            },
+        ],
+        task_desc="fix regression without bypassing validation",
+        stop_threshold=1,
+    )
+
+    assert out["deterministic_hard_ok"] is False
+    assert out["semantic_judged"] is False
+    assert out["judge_mode"] == "heuristic_fallback"
 
 
 def test_autoreason_deterministic_judge_prefers_quality_over_evidence_count():

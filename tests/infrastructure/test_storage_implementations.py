@@ -49,7 +49,10 @@ def test_lancedb_storage_unscoped_retrieve_is_fail_closed(tmp_path):
     storage.store("tenant-a", "lesson", {"content": "alpha secret"})
 
     assert storage.retrieve("alpha", artifact_type="lesson", limit=5) == []
-    assert storage.retrieve("alpha", artifact_type="lesson", limit=5, include_all_tenants=True)
+    assert storage.retrieve("alpha", artifact_type="lesson", limit=5, include_all_tenants=True) == []
+    assert storage.audit_events[-1]["event"] == "lancedb_global_search_blocked"
+    assert storage.audit_events[-1]["reason"] == "missing_audit_reason"
+    assert storage.retrieve("alpha", artifact_type="lesson", limit=5, include_all_tenants=True, audit_reason="explicit_include_all_tenants")
     assert storage.audit_events[-1]["event"] == "lancedb_global_search"
     assert storage.audit_events[-1]["include_all_tenants"] is True
     assert storage.audit_events[-1]["reason"] == "explicit_include_all_tenants"

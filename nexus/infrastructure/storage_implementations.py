@@ -37,6 +37,17 @@ class LanceDBStorage(MemoryStorage):
         if tenant_id:
             tenant_dirs = list((tenants_root / tenant_id / "lancedb").glob("*.jsonl"))
         elif include_all_tenants:
+            audit_reason = str(kwargs.get("audit_reason") or "").strip()
+            if not audit_reason:
+                self.audit_events.append(
+                    {
+                        "event": "lancedb_global_search_blocked",
+                        "query": str(query),
+                        "include_all_tenants": True,
+                        "reason": "missing_audit_reason",
+                    }
+                )
+                return []
             tenant_dirs = list(tenants_root.glob("*/lancedb/*.jsonl"))
             self.audit_events.append(
                 {
@@ -44,7 +55,7 @@ class LanceDBStorage(MemoryStorage):
                     "query": str(query),
                     "include_all_tenants": True,
                     "tenant_count": len({path.parts[-3] for path in tenant_dirs if len(path.parts) >= 3}),
-                    "reason": str(kwargs.get("audit_reason") or "explicit_include_all_tenants"),
+                    "reason": audit_reason,
                 }
             )
         else:

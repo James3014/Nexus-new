@@ -221,10 +221,25 @@ class AutoreasonService:
             a_streak_threshold=stop_threshold,
         )
         parsed = self.run_adversarial_critique(candidates=parsed, task_desc=task_desc)
-        judge_votes = self._semantic_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
-        judge_mode = "semantic" if judge_votes else ("heuristic_fallback" if self.judge_providers else "deterministic_evidence_quality")
-        if not judge_votes:
-            judge_votes = self._evidence_quality_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
+        semantic_votes, provider_unavailable = self._semantic_votes(
+            task_desc=task_desc,
+            candidates=parsed,
+            judge_count=cfg.judge_count,
+        )
+        deterministic_votes = self._evidence_quality_votes(task_desc=task_desc, candidates=parsed, judge_count=cfg.judge_count)
+        deterministic_hard_ok = not any(candidate.fatal for candidate in parsed)
+        judge_sources = []
+        if semantic_votes:
+            judge_sources.extend(str(vote.get("judge") or "semantic") for vote in semantic_votes)
+        judge_sources.append("deterministic_hard")
+        judge_sources = list(dict.fromkeys(judge_sources))
+        quorum_met = bool(semantic_votes and deterministic_hard_ok and len(judge_sources) >= 2)
+        if quorum_met:
+            judge_mode = "semantic"
+            judge_votes = [*semantic_votes, *deterministic_votes[: max(1, cfg.judge_count - len(semantic_votes))]]
+        else:
+            judge_mode = "heuristic_fallback" if self.judge_providers else "deterministic_evidence_quality"
+            judge_votes = deterministic_votes
         borda_scores = {candidate.candidate_id: 0 for candidate in parsed}
         for vote in judge_votes:
             for rank, candidate_id in enumerate(vote["ranking"]):
@@ -241,7 +256,11 @@ class AutoreasonService:
             "judge_votes": judge_votes,
             "judge_count": cfg.judge_count,
             "judge_mode": judge_mode,
-            "semantic_judged": judge_mode == "semantic",
+            "semantic_judged": quorum_met,
+            "judge_sources": judge_sources,
+            "provider_unavailable": provider_unavailable,
+            "quorum_met": quorum_met,
+            "deterministic_hard_ok": deterministic_hard_ok,
             "borda_scores": borda_scores,
             "stop_reason": stop_reason,
             "winner_role": winner.candidate_id if winner.candidate_id in {"A", "B", "AB"} else "legacy",
@@ -413,18 +432,20 @@ class AutoreasonService:
         task_desc: str,
         candidates: list[AutoreasonCandidate],
         judge_count: int,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[str]]:
         if not self.judge_providers:
-            return []
+            return [], []
         votes: list[dict[str, Any]] = []
-        safe_count = max(1, min(7, int(judge_count or 3)))
+        unavailable: list[str] = []
+        safe_count = max(1, min(len(self.judge_providers), int(judge_count or 3)))
         valid_ids = {item.candidate_id for item in candidates}
         for index in range(safe_count):
-            provider = self.judge_providers[index % len(self.judge_providers)]
+            provider = self.judge_providers[index]
             try:
                 vote = provider.rank(task_desc=task_desc, candidates=list(candidates))
             except Exception:
-                return []
+                unavailable.append(str(getattr(provider, "name", f"semantic-{index + 1}")))
+                continue
             ranking = [str(item) for item in vote.get("ranking", []) if str(item) in valid_ids]
             for candidate in candidates:
                 if candidate.candidate_id not in ranking:
@@ -437,7 +458,7 @@ class AutoreasonService:
                     "rubric": vote.get("rubric") if isinstance(vote.get("rubric"), dict) else {},
                 }
             )
-        return votes
+        return votes, unavailable
 
     def _vote(self, judge: str, candidates: list[AutoreasonCandidate]) -> dict[str, Any]:
         if judge == "evidence":

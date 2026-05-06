@@ -91,3 +91,5 @@ def test_swarm_quiet_moment_cli_emits_non_mutating_packet(tmp_path):
     assert payload["allowed_actions"] == ["observe", "report", "rollback"]
     assert payload["affected_nodes"] == ["pilot-a"]
     assert payload["resume_after_seconds"] == 12
+    assert payload["observe"]["status"] == "observed"
+    assert payload["rollback"]["status"] == "armed"

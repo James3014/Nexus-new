@@ -92,3 +92,47 @@ class DistantScoutPlanner:
         if target_boundary == "storage_search_boundary":
             return ["nexus/infrastructure/storage_implementations.py", "nexus/services/semantic_searcher.py"]
         return ["nexus/app/research_flow_service.py"]
+
+
+class ArchitectureRefactorExecutor:
+    """Validate and materialize a bounded architecture refactor contract."""
+
+    def prepare(self, *, plan: dict[str, Any], requested_files: list[str]) -> dict[str, Any]:
+        if str(plan.get("status") or "") != "READY":
+            return {
+                "schema": "nexus_architecture_refactor_execution_v1",
+                "status": "BLOCKED",
+                "reason": "scout_plan_not_ready",
+                "allowed_files": [],
+                "target_files": [],
+            }
+        bounded = plan.get("bounded_refactor") if isinstance(plan.get("bounded_refactor"), dict) else {}
+        allowed = [str(item) for item in bounded.get("allowed_files", []) or [] if str(item).strip()]
+        requested = [str(item) for item in requested_files or [] if str(item).strip()]
+        out_of_scope = [item for item in requested if item not in set(allowed)]
+        requires_new_test = bool(bounded.get("requires_new_test", False))
+        rollback = plan.get("rollback_plan") if isinstance(plan.get("rollback_plan"), dict) else {}
+        rollback_ready = bool(rollback.get("restore_points"))
+        status = "READY" if requested and not out_of_scope and requires_new_test and rollback_ready else "BLOCKED"
+        failures: list[str] = []
+        if not requested:
+            failures.append("no_target_files")
+        if out_of_scope:
+            failures.append("target_outside_bounded_refactor")
+        if not requires_new_test:
+            failures.append("missing_new_test_requirement")
+        if not rollback_ready:
+            failures.append("rollback_plan_missing_restore_points")
+        return {
+            "schema": "nexus_architecture_refactor_execution_v1",
+            "status": status,
+            "target_boundary": plan.get("target_boundary", ""),
+            "recommended_family": plan.get("recommended_family", ""),
+            "allowed_files": allowed,
+            "target_files": requested,
+            "out_of_scope_files": out_of_scope,
+            "requires_new_test": requires_new_test,
+            "rollback_ready": rollback_ready,
+            "verification_commands": list(plan.get("verification_commands", []) or []),
+            "failures": failures,
+        }
