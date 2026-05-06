@@ -123,12 +123,28 @@ class AutoreasonReceiptAdapter:
             for key in ("incumbent_id", "stop_reason"):
                 if payload.get(key):
                     refs.append(f"{key}:{payload.get(key)}")
+            critique = payload.get("adversarial_critique") if isinstance(payload.get("adversarial_critique"), dict) else {}
+            for candidate_id, item in sorted(critique.items()):
+                if not isinstance(item, dict):
+                    continue
+                if item.get("fatal"):
+                    refs.append(f"discriminator_fatal:{candidate_id}")
+                critiques = item.get("critiques", []) if isinstance(item.get("critiques"), list) else []
+                if critiques:
+                    refs.append(f"discriminator_critiques:{candidate_id}:{len(critiques)}")
+                defenses = item.get("defenses", []) if isinstance(item.get("defenses"), list) else []
+                if defenses:
+                    refs.append(f"discriminator_defenses:{candidate_id}:{len(defenses)}")
         clean_refs = [
             str(item).strip()
             for item in refs
             if item is not None and str(item).strip() and str(item).strip() != "None"
         ]
-        gate_passed = bool(winner and claim_verified)
+        winner_failed_discriminator = False
+        critique = payload.get("adversarial_critique") if isinstance(payload.get("adversarial_critique"), dict) else {}
+        if winner and isinstance(critique.get(str(winner)), dict):
+            winner_failed_discriminator = bool(critique[str(winner)].get("fatal"))
+        gate_passed = bool(winner and claim_verified and not winner_failed_discriminator)
         return merge_capability_receipt(
             name=self.name,
             selected=True,
@@ -414,7 +430,12 @@ class BeliefReceiptAdapter:
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
         refs = _as_refs(payload.get("belief_refs") or payload.get("belief_ref"))
+        semantic_refs = _as_refs(payload.get("semantic_searcher_refs") or payload.get("semantic_refs"))
+        refs = list(dict.fromkeys([*refs, *semantic_refs]))
         invoked = bool(payload.get("belief_confidence") is not None or refs or _pillar_present(payload, "belief"))
+        confidence_source = str(payload.get("belief_confidence_source") or payload.get("semantic_searcher_confidence_source") or "").strip()
+        if confidence_source:
+            refs.append(f"confidence_source:{confidence_source}")
         gate_passed = bool(refs and _as_bool(payload.get("belief_gate_passed", False)))
         return merge_capability_receipt(
             name=self.name,

@@ -116,6 +116,51 @@ def test_logic_mismatch_forces_rejected():
     assert "logic_mismatch" in analysis["triggers"]
 
 
+def test_logic_mismatch_hard_detector_rejects_expected_actual_drift():
+    guard = HallucinationGuard()
+    analysis = guard.analyze(
+        "The runtime matches the contract.",
+        {
+            "code_artifacts": ["target.py"],
+            "logic_checks": [{"expected": "deny_by_default", "actual": "allow_by_default", "operator": "equals"}],
+        },
+    )
+
+    assert analysis["status"] == "REJECTED"
+    assert "logic_mismatch" in analysis["triggers"]
+
+
+def test_logic_mismatch_hard_detector_allows_matching_contract():
+    guard = HallucinationGuard()
+    analysis = guard.analyze(
+        "The runtime matches the contract.",
+        {
+            "code_artifacts": ["target.py"],
+            "logic_checks": [{"expected": "deny_by_default", "actual": "deny_by_default", "operator": "equals"}],
+        },
+    )
+
+    assert "logic_mismatch" not in analysis["triggers"]
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"logic_mismatches": {"expected": "stable", "actual": "random"}},
+        {"logic_mismatches": "expected != actual"},
+        {"test_artifacts": ["logic mismatch: expected stable order actual random order"]},
+        {"command_artifacts": ["expected: deny_by_default actual: allow_by_default"]},
+    ],
+)
+def test_logic_mismatch_hard_detector_rejects_common_evidence_shapes(evidence):
+    guard = HallucinationGuard()
+    payload = {"code_artifacts": ["target.py"], **evidence}
+    analysis = guard.analyze("The runtime matches the contract.", payload)
+
+    assert analysis["status"] == "REJECTED"
+    assert "logic_mismatch" in analysis["triggers"]
+
+
 def test_verified_claim_without_evidence_forces_rejected():
     guard = HallucinationGuard()
     analysis = guard.analyze("This fix is verified.", {"code_artifacts": [], "test_artifacts": []})

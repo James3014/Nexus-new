@@ -32,6 +32,7 @@ DOC_FEATURE_MARKERS = {
 class DriftAudit:
     schema_checks: list[str]
     runtime_checks: list[str]
+    runtime_probes: dict[str, bool]
     required_checks: list[str]
     doc_features: dict[str, bool]
     failures: list[dict[str, Any]] = field(default_factory=list)
@@ -67,15 +68,50 @@ def _doc_features(path: Path) -> dict[str, bool]:
     }
 
 
+def _runtime_probes(guard: HallucinationGuard) -> dict[str, bool]:
+    rejected = guard.analyze(
+        "The runtime matches the contract.",
+        {
+            "code_artifacts": ["nexus/core/hallucination_guard.py"],
+            "logic_checks": [
+                {
+                    "expected": "deny_by_default",
+                    "actual": "allow_by_default",
+                    "operator": "equals",
+                }
+            ],
+        },
+    )
+    allowed = guard.analyze(
+        "The runtime matches the contract.",
+        {
+            "code_artifacts": ["nexus/core/hallucination_guard.py"],
+            "logic_checks": [
+                {
+                    "expected": "deny_by_default",
+                    "actual": "deny_by_default",
+                    "operator": "equals",
+                }
+            ],
+        },
+    )
+    return {
+        "logic_mismatch_hard_rejects": "logic_mismatch" in rejected.get("triggers", []),
+        "logic_mismatch_allows_match": "logic_mismatch" not in allowed.get("triggers", []),
+    }
+
+
 def audit_drift(
     *,
     schema_path: Path = DEFAULT_SCHEMA,
     alignment_doc: Path = DEFAULT_ALIGNMENT_DOC,
+    guard_factory: Any | None = None,
 ) -> DriftAudit:
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    guard = HallucinationGuard(schema_path=schema_path)
+    guard = guard_factory(schema_path=schema_path) if guard_factory is not None else HallucinationGuard(schema_path=schema_path)
     schema_checks = _schema_checks(schema)
     runtime_checks = _runtime_checks(guard)
+    runtime_probes = _runtime_probes(guard)
     doc_features = _doc_features(alignment_doc)
     failures: list[dict[str, Any]] = []
 
@@ -92,10 +128,14 @@ def audit_drift(
             failures.append({"reason": "documented_feature_missing_schema", "feature": feature})
         if documented and feature not in runtime_checks:
             failures.append({"reason": "documented_feature_missing_runtime", "feature": feature})
+    for probe, passed in runtime_probes.items():
+        if not passed:
+            failures.append({"reason": "runtime_probe_failed", "probe": probe})
 
     return DriftAudit(
         schema_checks=schema_checks,
         runtime_checks=runtime_checks,
+        runtime_probes=runtime_probes,
         required_checks=sorted(REQUIRED_CHECKS),
         doc_features=doc_features,
         failures=failures,

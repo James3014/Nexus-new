@@ -20,6 +20,13 @@ PHASE_ALIASES = {
     "A": ("phase a", "a phase", "audit", "acceptance", "審核", "驗證"),
     "C": ("phase c", "c phase", "crystallize", "learning", "結晶", "學習"),
 }
+S_STAGE_REQUIRED_CHECKS = {
+    "stage_flow": "nexus/engine/pipeline.py",
+    "stage_descriptions": "nexus/engine/pipeline.py",
+    "stage_status": "nexus/engine/pipeline.py",
+    "decision_journal": "nexus/engine/pipeline.py",
+    "stage_flow_test": "tests/engine/test_pipeline_stage_flow.py",
+}
 CODE_REF_RE = re.compile(r"(?:^|[`\s(])((?:nexus|scripts|tests|docs|wiki)/[A-Za-z0-9_./\-]+\.(?:py|md|json|yaml|yml))")
 STATUS_RE = re.compile(r"^\s*\[PHYSICAL_STATUS:\s*([^\]]+)\]", re.I | re.M)
 HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$", re.M)
@@ -42,6 +49,7 @@ class HubDocument:
 class HubAudit:
     documents: list[HubDocument]
     guidance: dict[str, list[str]]
+    runtime_checklist: dict[str, Any]
     failures: list[dict[str, Any]]
 
     @property
@@ -149,7 +157,22 @@ def scan_brain_hub(root: Path, paths: list[Path], *, manifest_path: Path | None 
         for phase in doc.phases:
             guidance[phase].append(doc.path)
     guidance = {phase: sorted(set(files)) for phase, files in guidance.items() if files}
-    return HubAudit(documents=docs, guidance=guidance, failures=failures)
+    runtime_checklist = _runtime_checklist(root=root, guidance=guidance)
+    failures.extend(runtime_checklist.get("failures", []))
+    return HubAudit(documents=docs, guidance=guidance, runtime_checklist=runtime_checklist, failures=failures)
+
+
+def _runtime_checklist(*, root: Path, guidance: dict[str, list[str]]) -> dict[str, Any]:
+    checklist: dict[str, Any] = {"s_stage_required_checks": {}, "failures": []}
+    if "S" not in guidance:
+        return checklist
+    for check, rel_path in S_STAGE_REQUIRED_CHECKS.items():
+        path = root / rel_path
+        present = path.exists() and check.removesuffix("_test") in path.read_text(encoding="utf-8")
+        checklist["s_stage_required_checks"][check] = present
+        if not present:
+            checklist["failures"].append({"path": rel_path, "reason": "s_stage_required_check_missing", "check": check})
+    return checklist
 
 
 def default_paths(root: Path) -> list[Path]:

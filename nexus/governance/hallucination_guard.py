@@ -160,11 +160,50 @@ class HallucinationGuard:
         return any(marker in evidence_blob for marker in fail_markers)
 
     def _check_logic_mismatch(self) -> bool:
+        if self._logic_mismatch_reasons():
+            return True
         mismatches = self.evidence_bundle.get("logic_mismatches", []) if isinstance(self.evidence_bundle, dict) else []
-        if isinstance(mismatches, list) and mismatches:
+        if isinstance(mismatches, list) and any(bool(item) for item in mismatches):
+            return True
+        if isinstance(mismatches, dict) and mismatches:
+            return True
+        if isinstance(mismatches, str) and mismatches.strip():
             return True
         evidence_blob = "\n".join(self._iter_artifact_values()).lower()
-        return "logic mismatch" in evidence_blob or "expected != actual" in evidence_blob
+        markers = (
+            "logic mismatch",
+            "logical mismatch",
+            "expected != actual",
+            "actual != expected",
+            "expected/actual mismatch",
+        )
+        if any(marker in evidence_blob for marker in markers):
+            return True
+        return bool(
+            re.search(r"\bexpected\s*[:=].+\bactual\s*[:=]", evidence_blob, re.S)
+            or re.search(r"\bactual\s*[:=].+\bexpected\s*[:=]", evidence_blob, re.S)
+        )
+
+    def _logic_mismatch_reasons(self) -> list[str]:
+        if not isinstance(self.evidence_bundle, dict):
+            return []
+        checks = self.evidence_bundle.get("logic_checks", [])
+        if not isinstance(checks, list):
+            return []
+        reasons: list[str] = []
+        for index, item in enumerate(checks):
+            if not isinstance(item, dict):
+                continue
+            expected = item.get("expected")
+            actual = item.get("actual")
+            operator = str(item.get("operator") or "equals").strip().lower()
+            if operator in {"equals", "=="} and expected != actual:
+                reasons.append(f"logic_check_{index}:expected_actual_mismatch")
+            elif operator == "contains" and str(expected) not in str(actual):
+                reasons.append(f"logic_check_{index}:expected_not_contained")
+            elif operator == "not_contains" and str(expected) in str(actual):
+                reasons.append(f"logic_check_{index}:forbidden_value_present")
+        return reasons
 
     def _check_verified_claim_without_evidence(self) -> bool:
         text = self.response_text.lower()

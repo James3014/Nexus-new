@@ -2381,6 +2381,7 @@ def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, mon
         returncode = 0
 
     def fake_run(_cmd, **kwargs):
+        captured["cmd"] = list(_cmd)
         captured["env"] = kwargs.get("env", {})
         return _Proc()
 
@@ -2479,6 +2480,7 @@ def test_run_with_nexus_can_enable_routing_layer_executors(tmp_path: Path, monke
         returncode = 0
 
     def fake_run(_cmd, **kwargs):
+        captured["cmd"] = list(_cmd)
         captured["env"] = kwargs.get("env", {})
         return _Proc()
 
@@ -2698,6 +2700,7 @@ def test_run_with_nexus_can_enable_routing_layer_executors_without_llm(tmp_path:
         returncode = 0
 
     def fake_run(_cmd, **kwargs):
+        captured["cmd"] = list(_cmd)
         captured["env"] = kwargs.get("env", {})
         return _Proc()
 
@@ -2722,6 +2725,8 @@ def test_run_with_nexus_can_enable_routing_layer_executors_without_llm(tmp_path:
     assert captured["env"]["NEXUS_DDTREE_EXECUTOR"] == "1"
     assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "3"
     assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
+    assert "--candidate-count" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--candidate-count") + 1] == "3"
     assert out["run_eligible"] is True
 
 

@@ -248,3 +248,68 @@ def test_legacy_llm_judge_panel_selected_capability_canonicalizes_to_judge_panel
 
     assert "llm_judge_panel" not in receipts
     assert receipts["judge_panel"].public_claim_safe is True
+
+
+def test_autoreason_receipt_records_discriminator_and_blocks_fatal_winner():
+    plan = {"selected_capabilities": ["autoreason"]}
+
+    safe_winner = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            autoreason={
+                "enabled": True,
+                "status": "SUCCESS",
+                "winner": "safe",
+                "judge_votes": [{"judge": "deterministic", "ranking": ["safe", "unsafe"]}],
+                "adversarial_critique": {
+                    "safe": {"fatal": False, "critiques": ["edge risk"], "defenses": ["test covered"]},
+                    "unsafe": {"fatal": True, "critiques": ["drops scope guard"], "defenses": []},
+                },
+            },
+        )
+    }
+    fatal_winner = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            autoreason={
+                "enabled": True,
+                "status": "SUCCESS",
+                "winner": "unsafe",
+                "judge_votes": [{"judge": "deterministic", "ranking": ["unsafe", "safe"]}],
+                "adversarial_critique": {
+                    "safe": {"fatal": False, "critiques": [], "defenses": ["test covered"]},
+                    "unsafe": {"fatal": True, "critiques": ["drops scope guard"], "defenses": []},
+                },
+            },
+        )
+    }
+
+    assert safe_winner["autoreason"].public_claim_safe is True
+    assert "discriminator_fatal:unsafe" in safe_winner["autoreason"].evidence_refs
+    assert "discriminator_defenses:safe:1" in safe_winner["autoreason"].evidence_refs
+    assert fatal_winner["autoreason"].public_claim_safe is False
+    assert fatal_winner["autoreason"].failure_reason == "evidence_without_gate_pass"
+
+
+def test_belief_receipt_can_cite_semantic_searcher_evidence_ref():
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan={"selected_capabilities": ["belief"]},
+            capabilities={
+                "claim_verified": True,
+                "belief_confidence": 0.82,
+                "belief_gate_passed": True,
+                "semantic_searcher_refs": ["semantic:policy:r1"],
+                "semantic_searcher_confidence_source": "semantic_searcher:policy:r1",
+            },
+        )
+    }
+
+    assert receipts["belief"].public_claim_safe is True
+    assert "semantic:policy:r1" in receipts["belief"].evidence_refs
+    assert "confidence_source:semantic_searcher:policy:r1" in receipts["belief"].evidence_refs
