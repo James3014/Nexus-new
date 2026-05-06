@@ -358,6 +358,24 @@ def test_ultra_review_logic_repro_handles_changed_paths_with_spaces(tmp_path):
     assert payload["logic_breaker"]["passed"] is True
 
 
+def test_ultra_review_logic_repro_accepts_deleted_files(tmp_path):
+    _init_repo(tmp_path)
+    target = tmp_path / "docs" / "obsolete.md"
+    target.parent.mkdir()
+    target.write_text("remove me\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "add obsolete doc"], cwd=tmp_path, check=True, capture_output=True)
+    target.unlink()
+
+    payload = UltraReviewService(tmp_path).run(
+        report_path="reports/ultra.json",
+        sandbox_root="reports/sandboxes",
+    )
+
+    assert payload["gate_passed"] is True
+    assert payload["logic_breaker"]["passed"] is True
+
+
 def test_ultra_review_cli_help_includes_contract_options():
     runner = CliRunner()
     result = runner.invoke(cli_mod.nexus, ["nexus", "ultra-review", "--help"])
