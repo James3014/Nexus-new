@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from nexus.core.evolution_protocols import (
     EvolutionTier,
+    audit_shadow_isolation,
+    build_l3_hard_block_warning,
     build_quiet_moment_event,
     decide_forgetting,
     evaluate_shadow_promotion,
@@ -33,6 +35,35 @@ def test_quiet_moment_event_is_non_mutating():
     assert event["production_writes_allowed"] is False
     assert event["allowed_actions"] == ["observe", "report", "rollback"]
     assert event["resume_after_seconds"] == 0
+
+
+def test_l3_hard_block_warning_requires_voice_and_mtls_binding():
+    warning = build_l3_hard_block_warning(EvolutionTier.L3_SWARM, reason_codes=["missing_explicit_approval"])
+
+    assert warning.allowed is False
+    assert warning.voice_warning_required is True
+    assert warning.mtls_binding_required is True
+    assert "missing_mtls_binding" in warning.reason_codes
+    assert "missing_explicit_approval" in warning.reason_codes
+
+
+def test_shadow_isolation_blocks_production_write_targets(tmp_path):
+    production = tmp_path / "production"
+    shadow = tmp_path / "shadow"
+    production.mkdir()
+    shadow.mkdir()
+
+    decision = audit_shadow_isolation(
+        [
+            {"target_path": str(shadow / "candidate.json")},
+            {"target_path": str(production / "live.json")},
+        ],
+        production_roots=[str(production)],
+    )
+
+    assert decision.isolated is False
+    assert decision.production_write_allowed is False
+    assert decision.reason_codes == ("shadow_target_inside_production_root",)
 
 
 def test_shadow_promotion_remains_shadow_only_when_evidence_is_weak():

@@ -223,6 +223,41 @@ def test_learning_steward_filters_successful_low_step_trajectory():
     assert state.metadata["min_evolution_steps"] == 10
 
 
+def test_learning_steward_accepts_runtime_governance_profile_override():
+    state = NexusState(task_id="learn-runtime-profile")
+    state.total_token_usage = 1500
+    state.metadata["governance_profile"] = {
+        "alpha": 0.5,
+        "beta": 2.0,
+        "gamma": 0.5,
+        "token_budget": 1000,
+        "min_evolution_steps": 2,
+    }
+    evidence = LearningEvidence(
+        success=True,
+        phases=["P", "X", "A"],
+        unique_phase_count=3,
+        retry_count=0,
+        policy_hit_count=1,
+        patch_generated=False,
+        patch_apply_success=False,
+        proof_present=False,
+        proof_type="",
+        proof_value="",
+        bayesian_aggression=0.5,
+        entropy_score=0.0,
+        trajectory_step_count=3,
+    )
+
+    decision = LearningSteward(GovernanceProfile()).decide(state, evidence)
+
+    assert decision.freeze_learning is True
+    assert "token_budget_exceeded" in decision.reasons
+    assert "low_step_trajectory" not in decision.reasons
+    assert state.metadata["governance_profile_source"] == "metadata_override"
+    assert state.metadata["min_evolution_steps"] == 2
+
+
 def test_belief_engine_promotes_semantic_searcher_refs_to_first_class_fields(tmp_path):
     engine = BeliefEngine(tmp_path / "belief.json")
 

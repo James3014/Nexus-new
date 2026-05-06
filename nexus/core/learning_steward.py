@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List
 
 from .learning_evidence import LearningEvidence
@@ -37,12 +37,13 @@ class LearningSteward:
         reasons: List[str] = []
         freeze = False
         metadata = state.metadata
+        profile = self._profile_for(metadata)
 
         if self._requires_physical_proof(evidence):
             if not evidence.proof_present:
                 freeze = True
                 reasons.append("missing_physical_proof_evidence")
-            elif evidence.proof_type.lower() not in self.profile.valid_proof_types:
+            elif evidence.proof_type.lower() not in profile.valid_proof_types:
                 freeze = True
                 reasons.append("invalid_physical_proof_type")
 
@@ -54,25 +55,25 @@ class LearningSteward:
         failure_history = self._failure_history(metadata)
         feedback_reward = self._feedback_reward(state)
         curiosity_score = (
-            (self.profile.alpha * novelty)
-            + (self.profile.gamma * feedback_reward)
-            - (self.profile.beta * failure_history)
+            (profile.alpha * novelty)
+            + (profile.gamma * feedback_reward)
+            - (profile.beta * failure_history)
         )
         if curiosity_score < 0.0:
             freeze = True
             reasons.append("curiosity_negative")
 
-        if float(state.total_token_usage or 0.0) > self.profile.token_budget:
+        if float(state.total_token_usage or 0.0) > profile.token_budget:
             freeze = True
             reasons.append("token_budget_exceeded")
 
-        canary_reasons = self._evaluate_canary(metadata)
+        canary_reasons = self._evaluate_canary(metadata, profile)
         if canary_reasons:
             freeze = True
             reasons.extend(canary_reasons)
 
         trajectory_steps = int(evidence.trajectory_step_count or len(evidence.phases))
-        low_step_filtered = bool(evidence.success and trajectory_steps < self.profile.min_evolution_steps)
+        low_step_filtered = bool(evidence.success and trajectory_steps < profile.min_evolution_steps)
         if low_step_filtered:
             freeze = True
             reasons.append("low_step_trajectory")
@@ -83,7 +84,7 @@ class LearningSteward:
         metadata["curiosity_feedback_reward"] = round(feedback_reward, 2)
         metadata["learning_frozen"] = freeze
         metadata["learning_freeze_reasons"] = reasons
-        metadata["min_evolution_steps"] = self.profile.min_evolution_steps
+        metadata["min_evolution_steps"] = profile.min_evolution_steps
         metadata["trajectory_step_count"] = trajectory_steps
         metadata["low_step_filtered"] = low_step_filtered
 
@@ -95,6 +96,28 @@ class LearningSteward:
             reasons=reasons,
             action=action,
         )
+
+    def _profile_for(self, metadata: dict) -> GovernanceProfile:
+        raw = metadata.get("governance_profile")
+        if not isinstance(raw, dict):
+            metadata["governance_profile_source"] = "default"
+            return self.profile
+        allowed: dict[str, float | int] = {}
+        for key in ("alpha", "beta", "gamma", "token_budget", "memory_health_baseline"):
+            if key in raw:
+                try:
+                    allowed[key] = float(raw[key])
+                except (TypeError, ValueError):
+                    metadata["governance_profile_source"] = "invalid_metadata_override"
+                    return self.profile
+        if "min_evolution_steps" in raw:
+            try:
+                allowed["min_evolution_steps"] = max(1, int(raw["min_evolution_steps"]))
+            except (TypeError, ValueError):
+                metadata["governance_profile_source"] = "invalid_metadata_override"
+                return self.profile
+        metadata["governance_profile_source"] = "metadata_override" if allowed else "default"
+        return replace(self.profile, **allowed) if allowed else self.profile
 
     @staticmethod
     def _requires_physical_proof(evidence: LearningEvidence) -> bool:
@@ -146,8 +169,8 @@ class LearningSteward:
             reward += (test_pass_rate - 0.5) * 40.0
         return round(max(-60.0, min(60.0, reward)), 2)
 
-    def _evaluate_canary(self, metadata: dict) -> List[str]:
-        baseline = float(metadata.get("memory_health_baseline", self.profile.memory_health_baseline))
+    def _evaluate_canary(self, metadata: dict, profile: GovernanceProfile) -> List[str]:
+        baseline = float(metadata.get("memory_health_baseline", profile.memory_health_baseline))
         current = float(metadata.get("memory_health_current", baseline))
         if baseline <= 0:
             return []

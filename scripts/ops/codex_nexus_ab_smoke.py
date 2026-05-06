@@ -89,6 +89,37 @@ def build_command(*, output_dir: str, task_ids: tuple[str, ...], preflight_only:
     return cmd
 
 
+def validate_smoke_plan(*, cmd: list[str], env: dict[str, str], task_ids: tuple[str, ...]) -> dict[str, Any]:
+    reasons: list[str] = []
+    if env.get("NEXUS_VALUE_HIDDEN_VERIFIER") != "1":
+        reasons.append("hidden_verifier_disabled")
+    if env.get("NEXUS_CODEX_MODEL_NAME") != env.get("NEXUS_DIRECT_CODEX_MODEL"):
+        reasons.append("same_model_lock_missing")
+    required_flags = (
+        "--with-nexus-runner",
+        "--with-llm-mode",
+        "--without-mode",
+        "--enable-autoreason-executor",
+        "--enable-ddtree-executor",
+        "--enable-ultra-review-dry-gate",
+        "--evidence-bundle",
+    )
+    for flag in required_flags:
+        if flag not in cmd:
+            reasons.append(f"missing_flag:{flag}")
+    if "--task-id-filter" not in cmd or cmd[cmd.index("--task-id-filter") + 1] != ",".join(task_ids):
+        reasons.append("task_id_filter_mismatch")
+    if "--preflight-only" not in cmd:
+        reasons.append("preflight_guard_missing")
+    return {
+        "passed": not reasons,
+        "reason_codes": reasons,
+        "task_count": len(task_ids),
+        "same_model": env.get("NEXUS_CODEX_MODEL_NAME") == env.get("NEXUS_DIRECT_CODEX_MODEL"),
+        "preflight_only": "--preflight-only" in cmd,
+    }
+
+
 def latest_jsonl(output_dir: Path, prefix: str) -> Path | None:
     candidates = sorted(output_dir.glob(f"{prefix}_*.jsonl"), key=lambda path: path.stat().st_mtime)
     return candidates[-1] if candidates else None
@@ -114,9 +145,16 @@ def main(argv: list[str] | None = None) -> int:
 
     task_ids = tuple(item.strip() for item in args.task_id_filter.split(",") if item.strip())
     cmd = build_command(output_dir=args.output_dir, task_ids=task_ids, preflight_only=bool(args.preflight_only))
+    plan_validation = validate_smoke_plan(cmd=cmd, env=benchmark_env(str(args.model)), task_ids=task_ids)
     if args.print_only:
-        print(json.dumps({"command": cmd, "env_model": args.model, "task_ids": list(task_ids)}, indent=2, ensure_ascii=False))
-        return 0
+        print(
+            json.dumps(
+                {"command": cmd, "env_model": args.model, "task_ids": list(task_ids), "plan_validation": plan_validation},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return 0 if plan_validation["passed"] else 2
     repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(cmd, cwd=repo_root, env=benchmark_env(str(args.model)), text=True, check=False)
     payload = {

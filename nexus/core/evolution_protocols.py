@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
@@ -22,6 +23,23 @@ class ForgettingDecision:
 @dataclass(frozen=True)
 class ShadowPromotionDecision:
     status: str
+    production_write_allowed: bool
+    reason_codes: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class L3HardBlockWarning:
+    allowed: bool
+    tier: EvolutionTier
+    reason_codes: tuple[str, ...]
+    voice_warning_required: bool
+    mtls_binding_required: bool
+    warning_message: str
+
+
+@dataclass(frozen=True)
+class ShadowIsolationDecision:
+    isolated: bool
     production_write_allowed: bool
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
 
@@ -59,6 +77,51 @@ def build_quiet_moment_event(
         "allowed_actions": ["observe", "report", "rollback"],
         "production_writes_allowed": False,
     }
+
+
+def build_l3_hard_block_warning(
+    tier: EvolutionTier | str,
+    *,
+    reason_codes: list[str] | tuple[str, ...] = (),
+    mtls_enabled: bool = False,
+) -> L3HardBlockWarning:
+    """Build the operator-facing hard stop for soul-tier mutations."""
+    tier_value = EvolutionTier(tier)
+    reasons = list(reason_codes)
+    high_tier = tier_value in {EvolutionTier.L3_SWARM, EvolutionTier.L4_META}
+    if high_tier and not mtls_enabled:
+        reasons.append("missing_mtls_binding")
+    reasons = sorted(set(reasons))
+    return L3HardBlockWarning(
+        allowed=not reasons,
+        tier=tier_value,
+        reason_codes=tuple(reasons),
+        voice_warning_required=high_tier,
+        mtls_binding_required=high_tier,
+        warning_message=f"{tier_value.value} mutation requires explicit operator approval and evidence binding.",
+    )
+
+
+def audit_shadow_isolation(
+    shadow_rows: list[dict[str, Any]],
+    *,
+    production_roots: list[str] | tuple[str, ...],
+) -> ShadowIsolationDecision:
+    """Fail closed when a shadow row targets a production path."""
+    roots = [Path(item).expanduser().resolve() for item in production_roots if str(item).strip()]
+    reasons: list[str] = []
+    for row in shadow_rows:
+        target = str(row.get("target_path") or row.get("write_path") or "").strip()
+        if not target:
+            continue
+        resolved = Path(target).expanduser().resolve()
+        if any(resolved == root or root in resolved.parents for root in roots):
+            reasons.append("shadow_target_inside_production_root")
+    return ShadowIsolationDecision(
+        isolated=not reasons,
+        production_write_allowed=False,
+        reason_codes=tuple(sorted(set(reasons))),
+    )
 
 
 def evaluate_shadow_promotion(
