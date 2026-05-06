@@ -180,6 +180,8 @@ def test_repair_audit_loop_runs_composed_r_phase_when_registered(tmp_path, monke
     assert executors["R"].calls == 1
     assert ctx.state.metadata["composition_repair_phase_status"] == "APPROVED"
     assert ctx.state.metadata["last_patch_generated"] is True
+    assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r"
+    assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
     assert pregate_calls == [("APPROVED", executors["R"].mutations)]
     assert evidence_calls == ["composition-repair"]
 
@@ -233,6 +235,98 @@ def test_repair_audit_loop_composed_r_rejection_skips_pregate_and_evidence(tmp_p
     assert pipeline._repair_audit_loop(ctx, tracer) is False
     assert executors["R"].calls == 1
     assert ctx.state.metadata["composition_repair_phase_status"] == "REJECTED_NO_RED_TEST"
+    assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r"
+    assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
+
+
+def test_repair_audit_loop_composed_r_uses_nested_result_status(tmp_path, monkeypatch):
+    nested_result = {
+        "status": "APPROVED",
+        "patch_generated": True,
+        "patch_apply_success": True,
+    }
+    executors = {"R": FakeExecutor("R", {"result_object": nested_result})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-repair-nested",
+        task_desc="fix composed repair",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        accumulator=SimpleNamespace(record=lambda *_args, **_kwargs: None),
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-repair-nested"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: _Span())
+    pregate_calls = []
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(pipeline, "_register_phase_decision", lambda *_args, **_kwargs: "dec-r-fallback")
+    monkeypatch.setattr(
+        pipeline,
+        "_run_pregate_if_needed",
+        lambda _ctx, status, result: pregate_calls.append((status, result)) or status,
+    )
+    monkeypatch.setattr(pipeline, "_write_hallucination_evidence_bundle", lambda _ctx: tmp_path / "evidence.json")
+    monkeypatch.setattr(
+        pipeline,
+        "_evaluate_audit_result",
+        lambda *_args, **_kwargs: {"audit_success": True, "status": "APPROVED", "phantom_reason": ""},
+    )
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is True
+    assert ctx.state.metadata["composition_repair_phase_status"] == "APPROVED"
+    assert ctx.state.metadata["last_patch_generated"] is True
+    assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r-fallback"
+    assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
+    assert pregate_calls == [("APPROVED", nested_result)]
+
+
+def test_repair_audit_loop_composed_r_without_review_status_fails_closed(tmp_path, monkeypatch):
+    executors = {"R": FakeExecutor("R", {"result_object": {"patch_generated": True}})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-repair-no-status",
+        task_desc="fix composed repair",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        accumulator=SimpleNamespace(record=lambda *_args, **_kwargs: None),
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-repair-no-status"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: _Span())
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(pipeline, "_register_phase_decision", lambda *_args, **_kwargs: "dec-r-fail-closed")
+    monkeypatch.setattr(
+        pipeline,
+        "_run_pregate_if_needed",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("status-less composed R must not run pregate")),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_write_hallucination_evidence_bundle",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("status-less composed R must not write evidence")),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_evaluate_audit_result",
+        lambda *_args, **_kwargs: {"audit_success": False, "status": "REJECTED", "phantom_reason": ""},
+    )
+    monkeypatch.setattr(pipeline, "_handle_escalation", lambda *_args, **_kwargs: False)
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is False
+    assert executors["R"].calls == 1
+    assert ctx.state.metadata["composition_repair_phase_status"] == "REJECTED"
+    assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r-fail-closed"
+    assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
 
 
 def test_repair_audit_loop_runs_composed_a_phase_before_legacy_audit(tmp_path, monkeypatch):

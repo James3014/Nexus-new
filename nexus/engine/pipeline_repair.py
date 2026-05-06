@@ -27,6 +27,15 @@ class AuditEvalContext:
     current_decision_id: str
     current_skill_id: str
 
+@dataclass
+class ComposedRepairResult:
+    """Normalized output from a composed R phase."""
+    status: str
+    result_object: dict
+    mutations: dict
+    current_decision_id: str
+    current_skill_id: str
+
 class PipelineRepairMixin:
     """🛠️ Mixin for Repair/Audit loop logic in NexusPipeline."""
 
@@ -118,10 +127,10 @@ class PipelineRepairMixin:
             }
         )
         result = plugin.execute(self, ctx)
-        mutations = dict(result.mutations or {})
-        status = str(mutations.get("status") or result.status or "").strip().upper() or "APPROVED"
-        result_object = mutations.get("result_object")
-        result_object = dict(result_object) if isinstance(result_object, dict) else mutations
+        normalized = self._normalize_composed_repair_result(ctx, result, repair_attempts)
+        mutations = normalized.mutations
+        status = normalized.status
+        result_object = normalized.result_object
         ctx.state.metadata["last_review_status"] = status
         self._map_repair_metadata(ctx, result_object)
         if self._is_rejected_repair_status(status):
@@ -135,8 +144,8 @@ class PipelineRepairMixin:
         r_out = {
             "status": status,
             "result": result_object,
-            "current_decision_id": str(mutations.get("decision_id") or f"composition-r-{repair_attempts}"),
-            "current_skill_id": str(mutations.get("skill_id") or "composition-repair"),
+            "current_decision_id": normalized.current_decision_id,
+            "current_skill_id": normalized.current_skill_id,
         }
         ctx.state.metadata["composition_repair_phase_status"] = status
         ctx.state.metadata["composition_repair_phase_mutations"] = mutations
@@ -152,6 +161,43 @@ class PipelineRepairMixin:
             },
         )
         return r_out
+
+    def _normalize_composed_repair_result(
+        self,
+        ctx: PipelineContextProtocol,
+        result: Any,
+        repair_attempts: int,
+    ) -> ComposedRepairResult:
+        """Align composed R output with legacy repair response semantics."""
+        mutations = dict(getattr(result, "mutations", None) or {})
+        raw_result_object = mutations.get("result_object")
+        result_object = dict(raw_result_object) if isinstance(raw_result_object, dict) else mutations
+
+        raw_status = mutations.get("status") or result_object.get("status")
+        if raw_status is None:
+            # PhaseResult.status describes plugin execution, not repair review approval.
+            phase_status = str(getattr(result, "status", "") or "").strip().upper()
+            raw_status = phase_status if self._is_rejected_repair_status(phase_status) else "REJECTED"
+        status = str(raw_status or "REJECTED").strip().upper()
+
+        phase_decisions = ctx.state.metadata.setdefault("phase_decisions", {})
+        phase_skills = ctx.state.metadata.setdefault("phase_skills", {})
+        decision_id = str(
+            mutations.get("decision_id")
+            or phase_decisions.get("R")
+            or self._register_phase_decision(ctx, "R", f"composition-r-{repair_attempts}")
+        )
+        skill_id = str(mutations.get("skill_id") or phase_skills.get("R") or "composition-repair")
+        phase_decisions["R"] = decision_id
+        phase_skills["R"] = skill_id
+
+        return ComposedRepairResult(
+            status=status,
+            result_object=result_object,
+            mutations=mutations,
+            current_decision_id=decision_id,
+            current_skill_id=skill_id,
+        )
 
     def _record_intra_loop_trauma(self, ctx: PipelineContextProtocol, r_out: dict):
         """🛡️ [v24.0] 記錄失敗基因，防止修復循環陷入死胡同。"""
