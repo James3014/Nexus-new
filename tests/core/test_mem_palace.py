@@ -16,6 +16,23 @@ class FakeConfigStore:
         return [0.1, 0.2, 0.7]
 
 
+class FakeStorage:
+    def __init__(self):
+        self.scoped_tenants = []
+        self.retrieve_calls = []
+
+    def scoped_access(self, tenant_id):
+        self.scoped_tenants.append(tenant_id)
+        return self
+
+    def retrieve(self, query, **kwargs):
+        self.retrieve_calls.append({"query": query, **kwargs})
+        return [{"tenant_id": self.scoped_tenants[-1], "content": query}]
+
+    def store(self, tenant_id, artifact_type, data):
+        return {"tenant_id": tenant_id, "artifact_type": artifact_type, "data": data}
+
+
 def test_audit_logic():
     palace = MemPalace()
     assert palace.audit_action("D", "Check evidence in LDB") is True
@@ -38,3 +55,22 @@ def test_mem_palace_uses_injected_belief_and_config_stores():
     assert constraints["forbid"] == []
     assert constraints["prefer"] == ["prefer small patch"]
     assert palace.get_router_bias() == [0.1, 0.2, 0.7]
+
+
+def test_mem_palace_retrieve_from_shards_uses_tenant_scoped_storage():
+    storage = FakeStorage()
+    palace = MemPalace(storage=storage)
+
+    rows = palace.retrieve_from_shards("tenant-a", "scoped evidence", artifact_type="lesson", limit=2)
+
+    assert storage.scoped_tenants == ["tenant-a"]
+    assert storage.retrieve_calls == [{"query": "scoped evidence", "artifact_type": "lesson", "limit": 2}]
+    assert rows == [{"tenant_id": "tenant-a", "content": "scoped evidence"}]
+
+
+def test_mem_palace_retrieve_from_shards_fails_closed_without_tenant():
+    storage = FakeStorage()
+    palace = MemPalace(storage=storage)
+
+    assert palace.retrieve_from_shards("", "scoped evidence") == []
+    assert storage.scoped_tenants == []

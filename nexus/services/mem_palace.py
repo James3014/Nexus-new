@@ -27,6 +27,24 @@ class MemPalace:
         """🏛️ v25.5 Physical Sharding & AAAK 30x Compression."""
         return self.storage.store(tenant_id, artifact_type, data)
 
+    def retrieve_from_shards(
+        self,
+        tenant_id: str,
+        query: str,
+        artifact_type: str | None = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Read memory through a tenant-bound storage handle only."""
+        tenant = str(tenant_id or "").strip()
+        if not tenant:
+            return []
+        try:
+            scoped = self.storage.scoped_access(tenant)
+            return scoped.retrieve(query, artifact_type=artifact_type, limit=limit)
+        except Exception as e:
+            logger.warning("🏰 [MemPalace] retrieve_from_shards failed: %s", e)
+            return []
+
     def trigger_arweave_distillation(self, data: Dict[str, Any]) -> str:
         """🔄 v25.5 Infinite Context Loop: 模擬 Arweave 永久化。"""
         mock_tx_id = f"ARW-{os.urandom(8).hex()}"

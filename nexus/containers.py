@@ -85,7 +85,8 @@ class NexusContainer(containers.DeclarativeContainer):
     router = providers.Singleton(
         SkillsRouter,
         project_root=project_root,
-        run_dir=run_dir
+        run_dir=run_dir,
+        mem_palace=mem_palace,
     )
 
     linter = providers.Singleton(Linter)

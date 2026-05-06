@@ -23,9 +23,10 @@ class SkillsRouter:
         return highest_idx
 
     """🔀 Nexus v26.0 General Contractor Hardened Router."""
-    def __init__(self, project_root: str, run_dir: str = None):
+    def __init__(self, project_root: str, run_dir: str = None, mem_palace: Any = None):
         self.project_root = project_root
         self.run_dir = run_dir or project_root
+        self.mem_palace = mem_palace
         self.firewall = DomainFirewall()
         from nexus.core.engine.critique_engine import critique
         self.critique = critique
@@ -96,6 +97,10 @@ class SkillsRouter:
     def _palace_search(self, query: str, tenant_id: str) -> Dict[str, Any]:
         """[D-4 Hardened] Wire up memory repository for palace search."""
         try:
+            if self.mem_palace and hasattr(self.mem_palace, "retrieve_from_shards"):
+                rows = self.mem_palace.retrieve_from_shards(tenant_id, query, limit=3)
+                results = self._filter_tenant_rows(rows, tenant_id)
+                return {"status": "SUCCESS", "hit_rate": 1.0 if results else 0.0, "results": results, "tenant": tenant_id}
             from nexus.services.memory_repository import MemoryRepository
             from pathlib import Path
             repo = MemoryRepository(Path(self.project_root) / ".nexus" / "memory" / "memory_index.lancedb")
@@ -103,7 +108,7 @@ class SkillsRouter:
             if not tables:
                 return {"status": "SUCCESS", "hit_rate": 0.0, "results": [], "tenant": tenant_id}
             df = repo.search_fts_across_tables(query, list(tables)[:5], limit=3)
-            results = df.to_dict(orient="records") if not df.empty else []
+            results = self._filter_tenant_rows(df.to_dict(orient="records") if not df.empty else [], tenant_id)
             hit_rate = 1.0 if results else 0.0
             return {"status": "SUCCESS", "hit_rate": hit_rate, "results": results, "tenant": tenant_id}
         except Exception as e:
@@ -117,11 +122,34 @@ class SkillsRouter:
             msa_indexer = importlib.import_module("nexus.experiments.msa_routing.msa_indexer")
             retriever = msa_indexer.LanceDBRetriever(self.project_root)
             raw_candidates = retriever.retrieve(query)
-            results = [{"id": c.id, "score": c.score} for c in raw_candidates]
+            filtered = [c for c in raw_candidates if self._candidate_tenant_id(c) == str(tenant_id)]
+            results = [{"id": c.id, "score": c.score} for c in filtered]
             return {"status": "SUCCESS", "results": results, "tenant": tenant_id}
         except Exception as e:
             logger.debug(f"_semantic_search error: {e}")
             return {"status": "SUCCESS", "results": [], "tenant": tenant_id}
+
+    @staticmethod
+    def _row_tenant_id(row: Dict[str, Any]) -> str:
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        return str(row.get("tenant_id") or row.get("tenant") or metadata.get("tenant_id") or metadata.get("tenant") or "")
+
+    @classmethod
+    def _filter_tenant_rows(cls, rows: List[Dict[str, Any]], tenant_id: str) -> List[Dict[str, Any]]:
+        tenant = str(tenant_id or "")
+        return [row for row in rows if isinstance(row, dict) and cls._row_tenant_id(row) == tenant]
+
+    @staticmethod
+    def _candidate_tenant_id(candidate: Any) -> str:
+        metadata = getattr(candidate, "metadata", None)
+        metadata = metadata if isinstance(metadata, dict) else {}
+        return str(
+            getattr(candidate, "tenant_id", "")
+            or getattr(candidate, "tenant", "")
+            or metadata.get("tenant_id")
+            or metadata.get("tenant")
+            or ""
+        )
 
     def _msa_search(self, query: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         import os
