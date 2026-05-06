@@ -286,6 +286,67 @@ def test_nine_capability_identity_union_passes_for_route_oracles_plus_belief(tmp
     assert failures == []
 
 
+def test_route_runtime_capability_union_includes_runtime_receipt_oracles():
+    summaries = [
+        {
+            "suite": "route_oracles",
+            "expected_capabilities": [
+                "autoreason",
+                "ddtree",
+                "ultra_review",
+                "research",
+                "lancedb",
+                "swarm",
+                "drone",
+                "nightshift",
+            ],
+            "public_safe_capabilities": [
+                "autoreason",
+                "ddtree",
+                "ultra_review",
+                "research",
+                "lancedb",
+                "swarm",
+                "drone",
+                "nightshift",
+            ],
+        },
+        {
+            "suite": "belief_gate",
+            "expected_capabilities": ["belief"],
+            "public_safe_capabilities": ["belief"],
+        },
+        {
+            "suite": "runtime_receipt_oracles",
+            "expected_capabilities": ["semantic_searcher", "swarm_quiet_moment"],
+            "public_safe_capabilities": ["semantic_searcher", "swarm_quiet_moment"],
+        },
+    ]
+
+    assert capability_route_smoke.validate_route_runtime_capability_union(summaries) == []
+
+
+def test_route_runtime_capability_union_fails_when_runtime_oracle_missing():
+    summaries = [
+        {
+            "suite": "route_oracles",
+            "expected_capabilities": sorted(capability_route_smoke.REQUIRED_NINE_CAPABILITIES - {"belief"}),
+            "public_safe_capabilities": sorted(capability_route_smoke.REQUIRED_NINE_CAPABILITIES - {"belief"}),
+        },
+        {
+            "suite": "belief_gate",
+            "expected_capabilities": ["belief"],
+            "public_safe_capabilities": ["belief"],
+        },
+    ]
+
+    failures = capability_route_smoke.validate_route_runtime_capability_union(summaries)
+    codes = {code for item in failures for code in (item.get("row_failures") or [])}
+
+    assert "route_runtime_expected_capability_union_incomplete" in codes
+    assert "route_runtime_public_safe_capability_union_incomplete" in codes
+
+
 def test_route_quality_gate_passes_on_thresholds():
     failures = capability_route_smoke.validate_route_quality_gate(
         [

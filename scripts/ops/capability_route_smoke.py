@@ -93,6 +93,13 @@ REQUIRED_NINE_CAPABILITIES = frozenset(
         "belief",
     }
 )
+REQUIRED_ROUTE_RUNTIME_CAPABILITIES = frozenset(
+    {
+        *REQUIRED_NINE_CAPABILITIES,
+        "semantic_searcher",
+        "swarm_quiet_moment",
+    }
+)
 
 ROUTE_QUALITY_THRESHOLDS = {
     "selected_to_invoked_rate": 0.70,
@@ -356,6 +363,60 @@ def validate_nine_capability_identity(summaries: list[dict[str, Any]]) -> list[d
     return failures
 
 
+def validate_route_runtime_capability_union(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    target_summaries = [
+        summary
+        for summary in summaries
+        if summary.get("suite") in {"route_oracles", "belief_gate", "runtime_receipt_oracles"}
+    ]
+    expected = {
+        cap
+        for summary in target_summaries
+        for cap in (summary.get("expected_capabilities") or [])
+        if isinstance(cap, str)
+    }
+    public_safe = {
+        cap
+        for summary in target_summaries
+        for cap in (summary.get("public_safe_capabilities") or [])
+        if isinstance(cap, str)
+    }
+    if expected != REQUIRED_ROUTE_RUNTIME_CAPABILITIES:
+        failures.append(
+            {
+                "task_id": "__route_runtime_capability_union__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": sorted(REQUIRED_ROUTE_RUNTIME_CAPABILITIES - expected),
+                "failure_reasons": {
+                    "expected_capabilities": {
+                        "required": sorted(REQUIRED_ROUTE_RUNTIME_CAPABILITIES),
+                        "actual": sorted(expected),
+                    }
+                },
+                "row_failures": ["route_runtime_expected_capability_union_incomplete"],
+            }
+        )
+    if public_safe != REQUIRED_ROUTE_RUNTIME_CAPABILITIES:
+        failures.append(
+            {
+                "task_id": "__route_runtime_capability_union__",
+                "status": "SUMMARY",
+                "semantic_status": "SUMMARY",
+                "missing": sorted(REQUIRED_ROUTE_RUNTIME_CAPABILITIES - public_safe),
+                "failure_reasons": {
+                    "public_safe_capabilities": {
+                        "required": sorted(REQUIRED_ROUTE_RUNTIME_CAPABILITIES),
+                        "actual": sorted(public_safe),
+                    }
+                },
+                "row_failures": ["route_runtime_public_safe_capability_union_incomplete"],
+            }
+        )
+    return failures
+
+
 def validate_route_quality_gate(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
     selected_total = 0
@@ -485,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.print_only:
         if not any(bool(summary.get("infra_invalid")) for summary in summaries):
             failures.extend(validate_nine_capability_identity(summaries))
+            failures.extend(validate_route_runtime_capability_union(summaries))
             failures.extend(validate_route_quality_gate(summaries))
             failures.extend(validate_brain_hub_guidance_gate(summaries))
     payload = {

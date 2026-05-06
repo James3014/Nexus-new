@@ -636,6 +636,76 @@ def test_public_benchmark_preflight_blocks_model_run_without_executor_evidence_f
     assert "capability_readiness:llm_candidate_cap_below_ddtree_threshold" in report["failures"]
 
 
+def test_public_benchmark_preflight_blocks_route_oracle_candidate_count_regression(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "route_oracles.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "route-oracle-regression",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "route-oracle-autoreason-001",
+                        "category": "route_oracle",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://route-oracle",
+                        "repo_ref": "v1",
+                        "task_desc": "Route oracle requiring Autoreason and DDTree tournament evidence.",
+                        "task_type": "public_test_repair",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_autoreason_judge",
+                        "expected_capabilities": ["autoreason", "ddtree"],
+                        "capability_activation_contract": "required",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        repo_kind_filter="all",
+        task_id_filter="route-oracle-autoreason-001",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="all",
+        with_model_provider="gemini",
+        with_nexus_runner="subprocess",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=1,
+        nexus_only=False,
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "FAIL"
+    assert "capability_readiness:llm_candidate_cap_below_ddtree_threshold" in report["failures"]
+    assert report["capability_readiness"]["observed_flags"]["llm_candidate_cap"] == 1
+
+
 def test_public_benchmark_preflight_allows_nexus_only_without_direct_model(tmp_path: Path, monkeypatch):
     manifest = tmp_path / "tasks.json"
     manifest.write_text(
