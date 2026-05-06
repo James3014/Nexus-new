@@ -1857,6 +1857,40 @@ def build_route_executor_flags(*, task_desc: str, task_type: str, route: dict[st
     }
 
 
+def _refresh_route_for_runtime_candidate_factory(
+    *,
+    route: dict[str, Any],
+    result: dict[str, Any],
+    result_report: dict[str, Any],
+    task_desc: str,
+    task_type: str,
+) -> dict[str, Any]:
+    """Replan when runtime evidence proves A/B/AB candidate judging is possible."""
+    summaries = result_report.get("candidate_summaries", []) if isinstance(result_report, dict) else []
+    if str(result.get("flow", "")) != "hyper_sprint" or not isinstance(summaries, list) or len(summaries) < 2:
+        return route
+
+    route_features = dict(route.get("route_features", {}) if isinstance(route.get("route_features"), dict) else {})
+    previous_count = int(route_features.get("candidate_count", 1) or 1)
+    route_features["candidate_count"] = max(previous_count, len(summaries))
+    route_features["candidate_factory_readiness_estimate"] = {
+        "ready": True,
+        "status": "READY",
+        "reason": "runtime_candidate_summaries",
+        "estimated_candidates": len(summaries),
+    }
+    route["route_features"] = route_features
+    route["runtime_candidate_factory_replanned"] = True
+    capability_plan, route_decision = _build_capability_plan_and_decision(
+        task_desc=task_desc,
+        task_type=task_type,
+        route=route,
+    )
+    route["capability_plan"] = capability_plan.to_dict()
+    route["route_decision"] = route_decision
+    return route
+
+
 def _write_output_file(repo_root: Path, path: Path, payload: dict) -> Path:
     out = path if path.is_absolute() else (repo_root / path).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -2845,6 +2879,13 @@ def run_auto_flow(
     artifact_verified = bool(tests_passed and (artifact_summary["changed"] or verification_only_rescue))
     nexus_rescued = bool((guard_hit or verification_only_rescue) and tests_passed)
     winner_source = result_report.get("winner_source") or guard_fallback_from.get("winner_source") or ("nexus_rescue" if nexus_rescued else "local_only")
+    route = _refresh_route_for_runtime_candidate_factory(
+        route=route,
+        result=result,
+        result_report=result_report,
+        task_desc=task_desc,
+        task_type=task_type,
+    )
     self_heal_used = bool(
         "self_heal" in str(winner_source)
         or any("self_heal" in str(code) for code in result_report.get("error_codes", []))
