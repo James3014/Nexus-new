@@ -99,3 +99,30 @@ def test_event_bus_typed_domain_emitters_preserve_publish_contract(tmp_path):
     assert "audit_failed" in content
     assert "learning_decision" in content
     assert "evidence_accepted" in content
+
+
+def test_event_bus_audits_raw_and_semantic_transition_events(tmp_path):
+    NexusEventBus.configure(tmp_path)
+
+    NexusEventBus.emit_audit_failure(task_id="task-1", reason="missing evidence", evidence_id="EV-1")
+    NexusEventBus.publish("phase_start", {"task_id": "task-1", "phase": "P"})
+
+    audit = NexusEventBus.audit_event_contracts()
+
+    assert audit["schema_version"] == "nexus_event_contract_audit.v1"
+    assert audit["semantic_event_count"] == 1
+    assert audit["raw_event_count"] == 1
+    assert audit["unknown_event_count"] == 0
+    assert audit["transition_status"] == "raw_events_present"
+    assert audit["passed"] is True
+
+
+def test_event_bus_audit_flags_unknown_event_types(tmp_path):
+    NexusEventBus.configure(tmp_path)
+
+    NexusEventBus.publish("legacy_custom_blob", {"task_id": "task-1"})
+
+    audit = NexusEventBus.audit_event_contracts()
+
+    assert audit["passed"] is False
+    assert audit["unknown_event_types"] == ["legacy_custom_blob"]

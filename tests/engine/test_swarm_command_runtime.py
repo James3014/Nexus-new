@@ -59,3 +59,35 @@ def test_swarm_run_exception_still_writes_completion_contract(monkeypatch, tmp_p
     assert report["semantic_status"] == "UNVERIFIED"
     assert report["blocker_type"] == "runtime_defect"
     assert "swarm_exception:RuntimeError" in report["semantic_failures"]
+
+
+def test_swarm_quiet_moment_cli_emits_non_mutating_packet(tmp_path):
+    @click.group()
+    def root():
+        pass
+
+    swarm_cmd.register(root, tmp_path)
+
+    runner = CliRunner()
+    res = runner.invoke(
+        root,
+        [
+            "swarm",
+            "quiet-moment",
+            "--reason",
+            "shadow promotion boundary",
+            "--node",
+            "pilot-a",
+            "--resume-after",
+            "12",
+            "--output-json",
+        ],
+    )
+
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["schema_version"] == "nexus_quiet_moment.v1"
+    assert payload["production_writes_allowed"] is False
+    assert payload["allowed_actions"] == ["observe", "report", "rollback"]
+    assert payload["affected_nodes"] == ["pilot-a"]
+    assert payload["resume_after_seconds"] == 12

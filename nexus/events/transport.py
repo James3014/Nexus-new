@@ -10,6 +10,9 @@ from nexus.events.signal_queue_service import SignalQueueService
 
 logger = logging.getLogger(__name__)
 
+SEMANTIC_EVENT_TYPES = frozenset({"audit_failed", "learning_decision", "evidence_accepted"})
+RAW_EVENT_TYPES = frozenset({"phase_start", "phase_end", "lifecycle_pre", "external_signal_injected"})
+
 
 class NexusEventBus:
     """Persistent pub/sub with bidirectional signal injection."""
@@ -131,3 +134,31 @@ class NexusEventBus:
             return cls._log_store.read_recent(event_type=event_type, limit=limit)
         except Exception:
             return []
+
+    @classmethod
+    def audit_event_contracts(cls, limit: int = 100) -> Dict[str, Any]:
+        """Report raw-vs-semantic event usage during the migration window."""
+        events = cls.get_recent_events(limit=limit)
+        semantic = []
+        raw = []
+        unknown = []
+        for event in events:
+            event_type = str(event.get("event_type") or "")
+            if event_type in SEMANTIC_EVENT_TYPES:
+                semantic.append(event_type)
+            elif event_type in RAW_EVENT_TYPES:
+                raw.append(event_type)
+            else:
+                unknown.append(event_type)
+        return {
+            "schema_version": "nexus_event_contract_audit.v1",
+            "events_scanned": len(events),
+            "semantic_event_count": len(semantic),
+            "raw_event_count": len(raw),
+            "unknown_event_count": len(unknown),
+            "semantic_event_types": sorted(set(semantic)),
+            "raw_event_types": sorted(set(raw)),
+            "unknown_event_types": sorted(set(unknown)),
+            "transition_status": "raw_events_present" if raw else "semantic_only",
+            "passed": not unknown,
+        }

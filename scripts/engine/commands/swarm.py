@@ -110,3 +110,26 @@ def register(nexus_group, REPO_ROOT):
                 print(f"❌ [Nexus:Swarm] Critical execution error: {e}")
                 print(f"Report: {written}")
             sys.exit(1)
+
+    @swarm.command(name="quiet-moment")
+    @click.option("--reason", required=True, help="Why the swarm must pause.")
+    @click.option("--node", "nodes", multiple=True, help="Affected node id. Repeat for multiple nodes.")
+    @click.option("--resume-after", default=10, type=int, help="Expected pause duration in seconds.")
+    @click.option("--output-json", is_flag=True)
+    def swarm_quiet_moment(reason, nodes, resume_after, output_json):
+        """Emit a user-visible, non-mutating Quiet Moment packet."""
+        from nexus.core.evolution_protocols import build_quiet_moment_event
+
+        event = build_quiet_moment_event(
+            reason=reason,
+            affected_nodes=list(nodes) or ["local"],
+            resume_after_seconds=resume_after,
+        )
+        if output_json:
+            print(json.dumps(event, indent=2, ensure_ascii=False))
+            return
+        click.echo(f"Quiet Moment: {reason}")
+        click.echo(f"Affected nodes: {', '.join(event['affected_nodes'])}")
+        click.echo(f"Resume after: {event['resume_after_seconds']}s")
+        click.echo("Allowed actions: observe, report, rollback")
+        click.echo("Production writes: blocked")

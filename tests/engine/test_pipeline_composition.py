@@ -330,7 +330,17 @@ def test_repair_audit_loop_composed_r_without_review_status_fails_closed(tmp_pat
 
 
 def test_repair_audit_loop_runs_composed_a_phase_before_legacy_audit(tmp_path, monkeypatch):
-    executors = {"A": FakeExecutor("A", {"fail": True, "reason": "composition_rejected"})}
+    executors = {
+        "A": FakeExecutor(
+            "A",
+            {
+                "fail": True,
+                "reason": "composition_rejected",
+                "decision_id": "dec-a",
+                "skill_id": "composition-audit",
+            },
+        )
+    }
     pipeline = NexusPipeline(_engine(tmp_path, executors))
     pipeline.engine.max_retries = 1
     ctx = SimpleNamespace(
@@ -366,6 +376,110 @@ def test_repair_audit_loop_runs_composed_a_phase_before_legacy_audit(tmp_path, m
     assert pipeline._repair_audit_loop(ctx, tracer) is False
     assert executors["A"].calls == 1
     assert ctx.state.metadata["composition_audit_phase_rejection"] == "composition_rejected"
+    assert ctx.state.metadata["phase_decisions"]["A"] == "dec-a"
+    assert ctx.state.metadata["phase_skills"]["A"] == "composition-audit"
+
+
+def test_repair_audit_loop_composed_a_rejects_status_without_fail_flag(tmp_path, monkeypatch):
+    executors = {"A": FakeExecutor("A", {"status": "REJECTED", "reason": "logic_mismatch"})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    history_calls = []
+    outcome_calls = []
+    pipeline.engine._add_step_to_history = lambda _state, phase, metadata: history_calls.append((phase, metadata))
+    monkeypatch.setattr(
+        pipeline,
+        "_record_repair_outcome_event",
+        lambda *args, **_kwargs: outcome_calls.append(args),
+    )
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-audit-status-rejected",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-audit-status-rejected"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(
+        pipeline,
+        "_execute_single_repair",
+        lambda *_args, **_kwargs: {
+            "status": "APPROVED",
+            "result": {"patch_generated": True, "patch_apply_success": True},
+            "current_decision_id": "dec-r",
+            "current_skill_id": "repair",
+        },
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_evaluate_audit_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("rejected composed A must block legacy audit")),
+    )
+    monkeypatch.setattr(pipeline, "_build_hallucination_evidence_bundle", lambda _ctx: {"code_artifacts": ["x.py"]})
+    monkeypatch.setattr(pipeline, "_register_phase_decision", lambda *_args, **_kwargs: "dec-a-fallback")
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is False
+    assert ctx.state.metadata["composition_audit_phase_status"] == "REJECTED"
+    assert ctx.state.metadata["composition_audit_phase_rejection"] == "logic_mismatch"
+    assert ctx.state.metadata["phase_decisions"]["A"] == "dec-a-fallback"
+    assert ctx.state.metadata["phase_skills"]["A"] == "composition-audit"
+    assert ctx.state.metadata["last_audit_decision_id"] == "dec-a-fallback"
+    assert ctx.state.metadata["last_repair_decision_id"] == "dec-r"
+    assert ctx.state.metadata["anti_hallucination_checks"] == 1
+    assert ctx.state.metadata["anti_hallucination_block_count"] == 1
+    assert ctx.state.metadata["evidence_trust_rejection"] is True
+    assert history_calls == [
+        (
+            "A",
+            {
+                "status": "REJECTED",
+                "decision_id": "dec-a-fallback",
+                "skill_id": "composition-audit",
+                "composition_phase": True,
+            },
+        )
+    ]
+    assert outcome_calls[0][1:6] == (1, False, "logic_mismatch", {"patch_generated": True, "patch_apply_success": True}, "dec-r")
+
+
+def test_repair_audit_loop_composed_a_rejects_false_audit_success(tmp_path, monkeypatch):
+    executors = {"A": FakeExecutor("A", {"audit_success": False, "reason": "evidence_low_trust"})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-audit-false-success",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-audit-false-success"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(
+        pipeline,
+        "_execute_single_repair",
+        lambda *_args, **_kwargs: {
+            "status": "APPROVED",
+            "result": {"patch_generated": True, "patch_apply_success": True},
+            "current_decision_id": "dec-r",
+            "current_skill_id": "repair",
+        },
+    )
+    monkeypatch.setattr(pipeline, "_build_hallucination_evidence_bundle", lambda _ctx: {"code_artifacts": ["x.py"]})
+    monkeypatch.setattr(pipeline, "_handle_escalation", lambda *_args, **_kwargs: False)
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is False
+    assert ctx.state.metadata["composition_audit_phase_status"] == "REJECTED"
+    assert ctx.state.metadata["composition_audit_phase_rejection"] == "evidence_low_trust"
 
 
 def test_dry_run_repair_respects_composed_a_rejection(tmp_path):

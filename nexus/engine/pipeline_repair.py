@@ -36,6 +36,15 @@ class ComposedRepairResult:
     current_decision_id: str
     current_skill_id: str
 
+@dataclass
+class ComposedAuditResult:
+    """Normalized output from a composed A phase."""
+    status: str
+    mutations: dict
+    current_decision_id: str
+    current_skill_id: str
+    rejection_reason: str
+
 class PipelineRepairMixin:
     """🛠️ Mixin for Repair/Audit loop logic in NexusPipeline."""
 
@@ -537,7 +546,7 @@ class PipelineRepairMixin:
 
         return {"audit_success": audit_success, "status": status, "phantom_reason": phantom_reason}
 
-    def _run_composition_audit_phase(self, ctx: PipelineContextProtocol, r_out: dict) -> dict | None:
+    def _run_composition_audit_phase(self, ctx: PipelineContextProtocol, r_out: dict, repair_attempts: int = 1) -> dict | None:
         """Run the composed A phase as a fail-closed pre-audit gate when registered."""
         registry = getattr(self, "registry", None)
         if registry is None:
@@ -560,13 +569,76 @@ class PipelineRepairMixin:
         finally:
             ctx.pack = original_pack
 
-        ctx.state.metadata["composition_audit_phase_status"] = result.status
-        ctx.state.metadata["composition_audit_phase_mutations"] = result.mutations
-        if result.status in {"fail", "FAILED"} or bool((result.mutations or {}).get("fail")):
-            reason = str((result.mutations or {}).get("reason") or "composition_audit_failed")
+        normalized = self._normalize_composed_audit_result(ctx, result)
+        ctx.state.metadata["composition_audit_phase_status"] = normalized.status
+        ctx.state.metadata["composition_audit_phase_mutations"] = normalized.mutations
+        if self._is_rejected_repair_status(normalized.status) or bool(normalized.mutations.get("fail")) or normalized.mutations.get("audit_success") is False:
+            reason = normalized.rejection_reason
             ctx.state.metadata["composition_audit_phase_rejection"] = reason
+            self._record_composed_audit_rejection(ctx, r_out, normalized, repair_attempts, reason)
             return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
         return None
+
+    def _normalize_composed_audit_result(self, ctx: PipelineContextProtocol, result: Any) -> ComposedAuditResult:
+        """Normalize composed A output without treating executor success as audit success."""
+        mutations = dict(getattr(result, "mutations", None) or {})
+        raw_status = mutations.get("status") or getattr(result, "status", "")
+        status = str(raw_status or "REJECTED").strip().upper()
+        if bool(mutations.get("fail")) or mutations.get("audit_success") is False:
+            status = "REJECTED"
+
+        phase_decisions = ctx.state.metadata.setdefault("phase_decisions", {})
+        phase_skills = ctx.state.metadata.setdefault("phase_skills", {})
+        decision_id = str(mutations.get("decision_id") or phase_decisions.get("A") or self._register_phase_decision(ctx, "A", "composition-audit"))
+        skill_id = str(mutations.get("skill_id") or phase_skills.get("A") or "composition-audit")
+        phase_decisions["A"] = decision_id
+        phase_skills["A"] = skill_id
+        reason = str(mutations.get("reason") or f"composition_audit_{status.lower()}")
+
+        return ComposedAuditResult(
+            status=status,
+            mutations=mutations,
+            current_decision_id=decision_id,
+            current_skill_id=skill_id,
+            rejection_reason=reason,
+        )
+
+    def _record_composed_audit_rejection(
+        self,
+        ctx: PipelineContextProtocol,
+        r_out: dict,
+        audit: ComposedAuditResult,
+        repair_attempts: int,
+        reason: str,
+    ) -> None:
+        """Persist legacy-compatible A phase bookkeeping for composed audit rejections."""
+        ctx.state.current_phase = "A"
+        ctx.state.metadata["last_audit_decision_id"] = audit.current_decision_id
+        ctx.state.metadata["last_repair_decision_id"] = str(r_out.get("current_decision_id", ""))
+        ctx.state.metadata["evidence_trust_rejection"] = True
+        self._update_meta_counter(ctx, "anti_hallucination_checks")
+        self._update_meta_counter(ctx, "anti_hallucination_block_count")
+        self.engine._add_step_to_history(
+            ctx.state,
+            "A",
+            metadata={
+                "status": audit.status,
+                "decision_id": audit.current_decision_id,
+                "skill_id": audit.current_skill_id,
+                "composition_phase": True,
+            },
+        )
+        self._record_repair_outcome_event(
+            ctx,
+            repair_attempts,
+            False,
+            reason,
+            dict(r_out.get("result") or {}),
+            str(r_out.get("current_decision_id") or ""),
+            str(r_out.get("current_skill_id") or ""),
+            "REJECTED",
+            audit.status,
+        )
 
     def _update_meta_counter(self, ctx: PipelineContextProtocol, key: str, increment: int = 1) -> None:
         """Safely updates an integer counter in metadata."""
@@ -739,7 +811,7 @@ class PipelineRepairMixin:
                 current_decision_id=r_out["current_decision_id"],
                 current_skill_id=r_out["current_skill_id"]
             )
-            a_out = self._run_composition_audit_phase(ctx, r_out) or self._evaluate_audit_result(ctx, eval_ctx)
+            a_out = self._run_composition_audit_phase(ctx, r_out, repair_attempts) or self._evaluate_audit_result(ctx, eval_ctx)
             if rlm_loop is not None:
                 rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
                 budget_state = rlm_loop.consume_iteration()
