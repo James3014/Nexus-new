@@ -102,7 +102,10 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
     engine_root = repo_root / "nexus" / "engine"
     phase_executors = engine_root / "phase_executors.py"
     pipeline = engine_root / "pipeline.py"
+    pipeline_repair = engine_root / "pipeline_repair.py"
     phase_factory = engine_root / "phase_factory.py"
+    pipeline_text = pipeline.read_text(encoding="utf-8")
+    repair_text = pipeline_repair.read_text(encoding="utf-8")
     builder_phases = _builder_phases(phase_executors)
     registered_executor_phases = _registered_executor_phases(pipeline)
     factory_phases = _factory_create_all_phases(phase_factory)
@@ -122,7 +125,7 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
         else "incomplete"
     )
     runtime_fallback_paths = []
-    if "A" in registered_executor_phases:
+    if "A" in registered_executor_phases and "or self._evaluate_audit_result" in repair_text:
         runtime_fallback_paths.append(
             {
                 "phase": "A",
@@ -130,7 +133,7 @@ def build_inventory(repo_root: Path) -> dict[str, Any]:
                 "reason": "repair_audit_loop_uses_legacy_audit_when_no_a_executor_is_registered",
             }
         )
-    if "C" in registered_executor_phases:
+    if "C" in registered_executor_phases and "_stage_crystallize(ctx, success, tracer)" in pipeline_text:
         runtime_fallback_paths.append(
             {
                 "phase": "C",

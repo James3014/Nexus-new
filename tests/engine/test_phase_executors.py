@@ -124,26 +124,21 @@ def test_diagnose_binder_preserves_existing_pack_keys(tmp_path, monkeypatch):
     assert ctx.diagnosis_pack == {"diagnosis": "ok"}
 
 
-def test_crystallize_executor_wraps_existing_rich_pipeline_method(tmp_path):
-    calls = []
-
-    class Pipeline:
-        def _stage_crystallize(self, ctx, success, tracer):
-            calls.append((ctx.task_id, success, tracer))
-            ctx.state.metadata["rich_crystallize_ran"] = True
-
+def test_crystallize_executor_owns_terminal_side_effects(tmp_path, monkeypatch):
+    monkeypatch.setattr("nexus.engine.phases.crystallize.KnowledgeIndex", lambda *_args, **_kwargs: SimpleNamespace(index_reach_evidence=lambda *_a, **_k: None))
     ctx = SimpleNamespace(
         task_id="c-wrap",
         kwargs={},
         tracer=object(),
         pack={},
-        state=SimpleNamespace(metadata={"pipeline_success": True}),
+        state=SimpleNamespace(task_id="c-wrap", metadata={"pipeline_success": True}),
     )
     executor = build_crystallize_executor(tmp_path, tmp_path / ".nexus" / "runs")
 
-    result = executor.execute(Pipeline(), ctx)
+    result = executor.execute(None, ctx)
 
     assert result.status == "success"
-    assert calls == [("c-wrap", True, ctx.tracer)]
-    assert ctx.state.metadata["rich_crystallize_ran"] is True
+    assert ctx.state.metadata["pipeline_terminal_state"] == "SUCCESS"
+    assert ctx.state.metadata["pipeline_outcome"]["terminal_state"] == 0
+    assert ctx.state.metadata["nexus_outcome_v2"]["terminal_state"] == "SUCCESS"
     assert ctx.pack["crystallize"]["status"] == "COMPLETED"

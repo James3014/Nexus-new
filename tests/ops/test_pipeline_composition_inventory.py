@@ -15,8 +15,8 @@ def test_pipeline_composition_inventory_reports_partial_legacy_mixins():
     assert set(payload["registered_executor_phases"]) >= {"P", "X", "D", "R", "A", "C"}
     assert set(payload["phase_factory_create_all_phases"]) >= {"P", "X", "D", "R", "A", "C"}
     assert payload["runtime_missing_phases"] == []
-    assert payload["fallback_debt_phases"] == ["A", "C"]
-    assert payload["fallback_debt_count"] == 2
-    assert {item["phase"] for item in payload["runtime_fallback_paths"]} == {"A", "C"}
+    assert payload["fallback_debt_phases"] == []
+    assert payload["fallback_debt_count"] == 0
+    assert payload["runtime_fallback_paths"] == []
     assert payload["unexpected_mixins"] == []
     assert "PipelineRepairMixin" in payload["legacy_mixins"]

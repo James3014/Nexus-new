@@ -248,10 +248,12 @@ class NexusPipeline(
                 ctx.state.metadata["composition_crystallize_side_effects_verified"] = True
                 return
             ctx.state.metadata["composition_crystallize_side_effects_verified"] = False
-            ctx.state.metadata["composition_crystallize_fallback_reason"] = "missing_terminal_outcome_side_effects"
-            self._stage_crystallize(ctx, success, tracer)
+            ctx.state.metadata["composition_crystallize_failure_reason"] = "missing_terminal_outcome_side_effects"
+            ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
             return
-        self._stage_crystallize(ctx, success, tracer)
+        ctx.state.metadata["composition_crystallize_phase_status"] = "MISSING"
+        ctx.state.metadata["composition_crystallize_failure_reason"] = "missing_crystallize_executor"
+        ctx.state.metadata["pipeline_terminal_state"] = "FAILED"
 
     @staticmethod
     def _crystallize_side_effects_present(ctx: PipelineContext) -> bool:

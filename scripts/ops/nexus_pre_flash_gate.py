@@ -329,9 +329,12 @@ def validate_pipeline_composition_gate(repo_root: Path) -> list[dict[str, Any]]:
         "legacy_mixins": inventory.get("legacy_mixins", []),
         "failures": inventory.get("failures", []),
     }
-    if inventory.get("passed"):
+    fallback_debt_count = int(inventory.get("fallback_debt_count", 0) or 0)
+    inventory_passed = bool(inventory.get("passed"))
+    if inventory_passed and fallback_debt_count == 0:
         return [_ok("pipeline_composition_gate", **details)]
-    return [_fail("pipeline_composition_gate", "pipeline_composition_inventory_failed", **details)]
+    reason = "pipeline_composition_fallback_debt_present" if inventory_passed and fallback_debt_count else "pipeline_composition_inventory_failed"
+    return [_fail("pipeline_composition_gate", reason, **details)]
 
 
 def repair_subset_command(output_dir: str) -> list[str]:

@@ -550,10 +550,12 @@ class PipelineRepairMixin:
         """Run the composed A phase as a fail-closed pre-audit gate when registered."""
         registry = getattr(self, "registry", None)
         if registry is None:
-            return None
+            return self._missing_composed_audit_result(ctx, reason="missing_phase_registry")
         plugin = next((item for item in registry.get_ordered_plugins() if item.name == "A"), None)
-        if plugin is None or not plugin.should_run(ctx):
-            return None
+        if plugin is None:
+            return self._missing_composed_audit_result(ctx, reason="missing_composed_audit_executor")
+        if not plugin.should_run(ctx):
+            return self._missing_composed_audit_result(ctx, reason="composed_audit_executor_skipped")
 
         original_pack = dict(ctx.pack or {})
         evidence_bundle = self._build_hallucination_evidence_bundle(ctx)
@@ -578,6 +580,12 @@ class PipelineRepairMixin:
             self._record_composed_audit_rejection(ctx, r_out, normalized, repair_attempts, reason)
             return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
         return {"audit_success": True, "status": normalized.status or "APPROVED", "phantom_reason": ""}
+
+    def _missing_composed_audit_result(self, ctx: PipelineContextProtocol, *, reason: str) -> dict:
+        ctx.state.metadata["composition_audit_phase_status"] = "MISSING"
+        ctx.state.metadata["composition_audit_phase_rejection"] = reason
+        ctx.state.metadata["evidence_trust_rejection"] = True
+        return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
 
     def _normalize_composed_audit_result(self, ctx: PipelineContextProtocol, result: Any) -> ComposedAuditResult:
         """Normalize composed A output without treating executor success as audit success."""
@@ -811,7 +819,7 @@ class PipelineRepairMixin:
                 current_decision_id=r_out["current_decision_id"],
                 current_skill_id=r_out["current_skill_id"]
             )
-            a_out = self._run_composition_audit_phase(ctx, r_out, repair_attempts) or self._evaluate_audit_result(ctx, eval_ctx)
+            a_out = self._run_composition_audit_phase(ctx, r_out, repair_attempts)
             if rlm_loop is not None:
                 rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
                 budget_state = rlm_loop.consume_iteration()

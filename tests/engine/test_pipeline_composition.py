@@ -223,7 +223,7 @@ def test_pipeline_registers_crystallize_phase_executor(tmp_path):
     assert "C" in {plugin.name for plugin in pipeline.registry.get_ordered_plugins()}
 
 
-def test_pipeline_falls_back_when_composed_c_lacks_terminal_side_effects(tmp_path, monkeypatch):
+def test_pipeline_fails_closed_when_composed_c_lacks_terminal_side_effects(tmp_path, monkeypatch):
     executors = {
         "P": FakeExecutor("P", {"plan": "ok"}),
         "X": FakeExecutor("X", {"findings": ["ok"]}),
@@ -234,11 +234,15 @@ def test_pipeline_falls_back_when_composed_c_lacks_terminal_side_effects(tmp_pat
     monkeypatch.setattr(pipeline, "_repair_audit_loop", lambda *_args, **_kwargs: True)
     fallback_calls = []
     monkeypatch.setattr(pipeline, "_stage_crystallize", lambda ctx, success, _tracer: fallback_calls.append((ctx.task_id, success)))
-    monkeypatch.setattr(pipeline, "_finalize_and_report", lambda _ctx, success, _tracer: success)
+    seen = {}
+    monkeypatch.setattr(pipeline, "_finalize_and_report", lambda ctx, success, _tracer: seen.update(ctx.state.metadata) or success)
 
     assert pipeline.run("repair vague runtime behavior", task_id="composition-c") is True
     assert executors["C"].calls == 1
-    assert fallback_calls == [("composition-c", True)]
+    assert fallback_calls == []
+    assert seen["composition_crystallize_side_effects_verified"] is False
+    assert seen["composition_crystallize_failure_reason"] == "missing_terminal_outcome_side_effects"
+    assert seen["pipeline_terminal_state"] == "FAILED"
 
 
 def test_pipeline_accepts_composed_c_only_when_terminal_side_effects_exist(tmp_path, monkeypatch):
@@ -284,7 +288,8 @@ def test_repair_audit_loop_runs_composed_r_phase_when_registered(tmp_path, monke
                 "decision_id": "dec-r",
                 "skill_id": "composition-repair",
             },
-        )
+        ),
+        "A": FakeExecutor("A", {"status": "APPROVED", "decision_id": "dec-a", "skill_id": "composition-audit"}),
     }
     pipeline = NexusPipeline(_engine(tmp_path, executors))
     pipeline.engine.max_retries = 1
@@ -324,6 +329,7 @@ def test_repair_audit_loop_runs_composed_r_phase_when_registered(tmp_path, monke
 
     assert pipeline._repair_audit_loop(ctx, tracer) is True
     assert executors["R"].calls == 1
+    assert executors["A"].calls == 1
     assert ctx.state.metadata["composition_repair_phase_status"] == "APPROVED"
     assert ctx.state.metadata["last_patch_generated"] is True
     assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r"
@@ -391,7 +397,10 @@ def test_repair_audit_loop_composed_r_uses_nested_result_status(tmp_path, monkey
         "patch_generated": True,
         "patch_apply_success": True,
     }
-    executors = {"R": FakeExecutor("R", {"result_object": nested_result})}
+    executors = {
+        "R": FakeExecutor("R", {"result_object": nested_result}),
+        "A": FakeExecutor("A", {"status": "APPROVED", "decision_id": "dec-a", "skill_id": "composition-audit"}),
+    }
     pipeline = NexusPipeline(_engine(tmp_path, executors))
     pipeline.engine.max_retries = 1
     ctx = SimpleNamespace(
@@ -425,10 +434,50 @@ def test_repair_audit_loop_composed_r_uses_nested_result_status(tmp_path, monkey
 
     assert pipeline._repair_audit_loop(ctx, tracer) is True
     assert ctx.state.metadata["composition_repair_phase_status"] == "APPROVED"
+    assert ctx.state.metadata["composition_audit_phase_status"] == "APPROVED"
     assert ctx.state.metadata["last_patch_generated"] is True
     assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r-fallback"
     assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
     assert pregate_calls == [("APPROVED", nested_result)]
+
+
+def test_repair_audit_loop_missing_composed_a_fails_closed(tmp_path, monkeypatch):
+    executors = {
+        "R": FakeExecutor(
+            "R",
+            {
+                "status": "APPROVED",
+                "patch_generated": True,
+                "patch_apply_success": True,
+            },
+        )
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-audit-missing",
+        task_desc="fix composed repair",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        accumulator=SimpleNamespace(record=lambda *_args, **_kwargs: None),
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-audit-missing"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: _Span())
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(
+        pipeline,
+        "_evaluate_audit_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("missing composed A must not fallback to legacy audit")),
+    )
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is False
+    assert ctx.state.metadata["composition_audit_phase_status"] == "MISSING"
+    assert ctx.state.metadata["composition_audit_phase_rejection"] == "missing_composed_audit_executor"
 
 
 def test_repair_audit_loop_composed_r_without_review_status_fails_closed(tmp_path, monkeypatch):

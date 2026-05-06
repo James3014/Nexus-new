@@ -178,7 +178,7 @@ def test_quick_payload_includes_pipeline_composition_gate():
     assert check["name"] == "pipeline_composition_gate"
     assert check["details"]["phase_ownership_status"] == "executor_owned_with_legacy_mixins_retained"
     assert check["details"]["runtime_missing_phases"] == []
-    assert check["details"]["fallback_debt_phases"] == ["A", "C"]
+    assert check["details"]["fallback_debt_phases"] == []
 
 
 def test_pipeline_composition_gate_fails_when_inventory_fails(monkeypatch):
@@ -201,6 +201,28 @@ def test_pipeline_composition_gate_fails_when_inventory_fails(monkeypatch):
     assert check["passed"] is False
     assert check["reason"] == "pipeline_composition_inventory_failed"
     assert check["details"]["runtime_missing_phases"] == ["C"]
+
+
+def test_pipeline_composition_gate_fails_when_fallback_debt_remains(monkeypatch):
+    monkeypatch.setattr(
+        nexus_pre_flash_gate,
+        "build_inventory",
+        lambda _repo_root: {
+            "passed": True,
+            "composition_status": "partial",
+            "phase_ownership_status": "executor_owned_with_legacy_mixins_retained",
+            "runtime_missing_phases": [],
+            "fallback_debt_phases": ["C"],
+            "fallback_debt_count": 1,
+            "failures": [],
+        },
+    )
+
+    check = nexus_pre_flash_gate.validate_pipeline_composition_gate(Path(".").resolve())[0]
+
+    assert check["passed"] is False
+    assert check["reason"] == "pipeline_composition_fallback_debt_present"
+    assert check["details"]["fallback_debt_phases"] == ["C"]
 
 
 def test_openseeker_autodata_smoke_writes_manifest_only_when_explicit(tmp_path: Path):
