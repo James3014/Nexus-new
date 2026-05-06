@@ -145,7 +145,7 @@ class NexusEventBus:
             return []
 
     @classmethod
-    def audit_event_contracts(cls, limit: int = 100) -> Dict[str, Any]:
+    def audit_event_contracts(cls, limit: int = 100, *, fail_on_raw: bool = False) -> Dict[str, Any]:
         """Report raw-vs-semantic event usage during the migration window."""
         events = cls.get_recent_events(limit=limit)
         semantic = []
@@ -159,6 +159,12 @@ class NexusEventBus:
                 raw.append(event_type)
             else:
                 unknown.append(event_type)
+        passed = not unknown and not (fail_on_raw and raw)
+        failure_reasons = []
+        if unknown:
+            failure_reasons.append("unknown_event_types_present")
+        if fail_on_raw and raw:
+            failure_reasons.append("raw_event_types_present")
         return {
             "schema_version": "nexus_event_contract_audit.v1",
             "events_scanned": len(events),
@@ -169,5 +175,7 @@ class NexusEventBus:
             "raw_event_types": sorted(set(raw)),
             "unknown_event_types": sorted(set(unknown)),
             "transition_status": "raw_events_present" if raw else "semantic_only",
-            "passed": not unknown,
+            "strict_raw_mode": bool(fail_on_raw),
+            "failure_reasons": failure_reasons,
+            "passed": passed,
         }

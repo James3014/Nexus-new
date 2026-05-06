@@ -81,6 +81,20 @@ def test_quick_payload_fails_when_event_contract_audit_fails(monkeypatch):
     assert any(item["name"] == "event_contract_audit" and not item["passed"] for item in payload["checks"])
 
 
+def test_event_contract_gate_can_fail_on_raw_strict_mode(monkeypatch, tmp_path: Path):
+    from nexus.events.transport import NexusEventBus
+
+    monkeypatch.setenv("NEXUS_EVENT_RAW_STRICT", "1")
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.publish("phase_start", {"task_id": "task-1", "phase": "P"})
+
+    checks = nexus_pre_flash_gate.validate_event_contracts(tmp_path)
+
+    assert checks[0]["passed"] is False
+    assert checks[0]["reason"] == "raw_event_types_present"
+    assert checks[0]["details"]["strict_raw_mode"] is True
+
+
 def test_quick_payload_fails_when_brain_hub_audit_fails(monkeypatch):
     class FailedHubAudit:
         passed = False

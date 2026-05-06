@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -181,7 +182,8 @@ def validate_brain_hub_alignment(repo_root: Path) -> list[dict[str, Any]]:
 
 def validate_event_contracts(repo_root: Path) -> list[dict[str, Any]]:
     NexusEventBus.configure(repo_root)
-    audit = NexusEventBus.audit_event_contracts()
+    strict_raw = os.environ.get("NEXUS_EVENT_RAW_STRICT") == "1"
+    audit = NexusEventBus.audit_event_contracts(fail_on_raw=strict_raw)
     if audit.get("passed"):
         return [
             _ok(
@@ -190,15 +192,25 @@ def validate_event_contracts(repo_root: Path) -> list[dict[str, Any]]:
                 semantic_event_count=audit.get("semantic_event_count", 0),
                 raw_event_count=audit.get("raw_event_count", 0),
                 transition_status=audit.get("transition_status", ""),
+                strict_raw_mode=audit.get("strict_raw_mode", False),
                 unknown_event_types=audit.get("unknown_event_types", []),
             )
         ]
+    reason = "event_contract_audit_failed"
+    failure_reasons = audit.get("failure_reasons", [])
+    if "unknown_event_types_present" in failure_reasons:
+        reason = "unknown_event_types_present"
+    elif "raw_event_types_present" in failure_reasons:
+        reason = "raw_event_types_present"
     return [
         _fail(
             "event_contract_audit",
-            "unknown_event_types_present",
+            reason,
             events_scanned=audit.get("events_scanned", 0),
+            raw_event_types=audit.get("raw_event_types", []),
             unknown_event_types=audit.get("unknown_event_types", []),
+            strict_raw_mode=audit.get("strict_raw_mode", False),
+            failure_reasons=failure_reasons,
         )
     ]
 

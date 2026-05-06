@@ -126,3 +126,17 @@ def test_event_bus_audit_flags_unknown_event_types(tmp_path):
 
     assert audit["passed"] is False
     assert audit["unknown_event_types"] == ["legacy_custom_blob"]
+
+
+def test_event_bus_audit_can_fail_on_raw_transition_events(tmp_path):
+    NexusEventBus.configure(tmp_path)
+
+    NexusEventBus.emit_audit_failure(task_id="task-1", reason="missing evidence", evidence_id="EV-1")
+    NexusEventBus.publish("phase_start", {"task_id": "task-1", "phase": "P"})
+
+    audit = NexusEventBus.audit_event_contracts(fail_on_raw=True)
+
+    assert audit["passed"] is False
+    assert audit["strict_raw_mode"] is True
+    assert audit["failure_reasons"] == ["raw_event_types_present"]
+    assert audit["raw_event_types"] == ["phase_start"]

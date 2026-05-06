@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--manifest", default="docs/ops/brain_hub_manifest.json")
     parser.add_argument("--output", default=".nexus/reports/brain_hub_coverage.md")
+    parser.add_argument("--output-json", action="store_true", help="Compatibility flag; this command always emits JSON.")
     args = parser.parse_args(argv)
     root = Path(args.repo_root).resolve()
     payload = build_coverage(root, manifest=root / args.manifest)

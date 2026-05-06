@@ -236,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
     parser.add_argument("--alignment-doc", default=str(DEFAULT_ALIGNMENT_DOC))
     parser.add_argument("--scoring-spec", default=str(DEFAULT_SCORING_SPEC))
+    parser.add_argument("--output-json", action="store_true", help="Compatibility flag; this command always emits JSON.")
     args = parser.parse_args(argv)
 
     audit = audit_drift(schema_path=Path(args.schema), alignment_doc=Path(args.alignment_doc), scoring_spec=Path(args.scoring_spec))
