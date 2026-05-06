@@ -46,10 +46,15 @@ class S2TSelectionDecision:
     gate_passed: bool
     reason_codes: list[str] = field(default_factory=list)
     selected_score: float = 0.0
+    score_components: dict[str, float] = field(default_factory=dict)
+    second_pass_required: bool = False
 
 
 class S2TSelector:
     """Deterministic baseline selector for S2T shadow and strict modes."""
+
+    def __init__(self, *, tie_threshold: float = 0.05) -> None:
+        self.tie_threshold = max(0.0, float(tie_threshold or 0.0))
 
     def select(self, candidates: list[S2TCandidate]) -> S2TSelectionDecision:
         if not candidates:
@@ -71,7 +76,7 @@ class S2TSelector:
                 reason_codes=reason_codes + ["no_verified_candidate"],
             )
 
-        selected = sorted(
+        ranked = sorted(
             verified,
             key=lambda candidate: (
                 candidate.selector_score,
@@ -80,17 +85,32 @@ class S2TSelector:
                 candidate.static_score,
             ),
             reverse=True,
-        )[0]
+        )
+        selected = ranked[0]
         if selected.evidence_refs:
             reason_codes.append("has_empirical_test_evidence")
         if "missing_test_evidence" not in selected.risk_flags:
             reason_codes.append("lower_claim_risk")
+        second_pass_required = len(ranked) > 1 and (ranked[0].selector_score - ranked[1].selector_score) <= self.tie_threshold
+        if second_pass_required:
+            reason_codes.append("second_pass_required")
         return S2TSelectionDecision(
             selected_candidate_id=selected.candidate_id,
             gate_passed=True,
             reason_codes=reason_codes,
             selected_score=selected.selector_score,
+            score_components=self._score_components(selected),
+            second_pass_required=second_pass_required,
         )
+
+    @staticmethod
+    def _score_components(candidate: S2TCandidate) -> dict[str, float]:
+        return {
+            "selector_score": round(float(candidate.selector_score), 4),
+            "static_score": round(float(candidate.static_score), 4),
+            "empirical_evidence_present": 1.0 if candidate.evidence_refs else 0.0,
+            "claim_risk_penalty": round(min(1.0, len(candidate.risk_flags) * 0.25), 4),
+        }
 
 
 @dataclass(frozen=True)
