@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from nexus.engine.phase_executors import HandlerPhaseExecutor, build_crystallize_executor
+from nexus.engine.phase_executors import HandlerPhaseExecutor, build_crystallize_executor, build_diagnose_executor
 from nexus.engine.phase_plugin import PhaseResult
 
 
@@ -42,6 +42,21 @@ def test_handler_phase_executor_honors_should_run():
     assert executor.should_run(ctx) is False
 
 
+def test_research_executor_records_skip_reason_when_should_run_is_false():
+    class SkipResearchHandler:
+        name = "X"
+        priority = 20
+
+        def should_run(self, _ctx):
+            return False
+
+    executor = HandlerPhaseExecutor(SkipResearchHandler())
+    ctx = SimpleNamespace(kwargs={}, state=SimpleNamespace(metadata={}))
+
+    assert executor.should_run(ctx) is False
+    assert ctx.state.metadata["research_skipped_reason"] == "phase_executor_should_run_false"
+
+
 def test_handler_phase_executor_maps_legacy_fail_dict_to_phase_failure():
     executor = HandlerPhaseExecutor(LegacyFailHandler())
     ctx = SimpleNamespace(kwargs={}, state=SimpleNamespace(), pack={})
@@ -67,6 +82,46 @@ def test_handler_phase_executor_maps_red_test_rejection_to_phase_failure():
 
     assert result.status == "fail"
     assert result.mutations["reason"] == "missing_red_test"
+
+
+def test_diagnose_executor_failure_records_veto_retry_metadata():
+    class DiagnoseVetoHandler:
+        name = "D"
+        priority = 25
+
+        def run(self, _state, _pack):
+            return {"status": "REJECTED", "veto_reason": "unsafe_diagnosis"}
+
+    executor = HandlerPhaseExecutor(DiagnoseVetoHandler())
+    ctx = SimpleNamespace(kwargs={}, state=SimpleNamespace(metadata={}), pack={})
+
+    result = executor.execute(None, ctx)
+
+    assert result.status == "fail"
+    assert ctx.state.metadata["d_stage_vetoed"] is True
+    assert ctx.state.metadata["d_stage_veto_reason"] == "unsafe_diagnosis"
+    assert ctx.state.metadata["d_stage_retry_required"] is True
+
+
+def test_diagnose_binder_preserves_existing_pack_keys(tmp_path, monkeypatch):
+    class DiagnoseHandler:
+        def __init__(self, *_args, **_kwargs):
+            self.name = "D"
+            self.priority = 25
+
+        def run(self, _state, _pack):
+            return {"diagnosis": "ok"}
+
+    monkeypatch.setattr("nexus.engine.phases.diagnose.DiagnosticPhaseHandler", DiagnoseHandler)
+    executor = build_diagnose_executor(tmp_path, tmp_path / ".nexus" / "runs", hub=None)
+    ctx = SimpleNamespace(kwargs={}, state=SimpleNamespace(), pack={"task": "keep-me"})
+
+    result = executor.execute(None, ctx)
+
+    assert result.status == "success"
+    assert ctx.pack["task"] == "keep-me"
+    assert ctx.pack["diagnosis"] == "ok"
+    assert ctx.diagnosis_pack == {"diagnosis": "ok"}
 
 
 def test_crystallize_executor_wraps_existing_rich_pipeline_method(tmp_path):

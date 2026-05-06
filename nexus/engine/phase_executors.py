@@ -25,7 +25,10 @@ class HandlerPhaseExecutor:
 
     def should_run(self, ctx: Any) -> bool:
         should = getattr(self.handler, "should_run", None)
-        return bool(should(ctx)) if callable(should) else True
+        result = bool(should(ctx)) if callable(should) else True
+        if not result and self.name == "X" and hasattr(ctx, "state"):
+            ctx.state.metadata["research_skipped_reason"] = "phase_executor_should_run_false"
+        return result
 
     def execute(self, pipeline: Any, ctx: Any) -> PhaseResult:
         execute = getattr(self.handler, "execute", None)
@@ -41,6 +44,10 @@ class HandlerPhaseExecutor:
             self.result_binder(ctx, mutations)
         status_text = str(mutations.get("status") or "").strip().upper()
         status = "fail" if mutations.get("fail") or status_text in FAIL_STATUSES else "success"
+        if self.name == "D" and status == "fail" and hasattr(ctx, "state"):
+            ctx.state.metadata["d_stage_vetoed"] = True
+            ctx.state.metadata["d_stage_veto_reason"] = str(mutations.get("veto_reason") or mutations.get("reason") or "diagnose_phase_failed")
+            ctx.state.metadata["d_stage_retry_required"] = True
         return PhaseResult(status=status, mutations=mutations, events=[])
 
 
@@ -75,7 +82,10 @@ def _bind_research(ctx: Any, mutations: dict[str, Any]) -> None:
 
 
 def _bind_diagnose(ctx: Any, mutations: dict[str, Any]) -> None:
-    ctx.pack = mutations
+    existing = dict(getattr(ctx, "pack", {}) or {})
+    existing.update(mutations)
+    ctx.pack = existing
+    ctx.diagnosis_pack = mutations
 
 
 def build_plan_executor(project_root: Any, run_dir: Any, **kwargs: Any) -> PhaseExecutor:
