@@ -221,6 +221,12 @@ version_scope:
 - **Decision**: Re-ran the report with `--output-file`, `--label-a gemini_flash`, `--label-b gemini_flash_nexus`, and A/B ordered as baseline/treatment.
 - **Prevention**: Benchmark receipts must include explicit labels and must verify that the treatment dataset has `gemini_uses_nexus_rate > baseline` before interpreting lift direction.
 
+## 2026-05-05: Domain Filter Instruction Can Exceed Local Search Tool Capability
+- **Phenomenon**: A tech-domain search attempted `rg --filter "domain=tech"` and failed because the local `rg` binary does not support a `--filter` flag.
+- **Root Cause**: `MUSE_PROTO.md` expresses domain filtering as an intent constraint, but the local search tool has no matching native flag.
+- **Decision**: Treat domain filtering as scope/path/query discipline unless a repo-specific wrapper provides a real `--filter` interface.
+- **Prevention**: Before using policy-prescribed CLI flags, verify the flag exists or route through the repo wrapper that owns the policy.
+
 ## 2026-04-25: Real-File Benchmarks Must Restore Target State
 - **Phenomenon**: The first cross-module smoke used real repository files with materialization disabled and left a structural sentinel in `nexus/engine/coordinator.py`.
 - **Root Cause**: The benchmark runner was designed around generated fixtures, where preserving a successful mutation is harmless; that assumption is unsafe when target files are real source files.
