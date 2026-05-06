@@ -35,6 +35,7 @@ class SprintConfig:
     enable_autoreason_executor: bool | None = None
     enable_ddtree_executor: bool | None = None
     ddtree_max_candidates: int = 2
+    distant_scout_plan: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -691,6 +692,31 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         "arweave_tx_id": None,
         "learn_slo_guard": learn_slo_guard,
     }
+    distant_plan = config.distant_scout_plan if isinstance(config.distant_scout_plan, dict) else {}
+    if distant_plan:
+        learning_trace["distant_scout_execution"] = {
+            "status": str(distant_plan.get("status") or ""),
+            "recommended_family": str(distant_plan.get("recommended_family") or ""),
+            "forbidden_families": list(distant_plan.get("forbidden_families", []) or []),
+            "target_boundary": str(distant_plan.get("target_boundary") or ""),
+            "applied": str(distant_plan.get("status") or "") == "READY",
+        }
+
+    def _apply_distant_scout_hint(hint: str) -> str:
+        scout = learning_trace.get("distant_scout_execution")
+        if not isinstance(scout, dict) or not scout.get("applied"):
+            return hint
+        forbidden = ",".join(str(item) for item in scout.get("forbidden_families", []) if str(item).strip())
+        return "\n".join(
+            item
+            for item in (
+                hint,
+                f"distant_scout_recommended_family={scout.get('recommended_family', '')}",
+                f"distant_scout_forbidden_families={forbidden}",
+                f"distant_scout_target_boundary={scout.get('target_boundary', '')}",
+            )
+            if str(item).strip()
+        )
 
     # Learning loop (retrieve): pull recent hints before candidate generation.
     historical_hints: list[str] = []
@@ -929,6 +955,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             task_desc=config.task,
             historical_hints=historical_hints,
         )
+        hint = _apply_distant_scout_hint(hint)
         used_source = "local"
         ev_recorded = False
         try:

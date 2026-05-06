@@ -146,6 +146,49 @@ def test_run_hyper_sprint_collects_pool_when_route_enables_ddtree(monkeypatch, t
     assert res.learning_trace["autoreason"]["enabled"] is True
 
 
+def test_run_hyper_sprint_applies_distant_scout_hint(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    hints = []
+
+    class FakeGenerator:
+        source = "local"
+
+        def generate(self, *_args, seed=0, **kwargs):
+            hints.append(kwargs["mutation_hint"])
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(
+        task="repair timeout",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=False,
+        safe_mode=True,
+        distant_scout_plan={
+            "status": "READY",
+            "recommended_family": "flow:architecture_timeout_policy_seam",
+            "forbidden_families": ["flow:retry_delay"],
+            "target_boundary": "repair_timeout_policy",
+        },
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert "distant_scout_recommended_family=flow:architecture_timeout_policy_seam" in hints[0]
+    assert "distant_scout_forbidden_families=flow:retry_delay" in hints[0]
+    assert res.learning_trace["distant_scout_execution"]["applied"] is True
+
+
 def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")

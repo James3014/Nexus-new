@@ -937,12 +937,14 @@ def _asi_record(
     status: str,
     error: str,
     route_confidence: float,
+    execution_family: str = "",
 ) -> dict[str, Any]:
     metric = 1.0 if str(status).upper() == "SUCCESS" else 0.0
+    family = execution_family or f"flow:{recommended_flow or chosen_flow or 'unknown'}"
     return {
         "run_id": run_id,
         "hypothesis": task_desc[:240],
-        "family": f"flow:{recommended_flow or chosen_flow or 'unknown'}",
+        "family": family,
         "metric_name": "success_rate",
         "metric": metric,
         "status": "keep" if metric >= 1.0 else "discard",
@@ -2469,6 +2471,7 @@ def run_auto_flow(
             "enable_ddtree_executor": executor_flags["enable_ddtree_executor"],
             "ddtree_max_candidates": executor_flags["ddtree_max_candidates"],
         }
+        distant_scout_plan = route.get("distant_scout_plan", {}) if isinstance(route.get("distant_scout_plan"), dict) else {}
         cfg = SprintConfig(
             task=task_desc_with_codeintel if llm_mode else task_desc,
             target_file=target_file,
@@ -2480,6 +2483,7 @@ def run_auto_flow(
             stage1_max_parallel=execution_profile["effective_stage1_max_parallel"],
             stage1_timeout_sec=effective_stage1_timeout,
             llm_mode=llm_mode,
+            distant_scout_plan=distant_scout_plan,
             **sprint_executor_flags,
         )
         res = run_hyper_sprint(repo_root=repo_root, config=cfg)
@@ -2518,6 +2522,7 @@ def run_auto_flow(
                     "effective_stage1_timeout_sec": effective_stage1_timeout,
                     "candidate_summaries": _candidate_summaries(list(getattr(res, "candidates", []) or [])),
                     "learning_trace": res.learning_trace,
+                    "distant_scout_execution": (res.learning_trace or {}).get("distant_scout_execution", {}),
                 },
             }
 
@@ -3139,6 +3144,14 @@ def run_auto_flow(
         status=str(result.get("status", "")),
         error=str(result.get("error", "")),
         route_confidence=route_confidence,
+        execution_family=str(
+            (
+                (result.get("report", {}) if isinstance(result.get("report"), dict) else {})
+                .get("distant_scout_execution", {})
+                or {}
+            ).get("recommended_family")
+            or ""
+        ),
     )
     research_session = _research_session_packet(
         task_id=task_id,

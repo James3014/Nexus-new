@@ -1596,7 +1596,10 @@ def test_plateau_hard_pivot_blocks_history_forced_baseline(tmp_path: Path, monke
         encoding="utf-8",
     )
 
+    seen_config = {}
+
     def fake_hyper(*, repo_root, config):
+        seen_config["distant_scout_plan"] = dict(config.distant_scout_plan)
         return SimpleNamespace(
             status="SUCCESS",
             reason="stage1_pass",
@@ -1608,7 +1611,14 @@ def test_plateau_hard_pivot_blocks_history_forced_baseline(tmp_path: Path, monke
             model_calls=0,
             total_tokens=0,
             token_capture_status="not_applicable_local_only",
-            learning_trace={},
+            learning_trace={
+                "distant_scout_execution": {
+                    "applied": True,
+                    "recommended_family": config.distant_scout_plan["recommended_family"],
+                    "forbidden_families": config.distant_scout_plan["forbidden_families"],
+                    "target_boundary": config.distant_scout_plan["target_boundary"],
+                }
+            },
             candidates=[],
         )
 
@@ -1643,7 +1653,10 @@ def test_plateau_hard_pivot_blocks_history_forced_baseline(tmp_path: Path, monke
     assert payload["guard"]["history_forced_baseline"] is False
     assert payload["guard"]["plateau_hard_pivot"] is True
     assert payload["route"]["route_features"]["route_pivot"] == "distant_scout"
+    assert seen_config["distant_scout_plan"]["forbidden_families"] == ["flow:retry_delay"]
     assert payload["strategy"]["distant_scout_plan"]["recommended_family"] != "flow:retry_delay"
+    assert payload["result"]["report"]["distant_scout_execution"]["recommended_family"] != "flow:retry_delay"
+    assert payload["research_session"]["family"] == payload["strategy"]["distant_scout_plan"]["recommended_family"]
 
 
 def test_baseline_local_mutation_ignores_prior_art_keyword_pollution(tmp_path: Path, monkeypatch):
