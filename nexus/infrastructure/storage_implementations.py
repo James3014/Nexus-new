@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 from nexus.infrastructure.storage_interfaces import MemoryStorage, CacheStore, JsonlStore, BeliefStore, ConfigStore
 
 class LanceDBStorage(MemoryStorage):
-    def __init__(self, project_root: Path, tenant_id: str | None = None):
+    def __init__(self, project_root: Path, tenant_id: str | None = None, audit_events: list[dict[str, Any]] | None = None):
         self.project_root = project_root
         self.tenant_id = tenant_id
+        self.audit_events = audit_events if audit_events is not None else []
 
     def scoped_access(self, tenant_id: str) -> "LanceDBStorage":
-        return LanceDBStorage(self.project_root, tenant_id=str(tenant_id))
+        return LanceDBStorage(self.project_root, tenant_id=str(tenant_id), audit_events=self.audit_events)
 
     def store(self, tenant_id: str, artifact_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
         tenant_dir = self.project_root / ".nexus" / "tenants" / tenant_id
@@ -37,6 +38,15 @@ class LanceDBStorage(MemoryStorage):
             tenant_dirs = list((tenants_root / tenant_id / "lancedb").glob("*.jsonl"))
         elif include_all_tenants:
             tenant_dirs = list(tenants_root.glob("*/lancedb/*.jsonl"))
+            self.audit_events.append(
+                {
+                    "event": "lancedb_global_search",
+                    "query": str(query),
+                    "include_all_tenants": True,
+                    "tenant_count": len({path.parts[-3] for path in tenant_dirs if len(path.parts) >= 3}),
+                    "reason": str(kwargs.get("audit_reason") or "explicit_include_all_tenants"),
+                }
+            )
         else:
             return []
         

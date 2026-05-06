@@ -50,6 +50,21 @@ def test_lancedb_storage_unscoped_retrieve_is_fail_closed(tmp_path):
 
     assert storage.retrieve("alpha", artifact_type="lesson", limit=5) == []
     assert storage.retrieve("alpha", artifact_type="lesson", limit=5, include_all_tenants=True)
+    assert storage.audit_events[-1]["event"] == "lancedb_global_search"
+    assert storage.audit_events[-1]["include_all_tenants"] is True
+    assert storage.audit_events[-1]["reason"] == "explicit_include_all_tenants"
+
+
+def test_lancedb_storage_global_search_audit_is_shared_with_scoped_handles(tmp_path):
+    storage = LanceDBStorage(tmp_path)
+    storage.store("tenant-a", "lesson", {"content": "alpha secret"})
+
+    tenant_a = storage.scoped_access("tenant-a")
+    assert tenant_a.retrieve("alpha", artifact_type="lesson", limit=5)
+    assert storage.audit_events == []
+
+    assert storage.retrieve("alpha", artifact_type="lesson", limit=5, include_all_tenants=True, audit_reason="ops_audit")
+    assert tenant_a.audit_events[-1]["reason"] == "ops_audit"
 
 
 def test_memory_storage_protocol_does_not_include_search():
