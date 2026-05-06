@@ -5,6 +5,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -176,26 +177,162 @@ def repair_subset_command(output_dir: str) -> list[str]:
     ]
 
 
-def run_repair_subset(repo_root: Path, output_dir: str) -> dict[str, Any]:
-    cmd = repair_subset_command(output_dir)
-    result = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, check=False)
+def _parse_progress_events(stderr: str) -> tuple[list[dict[str, Any]], int]:
+    events: list[dict[str, Any]] = []
+    parse_errors = 0
+    for line in (stderr or "").splitlines():
+        text = line.strip()
+        if not text.startswith("{"):
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            parse_errors += 1
+            continue
+        if isinstance(payload, dict) and payload.get("event"):
+            events.append(payload)
+    return events, parse_errors
+
+
+def _progress_summary(progress_events: list[dict[str, Any]]) -> dict[str, Any]:
+    starts = [item for item in progress_events if item.get("event") == "task_start"]
+    ends = [item for item in progress_events if item.get("event") == "task_end"]
+    stop_losses = [item for item in progress_events if item.get("event") == "task_stop_loss"]
+    total_timeouts = [item for item in progress_events if item.get("event") == "total_timeout"]
+    started = {str(item.get("task_id")) for item in starts if item.get("task_id")}
+    completed = {str(item.get("task_id")) for item in ends if item.get("task_id")}
+    last = progress_events[-1] if progress_events else {}
     return {
-        "name": "flash_style_repair_subset",
-        "passed": result.returncode == 0,
-        "command": cmd,
-        "returncode": result.returncode,
-        "stdout_tail": (result.stdout or "")[-2000:],
-        "stderr_tail": (result.stderr or "")[-2000:],
+        "task_start_count": len(starts),
+        "task_end_count": len(ends),
+        "task_stop_loss_count": len(stop_losses),
+        "total_timeout_count": len(total_timeouts),
+        "last_event": str(last.get("event") or "") if last else "",
+        "last_task_id": str(last.get("task_id") or "") if last else "",
+        "last_mode": str(last.get("mode") or "") if last else "",
+        "last_status": str(last.get("status") or "") if last else "",
+        "completed_task_ids": sorted(completed),
+        "active_task_ids": sorted(started - completed),
     }
 
 
-def build_payload(repo_root: Path, *, run_repair: bool, output_dir: str) -> dict[str, Any]:
+def _repair_classification(*, returncode: int | None, timed_out: bool, progress_events: list[dict[str, Any]], stdout: str, stderr: str) -> str:
+    has_total_timeout = any(item.get("event") == "total_timeout" for item in progress_events)
+    if timed_out and not progress_events:
+        return "hang"
+    if timed_out or has_total_timeout:
+        return "timeout"
+    if returncode == 0:
+        return "success"
+    if progress_events:
+        return "progress"
+    if not stdout.strip() and not stderr.strip():
+        return "hang"
+    return "failure"
+
+
+def _repair_failure_category(*, classification: str, progress_events: list[dict[str, Any]]) -> str:
+    if classification == "success":
+        return ""
+    if classification == "hang":
+        return "timeout_no_progress" if progress_events == [] else "no_output_failure"
+    if classification == "timeout":
+        if not progress_events:
+            return "timeout_no_progress"
+        last = str((progress_events[-1] or {}).get("event") or "")
+        return "timeout_after_task_start" if last == "task_start" else "timeout_after_progress"
+    if classification == "progress":
+        return "runner_failed_after_progress"
+    return "runner_failed"
+
+
+def _repair_subset_payload(
+    *,
+    cmd: list[str],
+    returncode: int | None,
+    stdout: str,
+    stderr: str,
+    duration_sec: float,
+    timeout_sec: float,
+    timed_out: bool,
+) -> dict[str, Any]:
+    progress_events, parse_errors = _parse_progress_events(stderr)
+    last_event = progress_events[-1] if progress_events else {}
+    classification = _repair_classification(
+        returncode=returncode,
+        timed_out=timed_out,
+        progress_events=progress_events,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    failure_category = _repair_failure_category(
+        classification=classification,
+        progress_events=progress_events,
+    )
+    progress_summary = _progress_summary(progress_events)
+    return {
+        "name": "flash_style_repair_subset",
+        "passed": classification == "success",
+        "classification": classification,
+        "command": cmd,
+        "returncode": returncode,
+        "duration_sec": round(duration_sec, 4),
+        "timeout_sec": timeout_sec,
+        "timed_out": timed_out,
+        "failure_category": failure_category,
+        "stdout_empty": not bool((stdout or "").strip()),
+        "progress_observed": bool(progress_events),
+        "progress_event_count": len(progress_events),
+        "progress_parse_errors": parse_errors,
+        "progress_summary": progress_summary,
+        "last_progress_event": last_event,
+        "stdout_tail": (stdout or "")[-2000:],
+        "stderr_tail": (stderr or "")[-2000:],
+    }
+
+
+def run_repair_subset(repo_root: Path, output_dir: str, *, timeout_sec: float = 1200.0) -> dict[str, Any]:
+    cmd = repair_subset_command(output_dir)
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=max(1.0, float(timeout_sec or 1200.0)),
+        )
+        return _repair_subset_payload(
+            cmd=cmd,
+            returncode=result.returncode,
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+            duration_sec=time.monotonic() - started,
+            timeout_sec=timeout_sec,
+            timed_out=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        return _repair_subset_payload(
+            cmd=cmd,
+            returncode=None,
+            stdout=stdout,
+            stderr=stderr,
+            duration_sec=time.monotonic() - started,
+            timeout_sec=timeout_sec,
+            timed_out=True,
+        )
+
+
+def build_payload(repo_root: Path, *, run_repair: bool, output_dir: str, repair_timeout_sec: float = 1200.0) -> dict[str, Any]:
     checks = [
         *validate_repair_factory_skipped_routes(repo_root),
         *validate_runtime_receipt_reconcile(),
     ]
     if run_repair:
-        checks.append(run_repair_subset(repo_root, output_dir))
+        checks.append(run_repair_subset(repo_root, output_dir, timeout_sec=repair_timeout_sec))
     failures = [item for item in checks if not item.get("passed")]
     return {
         "schema_version": "nexus_pre_flash_gate.v1",
@@ -211,10 +348,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--quick", action="store_true", help="Run deterministic local route/receipt checks only.")
     parser.add_argument("--run-repair-subset", action="store_true", help="Run two-task Flash-style Nexus-only repair subset.")
     parser.add_argument("--output-dir", default=".nexus/reports/bench_flash_repair_pruning_prefash")
+    parser.add_argument("--repair-timeout-sec", type=float, default=1200.0)
     args = parser.parse_args(argv)
 
     run_repair = bool(args.run_repair_subset and not args.quick)
-    payload = build_payload(Path(args.repo_root).resolve(), run_repair=run_repair, output_dir=args.output_dir)
+    payload = build_payload(
+        Path(args.repo_root).resolve(),
+        run_repair=run_repair,
+        output_dir=args.output_dir,
+        repair_timeout_sec=args.repair_timeout_sec,
+    )
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0 if payload["passed"] else 1
 

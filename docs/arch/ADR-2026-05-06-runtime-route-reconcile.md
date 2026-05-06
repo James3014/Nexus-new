@@ -40,3 +40,11 @@ A missing provider and a failed provider are not the same operational state. Wit
 Decision: Autoreason now reports `judge_mode=heuristic_fallback` when judge providers were configured but produced no valid semantic votes. `semantic_judged` remains false.
 
 Prevention: provider-unavailable tests assert `heuristic_fallback`, so Flash reports can distinguish true deterministic local mode from failed semantic provider execution.
+
+## P1040 Lesson: Long Pre-Flash Runs Need Progress Classification
+
+A Flash-style repair subset can run for more than a minute with no stdout while still making real progress on stderr JSONL task events. Treating that state as an opaque long wait makes the operator see only a final PASS/FAIL and hides whether Nexus improved or simply stalled.
+
+Decision: the pre-Flash gate records duration, timeout budget, parsed progress events, last progress event, stdout-empty state, and a failure category for repair subset execution.
+
+Prevention: tests cover success with stderr-only progress, timeout before any progress, timeout after task start, and non-zero failures with progress so the next Flash run can explain state instead of only reporting pass/fail.
