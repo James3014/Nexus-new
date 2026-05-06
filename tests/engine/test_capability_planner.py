@@ -341,7 +341,15 @@ def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
         task_type="public_ops_research",
         route={
             "recommended_flow": "baseline",
-            "route_features": {"risk_score": 10, "candidate_count": 1},
+            "route_features": {
+                "risk_score": 10,
+                "candidate_count": 2,
+                "candidate_factory_readiness_estimate": {
+                    "ready": True,
+                    "status": "READY",
+                    "estimated_candidates": 2,
+                },
+            },
             "capability_stack": {"selected_capabilities": ["baseline"]},
         },
         pillars={"lancedb": {"hits": 0}},
@@ -369,7 +377,15 @@ def test_capability_planner_keeps_autoreason_for_uncertain_or_evidence_repair():
         task_type="public_test_repair",
         route={
             "recommended_flow": "baseline",
-            "route_features": {"risk_score": 10, "candidate_count": 1},
+            "route_features": {
+                "risk_score": 10,
+                "candidate_count": 2,
+                "candidate_factory_readiness_estimate": {
+                    "ready": True,
+                    "status": "READY",
+                    "estimated_candidates": 2,
+                },
+            },
             "capability_stack": {"selected_capabilities": ["baseline"]},
         },
         pillars={"lancedb": {"hits": 0}},

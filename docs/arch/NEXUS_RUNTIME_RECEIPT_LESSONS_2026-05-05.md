@@ -15,6 +15,7 @@ This ADR records lessons from P321-P350 semantic runtime receipt integration.
 - Targeted pytest node names must be confirmed with `rg` before relying on them as evidence. A wrong node id can exit before running the intended assertions and create false validation confidence.
 - Candidate-ranking capabilities need an explicit readiness estimate before planner selection. A simple repair can solve through `hyper` and `delivery_gate` while lacking enough A/B/AB candidates for `autoreason` or `judge_panel`.
 - When route feature schema expands, schema-shape tests must be updated in the same change. Otherwise correct signal additions appear as regressions even when runtime behavior is unchanged.
+- Generic benchmark evidence wording must not override an explicit skipped candidate-factory estimate for repair tasks. Evidence text can require research/gates, but ranking layers still need viable candidates.
 
 ## Applied Fixes
 - Added late plateau replan before execution.
