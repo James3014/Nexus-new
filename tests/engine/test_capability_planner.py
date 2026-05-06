@@ -361,17 +361,38 @@ def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
     assert "autoreason" in set(trust_plan["selected_capabilities"])
 
 
-def test_capability_planner_keeps_autoreason_for_uncertain_or_evidence_repair():
+def test_capability_planner_blocks_repair_ranking_when_factory_skipped():
     uncertain_plan = CapabilityPlanner().plan(
-        task_desc="Repair hidden verifier timeout where root cause is uncertain.",
+        task_desc=(
+            "Repair hidden verifier timeout where root cause is uncertain. "
+            "Nexus wearing contract requires evidence, claim, and governance checks."
+        ),
         task_type="public_test_repair",
         route={
             "recommended_flow": "baseline",
-            "route_features": {"risk_score": 10, "candidate_count": 1, "adjusted_root_cause_confidence": 0.5},
+            "route_features": {
+                "risk_score": 10,
+                "candidate_count": 1,
+                "adjusted_root_cause_confidence": 0.5,
+                "candidate_factory_readiness_estimate": {
+                    "ready": False,
+                    "status": "SKIPPED",
+                    "estimated_candidates": 1,
+                },
+                "claim_uncertainty": True,
+                "blocked_assumptions_count": 1,
+            },
             "capability_stack": {"selected_capabilities": ["baseline"]},
         },
         pillars={"lancedb": {"hits": 0}},
     ).to_dict()
+
+    assert "repair_loop" in set(uncertain_plan["selected_capabilities"])
+    assert "autoreason" not in set(uncertain_plan["selected_capabilities"])
+    assert "judge_panel" not in set(uncertain_plan["selected_capabilities"])
+
+
+def test_capability_planner_keeps_autoreason_for_candidate_ready_repair():
     evidence_plan = CapabilityPlanner().plan(
         task_desc="Repair test evidence and public claim verification.",
         task_type="public_test_repair",
@@ -391,7 +412,6 @@ def test_capability_planner_keeps_autoreason_for_uncertain_or_evidence_repair():
         pillars={"lancedb": {"hits": 0}},
     ).to_dict()
 
-    assert {"autoreason", "judge_panel", "repair_loop"} <= set(uncertain_plan["selected_capabilities"])
     assert {"autoreason", "judge_panel", "repair_loop"} <= set(evidence_plan["selected_capabilities"])
 
 

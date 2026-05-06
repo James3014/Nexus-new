@@ -2488,6 +2488,23 @@ def test_runtime_receipt_plan_prunes_unexecuted_judge_panel():
     }
 
 
+def test_runtime_receipt_plan_adds_runtime_autoreason_success():
+    plan = research_flow_service._runtime_receipt_plan_payload(
+        {"selected_capabilities": ["hyper"]},
+        {
+            "capabilities": {},
+            "autoreason": {
+                "enabled": True,
+                "status": "SUCCESS",
+                "winner": "AB",
+                "judge_votes": [{"judge": "deterministic", "ranking": ["AB", "B", "A"]}],
+            },
+        },
+    )
+
+    assert "autoreason" in plan["selected_capabilities"]
+
+
 def test_auto_flow_writes_explicit_output_file(tmp_path: Path):
     target = tmp_path / "target.py"
     target.write_text("def normalize_flag(text):\n    return text\n", encoding="utf-8")

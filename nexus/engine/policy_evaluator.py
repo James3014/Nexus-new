@@ -12,17 +12,17 @@ def apply_signal_policies(
 ) -> None:
     task_lower = f"{task_desc} {task_type}".lower()
     hyper_selected = "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint"
-    repair_needs_autoreason = signals.repair_signal and (
+    repair_candidate_factory_blocked = (
+        signals.repair_signal
+        and not signals.candidate_factory_ready_estimate
+        and str(signals.candidate_factory_status).upper() == "SKIPPED"
+    )
+    repair_needs_autoreason = signals.repair_signal and not repair_candidate_factory_blocked and (
         signals.confidence < 0.75
         or signals.candidate_factory_ready_estimate
         or signals.memory_hits
         or signals.findings_hits
         or signals.governance_signal
-    )
-    repair_candidate_factory_blocked = (
-        signals.repair_signal
-        and not signals.candidate_factory_ready_estimate
-        and str(signals.candidate_factory_status).upper() == "SKIPPED"
     )
 
     if hyper_selected:
@@ -30,21 +30,27 @@ def apply_signal_policies(
     if signals.recommended_flow == "baseline":
         enable("direct_mode", "baseline_execution_path")
     if (
-        "autoreason" in signals.selected_seed
-        or signals.confidence < 0.75
-        or signals.candidate_factory_ready_estimate
-        or signals.memory_hits
-        or signals.findings_hits
-        or repair_needs_autoreason
-        or (signals.evidence_signal and not repair_candidate_factory_blocked)
-        or signals.governance_signal
+        not repair_candidate_factory_blocked
+        and (
+            "autoreason" in signals.selected_seed
+            or signals.confidence < 0.75
+            or signals.candidate_factory_ready_estimate
+            or signals.memory_hits
+            or signals.findings_hits
+            or repair_needs_autoreason
+            or signals.evidence_signal
+            or signals.governance_signal
+        )
     ):
         enable("autoreason", "low_confidence_or_multi_candidate_or_history")
     if (
-        signals.confidence < 0.75
-        or signals.candidate_factory_ready_estimate
-        or (signals.evidence_signal and not repair_candidate_factory_blocked)
-        or signals.governance_signal
+        not repair_candidate_factory_blocked
+        and (
+            signals.confidence < 0.75
+            or signals.candidate_factory_ready_estimate
+            or signals.evidence_signal
+            or signals.governance_signal
+        )
     ):
         enable("judge_panel", "evidence_quality_judge_required_for_uncertain_or_multi_candidate_route")
     if signals.confidence < 0.8 or "belief" in task_lower or "confidence" in task_lower or "budget" in task_lower:

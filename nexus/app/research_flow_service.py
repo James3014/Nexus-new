@@ -2083,6 +2083,9 @@ def _runtime_receipt_plan_payload(
             _remove_selected("judge_panel", stop_reason or status.lower() or "runtime_judge_not_executable")
     autoreason_selected = "autoreason" in selected
     autoreason_used = bool(autoreason.get("enabled") or str(autoreason.get("status") or "").strip().upper() == "SUCCESS")
+    if autoreason_used and not autoreason_selected:
+        selected.append("autoreason")
+        plan["selected_capabilities"] = selected
     if autoreason_selected and not autoreason_used:
         status = str(autoreason.get("status") or "").strip().upper()
         stop_reason = str(autoreason.get("stop_reason") or "").strip()
