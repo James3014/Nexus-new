@@ -1581,6 +1581,16 @@ def test_extract_record_maps_semantic_fields():
                 "conditional_capabilities": ["hyper", "autoreason"],
                 "pending_capabilities": ["swarm"],
                 "forbidden_capabilities": [],
+                "stop_policy": {
+                    "tactical_sequence": ["hyper_sprint", "autoreason", "ddtree", "belief", "ultra_review"],
+                    "tactical_tool_map": [
+                        {"capability": "hyper_sprint", "evidence_required": False},
+                        {"capability": "autoreason", "evidence_required": True},
+                        {"capability": "ddtree", "evidence_required": True},
+                        {"capability": "belief", "evidence_required": True},
+                        {"capability": "ultra_review", "evidence_required": True},
+                    ],
+                },
                 "signal_snapshot": {
                     "risk_score_0_100": 87,
                     "risk_score_0_1": 0.87,
@@ -1737,6 +1747,8 @@ def test_extract_record_maps_semantic_fields():
     assert out["route_decision_required_count"] == 3
     assert out["route_decision_conditional_count"] == 2
     assert out["route_decision_pending"] == ["swarm"]
+    assert out["route_tactical_sequence"] == ["hyper_sprint", "autoreason", "ddtree", "belief", "ultra_review"]
+    assert json.loads(out["route_tactical_tool_map_json"])[1]["capability"] == "autoreason"
     assert out["forecast_gate_shadow_schema"] == "nexus_forecast_gate_shadow_v1"
     assert out["forecast_gate_shadow_mode"] is True
     assert out["forecast_gate_suggested_tier"] == "L3_full_governed"

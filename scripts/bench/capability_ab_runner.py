@@ -1828,6 +1828,9 @@ def _extract_record(
     capability_plan = capability_plan if isinstance(capability_plan, dict) else {}
     route_decision = usage_trace.get("route_decision", {}) if isinstance(usage_trace, dict) else {}
     route_decision = route_decision if isinstance(route_decision, dict) else {}
+    route_stop_policy = route_decision.get("stop_policy", {}) if isinstance(route_decision.get("stop_policy"), dict) else {}
+    route_tactical_sequence = route_stop_policy.get("tactical_sequence", []) if isinstance(route_stop_policy.get("tactical_sequence"), list) else []
+    route_tactical_tool_map = route_stop_policy.get("tactical_tool_map", []) if isinstance(route_stop_policy.get("tactical_tool_map"), list) else []
     route_signal_snapshot = route_decision.get("signal_snapshot", {}) if isinstance(route_decision, dict) else {}
     route_signal_snapshot = route_signal_snapshot if isinstance(route_signal_snapshot, dict) else {}
     forecast_gate_shadow = route_decision.get("forecast_gate_shadow", {}) if isinstance(route_decision, dict) else {}
@@ -2068,6 +2071,9 @@ def _extract_record(
         "route_decision_conditional_count": len(route_decision.get("conditional_capabilities", []) or []),
         "route_decision_pending": list(route_decision.get("pending_capabilities", []) or []),
         "route_decision_forbidden": list(route_decision.get("forbidden_capabilities", []) or []),
+        "route_tactical_sequence": route_tactical_sequence,
+        "route_tactical_tool_map": route_tactical_tool_map,
+        "route_tactical_tool_map_json": json.dumps(route_tactical_tool_map, ensure_ascii=False, sort_keys=True),
         "legacy_override_detected": bool(route.get("legacy_override_detected", False)),
         "legacy_override_reason": str(route.get("legacy_override_reason") or ""),
         "brain_hub_guidance": brain_hub_guidance,

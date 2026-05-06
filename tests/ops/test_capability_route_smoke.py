@@ -159,6 +159,48 @@ def test_summarize_jsonl_route_quality_uses_actionable_receipts(tmp_path: Path):
     assert out["route_quality"]["outcome_total"] == 1
 
 
+def test_summarize_jsonl_counts_evidence_required_tactical_gap_as_over_selection(tmp_path: Path):
+    path = tmp_path / "with_nexus_1.jsonl"
+    row = {
+        "task_id": "tactical-gap",
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "route_decision_schema_version": "nexus_route_decision_v1",
+        "route_decision_selected_count": 1,
+        "expected_capability_receipt_coverage": {
+            "expected": ["autoreason"],
+            "public_safe": ["autoreason"],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": True,
+        },
+        "route_tactical_tool_map_json": json.dumps(
+            [
+                {"capability": "autoreason", "evidence_required": True},
+                {"capability": "semantic_searcher", "evidence_required": True},
+            ]
+        ),
+        "capability_receipts": [
+            {
+                "name": "autoreason",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": True,
+            }
+        ],
+    }
+    path.write_text(json.dumps(row), encoding="utf-8")
+
+    out = capability_route_smoke.summarize_jsonl(path)
+
+    assert out["route_quality"]["selected_total"] == 2
+    assert out["route_quality"]["invoked_total"] == 1
+    assert out["route_quality"]["unnecessary_selected_rate"] == 0.5
+
+
 def test_summarize_jsonl_fails_when_route_decision_missing(tmp_path: Path):
     path = tmp_path / "with_nexus_1.jsonl"
     row = {

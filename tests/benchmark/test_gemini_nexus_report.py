@@ -390,6 +390,36 @@ def test_route_quality_gate_derives_counts_from_actionable_receipts():
     assert failures == []
 
 
+def test_route_quality_gate_counts_missing_evidence_required_tactical_tools():
+    failures = _route_quality_gate_from_rows(
+        [
+            {
+                "task_id": "a",
+                "trial_index": 1,
+                "route_tactical_tool_map": [
+                    {"capability": "semantic_searcher", "evidence_required": True},
+                    {"capability": "autoreason", "evidence_required": True},
+                    {"capability": "baseline", "evidence_required": False},
+                ],
+                "capability_receipts": [
+                    {
+                        "name": "autoreason",
+                        "selected": True,
+                        "invoked": True,
+                        "evidence_present": True,
+                        "gate_passed": True,
+                        "outcome_contributed": True,
+                        "public_claim_safe": True,
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert "route_quality_selected_to_invoked_below_threshold" in failures
+    assert "route_quality_unnecessary_selected_above_threshold" in failures
+
+
 def test_public_claim_gate_rejects_research_selected_without_evidence_gate():
     gate = _public_claim_gate(
         rows_without=[{"task_id": "a", "trial_index": 1, "token_measured": True}],

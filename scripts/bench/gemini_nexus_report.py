@@ -276,14 +276,40 @@ def _receipt_route_quality_actionable(receipt: dict[str, Any]) -> bool:
     return not (reason and reason in _route_quality_ignored_reasons(name))
 
 
+def _route_tactical_tool_map(row: dict[str, Any]) -> list[dict[str, Any]]:
+    payload = _jsonish(row.get("route_tactical_tool_map"), [])
+    if not isinstance(payload, list) or not payload:
+        payload = _jsonish(row.get("route_tactical_tool_map_json"), [])
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
 def _row_route_quality_counts(row: dict[str, Any]) -> dict[str, int] | None:
     receipts = _jsonish(row.get("capability_receipts"), [])
-    if not isinstance(receipts, list) or not receipts:
+    tactical_map = _route_tactical_tool_map(row)
+    evidence_required_tools = {
+        normalize_capability_name(item.get("capability") or item.get("name"))
+        for item in tactical_map
+        if bool(item.get("evidence_required"))
+    }
+    evidence_required_tools = {name for name in evidence_required_tools if name}
+    if (not isinstance(receipts, list) or not receipts) and not evidence_required_tools:
         return None
+    receipts = receipts if isinstance(receipts, list) else []
     selected = invoked = evidence = outcome = 0
+    counted_names: set[str] = set()
+    receipts_by_name: dict[str, list[dict[str, Any]]] = {}
     for receipt in receipts:
-        if not isinstance(receipt, dict) or not _receipt_route_quality_actionable(receipt):
+        if not isinstance(receipt, dict):
             continue
+        name = normalize_capability_name(receipt.get("name") or receipt.get("capability"))
+        if name:
+            receipts_by_name.setdefault(name, []).append(receipt)
+        if not _receipt_route_quality_actionable(receipt):
+            continue
+        if name:
+            counted_names.add(name)
         if bool(receipt.get("selected", False)):
             selected += 1
         if bool(receipt.get("invoked", False)):
@@ -291,6 +317,15 @@ def _row_route_quality_counts(row: dict[str, Any]) -> dict[str, int] | None:
         if bool(receipt.get("evidence_present") or receipt.get("evidence")):
             evidence += 1
         if bool(receipt.get("outcome_contributed", False)):
+            outcome += 1
+    for name in sorted(evidence_required_tools - counted_names):
+        selected += 1
+        matching_receipts = receipts_by_name.get(name, [])
+        if any(bool(receipt.get("invoked", False)) for receipt in matching_receipts):
+            invoked += 1
+        if any(bool(receipt.get("evidence_present") or receipt.get("evidence")) for receipt in matching_receipts):
+            evidence += 1
+        if any(bool(receipt.get("outcome_contributed", False)) for receipt in matching_receipts):
             outcome += 1
     return {
         "selected": selected,
