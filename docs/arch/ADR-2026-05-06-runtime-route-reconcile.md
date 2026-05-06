@@ -48,3 +48,11 @@ A Flash-style repair subset can run for more than a minute with no stdout while 
 Decision: the pre-Flash gate records duration, timeout budget, parsed progress events, last progress event, stdout-empty state, and a failure category for repair subset execution.
 
 Prevention: tests cover success with stderr-only progress, timeout before any progress, timeout after task start, and non-zero failures with progress so the next Flash run can explain state instead of only reporting pass/fail.
+
+## P1060 Lesson: Wear-Nexus Smoke Must Use Real Execution, Not Explain-Only
+
+A direct `research:auto-flow --explain-route` invocation only prints the route and exits; it does not prove Nexus can modify code or produce artifact receipts. The first real CLI smoke then failed on a simple `normalize_flag(value)` repair because the local mutator only recognized `return text`.
+
+Decision: wear-Nexus smoke must run without `--explain-route` before Flash. The deterministic local normalize repair now derives the actual argument name from the function signature instead of hard-coding `text`.
+
+Prevention: local mutator tests now cover both `normalize_flag(text)` and `normalize_flag(value)` so Flash is not the first detector for simple local repair regressions.

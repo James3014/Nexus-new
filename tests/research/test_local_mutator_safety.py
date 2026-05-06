@@ -50,6 +50,15 @@ def normalize_flag(text: str) -> str:
     assert "return text.strip().lower()" in patched
 
 
+def test_normalize_flag_patch_uses_actual_argument_name():
+    source = """
+def normalize_flag(value):
+    return value
+"""
+    patched = generate_local_candidate(source, "fix normalize flag behavior", "local", 0)
+    assert "return value.strip().lower()" in patched
+
+
 def test_compute_backoff_patch_applied():
     source = """
 def compute_backoff(attempt: int) -> int:

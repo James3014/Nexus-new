@@ -213,12 +213,16 @@ def _patch_normalize_flag(source: str) -> str:
     if ".strip().lower()" in source:
         return source
 
-    pattern = re.compile(r"(\s+)return\s+text\s*$", re.MULTILINE)
+    signature = re.search(r"def\s+normalize_flag\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)", source)
+    if not signature:
+        return source
+    arg_name = signature.group(1)
+    pattern = re.compile(rf"(\s+)return\s+{re.escape(arg_name)}\s*$", re.MULTILINE)
     match = pattern.search(source)
     if not match:
         return source
     indent = match.group(1)
-    new_source = pattern.sub(f"{indent}return text.strip().lower()", source, count=1)
+    new_source = pattern.sub(f"{indent}return {arg_name}.strip().lower()", source, count=1)
     try:
         compile(new_source, "<normalize_flag_patch>", "exec")
         return new_source
