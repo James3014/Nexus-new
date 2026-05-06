@@ -2039,6 +2039,35 @@ def _augment_semantic_runtime_capabilities(
                 "gate_passed": bool(capabilities.get("judge_panel_gate_passed", False)),
             },
         ]
+        autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}
+        critique = autoreason.get("adversarial_critique", {}) if isinstance(autoreason.get("adversarial_critique"), dict) else {}
+        if critique:
+            winner = str(autoreason.get("winner") or "").strip()
+            discriminator_refs: list[str] = []
+            winner_failed_discriminator = False
+            for candidate_id, result in sorted(critique.items()):
+                if not isinstance(result, dict):
+                    continue
+                candidate = str(candidate_id)
+                if bool(result.get("fatal")):
+                    discriminator_refs.append(f"discriminator_fatal:{candidate}")
+                    if candidate == winner:
+                        winner_failed_discriminator = True
+                critiques = result.get("critiques", []) if isinstance(result.get("critiques"), list) else []
+                defenses = result.get("defenses", []) if isinstance(result.get("defenses"), list) else []
+                if critiques:
+                    discriminator_refs.append(f"discriminator_critiques:{candidate}:{len(critiques)}")
+                if defenses:
+                    discriminator_refs.append(f"discriminator_defenses:{candidate}:{len(defenses)}")
+            route_receipts.append(
+                {
+                    "name": "autoreason",
+                    "evidence_present": bool(discriminator_refs),
+                    "gate_passed": bool(artifact_verified and not winner_failed_discriminator),
+                    "winner": winner,
+                    "discriminator_refs": discriminator_refs,
+                }
+            )
         report = service.build(
             title=f"Nexus Formal Evidence Report: {task_id or receipt_slug}",
             hypothesis=task_desc,

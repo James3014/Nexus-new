@@ -18,6 +18,7 @@ P10-P19 added runtime guardrails for Brain Hub alignment, route receipts, candid
 8. Public benchmark gate logic must be shared between markdown and evidence bundles. If one path enforces token telemetry completeness and the other does not, the report will create contradictory public-claim evidence.
 9. Benchmark artifact regeneration should use exported helpers or an inline parser for JSONL. Do not assume private helper names exist when repairing evidence after a benchmark run.
 10. Multi-file inspection commands should use `rg` or separate `sed` calls; tools like `nl` accept one file shape poorly and can fail before producing useful evidence.
+11. When a test node was suggested from memory, confirm it with `rg -n "def test_"` before running pytest; otherwise `no tests ran` can be mistaken for a fast verification loop.
 
 ## Decision
 

@@ -2488,6 +2488,48 @@ def test_runtime_receipt_plan_prunes_unexecuted_judge_panel():
     }
 
 
+def test_formal_report_includes_autoreason_discriminator_receipt(tmp_path: Path):
+    nexus_usage_trace = {
+        "capabilities": {
+            "artifact_refs": ["artifact:demo:tests_passed"],
+            "artifact_gate_passed": True,
+            "judge_panel_report_path": ".nexus/reports/capabilities/judge_panel/demo.json",
+            "judge_panel_gate_passed": True,
+            "judge_panel_votes": [{"judge": "deterministic", "ranking": ["AB", "A"]}],
+        },
+        "autoreason": {
+            "winner": "AB",
+            "adversarial_critique": {
+                "A": {"fatal": True, "critiques": ["breaks invariant"], "defenses": []},
+                "AB": {"fatal": False, "critiques": ["edge checked"], "defenses": ["tests pass"]},
+            },
+        },
+    }
+
+    research_flow_service._augment_semantic_runtime_capabilities(
+        repo_root=tmp_path,
+        task_id="demo",
+        task_desc="Produce formal report with Autoreason discriminator evidence.",
+        task_type="public_test_repair",
+        target_file="target.py",
+        receipt_slug="demo",
+        selected_capabilities={"formal_report"},
+        nexus_usage_trace=nexus_usage_trace,
+        route={},
+        asi_ledger=[],
+        plateau={},
+        artifact_verified=True,
+        normalized_success_criteria="patch_and_tests_pass",
+    )
+
+    report_path = tmp_path / nexus_usage_trace["capabilities"]["formal_report_path"]
+    text = report_path.read_text(encoding="utf-8")
+
+    assert "name=autoreason" in text
+    assert "discriminator_fatal:A" in text
+    assert "discriminator_critiques:AB:1" in text
+
+
 def test_runtime_receipt_plan_adds_runtime_autoreason_success():
     plan = research_flow_service._runtime_receipt_plan_payload(
         {"selected_capabilities": ["hyper"]},
