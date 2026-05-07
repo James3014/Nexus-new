@@ -113,9 +113,12 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         if not candidate_verified:
             decision = "reject_failed_candidate"
             reason = "candidate route did not preserve verified delivery"
-        elif source in LOCAL_SUCCESS_SOURCES and calls <= 1 and str(candidate.get("token_capture_status") or "") != "measured":
+        elif source in LOCAL_SUCCESS_SOURCES:
             decision = "hold_not_model_uplift"
-            reason = f"candidate success source {source} with unreliable token capture"
+            reason = f"candidate success source {source} is not model uplift"
+        elif str(candidate.get("token_capture_status") or "") != "measured":
+            decision = "hold_not_model_uplift"
+            reason = "candidate token capture is not measured"
         elif wall_delta <= -15.0 and token_delta <= 5.0:
             decision = "promote_cost_tune"
             reason = f"verified with wall improvement {abs(wall_delta):.2f}% and token delta {token_delta:.2f}%"
@@ -182,6 +185,8 @@ def _next_required_action(decisions: list[TaskCostDecision]) -> str:
         return "stop_and_fix_failed_candidate_before_more_cost_tuning"
     if any(item.decision == "hold_not_model_uplift" for item in decisions):
         return "rerun_hold_tasks_with_measured_model_tokens_or_keep_out_of_model_uplift_claim"
+    if any(item.decision == "hold_needs_trace_diagnosis" for item in decisions):
+        return "diagnose_hold_tasks_before_promoting_cost_policy"
     if any(item.decision == "route_lite_required" for item in decisions):
         return "implement_lite_route_for_bare_already_verified_tasks"
     return "promote_cost_policy_then_rerun_12_task_fail_fast_loop"

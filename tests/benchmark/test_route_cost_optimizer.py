@@ -95,6 +95,88 @@ def test_optimizer_holds_unreliable_local_fallback(tmp_path: Path) -> None:
     assert out["next_required_action"] == "rerun_hold_tasks_with_measured_model_tokens_or_keep_out_of_model_uplift_claim"
 
 
+def test_optimizer_holds_measured_local_success_as_not_model_uplift(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    baseline = {
+        "rows": [
+            {
+                "task_id": "repair-001",
+                "with_semantic": "VERIFIED",
+                "with_status": "SUCCESS",
+                "with_wall": 40,
+                "with_tokens": 45000,
+                "without_semantic": "UNVERIFIED",
+                "without_status": "FAILED",
+            }
+        ]
+    }
+    _write_jsonl(
+        candidate / "with_nexus_1.jsonl",
+        [
+            {
+                "task_id": "repair-001",
+                "semantic_status": "VERIFIED",
+                "status": "SUCCESS",
+                "run_eligible": True,
+                "report_trust_mismatch": False,
+                "wall_duration_sec": 35,
+                "total_tokens": 44000,
+                "model_calls": 1,
+                "token_capture_status": "measured",
+                "nexus_winner_source": "local_hidden_shadow",
+            }
+        ],
+    )
+    _write_jsonl(candidate / "without_nexus_1.jsonl", [{"task_id": "repair-001", "semantic_status": "UNVERIFIED", "run_eligible": True}])
+
+    out = build_optimizer_plan(baseline_aggregate=baseline, candidate_dir=candidate)
+
+    assert out["decision_counts"] == {"hold_not_model_uplift": 1}
+    assert out["promoted_policy"]["hold_tasks"] == ["repair-001"]
+
+
+def test_optimizer_requires_trace_diagnosis_for_verified_cost_regression(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    baseline = {
+        "rows": [
+            {
+                "task_id": "context-001",
+                "with_semantic": "VERIFIED",
+                "with_status": "SUCCESS",
+                "with_wall": 50,
+                "with_tokens": 45000,
+                "without_semantic": "UNVERIFIED",
+                "without_status": "FAILED",
+            }
+        ]
+    }
+    _write_jsonl(
+        candidate / "with_nexus_1.jsonl",
+        [
+            {
+                "task_id": "context-001",
+                "semantic_status": "VERIFIED",
+                "status": "SUCCESS",
+                "run_eligible": True,
+                "report_trust_mismatch": False,
+                "wall_duration_sec": 80,
+                "total_tokens": 50000,
+                "model_calls": 1,
+                "token_capture_status": "measured",
+                "nexus_winner_source": "model_patch",
+            }
+        ],
+    )
+    _write_jsonl(candidate / "without_nexus_1.jsonl", [{"task_id": "context-001", "semantic_status": "UNVERIFIED", "run_eligible": True}])
+
+    out = build_optimizer_plan(baseline_aggregate=baseline, candidate_dir=candidate)
+
+    assert out["decision_counts"] == {"hold_needs_trace_diagnosis": 1}
+    assert out["next_required_action"] == "diagnose_hold_tasks_before_promoting_cost_policy"
+
+
 def test_optimizer_routes_bare_verified_rows_to_lite_when_cost_not_improved(tmp_path: Path) -> None:
     candidate = tmp_path / "candidate"
     candidate.mkdir()
