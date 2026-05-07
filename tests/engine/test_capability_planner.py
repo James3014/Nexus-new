@@ -603,3 +603,38 @@ def test_capability_planner_consumes_provider_signals_without_executor_side_effe
     assert {"research", "pregate", "plan_quality_gate", "swarm", "lancedb", "registry_sync"} <= selected
     assert payload["signal_snapshot"]["autonomic_suggested_mode"] == "research_first"
     assert payload["signal_snapshot"]["msa_rerank_reasons"] == ("source:lancedb", "sot:code")
+
+
+def test_capability_planner_applies_promoted_learning_policy_only_when_opt_in():
+    baseline = CapabilityPlanner().plan(
+        task_desc="Simple typo repair with no research need.",
+        task_type="docs_fix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 5, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+    ).to_dict()
+    learned = CapabilityPlanner().plan(
+        task_desc="Simple typo repair with no research need.",
+        task_type="docs_fix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 5, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        budget={
+            "learning_policy": {
+                "source_experiences": ["exp:task-1"],
+                "promoted_capabilities": ["autoreason"],
+                "penalized_capabilities": ["swarm"],
+            }
+        },
+    ).to_dict()
+
+    assert "autoreason" not in baseline["selected_capabilities"]
+    assert "autoreason" in learned["selected_capabilities"]
+    assert learned["signal_snapshot"]["learning_policy"]["influenced"] is True
+    trace = {item["capability"]: item for item in learned["decision_trace"]}
+    assert "learning_policy_promoted" in trace["autoreason"]["reasons"]
+    assert "learning_policy_penalized" in trace["swarm"]["reasons"]

@@ -171,7 +171,11 @@ def export_agent_lightning_preferences(events: list[S2TTraceEvent]) -> dict[str,
     return _export_preferences(events)
 
 
-def export_model_training_v2(events: list[S2TTraceEvent], experiences: list[Any] | None = None) -> dict[str, Any]:
+def export_model_training_v2(
+    events: list[S2TTraceEvent],
+    experiences: list[Any] | None = None,
+    quality_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     from nexus.contracts.s2t_export import export_model_training_v2 as _export_model_training_v2
 
-    return _export_model_training_v2(events, experiences)
+    return _export_model_training_v2(events, experiences, quality_rows)

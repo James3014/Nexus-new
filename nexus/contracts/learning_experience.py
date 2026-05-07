@@ -149,12 +149,14 @@ def build_learning_experience(
 def project_nexus_policy(experience: LearningExperience) -> dict[str, Any]:
     complete = [item.capability for item in experience.capability_lifecycle if item.funnel_complete]
     unnecessary = [item.capability for item in experience.capability_lifecycle if item.selected and not item.invoked]
+    escalation = build_escalation_recommendations(experience)
     return {
         "schema_version": "nexus_policy_learning_projection.v1",
         "experience_id": experience.experience_id,
         "promotion_status": experience.promotion_status,
         "route_weight_updates": complete,
         "capability_penalties": unnecessary,
+        "escalation_recommendations": escalation,
         "s2t_prior_eligible": bool(experience.s2t_trace_refs and experience.outcome == "verified_success"),
     }
 
@@ -168,6 +170,58 @@ def project_model_training(experience: LearningExperience) -> dict[str, Any]:
         "targets": list(experience.model_training_targets) if eligible else ["hard_negative"],
         "source_trace_refs": list(experience.s2t_trace_refs),
     }
+
+
+def apply_autodata_quality_gate(projection: dict[str, Any], quality_row: dict[str, Any] | None) -> dict[str, Any]:
+    """Fail closed model export when trajectory quality is not training-grade."""
+    gated = dict(projection)
+    if not quality_row:
+        gated["autodata_gate"] = {"attached": False, "status": "not_attached"}
+        return gated
+    eligible = bool(quality_row.get("eligible_for_training", False))
+    gated["training_eligible"] = bool(gated.get("training_eligible") and eligible)
+    if not gated["training_eligible"]:
+        gated["targets"] = ["hard_negative"]
+    gated["autodata_gate"] = {
+        "attached": True,
+        "status": "pass" if eligible else "fail",
+        "reasons": list(quality_row.get("reasons", []) or []),
+        "trajectory_steps": int(quality_row.get("trajectory_steps", quality_row.get("trajectory_step_count", 0)) or 0),
+        "information_density": float(quality_row.get("information_density", 0.0) or 0.0),
+    }
+    return gated
+
+
+def build_escalation_recommendations(experience: LearningExperience) -> list[dict[str, str]]:
+    recommendations: list[dict[str, str]] = []
+    by_capability = {item.capability: item for item in experience.capability_lifecycle}
+    hyper = by_capability.get("hyper")
+    if hyper and hyper.selected and hyper.invoked and not hyper.outcome:
+        recommendations.append(
+            {
+                "from": "hyper",
+                "to": "nightshift",
+                "reason": "hyper_invoked_without_outcome",
+            }
+        )
+    autoreason = by_capability.get("autoreason")
+    if autoreason and autoreason.selected and not autoreason.evidence:
+        recommendations.append(
+            {
+                "from": "autoreason",
+                "to": "judge_panel",
+                "reason": "autoreason_selected_without_evidence",
+            }
+        )
+    if experience.gate_chain.get("delivery") != "pass" and experience.gate_chain.get("artifact") == "pass":
+        recommendations.append(
+            {
+                "from": "artifact_gate",
+                "to": "delivery_gate",
+                "reason": "artifact_passed_delivery_not_verified",
+            }
+        )
+    return recommendations
 
 
 def _lifecycle_from_receipt(receipt: dict[str, Any]) -> CapabilityLifecycle:

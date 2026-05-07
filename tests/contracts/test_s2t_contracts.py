@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from nexus.contracts.learning_experience import build_learning_experience
 from nexus.contracts.s2t_policy import (
     S2TAdoptionDecision,
     S2TAdoptionMetrics,
@@ -238,6 +239,72 @@ def test_model_training_export_v2_preserves_v1_compat_and_redaction() -> None:
     assert exported["compat"]["agent_lightning_preferences_v1"]["pair_count"] == 1
     assert exported["redacted_source_rows"][0]["secret_values"] == {}
     assert exported["redacted_source_rows"][0]["private_paths"] == ["<redacted-path>"]
+
+
+def test_model_training_export_v2_applies_autodata_quality_gate() -> None:
+    event = S2TTraceEvent(
+        task_id="task-2",
+        run_id="run-1",
+        model="gemini-3-flash-preview",
+        mode="shadow",
+        phase="R",
+        risk_tier="high",
+        candidate_set_id="candset-1",
+        candidates=[
+            _candidate("A", selector_score=0.95, verifier_result="fail"),
+            _candidate("B", selector_score=0.70, verifier_result="pass"),
+        ],
+        selected_candidate_id="B",
+        verifier_result="pass",
+    )
+    experience = build_learning_experience(
+        task_id="task-2",
+        task_type="bug",
+        usage_trace={
+            "phase_trace": {"S": "start", "P": "plan", "X": "context", "D": "design", "R": "repair", "A": "audit", "C": "close"},
+            "capabilities": {
+                "artifact_gate_passed": True,
+                "artifact_refs": ["artifact:task-2"],
+                "claim_verified": True,
+                "delivery_gate_passed": True,
+                "delivery_refs": ["delivery:task-2"],
+            },
+            "s2t": {"trace_path": ".nexus/reports/s2t/task-2.jsonl"},
+        },
+        capability_receipts=[
+            {
+                "name": "autoreason",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "evidence_refs": ["autoreason:winner"],
+            }
+        ],
+    )
+
+    exported = export_model_training_v2(
+        [event],
+        experiences=[experience],
+        quality_rows=[
+            {
+                "task_id": "task-2",
+                "eligible_for_training": False,
+                "reasons": ["low_step_trajectory"],
+                "trajectory_step_count": 2,
+                "information_density": 0.25,
+            }
+        ],
+    )
+
+    projection = exported["experience_rows"][0]["projection"]
+    assert exported["compat"]["agent_lightning_preferences_v1"]["pair_count"] == 1
+    assert exported["quality_gate"]["autodata_attached"] is True
+    assert exported["quality_gate"]["training_eligible_count"] == 0
+    assert projection["training_eligible"] is False
+    assert projection["targets"] == ["hard_negative"]
+    assert projection["autodata_gate"]["trajectory_steps"] == 2
 
 
 def test_s2t_adoption_gate_requires_shadow_and_heldout_lift() -> None:

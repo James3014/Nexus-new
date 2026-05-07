@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from nexus.contracts.learning_experience import LearningExperience, project_model_training
+from nexus.contracts.learning_experience import (
+    LearningExperience,
+    apply_autodata_quality_gate,
+    project_model_training,
+)
 from nexus.contracts.s2t_trace import S2TTraceEvent
 
 
@@ -57,13 +61,22 @@ def export_agent_lightning_preferences(events: list[S2TTraceEvent]) -> dict[str,
     return {"format": "agent-lightning-preferences-v1", "pair_count": len(pairs), "pairs": pairs}
 
 
-def export_model_training_v2(events: list[S2TTraceEvent], experiences: list[LearningExperience] | None = None) -> dict[str, Any]:
+def export_model_training_v2(
+    events: list[S2TTraceEvent],
+    experiences: list[LearningExperience] | None = None,
+    quality_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Additive model-training export; v1 remains embedded for compatibility."""
     v1 = export_agent_lightning_preferences(events)
     redacted = [redact_s2t_event(event) for event in events]
+    quality_by_task = {
+        str(row.get("task_id", "")): row
+        for row in quality_rows or []
+        if isinstance(row, dict) and str(row.get("task_id", "")).strip()
+    }
     experience_rows = []
     for exp in experiences or []:
-        projection = project_model_training(exp)
+        projection = apply_autodata_quality_gate(project_model_training(exp), quality_by_task.get(exp.task_id))
         experience_rows.append(
             {
                 "experience": exp.to_dict(),
@@ -82,4 +95,10 @@ def export_model_training_v2(events: list[S2TTraceEvent], experiences: list[Lear
         },
         "redacted_source_rows": redacted,
         "experience_rows": experience_rows,
+        "quality_gate": {
+            "autodata_attached": bool(quality_rows),
+            "training_eligible_count": sum(
+                1 for row in experience_rows if row["projection"].get("training_eligible") is True
+            ),
+        },
     }

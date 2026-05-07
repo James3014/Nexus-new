@@ -622,6 +622,8 @@ class CapabilityPlanner:
             signals=signals,
             enable=enable,
         )
+        learning_policy = budget.get("learning_policy", {}) if isinstance(budget.get("learning_policy", {}), dict) else {}
+        self._apply_learning_policy(states=states, reasons=reasons, learning_policy=learning_policy, enable=enable)
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
@@ -667,6 +669,13 @@ class CapabilityPlanner:
         )
         signal_snapshot["recommended_flow_source"] = "route.recommended_flow"
         signal_snapshot["planner_version"] = "capability_planner_v1"
+        if learning_policy:
+            signal_snapshot["learning_policy"] = {
+                "influenced": True,
+                "source_experiences": tuple(learning_policy.get("source_experiences", ()) or ()),
+                "promoted_capabilities": tuple(learning_policy.get("promoted_capabilities", ()) or ()),
+                "penalized_capabilities": tuple(learning_policy.get("penalized_capabilities", ()) or ()),
+            }
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",
@@ -693,6 +702,26 @@ class CapabilityPlanner:
         if signals.risk_score >= 70 or signals.cross_module:
             return "L3_swarm_deep", "high_risk_or_cross_module"
         return "L2_hardened", "default_hardened_lane"
+
+    def _apply_learning_policy(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        learning_policy: dict[str, Any],
+        enable: Any,
+    ) -> None:
+        for name in learning_policy.get("promoted_capabilities", ()) or ():
+            cap = str(name)
+            if cap in self.nodes:
+                enable(cap, "learning_policy_promoted")
+        for name in learning_policy.get("penalized_capabilities", ()) or ():
+            cap = str(name)
+            if cap not in self.nodes:
+                continue
+            reasons[cap].append("learning_policy_penalized")
+            if learning_policy.get("enforce_penalties") is True and states.get(cap) == "conditional":
+                states[cap] = "optional"
 
     def _apply_budget_downgrade(
         self,

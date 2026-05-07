@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import List
+from typing import Any, List
 
 from .learning_evidence import LearningEvidence
 from .state_contracts import NexusState
@@ -25,6 +25,15 @@ class LearningDecision:
     curiosity_score: float
     reasons: List[str]
     action: str
+
+
+@dataclass(frozen=True)
+class LearningPathDecision:
+    nexus_action: str
+    model_action: str
+    reasons: List[str]
+    promotion_ready: bool
+    export_ready: bool
 
 
 class LearningSteward:
@@ -95,6 +104,63 @@ class LearningSteward:
             curiosity_score=round(curiosity_score, 2),
             reasons=reasons,
             action=action,
+        )
+
+    def decide_experience(self, experience: Any) -> LearningPathDecision:
+        """Split Nexus policy learning from model-training export decisions."""
+        if not experience:
+            return LearningPathDecision(
+                nexus_action="DISCARD",
+                model_action="DISCARD",
+                reasons=["missing_experience"],
+                promotion_ready=False,
+                export_ready=False,
+            )
+
+        reasons: List[str] = []
+        outcome = str(self._get(experience, "outcome", ""))
+        if outcome != "verified_success":
+            return LearningPathDecision(
+                nexus_action="FREEZE",
+                model_action="FREEZE",
+                reasons=["outcome_not_verified_success"],
+                promotion_ready=False,
+                export_ready=False,
+            )
+
+        gate_chain = self._get(experience, "gate_chain", {}) or {}
+        missing_gates = [
+            gate
+            for gate in ("artifact", "claim", "delivery")
+            if str(gate_chain.get(gate, "")) != "pass"
+        ]
+        if missing_gates:
+            return LearningPathDecision(
+                nexus_action="FREEZE",
+                model_action="FREEZE",
+                reasons=[f"missing_gate:{gate}" for gate in missing_gates],
+                promotion_ready=False,
+                export_ready=False,
+            )
+
+        lifecycle = list(self._get(experience, "capability_lifecycle", ()) or ())
+        funnel_complete = any(bool(self._get(item, "funnel_complete", False)) for item in lifecycle)
+        if not funnel_complete:
+            reasons.append("no_complete_capability_funnel")
+
+        s2t_refs = tuple(self._get(experience, "s2t_trace_refs", ()) or ())
+        promotion_ready = funnel_complete
+        export_ready = bool(s2t_refs)
+        nexus_action = "PROMOTE_NEXUS" if promotion_ready else "INGEST_SHADOW"
+        model_action = "EXPORT_MODEL" if export_ready else "INGEST_SHADOW"
+        if not export_ready:
+            reasons.append("missing_s2t_trace_refs")
+        return LearningPathDecision(
+            nexus_action=nexus_action,
+            model_action=model_action,
+            reasons=reasons,
+            promotion_ready=promotion_ready,
+            export_ready=export_ready,
         )
 
     def _profile_for(self, metadata: dict) -> GovernanceProfile:
@@ -168,6 +234,14 @@ class LearningSteward:
         if include_ci_signal:
             reward += (test_pass_rate - 0.5) * 40.0
         return round(max(-60.0, min(60.0, reward)), 2)
+
+    @staticmethod
+    def _get(obj: Any, key: str, default: Any = None) -> Any:
+        if isinstance(obj, dict):
+            if key == "funnel_complete":
+                return obj.get("funnel_complete", default)
+            return obj.get(key, default)
+        return getattr(obj, key, default)
 
     def _evaluate_canary(self, metadata: dict, profile: GovernanceProfile) -> List[str]:
         baseline = float(metadata.get("memory_health_baseline", profile.memory_health_baseline))
