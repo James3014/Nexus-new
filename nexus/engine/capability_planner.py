@@ -704,6 +704,8 @@ class CapabilityPlanner:
 
     @staticmethod
     def _decide_routing_tier(signals: Any) -> tuple[str, str]:
+        if signals.simple_hidden_bugfix and signals.confidence >= 0.85:
+            return "L0_micro_patch", "simple_hidden_bugfix_low_risk"
         if signals.hazard_forced_l3:
             return "L3_swarm_deep", "hazard_mapping_forced_l3"
         if signals.risk_score < 30 and signals.confidence >= 0.7 and not signals.cross_module:

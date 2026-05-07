@@ -135,6 +135,7 @@ class CapabilitySignalSet:
     hard_signal: bool = False
     codeintel_impact_present: bool = False
     should_research: bool = False
+    simple_hidden_bugfix: bool = False
     governance_signal: bool = False
     evidence_signal: bool = False
     repair_signal: bool = False

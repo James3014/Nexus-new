@@ -104,6 +104,20 @@ def build_capability_signals(
     skill_signals = build_skill_signals(skills)
     risk = normalize_risk_score(route_features.get("risk_score"))
     candidate_factory = _read_candidate_factory_estimate(route_features)
+    governance_signal = _contains_any(
+        task_lower,
+        ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance"),
+    )
+    simple_hidden_bugfix = bool(
+        task_type == "public_bugfix"
+        and risk["risk_score_0_100"] <= 20
+        and _as_int(route_features.get("candidate_count"), 1) <= 1
+        and not bool(route_features.get("claim_uncertainty", False))
+        and not bool(route_features.get("is_cross_module_task", False))
+        and not bool(route_features.get("has_hard_signal", False))
+        and not governance_signal
+        and not _contains_any(task_lower, ("contract", "context", "benchmark", "public report", "evidence", "claim"))
+    )
 
     return CapabilitySignalSet(
         task_desc=task_desc,
@@ -131,10 +145,8 @@ def build_capability_signals(
         hard_signal=bool(route_features.get("has_hard_signal", False)),
         codeintel_impact_present=bool(codeintel.get("impact_report_present", False)),
         should_research=bool(route.get("should_research", False)),
-        governance_signal=_contains_any(
-            task_lower,
-            ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance"),
-        ),
+        simple_hidden_bugfix=simple_hidden_bugfix,
+        governance_signal=governance_signal,
         evidence_signal=_contains_any(task_lower, ("evidence", "artifact", "claim", "semantic", "trust")),
         repair_signal=_contains_any(task_lower, ("repair", "self-heal", "failing branch", "timeout", "flaky")),
         learning_signal=_contains_any(task_lower, ("learn", "citation", "slo", "kpi", "source", "claim")),

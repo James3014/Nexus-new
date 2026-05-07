@@ -780,3 +780,30 @@ def test_capability_planner_enforces_runtime_penalty_candidates_for_high_cost_ca
     assert budget["learning_policy"]["enforce_penalties"] is True
     assert "research" not in plan["selected_capabilities"]
     assert "external_doc_scout" not in plan["selected_capabilities"]
+
+
+def test_capability_planner_uses_micro_patch_lane_for_simple_hidden_bugfix():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix a small hidden bug in one local file.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.92,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["routing_tier"] == "L0_micro_patch"
+    assert "research_route" not in plan["selected_capabilities"]
+    assert "memory" not in plan["selected_capabilities"]
+    assert "asi_constraint_extractor" not in plan["selected_capabilities"]
+    assert "belief" not in plan["selected_capabilities"]
+    assert "direct_mode" not in plan["selected_capabilities"]
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= set(plan["selected_capabilities"])

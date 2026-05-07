@@ -191,7 +191,12 @@ def apply_tier_policies(
     signals: Any,
     enable: Callable[[str, str], None],
 ) -> None:
-    if routing_tier == "L1_green_lane":
+    if routing_tier == "L0_micro_patch":
+        for capability in ("research_route", "memory", "asi_constraint_extractor", "belief", "direct_mode"):
+            if states.get(capability) in {"required", "conditional"}:
+                states[capability] = "optional"
+                reasons[capability].append("tier_l0_micro_patch_cost_control")
+    elif routing_tier == "L1_green_lane":
         for capability in ("swarm", "drone", "nightshift", "research_control_plane", "stress_test"):
             if states.get(capability) == "conditional":
                 states[capability] = "optional"
