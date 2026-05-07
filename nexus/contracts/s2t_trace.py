@@ -9,6 +9,7 @@ from nexus.contracts.s2t_policy import S2TCandidate
 
 
 S2T_TRACE_SCHEMA_VERSION = "s2t.v1"
+S2T_EPISODE_SCHEMA_VERSION = "s2t_episode.v1"
 
 _ALLOWED_TRACE_FIELDS = {
     "schema_version",
@@ -96,6 +97,54 @@ class S2TTraceEvent:
             for item in payload.get("candidates", [])
         ]
         return cls(**normalized)
+
+
+@dataclass(frozen=True)
+class S2TDecisionSpan:
+    """One S2T decision node inside a runtime episode."""
+
+    node: str
+    phase: str
+    candidate_set_id: str
+    selected_candidate_id: str
+    gate_passed: bool
+    verifier_result: str = "not_run"
+    reason_codes: list[str] = field(default_factory=list)
+    reward: float = 0.0
+
+    def __post_init__(self) -> None:
+        for field_name in ("node", "phase", "candidate_set_id", "selected_candidate_id"):
+            if not str(getattr(self, field_name)).strip():
+                raise ValueError(f"{field_name} is required")
+        if self.verifier_result not in {"pass", "fail", "not_run"}:
+            raise ValueError("verifier_result must be pass, fail, or not_run")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class S2TEpisodeTrace:
+    """Compact training-facing envelope for S2T runtime decisions."""
+
+    episode_id: str
+    task_id: str
+    model: str
+    mode: str
+    spans: list[S2TDecisionSpan]
+    schema_version: str = S2T_EPISODE_SCHEMA_VERSION
+    benchmark_split: str = ""
+    cost: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for field_name in ("episode_id", "task_id", "model", "mode"):
+            if not str(getattr(self, field_name)).strip():
+                raise ValueError(f"{field_name} is required")
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["spans"] = [span.to_dict() for span in self.spans]
+        return payload
 
 
 class S2TTraceWriter:

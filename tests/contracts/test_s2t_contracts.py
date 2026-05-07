@@ -12,6 +12,8 @@ from nexus.contracts.s2t_policy import (
     S2TStrictGate,
 )
 from nexus.contracts.s2t_trace import (
+    S2TDecisionSpan,
+    S2TEpisodeTrace,
     S2TTraceEvent,
     S2TTraceWriter,
     export_agent_lightning_preferences,
@@ -81,6 +83,44 @@ def test_s2t_trace_event_round_trips_and_rejects_success_without_verifier() -> N
             selected_candidate_id="A",
             verifier_result="fail",
             semantic_verified=True,
+        )
+
+
+def test_s2t_episode_trace_serializes_decision_spans() -> None:
+    span = S2TDecisionSpan(
+        node="candidate",
+        phase="R",
+        candidate_set_id="candset-1",
+        selected_candidate_id="AB",
+        gate_passed=True,
+        verifier_result="pass",
+        reason_codes=["has_empirical_test_evidence"],
+        reward=1.0,
+    )
+    episode = S2TEpisodeTrace(
+        episode_id="episode-1",
+        task_id="task-1",
+        model="gemini-3-flash-preview",
+        mode="shadow",
+        spans=[span],
+        cost={"model_calls": 3},
+    )
+
+    payload = episode.to_dict()
+
+    assert payload["schema_version"] == "s2t_episode.v1"
+    assert payload["spans"][0]["selected_candidate_id"] == "AB"
+    assert payload["spans"][0]["reward"] == 1.0
+    assert payload["cost"]["model_calls"] == 3
+
+    with pytest.raises(ValueError, match="verifier_result must be pass"):
+        S2TDecisionSpan(
+            node="candidate",
+            phase="R",
+            candidate_set_id="candset-1",
+            selected_candidate_id="AB",
+            gate_passed=True,
+            verifier_result="maybe",
         )
 
 

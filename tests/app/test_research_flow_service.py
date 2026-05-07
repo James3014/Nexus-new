@@ -2342,6 +2342,17 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert payload["nexus_usage_trace"]["governance_event_summary"]["event_count"] == 2
     event_log = tmp_path / ".nexus" / "events" / "event_log.jsonl"
     assert "evidence_accepted" in event_log.read_text(encoding="utf-8")
+    s2t = payload["nexus_usage_trace"]["s2t"]
+    assert s2t["schema_version"] == "s2t_episode.v1"
+    assert s2t["candidate_count"] == 3
+    assert s2t["selected_candidate_id"] == "AB"
+    assert s2t["episode"]["spans"][0]["node"] == "autoreason_candidate"
+    s2t_trace = tmp_path / s2t["trace_path"]
+    rows = [json.loads(line) for line in s2t_trace.read_text(encoding="utf-8").splitlines()]
+    assert rows[-1]["schema_version"] == "s2t.v1"
+    assert rows[-1]["candidate_set_id"].endswith(":autoreason")
+    assert rows[-1]["selected_candidate_id"] == "AB"
+    assert len(rows[-1]["candidates"]) == 3
 
 
 def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, monkeypatch):
