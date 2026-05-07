@@ -189,3 +189,35 @@ def test_promoted_learning_policy_artifact_round_trips_verified_experience(tmp_p
     assert policy["promoted_capabilities"] == ["codeintel"]
     assert saved == loaded
     assert loaded["penalized_capabilities"] == ["swarm"]
+
+
+def test_promoted_learning_policy_accumulates_recent_high_cost_roi_penalties(tmp_path) -> None:
+    first = build_learning_experience(
+        task_id="task-roi-1",
+        task_type="bug",
+        usage_trace={"phase_trace": {"S": "start", "P": "plan", "X": "context", "D": "design", "R": "repair", "A": "audit", "C": "close"}},
+        capability_receipts=[
+            {"name": "research", "selected": True, "invoked": False},
+            {"name": "external_doc_scout", "selected": True, "invoked": False},
+        ],
+    )
+    second = build_learning_experience(
+        task_id="task-roi-2",
+        task_type="bug",
+        usage_trace={"phase_trace": {"S": "start", "P": "plan", "X": "context", "D": "design", "R": "repair", "A": "audit", "C": "close"}},
+        capability_receipts=[
+            {"name": "research", "selected": True, "invoked": True, "evidence_present": False, "outcome_contributed": False},
+            {"name": "external_doc_scout", "selected": True, "invoked": False},
+        ],
+    )
+    path = tmp_path / ".nexus" / "policy" / "promoted_learning_policy.json"
+
+    save_promoted_learning_policy(path, [first])
+    saved = save_promoted_learning_policy(path, [second])
+
+    assert saved["capability_roi"]["research"]["selected"] == 2
+    assert saved["capability_roi"]["research"]["invoked"] == 1
+    assert saved["capability_roi"]["external_doc_scout"]["selected"] == 2
+    assert "research" in saved["penalty_candidates"]
+    assert "external_doc_scout" in saved["penalty_candidates"]
+    assert saved["enforce_penalties"] is True

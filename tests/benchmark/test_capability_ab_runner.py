@@ -1581,6 +1581,15 @@ def test_extract_record_maps_semantic_fields():
                 "conditional_capabilities": ["hyper", "autoreason"],
                 "pending_capabilities": ["swarm"],
                 "forbidden_capabilities": [],
+                "misclassification_audit": {
+                    "schema_version": "nexus_route_misclassification_audit_v1",
+                    "contract_suffix_detected": True,
+                    "task_body_used_for_lexical_signals": True,
+                    "bounded_repair_profile": False,
+                    "high_cost_capabilities_selected": ["ultra_review"],
+                    "high_cost_selected_count": 1,
+                    "suspicious_high_cost_reasons": ["high_risk_or_governance_route"],
+                },
                 "stop_policy": {
                     "tactical_sequence": ["hyper_sprint", "autoreason", "ddtree", "belief", "ultra_review"],
                     "tactical_tool_map": [
@@ -1747,6 +1756,12 @@ def test_extract_record_maps_semantic_fields():
     assert out["route_decision_required_count"] == 3
     assert out["route_decision_conditional_count"] == 2
     assert out["route_decision_pending"] == ["swarm"]
+    assert out["route_profile_contract_suffix_detected"] is True
+    assert out["route_profile_task_body_normalized"] is True
+    assert out["route_profile_bounded_repair"] is False
+    assert out["route_profile_high_cost_selected"] == ["ultra_review"]
+    assert out["route_profile_high_cost_selected_count"] == 1
+    assert out["route_profile_suspicious_high_cost_reasons"] == ["high_risk_or_governance_route"]
     assert out["route_tactical_sequence"] == ["hyper_sprint", "autoreason", "ddtree", "belief", "ultra_review"]
     assert json.loads(out["route_tactical_tool_map_json"])[1]["capability"] == "autoreason"
     assert out["forecast_gate_shadow_schema"] == "nexus_forecast_gate_shadow_v1"

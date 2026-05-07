@@ -735,3 +735,48 @@ def test_learning_policy_loader_feeds_planner_without_default_pollution(tmp_path
     assert budget["learning_policy"]["enforce_penalties"] is False
     assert "autoreason" in plan["selected_capabilities"]
     assert "learning_policy" in plan["signal_snapshot"]
+
+
+def test_capability_planner_enforces_runtime_penalty_candidates_for_high_cost_capabilities(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_learning_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_learning_policy.v1",
+  "source_experiences": ["exp:1", "exp:2"],
+  "promoted_capabilities": [],
+  "penalized_capabilities": ["research", "external_doc_scout"],
+  "escalation_recommendations": [],
+  "capability_roi": {
+    "research": {"selected": 2, "invoked": 0, "evidence": 0, "outcome": 0, "gate_passed": 0},
+    "external_doc_scout": {"selected": 2, "invoked": 0, "evidence": 0, "outcome": 0, "gate_passed": 0}
+  },
+  "penalty_candidates": ["research", "external_doc_scout"],
+  "enforce_penalties": true
+}""",
+        encoding="utf-8",
+    )
+
+    budget = load_learning_policy_budget(artifact)
+    plan = CapabilityPlanner().plan(
+        task_desc="Verify SDK API timeout parameter before editing call site.",
+        task_type="bug",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 70,
+                "candidate_count": 1,
+                "adjusted_root_cause_confidence": 0.6,
+                "claim_uncertainty": True,
+                "doc_scout_hits": 2,
+            },
+            "research_context": {"role": "claim_scout"},
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+        budget=budget,
+    ).to_dict()
+
+    assert budget["learning_policy"]["enforce_penalties"] is True
+    assert "research" not in plan["selected_capabilities"]
+    assert "external_doc_scout" not in plan["selected_capabilities"]

@@ -21,7 +21,8 @@ def load_learning_policy_budget(path: Path) -> dict[str, Any]:
             "source_experiences": [str(item) for item in policy.get("source_experiences", []) or []],
             "promoted_capabilities": promoted,
             "penalized_capabilities": penalized,
-            "enforce_penalties": False,
+            "enforce_penalties": bool(policy.get("enforce_penalties", False)),
+            "penalty_candidates": [str(item) for item in policy.get("penalty_candidates", []) or []],
         }
     }
 

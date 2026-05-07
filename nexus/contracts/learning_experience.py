@@ -8,6 +8,15 @@ from typing import Any
 
 LEARNING_EXPERIENCE_SCHEMA_VERSION = "nexus_learning_experience.v1"
 PHASE_CHAIN = ("S", "P", "X", "D", "R", "A", "C")
+HIGH_COST_CAPABILITIES = {
+    "research",
+    "external_doc_scout",
+    "ultra_review",
+    "sandbox",
+    "swarm",
+    "nightshift",
+    "research_control_plane",
+}
 
 
 CAPABILITY_TAXONOMY: dict[str, dict[str, Any]] = {
@@ -280,11 +289,38 @@ def build_promoted_learning_policy(experiences: list[LearningExperience]) -> dic
         "promoted_capabilities": sorted(set(promoted)),
         "penalized_capabilities": sorted(set(penalized)),
         "escalation_recommendations": escalation,
+        "capability_roi": _aggregate_capability_roi(experiences),
+        "penalty_candidates": _derive_penalty_candidates(_aggregate_capability_roi(experiences)),
+        "enforce_penalties": False,
     }
 
 
 def save_promoted_learning_policy(path: Path, experiences: list[LearningExperience]) -> dict[str, Any]:
-    policy = build_promoted_learning_policy(experiences)
+    current = build_promoted_learning_policy(experiences)
+    prior = load_promoted_learning_policy(path)
+    merged_roi = _merge_capability_roi(prior.get("capability_roi", {}) if isinstance(prior, dict) else {}, current.get("capability_roi", {}))
+    penalty_candidates = _derive_penalty_candidates(merged_roi)
+    policy = {
+        "schema_version": "nexus_promoted_learning_policy.v1",
+        "source_experiences": sorted(
+            set(str(item) for item in (prior.get("source_experiences", []) if isinstance(prior, dict) else []) or [])
+            | set(current.get("source_experiences", []) or [])
+        ),
+        "promoted_capabilities": sorted(
+            set(str(item) for item in (prior.get("promoted_capabilities", []) if isinstance(prior, dict) else []) or [])
+            | set(current.get("promoted_capabilities", []) or [])
+        ),
+        "penalized_capabilities": sorted(
+            set(str(item) for item in (prior.get("penalized_capabilities", []) if isinstance(prior, dict) else []) or [])
+            | set(current.get("penalized_capabilities", []) or [])
+            | set(penalty_candidates)
+        ),
+        "escalation_recommendations": list((prior.get("escalation_recommendations", []) if isinstance(prior, dict) else []) or [])
+        + list(current.get("escalation_recommendations", []) or []),
+        "capability_roi": merged_roi,
+        "penalty_candidates": penalty_candidates,
+        "enforce_penalties": bool(penalty_candidates),
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(policy, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return policy
@@ -298,6 +334,9 @@ def load_promoted_learning_policy(path: Path) -> dict[str, Any]:
             "promoted_capabilities": [],
             "penalized_capabilities": [],
             "escalation_recommendations": [],
+            "capability_roi": {},
+            "penalty_candidates": [],
+            "enforce_penalties": False,
         }
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
@@ -346,3 +385,57 @@ def _first_missing_phase(observed: list[str]) -> str:
         if phase not in observed:
             return phase
     return ""
+
+
+def _aggregate_capability_roi(experiences: list[LearningExperience]) -> dict[str, dict[str, int]]:
+    roi: dict[str, dict[str, int]] = {}
+    for exp in experiences:
+        for item in exp.capability_lifecycle:
+            entry = roi.setdefault(
+                item.capability,
+                {
+                    "selected": 0,
+                    "invoked": 0,
+                    "evidence": 0,
+                    "outcome": 0,
+                    "gate_passed": 0,
+                },
+            )
+            entry["selected"] += int(bool(item.selected))
+            entry["invoked"] += int(bool(item.invoked))
+            entry["evidence"] += int(bool(item.evidence))
+            entry["outcome"] += int(bool(item.outcome))
+            entry["gate_passed"] += int(bool(item.gate_passed))
+    return roi
+
+
+def _merge_capability_roi(
+    prior: dict[str, Any],
+    current: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    merged: dict[str, dict[str, int]] = {}
+    names = set(prior) | set(current)
+    for name in names:
+        base = prior.get(name, {}) if isinstance(prior.get(name, {}), dict) else {}
+        now = current.get(name, {})
+        merged[name] = {
+            "selected": int(base.get("selected", 0) or 0) + int(now.get("selected", 0) or 0),
+            "invoked": int(base.get("invoked", 0) or 0) + int(now.get("invoked", 0) or 0),
+            "evidence": int(base.get("evidence", 0) or 0) + int(now.get("evidence", 0) or 0),
+            "outcome": int(base.get("outcome", 0) or 0) + int(now.get("outcome", 0) or 0),
+            "gate_passed": int(base.get("gate_passed", 0) or 0) + int(now.get("gate_passed", 0) or 0),
+        }
+    return merged
+
+
+def _derive_penalty_candidates(roi: dict[str, dict[str, int]]) -> list[str]:
+    penalty: list[str] = []
+    for name, counts in roi.items():
+        selected = int(counts.get("selected", 0) or 0)
+        invoked = int(counts.get("invoked", 0) or 0)
+        outcome = int(counts.get("outcome", 0) or 0)
+        if name not in HIGH_COST_CAPABILITIES or selected < 2:
+            continue
+        if invoked * 2 < selected or outcome * 2 < selected:
+            penalty.append(name)
+    return sorted(set(penalty))

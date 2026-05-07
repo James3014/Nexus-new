@@ -1807,6 +1807,11 @@ def _extract_record(
     capability_plan = capability_plan if isinstance(capability_plan, dict) else {}
     route_decision = usage_trace.get("route_decision", {}) if isinstance(usage_trace, dict) else {}
     route_decision = route_decision if isinstance(route_decision, dict) else {}
+    misclassification_audit = (
+        route_decision.get("misclassification_audit", {})
+        if isinstance(route_decision.get("misclassification_audit"), dict)
+        else {}
+    )
     route_stop_policy = route_decision.get("stop_policy", {}) if isinstance(route_decision.get("stop_policy"), dict) else {}
     route_tactical_sequence = route_stop_policy.get("tactical_sequence", []) if isinstance(route_stop_policy.get("tactical_sequence"), list) else []
     route_tactical_tool_map = route_stop_policy.get("tactical_tool_map", []) if isinstance(route_stop_policy.get("tactical_tool_map"), list) else []
@@ -2052,6 +2057,12 @@ def _extract_record(
         "route_decision_conditional_count": len(route_decision.get("conditional_capabilities", []) or []),
         "route_decision_pending": list(route_decision.get("pending_capabilities", []) or []),
         "route_decision_forbidden": list(route_decision.get("forbidden_capabilities", []) or []),
+        "route_profile_contract_suffix_detected": bool(misclassification_audit.get("contract_suffix_detected", False)),
+        "route_profile_task_body_normalized": bool(misclassification_audit.get("task_body_used_for_lexical_signals", False)),
+        "route_profile_bounded_repair": bool(misclassification_audit.get("bounded_repair_profile", False)),
+        "route_profile_high_cost_selected": list(misclassification_audit.get("high_cost_capabilities_selected", []) or []),
+        "route_profile_high_cost_selected_count": int(misclassification_audit.get("high_cost_selected_count", 0) or 0),
+        "route_profile_suspicious_high_cost_reasons": list(misclassification_audit.get("suspicious_high_cost_reasons", []) or []),
         "route_tactical_sequence": route_tactical_sequence,
         "route_tactical_tool_map": route_tactical_tool_map,
         "route_tactical_tool_map_json": json.dumps(route_tactical_tool_map, ensure_ascii=False, sort_keys=True),
