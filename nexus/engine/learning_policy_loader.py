@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -72,10 +74,36 @@ def merge_runtime_route_cost_policy(project_root: Path, budget: dict[str, Any] |
     merged = dict(budget or {})
     if isinstance(merged.get("route_cost_policy"), dict):
         return merged
+    env_budget = load_route_cost_policy_budget_from_env()
+    if env_budget:
+        merged.update(env_budget)
+        return merged
     runtime_budget = load_route_cost_policy_budget(project_root / DEFAULT_ROUTE_COST_POLICY_PATH)
     if runtime_budget:
         merged.update(runtime_budget)
     return merged
+
+
+def load_route_cost_policy_budget_from_env() -> dict[str, Any]:
+    raw = os.environ.get("NEXUS_ROUTE_COST_CONTROLS", "").strip()
+    if not raw:
+        return {}
+    try:
+        controls = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(controls, dict):
+        return {}
+    policy: dict[str, Any] = {"source": str(controls.get("policy_source") or "env:NEXUS_ROUTE_COST_CONTROLS")}
+    if controls.get("lite_route") is True:
+        policy["current_lite_route"] = True
+    if controls.get("hold") is True:
+        policy["current_hold"] = True
+    if _is_positive_int(controls.get("candidate_cap")):
+        policy["current_candidate_cap"] = int(controls["candidate_cap"])
+    if len(policy) <= 1:
+        return {}
+    return {"route_cost_policy": policy}
 
 
 def route_cost_controls_for_task(project_root: Path, task_id: str, budget: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -632,6 +632,9 @@ class CapabilityPlanner:
         )
         learning_policy = budget.get("learning_policy", {}) if isinstance(budget.get("learning_policy", {}), dict) else {}
         self._apply_learning_policy(states=states, reasons=reasons, learning_policy=learning_policy, enable=enable)
+        route_cost_policy = budget.get("route_cost_policy", {}) if isinstance(budget.get("route_cost_policy", {}), dict) else {}
+        self._apply_route_cost_policy(states=states, reasons=reasons, route_cost_policy=route_cost_policy)
+        self._apply_candidate_factory_readiness_policy(states=states, reasons=reasons, route=route)
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
@@ -685,6 +688,13 @@ class CapabilityPlanner:
                 "promoted_capabilities": tuple(learning_policy.get("promoted_capabilities", ()) or ()),
                 "penalized_capabilities": tuple(learning_policy.get("penalized_capabilities", ()) or ()),
             }
+        if route_cost_policy:
+            signal_snapshot["route_cost_policy"] = {
+                "influenced": True,
+                "source": str(route_cost_policy.get("source") or ""),
+                "current_lite_route": bool(route_cost_policy.get("current_lite_route", False)),
+                "current_candidate_cap": route_cost_policy.get("current_candidate_cap"),
+            }
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",
@@ -733,6 +743,55 @@ class CapabilityPlanner:
             reasons[cap].append("learning_policy_penalized")
             if learning_policy.get("enforce_penalties") is True and states.get(cap) == "conditional":
                 states[cap] = "optional"
+
+    def _apply_candidate_factory_readiness_policy(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        route: dict[str, Any],
+    ) -> None:
+        route_features = route.get("route_features", {}) if isinstance(route.get("route_features", {}), dict) else {}
+        readiness = route_features.get("candidate_factory_readiness_estimate", {})
+        if not isinstance(readiness, dict):
+            return
+        if readiness.get("ready") is not False and str(readiness.get("status") or "").upper() != "SKIPPED":
+            return
+        for cap in ("autoreason", "judge_panel", "llm_judge_panel"):
+            if states.get(cap) == "conditional":
+                states[cap] = "optional"
+                reasons[cap].append("candidate_factory_skipped")
+
+    def _apply_route_cost_policy(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        route_cost_policy: dict[str, Any],
+    ) -> None:
+        if route_cost_policy.get("current_lite_route") is not True:
+            return
+        for cap in (
+            "research",
+            "ultra_review",
+            "sandbox",
+            "autoreason",
+            "judge_panel",
+            "external_doc_scout",
+            "research_control_plane",
+            "architecture_scout",
+            "swarm",
+            "drone",
+            "nightshift",
+            "multi_agent",
+            "xray",
+            "benchmark",
+            "meta_opt",
+            "stress_test",
+        ):
+            if states.get(cap) == "conditional":
+                states[cap] = "optional"
+                reasons[cap].append("route_cost_lite_policy")
 
     def _apply_budget_downgrade(
         self,

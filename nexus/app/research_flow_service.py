@@ -1347,9 +1347,10 @@ def _build_capability_plan_and_decision(
     task_type: str,
     route: dict[str, Any],
     task_id: str | None = None,
+    budget: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     decision_route = {key: value for key, value in route.items() if key != "capability_stack"}
-    plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=decision_route)
+    plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=decision_route, budget=budget)
     decision = build_route_decision(
         task_id=task_id or _safe_trace_slug(task_desc),
         task_desc=task_desc,
@@ -1770,6 +1771,7 @@ def build_route(
         task_desc=task_desc,
         task_type=task_type,
         route=route_payload,
+        budget=merge_runtime_learning_policy(repo_root),
     )
     route_payload["capability_plan"] = capability_plan.to_dict()
     route_payload["route_decision"] = route_decision
@@ -1967,6 +1969,7 @@ def _refresh_route_for_runtime_candidate_factory(
         task_desc=task_desc,
         task_type=task_type,
         route=route,
+        budget=merge_runtime_learning_policy(repo_root),
     )
     route["capability_plan"] = capability_plan.to_dict()
     route["route_decision"] = route_decision
@@ -2501,6 +2504,7 @@ def run_auto_flow(
             task_desc=task_desc,
             task_type=task_type,
             route=route,
+            budget=merge_runtime_learning_policy(repo_root),
         )
         route["capability_plan"] = capability_plan.to_dict()
         route["route_decision"] = route_decision

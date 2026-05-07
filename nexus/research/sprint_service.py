@@ -428,6 +428,14 @@ def _should_try_local_preflight_before_llm(*, task: str, source_code: str) -> bo
             "renamed public field",
             "canonical field",
             "build_response",
+            "credential scrubber",
+            "secret redaction",
+            "def redact",
+            "artifact references",
+            "evidence rollup",
+            "verified_claims",
+            "phased report summary",
+            "phase_ready",
         )
     )
 

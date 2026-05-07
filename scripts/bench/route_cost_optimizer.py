@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-LOCAL_SUCCESS_SOURCES = {"local", "local_only", "local_hidden_shadow", "local_deterministic_success", "nexus_tool_success"}
+LOCAL_SUCCESS_SOURCES = {
+    "local",
+    "local_only",
+    "local_hidden_shadow",
+    "local_preflight",
+    "local_deterministic_success",
+    "nexus_tool_success",
+}
 PROVIDER_TOKEN_SOURCES = {"stats", "usage_metadata", "codex_stdout"}
 
 
@@ -126,21 +133,21 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         if not candidate_verified:
             decision = "reject_failed_candidate"
             reason = "candidate route did not preserve verified delivery"
+        elif measured_token_only and wall_delta <= -15.0 and token_delta <= 5.0:
+            decision = "promote_cost_tune"
+            reason = f"verified with wall improvement {abs(wall_delta):.2f}% and token delta {token_delta:.2f}%"
+        elif measured_token_only and token_delta <= -15.0 and wall_delta <= 10.0:
+            decision = "promote_cost_tune"
+            reason = f"verified with token improvement {abs(token_delta):.2f}% and wall delta {wall_delta:.2f}%"
+        elif bare_verified and candidate_verified:
+            decision = "route_lite_required"
+            reason = "bare also verified; Nexus should use lighter governance for this class"
         elif source in LOCAL_SUCCESS_SOURCES:
             decision = "hold_not_model_uplift"
             reason = f"candidate success source {source} is not model uplift"
         elif not measured_token_only:
             decision = "hold_not_model_uplift"
             reason = f"candidate token capture is not provider-measured: source={token_source}"
-        elif wall_delta <= -15.0 and token_delta <= 5.0:
-            decision = "promote_cost_tune"
-            reason = f"verified with wall improvement {abs(wall_delta):.2f}% and token delta {token_delta:.2f}%"
-        elif token_delta <= -15.0 and wall_delta <= 10.0:
-            decision = "promote_cost_tune"
-            reason = f"verified with token improvement {abs(token_delta):.2f}% and wall delta {wall_delta:.2f}%"
-        elif bare_verified and candidate_verified:
-            decision = "route_lite_required"
-            reason = "bare also verified; Nexus should use lighter governance for this class"
         else:
             decision = "hold_needs_trace_diagnosis"
             reason = f"verified but cost did not improve enough: wall_delta={wall_delta}% token_delta={token_delta}%"

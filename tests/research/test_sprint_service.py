@@ -1462,6 +1462,47 @@ def test_run_hyper_sprint_uses_local_preflight_before_expensive_llm(monkeypatch,
     assert "local_preflight_before_llm_success" in res.error_codes
 
 
+def test_run_hyper_sprint_uses_local_preflight_for_governance_redaction(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "def redact(record):\n"
+        "    return dict(record)\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import redact\n\n"
+        "def test_redacts_secret_fields():\n"
+        "    assert redact({'token': 'abc', 'name': 'ok'}) == {'token': '[REDACTED]', 'name': 'ok'}\n",
+        encoding="utf-8",
+    )
+
+    class FailIfCalledLLM:
+        model_chain = ["fake-gemini"]
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("LLM should not be called for deterministic redaction preflight")
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
+
+    cfg = SprintConfig(
+        task="Refactor a credential scrubber while preserving secret redaction",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 0
+    assert res.winner_source == "local_preflight"
+
+
 def test_inplace_executor_rejects_no_change_candidate(tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")

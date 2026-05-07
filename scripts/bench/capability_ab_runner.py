@@ -2952,6 +2952,9 @@ def run_with_nexus(
     effective_llm_self_heal = bool(enable_llm_self_heal or env_self_heal_enabled)
     route_cost_controls = route_cost_controls_for_task(repo_root, task.id)
     effective_llm_candidate_cap = max(1, int(route_cost_controls.get("candidate_cap", llm_candidate_cap) or llm_candidate_cap))
+    if route_cost_controls.get("lite_route") is True:
+        effective_llm_candidate_cap = 1
+        effective_llm_self_heal = False
     enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
     test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file

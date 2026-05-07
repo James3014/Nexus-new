@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
-from nexus.engine.learning_policy_loader import load_learning_policy_budget, load_route_cost_policy_budget, route_cost_controls_for_task
+from nexus.engine.learning_policy_loader import (
+    load_learning_policy_budget,
+    load_route_cost_policy_budget,
+    load_route_cost_policy_budget_from_env,
+    route_cost_controls_for_task,
+)
 
 
 def test_capability_planner_builds_constrained_composition_trace():
@@ -804,6 +809,41 @@ def test_route_cost_policy_loader_exposes_task_controls(tmp_path):
     assert evidence_controls["candidate_cap"] == 1
     assert trust_controls["lite_route"] is True
     assert repair_controls["hold"] is True
+
+
+def test_route_cost_policy_loader_reads_task_specific_env_controls(monkeypatch):
+    monkeypatch.setenv(
+        "NEXUS_ROUTE_COST_CONTROLS",
+        '{"lite_route": true, "candidate_cap": 1, "policy_source": ".nexus/policy/promoted_route_cost_policy.json"}',
+    )
+
+    budget = load_route_cost_policy_budget_from_env()
+
+    assert budget["route_cost_policy"]["current_lite_route"] is True
+    assert budget["route_cost_policy"]["current_candidate_cap"] == 1
+
+
+def test_capability_planner_lite_route_downgrades_high_cost_conditionals():
+    plan = CapabilityPlanner().plan(
+        task_desc="Refactor a credential scrubber while preserving governance boundaries and evidence claims",
+        task_type="public_refactor",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 80, "has_governance_signal": True, "candidate_count": 1},
+            "route_decision": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+        budget={"route_cost_policy": {"current_lite_route": True, "source": "test"}},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= selected
+    assert "ultra_review" not in selected
+    assert "sandbox" not in selected
+    assert "research" not in selected
+    assert "autoreason" not in selected
 
 
 def test_capability_planner_uses_micro_patch_lane_for_simple_hidden_bugfix():
