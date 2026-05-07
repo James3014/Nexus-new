@@ -10,6 +10,14 @@ from nexus.engine.capability_signals import build_capability_constraints, build_
 PENDING_EXECUTOR_CAPABILITIES = {"swarm", "drone", "nightshift"}
 
 
+def _cost_tier(cost: int) -> str:
+    if cost >= 5:
+        return "high"
+    if cost >= 3:
+        return "medium"
+    return "low"
+
+
 def default_capability_nodes() -> dict[str, CapabilityNode]:
     nodes = [
         CapabilityNode(
@@ -649,6 +657,7 @@ class CapabilityPlanner:
                     "reasons": reasons[name] or ["available_but_not_selected"],
                     "dependencies": list(node.dependencies),
                     "parallelizable_with": list(node.parallelizable_with),
+                    "cost_tier": _cost_tier(int(node.cost)),
                     "score_delta": score_delta,
                     "score_components": scoring.components(node),
                     "scoring_weights": scoring.to_dict(),

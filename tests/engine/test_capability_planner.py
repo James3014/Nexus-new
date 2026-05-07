@@ -163,6 +163,7 @@ def test_capability_planner_default_scoring_matches_legacy_formula():
 
     trace = {item["capability"]: item for item in plan["decision_trace"]}
     assert trace["ddtree"]["score_delta"] == 3
+    assert trace["ddtree"]["cost_tier"] == "low"
     assert trace["ddtree"]["score_components"] == {
         "benefit": 3.0,
         "risk_reduction": 1.0,

@@ -298,6 +298,7 @@ class RouteDecision:
     policy_pruned_count: int = 0
     tuning_snapshot: dict[str, Any] = field(default_factory=dict)
     derivation_meta: dict[str, Any] = field(default_factory=dict)
+    misclassification_audit: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:

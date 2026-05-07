@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.engine.capability_contracts import CapabilityPlan, RouteDecision
+from nexus.engine.route_misclassification_audit import build_route_misclassification_audit
 from nexus.engine.capability_executor_controls import build_execution_plan
 from nexus.engine.route_forecast_policy import build_forecast_gate_shadow, build_pillar_signal_summary
 from nexus.engine.route_tactical_policy import build_tactical_stop_policy
@@ -83,6 +84,12 @@ def build_route_decision(
         policy_pruned_count=policy_pruned_count,
         tuning_snapshot=tuning_snapshot or {},
         derivation_meta=derivation_meta,
+        misclassification_audit=build_route_misclassification_audit(
+            task_desc=task_desc,
+            task_type=task_type,
+            plan=plan,
+            recommended_flow=recommended_flow,
+        ),
         created_at=datetime.now(timezone.utc).isoformat(),
     )
 

@@ -30,6 +30,7 @@ def test_route_decision_preserves_composable_capability_state():
         stop_policy={"max_wall_sec": 240, "budget_guard": "fail_closed"},
         receipt_requirements=("invoked", "evidence_present", "gate_passed", "outcome_contributed"),
         fallback_policy="fail_closed",
+        misclassification_audit={"schema_version": "nexus_route_misclassification_audit_v1"},
     ).to_dict()
 
     assert decision["schema_version"] == "nexus_route_decision_v1"
@@ -106,7 +107,45 @@ def test_route_decision_adapter_preserves_full_capability_space():
     assert isinstance(decision["plan_score"], int)
     assert decision["derivation_meta"]["routing_tier_fallback_used"] is False
     assert decision["derivation_meta"]["recommended_flow_mismatch"] is False
+    assert decision["misclassification_audit"]["schema_version"] == "nexus_route_misclassification_audit_v1"
+    assert decision["misclassification_audit"]["high_cost_capabilities_selected"]
     assert any(item["capability"] == "codeintel" for item in decision["decision_trace"])
+
+
+def test_route_decision_audit_detects_contract_suffix_and_bounded_repair_profile():
+    task_desc = (
+        "Repair a flaky-looking timeout calculation without deleting assertions."
+        "\n\nNexus wearing contract:"
+        "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+    )
+    plan = CapabilityPlanner().plan(
+        task_desc=task_desc,
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 55,
+                "adjusted_root_cause_confidence": 0.9,
+                "candidate_count": 1,
+                "has_hard_signal": True,
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+    )
+    decision = build_route_decision(
+        task_id="task-bounded-repair",
+        task_desc=task_desc,
+        task_type="public_test_repair",
+        recommended_flow="hyper_sprint",
+        plan=plan,
+    ).to_dict()
+
+    audit = decision["misclassification_audit"]
+    assert audit["contract_suffix_detected"] is True
+    assert audit["task_body_used_for_lexical_signals"] is True
+    assert audit["bounded_repair_profile"] is True
+    assert audit["high_cost_capabilities_selected"] == []
 
 
 def test_route_decision_adapter_records_recommended_flow_mismatch():
