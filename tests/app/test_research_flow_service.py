@@ -2363,6 +2363,10 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     projection = payload["nexus_usage_trace"]["learning_projection"]
     assert projection["nexus_policy"]["s2t_prior_eligible"] is True
     assert projection["model_training"]["training_eligible"] is True
+    assert projection["promoted_policy"]["schema_version"] == "nexus_promoted_learning_policy.v1"
+    assert "promoted_policy_path" in projection
+    promoted_policy = tmp_path / projection["promoted_policy_path"]
+    assert promoted_policy.exists()
 
 
 def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, monkeypatch):

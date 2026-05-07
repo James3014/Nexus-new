@@ -1594,9 +1594,15 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
     )
     if route_decision_report:
         from nexus.engine.capability_planner import CapabilityPlanner
+        from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
         from nexus.engine.route_decision_adapter import build_route_decision, write_route_decision_report
 
-        plan = CapabilityPlanner().plan(task_desc=task_desc, task_type=task_type, route=out)
+        plan = CapabilityPlanner().plan(
+            task_desc=task_desc,
+            task_type=task_type,
+            route=out,
+            budget=merge_runtime_learning_policy(repo_root),
+        )
         report_path = route_decision_report
         if not report_path.is_absolute():
             report_path = repo_root / report_path

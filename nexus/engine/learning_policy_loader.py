@@ -5,6 +5,8 @@ from typing import Any
 
 from nexus.contracts.learning_experience import load_promoted_learning_policy
 
+DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
+
 
 def load_learning_policy_budget(path: Path) -> dict[str, Any]:
     policy = load_promoted_learning_policy(path)
@@ -22,3 +24,14 @@ def load_learning_policy_budget(path: Path) -> dict[str, Any]:
             "enforce_penalties": False,
         }
     }
+
+
+def merge_runtime_learning_policy(project_root: Path, budget: dict[str, Any] | None = None) -> dict[str, Any]:
+    merged = dict(budget or {})
+    if isinstance(merged.get("learning_policy"), dict):
+        return merged
+    runtime_budget = load_learning_policy_budget(project_root / DEFAULT_PROMOTED_POLICY_PATH)
+    if not runtime_budget:
+        return merged
+    merged.update(runtime_budget)
+    return merged

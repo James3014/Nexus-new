@@ -26,10 +26,16 @@ from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
 from nexus.engine.openseeker_alignment import build_openseeker_trace
-from nexus.contracts.learning_experience import build_learning_experience, project_model_training, project_nexus_policy
+from nexus.contracts.learning_experience import (
+    build_learning_experience,
+    project_model_training,
+    project_nexus_policy,
+    save_promoted_learning_policy,
+)
 from nexus.contracts.s2t_policy import S2TCandidate, S2TSelector
 from nexus.contracts.s2t_trace import S2TDecisionSpan, S2TEpisodeTrace, S2TTraceEvent, S2TTraceWriter
 from nexus.core.event_bus import NexusEventBus
+from nexus.engine.learning_policy_loader import DEFAULT_PROMOTED_POLICY_PATH, merge_runtime_learning_policy
 from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
 from nexus.research.formal_report_service import FormalReportService
@@ -3227,6 +3233,7 @@ def run_auto_flow(
     nexus_usage_trace["capabilities"]["claim_probe_eligible"] = claim_probe["eligible"]
     nexus_usage_trace["capabilities"]["claim_probe_invoked"] = claim_probe["invoked"]
     nexus_usage_trace["capabilities"]["claim_probe_gate_passed"] = claim_probe["gate_passed"]
+    runtime_budget = merge_runtime_learning_policy(repo_root)
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
         capability_plan = CapabilityPlanner().plan(
@@ -3236,6 +3243,7 @@ def run_auto_flow(
             pillars=nexus_usage_trace["pillars"],
             codeintel=codeintel_evidence,
             phase_trace=nexus_usage_trace["phase_trace"],
+            budget=runtime_budget,
         )
         capability_plan_payload = capability_plan.to_dict()
     nexus_usage_trace["capability_plan"] = capability_plan_payload
@@ -3251,6 +3259,7 @@ def run_auto_flow(
             pillars=nexus_usage_trace["pillars"],
             codeintel=codeintel_evidence,
             phase_trace=nexus_usage_trace["phase_trace"],
+            budget=runtime_budget,
         ),
     ).to_dict()
     selected_for_runtime_receipts = {
@@ -3347,6 +3356,12 @@ def run_auto_flow(
         "nexus_policy": project_nexus_policy(learning_experience),
         "model_training": project_model_training(learning_experience),
     }
+    promoted_policy = save_promoted_learning_policy(
+        repo_root / DEFAULT_PROMOTED_POLICY_PATH,
+        [learning_experience],
+    )
+    nexus_usage_trace["learning_projection"]["promoted_policy"] = promoted_policy
+    nexus_usage_trace["learning_projection"]["promoted_policy_path"] = str(DEFAULT_PROMOTED_POLICY_PATH)
 
     payload = {
         "schema_version": "1.0",
