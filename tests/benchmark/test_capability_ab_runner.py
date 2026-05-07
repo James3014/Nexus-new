@@ -2720,6 +2720,60 @@ def test_run_with_nexus_can_enable_routing_layer_executors(tmp_path: Path, monke
     assert out["run_eligible"] is True
 
 
+def test_run_with_nexus_applies_promoted_route_cost_candidate_cap(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="nexus-value-evidence-001",
+        difficulty="hard",
+        task_type="public_feature",
+        task_desc="Fix evidence-heavy task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "candidate_cap_overrides": {"nexus-value-evidence-001": 1}
+}""",
+        encoding="utf-8",
+    )
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"pillars":{"lancedb":{"active":true},"memory":{"active":true},"mempalace":{"active":true},"belief":{"active":true},"artifact":{"active":true}},"phase_trace":{"P":"route_built","X":"retrieval_checked","D":"guard_decision","R":"hyper_executed","A":"artifact_verified","C":"closure_written"}},"result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"model_name":"gemini-3.1-pro-preview","model_patch_generated":true,"fallback_used":false,"total_tokens":10,"token_capture_status":"ok"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["cmd"] = list(_cmd)
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        llm_candidate_cap=3,
+    )
+
+    assert captured["cmd"][captured["cmd"].index("--candidate-count") + 1] == "1"
+    assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "1"
+    assert json.loads(captured["env"]["NEXUS_ROUTE_COST_CONTROLS"])["candidate_cap"] == 1
+    assert out["route_cost_policy_candidate_cap"] == 1
+    assert out["run_eligible"] is True
+
+
 def test_run_with_nexus_can_skip_llm_baseline_for_cost_control(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="pub-routing-cost",

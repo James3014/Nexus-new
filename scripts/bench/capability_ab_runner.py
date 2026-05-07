@@ -2913,8 +2913,12 @@ def run_with_nexus(
     skip_llm_baseline: bool = False,
     strict_llm_baseline: bool = False,
 ) -> dict[str, Any]:
+    from nexus.engine.learning_policy_loader import route_cost_controls_for_task
+
     env_self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "").strip().lower() in {"1", "true", "yes"}
     effective_llm_self_heal = bool(enable_llm_self_heal or env_self_heal_enabled)
+    route_cost_controls = route_cost_controls_for_task(repo_root, task.id)
+    effective_llm_candidate_cap = max(1, int(route_cost_controls.get("candidate_cap", llm_candidate_cap) or llm_candidate_cap))
     enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
     test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file
@@ -2939,7 +2943,7 @@ def run_with_nexus(
         "--history-fail-threshold",
         str(history_fail_threshold),
         "--candidate-count",
-        str(max(1, int(llm_candidate_cap))),
+        str(effective_llm_candidate_cap),
         "--timeout-sec",
         str(timeout_sec),
         "--output-json",
@@ -2991,7 +2995,9 @@ def run_with_nexus(
             env["NEXUS_AUTOREASON_EXECUTOR"] = "1"
         if enable_ddtree_executor:
             env["NEXUS_DDTREE_EXECUTOR"] = "1"
-        env["NEXUS_LLM_CANDIDATE_CAP"] = str(max(1, int(llm_candidate_cap)))
+        env["NEXUS_LLM_CANDIDATE_CAP"] = str(effective_llm_candidate_cap)
+        if route_cost_controls:
+            env["NEXUS_ROUTE_COST_CONTROLS"] = json.dumps(route_cost_controls, ensure_ascii=False, sort_keys=True)
         if llm_enabled:
             env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
             env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
@@ -3025,6 +3031,11 @@ def run_with_nexus(
     if not payload:
         payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    if route_cost_controls:
+        row["route_cost_policy_controls"] = route_cost_controls
+        row["route_cost_policy_candidate_cap"] = route_cost_controls.get("candidate_cap")
+        row["route_cost_policy_lite_route"] = bool(route_cost_controls.get("lite_route", False))
+        row["route_cost_policy_hold"] = bool(route_cost_controls.get("hold", False))
     if payload.get("status") == "SUCCESS" and verification_test_file != test_file:
         verify = _run_process_group(
             _pytest_verifier_cmd(verification_test_file),
@@ -3128,6 +3139,11 @@ def run_with_nexus(
                 row["status"] = "FAILED"
                 row["semantic_status"] = "UNVERIFIED"
                 row["semantic_completed"] = False
+    if route_cost_controls:
+        row["route_cost_policy_controls"] = route_cost_controls
+        row["route_cost_policy_candidate_cap"] = route_cost_controls.get("candidate_cap")
+        row["route_cost_policy_lite_route"] = bool(route_cost_controls.get("lite_route", False))
+        row["route_cost_policy_hold"] = bool(route_cost_controls.get("hold", False))
     return _annotate_benchmark_eligibility(
         row,
         provider="gemini" if llm_enabled else "local",

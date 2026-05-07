@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
-from nexus.engine.learning_policy_loader import load_learning_policy_budget
+from nexus.engine.learning_policy_loader import load_learning_policy_budget, load_route_cost_policy_budget, route_cost_controls_for_task
 
 
 def test_capability_planner_builds_constrained_composition_trace():
@@ -780,6 +780,30 @@ def test_capability_planner_enforces_runtime_penalty_candidates_for_high_cost_ca
     assert budget["learning_policy"]["enforce_penalties"] is True
     assert "research" not in plan["selected_capabilities"]
     assert "external_doc_scout" not in plan["selected_capabilities"]
+
+
+def test_route_cost_policy_loader_exposes_task_controls(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "candidate_cap_overrides": {"nexus-value-evidence-001": 1},
+  "lite_route_tasks": ["nexus-value-trust-001"],
+  "hold_tasks": ["nexus-value-repair-001"]
+}""",
+        encoding="utf-8",
+    )
+
+    budget = load_route_cost_policy_budget(artifact)
+    evidence_controls = route_cost_controls_for_task(tmp_path, "nexus-value-evidence-001", budget)
+    trust_controls = route_cost_controls_for_task(tmp_path, "nexus-value-trust-001", budget)
+    repair_controls = route_cost_controls_for_task(tmp_path, "nexus-value-repair-001", budget)
+
+    assert evidence_controls["candidate_cap"] == 1
+    assert trust_controls["lite_route"] is True
+    assert repair_controls["hold"] is True
 
 
 def test_capability_planner_uses_micro_patch_lane_for_simple_hidden_bugfix():
