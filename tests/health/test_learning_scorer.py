@@ -191,12 +191,12 @@ def test_learning_scorer_accepts_injected_governance_evaluator():
 def test_learning_governance_records_event_emit_failure(monkeypatch):
     from nexus.core.learning_governance import LearningGovernance
 
-    def fail_emit(**_kwargs):
+    def fail_publish(*_args, **_kwargs):
         raise RuntimeError("event bus unavailable")
 
     monkeypatch.setattr(
-        "nexus.core.learning_governance.NexusEventBus.emit_learning_decision",
-        fail_emit,
+        "nexus.core.learning_governance.NexusEventBus.publish",
+        fail_publish,
     )
     state = NexusState(task_id="learn-event-failure")
     state.steps_history = [_step("P"), _step("D"), _step("R")]
@@ -208,3 +208,31 @@ def test_learning_governance_records_event_emit_failure(monkeypatch):
     assert isinstance(decision.freeze_learning, bool)
     assert state.metadata["learning_decision_event_emitted"] is False
     assert state.metadata["learning_decision_event_error"] == "event bus unavailable"
+
+
+def test_learning_governance_event_emits_nexus_and_model_actions(monkeypatch):
+    from nexus.core.learning_governance import LearningGovernance
+
+    captured = {}
+
+    def capture_publish(event_type, payload):
+        captured["event_type"] = event_type
+        captured.update(payload)
+
+    monkeypatch.setattr(
+        "nexus.core.learning_governance.NexusEventBus.publish",
+        capture_publish,
+    )
+    state = NexusState(task_id="learn-event-actions")
+    state.metadata["pipeline_success"] = True
+    state.metadata["nexus_learning_action"] = "PROMOTE_NEXUS"
+    state.metadata["model_learning_action"] = "EXPORT_MODEL"
+    _allow_short_trajectory(state)
+
+    evidence = LearningEvidenceBuilder.build(state)
+    LearningGovernance.evaluate(state, evidence)
+
+    assert state.metadata["learning_decision_event_emitted"] is True
+    assert captured["event_type"] == "learning_decision"
+    assert captured["nexus_action"] == "PROMOTE_NEXUS"
+    assert captured["model_action"] == "EXPORT_MODEL"

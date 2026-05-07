@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
+from nexus.engine.learning_policy_loader import load_learning_policy_budget
 
 
 def test_capability_planner_builds_constrained_composition_trace():
@@ -638,3 +639,36 @@ def test_capability_planner_applies_promoted_learning_policy_only_when_opt_in():
     trace = {item["capability"]: item for item in learned["decision_trace"]}
     assert "learning_policy_promoted" in trace["autoreason"]["reasons"]
     assert "learning_policy_penalized" in trace["swarm"]["reasons"]
+
+
+def test_learning_policy_loader_feeds_planner_without_default_pollution(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_learning_policy.json"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text(
+        """
+{
+  "schema_version": "nexus_promoted_learning_policy.v1",
+  "source_experiences": ["exp:task-1"],
+  "promoted_capabilities": ["autoreason"],
+  "penalized_capabilities": ["swarm"],
+  "escalation_recommendations": []
+}
+""",
+        encoding="utf-8",
+    )
+
+    budget = load_learning_policy_budget(artifact)
+    plan = CapabilityPlanner().plan(
+        task_desc="Simple typo repair with no research need.",
+        task_type="docs_fix",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 5, "candidate_count": 1},
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        budget=budget,
+    ).to_dict()
+
+    assert budget["learning_policy"]["enforce_penalties"] is False
+    assert "autoreason" in plan["selected_capabilities"]
+    assert "learning_policy" in plan["signal_snapshot"]

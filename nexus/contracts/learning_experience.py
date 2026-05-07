@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -104,6 +106,41 @@ class LearningExperience:
             "nexus_policy_targets": list(self.nexus_policy_targets),
             "model_training_targets": list(self.model_training_targets),
         }
+
+
+def learning_experience_from_dict(payload: dict[str, Any]) -> LearningExperience:
+    lifecycle = tuple(
+        CapabilityLifecycle(
+            capability=str(item.get("capability", "unknown")),
+            category=str(item.get("category", "unknown")),
+            phase=str(item.get("phase", "C")),
+            selected=bool(item.get("selected", False)),
+            invoked=bool(item.get("invoked", False)),
+            evidence=bool(item.get("evidence", False)),
+            outcome=bool(item.get("outcome", False)),
+            gate_passed=bool(item.get("gate_passed", False)),
+            evidence_refs=tuple(str(ref) for ref in item.get("evidence_refs", []) or []),
+            failure_reason=str(item.get("failure_reason", "")),
+        )
+        for item in payload.get("capability_lifecycle", []) or []
+        if isinstance(item, dict)
+    )
+    return LearningExperience(
+        experience_id=str(payload.get("experience_id") or "exp:unknown"),
+        task_id=str(payload.get("task_id") or "unknown"),
+        task_type=str(payload.get("task_type") or ""),
+        phase_continuity=dict(payload.get("phase_continuity", {}) or {}),
+        capability_lifecycle=lifecycle,
+        gate_chain=dict(payload.get("gate_chain", {}) or {}),
+        outcome=str(payload.get("outcome") or "unverified"),
+        route_decision_ref=str(payload.get("route_decision_ref") or ""),
+        s2t_trace_refs=tuple(str(ref) for ref in payload.get("s2t_trace_refs", []) or []),
+        learning_steward_decision=str(payload.get("learning_steward_decision") or "shadow"),
+        nexus_policy_targets=tuple(str(item) for item in payload.get("nexus_policy_targets", []) or ()),
+        model_training_targets=tuple(str(item) for item in payload.get("model_training_targets", []) or ()),
+        promotion_status=str(payload.get("promotion_status") or "shadow"),
+        schema_version=str(payload.get("schema_version") or LEARNING_EXPERIENCE_SCHEMA_VERSION),
+    )
 
 
 def build_learning_experience(
@@ -222,6 +259,48 @@ def build_escalation_recommendations(experience: LearningExperience) -> list[dic
             }
         )
     return recommendations
+
+
+def build_promoted_learning_policy(experiences: list[LearningExperience]) -> dict[str, Any]:
+    promoted: list[str] = []
+    penalized: list[str] = []
+    escalation: list[dict[str, str]] = []
+    source_experiences: list[str] = []
+    for exp in experiences:
+        if exp.outcome != "verified_success":
+            continue
+        projection = project_nexus_policy(exp)
+        source_experiences.append(exp.experience_id)
+        promoted.extend(str(item) for item in projection["route_weight_updates"])
+        penalized.extend(str(item) for item in projection["capability_penalties"])
+        escalation.extend(projection["escalation_recommendations"])
+    return {
+        "schema_version": "nexus_promoted_learning_policy.v1",
+        "source_experiences": source_experiences,
+        "promoted_capabilities": sorted(set(promoted)),
+        "penalized_capabilities": sorted(set(penalized)),
+        "escalation_recommendations": escalation,
+    }
+
+
+def save_promoted_learning_policy(path: Path, experiences: list[LearningExperience]) -> dict[str, Any]:
+    policy = build_promoted_learning_policy(experiences)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(policy, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return policy
+
+
+def load_promoted_learning_policy(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "schema_version": "nexus_promoted_learning_policy.v1",
+            "source_experiences": [],
+            "promoted_capabilities": [],
+            "penalized_capabilities": [],
+            "escalation_recommendations": [],
+        }
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
 
 
 def _lifecycle_from_receipt(receipt: dict[str, Any]) -> CapabilityLifecycle:

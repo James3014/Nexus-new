@@ -2,9 +2,12 @@ from nexus.contracts.learning_experience import (
     CAPABILITY_TAXONOMY,
     apply_autodata_quality_gate,
     build_learning_experience,
+    build_promoted_learning_policy,
     build_escalation_recommendations,
+    load_promoted_learning_policy,
     project_model_training,
     project_nexus_policy,
+    save_promoted_learning_policy,
 )
 from nexus.core.learning_steward import LearningSteward
 
@@ -148,3 +151,41 @@ def test_learning_experience_escalates_failed_hyper_and_gates_autodata_export() 
     assert gated["training_eligible"] is False
     assert gated["targets"] == ["hard_negative"]
     assert gated["autodata_gate"]["status"] == "fail"
+
+
+def test_promoted_learning_policy_artifact_round_trips_verified_experience(tmp_path) -> None:
+    exp = build_learning_experience(
+        task_id="task-3",
+        task_type="bug",
+        usage_trace={
+            "phase_trace": {"S": "start", "P": "plan", "X": "context", "D": "design", "R": "repair", "A": "audit", "C": "close"},
+            "capabilities": {
+                "artifact_gate_passed": True,
+                "artifact_refs": ["artifact:task-3"],
+                "claim_verified": True,
+                "delivery_gate_passed": True,
+                "delivery_refs": ["delivery:task-3"],
+            },
+        },
+        capability_receipts=[
+            {
+                "name": "codeintel",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "evidence_refs": ["codeintel:impact"],
+            },
+            {"name": "swarm", "selected": True, "invoked": False},
+        ],
+    )
+    policy = build_promoted_learning_policy([exp])
+    path = tmp_path / ".nexus" / "policy" / "promoted_learning_policy.json"
+
+    saved = save_promoted_learning_policy(path, [exp])
+    loaded = load_promoted_learning_policy(path)
+
+    assert policy["promoted_capabilities"] == ["codeintel"]
+    assert saved == loaded
+    assert loaded["penalized_capabilities"] == ["swarm"]

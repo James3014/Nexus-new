@@ -41,10 +41,15 @@ class LearningGovernance:
         ).decide(state, evidence)
         state.metadata["learning_action"] = decision.action
         try:
-            NexusEventBus.emit_learning_decision(
-                task_id=state.task_id,
-                action=decision.action,
-                reasons=decision.reasons,
+            NexusEventBus.publish(
+                "learning_decision",
+                {
+                    "task_id": state.task_id,
+                    "action": decision.action,
+                    "reasons": decision.reasons,
+                    "nexus_action": str(state.metadata.get("nexus_learning_action") or decision.action),
+                    "model_action": str(state.metadata.get("model_learning_action") or decision.action),
+                },
             )
             state.metadata["learning_decision_event_emitted"] = True
         except Exception as exc:

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from nexus.contracts.learning_experience import learning_experience_from_dict
 from nexus.contracts.s2t_export import export_agent_lightning_preferences, export_model_training_v2, redact_s2t_event
 from nexus.contracts.s2t_trace import S2TTraceEvent
 
@@ -23,7 +24,41 @@ def _load_events(path: Path) -> list[S2TTraceEvent]:
     return events
 
 
-def export_s2t_trace_file(input_path: Path, output_path: Path, *, dry_run: bool = False, export_format: str = "v1") -> dict[str, Any]:
+def _load_json_rows(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.exists():
+        raise ValueError(f"manifest_missing:{path}")
+    if path.suffix == ".jsonl":
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line_number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError(f"invalid manifest row {line_number}: expected object")
+            rows.append(row)
+        return rows
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        for key in ("rows", "experiences", "quality_rows"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [row for row in value if isinstance(row, dict)]
+        return [payload]
+    return []
+
+
+def export_s2t_trace_file(
+    input_path: Path,
+    output_path: Path,
+    *,
+    dry_run: bool = False,
+    export_format: str = "v1",
+    experience_manifest: Path | None = None,
+    autodata_manifest: Path | None = None,
+) -> dict[str, Any]:
     if not input_path.exists():
         return {
             "passed": False,
@@ -37,7 +72,13 @@ def export_s2t_trace_file(input_path: Path, output_path: Path, *, dry_run: bool 
 
     events = _load_events(input_path)
     if export_format == "v2":
-        export = export_model_training_v2(events)
+        experiences = (
+            [learning_experience_from_dict(row) for row in _load_json_rows(experience_manifest)]
+            if experience_manifest
+            else None
+        )
+        quality_rows = _load_json_rows(autodata_manifest) if autodata_manifest else None
+        export = export_model_training_v2(events, experiences=experiences, quality_rows=quality_rows)
         payload = {**export, "source": str(input_path)}
         preference_pairs = export["compat"]["agent_lightning_preferences_v1"]["pair_count"]
     else:
@@ -57,6 +98,8 @@ def export_s2t_trace_file(input_path: Path, output_path: Path, *, dry_run: bool 
         "source_rows": len(events),
         "preference_pairs": preference_pairs,
         "format": export_format,
+        "experience_rows": len(payload.get("experience_rows", [])) if export_format == "v2" else 0,
+        "autodata_attached": bool(payload.get("quality_gate", {}).get("autodata_attached", False)) if export_format == "v2" else False,
     }
     if not dry_run:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,11 +112,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--format", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--experience-manifest", type=Path)
+    parser.add_argument("--autodata-manifest", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
     try:
-        summary = export_s2t_trace_file(args.input, args.output, dry_run=args.dry_run, export_format=args.format)
+        summary = export_s2t_trace_file(
+            args.input,
+            args.output,
+            dry_run=args.dry_run,
+            export_format=args.format,
+            experience_manifest=args.experience_manifest,
+            autodata_manifest=args.autodata_manifest,
+        )
     except Exception as exc:  # noqa: BLE001 - command boundary returns structured failure.
         summary = {
             "passed": False,

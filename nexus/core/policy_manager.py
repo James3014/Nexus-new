@@ -36,19 +36,33 @@ class PolicyManager:
         state.metadata["memory_lock_wait_p95_ms"] = round(
             float(self.episode_repository.coordinator.wait_p95_ms()), 2
         )
+        requested_learning_action = str(state.metadata.get("learning_action") or "").upper()
         LearningScorer.apply(state, evidence)
+        if requested_learning_action in {"PROMOTE_NEXUS", "EXPORT_MODEL", "INGEST_SHADOW"} and not bool(
+            state.metadata.get("learning_frozen", False)
+        ):
+            state.metadata["learning_action"] = requested_learning_action
         learning_action = str(state.metadata.get("learning_action") or "").upper()
         if learning_action == "FREEZE" or bool(state.metadata.get("learning_frozen", False)):
             state.metadata["learning_ingest_status"] = "skipped_frozen"
         elif learning_action == "DISCARD":
             state.metadata["learning_ingest_status"] = "discarded"
+        elif learning_action == "PROMOTE_NEXUS":
+            self._ingest_episode(state, episode, "promoted_nexus")
+        elif learning_action == "EXPORT_MODEL":
+            state.metadata["learning_ingest_status"] = "export_model_queued"
+        elif learning_action == "INGEST_SHADOW":
+            self._ingest_episode(state, episode, "ingested_shadow")
         else:
-            try:
-                self.memory_service.ingest_episode(episode)
-                state.metadata["learning_ingest_status"] = "ingested"
-            except Exception:
-                state.metadata["learning_ingest_status"] = "ingest_failed"
+            self._ingest_episode(state, episode, "ingested")
         self._run_metabolizer(state)
+
+    def _ingest_episode(self, state: NexusState, episode: dict[str, Any], status: str) -> None:
+        try:
+            self.memory_service.ingest_episode(episode)
+            state.metadata["learning_ingest_status"] = status
+        except Exception:
+            state.metadata["learning_ingest_status"] = "ingest_failed"
 
     def propose_policy(self, task_description: str) -> List[Dict[str, Any]]:
         """🔌 Phase M2: 根據任務描述語義檢索建議的 Policy"""
