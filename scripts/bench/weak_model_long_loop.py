@@ -101,7 +101,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "model_name": str(args.model_name),
         "tasks_file": str(args.tasks_file),
         "task_ids": task_ids,
-        "fail_fast": "stop_after_first_nonzero_task_return_code",
+        "fail_fast": "stop_after_first_nonzero_or_with_nexus_semantic_failure",
         "preflight_command": _base_command(args, output_dir=root / "preflight", task_ids=task_ids, preflight_only=True),
         "task_commands": [
             {
@@ -124,11 +124,43 @@ def run_plan(plan: dict[str, Any], *, model_name: str, plan_only: bool) -> dict[
         return {**plan, "execution_status": "preflight_failed", "preflight_returncode": preflight.returncode, "results": results}
     for item in plan["task_commands"]:
         result = subprocess.run(item["command"], env={**env}, check=False)
-        row = {"task_id": item["task_id"], "returncode": result.returncode, "output_dir": item["output_dir"]}
+        semantic_failure = _with_nexus_semantic_failure(Path(item["output_dir"]))
+        row = {
+            "task_id": item["task_id"],
+            "returncode": result.returncode,
+            "output_dir": item["output_dir"],
+            "semantic_failure": semantic_failure,
+        }
         results.append(row)
-        if result.returncode != 0:
-            return {**plan, "execution_status": "stopped_on_failed_task", "failed_task_id": item["task_id"], "results": results}
+        if result.returncode != 0 or semantic_failure["failed"]:
+            return {
+                **plan,
+                "execution_status": "stopped_on_failed_task",
+                "failed_task_id": item["task_id"],
+                "failed_task_reason": semantic_failure["reason"] if semantic_failure["failed"] else f"returncode:{result.returncode}",
+                "results": results,
+            }
     return {**plan, "execution_status": "complete", "results": results}
+
+
+def _with_nexus_semantic_failure(output_dir: Path) -> dict[str, Any]:
+    files = sorted(output_dir.glob("with_nexus_*.jsonl"))
+    if not files:
+        return {"failed": True, "reason": "with_nexus_jsonl_missing"}
+    rows: list[dict[str, Any]] = []
+    for line in files[-1].read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    if not rows:
+        return {"failed": True, "reason": "with_nexus_rows_missing"}
+    for row in rows:
+        if not bool(row.get("run_eligible", True)):
+            return {"failed": True, "reason": str(row.get("infra_invalid_reason") or "with_nexus_not_eligible")}
+        if str(row.get("semantic_status") or "") != "VERIFIED":
+            return {"failed": True, "reason": f"semantic_status:{row.get('semantic_status')}"}
+        if bool(row.get("report_trust_mismatch", False)):
+            return {"failed": True, "reason": "trust_mismatch"}
+    return {"failed": False, "reason": ""}
 
 
 def render_markdown(payload: dict[str, Any]) -> str:

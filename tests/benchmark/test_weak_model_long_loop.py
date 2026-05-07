@@ -30,7 +30,7 @@ def test_build_plan_uses_twelve_task_fail_fast_shape(tmp_path: Path):
     plan = loop.build_plan(_args(tmp_path, tasks))
 
     assert plan["task_ids"] == ["a", "b"]
-    assert plan["fail_fast"] == "stop_after_first_nonzero_task_return_code"
+    assert plan["fail_fast"] == "stop_after_first_nonzero_or_with_nexus_semantic_failure"
     assert "--llm-candidate-cap" in plan["preflight_command"]
     assert plan["preflight_command"][plan["preflight_command"].index("--llm-candidate-cap") + 1] == "3"
     assert "--preflight-only" in plan["preflight_command"]
@@ -56,7 +56,7 @@ def test_run_plan_stops_on_first_failed_task(monkeypatch):
         "model_name": "gemini-3-flash-preview",
         "tasks_file": "tasks.json",
         "task_ids": ["a", "b"],
-        "fail_fast": "stop_after_first_nonzero_task_return_code",
+        "fail_fast": "stop_after_first_nonzero_or_with_nexus_semantic_failure",
         "preflight_command": ["runner", "--preflight-only"],
         "task_commands": [
             {"task_id": "a", "output_dir": "out/a", "command": ["runner", "a"]},
@@ -68,6 +68,53 @@ def test_run_plan_stops_on_first_failed_task(monkeypatch):
 
     assert result["execution_status"] == "stopped_on_failed_task"
     assert result["failed_task_id"] == "a"
+    assert len(calls) == 2
+
+
+def test_run_plan_stops_on_semantic_failure_even_when_process_succeeds(tmp_path: Path, monkeypatch):
+    calls = []
+
+    class Result:
+        returncode = 0
+
+    def fake_run(cmd, env, check):
+        calls.append(cmd)
+        if "--preflight-only" not in cmd:
+            out = tmp_path / "out" / "a"
+            out.mkdir(parents=True)
+            (out / "with_nexus_1.jsonl").write_text(
+                json.dumps(
+                    {
+                        "task_id": "a",
+                        "semantic_status": "VERIFIED",
+                        "run_eligible": False,
+                        "infra_invalid_reason": "nexus_delivery_invalid",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        return Result()
+
+    monkeypatch.setattr(loop.subprocess, "run", fake_run)
+    plan = {
+        "schema_version": "nexus_weak_model_long_loop_v1",
+        "model_name": "gemini-3-flash-preview",
+        "tasks_file": "tasks.json",
+        "task_ids": ["a", "b"],
+        "fail_fast": "stop_after_first_nonzero_or_with_nexus_semantic_failure",
+        "preflight_command": ["runner", "--preflight-only"],
+        "task_commands": [
+            {"task_id": "a", "output_dir": str(tmp_path / "out" / "a"), "command": ["runner", "a"]},
+            {"task_id": "b", "output_dir": str(tmp_path / "out" / "b"), "command": ["runner", "b"]},
+        ],
+    }
+
+    result = loop.run_plan(plan, model_name="gemini-3-flash-preview", plan_only=False)
+
+    assert result["execution_status"] == "stopped_on_failed_task"
+    assert result["failed_task_id"] == "a"
+    assert result["failed_task_reason"] == "nexus_delivery_invalid"
     assert len(calls) == 2
 
 
