@@ -206,6 +206,16 @@ def _classify_token_unreliable_reason(
     return None
 
 
+PROVIDER_TOKEN_SOURCES = {"stats", "usage_metadata", "codex_stdout"}
+
+
+def _row_has_measured_provider_tokens(row: dict[str, Any]) -> bool:
+    """True only when token telemetry came from a provider-level source."""
+    token_status = str(row.get("token_capture_status") or row.get("model_token_capture_status") or "").strip().lower()
+    token_source = str(row.get("gateway_token_source") or "").strip().lower()
+    return bool(row.get("token_measured", False) and token_status == "measured" and token_source in PROVIDER_TOKEN_SOURCES)
+
+
 def _annotate_benchmark_eligibility(
     row: dict[str, Any],
     *,
@@ -254,7 +264,8 @@ def _annotate_benchmark_eligibility(
         row["rescue_cost_status"] = "local_after_model_timeout"
     row["token_reliable"] = token_unreliable_reason is None
     row["token_unreliable_reason"] = token_unreliable_reason
-    row["public_cost_evidence"] = bool(row.get("token_measured", False) and row["token_reliable"])
+    row["provider_token_measured"] = _row_has_measured_provider_tokens(row)
+    row["public_cost_evidence"] = bool(row["provider_token_measured"] and row["token_reliable"])
     winner_source = str(row.get("nexus_winner_source") or "")
     gateway_error_category = str(row.get("gateway_error_category") or "")
     row["local_fallback_unhelpful"] = bool(
@@ -440,6 +451,8 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
         first_pass = [row for row in eligible if int(row.get("attempt_count", 0) or 0) <= 1 and row.get("status") == "SUCCESS"]
         token_reliable = [row for row in eligible if bool(row.get("token_reliable", False))]
         local_fallback_unhelpful = [row for row in eligible if bool(row.get("local_fallback_unhelpful", False))]
+        token_measured = [row for row in eligible if bool(row.get("token_measured", False))]
+        provider_token_measured = [row for row in eligible if _row_has_measured_provider_tokens(row)]
         summary[mode] = {
             "total_n": len(mode_rows),
             "eligible_n": len(eligible),
@@ -454,6 +467,8 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
             "avg_cli_uninstrumented_sec": _avg([float(row.get("cli_uninstrumented_sec", 0) or 0) for row in eligible]),
             "avg_runner_overhead_sec": _avg([float(row.get("runner_overhead_sec", 0) or 0) for row in eligible]),
             "avg_tokens": _avg([float(row.get("total_tokens", 0) or 0) for row in eligible]),
+            "token_measured_rate": round(len(token_measured) / len(eligible), 4) if eligible else None,
+            "provider_token_measured_rate": round(len(provider_token_measured) / len(eligible), 4) if eligible else None,
             "token_reliable_rate": round(len(token_reliable) / len(eligible), 4) if eligible else None,
             "token_unreliable_reasons": sorted(
                 {
@@ -3529,6 +3544,13 @@ def _route_cost_ledger(rows: list[dict[str, Any]]) -> dict[str, Any]:
     def mean(values: list[float]) -> float:
         return round(sum(values) / len(values), 4) if values else 0.0
 
+    def source_counts(source_rows: list[dict[str, Any]]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in source_rows:
+            source = str(row.get("gateway_token_source") or "missing")
+            counts[source] = counts.get(source, 0) + 1
+        return dict(sorted(counts.items()))
+
     def arm(mode: str) -> dict[str, Any]:
         arm_rows = [row for row in rows if str(row.get("mode")) == mode]
         eligible = [row for row in arm_rows if bool(row.get("run_eligible", True))]
@@ -3539,6 +3561,11 @@ def _route_cost_ledger(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "avg_model_calls": mean([number(row, "model_calls") for row in eligible]),
             "avg_tokens": mean([number(row, "total_tokens", "model_total_tokens") for row in eligible]),
             "token_measured_rate": _rate_for(eligible, "token_measured"),
+            "provider_token_measured_rate": round(sum(1 for row in eligible if _row_has_measured_provider_tokens(row)) / len(eligible), 4)
+            if eligible
+            else 0.0,
+            "provider_token_source_counts": source_counts(eligible),
+            "measured_token_only_cost_comparable_rate": _rate_for(eligible, "public_cost_evidence"),
             "route_recommended_flow_present_rate": _rate_for(eligible, "route_recommended_flow"),
             "chosen_flow_present_rate": _rate_for(eligible, "chosen_flow"),
             "route_decision_present_rate": _rate_for(eligible, "route_decision_schema_version"),
@@ -3721,6 +3748,10 @@ def write_evidence_bundle(
     route_decision_present_rate = _rate_for(with_rows, "route_decision_schema_version")
     token_measured_rate_with = _rate_for(with_rows, "token_measured")
     token_measured_rate_without = _rate_for(without_rows, "token_measured")
+    provider_token_measured_rate_with = round(sum(1 for row in with_rows if _row_has_measured_provider_tokens(row)) / len(with_rows), 4) if with_rows else 0.0
+    provider_token_measured_rate_without = (
+        round(sum(1 for row in without_rows if _row_has_measured_provider_tokens(row)) / len(without_rows), 4) if without_rows else 0.0
+    )
     eligibility_complete = len(eligible_with) == len(with_rows) and len(eligible_without) == len(without_rows)
     delivery_gate_failures = []
     cost_gate_failures = []
@@ -3756,6 +3787,10 @@ def write_evidence_bundle(
         cost_gate_failures.append("with_token_measured_below_threshold")
     if token_measured_rate_without < 0.8:
         cost_gate_failures.append("without_token_measured_below_threshold")
+    if provider_token_measured_rate_with < 0.8:
+        cost_gate_failures.append("with_provider_token_measured_below_threshold")
+    if provider_token_measured_rate_without < 0.8:
+        cost_gate_failures.append("without_provider_token_measured_below_threshold")
     if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
         delivery_gate_failures.append("manifest_missing")
     if not config.get("runner_command"):
@@ -3783,6 +3818,8 @@ def write_evidence_bundle(
         "route_decision_present_rate": route_decision_present_rate,
         "token_measured_rate_with": token_measured_rate_with,
         "token_measured_rate_without": token_measured_rate_without,
+        "provider_token_measured_rate_with": provider_token_measured_rate_with,
+        "provider_token_measured_rate_without": provider_token_measured_rate_without,
         "runner_command_present": bool(config.get("runner_command")),
         "manifest_hash_present": bool(config.get("tasks_manifest_hash")),
         "raw_file_hashes_present": True,
@@ -3851,6 +3888,8 @@ def write_evidence_bundle(
         "telemetry_completeness": {
             "token_measured_rate_without": token_measured_rate_without,
             "token_measured_rate_with": token_measured_rate_with,
+            "provider_token_measured_rate_without": provider_token_measured_rate_without,
+            "provider_token_measured_rate_with": provider_token_measured_rate_with,
             "gateway_stats_source_rate_without": _rate_for(without_rows, "gateway_stats_present"),
             "gateway_stats_source_rate_with": _rate_for(with_rows, "gateway_stats_present"),
         },

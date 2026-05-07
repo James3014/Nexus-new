@@ -682,3 +682,11 @@ version_scope:
 - **Root Cause**: The test expectation drifted from the declared router policy: DDTree starts at larger candidate budgets, while flaky timeout plus low confidence is a governance candidate.
 - **Decision**: Keep the safer route policy, fix the expectations, and verify with the exact discovered pytest node id.
 - **Prevention**: Capability-stack tests must assert documented thresholds, and targeted pytest commands must be discovered with `rg "def test_"` before being used as proof.
+
+## 2026-05-07 Route Oracle Runtime Seed Closure
+
+- **Phenomenon**: `capability_route_smoke.py` failed after Nexus-only self-check even though task execution succeeded; `route-oracle-ultra-review-001` declared `expected_capabilities=[ultra_review]` but runtime did not select/invoke `ultra_review`, causing missing public-safe receipt.
+- **Root Cause**: Expected capability contracts were enforced in report/smoke coverage, but were not projected into `CapabilitySignalSet` selected/governance/acceleration seeds. The planner therefore treated `ultra_review` as optional and risk-score gated.
+- **Lesson**: Benchmark/oracle expected capability contracts must enter runtime planner signals before receipt validation. Report-only enforcement is too late and creates false confidence until smoke fails.
+- **Action Taken**: Added route-oracle expected-capability parsing in `capability_signals.py`, seeding `ultra_review` into governance and `ddtree` into acceleration. Added regression coverage and reran Nexus route smoke to pass.
+- **Verification**: `capability_route_smoke.py` passed with `receipt_diagnostic_pass=true`; route-oracle public-safe capability union includes `ultra_review`.

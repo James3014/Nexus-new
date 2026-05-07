@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 LOCAL_SUCCESS_SOURCES = {"local", "local_only", "local_hidden_shadow", "local_deterministic_success", "nexus_tool_success"}
+PROVIDER_TOKEN_SOURCES = {"stats", "usage_metadata", "codex_stdout"}
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,8 @@ class TaskCostDecision:
     token_delta_pct: float
     candidate_model_calls: int
     candidate_success_source: str
+    candidate_token_source: str
+    measured_token_only: bool
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +45,8 @@ class TaskCostDecision:
             "token_delta_pct": self.token_delta_pct,
             "candidate_model_calls": self.candidate_model_calls,
             "candidate_success_source": self.candidate_success_source,
+            "candidate_token_source": self.candidate_token_source,
+            "measured_token_only": self.measured_token_only,
         }
 
 
@@ -91,6 +96,12 @@ def _candidate_bare_rows(run_dir: Path) -> dict[str, dict[str, Any]]:
     return {str(row.get("task_id") or ""): row for row in rows if row.get("task_id")}
 
 
+def _measured_token_only(row: dict[str, Any]) -> bool:
+    token_status = str(row.get("token_capture_status") or row.get("model_token_capture_status") or "").strip().lower()
+    token_source = str(row.get("gateway_token_source") or "").strip().lower()
+    return bool(row.get("token_measured", False) and token_status == "measured" and token_source in PROVIDER_TOKEN_SOURCES)
+
+
 def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: Path) -> dict[str, Any]:
     baseline_rows = {str(row.get("task_id") or ""): row for row in baseline_aggregate.get("rows", []) or []}
     candidate_rows = _candidate_rows(candidate_dir)
@@ -107,6 +118,8 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         baseline_tokens = float(baseline.get("with_tokens") or 0.0)
         candidate_tokens = _num(candidate, "total_tokens")
         source = str(candidate.get("nexus_winner_source") or "")
+        token_source = str(candidate.get("gateway_token_source") or "missing")
+        measured_token_only = _measured_token_only(candidate)
         calls = int(_num(candidate, "model_calls"))
         wall_delta = _pct_delta(candidate_wall, baseline_wall)
         token_delta = _pct_delta(candidate_tokens, baseline_tokens)
@@ -116,9 +129,9 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         elif source in LOCAL_SUCCESS_SOURCES:
             decision = "hold_not_model_uplift"
             reason = f"candidate success source {source} is not model uplift"
-        elif str(candidate.get("token_capture_status") or "") != "measured":
+        elif not measured_token_only:
             decision = "hold_not_model_uplift"
-            reason = "candidate token capture is not measured"
+            reason = f"candidate token capture is not provider-measured: source={token_source}"
         elif wall_delta <= -15.0 and token_delta <= 5.0:
             decision = "promote_cost_tune"
             reason = f"verified with wall improvement {abs(wall_delta):.2f}% and token delta {token_delta:.2f}%"
@@ -147,6 +160,8 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
                 token_delta_pct=token_delta,
                 candidate_model_calls=calls,
                 candidate_success_source=source,
+                candidate_token_source=token_source,
+                measured_token_only=measured_token_only,
             )
         )
     counts: dict[str, int] = {}
@@ -204,11 +219,19 @@ def render_markdown(payload: dict[str, Any]) -> str:
     ]
     for name, count in sorted(payload["decision_counts"].items()):
         lines.append(f"- `{name}`: {count}")
-    lines.extend(["", "## Decisions", "", "| Task | Decision | Wall delta | Token delta | Source | Reason |", "| :--- | :--- | ---: | ---: | :--- | :--- |"])
+    lines.extend(
+        [
+            "",
+            "## Decisions",
+            "",
+            "| Task | Decision | Wall delta | Token delta | Winner | Token source | Measured-only | Reason |",
+            "| :--- | :--- | ---: | ---: | :--- | :--- | :--- | :--- |",
+        ]
+    )
     for row in payload["decisions"]:
         lines.append(
             f"| {row['task_id']} | {row['decision']} | {row['wall_delta_pct']}% | {row['token_delta_pct']}% | "
-            f"{row['candidate_success_source']} | {row['reason']} |"
+            f"{row['candidate_success_source']} | {row['candidate_token_source']} | {row['measured_token_only']} | {row['reason']} |"
         )
     lines.extend(["", "## Promoted Policy Draft", "", "```json", json.dumps(payload["promoted_policy"], ensure_ascii=False, indent=2), "```", ""])
     return "\n".join(lines)

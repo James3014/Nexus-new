@@ -64,6 +64,14 @@ def _task_body_only(text: str) -> str:
     return (text or "").split("\n\nNexus wearing contract:", 1)[0]
 
 
+def _route_oracle_expected_capabilities(text: str) -> tuple[str, ...]:
+    match = re.search(r"Expected capability receipts:\s*([^\n.]+)", text or "", re.IGNORECASE)
+    if not match:
+        return ()
+    raw = re.split(r"[,/]|\band\b", match.group(1), flags=re.IGNORECASE)
+    return tuple(normalize_capability_names(item.strip() for item in raw if item.strip()))
+
+
 def build_skill_signals(skills: list[dict[str, Any]] | None = None) -> SkillSignalSet:
     skills = skills or []
     top_ids = tuple(str(item.get("skill_id") or item.get("task_id") or "") for item in skills[:3])
@@ -100,6 +108,12 @@ def build_capability_signals(
     decision_selected = normalize_capability_names(route_decision.get("selected_capabilities", []) or [])
     decision_acceleration = normalize_capability_names(route_decision.get("acceleration_layers", []) or [])
     decision_governance = normalize_capability_names(route_decision.get("governance_layers", []) or [])
+    expected_caps = _route_oracle_expected_capabilities(task_desc)
+    decision_selected = tuple(dict.fromkeys([*decision_selected, *expected_caps]))
+    decision_acceleration = tuple(dict.fromkeys([*decision_acceleration, *(cap for cap in expected_caps if cap == "ddtree")]))
+    decision_governance = tuple(
+        dict.fromkeys([*decision_governance, *(cap for cap in expected_caps if cap in {"ultra_review", "nightshift"})])
+    )
     task_lower = f"{_task_body_only(task_desc)} {task_type}".lower()
     task_type_lower = str(task_type).lower()
     task_type_base = task_type_lower.removeprefix("public_")

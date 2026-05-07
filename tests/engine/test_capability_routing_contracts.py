@@ -936,3 +936,28 @@ def test_pending_executor_receipts_keep_route_selection_but_block_public_claims(
     assert receipts["nightshift"].selected is False
     assert receipts["nightshift"].public_claim_safe is False
     assert receipts["nightshift"].failure_reason == "pending_executor"
+
+
+def test_route_oracle_expected_capability_contract_seeds_governance_and_acceleration():
+    task_desc = (
+        "Select the required verifier.\n\n"
+        "Nexus route oracle contract:\n"
+        "- Expected capability receipts: ultra_review, ddtree.\n"
+        "- If the matching executor flag is available, the route must select and invoke the expected capability."
+    )
+
+    signals = build_capability_signals(
+        task_desc=task_desc,
+        task_type="public_feature",
+        route={"recommended_flow": "hyper_sprint", "route_features": {"risk_score": 65}},
+    )
+    plan = CapabilityPlanner().plan(
+        task_desc=task_desc,
+        task_type="public_feature",
+        route={"recommended_flow": "hyper_sprint", "route_features": {"risk_score": 65}},
+    )
+
+    assert "ultra_review" in signals.governance_seed
+    assert "ddtree" in signals.acceleration_seed
+    assert "ultra_review" in plan.selected_capabilities
+    assert "ddtree" in plan.selected_capabilities
