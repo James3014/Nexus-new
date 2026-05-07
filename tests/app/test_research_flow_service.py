@@ -1215,6 +1215,80 @@ def test_run_auto_flow_replans_from_failed_llm_baseline_to_hyper(tmp_path: Path,
     assert payload["nexus_usage_trace"]["capabilities"]["hyper_used"] is True
 
 
+def test_hidden_contract_apply_events_uses_local_first_before_llm(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    test_file = tmp_path / "test_target.py"
+    target.write_text(
+        "def apply_events(events):\n"
+        "    state = {'count': 0, 'seen': []}\n"
+        "    for event in events:\n"
+        "        state['count'] += int(event.get('delta', 0))\n"
+        "        state['seen'].append(event.get('id'))\n"
+        "    return state\n",
+        encoding="utf-8",
+    )
+    test_file.write_text(
+        "import importlib.util\n"
+        "from pathlib import Path\n\n"
+        "_TARGET_PATH = Path(__file__).resolve().parent / 'target.py'\n"
+        "_SPEC = importlib.util.spec_from_file_location('bench_target', _TARGET_PATH)\n"
+        "_MOD = importlib.util.module_from_spec(_SPEC)\n"
+        "assert _SPEC is not None and _SPEC.loader is not None\n"
+        "_SPEC.loader.exec_module(_MOD)\n"
+        "apply_events = _MOD.apply_events\n\n"
+        "def test_applies_unique_happy_path_events():\n"
+        "    events = [{'id': 'a', 'delta': 2}, {'id': 'b', 'delta': 3}]\n"
+        "    assert apply_events(events) == {'count': 5, 'seen': ['a', 'b']}\n",
+        encoding="utf-8",
+    )
+
+    class FailIfCalledLLM:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **_kwargs):
+            raise AssertionError("hidden contract local-first should avoid LLM baseline")
+
+    monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FailIfCalledLLM)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc=(
+            "Fix a state normalization bug where the visible test covers the happy path "
+            "but the verification test requires idempotent handling of duplicate events."
+            "\n\nNexus wearing contract:\n- benchmark contract suffix"
+        ),
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="public_bugfix",
+        candidate_count=3,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=True,
+        llm_baseline=True,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow=None,
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-hidden-local-first",
+    )
+
+    report = payload["result"]["report"]
+    assert payload["result"]["status"] == "SUCCESS"
+    assert payload["strategy"]["path"] == "baseline_only"
+    assert report["source"] == "local_hidden_contract_fast_path"
+    assert report["model_calls"] == 0
+    assert report["baseline_source_policy"] == "hidden_contract_local_first_before_llm"
+    assert payload["route"]["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+
+
 def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypatch):
     target = tmp_path / "demo.py"
     test_file = tmp_path / "test_demo.py"

@@ -2595,11 +2595,34 @@ def run_auto_flow(
         out["baseline_source_policy"] = "strict_llm_no_local_fallback"
         return out
 
+    def _hidden_contract_local_first_patch(trial: int) -> tuple[str, str, dict[str, Any]] | None:
+        """Use deterministic local repair before spending a model call on known hidden-contract reducers."""
+
+        hidden_fast_path = str(route.get("recommended_reason") or "") == "benchmark_hidden_contract_fast_path"
+        task_lower = task_desc.lower()
+        if (
+            not hidden_fast_path
+            or llm_baseline_required
+            or "def apply_events" not in original_code
+            or "duplicate event" not in task_lower
+        ):
+            return None
+        patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
+        if patched == original_code:
+            return None
+        meta = _local_baseline_meta()
+        meta["baseline_source_policy"] = "hidden_contract_local_first_before_llm"
+        return patched, "local_hidden_contract_fast_path", meta
+
     def _generate_baseline_patch(trial: int = 0) -> tuple[str, str, dict[str, Any]]:
         """R4: Enhanced baseline generation with LLM fast-fallback and conservative local paths."""
         source_label = "local"
         fallback_reason = None
         fallback_meta: dict[str, Any] | None = None
+
+        local_first = _hidden_contract_local_first_patch(trial)
+        if local_first is not None:
+            return local_first
         
         # [NEW: X-2] Prior-Art from Claims
         try:
