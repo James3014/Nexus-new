@@ -1,52 +1,40 @@
-# 🧬 Nexus 認知演進：harness-100 深度學習計畫書
-**[STATUS: STRATEGIC_ARCHIVE | VERSION: 1.0]**
-**[SOURCE: harness-100 | TARGET: Nexus v23+ Infrastructure]**
+# Nexus 認知演化長計劃 (v25.5) - 從學習閉環到自動演化
 
-## 🏟️ 概覽 (Overview)
-本計畫旨在將 `harness-100` 的多代理專家智慧（軟實力）注入 Nexus 的 P-X-D-R-A-C 高韌性執行框架（硬實力）中。將 Nexus 從「自動化執行器」升級為具備「領域專家意識」的戰甲指揮官。
+本文件定義了 Nexus 戰甲如何透過「雙學習系統」實現自我強化：一層提升 Nexus 路由策略，另一層為模型訓練提供高品質數據。
 
 ---
 
-## 🛠️ 核心強化階段 (Phased Implementation)
+## 階段一：地基與數據採集 (P1–P3) [DONE]
+*   **P1: 能力分類 Registry**：建立 9 類能力（偵查、修復、協作等）的語義標籤。
+*   **P2: 學習軌跡合約 (Trace Contract)**：定義 `LearningExperience` 與 `CapabilityLifecycle`。
+*   **P3: Runtime 數據採集器 (Harvester)**：在 `research_flow_service` 中接入，自動生成 Episode 紀錄。
 
-### 階段一：實體化與語義索引 (Research & Ingest)
-*   **目標**：將 100 個 Harness 的內容轉化為 Nexus 的向量知識庫與 Wiki。
-*   **執行路徑**：
-    1.  遍歷 `harness-100/en` 下的所有專業領域目錄。
-    2.  提取 `.claude/agents/*.md` 的人格定義、專業術語、框架限制（如 SOLID, DDD）。
-    3.  將提取出的「智慧結晶」索引至 Nexus 的 `nexus_wiki_vault` 與 `LanceDB`。
-*   **強化效果**：優化 **R (Research)** 相位，提供即時的領域最佳實踐（Best Practices）支援。
+## 階段二：策略學習與路由接入 (P4–P7) [PARTIAL]
+*   **P4: Policy Learner 投影**：將 Episode 轉化為路由權重與 S2T 先驗。
+*   **P5: CapabilityPlanner 接入**：讓路由能讀取過去成功配置（`learning_influenced=true`）。
+*   **P6: S2T Selector 歷史先驗**：候選重排時參考歷史相似任務的勝率。
+*   **P7: 升級策略 (Escalation Policy)**：學習何時自動從 Hyper 升級至 Nightshift 或 Swarm。
 
-### 階段二：專家技能 Forge (Skill Mapping)
-*   **目標**：將 Harness 指令集轉化為 Nexus 的 `SKILL.md` 指令。
-*   **執行路徑**：
-    1.  建立 `Expert Persona` 映射機制，將 `harness-100` 的人格定義與 Nexus 的實體工具鏈（Toolchains）結合。
-    2.  生成 `.agents/skills/expert-<name>` 系列專業技能。
-*   **強化效果**：升級 **X (Execute)** 相位，使 Drone 具備特定領域的專家深度。
+## 階段三：深度治理與分析 (P8–P10) [ACTIVE]
+*   **P8: 策略分析服務 (Distillation)**：將失敗任務轉化為可審核的 Strategy Lesson。
+*   **P9: 匯出門禁 (Export Gate)**：確保只有 REDACTED 且 GOLD 的軌跡能進入訓練集。
+*   **P10: LearningSteward 五態治理**：實作 `DISCARD`, `FREEZE`, `SHADOW`, `PROMOTE`, `EXPORT` 的判定邏輯。
 
-### 階段三：多代理共識攔截器 (Audit Orchestration)
-*   **目標**：實作 Nexus 版的「多代理對話」交叉驗證系統。
-*   **執行路徑**：
-    1.  重構 Nexus **A (Audit)** 相位。
-    2.  在審計時啟動 Swarm 中的 3 個不同人格節點（如：Architect, Security, Developer）。
-    3.  實施 `Consensus Guard` 攔截機制，唯有達成共識方可進入固化階段。
-*   **強化效果**：徹底強化 **A (Audit)** 相位，將幻覺與邏輯錯誤率降至最低。
-
-### 階段四：自主演進與結晶 (Crystal Evolution)
-*   **目標**：透過 Learn Mode 驗證學習效果並自動優化權重。
-*   **執行路徑**：
-    1.  執行實戰任務並收集 `tracelog.jsonl`。
-    2.  分析不同專業人格的成功率。
-    3.  自動更新 `AutonomicRouter` 決策權重。
-*   **強化效果**：完成 **C (Crystallize)** 相位閉環，實現真正的認知演進。
+## 階段四：驗證、演化與生產門禁 (P11–P15) [PLANNED]
+*   **P11: 自動化 Policy 晉升系統**：建立 shadow 到 promoted 的自動化門禁。
+*   **P12: 軌跡故障挖掘 (Failure Miner)**：分析 `trust_mismatch` 案例，修正治理規則。
+*   **P13: Autodata GOLD 篩選標準**：實作強弱分差 20% 的自動化判定。
+*   **P14: 小型 Nexus Self-Test**：在內部實驗室跑失敗->學習->成功的完整閉環驗證。
+*   **P15: Flash 2 題 A/B 測試門禁**：生產環境試點，證明 `tokens_per_success` 下降且無退步。
 
 ---
 
-## 🛡️ 治理規範 (Governance)
-- **Source Integrity**: 必須註明所有學習內容來源於 `revfactory/harness-100`。
-- **Truth Anchoring**: 所有認知推理必須錨定於 Nexus 的實體工具輸出（如編譯器報錯、Linter 結果）。
-- **Safety**: 專家指令集不得覆蓋 Nexus 的核心 L0 安全治理規則。
+## 核心上線標準
+1.  **解決率 (Solve Rate)**：不得低於 Baseline。
+2.  **信心對位 (Trust)**：`trust_mismatch` 不得上升。
+3.  **效率 (Efficiency)**：`tokens_per_success` 必須下降（路由變精準）。
+4.  **安全 (Safety)**：所有的學習產出必須經過 `LearningSteward` 審計。
 
 ---
-**[Archived at: 2026-05-06]**
-**[Authorized by: Nexus Battlesuit Engineer]**
+*存檔日期：2026-05-04*
+*執行代理：Gemini Nexus Engineer*
