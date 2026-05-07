@@ -670,6 +670,48 @@ def test_build_route_treats_self_heal_failure_tail_as_hyper(tmp_path: Path):
     assert out["route_features"]["has_strong_commercial_signal"] is False
 
 
+def test_build_route_keeps_hyper_without_forcing_research_for_second_edit_repair(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Repair the implementation after an intentionally tempting first patch breaks "
+            "an invariant; success requires using the failure tail to produce a bounded second edit."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+            "\n- Governance: keep the solution inside scope."
+        ),
+        task_type="public_test_repair",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+    )
+
+    assert out["recommended_flow"] == "hyper_sprint"
+    assert out["should_research"] is False
+
+
+def test_build_route_does_not_treat_behavioral_contract_as_external_claim_research(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Repair a flaky-looking timeout calculation without deleting assertions; "
+            "success requires preserving the behavioral contract and validating the actual failing branch."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+            "\n- Governance: keep the solution inside scope."
+        ),
+        task_type="public_test_repair",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+    )
+
+    assert out["recommended_flow"] == "hyper_sprint"
+    assert out["should_research"] is False
+    assert out["research_context"]["role"] == "general"
+    assert out["route_features"]["claim_uncertainty"] is False
+
+
 def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix claim verification so only fully supported successful claims are accepted.",

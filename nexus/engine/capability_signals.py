@@ -60,6 +60,10 @@ def _contains_word_or_phrase(text: str, tokens: tuple[str, ...]) -> bool:
     return False
 
 
+def _task_body_only(text: str) -> str:
+    return (text or "").split("\n\nNexus wearing contract:", 1)[0]
+
+
 def build_skill_signals(skills: list[dict[str, Any]] | None = None) -> SkillSignalSet:
     skills = skills or []
     top_ids = tuple(str(item.get("skill_id") or item.get("task_id") or "") for item in skills[:3])
@@ -96,7 +100,7 @@ def build_capability_signals(
     decision_selected = normalize_capability_names(route_decision.get("selected_capabilities", []) or [])
     decision_acceleration = normalize_capability_names(route_decision.get("acceleration_layers", []) or [])
     decision_governance = normalize_capability_names(route_decision.get("governance_layers", []) or [])
-    task_lower = f"{task_desc} {task_type}".lower()
+    task_lower = f"{_task_body_only(task_desc)} {task_type}".lower()
     skill_signals = build_skill_signals(skills)
     risk = normalize_risk_score(route_features.get("risk_score"))
     candidate_factory = _read_candidate_factory_estimate(route_features)

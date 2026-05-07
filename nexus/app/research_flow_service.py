@@ -179,12 +179,16 @@ def _derive_findings_query(task_desc: str, target_file: str | None = None) -> st
     return text[:200]
 
 
+def _task_body_only(task_desc: str) -> str:
+    return (task_desc or "").split("\n\nNexus wearing contract:", 1)[0]
+
+
 def _classify_commercial_signal(task_type: str, task_desc: str) -> tuple[bool, bool]:
     """Return (commercial_signal, strong_commercial_signal) for public tasks."""
     if not str(task_type).startswith("public_"):
         return False, False
 
-    task_body = (task_desc or "").split("\n\nNexus wearing contract:", 1)[0]
+    task_body = _task_body_only(task_desc)
     task_upper = task_body.upper()
     commercial_keywords_soft = (
         "CLAIM",
@@ -194,7 +198,6 @@ def _classify_commercial_signal(task_type: str, task_desc: str) -> tuple[bool, b
         "SECRET",
         "AUTHORIZATION",
         "TRUST",
-        "VERIFICATION",
         "SEMANTIC",
         "COMPLIANCE",
         "REPAIR",
@@ -207,7 +210,6 @@ def _classify_commercial_signal(task_type: str, task_desc: str) -> tuple[bool, b
         "SECRET",
         "AUTHORIZATION",
         "TRUST",
-        "VERIFICATION",
         "COMPLIANCE",
         "SECURITY",
         "RISK",
@@ -804,11 +806,12 @@ def _hitl_payload(*, route_confidence: float, route: dict[str, Any], task_id: st
 
 
 def _infer_research_role(*, task_desc: str, task_type: str, route_features: dict[str, Any]) -> str:
-    task_lower = f"{task_desc} {task_type}".lower()
+    task_lower = f"{_task_body_only(task_desc)} {task_type}".lower()
     if any(token in task_lower for token in ("benchmark", "latency", "throughput", "public report", "solve rate", "p99")):
         return "benchmark_framer"
     if bool(route_features.get("claim_uncertainty", False)) or any(
-        token in task_lower for token in ("api", "sdk", "parameter", "flag", "contract", "claim", "verify", "evidence")
+        token in task_lower
+        for token in ("api", "sdk", "parameter", "flag", "call site", "request header", "response schema")
     ):
         return "claim_scout"
     if bool(route_features.get("plateau_detected", False)) or bool(route_features.get("is_cross_module_task", False)):
@@ -870,8 +873,19 @@ def _build_research_context(
         include_external=include_external,
     )
     doc_hits = int(doc_scout.get("hits_count", 0) or 0)
-    task_lower = f"{task_desc} {task_type}".lower()
-    claim_like_task = any(token in task_lower for token in ("api", "sdk", "parameter", "flag", "contract", "claim", "verify", "evidence"))
+    task_lower = f"{_task_body_only(task_desc)} {task_type}".lower()
+    claim_like_task = any(
+        token in task_lower
+        for token in (
+            "api",
+            "sdk",
+            "parameter",
+            "flag",
+            "call site",
+            "request header",
+            "response schema",
+        )
+    )
     doc_supports_claim = _doc_scout_supports_specific_claim(task_desc=task_desc, doc_scout=doc_scout)
     claim_uncertainty = bool(
         claim_like_task
@@ -1536,10 +1550,29 @@ def _decide_flow(
             consensus_votes["baseline"] += 1
         vote_reasons.append("router_hint_applied")
 
+    bounded_repair_can_skip_research = bool(
+        "repair" in task_type.lower()
+        and findings_hits == 0
+        and memory_hits == 0
+        and not is_cross_module_task
+        and adjusted_root_cause_confidence >= 0.75
+    )
+    hyper_research_needed = False if bounded_repair_can_skip_research else bool(
+        decision.should_research
+        or findings_hits > 0
+        or memory_hits > 0
+        or is_cross_module_task
+        or has_strong_commercial_signal
+        or adjusted_root_cause_confidence < 0.6
+    )
     if recommended_flow == "hyper_sprint":
-        should_research = True
-        mode = decision.mode if decision.mode != "skip" else "external"
-        reason = decision.reason if decision.reason != "clear_root_cause" else recommended_reason
+        should_research = hyper_research_needed
+        if should_research:
+            mode = decision.mode if decision.mode != "skip" else "external"
+            reason = decision.reason if decision.reason != "clear_root_cause" else recommended_reason
+        else:
+            mode = "skip"
+            reason = recommended_reason
     else:
         should_research = False
         mode = "skip"

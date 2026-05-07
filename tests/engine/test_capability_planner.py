@@ -393,6 +393,68 @@ def test_capability_planner_blocks_repair_ranking_when_factory_skipped():
     assert "judge_panel" not in set(uncertain_plan["selected_capabilities"])
 
 
+def test_capability_planner_ignores_benchmark_contract_only_learning_and_claim_noise():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Repair merge helper behavior without changing default values in normal path."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+            "\n- Governance: keep the solution inside scope."
+        ),
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "baseline",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 20,
+                "candidate_count": 1,
+                "adjusted_root_cause_confidence": 0.9,
+            },
+            "capability_stack": {"selected_capabilities": ["baseline"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert "research" not in selected
+    assert "external_doc_scout" not in selected
+    assert "learn_mode" not in selected
+    assert "learn_phase_slo" not in selected
+    assert "acceptance_check" not in selected
+    assert "ultra_review" not in selected
+    assert "pregate" not in selected
+    assert "plan_quality_gate" not in selected
+
+
+def test_capability_planner_keeps_simple_public_repair_out_of_external_review_stack():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Repair a flaky-looking timeout calculation without deleting assertions; "
+            "success requires preserving the behavioral contract and validating the actual failing branch."
+        ),
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 55,
+                "candidate_count": 1,
+                "adjusted_root_cause_confidence": 0.9,
+                "has_hard_signal": True,
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+        pillars={"lancedb": {"hits": 0}},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert "repair_loop" in selected
+    assert "research" not in selected
+    assert "external_doc_scout" not in selected
+    assert "ultra_review" not in selected
+    assert "sandbox" not in selected
+
+
 def test_capability_planner_keeps_autoreason_for_candidate_ready_repair():
     evidence_plan = CapabilityPlanner().plan(
         task_desc="Repair test evidence and public claim verification.",

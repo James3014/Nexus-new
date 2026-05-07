@@ -66,7 +66,9 @@ def apply_signal_policies(
     if signals.claim_uncertainty:
         enable("research", "claim_uncertainty_requires_research")
         enable("external_doc_scout", "claim_uncertainty_requires_external_fact_check")
-    if signals.doc_scout_hits > 0:
+    if signals.doc_scout_hits > 0 and (
+        signals.claim_uncertainty or signals.research_role in {"claim_scout", "architecture_scout", "benchmark_framer"}
+    ):
         enable("external_doc_scout", "doc_scout_hits_available_for_external_verification")
     if signals.blocked_assumptions_count > 0 or "constraint" in task_lower or "blocked assumption" in task_lower:
         enable("asi_constraint_extractor", "blocked_assumptions_require_cross_task_constraint_check")
@@ -93,12 +95,29 @@ def apply_signal_policies(
         enable("ddtree", "candidate_space_pruning")
     if signals.repair_signal:
         enable("repair_loop", "repair_or_self_heal_signal")
-    if "ultra_review" in signals.governance_seed or signals.risk_score >= 70 or signals.hard_signal or signals.governance_signal:
+    if (
+        "ultra_review" in signals.governance_seed
+        or signals.risk_score >= 70
+        or signals.governance_signal
+        or (signals.hard_signal and (signals.cross_module or signals.claim_uncertainty))
+    ):
         enable("ultra_review", "high_risk_or_governance_route")
         enable("sandbox", "high_risk_isolated_execution")
     if signals.cross_module or signals.codeintel_impact_present or signals.risk_score >= 30:
         enable("codeintel", "impact_or_blast_radius_needed")
-    if signals.should_research or not signals.lancedb_hits:
+    retrieval_gap_needs_research = (
+        not signals.lancedb_hits
+        and (
+            signals.memory_hits
+            or signals.findings_hits
+            or signals.claim_uncertainty
+            or signals.cross_module
+            or signals.governance_signal
+            or signals.candidate_factory_ready_estimate
+            or signals.research_role in {"claim_scout", "architecture_scout", "failure_historian", "benchmark_framer"}
+        )
+    )
+    if signals.should_research or retrieval_gap_needs_research:
         enable("research", "context_or_retrieval_gap")
     if signals.autonomic_research_requested or signals.autonomic_suggested_mode == "research_first":
         enable("research", "autonomic_research_signal")
@@ -114,7 +133,14 @@ def apply_signal_policies(
     if signals.learning_signal:
         enable("learn_mode", "claim_or_citation_learning_signal")
         enable("learn_phase_slo", "learn_phase_policy_needed")
-    if signals.risk_score >= 30 or signals.governance_signal or signals.evidence_signal:
+    precheck_required = (
+        signals.risk_score >= 60
+        or signals.governance_signal
+        or (signals.repair_signal and signals.confidence < 0.75)
+        or ((signals.memory_hits or signals.findings_hits) and signals.confidence < 0.6)
+        or (signals.evidence_signal and (signals.claim_uncertainty or signals.benchmark_required))
+    )
+    if precheck_required:
         enable("pregate", "risk_or_policy_precheck")
         enable("plan_quality_gate", "plan_review_required")
     if signals.acceptance_signal or signals.benchmark_signal or signals.evidence_signal:
