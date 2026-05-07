@@ -77,6 +77,8 @@ def _base_command(args: argparse.Namespace, *, output_dir: Path, task_ids: list[
         "auto",
         "--progress-log",
     ]
+    if not bool(args.allow_local_tool_success):
+        cmd.append("--strict-llm-baseline")
     if preflight_only:
         cmd.append("--preflight-only")
     return cmd
@@ -101,6 +103,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "model_name": str(args.model_name),
         "tasks_file": str(args.tasks_file),
         "task_ids": task_ids,
+        "lane": "model_uplift" if not bool(args.allow_local_tool_success) else "cost_avoidance_or_model_uplift",
         "fail_fast": "stop_after_first_nonzero_or_with_nexus_semantic_failure",
         "preflight_command": _base_command(args, output_dir=root / "preflight", task_ids=task_ids, preflight_only=True),
         "task_commands": [
@@ -169,6 +172,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- model_name: `{payload['model_name']}`",
         f"- tasks_file: `{payload['tasks_file']}`",
+        f"- lane: `{payload['lane']}`",
         f"- task_count: `{len(payload['task_ids'])}`",
         f"- execution_status: `{payload.get('execution_status', 'not_run')}`",
         f"- fail_fast: `{payload['fail_fast']}`",
@@ -196,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-task-stop-loss-sec", type=int, default=600)
     parser.add_argument("--total-timeout-sec", type=int, default=7200)
     parser.add_argument("--plan-only", action="store_true")
+    parser.add_argument("--allow-local-tool-success", action="store_true")
     parser.add_argument("--output", required=True)
     parser.add_argument("--output-json", required=True)
     args = parser.parse_args(argv)

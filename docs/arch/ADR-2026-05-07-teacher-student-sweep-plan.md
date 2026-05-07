@@ -37,3 +37,5 @@ Teacher/student reports must split model-assisted success from deterministic Nex
 Long-loop closure requires an explicit Phase 0-9 plan artifact. The closure planner must block publication when the run has fewer than 12 tasks, no model-uplift-eligible rows, or only local/tool successes. This prevents short benchmark loops from becoming a story generator instead of a route optimizer.
 
 Fail-fast cannot rely on process return code alone. A benchmark task can return zero while the `with_nexus` row is `run_eligible=false` with `infra_invalid_reason=nexus_delivery_invalid`. The weak-model long loop must inspect the generated with-Nexus JSONL row after every task and stop on semantic or eligibility failure before spending more model calls.
+
+The weak-model uplift lane must require a model baseline call. Hidden-contract tasks can be solved by a local-first Nexus fast path, which is useful cost-avoidance evidence but blocks weak-model uplift claims. Long-loop commands therefore default to `--strict-llm-baseline`; local/tool success is only allowed in an explicit cost-avoidance lane.

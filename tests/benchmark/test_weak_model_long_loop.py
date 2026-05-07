@@ -19,6 +19,7 @@ def _args(tmp_path: Path, tasks_file: Path):
             "timeout_sec": 300,
             "per_task_stop_loss_sec": 600,
             "total_timeout_sec": 7200,
+            "allow_local_tool_success": False,
         },
     )()
 
@@ -30,11 +31,25 @@ def test_build_plan_uses_twelve_task_fail_fast_shape(tmp_path: Path):
     plan = loop.build_plan(_args(tmp_path, tasks))
 
     assert plan["task_ids"] == ["a", "b"]
+    assert plan["lane"] == "model_uplift"
     assert plan["fail_fast"] == "stop_after_first_nonzero_or_with_nexus_semantic_failure"
     assert "--llm-candidate-cap" in plan["preflight_command"]
     assert plan["preflight_command"][plan["preflight_command"].index("--llm-candidate-cap") + 1] == "3"
+    assert "--strict-llm-baseline" in plan["preflight_command"]
     assert "--preflight-only" in plan["preflight_command"]
     assert plan["task_commands"][0]["command"][plan["task_commands"][0]["command"].index("--task-id-filter") + 1] == "a"
+
+
+def test_build_plan_can_allow_local_tool_success_lane(tmp_path: Path):
+    tasks = tmp_path / "tasks.json"
+    tasks.write_text(json.dumps([{"task_id": "a"}]), encoding="utf-8")
+    args = _args(tmp_path, tasks)
+    args.allow_local_tool_success = True
+
+    plan = loop.build_plan(args)
+
+    assert plan["lane"] == "cost_avoidance_or_model_uplift"
+    assert "--strict-llm-baseline" not in plan["preflight_command"]
 
 
 def test_run_plan_stops_on_first_failed_task(monkeypatch):
@@ -57,6 +72,7 @@ def test_run_plan_stops_on_first_failed_task(monkeypatch):
         "tasks_file": "tasks.json",
         "task_ids": ["a", "b"],
         "fail_fast": "stop_after_first_nonzero_or_with_nexus_semantic_failure",
+        "lane": "model_uplift",
         "preflight_command": ["runner", "--preflight-only"],
         "task_commands": [
             {"task_id": "a", "output_dir": "out/a", "command": ["runner", "a"]},
@@ -103,6 +119,7 @@ def test_run_plan_stops_on_semantic_failure_even_when_process_succeeds(tmp_path:
         "tasks_file": "tasks.json",
         "task_ids": ["a", "b"],
         "fail_fast": "stop_after_first_nonzero_or_with_nexus_semantic_failure",
+        "lane": "model_uplift",
         "preflight_command": ["runner", "--preflight-only"],
         "task_commands": [
             {"task_id": "a", "output_dir": str(tmp_path / "out" / "a"), "command": ["runner", "a"]},
