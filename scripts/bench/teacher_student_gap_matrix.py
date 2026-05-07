@@ -18,6 +18,15 @@ class TaskArm:
     wall_sec: float
     tokens: int
     model_calls: float
+    run_eligible: bool
+    infra_invalid_reason: str
+    model_uses_nexus: bool
+    gemini_uses_nexus: bool
+    nexus_wearing_valid: bool
+    nexus_winner_source: str
+    baseline_source_policy: str
+    rescue_cost_status: str
+    token_capture_status: str
     selected_count: int
     strategy_path: str
     high_cost_selected: tuple[str, ...]
@@ -25,6 +34,39 @@ class TaskArm:
     @property
     def verified(self) -> bool:
         return self.semantic_status == "VERIFIED" and not self.trust_mismatch
+
+    @property
+    def success_source(self) -> str:
+        if not self.verified:
+            return "failed"
+        source_text = " ".join(
+            [
+                self.nexus_winner_source,
+                self.baseline_source_policy,
+                self.rescue_cost_status,
+                self.token_capture_status,
+            ]
+        ).lower()
+        if (
+            "local_hidden_contract_fast_path" in source_text
+            or self.baseline_source_policy == "hidden_contract_local_first_before_llm"
+        ):
+            return "local_deterministic_success"
+        if self.model_calls > 0 and (self.model_uses_nexus or self.gemini_uses_nexus or self.nexus_wearing_valid):
+            return "model_assisted_success"
+        if self.model_calls <= 0:
+            return "nexus_tool_success"
+        return "verified_non_model_success"
+
+    @property
+    def model_uplift_eligible(self) -> bool:
+        return (
+            self.verified
+            and self.run_eligible
+            and not self.infra_invalid_reason
+            and self.model_calls > 0
+            and (self.model_uses_nexus or self.gemini_uses_nexus or self.nexus_wearing_valid)
+        )
 
 
 def _row_files(run_dir: Path, arm: str) -> list[Path]:
@@ -68,6 +110,15 @@ def _load_arm_rows(run_dir: Path, arm: str) -> dict[str, TaskArm]:
             wall_sec=_as_float(row.get("wall_duration_sec")),
             tokens=_as_int(row.get("total_tokens")),
             model_calls=_as_float(row.get("model_calls")),
+            run_eligible=bool(row.get("run_eligible", True)),
+            infra_invalid_reason=str(row.get("infra_invalid_reason") or ""),
+            model_uses_nexus=bool(row.get("model_uses_nexus", False)),
+            gemini_uses_nexus=bool(row.get("gemini_uses_nexus", False)),
+            nexus_wearing_valid=bool(row.get("nexus_wearing_valid", False)),
+            nexus_winner_source=str(row.get("nexus_winner_source") or row.get("source") or ""),
+            baseline_source_policy=str(row.get("baseline_source_policy") or ""),
+            rescue_cost_status=str(row.get("rescue_cost_status") or ""),
+            token_capture_status=str(row.get("token_capture_status") or ""),
             selected_count=_as_int(row.get("route_decision_selected_count")),
             strategy_path=str(row.get("strategy_path") or ""),
             high_cost_selected=_as_list(row.get("route_profile_high_cost_selected")),
@@ -106,6 +157,10 @@ def _recommendation(*, student: TaskArm, teacher: TaskArm, student_bare: TaskArm
     teacher_direct_failed = bool(teacher_direct and not teacher_direct.verified)
     student_bare_failed = bool(student_bare and not student_bare.verified)
 
+    if student.verified and not student.model_uplift_eligible:
+        if student.success_source == "local_deterministic_success":
+            return "keep_as_nexus_cost_avoidance_not_model_uplift"
+        return "separate_nexus_tool_success_from_model_uplift"
     if not student.verified and teacher.verified:
         return "raise_student_capability_or_context"
     if student.trust_mismatch:
@@ -145,6 +200,14 @@ def build_gap_matrix(*, student_run: Path, teacher_run: Path, student_name: str,
                 "bucket": _bucket(s),
                 "student_verified": s.verified,
                 "teacher_verified": t.verified,
+                "student_success_source": s.success_source,
+                "teacher_success_source": t.success_source,
+                "student_model_uplift_eligible": s.model_uplift_eligible,
+                "teacher_model_uplift_eligible": t.model_uplift_eligible,
+                "student_run_eligible": s.run_eligible,
+                "teacher_run_eligible": t.run_eligible,
+                "student_infra_invalid_reason": s.infra_invalid_reason,
+                "teacher_infra_invalid_reason": t.infra_invalid_reason,
                 "student_bare_verified": bool(sb and sb.verified),
                 "teacher_direct_verified": bool(td and td.verified),
                 "student_wall_sec": round(s.wall_sec, 4),
@@ -187,14 +250,16 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- student: `{payload['student_model']}`",
         f"- teacher: `{payload['teacher_model']}`",
         "",
-        "| Task | Bucket | Student | Teacher | Wall | Tokens | Strategy | Recommendation |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        "| Task | Bucket | Student | Teacher | Source | Eligible | Wall | Tokens | Strategy | Recommendation |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
     for row in payload["rows"]:
         lines.append(
             f"| {row['task_id']} | {row['bucket']} | "
             f"{'PASS' if row['student_verified'] else 'FAIL'} | "
             f"{'PASS' if row['teacher_verified'] else 'FAIL'} | "
+            f"{row['student_success_source']} -> {row['teacher_success_source']} | "
+            f"{row['student_model_uplift_eligible']} -> {row['teacher_model_uplift_eligible']} | "
             f"{row['student_wall_sec']:.2f}s / {row['teacher_wall_sec']:.2f}s ({_fmt_ratio(row['student_vs_teacher_wall_ratio'])}) | "
             f"{row['student_tokens']} / {row['teacher_tokens']} ({_fmt_ratio(row['student_vs_teacher_token_ratio'])}) | "
             f"{row['student_strategy_path']} -> {row['teacher_strategy_path']} | "

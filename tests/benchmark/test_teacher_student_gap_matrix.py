@@ -19,6 +19,15 @@ def _write_row(root: Path, arm: str, task_id: str, **overrides) -> None:
         "wall_duration_sec": 10.0,
         "total_tokens": 1000,
         "model_calls": 1,
+        "run_eligible": True,
+        "infra_invalid_reason": None,
+        "model_uses_nexus": True,
+        "gemini_uses_nexus": True,
+        "nexus_wearing_valid": True,
+        "nexus_winner_source": "llm",
+        "baseline_source_policy": "model_first",
+        "rescue_cost_status": "model_assisted",
+        "token_capture_status": "captured",
         "route_decision_selected_count": 4,
         "strategy_path": "baseline_only",
         "route_profile_high_cost_selected": [],
@@ -56,3 +65,47 @@ def test_render_markdown_includes_gap_ratios(tmp_path: Path):
     assert "Nexus Teacher Student Gap Matrix" in out
     assert "2.00x" in out
     assert "slim_student_runtime_path" in out
+
+
+def test_local_deterministic_success_is_not_model_uplift(tmp_path: Path):
+    student = tmp_path / "student"
+    teacher = tmp_path / "teacher"
+    _write_row(
+        student,
+        "with_nexus",
+        "nexus-value-hidden-001",
+        wall_duration_sec=14.6789,
+        total_tokens=0,
+        model_calls=0,
+        run_eligible=False,
+        infra_invalid_reason="nexus_delivery_invalid",
+        model_uses_nexus=False,
+        gemini_uses_nexus=False,
+        nexus_wearing_valid=False,
+        nexus_winner_source="local_hidden_contract_fast_path",
+        baseline_source_policy="hidden_contract_local_first_before_llm",
+        rescue_cost_status="local_only",
+        token_capture_status="not_applicable_local_only",
+    )
+    _write_row(
+        teacher,
+        "with_nexus",
+        "nexus-value-hidden-001",
+        wall_duration_sec=27.74,
+        total_tokens=21278,
+        model_calls=1,
+        nexus_winner_source="llm",
+    )
+
+    payload = build_gap_matrix(student_run=student, teacher_run=teacher, student_name="flash_lite_route_local_first", teacher_name="gpt55_nexus")
+    row = payload["rows"][0]
+    out = render_markdown(payload)
+
+    assert row["student_verified"] is True
+    assert row["student_success_source"] == "local_deterministic_success"
+    assert row["student_model_uplift_eligible"] is False
+    assert row["student_run_eligible"] is False
+    assert row["student_infra_invalid_reason"] == "nexus_delivery_invalid"
+    assert row["recommendation"] == "keep_as_nexus_cost_avoidance_not_model_uplift"
+    assert "local_deterministic_success -> model_assisted_success" in out
+    assert "False -> True" in out
