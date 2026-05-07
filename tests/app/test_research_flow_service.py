@@ -712,6 +712,53 @@ def test_build_route_does_not_treat_behavioral_contract_as_external_claim_resear
     assert out["route_features"]["claim_uncertainty"] is False
 
 
+def test_build_route_hidden_contract_fast_path_survives_low_confidence_candidate_factory(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Fix a state normalization bug where the visible test covers the happy path but "
+            "the verification test requires idempotent handling of duplicate events."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+            "\n- Governance: keep the solution inside scope."
+            "\n- Route oracle: expected capability receipts are claim_gate and delivery_gate."
+        ),
+        task_type="public_bugfix",
+        candidate_count=3,
+        root_cause_confidence=0.55,
+        findings_query=None,
+        target_file="target.py",
+    )
+
+    assert out["recommended_flow"] == "baseline"
+    assert out["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+    assert out["should_research"] is False
+    assert "research" not in out["capability_plan"]["selected_capabilities"]
+
+
+def test_build_route_repair_contract_can_skip_research_under_cost_capped_benchmark(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Repair a flaky-looking timeout calculation without deleting assertions; "
+            "success requires preserving the behavioral contract and validating the actual failing branch."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+            "\n- Governance: keep the solution inside scope."
+            "\n- Route oracle: expected capability receipts are hyper and delivery_gate."
+        ),
+        task_type="public_test_repair",
+        candidate_count=3,
+        root_cause_confidence=0.55,
+        findings_query=None,
+        target_file="target.py",
+    )
+
+    assert out["recommended_flow"] == "hyper_sprint"
+    assert out["should_research"] is False
+    assert "research" not in out["capability_plan"]["selected_capabilities"]
+
+
 def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix claim verification so only fully supported successful claims are accepted.",

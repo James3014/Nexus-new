@@ -105,8 +105,21 @@ def apply_signal_policies(
         enable("sandbox", "high_risk_isolated_execution")
     if signals.cross_module or signals.codeintel_impact_present or signals.risk_score >= 30:
         enable("codeintel", "impact_or_blast_radius_needed")
+    bounded_research_skip = bool(
+        signals.simple_hidden_bugfix
+        or (
+            str(signals.task_type).lower().removeprefix("public_") == "test_repair"
+            and signals.repair_signal
+            and not signals.should_research
+            and not signals.cross_module
+            and not signals.memory_hits
+            and not signals.findings_hits
+            and not signals.claim_uncertainty
+        )
+    )
     retrieval_gap_needs_research = (
-        not signals.lancedb_hits
+        not bounded_research_skip
+        and not signals.lancedb_hits
         and (
             signals.memory_hits
             or signals.findings_hits

@@ -238,6 +238,70 @@ Retry result:
   - runtime `with_nexus` still emitted:
     - hidden selected `12` with `research`
     - repair selected `17` with `research`
+
+## Phase A Update
+
+Status:
+
+- `Flash`: `PROMOTE`
+- `3.1 Pro`: `HOLD`
+
+What changed:
+
+- route pre-classification now strips the appended benchmark contract suffix
+- hidden / bounded repair route rules now normalize `public_*` task types
+- benchmark hidden / bounded repair fast paths cap risk before routing tier escalation
+
+Local route replay after patch:
+
+- `public_bugfix` hidden:
+  - `should_research=false`
+  - selected no longer includes `research`
+  - high-cost selected: none
+- `public_test_repair` repair:
+  - `should_research=false`
+  - selected no longer includes `research`
+  - high-cost selected: none
+- `public_refactor` governance:
+  - retains `research`, `ultra_review`, `sandbox`
+
+Flash `3x1` rerun:
+
+- previous with_nexus:
+  - avg wall: `73.12s`
+  - avg tokens: `49441.67`
+- patched with_nexus:
+  - avg wall: `46.25s`
+  - avg tokens: `44450.67`
+- patched rows:
+  - hidden selected: `autoreason`, `judge_panel`, `delivery_gate`, `mempalace_gate`, `artifact_gate`, `claim_gate`
+  - repair selected: `codeintel`, `hyper`, `autoreason`, `judge_panel`, `ddtree`, `memory`, `asi_constraint_extractor`, `belief`, `repair_loop`, `research_route`, `delivery_gate`, `mempalace_gate`, `artifact_gate`, `claim_gate`
+  - governance remains hardened
+
+`3.1 Pro` `3x1` rerun:
+
+- with_nexus:
+  - solve: `3/3`
+  - avg wall: `66.52s`
+  - avg tokens: `42003`
+- route rows match the same lane shape as Flash:
+  - hidden/repair no longer select `research`
+  - governance remains hardened
+
+Readout:
+
+- the route-fix is real across both Gemini models
+- Flash gets real cost improvement from the route closure
+- `3.1 Pro` keeps the route improvement, but wall time did not improve enough yet
+- next bottleneck for `3.1 Pro` is phase work / prompt payload, not route misclassification
+
+Decision:
+
+- promote the route-fix for Flash
+- keep Pro on `HOLD`
+- next optimization loop should target:
+  - `phase_wall_total_sec`
+  - lane-specific prompt/context reduction
   - runtime tactical sequence still contained:
     - hidden: `baseline -> memory -> research -> ...`
     - repair: `hyper_sprint -> pregate -> memory -> research -> ...`

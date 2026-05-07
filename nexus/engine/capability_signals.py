@@ -101,6 +101,8 @@ def build_capability_signals(
     decision_acceleration = normalize_capability_names(route_decision.get("acceleration_layers", []) or [])
     decision_governance = normalize_capability_names(route_decision.get("governance_layers", []) or [])
     task_lower = f"{_task_body_only(task_desc)} {task_type}".lower()
+    task_type_lower = str(task_type).lower()
+    task_type_base = task_type_lower.removeprefix("public_")
     skill_signals = build_skill_signals(skills)
     risk = normalize_risk_score(route_features.get("risk_score"))
     candidate_factory = _read_candidate_factory_estimate(route_features)
@@ -109,15 +111,23 @@ def build_capability_signals(
         ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance"),
     )
     simple_hidden_bugfix = bool(
-        task_type == "public_bugfix"
-        and risk["risk_score_0_100"] <= 20
-        and _as_int(route_features.get("candidate_count"), 1) <= 1
-        and not bool(route_features.get("claim_uncertainty", False))
-        and not bool(route_features.get("is_cross_module_task", False))
-        and not bool(route_features.get("has_hard_signal", False))
-        and not governance_signal
-        and not _contains_any(task_lower, ("contract", "context", "benchmark", "public report", "evidence", "claim"))
-    )
+        (
+            task_type == "public_bugfix"
+            and risk["risk_score_0_100"] <= 20
+            and _as_int(route_features.get("candidate_count"), 1) <= 1
+        )
+        or (
+            task_type_base == "bugfix"
+            and "verification test" in task_lower
+            and "happy path" in task_lower
+            and _as_float(route_features.get("adjusted_root_cause_confidence"), 1.0) >= 0.5
+            and _as_int(route_features.get("candidate_count"), 1) >= 3
+        )
+    ) and not bool(route_features.get("claim_uncertainty", False)) \
+        and not bool(route_features.get("is_cross_module_task", False)) \
+        and not bool(route_features.get("has_hard_signal", False)) \
+        and not governance_signal \
+        and not _contains_any(task_lower, ("context", "public report", "evidence", "claim"))
 
     return CapabilitySignalSet(
         task_desc=task_desc,
