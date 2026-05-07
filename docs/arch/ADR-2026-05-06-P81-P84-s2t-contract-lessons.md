@@ -19,6 +19,8 @@ S2T had a useful partial implementation, but export/redaction lived in `s2t_trac
 
 1. Trace contracts and training export are separate seams. Mixing them makes Phase 0 look complete while export safety remains hard to audit.
 2. The repository can hit `.git/index.lock` permission errors under sandboxed git operations. Retry staging through the approved git path rather than changing unrelated files or deleting locks.
+3. Nexus CLI smoke must use the canonical grouped command (`nexus status`), not blocked legacy aliases such as `nexus:status`.
+4. Audit smoke checks must be deterministic. Randomized boundary simulations can create false regressions and hide whether a runtime change actually improved S2T behavior.
 
 ## Evidence
 
@@ -26,3 +28,4 @@ S2T had a useful partial implementation, but export/redaction lived in `s2t_trac
 - `tests/contracts/test_s2t_redaction.py`: PASS.
 - `tests/ops/test_export_s2t_agent_lightning.py`: PASS.
 - `tests/ops/test_s2t_adoption_gate.py`: PASS.
+- `uv run scripts/engine/nexus_cli.py nexus status`: PASS after deterministic enterprise audit fix.
