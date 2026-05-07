@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from scripts.bench.teacher_student_gap_matrix import build_gap_matrix, render_markdown
+
+
+def _write_row(root: Path, arm: str, task_id: str, **overrides) -> None:
+    evidence = root / "evidence_1"
+    evidence.mkdir(parents=True, exist_ok=True)
+    row = {
+        "task_id": task_id,
+        "task_type": "public_test_repair" if "repair" in task_id else "public_bugfix",
+        "category": "test_repair" if "repair" in task_id else "bugfix",
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 10.0,
+        "total_tokens": 1000,
+        "model_calls": 1,
+        "route_decision_selected_count": 4,
+        "strategy_path": "baseline_only",
+        "route_profile_high_cost_selected": [],
+    }
+    row.update(overrides)
+    (evidence / f"{arm}__{task_id}__trial_1.row.json").write_text(json.dumps(row), encoding="utf-8")
+
+
+def test_teacher_student_gap_matrix_recommends_teacher_runtime_profile(tmp_path: Path):
+    student = tmp_path / "student"
+    teacher = tmp_path / "teacher"
+    _write_row(student, "with_nexus", "nexus-value-repair-002", wall_duration_sec=60.0, total_tokens=50000, strategy_path="hyper_direct_hard_skip_probe")
+    _write_row(student, "without_nexus", "nexus-value-repair-002", status="FAILED", semantic_status="UNVERIFIED", wall_duration_sec=30.0)
+    _write_row(teacher, "with_nexus", "nexus-value-repair-002", wall_duration_sec=20.0, total_tokens=20000, strategy_path="codex_wearing_nexus_context")
+    _write_row(teacher, "without_nexus", "nexus-value-repair-002", status="FAILED", semantic_status="UNVERIFIED", wall_duration_sec=12.0)
+
+    payload = build_gap_matrix(student_run=student, teacher_run=teacher, student_name="flash_nexus", teacher_name="gpt55_nexus")
+
+    assert payload["schema_version"] == "nexus_teacher_student_gap_matrix_v1"
+    assert payload["rows"][0]["bucket"] == "repair"
+    assert payload["rows"][0]["student_vs_teacher_wall_ratio"] == 3.0
+    assert payload["rows"][0]["recommendation"] == "keep_nexus_value_but_copy_teacher_runtime_profile"
+
+
+def test_render_markdown_includes_gap_ratios(tmp_path: Path):
+    student = tmp_path / "student"
+    teacher = tmp_path / "teacher"
+    _write_row(student, "with_nexus", "nexus-value-hidden-001", wall_duration_sec=40.0, total_tokens=4000)
+    _write_row(student, "without_nexus", "nexus-value-hidden-001", wall_duration_sec=10.0, total_tokens=3000)
+    _write_row(teacher, "with_nexus", "nexus-value-hidden-001", wall_duration_sec=20.0, total_tokens=2000)
+    _write_row(teacher, "without_nexus", "nexus-value-hidden-001", wall_duration_sec=12.0, total_tokens=1800)
+
+    out = render_markdown(build_gap_matrix(student_run=student, teacher_run=teacher, student_name="flash_nexus", teacher_name="gpt55_nexus"))
+
+    assert "Nexus Teacher Student Gap Matrix" in out
+    assert "2.00x" in out
+    assert "slim_student_runtime_path" in out
