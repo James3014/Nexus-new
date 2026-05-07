@@ -58,6 +58,8 @@ def _task_ids_for(profile: SweepProfile, rows: list[dict[str, Any]]) -> list[str
         str(row.get("task_id") or "")
         for row in rows
         if str(row.get("recommendation") or "") in set(profile.target_recommendations)
+        and bool(row.get("student_model_uplift_eligible", True))
+        and str(row.get("student_success_source") or "") not in {"local_deterministic_success", "nexus_tool_success"}
     ]
     return sorted(task_id for task_id in task_ids if task_id)
 

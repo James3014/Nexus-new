@@ -53,3 +53,32 @@ def test_render_markdown_includes_executable_command():
     assert "capability_ab_runner.py" in md
     assert "--always-on-eval" in md
     assert "--preflight-only" in md
+
+
+def test_sweep_plan_skips_local_tool_success_rows():
+    out = build_sweep_plan(
+        gap_payload={
+            "rows": [
+                {
+                    "task_id": "nexus-value-hidden-001",
+                    "recommendation": "slim_student_runtime_path",
+                    "student_success_source": "local_deterministic_success",
+                    "student_model_uplift_eligible": False,
+                },
+                {
+                    "task_id": "nexus-value-repair-002",
+                    "recommendation": "slim_student_runtime_path",
+                    "student_success_source": "model_assisted_success",
+                    "student_model_uplift_eligible": True,
+                },
+            ]
+        },
+        tasks_file="tasks.json",
+        output_dir=".nexus/reports/sweep",
+        model_name="gemini-3-flash-preview",
+        timeout_sec=300,
+        total_timeout_sec=3600,
+    )
+
+    by_name = {profile["name"]: profile for profile in out["profiles"]}
+    assert by_name["flash_lite_route"]["task_ids"] == ["nexus-value-repair-002"]
