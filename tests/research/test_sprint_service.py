@@ -535,6 +535,17 @@ def test_value_task_contract_includes_nightshift_report_path_rule():
     assert "Reject boolean-only Nightshift recovery" in contract
 
 
+def test_value_task_contract_names_parse_config_defaults():
+    contract = _build_value_task_contract(
+        source_code="def parse_config(data):\n    return {'strict': bool(data.get('strict', False)), 'retries': data.get('retries', 0)}\n",
+        task="Sync configuration docs and strict parser defaults where history-like examples conflict with the new canonical behavior.",
+        test_source="assert parse_config({}) == {'strict': True, 'retries': 3}",
+    )
+
+    assert "strict=True and retries=3" in contract
+    assert "explicit inputs are preserved" in contract
+
+
 def test_hidden_verifier_mode_omits_initial_test_source(monkeypatch, tmp_path: Path):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"

@@ -253,7 +253,11 @@ def _build_value_task_contract(*, source_code: str, task: str, test_source: str 
         rules.append("Reject boolean-only Nightshift recovery when report_path is missing or empty.")
     if "deny" in combined or "authorization" in combined or "redact" in combined:
         rules.append("MemPalace rule: fail closed for unknown or missing authorization data and never weaken redaction.")
-    if "strict" in combined or "canonical" in combined or "config" in combined:
+    if "strict parser defaults" in combined or "parse_config" in combined:
+        rules.append(
+            "LanceDB/context rule: for parse_config, omitted values use canonical defaults strict=True and retries=3; explicit inputs are preserved."
+        )
+    elif "strict" in combined or "canonical" in combined or "config" in combined:
         rules.append("LanceDB/context rule: follow the canonical config/doc contract over older examples.")
     if not rules:
         return ""
