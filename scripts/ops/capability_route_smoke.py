@@ -162,6 +162,38 @@ def classify_suite_infra_invalid(result: subprocess.CompletedProcess[str], *, ou
     return None
 
 
+def _route_over_selection_hotspots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        for receipt in row.get("capability_receipts", []) or []:
+            if not isinstance(receipt, dict) or not receipt.get("selected"):
+                continue
+            name = str(receipt.get("name") or "").strip()
+            if not name:
+                continue
+            bucket = counts.setdefault(name, {"selected": 0, "invoked": 0, "selected_not_invoked": 0})
+            bucket["selected"] += 1
+            if receipt.get("invoked"):
+                bucket["invoked"] += 1
+            else:
+                bucket["selected_not_invoked"] += 1
+    hotspots = []
+    for name, values in counts.items():
+        if values["selected_not_invoked"] <= 0:
+            continue
+        selected = max(1, values["selected"])
+        hotspots.append(
+            {
+                "capability": name,
+                "selected": values["selected"],
+                "invoked": values["invoked"],
+                "selected_not_invoked": values["selected_not_invoked"],
+                "selected_not_invoked_rate": values["selected_not_invoked"] / selected,
+            }
+        )
+    return sorted(hotspots, key=lambda item: (-item["selected_not_invoked"], item["capability"]))
+
+
 def summarize_jsonl(path: Path) -> dict[str, Any]:
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     failures: list[dict[str, Any]] = []
@@ -236,6 +268,7 @@ def summarize_jsonl(path: Path) -> dict[str, Any]:
             "invoked_to_evidence_rate": invoked_to_evidence_rate,
             "evidence_to_outcome_rate": evidence_to_outcome_rate,
             "unnecessary_selected_rate": unnecessary_selected_rate,
+            "over_selection_hotspots": _route_over_selection_hotspots(rows),
         },
         "brain_hub_guidance": {
             "present_total": brain_hub_guidance_present,

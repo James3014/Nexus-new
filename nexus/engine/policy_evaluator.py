@@ -3,6 +3,16 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
+CONTRACT_SPLITTERS = ("\n\nNexus wearing contract:", "\n\nNexus route oracle contract:")
+
+
+def _task_body_only(text: str) -> str:
+    body = text or ""
+    for splitter in CONTRACT_SPLITTERS:
+        body = body.split(splitter, 1)[0]
+    return body
+
+
 def apply_signal_policies(
     *,
     signals: Any,
@@ -10,7 +20,7 @@ def apply_signal_policies(
     task_type: str,
     enable: Callable[[str, str], None],
 ) -> None:
-    task_lower = f"{task_desc} {task_type}".lower()
+    task_lower = f"{_task_body_only(task_desc)} {task_type}".lower()
     hyper_selected = "hyper_sprint" in signals.selected_seed or signals.recommended_flow == "hyper_sprint"
     repair_candidate_factory_blocked = (
         signals.repair_signal

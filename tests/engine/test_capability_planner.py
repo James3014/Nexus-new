@@ -831,3 +831,32 @@ def test_capability_planner_uses_micro_patch_lane_for_simple_hidden_bugfix():
     assert "belief" not in plan["selected_capabilities"]
     assert "direct_mode" not in plan["selected_capabilities"]
     assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= set(plan["selected_capabilities"])
+
+
+def test_capability_planner_ignores_wearing_contract_for_costly_lexical_signals():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Fix a small parser branch.\n\n"
+            "Nexus wearing contract:\n"
+            "- MemPalace: keep the solution inside governance constraints.\n"
+            "- Artifact/Claim: treat completion claims as valid only when backed by evidence."
+        ),
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 20,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "has_hard_signal": False,
+            },
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert "asi_constraint_extractor" not in selected
+    assert "learn_mode" not in selected
+    assert "learn_phase_slo" not in selected
+    assert "acceptance_check" not in selected

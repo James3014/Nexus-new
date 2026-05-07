@@ -144,6 +144,16 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
     raw_tail = str(row.get("baseline_raw_tail") or "")
     combined = f"{gateway_error}\n{raw_tail}".lower()
     model_calls = int(row.get("model_calls", 0) or 0)
+    pillars = _observed_nexus_pillars(row) if nexus_required else []
+    phases = _observed_nexus_phases(row) if nexus_required else []
+    local_preflight_verified = bool(
+        nexus_required
+        and str(row.get("nexus_winner_source") or "").startswith("local_preflight")
+        and bool(row.get("semantic_completed", False))
+        and bool(row.get("nexus_context_delivered", False))
+        and len(pillars) >= len(PILLAR_OBSERVATION_FIELDS)
+        and len(phases) >= len(PHASE_OBSERVATION_FIELDS)
+    )
 
     if "quota" in combined or "resource exhausted" in combined or "rate limit" in combined or "429" in combined:
         return "quota_exhausted"
@@ -159,18 +169,19 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
         return "timeout_before_model_call"
 
     if nexus_required:
-        pillars = _observed_nexus_pillars(row)
-        phases = _observed_nexus_phases(row)
         if (
-            model_calls <= 0
-            or not _model_uses_nexus(row)
+            not local_preflight_verified
+            and (
+                model_calls <= 0
+                or not _model_uses_nexus(row)
+            )
             or not bool(row.get("nexus_context_delivered", False))
             or len(pillars) < len(PILLAR_OBSERVATION_FIELDS)
             or len(phases) < len(PHASE_OBSERVATION_FIELDS)
         ):
             return "nexus_delivery_invalid"
 
-    if model_required and model_calls <= 0:
+    if model_required and model_calls <= 0 and not local_preflight_verified:
         return "timeout_before_model_call"
     return None
 
@@ -227,6 +238,13 @@ def _annotate_benchmark_eligibility(
     row["model_uses_nexus"] = _model_uses_nexus(row)
     row["nexus_pillars_observed"] = _observed_nexus_pillars(row)
     row["nexus_phases_observed"] = _observed_nexus_phases(row)
+    row["nexus_internal_delivery_valid"] = bool(
+        str(row.get("nexus_winner_source") or "").startswith("local_preflight")
+        and bool(row.get("semantic_completed", False))
+        and bool(row.get("nexus_context_delivered", False))
+        and len(row["nexus_pillars_observed"]) >= len(PILLAR_OBSERVATION_FIELDS)
+        and len(row["nexus_phases_observed"]) >= len(PHASE_OBSERVATION_FIELDS)
+    )
     gateway_error = str(row.get("baseline_gateway_error_category") or "").strip()
     model_calls = int(row.get("model_calls", 0) or 0)
     row["invocation_started"] = bool(model_calls > 0 or gateway_error in {"cli_error", "parse_failure", "timeout"})

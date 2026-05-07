@@ -415,6 +415,23 @@ class LocalCandidateGenerator:
             "token_capture_status": "not_applicable_local_only",
         }
 
+
+def _should_try_local_preflight_before_llm(*, task: str, source_code: str) -> bool:
+    if os.environ.get("NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM", "").strip().lower() in {"1", "true", "yes"}:
+        return False
+    combined = f"{task}\n{source_code}".lower()
+    # These contracts are already represented in the deterministic local mutator.
+    # Try that cheap path before waiting on an external model call.
+    return any(
+        marker in combined
+        for marker in (
+            "renamed public field",
+            "canonical field",
+            "build_response",
+        )
+    )
+
+
 class SprintExecutor:
     def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int, task: str):
         self.repo_root = repo_root
@@ -963,6 +980,50 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         used_source = "local"
         ev_recorded = False
         try:
+            if llm_generator is not None and _should_try_local_preflight_before_llm(task=config.task, source_code=source_code):
+                preflight_code, preflight_meta = local_generator.generate(
+                    source_code=source_code,
+                    task=config.task,
+                    mutation_hint=f"{hint}\nlocal_preflight_before_llm",
+                    seed=idx + 7000,
+                )
+                preflight_source = str(preflight_meta.get("source", "local_preflight")) or "local_preflight"
+                if preflight_source == "local":
+                    preflight_source = "local_preflight"
+                preflight_guard_ok, preflight_guard_reason = _semantic_guard(
+                    source_code,
+                    preflight_code,
+                    config.task,
+                    preflight_source,
+                )
+                if preflight_guard_ok:
+                    preflight_ev = executor.evaluate_candidate(
+                        seed=idx + 7000,
+                        hint=f"{hint} | local_preflight_before_llm",
+                        code=preflight_code,
+                        source=preflight_source,
+                    )
+                else:
+                    preflight_ev = CandidateEval(
+                        seed=idx + 7000,
+                        score=0.0,
+                        hint=f"{hint} | local_preflight_before_llm",
+                        error=preflight_guard_reason,
+                        candidate_code=preflight_code,
+                        source=preflight_source,
+                    )
+                candidates.append(preflight_ev)
+                ev_recorded = True
+                learning_trace["local_preflight_before_llm"] = {
+                    "attempted": True,
+                    "score": preflight_ev.score,
+                    "source": preflight_source,
+                }
+                if preflight_ev.score >= 1.0:
+                    error_codes.append("local_preflight_before_llm_success")
+                    ev = preflight_ev
+                    break
+                error_codes.append("local_preflight_before_llm_miss")
             if llm_generator is not None:
                 try:
                     candidate_code, meta = llm_generator.generate(

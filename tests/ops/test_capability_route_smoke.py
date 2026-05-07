@@ -201,6 +201,41 @@ def test_summarize_jsonl_counts_evidence_required_tactical_gap_as_over_selection
     assert out["route_quality"]["unnecessary_selected_rate"] == 0.5
 
 
+def test_summarize_jsonl_reports_over_selection_hotspots(tmp_path: Path):
+    path = tmp_path / "with_nexus_1.jsonl"
+    row = {
+        "task_id": "hotspot",
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "route_decision_schema_version": "nexus_route_decision_v1",
+        "route_decision_selected_count": 2,
+        "expected_capability_receipt_coverage": {
+            "expected": ["artifact_gate"],
+            "public_safe": ["artifact_gate"],
+            "missing": [],
+            "failure_reasons": {},
+            "all_public_safe": True,
+        },
+        "capability_receipts": [
+            {"name": "artifact_gate", "selected": True, "invoked": True, "evidence_present": True, "gate_passed": True, "outcome_contributed": True},
+            {"name": "pregate", "selected": True, "invoked": False, "evidence_present": False, "gate_passed": False, "outcome_contributed": False},
+        ],
+    }
+    path.write_text(json.dumps(row), encoding="utf-8")
+
+    out = capability_route_smoke.summarize_jsonl(path)
+
+    assert out["route_quality"]["over_selection_hotspots"] == [
+        {
+            "capability": "pregate",
+            "selected": 1,
+            "invoked": 0,
+            "selected_not_invoked": 1,
+            "selected_not_invoked_rate": 1.0,
+        }
+    ]
+
+
 def test_summarize_jsonl_fails_when_route_decision_missing(tmp_path: Path):
     path = tmp_path / "with_nexus_1.jsonl"
     row = {

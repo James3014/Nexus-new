@@ -1418,6 +1418,50 @@ def test_local_mode_can_opt_into_swarm_executor(monkeypatch, tmp_path: Path):
     assert calls["inplace"] == 0
 
 
+def test_run_hyper_sprint_uses_local_preflight_before_expensive_llm(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "FIELD = 'status'\n\n"
+        "def build_response(value):\n"
+        "    return {FIELD: value}\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import build_response\n\n"
+        "def test_uses_canonical_result_field():\n"
+        "    assert build_response('ok') == {'result': 'ok'}\n",
+        encoding="utf-8",
+    )
+
+    class FailIfCalledLLM:
+        model_chain = ["fake-gemini"]
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("LLM should not be called when local preflight verifies the patch")
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
+
+    cfg = SprintConfig(
+        task="Sync code and docs after a renamed public field; infer the canonical field from contract text",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 0
+    assert res.fallback_used is False
+    assert res.winner_source == "local_preflight"
+    assert "local_preflight_before_llm_success" in res.error_codes
+
+
 def test_inplace_executor_rejects_no_change_candidate(tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
