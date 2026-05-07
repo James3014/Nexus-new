@@ -4331,6 +4331,11 @@ def main() -> int:
     )
     parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
     parser.add_argument("--llm-safe-probe", action="store_true")
+    parser.add_argument(
+        "--always-on-eval",
+        action="store_true",
+        help="Fail closed unless the Nexus treatment arm is allowed to auto-route without forced Hyper shortcuts.",
+    )
     parser.add_argument("--without-mode", choices=["service", "bare", "gemini", "codex"], default="bare")
     parser.add_argument("--force-learn-slo-ready", action="store_true")
     parser.add_argument(
@@ -4414,6 +4419,12 @@ def main() -> int:
         os.environ["NEXUS_GEMINI_MODEL_NAME"] = str(args.gemini_model).strip()
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
+    if args.always_on_eval and args.force_flow != "auto":
+        parser.error("--always-on-eval requires --force-flow auto")
+    if args.always_on_eval and args.skip_llm_baseline:
+        parser.error("--always-on-eval cannot be combined with --skip-llm-baseline")
+    if args.always_on_eval and args.llm_safe_probe:
+        parser.error("--always-on-eval cannot be combined with --llm-safe-probe")
     if args.llm_safe_probe:
         args.with_llm_mode = "hard"
         args.force_flow = "hyper_sprint"

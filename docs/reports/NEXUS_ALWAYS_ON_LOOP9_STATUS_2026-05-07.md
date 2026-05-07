@@ -311,3 +311,99 @@ Decision:
 - do not promote the planner-seam patch
 - the live runtime still uses another upstream route seam when populating `route["capability_plan"]`
 - next loop must target runtime route materialization, not planner policy alone
+
+## Phase C Contract Correction
+
+Status:
+
+- `always-on benchmark contract`: `PROMOTE`
+
+What changed:
+
+- `always-on` evaluation is now treated as a separate contract from `forced-hyper` evaluation
+- `scripts/bench/capability_ab_runner.py` rejects `--always-on-eval` when combined with:
+  - `--force-flow != auto`
+  - `--skip-llm-baseline`
+  - `--llm-safe-probe`
+
+Why:
+
+- first-pass `Phase C` diagnosis showed `R` phase dominance
+- row inspection then showed the benchmark contract itself was forcing:
+  - `strategy_path=hyper_direct_forced`
+- without closing that contract leak, wall/token analysis for hidden/repair would remain polluted
+
+Next gate:
+
+- rerun `Flash` and `Gemini 3.1 Pro` with:
+  - `--always-on-eval`
+  - `--force-flow auto`
+- only then continue `Phase C/D` phase-work and prompt/context slimming
+
+## Phase C Auto-Contract Rerun
+
+Status:
+
+- `Flash`: `HOLD`
+- `3.1 Pro`: `REVERT`
+
+Flash `3x1` under valid always-on contract:
+
+- with_nexus:
+  - solve: `3/3`
+  - avg wall: `58.59s`
+  - avg phase wall: `49.72s`
+  - avg tokens: `47445.67`
+- bare:
+  - solve: `2/3`
+  - avg wall: `26.46s`
+  - avg tokens: `44333.67`
+- row readout:
+  - hidden:
+    - `strategy_path=baseline_only`
+    - `R=57.29s`
+    - `tokens=50436`
+  - repair:
+    - `strategy_path=hyper_direct_hard_skip_probe`
+    - `R=46.45s`
+  - governance:
+    - `strategy_path=hyper_direct_hard_skip_probe`
+    - `R=24.12s`
+
+Readout:
+
+- valid always-on contract preserved Flash solve lift
+- but it did **not** reduce cost versus the previous route-fixed run
+- the dominant hidden cost moved into `baseline_only` execution inside `R`
+
+`3.1 Pro` `3x1` under valid always-on contract:
+
+- with_nexus:
+  - solve: `2/3`
+  - trust mismatch: `1/3`
+  - avg wall: `85.08s`
+  - avg phase wall: `76.19s`
+  - avg tokens: `41629`
+- bare:
+  - eligible solve: `1/2`
+  - one bare row infra-invalid: `quota_exhausted`
+- row readout:
+  - hidden:
+    - `strategy_path=baseline_only`
+    - `R=35.25s`
+  - repair:
+    - `strategy_path=hyper_direct_hard_skip_probe`
+    - `R=147.66s`
+  - governance:
+    - `FAILED`
+    - `trust_mismatch=True`
+    - `R=28.11s`
+
+Decision:
+
+- keep the always-on benchmark contract fix
+- do not promote auto-lane cost closure yet
+- next loop must target:
+  - `Flash hidden baseline_only` R-path slimming
+  - `3.1 Pro repair` R-path slimming
+  - `3.1 Pro governance` trust regression triage before any further cost work

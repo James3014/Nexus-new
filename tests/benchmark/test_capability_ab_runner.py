@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
     _annotate_benchmark_eligibility,
@@ -41,6 +43,7 @@ from scripts.bench.capability_ab_runner import (
     _build_parallel_smoke_rows,
     build_public_benchmark_preflight,
     _materialize_fixture,
+    main,
     _nexus_task_desc,
     _nexus_codex_hidden_verifier_guidance,
     _compact_nexus_route_for_prompt,
@@ -4227,3 +4230,46 @@ def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):
     payload = json.loads((tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").read_text(encoding="utf-8"))
     assert payload["phase_slo_pass"] is True
     assert payload["global"]["required_done_ratio"] == 1.0
+
+
+def test_main_rejects_always_on_eval_with_forced_hyper(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "capability_ab_runner.py",
+            "--tasks-file",
+            "scripts/bench/public_benchmark_nexus_value_v1.json",
+            "--output-dir",
+            ".nexus/reports/test_always_on_eval",
+            "--always-on-eval",
+            "--force-flow",
+            "hyper_sprint",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 2
+
+
+def test_main_rejects_always_on_eval_with_skip_llm_baseline(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "capability_ab_runner.py",
+            "--tasks-file",
+            "scripts/bench/public_benchmark_nexus_value_v1.json",
+            "--output-dir",
+            ".nexus/reports/test_always_on_eval",
+            "--always-on-eval",
+            "--skip-llm-baseline",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 2
