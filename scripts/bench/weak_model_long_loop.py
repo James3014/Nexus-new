@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,7 @@ def _base_command(args: argparse.Namespace, *, output_dir: Path, task_ids: list[
 
 def _env(model_name: str) -> dict[str, str]:
     return {
+        **os.environ,
         "NEXUS_VALUE_HIDDEN_VERIFIER": "1",
         "NEXUS_GEMINI_MODEL_NAME": model_name,
         "NEXUS_DIRECT_GEMINI_MODEL": model_name,
