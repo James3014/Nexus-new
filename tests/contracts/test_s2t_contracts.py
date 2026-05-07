@@ -17,6 +17,7 @@ from nexus.contracts.s2t_trace import (
     S2TTraceEvent,
     S2TTraceWriter,
     export_agent_lightning_preferences,
+    export_model_training_v2,
     redact_s2t_event,
 )
 
@@ -209,6 +210,34 @@ def test_s2t_agent_lightning_export_emits_preference_pairs() -> None:
     assert exported["format"] == "agent-lightning-preferences-v1"
     assert exported["pairs"][0]["chosen_candidate_id"] == "B"
     assert exported["pairs"][0]["rejected_candidate_id"] == "A"
+
+
+def test_model_training_export_v2_preserves_v1_compat_and_redaction() -> None:
+    event = S2TTraceEvent(
+        task_id="task-1",
+        run_id="run-1",
+        model="gemini-3-flash-preview",
+        mode="shadow",
+        phase="R",
+        risk_tier="high",
+        candidate_set_id="candset-1",
+        candidates=[
+            _candidate("A", selector_score=0.95, verifier_result="fail"),
+            _candidate("B", selector_score=0.70, verifier_result="pass"),
+        ],
+        selected_candidate_id="B",
+        verifier_result="pass",
+        secret_values={"token": "secret"},
+        private_paths=["/Users/jameschen/private.txt"],
+    )
+
+    exported = export_model_training_v2([event])
+
+    assert exported["schema_version"] == "nexus_model_training_export.v2"
+    assert exported["compat"]["agent_lightning_preferences_v1"]["format"] == "agent-lightning-preferences-v1"
+    assert exported["compat"]["agent_lightning_preferences_v1"]["pair_count"] == 1
+    assert exported["redacted_source_rows"][0]["secret_values"] == {}
+    assert exported["redacted_source_rows"][0]["private_paths"] == ["<redacted-path>"]
 
 
 def test_s2t_adoption_gate_requires_shadow_and_heldout_lift() -> None:

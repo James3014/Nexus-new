@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nexus.contracts.learning_experience import LearningExperience, project_model_training
 from nexus.contracts.s2t_trace import S2TTraceEvent
 
 
@@ -54,3 +55,31 @@ def export_agent_lightning_preferences(events: list[S2TTraceEvent]) -> dict[str,
             }
         )
     return {"format": "agent-lightning-preferences-v1", "pair_count": len(pairs), "pairs": pairs}
+
+
+def export_model_training_v2(events: list[S2TTraceEvent], experiences: list[LearningExperience] | None = None) -> dict[str, Any]:
+    """Additive model-training export; v1 remains embedded for compatibility."""
+    v1 = export_agent_lightning_preferences(events)
+    redacted = [redact_s2t_event(event) for event in events]
+    experience_rows = []
+    for exp in experiences or []:
+        projection = project_model_training(exp)
+        experience_rows.append(
+            {
+                "experience": exp.to_dict(),
+                "projection": projection,
+            }
+        )
+    return {
+        "schema_version": "nexus_model_training_export.v2",
+        "format": "nexus-model-training-export-v2",
+        "source_schema": "s2t.v1",
+        "compat": {"agent_lightning_preferences_v1": v1},
+        "redaction": {
+            "applied": True,
+            "secret_values_removed": True,
+            "private_paths_redacted": True,
+        },
+        "redacted_source_rows": redacted,
+        "experience_rows": experience_rows,
+    }

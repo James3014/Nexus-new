@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from nexus.contracts.s2t_export import export_agent_lightning_preferences, redact_s2t_event
+from nexus.contracts.s2t_export import export_agent_lightning_preferences, export_model_training_v2, redact_s2t_event
 from nexus.contracts.s2t_trace import S2TTraceEvent
 
 
@@ -23,7 +23,7 @@ def _load_events(path: Path) -> list[S2TTraceEvent]:
     return events
 
 
-def export_s2t_trace_file(input_path: Path, output_path: Path, *, dry_run: bool = False) -> dict[str, Any]:
+def export_s2t_trace_file(input_path: Path, output_path: Path, *, dry_run: bool = False, export_format: str = "v1") -> dict[str, Any]:
     if not input_path.exists():
         return {
             "passed": False,
@@ -36,20 +36,27 @@ def export_s2t_trace_file(input_path: Path, output_path: Path, *, dry_run: bool 
         }
 
     events = _load_events(input_path)
-    export = export_agent_lightning_preferences(events)
-    redacted_rows = [redact_s2t_event(event) for event in events]
-    payload = {
-        **export,
-        "source": str(input_path),
-        "redacted_source_rows": redacted_rows,
-    }
+    if export_format == "v2":
+        export = export_model_training_v2(events)
+        payload = {**export, "source": str(input_path)}
+        preference_pairs = export["compat"]["agent_lightning_preferences_v1"]["pair_count"]
+    else:
+        export = export_agent_lightning_preferences(events)
+        redacted_rows = [redact_s2t_event(event) for event in events]
+        payload = {
+            **export,
+            "source": str(input_path),
+            "redacted_source_rows": redacted_rows,
+        }
+        preference_pairs = export["pair_count"]
     summary = {
         "passed": True,
         "dry_run": dry_run,
         "source": str(input_path),
         "output": str(output_path),
         "source_rows": len(events),
-        "preference_pairs": export["pair_count"],
+        "preference_pairs": preference_pairs,
+        "format": export_format,
     }
     if not dry_run:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,11 +68,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export S2T trace JSONL to Agent Lightning preference JSON.")
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--format", choices=("v1", "v2"), default="v1")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
     try:
-        summary = export_s2t_trace_file(args.input, args.output, dry_run=args.dry_run)
+        summary = export_s2t_trace_file(args.input, args.output, dry_run=args.dry_run, export_format=args.format)
     except Exception as exc:  # noqa: BLE001 - command boundary returns structured failure.
         summary = {
             "passed": False,

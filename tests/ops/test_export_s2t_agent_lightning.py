@@ -78,6 +78,21 @@ def test_export_s2t_trace_file_dry_run_does_not_write(tmp_path: Path) -> None:
     assert not output.exists()
 
 
+def test_export_s2t_trace_file_writes_v2_with_v1_compat(tmp_path: Path) -> None:
+    trace = tmp_path / "trace.jsonl"
+    output = tmp_path / "model_training.json"
+    _write_trace(trace)
+
+    summary = export_s2t_trace_file(trace, output, dry_run=False, export_format="v2")
+
+    exported = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["format"] == "v2"
+    assert summary["preference_pairs"] == 1
+    assert exported["schema_version"] == "nexus_model_training_export.v2"
+    assert exported["compat"]["agent_lightning_preferences_v1"]["pair_count"] == 1
+    assert exported["redacted_source_rows"][0]["secret_values"] == {}
+
+
 def test_export_s2t_main_returns_nonzero_for_missing_input(tmp_path: Path) -> None:
     rc = main(["--input", str(tmp_path / "missing.jsonl"), "--output", str(tmp_path / "out.json")])
 

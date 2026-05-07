@@ -26,6 +26,7 @@ from nexus.engine.capability_selector import CapabilitySelector
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
 from nexus.engine.openseeker_alignment import build_openseeker_trace
+from nexus.contracts.learning_experience import build_learning_experience, project_model_training, project_nexus_policy
 from nexus.contracts.s2t_policy import S2TCandidate, S2TSelector
 from nexus.contracts.s2t_trace import S2TDecisionSpan, S2TEpisodeTrace, S2TTraceEvent, S2TTraceWriter
 from nexus.core.event_bus import NexusEventBus
@@ -3333,6 +3334,19 @@ def run_auto_flow(
     nexus_usage_trace["capabilities"]["evidence_hop_count"] = openseeker_trace["evidence_hop_count"]
     nexus_usage_trace["capabilities"]["tool_action_count"] = openseeker_trace["tool_action_count"]
     nexus_usage_trace["capabilities"]["low_step_filtered"] = openseeker_trace["low_step_filtered"]
+    learning_experience = build_learning_experience(
+        task_id=task_id or receipt_slug,
+        task_type=task_type,
+        usage_trace=nexus_usage_trace,
+        capability_receipts=nexus_usage_trace["capability_receipts"],
+        route_decision_ref=str(nexus_usage_trace.get("route_decision", {}).get("task_id", "")),
+        learning_steward_decision=str(learn_phase_slo.get("status") or "shadow"),
+    )
+    nexus_usage_trace["learning_experience"] = learning_experience.to_dict()
+    nexus_usage_trace["learning_projection"] = {
+        "nexus_policy": project_nexus_policy(learning_experience),
+        "model_training": project_model_training(learning_experience),
+    }
 
     payload = {
         "schema_version": "1.0",

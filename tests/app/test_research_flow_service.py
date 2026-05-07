@@ -2353,6 +2353,16 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert rows[-1]["candidate_set_id"].endswith(":autoreason")
     assert rows[-1]["selected_candidate_id"] == "AB"
     assert len(rows[-1]["candidates"]) == 3
+    learning = payload["nexus_usage_trace"]["learning_experience"]
+    assert learning["schema_version"] == "nexus_learning_experience.v1"
+    assert learning["phase_continuity"]["expected"] == ["S", "P", "X", "D", "R", "A", "C"]
+    assert learning["gate_chain"]["artifact"] == "pass"
+    assert learning["gate_chain"]["claim"] == "pass"
+    assert learning["gate_chain"]["delivery"] == "pass"
+    assert learning["outcome"] == "verified_success"
+    projection = payload["nexus_usage_trace"]["learning_projection"]
+    assert projection["nexus_policy"]["s2t_prior_eligible"] is True
+    assert projection["model_training"]["training_eligible"] is True
 
 
 def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, monkeypatch):
