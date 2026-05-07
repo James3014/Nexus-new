@@ -217,7 +217,33 @@ Current best statement:
 
 Only one optimization loop should run next:
 
-1. make hidden/repair stop auto-opening `research` under the public benchmark contract
-2. preserve verified rate and trust mismatch
-3. rerun the same `3x1` matrix for both Gemini models
-4. only if hidden wall/tokens drop without verified regression, promote the always-on lane
+1. patch the runtime route seam that materializes `route["capability_plan"]`, not only the standalone planner seam
+2. make hidden/repair stop auto-opening `research` under the public benchmark contract
+3. preserve verified rate and trust mismatch
+4. rerun the same `3x1` matrix for both Gemini models
+5. only if hidden wall/tokens drop without verified regression, promote the always-on lane
+
+## Loop 2 Retry
+
+Status: `HOLD`
+
+Retry result:
+
+- attempted seam:
+  - `nexus/engine/policy_evaluator.py`
+- local planner verification:
+  - hidden synthetic replay dropped to the `L0_micro_patch` gate-only stack
+  - repair synthetic replay removed `research`
+- benchmark result:
+  - runtime `with_nexus` still emitted:
+    - hidden selected `12` with `research`
+    - repair selected `17` with `research`
+  - runtime tactical sequence still contained:
+    - hidden: `baseline -> memory -> research -> ...`
+    - repair: `hyper_sprint -> pregate -> memory -> research -> ...`
+
+Decision:
+
+- do not promote the planner-seam patch
+- the live runtime still uses another upstream route seam when populating `route["capability_plan"]`
+- next loop must target runtime route materialization, not planner policy alone
