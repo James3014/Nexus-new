@@ -109,3 +109,37 @@ def test_local_deterministic_success_is_not_model_uplift(tmp_path: Path):
     assert row["recommendation"] == "keep_as_nexus_cost_avoidance_not_model_uplift"
     assert "local_deterministic_success -> model_assisted_success" in out
     assert "False -> True" in out
+
+
+def test_gap_matrix_can_use_gpt55_direct_teacher_arm(tmp_path: Path):
+    student = tmp_path / "student"
+    teacher = tmp_path / "teacher"
+    _write_row(student, "with_nexus", "nexus-value-hidden-001", wall_duration_sec=45.0, total_tokens=9000)
+    _write_row(teacher, "with_nexus", "nexus-value-hidden-001", wall_duration_sec=30.0, total_tokens=6000, strategy_path="codex_wearing_nexus_context")
+    _write_row(
+        teacher,
+        "without_nexus",
+        "nexus-value-hidden-001",
+        wall_duration_sec=15.0,
+        total_tokens=3000,
+        model_uses_nexus=False,
+        gemini_uses_nexus=False,
+        nexus_wearing_valid=False,
+        strategy_path="gpt55_direct",
+    )
+
+    payload = build_gap_matrix(
+        student_run=student,
+        teacher_run=teacher,
+        student_name="flash_nexus",
+        teacher_name="gpt55_direct",
+        teacher_arm="without_nexus",
+    )
+    row = payload["rows"][0]
+    out = render_markdown(payload)
+
+    assert payload["teacher_arm"] == "without_nexus"
+    assert row["teacher_wall_sec"] == 15.0
+    assert row["student_vs_teacher_wall_ratio"] == 3.0
+    assert row["teacher_strategy_path"] == "gpt55_direct"
+    assert "teacher_arm: `without_nexus`" in out

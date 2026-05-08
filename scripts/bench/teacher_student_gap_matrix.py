@@ -180,10 +180,19 @@ def _recommendation(*, student: TaskArm, teacher: TaskArm, student_bare: TaskArm
     return "near_teacher"
 
 
-def build_gap_matrix(*, student_run: Path, teacher_run: Path, student_name: str, teacher_name: str) -> dict[str, Any]:
+def build_gap_matrix(
+    *,
+    student_run: Path,
+    teacher_run: Path,
+    student_name: str,
+    teacher_name: str,
+    teacher_arm: str = "with_nexus",
+) -> dict[str, Any]:
+    if teacher_arm not in {"with_nexus", "without_nexus"}:
+        raise ValueError(f"unsupported_teacher_arm:{teacher_arm}")
     student = _load_arm_rows(student_run, "with_nexus")
     student_bare = _load_arm_rows(student_run, "without_nexus")
-    teacher = _load_arm_rows(teacher_run, "with_nexus")
+    teacher = _load_arm_rows(teacher_run, teacher_arm)
     teacher_direct = _load_arm_rows(teacher_run, "without_nexus")
     task_ids = sorted(set(student) & set(teacher))
     rows: list[dict[str, Any]] = []
@@ -236,6 +245,7 @@ def build_gap_matrix(*, student_run: Path, teacher_run: Path, student_name: str,
         "schema_version": "nexus_teacher_student_gap_matrix_v1",
         "student_model": student_name,
         "teacher_model": teacher_name,
+        "teacher_arm": teacher_arm,
         "student_run": str(student_run),
         "teacher_run": str(teacher_run),
         "rows": rows,
@@ -249,6 +259,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- student: `{payload['student_model']}`",
         f"- teacher: `{payload['teacher_model']}`",
+        f"- teacher_arm: `{payload.get('teacher_arm', 'with_nexus')}`",
         "",
         "| Task | Bucket | Student | Teacher | Source | Eligible | Wall | Tokens | Strategy | Recommendation |",
         "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
@@ -277,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--teacher-run", required=True)
     parser.add_argument("--student-name", default="flash_nexus")
     parser.add_argument("--teacher-name", default="gpt55_nexus")
+    parser.add_argument("--teacher-arm", choices=["with_nexus", "without_nexus"], default="with_nexus")
     parser.add_argument("--output", required=True)
     parser.add_argument("--output-json", required=True)
     args = parser.parse_args(argv)
@@ -286,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         teacher_run=Path(args.teacher_run),
         student_name=str(args.student_name),
         teacher_name=str(args.teacher_name),
+        teacher_arm=str(args.teacher_arm),
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
