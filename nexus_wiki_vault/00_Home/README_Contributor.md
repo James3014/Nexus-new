@@ -1,3 +1,16 @@
+---
+aliases: '[README_Contributor, Contributor Guide]'
+confidence: high
+last_compiled: '2026-05-06'
+owner: agent
+source_of_truth: compiled-wiki
+status: active
+tags: '[home, contributor, engineering]'
+title: README Contributor
+type: home
+version_scope: '[v26]'
+---
+
 # 👩‍💻 README: 貢獻者導覽 (Contributor Guide)
 **[ROLE: DEVELOPER | AUDIENCE: CONTRIBUTORS]**
 
@@ -16,3 +29,28 @@
 
 ---
 **[NEXUS COMMUNITY: BUILD THE OS OF TRUST]**
+
+## One-sentence summary
+貢獻者導覽頁定義加入、實作與交付的一致規程與驗收順序，降低外部貢獻者理解成本。
+
+## Role / responsibility
+- 指引貢獻者完成 sandbox、提交、驗證與封印流程。
+
+## Upstream
+- [[System Overview]]
+- [[01_System/Code_Ownership_Matrix|Code Ownership Matrix]]
+
+## Downstream
+- [[05_Protocols/Protocol - Engineering Discipline|Protocol - Engineering Discipline]]
+- [[06_Ops/Ops - Wiki Page Type Contracts|Wiki Page Type Contracts]]
+
+## Related modules / files
+- [Source: 06_Ops/Ops - Wiki Page Type Contracts.md]
+- [Source: 05_Protocols/Protocol - Engineering Discipline.md]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 文檔是否應加入新手入門目標時間（例如 5 分鐘和 30 分鐘任務）？

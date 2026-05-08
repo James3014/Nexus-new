@@ -1,3 +1,18 @@
+---
+title: LLM_Wiki EXCLUDE_RULES
+type: ops
+status: active
+version_scope: v1.0
+owner: agent
+confidence: high
+last_compiled: 2026-04-21
+source_of_truth: LLM_Wiki/EXCLUDE_RULES.md
+tags:
+  - llm-wiki
+  - exclude
+  - scope-control
+---
+
 # LLM_Wiki EXCLUDE_RULES
 版本: v1.0
 狀態: Draft for review
@@ -76,3 +91,32 @@
 ## F. 變更控制
 - 本文件任何變更需先審核，不直接重跑全量 ingest。
 - 先更新 INGEST_SCOPE_V1.md 的「影響範圍」再執行。
+
+## One-sentence summary
+定義 LLM_Wiki ingest 的排除、隔離與蒸餾納入條件，防止高風險原文直接進主知識層。 [Source: LLM_Wiki/EXCLUDE_RULES.md]
+
+## Role / responsibility
+- 提供硬性過濾規則，降低敏感或無關資訊污染。 [Source: LLM_Wiki/EXCLUDE_RULES.md]
+- 引導蒸餾流程，保留可公開與可驗證內容。 [Source: LLM_Wiki/INGEST_SCOPE_V1.md]
+
+## Upstream
+- **[LLM_Wiki/INGEST_SCOPE_V1](INGEST_SCOPE_V1.md)**: 進一步定義納入邊界。 [Source: LLM_Wiki/INGEST_SCOPE_V1.md]
+
+## Downstream
+- **[wiki_linter](../scripts/ops/wiki_linter.py)**: 門檻與可追蹤性驗證。 [Source: scripts/ops/wiki_linter.py]
+- **LLM_Wiki INGEST_PIPELINE**: 待建立的批次 ingest 計畫。 [Source: LLM_Wiki/INGEST_SCOPE_V1.md]
+
+## Related modules / files
+- `LLM_Wiki/INGEST_SCOPE_V1.md`
+- `scripts/ops/wiki_linter.py`
+- `scripts/ops/wiki_coverage_audit.py`
+
+## Source notes
+- 規則基於現有工作流程與敏感資料風險清單維護。 [Source: LLM_Wiki/EXCLUDE_RULES.md]
+
+## Open questions / conflicts
+- [ ] 是否要納入 API token 格式變化的動態規則更新？
+
+**[Source: LLM_Wiki/EXCLUDE_RULES.md]**
+
+[[System Overview]]

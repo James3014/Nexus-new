@@ -33,5 +33,28 @@ title: Module - Engine Service Registry
 - **Atomic Init**: 所有服務必須由 `bootstrap.build_engine_components` 進行原子化初始化。
 - **Contract-First**: 服務間通訊嚴禁直接修改對象狀態，必須透過傳遞 Pydantic `Artifact` 進行。
 
+## Role / responsibility
+- 建立並維護 `nexus/engine` 服務清單，界定每個服務的職責、觸發條件與輸入輸出。 [Source: nexus/engine/bootstrap.py]
+- 支援 CI/路由/記憶相關能力的註冊與健康檢查邏輯。 [Source: scripts/ops/ci_gate.py]
+
+## Upstream
+- `nexus/engine/bootstrap.py` 管理服務匯流樞紐。 [Source: nexus/engine/bootstrap.py]
+
+## Downstream
+- 被 `Module - Core Orchestrator` 與 `Module - Domain Services and Adapters` 作為服務總表參考。 [Source: scripts/engine/nexus_cli.py]
+
+## Related modules / files
+- `nexus/engine/bootstrap.py`: 服務組裝入口。 [Source: nexus/engine/bootstrap.py]
+- `scripts/ops/ci_gate.py`: 提供 registry 與 route smoke 的驗收。 [Source: scripts/ops/ci_gate.py]
+
+## Source notes
+- service index 為 runtime 可驗證的硬件映射，避免口頭記憶導向。 [Source: scripts/engine/nexus_cli.py]
+
+## Open questions / conflicts
+- [ ] `repair_setup_service.py`、`repair_attempt_service.py` 是否仍為實作主路徑，需確認是否已移除。 [Source: nexus/engine/bootstrap.py]
+- [ ] `nexus/research/learn/source_registry_service.py` 是否已被重構整合。 [Source: scripts/ops/wiki_linter.py]
+
 ---
-**[Source: April 21 Massive Refactor | MISSION-SEALED]**
+**[Source: scripts/engine/nexus_cli.py]**
+
+[[System Overview]]

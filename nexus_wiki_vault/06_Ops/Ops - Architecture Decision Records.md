@@ -17,6 +17,26 @@ version_scope: '[v22, v23, v24, v25, v26]'
 ## One-sentence summary
 本頁作為 Nexus 治理決策脈絡索引，記錄每個關鍵選型的背景、替代方案、取捨與驗證方式。 [Source: scripts/ops/ci_gate.py]
 
+## Role / responsibility
+- 維護治理決策索引，確保決策可追溯且可驗證。 [Source: scripts/ops/ci_gate.py]
+
+## Upstream
+- `06_Ops/Ops - Governance Changelog.md` 保持歷史變更與決策同步。 [Source: 06_Ops/Ops - Governance Changelog.md]
+
+## Downstream
+- 供 `06_Ops/Ops - Governance Changelog.md` 與審核流程引用。 [Source: 06_Ops/Ops - Governance Changelog.md]
+- 供 `06_Ops/Ops - CI/CD Promotion Gate.md` 做治理門禁回顧。 [Source: 06_Ops/Ops - CI/CD Promotion Gate.md]
+
+## Related modules / files
+- `scripts/ops/ci_gate.py`: ADR 變更驗證入口。 [Source: scripts/ops/ci_gate.py]
+- `06_Ops/Ops - Governance Changelog.md`: 重大變更事件。 [Source: 06_Ops/Ops - Governance Changelog.md]
+
+## Source notes
+- ADR 編碼、變更緣由與驗證參考都以腳本輸出與交付門禁為準。 [Source: scripts/ops/ci_gate.py]
+
+## Open questions / conflicts
+- [ ] ADR-008 1-bit Core 關鍵路徑是否納入獨立回歸套件。 [Source: scripts/engine/nexus_cli.py]
+
 ## ADR Registry (核心決策索引)
 
 | ADR ID | Decision | Status | Evidence | Last Verified |

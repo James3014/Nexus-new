@@ -33,3 +33,24 @@ title: System - Errors Enum
 
 ---
 **[Source: nexus/core/exit_codes.py]**
+
+## Role / responsibility
+- 定義系統阻斷語義的公共參考表，避免返回碼誤用。
+
+## Upstream
+- [[01_System/Exit_Code_Registry|Exit_Code_Registry]]
+- [[01_System/Code_Ownership_Matrix|Code Ownership Matrix]]
+
+## Downstream
+- [[06_Ops/Ops - Acceptance and Release|Acceptance and Release]]
+- [[07_Compliance/Hallucination_Guard_Scoring_Spec|Hallucination Guard Scoring]]
+
+## Related modules / files
+- [Source: nexus/core/exit_codes.py]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 退出碼是否需增加「資料證據缺失」為獨立阻斷碼以提升可觀測性？

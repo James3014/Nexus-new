@@ -40,3 +40,25 @@ services:
 
 ---
 **[Source: nexus/core/swarm.py]**
+
+## Role / responsibility
+- 定義跨節點佈署模型、節點溝通與故障邊界。
+
+## Upstream
+- [[01_System/MUSE_PROTO|MUSE_PROTO]]
+- [[System Relationship and Dependency Graph|System Relationship and Dependency Graph]]
+
+## Downstream
+- [[06_Ops/Security/Audit - mTLS and Service Mesh Gap|mTLS Audit Gap]]
+- [[06_Ops/Ops - Performance Benchmarks|Performance Benchmarks]]
+
+## Related modules / files
+- [Source: nexus/core/swarm.py]
+- [Source: compiled-wiki]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 多節點佈署故障時，是否應先保留 Hub 或降級到單節點保守模式？

@@ -3,9 +3,9 @@ aliases: '[Orchestrator Node, Nexus CLI Engine, Engine Master, NexusEngine]'
 confidence: high
 last_compiled: '2026-04-22'
 owner: agent
-raw_sources: 'nexus/engine/coordinator.py, nexus/engine/bootstrap.py, nexus/engine/cli_runner_async.py'
+raw_sources: 'nexus/core/orchestrator.py, nexus/core/state_contracts.py, scripts/engine/nexus_cli.py'
 related_pages: '[[Module - Engine Service Registry]]'
-source_of_truth: nexus/engine/coordinator.py
+source_of_truth: nexus/core/orchestrator.py
 status: hardened
 tags: '[module, core, orchestrator, engine, service_mesh, seam]'
 title: Module - Core Orchestrator
@@ -35,5 +35,30 @@ title: Module - Core Orchestrator
 - **Atomic Init**: 所有服務由 `bootstrap.py` 原子化產出。
 - **Seam Integrity**: 物理保證 L4 指揮官永遠不會越過 `Coordinator` 直接操作 Drone。
 
+## Role / responsibility
+- 聚合核心路由、審核與執行步驟，維持 Orchestrator 的行為可預期與可回溯。 [Source: nexus/core/orchestrator.py]
+- 將服務註冊、路由決策、回傳訊息統一到單一執行框架。 [Source: nexus/engine/bootstrap.py]
+
+## Upstream
+- `nexus/core/orchestrator.py`：定義主循環節點與錯誤恢復。 [Source: nexus/core/orchestrator.py]
+- `nexus/core/state_contracts.py`：規範 state 流轉。 [Source: nexus/core/state_contracts.py]
+
+## Downstream
+- 被 CLI 與 route smoke 調度呼叫，回傳 `NexusReceipt` 供驗證。 [Source: scripts/engine/nexus_cli.py]
+- 影響 `nexus/core/policy_manager.py` 的 policy/event 記錄。 [Source: scripts/ops/ci_gate.py]
+
+## Related modules / files
+- `nexus/core/orchestrator.py`: 核心循環實作。 [Source: nexus/core/orchestrator.py]
+- `nexus/core/state_contracts.py`: 狀態機與驗證邏輯。 [Source: nexus/core/state_contracts.py]
+- `nexus/engine/bootstrap.py`: 初始化與服務組裝。 [Source: nexus/engine/bootstrap.py]
+
+## Source notes
+- 本頁以實際路徑回收為主，不以 legacy 文字說明覆蓋實作。 [Source: scripts/engine/nexus_cli.py]
+
+## Open questions / conflicts
+- [ ] 是否保留 `campaign_master_loop` 的同名替代流程，還是以新 seam 命名為主。 [Source: nexus/engine/bootstrap.py]
+
 ---
-**[Source: nexus/engine/cli_runner_async.py | SEAM-HARDENED]**
+**[Source: nexus/core/orchestrator.py]**
+
+[[System Overview]]

@@ -36,5 +36,31 @@ title: Governance - Capability Gate & Tool Isolation
 - **JIT Injection**: 所有的工具集均透過 `managed_toolsets()` 進行即時過濾。
 - **Hidden Tools**: 任何未在當前階段授權的工具將對 Agent 隱藏，物理阻斷「越權調用」的可能性。
 
----
-**[Source: nexus/governance/capability_gate.py | REFACTOR_SYNCED]**
+## Role / responsibility
+- 提供 phase 級工具訪問邊界，控制不同階段可用工具範圍。 [Source: nexus/governance/capability_gate.py]
+- 落實治理隔離，阻斷越權工具調用。 [Source: 06_Ops/Ops - Governance Changelog.md]
+
+## Upstream
+- **[System Overview](../00_Home/System Overview.md)**: 定義全域治理入口。 [Source: 00_Home/System Overview.md]
+- **[Protocol - Evidence Map](../05_Protocols/Protocol - Evidence Map.md)**: 對應治理證據格式。 [Source: 05_Protocols/Protocol - Evidence Map.md]
+
+## Downstream
+- **[06_Ops/Ops - Ownership and Review SLA](../06_Ops/Ops - Ownership and Review SLA.md)**: 執行能力邊界責任稽核。 [Source: 06_Ops/Ops - Ownership and Review SLA.md]
+- **[Protocol - Security & Tool Guard Registry](../02_Modules/Module - Security and Tool Guard Registry.md)**: 核對工具注入點映射。 [Source: 02_Modules/Module - Security and Tool Guard Registry.md]
+
+## Related modules / files
+- `nexus/governance/capability_gate.py`
+- `nexus/core/capability_gate.py`
+- `02_Modules/Module - Security and Tool Guard Registry.md`
+
+## Source notes
+- 能力隔離邏輯依據治理路徑與實際程式碼一致。 [Source: nexus/governance/capability_gate.py]
+- 可回放驗證結果可在 CI Gate 與 Audit Log 中查詢。 [Source: scripts/ops/ci_gate.py]
+
+## Open questions / conflicts
+- [ ] 是否需加入能力組跨任務配額與突發切斷保護？
+- [ ] 是否需要更細顆粒的 tool cooldown 防止高頻錯誤重試？
+
+**[Source: nexus/governance/capability_gate.py]**
+
+[[System Overview]]

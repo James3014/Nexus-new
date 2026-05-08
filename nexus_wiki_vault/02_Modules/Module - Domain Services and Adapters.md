@@ -36,5 +36,31 @@ Nexus 透過 `build_engine_components` 在啟動時完成物理接線。所有�
 2. **Standard Interfaces**: 每個 Service 必須回傳標準化的 `Decision` 或 `Artifact` 對象。
 3. **No Legacy Seams**: 嚴禁在引擎外層調用已標註為 `legacy` 的舊版 `coordinator` 直接實例化方法。
 
+## Role / responsibility
+- 管理 domain services 的註冊、生命周期與訊息邊界。 [Source: nexus/engine/bootstrap.py]
+- 提供服務發現能力，確保上游模組調用一致的介面。 [Source: nexus/services/context_crystal.py]
+
+## Upstream
+- `nexus/engine/bootstrap.py` 控制 service mesh 建置與可用性。 [Source: nexus/engine/bootstrap.py]
+- `nexus/core/orchestrator.py` 提供高階路由契約。 [Source: nexus/core/orchestrator.py]
+
+## Downstream
+- 下游 `Module - Core Orchestrator`、`Module - Engine Service Registry` 依賴本頁作為服務參考。 [Source: scripts/engine/nexus_cli.py]
+- `scripts/ops/ci_gate.py` 使用該映射完成服務完整性核查。 [Source: scripts/ops/ci_gate.py]
+
+## Related modules / files
+- `nexus/engine/bootstrap.py`: Service mesh 建置入口。 [Source: nexus/engine/bootstrap.py]
+- `nexus/engine/autonomic_routing_service.py`: 路由服務實作。 [Source: nexus/engine/autonomic_routing_service.py]
+- `nexus/engine/forecast_gate_service.py`: 預測與閘道決策。 [Source: nexus/engine/forecast_gate_service.py]
+
+## Source notes
+- 以 `build_engine_components` 當核心接線點，避免服務在未完成註冊下被直接調用。 [Source: nexus/engine/bootstrap.py]
+
+## Open questions / conflicts
+- [ ] `nexus/services/registry.py` 是否保留舊版兼容，需確認是否刪除。 [Source: nexus/services/registry.py]
+- [ ] Service Mesh 是否需要對外提供 registry 版本號欄位。 [Source: scripts/engine/nexus_cli.py]
+
 ---
-**[Source: nexus/engine/bootstrap.py | APRIL-21-MESH]**
+**[Source: nexus/engine/bootstrap.py]**
+
+[[System Overview]]

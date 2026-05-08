@@ -1,56 +1,60 @@
+---
+aliases:
+- Context Hygiene
+- Context Boundaries
+confidence: high
+last_compiled: '2026-05-06'
+owner: agent
+related_pages:
+- '[[05_Protocols/Protocol - Knowledge Lineage.md]]'
+source_of_truth: scripts/ops/wiki_drift_audit.py
+status: hardened
+tags:
+- protocol
+- context
+- operations
+title: Protocol - Context Hygiene
+type: protocol
+version_scope: v26
+---
+
 # Protocol - Context Hygiene
 
-## 🎯 核心原則：上下文純淨度優先於一切 (Purity First)
+## One-sentence summary
+控制上下文訊號密度與雜訊輸入，降低幻覺與目標漂移風險，讓推理維持高信噪比。
 
-隨意填充的大量日誌與冗餘上下文是導致 LLM 產生「幻覺」與「任務迷失」的根本原因。本協議定義了維持 Nexus 環境純淨度的物理邊界。
+## Role / responsibility
+- 規定讀取與輸出的上下文邊界。
+- 防止無關訊息侵入導致推理路徑偏移。
 
----
+## Upstream
+- 運行日誌、任務 trace 及 `context` 產生源。
+- `scripts/ops/wiki_drift_audit.py` 的漂移檢出結果。
 
-### 🛡️ 物理邊界 (Physical Boundaries)
+## Downstream
+- `05_Protocols/Protocol - Engineering Discipline.md`
+- `06_Ops/Ops - Wisdom Layer v22 Architecture.md`
 
-1.  **輸出截斷 (The Truncation Wall)**：
-    *   單次工具輸出超過 **2000 行** 或 **50KB** 時，必須由 `output_guard.py` 強制截斷。
-    *   截斷後僅回傳：標頭、尾部 50 行、以及自動偵測到的 Root Cause 區塊。
-2.  **記憶分片 (Memory Pagination)**：
-    *   禁止一次性加載整個 Module 的源代碼。必須先使用 `get_symbols_overview` 進行預讀，精確定位後再讀取目標區塊。
-3.  **結晶化代謝 (Metabolic Crystallization)**：
-    *   長對話（超過 20 輪）必須觸發一次 `session_seed` 寫入，並重置上下文。當前狀態應由 `metabolism_engine` 保存並重新加載。
+## Related modules / files
+- `scripts/ops/wiki_drift_audit.py`
+- `nexus/core/context_hub.py`
+- `nexus/services/memory_pipeline.py`
 
----
+## Source notes
+- 本協議對應 `ContextHub` 與輸出截斷策略的治理約束。[Source: scripts/ops/wiki_drift_audit.py]
 
-### 🛠️ 工作流要求 (Workflow Constraints)
+## Open questions / conflicts
+- [ ] 是否需要對長對話自動強制輸出摘要後再繼續推理？
+- [ ] 2000 行截斷門檻是否需依任務類型調參？
 
-*   **日誌讀取原則**：
-    *   禁止盲目讀取 `/tmp/` 下的完整日誌。
-    *   必須優先使用 `grep` 或 `awk` 尋找關鍵詞。
-    *   範例：`grep -C 5 "AssertionError" /tmp/nexus_xxx.log`。
-*   **變更摘要強制化**：
-    *   每次修改文件後，必須在下一次推論中簡述「改動了哪些行」以及「為什麼這麼改」，作為對上下文的二次校準。
+## 核心規則
+1. 工具輸出若超過 2000 行/50KB，必須啟用截斷策略（標頭 + 尾部 + Root Cause）。
+2. 首次讀取禁止一次性加載整個模組，必須以符號預覽導向精準讀取。
+3. 每次上下文切換都應建立 session seed，保留關鍵上下文快照。
 
----
+## 驗證標準
+- **清潔 (Clean)**：輸入上下文與當前目標相關度高，無大量環境噪音。
+- **污染 (Polluted)**：存在大量編譯日誌、環境 dump 或非任務歷史。
 
-### ⚖️ 判定標準
-
-*   **合格 (Clean)**：LLM 每次推論時，上下文中的代碼片段與日誌片段皆與當前目標高度相關。
-*   **違規 (Polluted)**：上下文中存在大量與當前修復無關的編譯日誌、環境變量列表或無效的歷史輸出。
-
----
-
-### 🛡️ 智慧壓縮政策 (Smart Compression Policy - Nexus v22.1)
-
-根據 2026-04-11 實測報告，Nexus 採用以下三級壓縮邏輯以降低 Token 浪費：
-
-| 模式 (Tier) | 觸發關鍵字 (Trigger) | 壓縮參數 (Args) | 預期效果 |
-| :--- | :--- | :--- | :--- |
-| **Scan** | list, scan, where, overview | `-m signatures` | **節省 90%+** |
-| **Discovery** | how, read, explain, logic | `-m aggressive` | **節省 10%** |
-| **Fixing** | fix, bug, rca, change, refactor | **-m full (禁用)** | **0% (保證無損)** |
-
-#### 🚫 禁用清單 (No-Go Scenarios)
-- 涉及 **安全性**、**加密**、**數學算式** 與 **邊界 Bug** 時，嚴禁使用壓縮。
-- 計劃實作 (Implementation Plan) 的「修改建議」必須基於 **Full 模式** 讀取結果。
-
-[METADATA]
-Status: ACTIVE
-Version: v22.1
-Enforcement: ENGINE_LEVEL (via scripts/ops/leanctx_real_validation.py)
+## Link to System
+[[System Overview]]

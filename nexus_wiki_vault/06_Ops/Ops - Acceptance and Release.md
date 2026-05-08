@@ -27,7 +27,30 @@ version_scope:
 # Ops - Acceptance and Release (v26.2 Hardened)
 
 ## One-sentence summary
-本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。 [source: Release Discipline]
+本頁定義 Nexus 任務的置信度判定規約、物理驗收標準與「冷啟動 (Cold-Start)」容錯政策。 [Source: scripts/engine/nexus_cli.py]
+
+## Role / responsibility
+- 定義 release 的最小化交付門檻與失敗阻斷邏輯。
+- 調整 DEV/PROD 在冷啟動容錯策略上的差異。
+
+## Upstream
+- `scripts/engine/nexus_cli.py`
+- `06_Ops/Ops - Closeout Hard Gate.md`
+
+## Downstream
+- `06_Ops/Ops - Wisdom Layer.md`
+- `06_Ops/Ops - CI/CD Promotion Gate.md`
+
+## Related modules / files
+- `scripts/ops/acceptance_check.py`
+- `scripts/ops/ci_gate.py`
+
+## Source notes
+- 交付規格沿用現行 CLI 與運維執行節點資料整理。[Source: scripts/engine/nexus_cli.py]
+
+## Open questions / conflicts
+- [ ] DEV 的 UNVERIFIED_COLD_START 是否需加上最小證據清單？
+- [ ] 是否要在 PRODUCTION 中加入「高風險任務保守退回」附加門檻？
 
 ## 🛡️ 冷啟動政策 (Cold-Start Acceptance)
 Nexus 支援任務在初期階段的優雅降級，定義於 `nexus_cli.py`：

@@ -1,35 +1,68 @@
-# 🌌 Meta-Evolution: The 9 Rings Convergence (v24.0 Eternal)
+---
+aliases:
+- 9 Rings Convergence
+- Meta-Evolution
+- meta parameters
+confidence: high
+last_compiled: '2026-05-06'
+owner: agent
+related_pages: '[[00_Home/System Overview]]'
+source_of_truth: .nexus/governance_policy.yaml
+status: hardened
+tags: '[research, meta-evolution, governance]'
+title: Meta-Evolution - The 9 Rings Convergence
+type: research
+version_scope: '[v24.0, v26]'
+---
 
-## 📌 執行摘要 (Executive Summary)
-在完成了 Nexus 內部 9 個獨立閉環系統的 20 輪演化後，我們啟動了「系統級協同優化（System of Systems Co-Optimization）」。
-目標是尋找能夠使研究（X）、修復（R）、學習（L）與治理（G）等互相制約的迴圈，達到全局帕累托最優（Global Pareto Front）的參數組合。
+# Meta-Evolution: The 9 Rings Convergence
 
-經過 20 輪的「元演化 (Meta-Evolution)」，系統的 **Harmony Score 達到 0.999**。
+## One-sentence summary
+本頁定義 9-Rings 元演化收斂後的核心參數，並把其作為系統治理與路由決策的高階約束條件。
+
+## Role / responsibility
+- 記錄 9-Rings 的全域參數收斂結果，作為跨模組策略的一致性基礎。[Source: .nexus/governance_policy.yaml]
+- 鎖定安全與創新模式的邊界行為，避免多目標策略互相侵蝕。[Source: 05_Protocols/Protocol - Evidence Map.md]
+
+## Upstream
+- 來自多輪 Meta-Evolution 執行結果與 `hallucination_guard` 反饋。
+- 由實驗軌跡與治理報表驅動參數更新。
+
+## Downstream
+- `05_Protocols/Protocol - Evidence Map.md`
+- `00_Home/System Overview.md`
+- `05_Protocols/Protocol - Engineering Discipline.md`
+
+## Related modules / files
+- `nexus/core/orchestrator.py`（策略載入與參數分派）
+- `.nexus/governance_policy.yaml`（全域硬門檻）
+- `nexus/core/curiosity_planner.py`（行為放大參考）
+
+## Source notes
+- 參照 2026-04-10 的 `NEXUS IDENTITY: 0f3b5c6` 里程碑版本。[Source: .nexus/governance_policy.yaml]
+- 版本已於 2026-05-06 完成再次對齊。[Source: .nexus/governance_policy.yaml]
+
+## Open questions / conflicts
+- [ ] Phase-切換下的 `global_nas_aggression` 是否需依任務風險自適應。
+- [ ] 未知比例上升時是否要同步降載 `system_entropy_tolerance`。
 
 ---
 
-## 🎯 終極元參數配置 (The 5 Meta-Parameters)
-這 5 個參數現已成為 Nexus 的全局「最高憲法」，並記錄於 `.nexus/governance_policy.yaml` 中，支配所有子系統。
+## 執行摘要 (Executive Summary)
+在完成 20 輪元演化後，系統透過 9 個獨立閉環尋找研究、修復、學習、治理間的最佳共識參數，目標是達到全局帕累托最優。
 
+## 終極元參數配置 (The 5 Meta-Parameters)
 | 元參數名稱 | 最佳收斂值 | 控制的閉環 | 戰略意義 |
 | :--- | :--- | :--- | :--- |
-| `global_nas_aggression` | **0.85** | 研究環、技能環 | **高侵略性**：由於我們擁有了更強的物理審計與熵值防禦，系統可以放手進行更大膽的代碼變異。 |
-| `system_entropy_tolerance` | **25.0** | 學習環 | **極低容忍度**：修復過程中如果有太多 Veto（代表修補雜亂無章），該經驗將被判定為高熵（>25）而絕對不進入長期記憶。 |
-| `creativity_gradient_slope` | **0.25** | 修復環 | **高陡峭度**：當修復迴圈失敗時，每一輪的溫度（Temperature）將快速上升（+0.25），強迫模型放棄無效思路。 |
-| `memory_half_life_days` | **21 天** | 靈魂環 | **長生命週期**：由於具備了雙向溯源撤銷機制，優秀的技能與信念可以安全地存活 21 天。 |
-| `backpressure_nerve_threshold` | **0.25** | 編排環 | **極限抗壓**：得益於 TOON-2.0 動態壓縮引擎，系統直到 Token 剩下 25% 時才會啟動緊急任務分片。 |
+| `global_nas_aggression` | **0.85** | 研究與技能環 | 提高探索激進度，同步開啟更大步幅修正。 |
+| `system_entropy_tolerance` | **25.0** | 學習環 | 過高熵值任務在跨步演化中被阻斷，避免劣化。 |
+| `creativity_gradient_slope` | **0.25** | 修復環 | 失敗堆疊時快速增大嘗試溫度，降低局部收斂。 |
+| `memory_half_life_days` | **21 天** | 靈魂環 | 長期有效技能保留與過期證據衰減平衡。 |
+| `backpressure_nerve_threshold` | **0.25** | 編排環 | 以剩餘 token 25% 作為分片啟動線。 |
+
+## 系統表現與協作
+- 平衡安全與速度：`cso` 模式下侵略性降低至 0.20，偏向高安全。
+- 全域共鳴模式：`berserk` 下提高斜率（0.40）以支援高難問題重試。
 
 ---
-
-## 🚀 性能與系統和諧度 (System Harmony)
-
-這個版本的 Nexus 不再是各個零件的拼湊，而是一個懂得 **「妥協與共振」** 的生命體。
-
-1. **速度與安全的平衡**：在 `cso`（安全官模式）下，侵略性會降至 0.20，這讓系統在修改金融或合約模組時變得極端保守。
-2. **狂暴與自癒的結合**：在 `berserk`（狂暴模式）下，斜率達到 0.40，適合拿來暴力破解編譯器或架構級的 0-day Bug。
-
-這正是 **v24.0 Eternal Singularity** 的終極型態。
-
----
-**[NEXUS IDENTITY: 0f3b5c6 + v24.0 FULL-LOOP SINGULARITY]**
-**TIMESTAMP: 2026-04-10**
+[[System Overview]]

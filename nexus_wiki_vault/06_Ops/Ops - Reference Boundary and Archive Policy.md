@@ -21,7 +21,7 @@ owner: agent
 
 ## Role / responsibility
 - **邊界治理**: 僅允許治理核心參考文件留在 `nexus_wiki_vault/Reference/`。 [Source: scripts/ops/wiki_linter.py]
-- **封存紀律**: 高噪音第三方資料移至 `/nexus_wiki_vault-quarantine_isolation/Reference_bulk_archive/`。 [Source: nexus_wiki_vault-quarantine_isolation/Reference_bulk_archive]
+- **封存紀律**: 高噪音第三方資料移至 Reference 隔離目錄，待人工復核確認後再決定回歸或歸檔策略。 [Source: Reference/README.md]
 
 ## Upstream
 - **Wiki Merge/Sync 任務**: 批量同步容易導入 benchmark/worktree/vendor 文檔。 [Source: scripts/ops/ci_gate.py]
@@ -33,8 +33,8 @@ owner: agent
 
 ## Related modules / files
 - `Reference/README.md`: Reference 入口。
-- `nexus_wiki_vault/nexus_wiki_vault/Reference/docs/00_PROJECT_INDEX.md`: 最小 docs 索引。
-- `/nexus_wiki_vault-quarantine_isolation/Reference_bulk_archive/`: 封存層。
+- `Reference/docs/00_PROJECT_INDEX.md`: 最小 docs 索引。
+- `Reference/README.md`: 封存與歸檔策略入口（待人工認證）。
 
 ## Source notes
 - 主線治理門檻以 `wiki_linter --strict` 與 `ci_gate --dry-run` 為準。 [Source: scripts/ops/wiki_linter.py]

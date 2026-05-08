@@ -35,5 +35,29 @@ title: Compliance - Hallucination Guard Scoring Spec
 2. **截斷保護**: 對過長 Log 執行 `truncate_output` (保留首尾) 以節省 Token。
 3. **對抗性比對**: `CritiqueEngine` 會主動搜尋 `known-failures` 進行反事實校驗。
 
----
+## Role / responsibility
+- 定義違規評分與阻斷門檻，提供一致化 hallucination 審核標準。 [Source: nexus/core/hallucination_guard.py]
+- 與 claim_state 與 evidence_bundle 的降級邏輯保持對齊。 [Source: nexus/orchestrator/evidence_policy.py]
+
+## Upstream
+- **[Core Hallucination Guard](../nexus/core/hallucination_guard.py)**: 真正計分與封鎖實作。 [Source: nexus/core/hallucination_guard.py]
+- **[Compliance Dashboard](Compliance_Dashboard.md)**: 將門檻結果納入可見化運維。 [Source: 07_Compliance/Compliance_Dashboard.md]
+
+## Downstream
+- **[07_Compliance/Current_Compliance_Status](Current_Compliance_Status.md)**: 回寫結果影響治理狀態。 [Source: 07_Compliance/Current_Compliance_Status.md]
+- **[06_Ops/Ops - Governance SLO Dashboard](../06_Ops/Ops - Governance SLO Dashboard.md)**: 供審核指標觀測。 [Source: 06_Ops/Ops - Governance SLO Dashboard.md]
+
+## Related modules / files
+- `nexus/core/hallucination_guard.py`
+- `nexus/orchestrator/evidence_policy.py`
+- `scripts/ops/wiki_coverage_audit.py`
+
+## Source notes
+- 計分權重與硬封鎖規則依本地 core 實作與門禁規則對齊。 [Source: nexus/core/hallucination_guard.py]
+
+## Open questions / conflicts
+- [ ] 是否需將 `logic_mismatch` 權重與 `hallucination_index_v1.json` 中條目動態綁定？
+
 **[Source: nexus/core/hallucination_guard.py]**
+
+[[System Overview]]

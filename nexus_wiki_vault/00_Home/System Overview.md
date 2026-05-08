@@ -38,3 +38,29 @@ Nexus 是一個以物理誠信為核心、為 AI Agent 打造的自動化治理�
 
 ---
 **[NEXUS IDENTITY: e148a212 + v32.6 REFACTOR-SEALED]**
+
+## One-sentence summary
+系統總覽頁定義 Nexus 的治理作業模型、核心角色入口與三大任務主線，作為全域導航與信任錨點。
+
+## Role / responsibility
+- 提供全域入口、任務主線與治理鏈路索引，統一各角色語義對位。
+
+## Upstream
+- [[01_System/MUSE_PROTO|MUSE_PROTO]]
+- [[06_Ops/Ops - Wiki Page Type Contracts|Wiki Page Type Contracts]]
+
+## Downstream
+- [[00_Home/README_Product|README_Product]]
+- [[00_Home/README_Agent|README_Agent]]
+- [[00_Home/README_Contributor|README_Contributor]]
+
+## Related modules / files
+- [Source: 01_System/MUSE_PROTO.md]
+- [Source: 05_Protocols/Protocol - CLI Drift Matrix.md]
+- [Source: 00_Home/README_Product.md]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- Governance 與 runtime route 能否共用單一「健康閾值」而非分層指標，避免重複解讀？

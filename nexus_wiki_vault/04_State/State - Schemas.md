@@ -4,10 +4,11 @@ aliases:
 - Task Status Enum
 - State Schemas
 confidence: high
-last_compiled: 2026-04-21
+last_compiled: '2026-05-06'
 owner: agent
 related_pages:
-- '[[16_STATE_LIFECYCLE_AND_METABOLISM_PRUNING]]'
+- '[[04_State/State - Lifecycle.md]]'
+- '[[06_Ops/Ops - Acceptance and Release.md]]'
 source_of_truth: nexus/orchestrator/task_contract.py
 status: hardened
 tags:
@@ -25,10 +26,34 @@ version_scope:
 # State - Schemas (v26 Pydantic Enforced)
 
 ## One-sentence summary
-本頁集中說明 Nexus 系統內所有 `Task` 相關的 Pydantic 契約數據結構與嚴格的狀態轉移 (State Transition) 規約。
+本頁集中說明 Nexus 系統任務狀態契約與狀態轉移邏輯，並將其作為交付阻斷依據。
+
+## Role / responsibility
+- 定義 `Task` 相關的狀態欄位與轉移規範。
+- 提供跨模組共用的可驗證狀態邊界。
+
+## Upstream
+- `nexus/orchestrator/task_contract.py`。
+- `06_Ops/Ops - Closeout Hard Gate.md` 的完成條件。
+
+## Downstream
+- `04_State/State - Lifecycle.md`：生命週期文件對齊。
+- `06_Ops/Ops - Acceptance and Release.md`：交付決策引用狀態結構。
+
+## Related modules / files
+- `nexus/orchestrator/task_contract.py`
+- `nexus/orchestrator/task_state_transition.py`
+- `tests/nexus/orchestrator/test_task_contract.py`
+
+## Source notes
+- 本頁內容沿用現行 task contract 架構與轉移限制整理。[Source: nexus/orchestrator/task_contract.py]
+
+## Open questions / conflicts
+- [ ] 是否將 `FAILED` 與 `REJECTED` 分離為不同恢復策略類型？
+- [ ] 新增 `TEMP_FAILSAFE` 是否會影響 closeout 驗證流程？
 
 ## 🛡️ TaskStatus 實體枚舉 (Enums)
-所有的 `Task` 實體必須具備以下精確狀態：
+所有 `Task` 實體必須具備以下精確狀態：
 
 | Status | Category | Description |
 | :--- | :--- | :--- |
@@ -45,7 +70,7 @@ version_scope:
 系統透過 `TaskStateTransition.validate_transition` 強制執行物理阻斷：
 - **合法**: `CREATED -> ASSIGNED -> IN_PROGRESS`。
 - **非法**: 禁止 `CREATED -> INTEGRATED` (繞過審計)。
-- **Fail-Safe**: 偵測到非法轉移時，物理拋出 `ValueError`。
+- **Fail-Safe**: 偵測到非法轉移時，拋出 `ValueError`。
 
----
-Back to [[System Overview]]
+## Link to System
+[[System Overview]]

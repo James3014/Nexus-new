@@ -12,7 +12,30 @@ title: Module - Router Decision Flow
 # Module - Router Decision Flow (v26 Hardened)
 
 ## One-sentence summary
-本頁解析 Nexus `SkillsRouter` 的決策邏輯，詳述其如何結合「領地防火牆」、「計費閘道」與「MSA 雙模檢索」來引導 Agent 任務。
+本頁解析 `SkillsRouter` 的決策邏輯，描述其如何結合預審、授權與搜尋策略驅動路由決定。 [Source: nexus/core/router.py]
+
+## Role / responsibility
+- 定義路由決策流程與保護性檢查順序，確保每個任務都有可回放的流程邏輯。 [Source: nexus/core/router.py]
+- 對上游 Orchestrator 提供模式切換與結果標註。 [Source: nexus/core/orchestrator.py]
+
+## Upstream
+- `nexus/core/orchestrator.py` 提供主循環節點與異常回退策略。 [Source: nexus/core/orchestrator.py]
+- `nexus/core/state_contracts.py` 提供狀態欄位一致性。 [Source: nexus/core/state_contracts.py]
+
+## Downstream
+- `Module - Core Orchestrator` 使用本決策結果推進任務執行。 [Source: 02_Modules/Module - Core Orchestrator.md]
+- 能力路由 smoke 以本頁規格為預期行為對照。 [Source: scripts/ops/capability_route_smoke.py]
+
+## Related modules / files
+- `nexus/core/router.py`: 路由核心實作。 [Source: nexus/core/router.py]
+- `nexus/core/orchestrator.py`: 執行序列協調。 [Source: nexus/core/orchestrator.py]
+- `nexus/services/context_crystal.py`: context 化輸入資料。 [Source: nexus/services/context_crystal.py]
+
+## Source notes
+- 本流程源於 `nexus/core/router.py` 的輸入輸出和路由分支實作。 [Source: nexus/core/router.py]
+
+## Open questions / conflicts
+- [ ] 是否要將計費與領地授權結果加入 evidence receipt 的必帶欄位。 [Source: nexus/core/router.py]
 
 ## ⚙️ 決策流程 (The Routing Process)
 
@@ -24,7 +47,7 @@ title: Module - Router Decision Flow
 - 狀態非 `active` 則回傳 `BLOCKED`。
 
 ### Step 3: 領地授權 (Firewall Authorization)
-- 鑑定當前 `active_domain` (如 Q1_Critical_Core)。
+- 鑑定當前 `active_domain`（如 `Q1_Critical_Core`）。
 - 物理阻斷非該領地允許的技能調用。
 
 ### Step 4: 雙模檢索 (Dual-Mode Search)
@@ -37,3 +60,5 @@ title: Module - Router Decision Flow
 
 ---
 **[Source: nexus/core/router.py]**
+
+[[System Overview]]

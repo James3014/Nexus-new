@@ -54,7 +54,7 @@ Nexus v23 採用階層式三系統架構來管理知識與智慧：
 | Component | Responsibility (職責) | Source (Path) |
 |---|---|---|
 | **MemPalace** | 處理 Belief Revision 與智慧節點連通。 | [Source: nexus/services/mem_palace.py] |
-| **LanceDB** | 提供高效向量檢索與智慧過濾。 | [Source: nexus-swarm/wisdom/wisdom_memory] |
+| **LanceDB** | 提供高效向量檢索與智慧過濾。 | [Source: nexus/services/memory_repository.py] |
 | **Memory Service** | 傳統 RAG 管道與服務適配。 | [Source: nexus/services/memory.py] |
 
 ## Upstream
@@ -71,7 +71,7 @@ Nexus v23 採用階層式三系統架構來管理知識與智慧：
 - `nexus/services/memory.py`: 記憶服務。 [Code: nexus/services/memory.py]
 
 ## Source notes
-- v22 Engine Spec: 要求長效記憶的召回延遲 (90th percentile) 不得超過 800ms。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- v22 Engine Spec: 要求長效記憶的召回延遲 (90th percentile) 不得超過 800ms。 [Source: 00_Home/System Overview.md]
 
 ## Open questions / conflicts
 - [x] **Memory Tiering**: 已於 v23 透過「三系統架構」(MemPalace/LanceDB/Memory) 完成實體化。

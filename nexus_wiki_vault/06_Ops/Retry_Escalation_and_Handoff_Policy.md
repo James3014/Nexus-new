@@ -14,6 +14,29 @@ title: Ops - Retry Escalation and Handoff Policy
 ## One-sentence summary
 本頁定義 Nexus 在任務失敗時的「自癒重試」與「人工移交」分流政策，確保機群在極限狀態下具備安全退場機制。
 
+## Role / responsibility
+- 規範任務失敗時的重試與移交邊界，避免任務陷入無效循環。 [Source: nexus/core/exit_codes.py]
+- 將失敗證據封裝成可稽核單位，供運維與合規查核。 [Source: scripts/ops/ci_gate.py]
+
+## Upstream
+- `nexus/core/exit_codes.py` 定義失敗分類與輸入邏輯。 [Source: nexus/core/exit_codes.py]
+- `06_Ops/Ops - Acceptance and Release.md` 規範 cold-start 與阻斷策略。 [Source: 06_Ops/Ops - Acceptance and Release.md]
+
+## Downstream
+- 影響 `closeout` 與 `nexus:acceptance` 的人工移交觸發。 [Source: scripts/ops/ci_gate.py]
+- 回填到 `06_Ops/Ops - Learning Closure Matrix.md` 形成防再發知識。 [Source: 06_Ops/Ops - Learning Closure Matrix.md]
+
+## Related modules / files
+- `nexus/core/exit_codes.py`: 失敗分類定義。 [Source: nexus/core/exit_codes.py]
+- `scripts/ops/ci_gate.py`: 任務退出態流程與阻斷規則。 [Source: scripts/ops/ci_gate.py]
+- `tests/ops/test_closeout_guard.py`: 人機移交回退測試。 [Source: tests/ops/test_closeout_guard.py]
+
+## Source notes
+- 依據 `exit_codes` 實作整理對應門檻。 [Source: nexus/core/exit_codes.py]
+
+## Open questions / conflicts
+- [ ] `ESCALATED` 是否需要加入自動降級窗口限制以保護成本。 [Source: nexus/core/exit_codes.py]
+
 ## 📊 任務分流政策 (Decision Matrix)
 
 | Exit Code | Classification | Retry Policy (重試) | Handoff Action (移交) |
@@ -37,3 +60,5 @@ title: Ops - Retry Escalation and Handoff Policy
 
 ---
 **[Source: nexus/core/exit_codes.py]**
+
+[[System Overview]]

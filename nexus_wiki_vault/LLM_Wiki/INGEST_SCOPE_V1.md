@@ -1,3 +1,18 @@
+---
+title: LLM_Wiki INGEST_SCOPE_V1
+type: ops
+status: active
+version_scope: v1.0
+owner: agent
+confidence: high
+last_compiled: 2026-04-21
+source_of_truth: LLM_Wiki/INGEST_SCOPE_V1.md
+tags:
+  - llm-wiki
+  - ingest
+  - scope
+---
+
 # LLM_Wiki INGEST_SCOPE_V1
 版本: v1.0
 狀態: Draft for review（只定規則，不搬檔）
@@ -66,3 +81,33 @@
 - 建立 LLM_Wiki/_meta/INGEST_QUEUE_PHASE_A.md（只列候選，不寫內容）
 - 建立 LLM_Wiki/_meta/BATCH_A1_MANIFEST.md（平衡配額，不單一子樹偏斜）
 - 先跑 restricted + denylist lint，產生第一版 lint 報告
+
+## One-sentence summary
+以三層處理（排除、隔離、蒸餾進入）定義 LLM_Wiki 的可持續 ingest 邊界。 [Source: LLM_Wiki/INGEST_SCOPE_V1.md]
+
+## Role / responsibility
+- 管理 LLM_Wiki 來源收斂規則，避免非規範內容進入主知識庫。 [Source: LLM_Wiki/INGEST_SCOPE_V1.md]
+- 保持可審核、可追蹤、可回溯的 ingest 範圍。 [Source: LLM_Wiki/INGEST_SCOPE_V1.md]
+
+## Upstream
+- **[LLM_Wiki/EXCLUDE_RULES](EXCLUDE_RULES.md)**: 具體排除規則。 [Source: LLM_Wiki/EXCLUDE_RULES.md]
+- **[Reference/Role_Guides/Expert_Guide](../Reference/Role_Guides/Expert_Guide.md)**: 人工審核規則對齊。 [Source: Reference/Role_Guides/Expert_Guide.md]
+
+## Downstream
+- **[LLM_Wiki/EXCLUDE_RULES](EXCLUDE_RULES.md)**: 同步變更後續門檻。 [Source: LLM_Wiki/EXCLUDE_RULES.md]
+- **[06_Ops/Ops - Wiki Sync Check](../06_Ops/Ops - Wiki Page Type Contracts.md)**: 管理規則變更映射。 [Source: 06_Ops/Ops - Wiki Page Type Contracts.md]
+
+## Related modules / files
+- `LLM_Wiki/EXCLUDE_RULES.md`
+- `scripts/ops/wiki_linter.py`
+- `scripts/ops/wiki_coverage_audit.py`
+
+## Source notes
+- 入口規範依本頁與對應排除規則文件維護。 [Source: LLM_Wiki/INGEST_SCOPE_V1.md]
+
+## Open questions / conflicts
+- [ ] 是否要將 `workspace/obsidian` 的變更以增量而非全量方式同步？
+
+**[Source: LLM_Wiki/INGEST_SCOPE_V1.md]**
+
+[[System Overview]]

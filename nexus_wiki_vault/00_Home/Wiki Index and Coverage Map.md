@@ -1,3 +1,16 @@
+---
+aliases: '[Wiki Index and Coverage Map, Home Index]'
+confidence: high
+last_compiled: '2026-05-06'
+owner: agent
+source_of_truth: compiled-wiki
+status: active
+tags: '[home, index, governance]'
+title: Wiki Index and Coverage Map
+type: home
+version_scope: '[v30]'
+---
+
 # 🗺️ Nexus Wiki Index & Coverage Map (v30.3 Final)
 **[PHYSICAL_STATUS: STRUCTURE_FROZEN | VERSION_V30.3]**
 
@@ -44,3 +57,29 @@
 
 ---
 **[NEXUS v30.3 IDENTITY: STRUCTURE-FROZEN | SSOT]**
+
+## One-sentence summary
+這是 Nexus Wiki 的主索引與 coverage 對位頁，提供入口、任務主線與目錄對位的整體導航。
+
+## Role / responsibility
+- 導向各角色與任務線，維持文件結構一致性與導覽可信度。
+
+## Upstream
+- [[System Overview]]
+- [[01_System/System - Unknowns and Conflicts|System - Unknowns and Conflicts]]
+
+## Downstream
+- [[00_Product/User Stories|User Stories]]
+- [[99_Schema/Page_Version_Matrix|Page Maturity Matrix]]
+- [[08_Diffs/Code_to_Wiki_Alignment_Matrix|Code-to-Wiki Alignment]]
+
+## Related modules / files
+- [Source: 90_Sources/Source - Coverage Heatmap.md]
+- [[00_Home/README_Product|README_Product]]
+- [[05_Protocols/Protocol - CLI Drift Matrix|Protocol - CLI Drift Matrix]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 與 00_Product 的長尾頁面索引是否應該同步列入以避免 dead-link 機制風險？

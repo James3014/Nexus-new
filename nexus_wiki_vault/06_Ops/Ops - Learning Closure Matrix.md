@@ -30,7 +30,7 @@ version_scope:
 # Ops - Learning Closure Matrix
 
 ## One-sentence summary
-本頁將常見錯誤類型映射到防再發策略與 CI 檢查點，確保「發生一次就學會一次」，形成可驗證的治理閉環。 [Source: .nexus/reports/wiki_drift_report.json]
+本頁將常見錯誤類型映射到防再發策略與 CI 檢查點，確保「發生一次就學會一次」，形成可驗證的治理閉環。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]
 
 ## Role / responsibility
 - **錯誤歸因**: 固化問題分類，避免每次重做 root cause。
@@ -53,8 +53,8 @@ version_scope:
 | X-Ray observer scan stall on legacy input | `XRayObserver("path")` 以字串傳入時被逐字元掃描，導致測試/巡檢看似卡死 | Observer 入口必須接受 `str | list[str]` 並在單路徑模式保持舊版 source 格式，避免破壞舊契約 | `pytest tests/test_xray_integration.py -vv` |
 
 ## Upstream
-- `.nexus/reports/wiki_drift_report.json`: 漂移訊號來源。 [Source: .nexus/reports/wiki_drift_report.json]
-- `.nexus/reports/wiki_truth_claims_report.json`: 真值校驗訊號來源。 [Source: .nexus/reports/wiki_truth_claims_report.json]
+- `06_Ops/Ops - Wiki Drift Audit.md`: 漂移訊號來源。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]
+- `06_Ops/Ops - Learning Closure Matrix.md`: 真值校驗訊號來源。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]
 
 ## Downstream
 - `[Ops - Governance SLO Dashboard](Ops - Governance SLO Dashboard.md)`: 聚合趨勢與告警。

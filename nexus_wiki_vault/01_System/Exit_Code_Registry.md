@@ -39,3 +39,25 @@ title: System - Exit Code Registry
 
 ---
 **[Source: nexus/core/exit_codes.py]**
+
+## Role / responsibility
+- 提供單一定義與門禁行為準則，讓運行時與 CI 對退出語義保持一致。
+
+## Upstream
+- [[01_System/Errors_Enum|Errors Enum]]
+- [[06_Ops/Ops - Acceptance and Release|Acceptance and Release]]
+
+## Downstream
+- [[06_Ops/Ops - Closeout Hard Gate|Closeout Hard Gate]]
+- [[07_Compliance/Governance - Capability Gate and Tool Isolation|Capability Gate and Tool Isolation]]
+
+## Related modules / files
+- [Source: nexus/core/exit_codes.py]
+- [Source: scripts/engine/nexus_cli.py]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 是否需要將 `ESCALATED` 分離為可恢復與不可恢復兩層以降低運維成本？

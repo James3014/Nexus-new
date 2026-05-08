@@ -37,6 +37,30 @@ version_scope:
 ## One-sentence summary
 本頁定義 Nexus 三系統（LanceDB / Memory / MemPalace）與技能選取、學習回寫之間的完整閉環資料流，是 Phase 13 Autonomic Routing Intelligence 的架構存根。
 
+## Role / responsibility
+- 將技能推薦、記憶檢索與信念約束整合為單一路徑，並回寫學習閉環。 [Source: nexus/core/context_hub.py]
+- 保持 `finalize_learning_loop` 對 `SkillRegistry` 與 mem-palace 的結果一致性。 [Source: nexus/core/context_hub.py]
+
+## Upstream
+- `Module - Memory Pipeline Deep Dive`、`Module - Intelligence and Context Core` 提供知識與上下文基礎。 [Source: 02_Modules/Module - Memory Pipeline Deep Dive.md]
+- `Module - Policy and Learning Governance` 提供治理約束框架。 [Source: 02_Modules/Module - Policy and Learning Governance.md]
+
+## Downstream
+- 回寫結果供 `Module - Engine Service Registry` 與 `Module - Core Orchestrator` 取用。 [Source: 02_Modules/Module - Engine Service Registry.md]
+- 影響路由品質指標與 route smoke 的實證資料。 [Source: scripts/ops/capability_route_smoke.py]
+
+## Related modules / files
+- `nexus/core/context_hub.py`: 主要上下文組裝與候選產生。 [Source: nexus/core/context_hub.py]
+- `nexus/services/mem_palace.py`: 信念約束擷取。 [Source: nexus/services/mem_palace.py]
+- `nexus/learning/skill_registry.py`: 技能勝率與偏好更新。 [Source: nexus/learning/skill_registry.py]
+
+## Source notes
+- 本頁以 `context_hub.py`、`learning/skill_registry.py`、`mem_palace.py` 為主證據。 [Source: nexus/core/context_hub.py]
+
+## Open questions / conflicts
+- [ ] 技能勝率與信念 TTL 覆蓋率是否需提升，避免長期偏差積累。 [Source: nexus/core/context_hub.py]
+- [ ] 若 `nexus/learning/skill_registry.py` 介面改版，是否同步更新本頁映射。 [Source: nexus/learning/skill_registry.py]
+
 ---
 
 ## 設計動機 (Why)

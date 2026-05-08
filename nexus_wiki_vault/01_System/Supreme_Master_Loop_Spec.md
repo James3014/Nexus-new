@@ -4,6 +4,7 @@ confidence: high
 last_compiled: '2026-04-20'
 owner: agent
 status: production
+type: system
 tags: '[core, architecture, loop]'
 title: Supreme Master Loop Specification
 ---
@@ -50,3 +51,28 @@ Supreme Master Loop 已進入 **Production** 階段。它將開發與治理統�
 
 ---
 **[Source: nexus_wiki_vault/01_System/Supreme_Master_Loop_Spec.md]**
+
+## One-sentence summary
+本頁定義 Supreme Master Loop 的 P-X-D-R-A-C 執行骨架，作為系統治理、執行與驗收的一致控制面。
+
+## Role / responsibility
+- 固定主循環邊界，將調度、執行、審計與結案流程對齊到可驗證規格。
+
+## Upstream
+- [[01_System/MUSE_PROTO|MUSE_PROTO]]
+- [[01_System/Errors_Enum|Errors Enum]]
+
+## Downstream
+- [[01_System/System Relationship and Dependency Graph|System Relationship and Dependency Graph]]
+- [[06_Ops/Ops - CI Failure Playbook|CI Failure Playbook]]
+
+## Related modules / files
+- [Source: scripts/engine/nexus_cli.py]
+- [Source: nexus/core/campaign_general.py]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- P 與 X 的邊界是否需要額外加入「工具溝通超時」的硬件性檢核？

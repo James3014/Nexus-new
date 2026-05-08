@@ -31,8 +31,32 @@ version_scope: '[v17.1, v22, v23]'
 記錄 Nexus 治理架構的所有重大變更、審計硬化與契約遷移歷史。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
 
 ## Role / responsibility
+- 維護治理變更記錄，保證技術決策與風險緩解可追溯。 [Source: scripts/ops/ci_gate.py]
+
+## Upstream
+- `05_Protocols/Protocol - Evidence Map.md`：治理協定輸入來源。 [Source: 05_Protocols/Protocol - Evidence Map.md]
+
+## Downstream
+- 供 `06_Ops/Ops - Closeout Hard Gate.md` 與發佈門禁參考。 [Source: 06_Ops/Ops - Closeout Hard Gate.md]
+- 供 `06_Ops/Ops - Acceptance and Release.md` 作為歷史背景。 [Source: 06_Ops/Ops - Acceptance and Release.md]
+
+## Related modules / files
+- `scripts/ops/ci_gate.py`: governance 變更驗證入口。 [Source: scripts/ops/ci_gate.py]
+- `03_Flows/Flow - PXDRAC Runtime.md`: 運行策略參考。 [Source: 03_Flows/Flow - PXDRAC Runtime.md]
+
+## Source notes
+- 變更歷史依據來自實際腳本審計紀錄與 CI 驗證。 [Source: scripts/ops/ci_gate.py]
+
+## Open questions / conflicts
+- [ ] 是否新增「失效/回滾」欄位標準化輸出。 [Source: scripts/ops/ci_gate.py]
+
+## Role / responsibility
 - **歷史溯源**: 提供系統治理邏輯演化的完整 Traceability。 [Source: scripts/ops/ci_gate.py]
 - **風險管理**: 記錄每次變更的風險等級與回滾計畫，確保治理硬化的穩定性。
+
+---
+
+[[System Overview]]
 
 ## Governance Change History (治理變更歷史)
 

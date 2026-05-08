@@ -1,3 +1,18 @@
+---
+title: Flow - Recursive Auto-Repair
+type: flow
+status: active
+version_scope: v23.8.1
+owner: agent
+confidence: high
+last_compiled: 2026-03-31
+source_of_truth: scripts/ops/autonomous_repair_loop.py
+tags:
+  - flow
+  - auto-repair
+  - ci-gate
+---
+
 # Flow - Recursive Auto-Repair
 
 ## 🌀 核心流程圖 (State Machine)
@@ -54,7 +69,38 @@ python scripts/ops/ci_gate.py --auto-heal
 python scripts/ops/autonomous_repair_loop.py
 ```
 
+## One-sentence summary
+本流程定義 CI 失敗後以多輪修復、回滾與重構反思為主軸的遞迴自我修正序列。 [Source: scripts/ops/autonomous_repair_loop.py]
+
+## Role / responsibility
+- 提供失敗後的自動修復策略與回滾節奏。 [Source: scripts/ops/autonomous_repair_loop.py]
+- 限制 unsafe 動作，保留新建檔案與可追溯痕跡。 [Source: scripts/ops/ci_gate.py]
+
+## Upstream
+- **[scripts/ops/autonomous_repair_loop.py](../scripts/ops/autonomous_repair_loop.py)**: 流程執行入口。 [Source: scripts/ops/autonomous_repair_loop.py]
+- **[06_Ops/Ops - CI Failure Playbook](../06_Ops/Ops - CI Failure Playbook.md)**: 啟動條件與處置參考。 [Source: 06_Ops/Ops - CI Failure Playbook.md]
+
+## Downstream
+- **[06_Ops/Ops - Closeout Hard Gate](../06_Ops/Ops - Closeout Hard Gate.md)**: 修復結果回報交付。 [Source: 06_Ops/Ops - Closeout Hard Gate.md]
+- **[06_Ops/Ops - Governance SLO Dashboard](../06_Ops/Ops - Governance SLO Dashboard.md)**: 監控迭代失敗率。 [Source: 06_Ops/Ops - Governance SLO Dashboard.md]
+
+## Related modules / files
+- `scripts/ops/autonomous_repair_loop.py`
+- `nexus/orchestrator/pipeline.py`
+- `06_Ops/Ops - CI Failure Playbook.md`
+
+## Source notes
+- 本流程依據自修復 loop 與 ci_gate 交互行為整理。 [Source: scripts/ops/autonomous_repair_loop.py]
+
+## Open questions / conflicts
+- [ ] 第 4-5 輪仍可否加入架構改造分支？
+- [ ] 需不需要加入 cross-scope checkpoint 保存快照，降低重試副作用？
+
 [METADATA]
 Status: ACTIVE
 Version: v23.8.1
 Module: scripts/ops/autonomous_repair_loop.py
+
+**[Source: scripts/ops/autonomous_repair_loop.py]**
+
+[[System Overview]]

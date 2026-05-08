@@ -54,9 +54,9 @@ version_scope:
 - 提供每個責任區對應的最小驗證命令。 [Source: scripts/ops/ci_gate.py]
 
 ## Upstream
-- 架構層定義來自 `[System Overview](../00_Home/System Overview.md)`。 [Source: nexus_wiki_vault/00_Home/System Overview.md]].md]
-- 流程層定義來自 `[Flow - PXDRAC Runtime](../03_Flows/Flow - PXDRAC Runtime.md)`。 [Source: nexus_wiki_vault/03_Flows/Flow - PXDRAC Runtime.md]].md]
-- 治理約束來自 `[[Ops - CI/CD Promotion Gate]]`。 [Source: nexus_wiki_vault/06_Ops/Ops - CI/CD Promotion Gate.md]].md]
+- 架構層定義來自 `[System Overview](../00_Home/System Overview.md)`。 [Source: 00_Home/System Overview.md]
+- 流程層定義來自 `[Flow - PXDRAC Runtime](../03_Flows/Flow - PXDRAC Runtime.md)`。 [Source: 03_Flows/Flow - PXDRAC Runtime.md]
+- 治理約束來自 `[[Ops - CI/CD Promotion Gate]]`。 [Source: 06_Ops/Ops - CI/CD Promotion Gate.md]
 
 ## Downstream
 - 新 Agent 可以先定責，再落到具體檔案閱讀與修改。 [Source: scripts/nexus_cli.py]
@@ -72,7 +72,7 @@ version_scope:
 - `nexus/core/policy_manager.py`: episode/policy 記錄與回注。 [Source: nexus/core/policy_manager.py]
 - `nexus/core/memory/ingest.py`: 任務結果轉 episodic memory。 [Source: nexus/core/memory/ingest.py]
 - `nexus/core/phase_health.py`: phase health 計算 facade。 [Source: nexus/core/phase_health.py]
-- `.nexus/`、`manifest.json`: runtime 工件與最終封裝索引。 [Source: manifest.json]
+- `.nexus/release_manifest.json`: runtime 封裝索引與發版紀錄。 [Source: .nexus/release_manifest.json]
 
 ## Source notes
 - `scripts/engine/nexus_cli.py` 使用 Click 註冊 `nexus:*` 命令族，並在啟動時執行 protocol gate。 [Source: scripts/engine/nexus_cli.py]
@@ -83,8 +83,7 @@ version_scope:
 
 ## [LanceDB](Module - Memory Repository.md) implementation boundary (as-is vs proposal)
 - **已落地（repo 可驗證）**: `.nexus/memory/memory_index.[lancedb](Module - Memory Repository.md)`、`nexus/services/memory_indexer.py`、`nexus_swarm/nexus_swarm/wisdom/lancedb_store.py`。 [Source: nexus/services/memory_indexer.py]
-- **已落地（Desk 表徵）**: `nexus-desk/src-tauri/src/main.rs` 目前有 `phase_health_source` 欄位與 Desk view model。 [Source: nexus-desk/src-tauri/src/main.rs]
-- **未落地（提案/外部文件）**: `scripts/embed_run.py`、`war_armor` table、`ArmorComparison.tsx` 目前不在本 repo。 [Source: nexus_wiki_vault/90_Sources/Source - Nexus Anti Registry.md]].md]
+- **未落地（提案/外部文件）**: `ArmorComparison.tsx` 目前不在本 repo，需改以 runtime 來源替代。 [Source: 90_Sources/Source - Nexus Anti Registry.md]
 - **治理規則**: 未落地提案僅可放在來源登記或 roadmap，不可寫成核心真值。 [Source: scripts/ops/wiki_linter.py]
 
 ## Open questions / conflicts

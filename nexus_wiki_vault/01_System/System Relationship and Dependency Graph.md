@@ -53,3 +53,28 @@ graph TD
 
 ---
 Back to [[System Overview]]
+
+## One-sentence summary
+系統關係圖定義 L4-L3-L2 的核心依賴邊界與事件流向，作為架構變更的對位參考。
+
+## Role / responsibility
+- 提供組件邊界、依賴方向與監控對位的可讀圖譜，降低跨層變更風險。
+
+## Upstream
+- [[01_System/Code_Ownership_Matrix|Code Ownership Matrix]]
+- [[01_System/Supreme_Master_Loop_Spec|Supreme_Master_Loop_Spec]]
+
+## Downstream
+- [[06_Ops/Ops - Architecture Decision Records|Architecture Decision Records]]
+- [[05_Protocols/Protocol - Master Loop|Protocol - Master Loop]]
+
+## Related modules / files
+- [Source: compiled-wiki]
+- [Source: 02_Modules/Module - Core Orchestrator.md]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- Graph 邊界是否需要補上事件一致性保證的「回寫順序」欄位？

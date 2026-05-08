@@ -1,3 +1,16 @@
+---
+aliases: '[README_Product, Product Landing]'
+confidence: high
+last_compiled: '2026-05-06'
+owner: product
+source_of_truth: compiled-wiki
+status: active
+tags: '[home, product, position]'
+title: README Product
+type: home
+version_scope: '[v30]'
+---
+
 # 🚀 Nexus: 具備自我治理能力的 Agent 作業系統
 **[產品定位：企業級 AI 代理安全與合規入口]**
 
@@ -20,3 +33,28 @@ Nexus 是專為自主代理 (Autonomous Agents) 打造的治理環境。我們�
 
 ---
 **[NEXUS PRODUCT: THE HARD-SHELL FOR SOFT INTELLIGENCE]**
+
+## One-sentence summary
+產品導覽頁定義 Nexus 的價值主張、技術防線與可交付成效，支援外部與內部需求對齊。
+
+## Role / responsibility
+- 對齊產品敘事、技術底層與治理承諾，作為外部對話基礎。
+
+## Upstream
+- [[System Overview]]
+- [[01_System/MUSE_PROTO|MUSE_PROTO]]
+
+## Downstream
+- [[00_Home/README_Agent|README_Agent]]
+- [[05_Protocols/Protocol - Product Trust|Protocol - Product Trust]]
+
+## Related modules / files
+- [Source: 05_Commercial/Go-to-Market.md]
+- [Source: 06_Ops/Ops - CI Failure Playbook.md]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 產品敘事中「1-bit Core」與實際可驗證指標是否需更新對齊最新 baseline？

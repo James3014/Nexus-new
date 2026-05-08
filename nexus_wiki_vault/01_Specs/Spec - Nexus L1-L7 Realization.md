@@ -1,31 +1,66 @@
-# 🧬 Spec - Nexus L1-L7 Realization
+---
+aliases:
+- Nexus L1-L7 Realization
+- L1-L7 Spec
+confidence: high
+last_compiled: '2026-05-06'
+owner: agent
+related_pages:
+- '[[01_System/Supreme_Master_Loop_Spec.md]]'
+source_of_truth: nexus/core/orchestrator.py
+status: draft
+tags:
+- spec
+- realization
+- architecture
+title: Spec - Nexus L1-L7 Realization
+type: spec
+version_scope:
+- v24
+- v26
+---
 
-## 1. 概述 (Overview)
-本文件定義 Nexus L1~L7 核心模組的真實化 (Realization) 標準，旨在消除模板化與硬編碼邏輯，實現資料驅動的任務拆解、可攜式技能組裝與物理化驗收。
+# Spec - Nexus L1-L7 Realization
 
-## 2. 核心變更 (Core Changes)
+## One-sentence summary
+定義 L1~L7 核心模組的行為實現標準，將抽象原則轉為可驗證的交付契約。
 
-### 2.1 L4: 動態 DAG 拆解 (CampaignGeneral)
-- **變更**: 將原本固定的 6 節點拆解邏輯改為啟發式關鍵字驅動。
-- **支援關鍵字**: `refactor` (4 節點), `fix` (3 節點), `bug`, `doc`, `wiki`, `security`, `feature`, `system`。
-- **Fallback**: 當無匹配關鍵字時，根據意圖長度產生 2~4 個節點。短意圖 (< 15 字) 固定為 2 節點。
-- **穩定性**: 支持 `seed` 確定性輸出與基於 MD5 雜湊的變異。
-- **Metadata**: 包含 `fallback_used`, `dag_score` 與 `stability_tag`。
+## Role / responsibility
+- 落實各層級責任與資料契約。
+- 保證實現路徑可被 acceptance、ci_gate 與 evidence pipeline 覆蓋。
 
-### 2.2 L3: 可攜式技能組裝 (SkillAssembler)
-- **變更**: 移除 `/Users/jameschen/` 等本機絕對路徑，改用 `project_root` 與環境變數。
-- **命名**: 使用 `SHA256(intent)[:8]` 作為穩定雜湊名稱，取代不穩定的 `hash()`。
-- **Metadata**: 寫入 `SKILL.md` 的 YAML 區塊，包含原始意圖、缺口原因與建立時間。
+## Upstream
+- `01_System/Supreme_Master_Loop_Spec.md`
+- `06_Ops/Ops - Closeout Hard Gate.md`
 
-### 2.3 L2: 物理化驗收 Gate (CriteriaBuilder)
-- **變更**: 實作 `execute_criteria` 邏輯，能真正呼叫測試 Artifacts。
-- **報表**: 生成機器可讀的 `criteria_report.json`。
-- **整合**: 驗收失敗將直接阻擋 Promote 流程。
+## Downstream
+- `06_Ops/Ops - Artifact Retention and Provenance.md`
+- `06_Ops/Ops - Wiki Page Type Contracts.md`
 
-## 3. 驗證機制 (Verification)
-- **測試包**: `tests/core/test_l1_l4_realization.py`
-- **Gate**: `acceptance-check` + `ci_gate`。
+## Related modules / files
+- `nexus/core/orchestrator.py`
+- `nexus/core/pipeline.py`
+- `nexus/engine/pipeline_outcome.py`
+- `nexus/engine/pipeline_orchestrator.py`
 
-## 4. 未來演化 (Future Evolution)
-- 對接真實的 LLM API 以替換目前的啟發式關鍵字拆解。
-- 實作 L3 技能的沙盒化 JIT 驗證。
+## Source notes
+- 依據系統規格與現有實作邊界定義，非外部規模化需求文檔原文。[Source: 01_System/Supreme_Master_Loop_Spec.md]
+
+## Open questions / conflicts
+- [ ] L3/Skill 組件在跨租戶情境下的隔離邊界是否已足夠。
+- [ ] 是否將 `project_root` 行為改成完全禁止絕對路徑寫入？
+
+## 概述
+本規格定義核心流程的實作落點與驗收準則，涵蓋任務拆解、技能組裝與驗收阻斷。
+
+## 核心變更（摘要）
+- 動態 DAG 拆解改為條件式節點策略。
+- 可攜式技能組裝採用可重現命名與 metadata 記錄。
+- 驗收 gate 直接接入可機械化測試報表。
+
+## 驗證機制
+- 測試包：`tests/core/test_l1_l4_realization.py`
+- Gate：`acceptance-check` + `ci_gate`
+
+## Link to System
+[[System Overview]]

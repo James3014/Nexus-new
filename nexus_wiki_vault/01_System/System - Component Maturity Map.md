@@ -1,3 +1,16 @@
+---
+aliases: '[System Maturity Map, Component Health]'
+confidence: high
+last_compiled: '2026-05-06'
+owner: agent
+source_of_truth: compiled-wiki
+status: active
+tags: '[system, maturity, risk]'
+title: System Component Maturity Map
+type: system
+version_scope: '[v26]'
+---
+
 # 🩺 System Component Maturity & Health Map
 
 ## 📊 成熟度階梯 (Maturity Ladder)
@@ -28,3 +41,27 @@
 
 ---
 **[Source: nexus_wiki_vault/01_System/System - Component Maturity Map.md]**
+
+## One-sentence summary
+組件成熟度地圖定義各模組在穩定度、風險與治理要求上的分層狀態，幫助決策不同變更策略。
+
+## Role / responsibility
+- 指引不同成熟度組件的修改準則與安全閘門。
+
+## Upstream
+- [[01_System/System Relationship and Dependency Graph|System Relationship and Dependency Graph]]
+- [[01_System/Code_Ownership_Matrix|Code Ownership Matrix]]
+
+## Downstream
+- [[05_Governance|Governance]]
+- [[06_Ops/Ops - Closeout Hard Gate|Closeout Hard Gate]]
+
+## Related modules / files
+- [Source: compiled-wiki]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 是否需要將「EVOLVING/EXPERIMENTAL」轉換到可量化閘門數值，便於自動化決策？

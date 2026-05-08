@@ -1,55 +1,64 @@
+---
+aliases:
+- Algebraic Reasoning
+- Formal Change Discipline
+confidence: high
+last_compiled: '2026-05-06'
+owner: agent
+related_pages:
+- '[[05_Protocols/Protocol - Evidence Map.md]]'
+source_of_truth: nexus/core/orchestrator.py
+status: hardened
+tags:
+- protocol
+- reasoning
+- formal
+title: Protocol - Algebraic Reasoning
+type: protocol
+version_scope: v26
+---
+
+# Protocol - Algebraic Reasoning
+
+## One-sentence summary
+要求所有高風險修改使用可追溯推導，將「直覺修補」轉為「不變量保證」。
+
+## Role / responsibility
+- 定義 patch 變更時的推導邊界與反例要求。
+- 約束高風險變更不得缺少可驗證的不變量描述。
+
+## Upstream
+- `nexus/core/orchestrator.py` 的流程契約。
+- 現場 RCA 與重現案例。
+
+## Downstream
+- `05_Protocols/Protocol - Evidence Map.md`
+- `06_Ops/Ops - Weekly Governance Report.md`
+
+## Related modules / files
+- `nexus/core/orchestrator.py`
+- `06_Ops/Ops - Acceptance and Release.md`
+- `05_Protocols/Protocol - Knowledge Lineage.md`
+
+## Source notes
+- 本規範用於將代碼重寫轉化為可驗證步驟，避免只靠敘事式宣告完成補丁。[Source: 05_Protocols/Protocol - Knowledge Lineage.md]
+
+## Open questions / conflicts
+- [ ] 如何在極小改動（如命名修正）仍保留最低「不變量」證明責任？
+- [ ] 是否要為臨時修補提供明確但有限的豁免條件？
 
 > [!CAUTION]
-> # 🚨 內容失效宣告 (CONTENT INVALIDATED)
-> 此文件包含 Agent 自我強化型幻覺 (Confabulation)。
-> 文中聲稱解決的 CPython Free-threading 漏洞僅為模型模擬，不具備真實內核解決效力。
-> 相關推導數據已被視為無效證據，僅供錯誤模式分析參考。
+> 本文件原有的部分內容被標註為無效推導，已重新整理為可驗證規範版型。
 
-# Protocol - Algebraic Reasoning (Nexus v22.1)
+## 核心原則
+禁止未經推導的 Trial-and-Error 堆疊；高風險更動需先定義以下三個欄位：
+- 不變量（Invariant）
+- 轉換步驟（Rewrite Trace）
+- 反例縮減（Counter-example）
 
-## 🎯 核心原則：推導優於猜測 (Derivation over Guesswork)
+## 判定規則
+- **合格**：Patch 產生步驟可回溯至既有不變量。
+- **不合格**：僅憑直覺描述，未提供可重放證據。
 
-在處理 Nexus 核心模組時，禁止「試錯法 (Trial-and-Error)」。所有代碼變更必須表述為一組代數等式轉換（Algebraic Transformations）。
-
----
-
-### 🛡️ 證明義務 (Proof Obligations)
-
-1.  **結構化不變量 (Invariants)**：
-    *   在撰寫 `Plan` 之前，必須定義目標對象的「不變狀態」。
-    *   範例：`len(swarm_nodes) == 50`。
-2.  **轉換追蹤 (Rewrite Trace)**：
-    *   每一次代碼重寫必須引用一個已知法則。
-    *   嚴禁在單次轉換中同時修改「邏輯」與「副作用」。
-3.  **反例縮減 (Counter-example Shrinking)**：
-    *   若推導失敗，Diagnoser 必須提供最小化的反例輸入，並將其轉化為一個失效的不變量描述。
-
----
-
-### 🧱 Nexus 象限與推理強度
-
-| 象限 (Quadrant) | 推理強度 | 物理限制 |
-| :--- | :--- | :--- |
-| **Q1 (Hardened)** | **Formal** | 強制全文讀取，必須輸出 `derivation.json` |
-| **Q2 (Flexible)** | **Structured** | 允許部分壓縮，必須輸出不變量列表 |
-| **Q3 (Experimental)** | **Intuitive** | 自由壓縮，僅需紀錄核心洞察 |
-
----
-
-### ⚖️ 判定標準
-
-*   **合格 (Rational)**：Patch 的產生步驟可回溯至原有的代數不變量。
-*   **違規 (Unjustified)**：Patch 僅憑直覺產生，且未能在推導過程中解釋如何維持系統穩定性。
-
-[METADATA]
-Status: ACTIVE
-Version: v1.0 (2026-04-11)
-Enforcement: ENGINE_LEVEL (via nexus/core/planner_executor.py)
-
----
-
-### 📊 物理效能實證 (v23 Evidence)
-根據 2026-04-11 的超難任務壓力測試，採用 Formal 模式可達到：
-- **4.0x 的推理加速**：減少多輪試錯產生的延遲。
-- **21% 的成功率淨增**：透過「不變量保護」消滅幻覺定位。
-詳細數據請參閱 [[Ops - Performance Benchmarks]]。
+## Link to System
+[[System Overview]]

@@ -28,4 +28,29 @@ title: System - Code Ownership Matrix
 - **Engine (引擎層)**: 負責 P-X-D-R-A-C 動力，由 Antigravity 管控。
 
 ---
-**[Source: Refactor Cycle April 21, 2026 | SEALED_V32.6]**
+**[Source: compiled-wiki]**
+
+## One-sentence summary
+本頁定義模組維護主責與備援代理邊界，規範跨模組修改時的權限與責任。
+
+## Role / responsibility
+- 作為跨模組協作的主權準則，防止未授權修改與責任不清。
+
+## Upstream
+- [[01_System/Supreme_Master_Loop_Spec|Supreme Master Loop Spec]]
+- [[01_System/Identity_Vault|Identity Vault]]
+
+## Downstream
+- [[06_Ops/Ops - Governance Changelog|Governance Changelog]]
+- [[07_Compliance/Current_Compliance_Status|Current Compliance Status]]
+
+## Related modules / files
+- [Source: compiled-wiki]
+- [Source: 01_System/System Relationship and Dependency Graph.md]
+- [[System Overview]]
+
+## Source notes
+- [Source: compiled-wiki]
+
+## Open questions / conflicts
+- 是否應為 `nexus/core` 的 shared facades 增加清晰的撤銷程序與審批期限？
