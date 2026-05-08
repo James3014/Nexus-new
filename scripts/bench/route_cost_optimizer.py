@@ -38,6 +38,8 @@ class TaskCostDecision:
     candidate_success_source: str
     candidate_token_source: str
     measured_token_only: bool
+    clean_model_cost_evidence: bool
+    cost_evidence_class: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +62,8 @@ class TaskCostDecision:
             "candidate_success_source": self.candidate_success_source,
             "candidate_token_source": self.candidate_token_source,
             "measured_token_only": self.measured_token_only,
+            "clean_model_cost_evidence": self.clean_model_cost_evidence,
+            "cost_evidence_class": self.cost_evidence_class,
         }
 
 
@@ -115,6 +119,37 @@ def _measured_token_only(row: dict[str, Any]) -> bool:
     return bool(row.get("token_measured", False) and token_status == "measured" and token_source in PROVIDER_TOKEN_SOURCES)
 
 
+def _clean_model_cost_evidence(row: dict[str, Any]) -> bool:
+    if "clean_model_cost_evidence" in row:
+        return bool(row.get("clean_model_cost_evidence", False))
+    source = str(row.get("nexus_winner_source") or "").strip()
+    return bool(
+        _measured_token_only(row)
+        and int(_num(row, "model_calls")) > 0
+        and not _runner_overhead_polluted(row)
+        and source not in LOCAL_SUCCESS_SOURCES
+        and not source.startswith("local_preflight")
+    )
+
+
+def _cost_evidence_class(row: dict[str, Any]) -> str:
+    explicit = str(row.get("cost_evidence_class") or "").strip()
+    if explicit:
+        return explicit
+    if _clean_model_cost_evidence(row):
+        return "clean_model_cost"
+    if _runner_overhead_polluted(row):
+        return "runner_overhead_polluted"
+    source = str(row.get("nexus_winner_source") or "").strip()
+    if int(_num(row, "model_calls")) <= 0:
+        return "rescue_only_no_model_call" if source in LOCAL_SUCCESS_SOURCES or source.startswith("local_preflight") else "no_model_call"
+    if source in LOCAL_SUCCESS_SOURCES or source.startswith("local_preflight"):
+        return "rescue_only_local_success"
+    if not _measured_token_only(row):
+        return "token_unreliable"
+    return "not_clean_model_cost"
+
+
 def _runner_overhead_polluted(row: dict[str, Any]) -> bool:
     return bool(row.get("runner_overhead_polluted", False))
 
@@ -148,6 +183,8 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         source = str(candidate.get("nexus_winner_source") or "")
         token_source = str(candidate.get("gateway_token_source") or "missing")
         measured_token_only = _measured_token_only(candidate)
+        clean_model_cost_evidence = _clean_model_cost_evidence(candidate)
+        cost_evidence_class = _cost_evidence_class(candidate)
         calls = int(_num(candidate, "model_calls"))
         wall_delta = _pct_delta(candidate_effective_wall, baseline_wall)
         token_delta = _pct_delta(candidate_tokens, baseline_tokens)
@@ -159,10 +196,10 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
             reason = (
                 "candidate wall cost is polluted by runner overhead; rerun inprocess or use uncontaminated cost truth before promotion"
             )
-        elif measured_token_only and wall_delta <= -15.0 and token_delta <= 5.0:
+        elif clean_model_cost_evidence and wall_delta <= -15.0 and token_delta <= 5.0:
             decision = "promote_cost_tune"
             reason = f"verified with wall improvement {abs(wall_delta):.2f}% and token delta {token_delta:.2f}%"
-        elif measured_token_only and token_delta <= -15.0 and wall_delta <= 10.0:
+        elif clean_model_cost_evidence and token_delta <= -15.0 and wall_delta <= 10.0:
             decision = "promote_cost_tune"
             reason = f"verified with token improvement {abs(token_delta):.2f}% and wall delta {wall_delta:.2f}%"
         elif bare_verified and candidate_verified:
@@ -198,6 +235,8 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
                 candidate_success_source=source,
                 candidate_token_source=token_source,
                 measured_token_only=measured_token_only,
+                clean_model_cost_evidence=clean_model_cost_evidence,
+                cost_evidence_class=cost_evidence_class,
             )
         )
     counts: dict[str, int] = {}
@@ -223,6 +262,8 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
                 "candidate_model_calls": item.candidate_model_calls,
                 "candidate_token_source": item.candidate_token_source,
                 "measured_token_only": item.measured_token_only,
+                "clean_model_cost_evidence": item.clean_model_cost_evidence,
+                "cost_evidence_class": item.cost_evidence_class,
                 "candidate_verified": item.candidate_verified,
                 "bare_verified": item.bare_verified,
             }

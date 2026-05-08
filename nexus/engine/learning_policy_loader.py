@@ -78,6 +78,8 @@ def merge_runtime_route_cost_policy(project_root: Path, budget: dict[str, Any] |
     if env_budget:
         merged.update(env_budget)
         return merged
+    if os.environ.get("NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY", "").strip().lower() in {"1", "true", "yes"}:
+        return merged
     runtime_budget = load_route_cost_policy_budget(project_root / DEFAULT_ROUTE_COST_POLICY_PATH)
     if runtime_budget:
         merged.update(runtime_budget)

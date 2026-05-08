@@ -218,6 +218,14 @@ def _classify_token_unreliable_reason(
 
 
 PROVIDER_TOKEN_SOURCES = {"stats", "usage_metadata", "codex_stdout"}
+LOCAL_SUCCESS_SOURCES = {
+    "local",
+    "local_only",
+    "local_hidden_shadow",
+    "local_preflight",
+    "local_deterministic_success",
+    "nexus_tool_success",
+}
 
 
 def _row_has_measured_provider_tokens(row: dict[str, Any]) -> bool:
@@ -284,6 +292,35 @@ def _annotate_benchmark_eligibility(
     row["token_unreliable_reason"] = token_unreliable_reason
     row["provider_token_measured"] = _row_has_measured_provider_tokens(row)
     row["public_cost_evidence"] = bool(row["provider_token_measured"] and row["token_reliable"])
+    success_source = str(row.get("nexus_winner_source") or row.get("source") or "").strip()
+    local_success = bool(
+        success_source in LOCAL_SUCCESS_SOURCES
+        or success_source.startswith("local_preflight")
+        or row["rescue_cost_status"].startswith("local")
+        or bool(row.get("nexus_rescued", False))
+    )
+    clean_model_cost_evidence = bool(
+        model_calls > 0
+        and row["provider_token_measured"]
+        and row["token_reliable"]
+        and not bool(row.get("runner_overhead_polluted", False))
+        and not local_success
+    )
+    if clean_model_cost_evidence:
+        cost_evidence_class = "clean_model_cost"
+    elif bool(row.get("runner_overhead_polluted", False)):
+        cost_evidence_class = "runner_overhead_polluted"
+    elif model_calls <= 0:
+        cost_evidence_class = "rescue_only_no_model_call" if local_success or row["nexus_internal_delivery_valid"] else "no_model_call"
+    elif local_success:
+        cost_evidence_class = "rescue_only_local_success"
+    elif not row["provider_token_measured"] or not row["token_reliable"]:
+        cost_evidence_class = "token_unreliable"
+    else:
+        cost_evidence_class = "not_clean_model_cost"
+    row["local_success_source"] = local_success
+    row["clean_model_cost_evidence"] = clean_model_cost_evidence
+    row["cost_evidence_class"] = cost_evidence_class
     winner_source = str(row.get("nexus_winner_source") or "")
     gateway_error_category = str(row.get("gateway_error_category") or "")
     row["local_fallback_unhelpful"] = bool(
@@ -488,6 +525,12 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
             "avg_tokens": _avg([float(row.get("total_tokens", 0) or 0) for row in eligible]),
             "token_measured_rate": round(len(token_measured) / len(eligible), 4) if eligible else None,
             "provider_token_measured_rate": round(len(provider_token_measured) / len(eligible), 4) if eligible else None,
+            "clean_model_cost_evidence_rate": round(
+                sum(1 for row in eligible if bool(row.get("clean_model_cost_evidence", False))) / len(eligible),
+                4,
+            )
+            if eligible
+            else None,
             "token_reliable_rate": round(len(token_reliable) / len(eligible), 4) if eligible else None,
             "token_unreliable_reasons": sorted(
                 {
@@ -2051,7 +2094,7 @@ def _extract_record(
         "nexus_usage_valid": bool(usage_trace.get("usage_valid", False)),
         "gemini_patch_status": usage_trace.get("gemini_patch_status"),
         "nexus_rescued": bool(usage_trace.get("nexus_rescued", False)),
-        "nexus_winner_source": usage_trace.get("winner_source"),
+        "nexus_winner_source": usage_trace.get("winner_source") or report.get("winner_source") or report.get("source"),
         "pillar_lancedb_active": bool((pillars.get("lancedb", {}) or {}).get("active", False)),
         "pillar_lancedb_hits": int((pillars.get("lancedb", {}) or {}).get("hits", 0) or 0),
         "pillar_memory_active": bool((pillars.get("memory", {}) or {}).get("active", False)),
@@ -2246,13 +2289,26 @@ def _extract_json_payload(raw_output: str) -> dict[str, Any]:
     text = (raw_output or "").strip()
     if not text:
         return {}
+    try:
+        payload = json.loads(text)
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        return payload
+    decoder = json.JSONDecoder()
     brace_positions = [idx for idx, ch in enumerate(text) if ch == "{"]
     for idx in reversed(brace_positions):
         candidate = text[idx:]
         try:
             payload = json.loads(candidate)
         except Exception:
-            continue
+            try:
+                payload, end = decoder.raw_decode(candidate)
+            except Exception:
+                continue
+            trailing = candidate[end:].strip()
+            if trailing and "SyntaxWarning" not in trailing:
+                continue
         if isinstance(payload, dict):
             return payload
     return {}
@@ -3015,6 +3071,8 @@ def run_with_nexus(
             if strict_llm_baseline:
                 args.append("--llm-baseline-required")
     effective_force_flow = force_flow
+    if llm_enabled and strict_llm_baseline and effective_force_flow is None:
+        effective_force_flow = "baseline"
     if llm_enabled and skip_llm_baseline and effective_force_flow is None:
         effective_force_flow = "hyper_sprint"
     if effective_force_flow:
@@ -3027,6 +3085,31 @@ def run_with_nexus(
         os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = str(
             (repo_root / ".nexus" / "config" / f"capability_tuning_{tuning_profile}.json").resolve()
         )
+    bench_env_updates: dict[str, str] = {}
+    if llm_enabled:
+        bench_env_updates.update(
+            {
+                "NEXUS_GEMINI_MODEL_NAME": str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview"),
+                "NEXUS_FORCE_LLM_DESPITE_LEARN_SLO": "1",
+                "NEXUS_GATEWAY_MAX_RETRIES": "1",
+                "NEXUS_GATEWAY_TIMEOUT_SEC": _benchmark_gateway_timeout_sec(
+                    _benchmark_gateway_timeout_for_task(timeout_sec)
+                ),
+                "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "1" if effective_llm_self_heal else "0",
+                "NEXUS_DISABLE_DAYSHIFT_OPTIMIZER": "1",
+            }
+        )
+    if enable_ultra_review_dry_gate:
+        bench_env_updates["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
+    if enable_autoreason_executor:
+        bench_env_updates["NEXUS_AUTOREASON_EXECUTOR"] = "1"
+    if enable_ddtree_executor:
+        bench_env_updates["NEXUS_DDTREE_EXECUTOR"] = "1"
+    bench_env_updates["NEXUS_LLM_CANDIDATE_CAP"] = str(effective_llm_candidate_cap)
+    if route_cost_controls:
+        bench_env_updates["NEXUS_ROUTE_COST_CONTROLS"] = json.dumps(route_cost_controls, ensure_ascii=False, sort_keys=True)
+    env_restore = {key: os.environ.get(key) for key in bench_env_updates}
+    os.environ.update(bench_env_updates)
     runner: CliRunner | None = None
     if runner_mode == "subprocess":
         cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
@@ -3040,24 +3123,8 @@ def run_with_nexus(
         env["NEXUS_MEMORY_AUTO_INIT"] = "0"
         env["NEXUS_FINDINGS_LANCEDB_SYNC"] = "0"
         env["NEXUS_LEARN_CLOSURE_WRITEBACK"] = "0"
-        if enable_ultra_review_dry_gate:
-            env["NEXUS_ULTRA_REVIEW_DRY_GATE"] = "1"
-        if enable_autoreason_executor:
-            env["NEXUS_AUTOREASON_EXECUTOR"] = "1"
-        if enable_ddtree_executor:
-            env["NEXUS_DDTREE_EXECUTOR"] = "1"
-        env["NEXUS_LLM_CANDIDATE_CAP"] = str(effective_llm_candidate_cap)
-        if route_cost_controls:
-            env["NEXUS_ROUTE_COST_CONTROLS"] = json.dumps(route_cost_controls, ensure_ascii=False, sort_keys=True)
         if llm_enabled:
-            env["NEXUS_GEMINI_MODEL_NAME"] = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "gemini-3.1-pro-preview")
-            env["NEXUS_FORCE_LLM_DESPITE_LEARN_SLO"] = "1"
-            env["NEXUS_GATEWAY_MAX_RETRIES"] = "1"
-            env["NEXUS_GATEWAY_TIMEOUT_SEC"] = _benchmark_gateway_timeout_sec(
-                _benchmark_gateway_timeout_for_task(timeout_sec)
-            )
-            env["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] = "1" if effective_llm_self_heal else "0"
-            env["NEXUS_DISABLE_DAYSHIFT_OPTIMIZER"] = "1"
+            env.update({key: value for key, value in bench_env_updates.items() if key.startswith("NEXUS_")})
         if enable_swarm_bench_executor:
             env["NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR"] = "1"
         else:
@@ -3145,6 +3212,7 @@ def run_with_nexus(
                         retry_args.extend(["--force-flow", "hyper_sprint"])
                     retry_start = time.monotonic()
                     try:
+                        retry_output = ""
                         if runner_mode == "subprocess":
                             retry_cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *retry_args]
                             retry_res = _run_process_group(
@@ -3160,8 +3228,15 @@ def run_with_nexus(
                             retry_output = retry_res.output or ""
                         retry_payload = _extract_json_payload(retry_output)
                     except subprocess.TimeoutExpired:
+                        retry_output = ""
                         retry_payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
                     retry_payload = retry_payload if isinstance(retry_payload, dict) else {}
+                    retry_output_tail = _tail_text(retry_output, max_chars=1600)
+                    retry_payload_status = str(retry_payload.get("status") or "")
+                    retry_payload_semantic_status = str(retry_payload.get("semantic_status") or "")
+                    row["hidden_retry_output_tail"] = retry_output_tail
+                    row["hidden_retry_payload_status"] = retry_payload_status
+                    row["hidden_retry_payload_semantic_status"] = retry_payload_semantic_status
                     if retry_payload.get("status") == "SUCCESS":
                         retry_row = _extract_record(
                             mode="with_nexus",
@@ -3182,6 +3257,9 @@ def run_with_nexus(
                         retry_row["hidden_verifier_stderr_tail"] = _tail_text(retry_verify.stderr, max_chars=1000)
                         retry_row["hidden_retry_used"] = True
                         retry_row["hidden_retry_reason"] = "hidden_verifier_failure_bounded_nexus_retry"
+                        retry_row["hidden_retry_output_tail"] = retry_output_tail
+                        retry_row["hidden_retry_payload_status"] = retry_payload_status
+                        retry_row["hidden_retry_payload_semantic_status"] = retry_payload_semantic_status
                         if retry_hidden_passed:
                             row = retry_row
                             recovered_on_retry = True
@@ -3200,12 +3278,19 @@ def run_with_nexus(
         row["route_cost_policy_candidate_cap"] = route_cost_controls.get("candidate_cap")
         row["route_cost_policy_lite_route"] = bool(route_cost_controls.get("lite_route", False))
         row["route_cost_policy_hold"] = bool(route_cost_controls.get("hold", False))
-    return _annotate_benchmark_eligibility(
-        row,
-        provider="gemini" if llm_enabled else "local",
-        model_required=llm_enabled,
-        nexus_required=llm_enabled,
-    )
+    try:
+        return _annotate_benchmark_eligibility(
+            row,
+            provider="gemini" if llm_enabled else "local",
+            model_required=llm_enabled,
+            nexus_required=llm_enabled,
+        )
+    finally:
+        for key, previous in env_restore.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
 
 
 def run_without_nexus(
@@ -3607,6 +3692,7 @@ def _route_cost_ledger(rows: list[dict[str, Any]]) -> dict[str, Any]:
             else 0.0,
             "provider_token_source_counts": source_counts(eligible),
             "measured_token_only_cost_comparable_rate": _rate_for(eligible, "public_cost_evidence"),
+            "clean_model_cost_evidence_rate": _rate_for(eligible, "clean_model_cost_evidence"),
             "route_recommended_flow_present_rate": _rate_for(eligible, "route_recommended_flow"),
             "chosen_flow_present_rate": _rate_for(eligible, "chosen_flow"),
             "route_decision_present_rate": _rate_for(eligible, "route_decision_schema_version"),
@@ -4425,6 +4511,11 @@ def main() -> int:
         action="store_true",
         help="When Nexus LLM baseline is enabled, require the baseline patch to come from the model and forbid local fallback.",
     )
+    parser.add_argument(
+        "--disable-promoted-route-cost-policy",
+        action="store_true",
+        help="Ignore the repo-level promoted route-cost policy for clean cost diagnosis runs.",
+    )
     parser.add_argument("--tuning-profile", choices=["", "daily", "iter", "weekly"], default="")
     parser.add_argument("--llm-safe-probe", action="store_true")
     parser.add_argument(
@@ -4513,6 +4604,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.gemini_model:
         os.environ["NEXUS_GEMINI_MODEL_NAME"] = str(args.gemini_model).strip()
+    if args.disable_promoted_route_cost_policy:
+        os.environ["NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY"] = "1"
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
     if args.always_on_eval and args.force_flow != "auto":
@@ -4861,6 +4954,7 @@ def main() -> int:
     for row in [*with_rows, *without_rows]:
         row["history_policy"] = history_policy
         row["learn_slo_policy"] = "forced_ready" if args.force_learn_slo_ready else "repo_state"
+        row["disable_promoted_route_cost_policy"] = bool(args.disable_promoted_route_cost_policy)
         row["hidden_verifier_mode"] = hidden_verifier_mode
     benchmark_summary = _summarize_benchmark_rows([*with_rows, *without_rows])
 
@@ -4901,6 +4995,7 @@ def main() -> int:
                     "enable_llm_self_heal": bool(args.enable_llm_self_heal),
                     "skip_llm_baseline": bool(args.skip_llm_baseline),
                     "strict_llm_baseline": bool(args.strict_llm_baseline),
+                    "disable_promoted_route_cost_policy": bool(args.disable_promoted_route_cost_policy),
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
                     "nexus_only": bool(args.nexus_only),

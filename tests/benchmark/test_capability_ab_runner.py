@@ -2036,6 +2036,18 @@ Memory warning
     assert payload["semantic_status"] == "VERIFIED"
 
 
+def test_extract_json_payload_tolerates_trailing_warning():
+    raw = """pytest failure context with {'result': 'ok'}
+{"status":"SUCCESS","semantic_status":"VERIFIED"}
+<unknown>:270: SyntaxWarning: 'return' in a 'finally' block
+"""
+
+    payload = _extract_json_payload(raw)
+
+    assert payload["status"] == "SUCCESS"
+    assert payload["semantic_status"] == "VERIFIED"
+
+
 def test_select_tasks_balances_buckets_for_all_mode():
     tasks = [
         CapabilityTask(id="easy-1", difficulty="easy", task_type="bug", task_desc="e1", target_file="a", test_file="b", success_criteria="x"),
@@ -2922,9 +2934,11 @@ def test_run_with_nexus_can_require_strict_llm_baseline(tmp_path: Path, monkeypa
     )
 
     assert "--llm-baseline-required" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--force-flow") + 1] == "baseline"
     assert out["baseline_llm_required"] is True
     assert out["baseline_source_policy"] == "strict_llm_no_local_fallback"
     assert out["baseline_provider"] == "gemini"
+    assert out["nexus_winner_source"] == "nexus_llm_baseline"
     assert out["run_eligible"] is True
 
 
@@ -3753,6 +3767,8 @@ def test_hidden_verifier_failure_retries_with_failure_evidence_when_self_heal_en
     assert "delete_file must be blocked" in retry_desc
     assert out["hidden_retry_used"] is True
     assert out["hidden_retry_reason"] == "hidden_verifier_failure_bounded_nexus_retry"
+    assert out["hidden_retry_payload_status"] == "SUCCESS"
+    assert out["hidden_retry_payload_semantic_status"] == "VERIFIED"
     assert out["hidden_verifier_passed"] is True
     assert out["status"] == "SUCCESS"
 
@@ -3843,6 +3859,8 @@ def test_hidden_verifier_failure_retries_inprocess_with_failure_evidence(tmp_pat
     assert "--force-flow" in captured_args[-1]
     assert out["hidden_retry_used"] is True
     assert out["hidden_retry_reason"] == "hidden_verifier_failure_bounded_nexus_retry"
+    assert out["hidden_retry_payload_status"] == "SUCCESS"
+    assert out["hidden_retry_payload_semantic_status"] == "VERIFIED"
     assert out["hidden_verifier_passed"] is True
     assert out["status"] == "SUCCESS"
 
@@ -4384,6 +4402,44 @@ def test_benchmark_row_classifies_model_timeout_with_local_fallback():
     assert summary["with_nexus"]["token_unreliable_reasons"] == ["model_timeout_with_local_fallback"]
 
 
+def test_benchmark_row_marks_clean_model_cost_evidence():
+    row = {
+        "mode": "with_nexus",
+        "run_eligible": True,
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 2.0,
+        "total_tokens": 1200,
+        "model_calls": 1,
+        "token_measured": True,
+        "token_capture_status": "measured",
+        "gateway_token_source": "usage_metadata",
+        "nexus_winner_source": "model_patch",
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "hyper_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+    }
+
+    _annotate_benchmark_eligibility(row, provider="gemini", model_required=True, nexus_required=True)
+    summary = _summarize_benchmark_rows([row])
+
+    assert row["public_cost_evidence"] is True
+    assert row["clean_model_cost_evidence"] is True
+    assert row["cost_evidence_class"] == "clean_model_cost"
+    assert summary["with_nexus"]["clean_model_cost_evidence_rate"] == 1.0
+
+
 def test_benchmark_row_splits_model_tokens_from_local_rescue():
     from scripts.bench.capability_ab_runner import _annotate_benchmark_eligibility
 
@@ -4438,6 +4494,8 @@ def test_benchmark_row_splits_model_tokens_from_local_rescue():
     assert row["gateway_timeout_sec"] == 60
     assert row["token_reliable"] is False
     assert row["token_unreliable_reason"] == "local_only_rescue_not_model_comparable"
+    assert row["clean_model_cost_evidence"] is False
+    assert row["cost_evidence_class"] == "rescue_only_local_success"
 
 
 def test_stats_token_outlier_is_not_public_reliable():

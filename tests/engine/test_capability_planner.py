@@ -811,6 +811,24 @@ def test_route_cost_policy_loader_exposes_task_controls(tmp_path):
     assert repair_controls["hold"] is True
 
 
+def test_route_cost_policy_loader_can_disable_repo_policy_for_clean_bench(tmp_path, monkeypatch):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/stale",
+  "hold_tasks": ["nexus-value-context-001"]
+}""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY", "1")
+
+    controls = route_cost_controls_for_task(tmp_path, "nexus-value-context-001")
+
+    assert controls == {}
+
+
 def test_route_cost_policy_loader_reads_task_specific_env_controls(monkeypatch):
     monkeypatch.setenv(
         "NEXUS_ROUTE_COST_CONTROLS",

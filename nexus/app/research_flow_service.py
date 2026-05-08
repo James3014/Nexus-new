@@ -3125,7 +3125,12 @@ def run_auto_flow(
     verification_only_rescue = bool(result_report.get("verification_only_rescue", False))
     artifact_verified = bool(tests_passed and (artifact_summary["changed"] or verification_only_rescue))
     nexus_rescued = bool((guard_hit or verification_only_rescue) and tests_passed)
-    winner_source = result_report.get("winner_source") or guard_fallback_from.get("winner_source") or ("nexus_rescue" if nexus_rescued else "local_only")
+    winner_source = (
+        result_report.get("winner_source")
+        or result_report.get("source")
+        or guard_fallback_from.get("winner_source")
+        or ("nexus_rescue" if nexus_rescued else "local_only")
+    )
     route = _refresh_route_for_runtime_candidate_factory(
         repo_root=repo_root,
         route=route,
