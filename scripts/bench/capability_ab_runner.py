@@ -45,6 +45,7 @@ from nexus.services.gemini_cli import (
     DEFAULT_GEMINI_BIN,
 )
 from scripts.bench.route_cost_trace_classifier import build_route_cost_trace_report
+from scripts.bench.s2t_shadow_report import build_promoted_s2t_policy, build_s2t_shadow_report
 from scripts.engine.nexus_cli import nexus as nexus_root
 
 DEFAULT_CODEX_BIN = "/Users/jameschen/.npm-global/bin/codex"
@@ -3995,6 +3996,8 @@ def write_evidence_bundle(
         delivery_gate_failures.append("runner_command_missing")
     route_cost_ledger = _route_cost_ledger(rows)
     route_cost_trace_report = build_route_cost_trace_report(rows)
+    s2t_shadow_report = build_s2t_shadow_report(rows)
+    s2t_policy_draft = build_promoted_s2t_policy(s2t_shadow_report)
     product_kpis = _product_kpis(rows)
     openseeker_kpis = _openseeker_kpis(rows)
     delivery_gate_passed = not delivery_gate_failures
@@ -4027,6 +4030,10 @@ def write_evidence_bundle(
         "route_cost_ledger_schema": route_cost_ledger.get("schema", ""),
         "route_cost_trace_report_present": bool(route_cost_trace_report),
         "route_cost_trace_report_schema": route_cost_trace_report.get("schema", ""),
+        "s2t_shadow_report_present": bool(s2t_shadow_report),
+        "s2t_shadow_report_schema": s2t_shadow_report.get("schema", ""),
+        "s2t_policy_draft_schema": s2t_policy_draft.get("schema", ""),
+        "s2t_policy_draft_status": s2t_policy_draft.get("status", ""),
         "product_kpis_present": bool(product_kpis),
         "product_kpis_schema": product_kpis.get("schema", ""),
         "openseeker_alignment_present": bool(openseeker_kpis),
@@ -4096,6 +4103,8 @@ def write_evidence_bundle(
         },
         "route_cost_ledger": route_cost_ledger,
         "route_cost_trace_report": route_cost_trace_report,
+        "s2t_shadow_report": s2t_shadow_report,
+        "s2t_policy_draft": s2t_policy_draft,
         "product_kpis": product_kpis,
         "openseeker_alignment": openseeker_kpis,
         "nexus_wearing": {

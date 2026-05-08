@@ -1126,12 +1126,21 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 1.0
     assert payload["public_claim_gate"]["checks"]["route_cost_ledger_schema"] == "nexus_route_cost_ledger_v1"
     assert payload["public_claim_gate"]["checks"]["route_cost_trace_report_schema"] == "nexus_route_cost_trace_report_v1"
+    assert payload["public_claim_gate"]["checks"]["s2t_shadow_report_schema"] == "nexus_s2t_shadow_report_v1"
+    assert payload["public_claim_gate"]["checks"]["s2t_policy_draft_schema"] == "nexus_promoted_s2t_policy_draft_v1"
+    assert payload["public_claim_gate"]["checks"]["s2t_policy_draft_status"] == "DRAFT_SHADOW_ONLY"
     assert payload["public_claim_gate"]["checks"]["product_kpis_schema"] == "nexus_product_kpis_v1"
     assert payload["public_claim_gate"]["checks"]["openseeker_alignment_schema"] == "nexus_openseeker_benchmark_kpis_v1"
     assert payload["route_cost_ledger"]["scope"] == "measured_benchmark_telemetry_not_billing_cost"
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["rows"] == 1
     assert payload["route_cost_ledger"]["arms"]["without_nexus"]["rows"] == 1
     assert payload["route_cost_trace_report"]["schema"] == "nexus_route_cost_trace_report_v1"
+    assert payload["s2t_shadow_report"]["schema"] == "nexus_s2t_shadow_report_v1"
+    assert payload["s2t_shadow_report"]["trace_event_schema"] == "nexus_s2t_trace_event_v1"
+    assert payload["s2t_shadow_report"]["promotion_gate"]["status"] == "SHADOW_ONLY"
+    assert payload["s2t_shadow_report"]["events"][0]["selector_shadow"]["training_eligible"] is True
+    assert payload["s2t_policy_draft"]["schema"] == "nexus_promoted_s2t_policy_draft_v1"
+    assert payload["s2t_policy_draft"]["status"] == "DRAFT_SHADOW_ONLY"
     assert payload["product_kpis"]["schema"] == "nexus_product_kpis_v1"
     assert payload["product_kpis"]["arms"]["with_nexus"]["avg_time_to_verified_sec"] == 0.0
     assert payload["product_kpis"]["arms"]["without_nexus"]["fail_closed_block_rate"] == 1.0
