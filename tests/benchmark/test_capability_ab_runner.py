@@ -1876,6 +1876,9 @@ def test_extract_record_summarizes_child_and_parent_timing_gaps():
     assert out["phase_wall_total_sec"] == 8.0
     assert out["cli_uninstrumented_sec"] == 2.0
     assert out["runner_overhead_sec"] == 2.5
+    assert out["model_attempt_wall_sec"] == 12.5
+    assert out["model_attempt_runner_overhead_sec"] == 2.5
+    assert out["model_attempt_runner_overhead_polluted"] is False
     assert out["timing_target_io_sec"] == 0.2
     assert out["timing_codeintel_sec"] == 1.7
     assert out["timing_context_pack_sec"] == 0.1
@@ -4200,6 +4203,10 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
             "cli_uninstrumented_sec": 2.0,
             "runner_overhead_sec": 0.5,
             "runner_overhead_polluted": True,
+            "model_attempt_wall_sec": 1.7,
+            "hidden_verifier_wall_sec": 0.2,
+            "hidden_retry_wall_sec": 1.1,
+            "hidden_retry_verifier_wall_sec": 0.3,
             "total_tokens": 200,
             "model_calls": 2,
         },
@@ -4215,6 +4222,10 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
     assert summary["with_nexus"]["avg_phase_wall_total_sec"] == 1.5
     assert summary["with_nexus"]["avg_cli_uninstrumented_sec"] == 2.0
     assert summary["with_nexus"]["avg_runner_overhead_sec"] == 0.5
+    assert summary["with_nexus"]["avg_model_attempt_wall_sec"] == 1.7
+    assert summary["with_nexus"]["avg_hidden_verifier_wall_sec"] == 0.2
+    assert summary["with_nexus"]["avg_hidden_retry_wall_sec"] == 1.1
+    assert summary["with_nexus"]["avg_hidden_retry_verifier_wall_sec"] == 0.3
     assert summary["with_nexus"]["runner_overhead_polluted_n"] == 1
 
 
@@ -4438,6 +4449,47 @@ def test_benchmark_row_marks_clean_model_cost_evidence():
     assert row["clean_model_cost_evidence"] is True
     assert row["cost_evidence_class"] == "clean_model_cost"
     assert summary["with_nexus"]["clean_model_cost_evidence_rate"] == 1.0
+
+
+def test_benchmark_row_uses_clean_retry_attempt_cost_when_outer_wall_is_polluted():
+    row = {
+        "mode": "with_nexus",
+        "run_eligible": True,
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 254.0,
+        "runner_overhead_polluted": True,
+        "model_attempt_wall_sec": 35.0,
+        "model_attempt_runner_overhead_sec": 0.2,
+        "model_attempt_runner_overhead_polluted": False,
+        "hidden_retry_used": True,
+        "hidden_retry_reason": "hidden_verifier_failure_bounded_nexus_retry",
+        "total_tokens": 42681,
+        "model_calls": 1,
+        "token_measured": True,
+        "token_capture_status": "measured",
+        "gateway_token_source": "stats",
+        "nexus_winner_source": "nexus_llm_baseline",
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "baseline_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+    }
+
+    _annotate_benchmark_eligibility(row, provider="gemini", model_required=True, nexus_required=True)
+
+    assert row["clean_model_cost_evidence"] is True
+    assert row["cost_evidence_class"] == "clean_model_cost"
 
 
 def test_benchmark_row_splits_model_tokens_from_local_rescue():

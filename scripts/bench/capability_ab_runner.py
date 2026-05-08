@@ -303,12 +303,12 @@ def _annotate_benchmark_eligibility(
         model_calls > 0
         and row["provider_token_measured"]
         and row["token_reliable"]
-        and not bool(row.get("runner_overhead_polluted", False))
+        and not _model_attempt_runner_overhead_polluted(row)
         and not local_success
     )
     if clean_model_cost_evidence:
         cost_evidence_class = "clean_model_cost"
-    elif bool(row.get("runner_overhead_polluted", False)):
+    elif _model_attempt_runner_overhead_polluted(row):
         cost_evidence_class = "runner_overhead_polluted"
     elif model_calls <= 0:
         cost_evidence_class = "rescue_only_no_model_call" if local_success or row["nexus_internal_delivery_valid"] else "no_model_call"
@@ -521,6 +521,10 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
             "avg_phase_wall_total_sec": _avg([float(row.get("phase_wall_total_sec", 0) or 0) for row in eligible]),
             "avg_cli_uninstrumented_sec": _avg([float(row.get("cli_uninstrumented_sec", 0) or 0) for row in eligible]),
             "avg_runner_overhead_sec": _avg([float(row.get("runner_overhead_sec", 0) or 0) for row in eligible]),
+            "avg_model_attempt_wall_sec": _avg([float(row.get("model_attempt_wall_sec", row.get("wall_duration_sec", 0)) or 0) for row in eligible]),
+            "avg_hidden_verifier_wall_sec": _avg([float(row.get("hidden_verifier_wall_sec", 0) or 0) for row in eligible]),
+            "avg_hidden_retry_wall_sec": _avg([float(row.get("hidden_retry_wall_sec", 0) or 0) for row in eligible]),
+            "avg_hidden_retry_verifier_wall_sec": _avg([float(row.get("hidden_retry_verifier_wall_sec", 0) or 0) for row in eligible]),
             "runner_overhead_polluted_n": sum(1 for row in eligible if bool(row.get("runner_overhead_polluted"))),
             "avg_tokens": _avg([float(row.get("total_tokens", 0) or 0) for row in eligible]),
             "token_measured_rate": round(len(token_measured) / len(eligible), 4) if eligible else None,
@@ -1684,6 +1688,12 @@ def _runner_overhead_polluted(wall_time_sec: float, cli_elapsed_sec: Any) -> boo
     return overhead >= max(30.0, cli_elapsed * 2.0)
 
 
+def _model_attempt_runner_overhead_polluted(row: dict[str, Any]) -> bool:
+    if "model_attempt_runner_overhead_polluted" in row:
+        return bool(row.get("model_attempt_runner_overhead_polluted", False))
+    return bool(row.get("runner_overhead_polluted", False))
+
+
 def _install_total_timeout(total_timeout_sec: int):
     if total_timeout_sec <= 0:
         return None
@@ -2018,6 +2028,9 @@ def _extract_record(
         "cli_uninstrumented_sec": _nonnegative_delta(timing.get("cli_elapsed_sec"), phase_wall_total_sec),
         "runner_overhead_sec": runner_overhead_sec,
         "runner_overhead_polluted": _runner_overhead_polluted(wall_time_sec, timing.get("cli_elapsed_sec")),
+        "model_attempt_wall_sec": round(wall_time_sec, 4),
+        "model_attempt_runner_overhead_sec": runner_overhead_sec,
+        "model_attempt_runner_overhead_polluted": _runner_overhead_polluted(wall_time_sec, timing.get("cli_elapsed_sec")),
         "timing_target_io_sec": timing_breakdown.get("target_io_sec"),
         "timing_codeintel_sec": timing_breakdown.get("codeintel_sec"),
         "timing_context_pack_sec": timing_breakdown.get("context_pack_sec"),
@@ -2986,6 +2999,7 @@ def _run_with_nexus_codex(
         },
     }
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    row["first_attempt_wall_sec"] = round(wall, 4)
     row["hidden_verifier_file"] = verification_test_file
     row["hidden_verifier_passed"] = tests_passed
     row["hidden_verifier_stdout_tail"] = pytest_stdout_tail
@@ -3155,15 +3169,18 @@ def run_with_nexus(
         row["route_cost_policy_lite_route"] = bool(route_cost_controls.get("lite_route", False))
         row["route_cost_policy_hold"] = bool(route_cost_controls.get("hold", False))
     if payload.get("status") == "SUCCESS" and verification_test_file != test_file:
+        verify_start = time.monotonic()
         verify = _run_process_group(
             _pytest_verifier_cmd(verification_test_file),
             cwd=repo_root,
             env=os.environ.copy(),
             timeout_sec=_remaining_task_timeout(start + max(1, int(timeout_sec)), timeout_sec),
         )
+        hidden_verifier_wall_sec = time.monotonic() - verify_start
         hidden_passed = verify.returncode == 0
         row["hidden_verifier_file"] = verification_test_file
         row["hidden_verifier_passed"] = hidden_passed
+        row["hidden_verifier_wall_sec"] = round(hidden_verifier_wall_sec, 4)
         row["hidden_verifier_stdout_tail"] = _tail_text(verify.stdout, max_chars=1000)
         row["hidden_verifier_stderr_tail"] = _tail_text(verify.stderr, max_chars=1000)
         if not hidden_passed:
@@ -3230,6 +3247,7 @@ def run_with_nexus(
                     except subprocess.TimeoutExpired:
                         retry_output = ""
                         retry_payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
+                    hidden_retry_wall_sec = time.monotonic() - retry_start
                     retry_payload = retry_payload if isinstance(retry_payload, dict) else {}
                     retry_output_tail = _tail_text(retry_output, max_chars=1600)
                     retry_payload_status = str(retry_payload.get("status") or "")
@@ -3237,6 +3255,7 @@ def run_with_nexus(
                     row["hidden_retry_output_tail"] = retry_output_tail
                     row["hidden_retry_payload_status"] = retry_payload_status
                     row["hidden_retry_payload_semantic_status"] = retry_payload_semantic_status
+                    row["hidden_retry_wall_sec"] = round(hidden_retry_wall_sec, 4)
                     if retry_payload.get("status") == "SUCCESS":
                         retry_row = _extract_record(
                             mode="with_nexus",
@@ -3244,12 +3263,26 @@ def run_with_nexus(
                             payload=retry_payload,
                             wall_time_sec=(wall + (time.monotonic() - retry_start)),
                         )
+                        retry_row["first_attempt_wall_sec"] = round(wall, 4)
+                        retry_row["hidden_verifier_wall_sec"] = round(hidden_verifier_wall_sec, 4)
+                        retry_row["hidden_retry_wall_sec"] = round(hidden_retry_wall_sec, 4)
+                        retry_row["model_attempt_wall_sec"] = round(hidden_retry_wall_sec, 4)
+                        retry_row["model_attempt_runner_overhead_sec"] = _nonnegative_delta(
+                            hidden_retry_wall_sec,
+                            retry_row.get("cli_elapsed_sec"),
+                        )
+                        retry_row["model_attempt_runner_overhead_polluted"] = _runner_overhead_polluted(
+                            hidden_retry_wall_sec,
+                            retry_row.get("cli_elapsed_sec"),
+                        )
+                        retry_verify_start = time.monotonic()
                         retry_verify = _run_process_group(
                             _pytest_verifier_cmd(verification_test_file),
                             cwd=repo_root,
                             env=os.environ.copy(),
                             timeout_sec=_remaining_task_timeout(start + max(1, int(timeout_sec)), timeout_sec),
                         )
+                        retry_hidden_verifier_wall_sec = time.monotonic() - retry_verify_start
                         retry_hidden_passed = retry_verify.returncode == 0
                         retry_row["hidden_verifier_file"] = verification_test_file
                         retry_row["hidden_verifier_passed"] = retry_hidden_passed
@@ -3257,6 +3290,7 @@ def run_with_nexus(
                         retry_row["hidden_verifier_stderr_tail"] = _tail_text(retry_verify.stderr, max_chars=1000)
                         retry_row["hidden_retry_used"] = True
                         retry_row["hidden_retry_reason"] = "hidden_verifier_failure_bounded_nexus_retry"
+                        retry_row["hidden_retry_verifier_wall_sec"] = round(retry_hidden_verifier_wall_sec, 4)
                         retry_row["hidden_retry_output_tail"] = retry_output_tail
                         retry_row["hidden_retry_payload_status"] = retry_payload_status
                         retry_row["hidden_retry_payload_semantic_status"] = retry_payload_semantic_status

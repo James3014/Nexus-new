@@ -109,6 +109,53 @@ def test_optimizer_holds_runner_overhead_polluted_rows(tmp_path: Path) -> None:
     assert out["promoted_policy"]["promotion_gate"]["runner_overhead_polluted"] is True
 
 
+def test_optimizer_promotes_clean_retry_attempt_despite_outer_wall_pollution(tmp_path: Path) -> None:
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    baseline = {
+        "rows": [
+            {
+                "task_id": "context-001",
+                "with_semantic": "VERIFIED",
+                "with_status": "SUCCESS",
+                "with_wall": 100,
+                "with_tokens": 50000,
+                "without_semantic": "UNVERIFIED",
+                "without_status": "FAILED",
+            }
+        ],
+    }
+    _write_jsonl(
+        candidate / "with_nexus_1.jsonl",
+        [
+            {
+                "task_id": "context-001",
+                "semantic_status": "VERIFIED",
+                "status": "SUCCESS",
+                "run_eligible": True,
+                "report_trust_mismatch": False,
+                "wall_duration_sec": 254,
+                "runner_overhead_polluted": True,
+                "model_attempt_wall_sec": 35,
+                "model_attempt_runner_overhead_polluted": False,
+                "total_tokens": 42681,
+                "model_calls": 1,
+                "token_measured": True,
+                "token_capture_status": "measured",
+                "gateway_token_source": "stats",
+                "nexus_winner_source": "nexus_llm_baseline",
+            }
+        ],
+    )
+    _write_jsonl(candidate / "without_nexus_1.jsonl", [{"task_id": "context-001", "semantic_status": "UNVERIFIED", "run_eligible": True}])
+
+    out = build_optimizer_plan(baseline_aggregate=baseline, candidate_dir=candidate)
+
+    assert out["decision_counts"] == {"promote_cost_tune": 1}
+    assert out["decisions"][0]["wall_delta_pct"] == -65.0
+    assert out["decisions"][0]["clean_model_cost_evidence"] is True
+
+
 def test_optimizer_holds_unreliable_local_fallback(tmp_path: Path) -> None:
     candidate = tmp_path / "candidate"
     candidate.mkdir()

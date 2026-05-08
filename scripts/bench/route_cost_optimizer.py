@@ -151,10 +151,15 @@ def _cost_evidence_class(row: dict[str, Any]) -> str:
 
 
 def _runner_overhead_polluted(row: dict[str, Any]) -> bool:
+    if "model_attempt_runner_overhead_polluted" in row:
+        return bool(row.get("model_attempt_runner_overhead_polluted", False))
     return bool(row.get("runner_overhead_polluted", False))
 
 
 def _effective_candidate_wall(row: dict[str, Any]) -> float:
+    model_attempt_wall = _num(row, "model_attempt_wall_sec")
+    if model_attempt_wall > 0:
+        return model_attempt_wall
     if _runner_overhead_polluted(row):
         cli_elapsed = _num(row, "cli_elapsed_sec")
         if cli_elapsed > 0:
