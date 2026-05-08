@@ -29,6 +29,9 @@ class TaskCostDecision:
     candidate_wall_sec: float
     baseline_tokens: float
     candidate_tokens: float
+    candidate_effective_wall_sec: float
+    candidate_runner_overhead_sec: float
+    candidate_runner_overhead_polluted: bool
     wall_delta_pct: float
     token_delta_pct: float
     candidate_model_calls: int
@@ -48,6 +51,9 @@ class TaskCostDecision:
             "candidate_wall_sec": self.candidate_wall_sec,
             "baseline_tokens": self.baseline_tokens,
             "candidate_tokens": self.candidate_tokens,
+            "candidate_effective_wall_sec": self.candidate_effective_wall_sec,
+            "candidate_runner_overhead_sec": self.candidate_runner_overhead_sec,
+            "candidate_runner_overhead_polluted": self.candidate_runner_overhead_polluted,
             "wall_delta_pct": self.wall_delta_pct,
             "token_delta_pct": self.token_delta_pct,
             "candidate_model_calls": self.candidate_model_calls,
@@ -109,6 +115,18 @@ def _measured_token_only(row: dict[str, Any]) -> bool:
     return bool(row.get("token_measured", False) and token_status == "measured" and token_source in PROVIDER_TOKEN_SOURCES)
 
 
+def _runner_overhead_polluted(row: dict[str, Any]) -> bool:
+    return bool(row.get("runner_overhead_polluted", False))
+
+
+def _effective_candidate_wall(row: dict[str, Any]) -> float:
+    if _runner_overhead_polluted(row):
+        cli_elapsed = _num(row, "cli_elapsed_sec")
+        if cli_elapsed > 0:
+            return cli_elapsed
+    return _num(row, "wall_duration_sec")
+
+
 def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: Path) -> dict[str, Any]:
     baseline_rows = {str(row.get("task_id") or ""): row for row in baseline_aggregate.get("rows", []) or []}
     candidate_rows = _candidate_rows(candidate_dir)
@@ -122,17 +140,25 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         bare_verified = _verified(bare) or (str(baseline.get("without_semantic") or "") == "VERIFIED" and str(baseline.get("without_status") or "") == "SUCCESS")
         baseline_wall = float(baseline.get("with_wall") or 0.0)
         candidate_wall = _num(candidate, "wall_duration_sec")
+        candidate_effective_wall = _effective_candidate_wall(candidate)
+        candidate_runner_overhead = _num(candidate, "runner_overhead_sec")
+        candidate_runner_overhead_polluted = _runner_overhead_polluted(candidate)
         baseline_tokens = float(baseline.get("with_tokens") or 0.0)
         candidate_tokens = _num(candidate, "total_tokens")
         source = str(candidate.get("nexus_winner_source") or "")
         token_source = str(candidate.get("gateway_token_source") or "missing")
         measured_token_only = _measured_token_only(candidate)
         calls = int(_num(candidate, "model_calls"))
-        wall_delta = _pct_delta(candidate_wall, baseline_wall)
+        wall_delta = _pct_delta(candidate_effective_wall, baseline_wall)
         token_delta = _pct_delta(candidate_tokens, baseline_tokens)
         if not candidate_verified:
             decision = "reject_failed_candidate"
             reason = "candidate route did not preserve verified delivery"
+        elif candidate_runner_overhead_polluted:
+            decision = "hold_runner_overhead_polluted"
+            reason = (
+                "candidate wall cost is polluted by runner overhead; rerun inprocess or use uncontaminated cost truth before promotion"
+            )
         elif measured_token_only and wall_delta <= -15.0 and token_delta <= 5.0:
             decision = "promote_cost_tune"
             reason = f"verified with wall improvement {abs(wall_delta):.2f}% and token delta {token_delta:.2f}%"
@@ -163,6 +189,9 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
                 candidate_wall_sec=candidate_wall,
                 baseline_tokens=baseline_tokens,
                 candidate_tokens=candidate_tokens,
+                candidate_effective_wall_sec=candidate_effective_wall,
+                candidate_runner_overhead_sec=candidate_runner_overhead,
+                candidate_runner_overhead_polluted=candidate_runner_overhead_polluted,
                 wall_delta_pct=wall_delta,
                 token_delta_pct=token_delta,
                 candidate_model_calls=calls,
@@ -181,6 +210,24 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         "schema_version": "nexus_route_cost_optimizer_v1",
         "baseline_schema": baseline_aggregate.get("schema_version", ""),
         "candidate_dir": str(candidate_dir),
+        "cost_truth_table": [
+            {
+                "task_id": item.task_id,
+                "baseline_wall_sec": item.baseline_wall_sec,
+                "candidate_wall_sec": item.candidate_wall_sec,
+                "candidate_effective_wall_sec": item.candidate_effective_wall_sec,
+                "candidate_runner_overhead_sec": item.candidate_runner_overhead_sec,
+                "candidate_runner_overhead_polluted": item.candidate_runner_overhead_polluted,
+                "baseline_tokens": item.baseline_tokens,
+                "candidate_tokens": item.candidate_tokens,
+                "candidate_model_calls": item.candidate_model_calls,
+                "candidate_token_source": item.candidate_token_source,
+                "measured_token_only": item.measured_token_only,
+                "candidate_verified": item.candidate_verified,
+                "bare_verified": item.bare_verified,
+            }
+            for item in decisions
+        ],
         "decision_counts": counts,
         "promoted_task_ids": promoted,
         "lite_required_task_ids": lite,
@@ -196,6 +243,8 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
                 "verified_delivery_preserved": all(item.candidate_verified for item in decisions),
                 "trust_mismatch_zero_required": True,
                 "reject_unreliable_local_fallback": True,
+                "reject_runner_overhead_pollution": True,
+                "runner_overhead_polluted": any(item.candidate_runner_overhead_polluted for item in decisions),
             },
         },
         "next_required_action": _next_required_action(decisions),
@@ -205,6 +254,8 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
 def _next_required_action(decisions: list[TaskCostDecision]) -> str:
     if any(item.decision == "reject_failed_candidate" for item in decisions):
         return "stop_and_fix_failed_candidate_before_more_cost_tuning"
+    if any(item.decision == "hold_runner_overhead_polluted" for item in decisions):
+        return "rerun_polluted_cost_rows_inprocess_before_promotion"
     if any(item.decision == "hold_not_model_uplift" for item in decisions):
         return "rerun_hold_tasks_with_measured_model_tokens_or_keep_out_of_model_uplift_claim"
     if any(item.decision == "hold_needs_trace_diagnosis" for item in decisions):
@@ -226,6 +277,12 @@ def render_markdown(payload: dict[str, Any]) -> str:
     ]
     for name, count in sorted(payload["decision_counts"].items()):
         lines.append(f"- `{name}`: {count}")
+    lines.extend(["", "## Cost Truth Table", "", "| Task | Raw wall | Effective wall | Runner overhead | Polluted | Tokens |", "| :--- | ---: | ---: | ---: | :--- | ---: |"])
+    for row in payload.get("cost_truth_table", []) or []:
+        lines.append(
+            f"| {row['task_id']} | {row['candidate_wall_sec']} | {row['candidate_effective_wall_sec']} | "
+            f"{row['candidate_runner_overhead_sec']} | {row['candidate_runner_overhead_polluted']} | {row['candidate_tokens']} |"
+        )
     lines.extend(
         [
             "",
