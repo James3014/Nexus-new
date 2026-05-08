@@ -960,3 +960,38 @@ def test_capability_planner_ignores_wearing_contract_for_costly_lexical_signals(
     assert "learn_mode" not in selected
     assert "learn_phase_slo" not in selected
     assert "acceptance_check" not in selected
+
+
+def test_capability_planner_keeps_hidden_contract_fast_path_light_under_learning_policy():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Sync code and docs after a renamed public field; the expected fix must infer "
+            "the canonical field from surrounding contract text rather than only the failing assertion."
+            "\n\nNexus wearing contract:\n"
+            "- Artifact/Claim: treat completion claims as valid only when backed by checks."
+        ),
+        task_type="public_docs_code_sync",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {
+                "risk_score": 20,
+                "candidate_count": 3,
+                "adjusted_root_cause_confidence": 1.0,
+                "benchmark_hidden_contract_fast_path": True,
+                "memory_hits": 1,
+            },
+        },
+        budget={
+            "learning_policy": {
+                "promoted_capabilities": ["research", "autoreason", "judge_panel"],
+                "enforce_penalties": False,
+            }
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert "research" not in selected
+    assert "autoreason" not in selected
+    assert "judge_panel" not in selected
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert "simple_hidden_contract_fast_path_cost_control" in trace["research"]["reasons"]

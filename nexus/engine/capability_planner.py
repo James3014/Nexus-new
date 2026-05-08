@@ -636,6 +636,7 @@ class CapabilityPlanner:
         self._apply_route_cost_policy(states=states, reasons=reasons, route_cost_policy=route_cost_policy)
         self._apply_candidate_factory_readiness_policy(states=states, reasons=reasons, route=route)
         self._apply_route_oracle_expected_contract(states=states, reasons=reasons, signals=signals)
+        self._apply_simple_hidden_contract_policy(states=states, reasons=reasons, signals=signals)
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
@@ -759,6 +760,34 @@ class CapabilityPlanner:
             if states.get(cap) != "required":
                 states[cap] = "required"
                 reasons[cap].append("route_oracle_expected_receipt_required")
+
+    def _apply_simple_hidden_contract_policy(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        signals: Any,
+    ) -> None:
+        if not getattr(signals, "simple_hidden_bugfix", False):
+            return
+        protected = set(getattr(signals, "route_oracle_expected_capabilities", ()) or ())
+        protected.update(str(item) for item in getattr(signals, "selected_seed", ()) or ())
+        for cap in (
+            "research",
+            "external_doc_scout",
+            "research_control_plane",
+            "architecture_scout",
+            "autoreason",
+            "judge_panel",
+            "llm_judge_panel",
+            "benchmark",
+            "meta_opt",
+        ):
+            if cap in protected:
+                continue
+            if states.get(cap) == "conditional":
+                states[cap] = "optional"
+                reasons[cap].append("simple_hidden_contract_fast_path_cost_control")
 
     def _apply_candidate_factory_readiness_policy(
         self,

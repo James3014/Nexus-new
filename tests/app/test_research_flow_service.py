@@ -804,6 +804,27 @@ def test_build_route_response_contract_fast_path_ignores_stale_memory(tmp_path: 
     assert "research" not in out["capability_plan"]["selected_capabilities"]
 
 
+def test_build_route_response_contract_fast_path_survives_candidate_cap(tmp_path: Path):
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Sync code and docs after a renamed public field; the expected fix must infer "
+            "the canonical field from surrounding contract text rather than only the failing assertion."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+        ),
+        task_type="public_docs_code_sync",
+        candidate_count=1,
+        root_cause_confidence=0.9,
+        findings_query=None,
+        target_file="target.py",
+    )
+
+    assert out["recommended_flow"] == "baseline"
+    assert out["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+    assert out["should_research"] is False
+
+
 def test_build_route_repair_contract_can_skip_research_under_cost_capped_benchmark(tmp_path: Path):
     out = research_flow_service.build_route(
         repo_root=tmp_path,
@@ -1387,7 +1408,9 @@ def test_hidden_contract_response_builder_uses_local_first_before_llm(tmp_path: 
         task_desc=(
             "Sync code and docs after a renamed public field; the visible test only checks "
             "mapping shape while the verification test requires the canonical field."
-            "\n\nNexus wearing contract:\n- benchmark contract suffix"
+            "\n\nNexus wearing contract:"
+            "\n- Governance: keep the solution inside scope."
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
         ),
         target_file=str(target),
         test_file=str(test_file),
@@ -1418,6 +1441,8 @@ def test_hidden_contract_response_builder_uses_local_first_before_llm(tmp_path: 
     assert report["model_calls"] == 0
     assert report["baseline_source_policy"] == "hidden_contract_local_first_before_llm"
     assert payload["route"]["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+    assert payload["nexus_usage_trace"]["pillars"]["mempalace"]["active"] is True
+    assert payload["nexus_usage_trace"]["capabilities"]["mempalace_gate_passed"] is True
 
 
 def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypatch):

@@ -146,9 +146,10 @@ def _classify_infra_invalid_reason(row: dict[str, Any], *, model_required: bool,
     model_calls = int(row.get("model_calls", 0) or 0)
     pillars = _observed_nexus_pillars(row) if nexus_required else []
     phases = _observed_nexus_phases(row) if nexus_required else []
+    local_internal_delivery_source = str(row.get("nexus_winner_source") or "") in LOCAL_INTERNAL_DELIVERY_SOURCES
     local_preflight_verified = bool(
         nexus_required
-        and str(row.get("nexus_winner_source") or "").startswith("local_preflight")
+        and local_internal_delivery_source
         and bool(row.get("semantic_completed", False))
         and bool(row.get("nexus_context_delivered", False))
         and len(pillars) >= len(PILLAR_OBSERVATION_FIELDS)
@@ -222,9 +223,14 @@ LOCAL_SUCCESS_SOURCES = {
     "local",
     "local_only",
     "local_hidden_shadow",
+    "local_hidden_contract_fast_path",
     "local_preflight",
     "local_deterministic_success",
     "nexus_tool_success",
+}
+LOCAL_INTERNAL_DELIVERY_SOURCES = {
+    "local_hidden_contract_fast_path",
+    "local_preflight",
 }
 
 
@@ -247,7 +253,7 @@ def _annotate_benchmark_eligibility(
     row["nexus_pillars_observed"] = _observed_nexus_pillars(row)
     row["nexus_phases_observed"] = _observed_nexus_phases(row)
     row["nexus_internal_delivery_valid"] = bool(
-        str(row.get("nexus_winner_source") or "").startswith("local_preflight")
+        str(row.get("nexus_winner_source") or "") in LOCAL_INTERNAL_DELIVERY_SOURCES
         and bool(row.get("semantic_completed", False))
         and bool(row.get("nexus_context_delivered", False))
         and len(row["nexus_pillars_observed"]) >= len(PILLAR_OBSERVATION_FIELDS)

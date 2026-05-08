@@ -4203,6 +4203,41 @@ def test_local_preflight_nexus_delivery_is_eligible_without_model_call():
     assert out["public_cost_evidence"] is False
 
 
+def test_local_hidden_contract_fast_path_nexus_delivery_is_eligible_without_model_call():
+    row = {
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "nexus_winner_source": "local_hidden_contract_fast_path",
+        "nexus_context_delivered": True,
+        "model_calls": 0,
+        "total_tokens": 0,
+        "token_capture_status": "not_applicable_local_only",
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "route_built",
+        "phase_x": "retrieval_checked",
+        "phase_d": "guard_decision",
+        "phase_r": "baseline_executed",
+        "phase_a": "artifact_verified",
+        "phase_c": "closure_written",
+    }
+
+    out = _annotate_benchmark_eligibility(
+        row,
+        provider="gemini",
+        model_required=True,
+        nexus_required=True,
+    )
+
+    assert out["run_eligible"] is True
+    assert out["nexus_wearing_valid"] is True
+    assert out["nexus_internal_delivery_valid"] is True
+    assert out["cost_evidence_class"] == "rescue_only_no_model_call"
+
+
 def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
     rows = [
         {"mode": "without_nexus", "run_eligible": True, "status": "SUCCESS", "semantic_completed": True, "report_trust_mismatch": False, "wall_duration_sec": 2.0, "total_tokens": 100, "model_calls": 1},

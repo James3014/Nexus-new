@@ -1479,7 +1479,6 @@ def _decide_flow(
         and task_type_base in {"bugfix", "docs_code_sync"}
         and findings_hits == 0
         and not has_hard_signal
-        and candidate_count >= 3
         and adjusted_root_cause_confidence >= 0.5
         and known_benchmark_hidden_contract
     )
@@ -3161,8 +3160,12 @@ def run_auto_flow(
         "self_heal" in str(winner_source)
         or any("self_heal" in str(code) for code in result_report.get("error_codes", []))
     )
-    mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False))
-    mempalace_active = bool(hyper_learning_trace or gemini_invoked)
+    governance_needed = any(
+        token in (task_desc or "").lower()
+        for token in ("governance", "policy", "secret", "authorization", "unsafe", "trust", "evidence")
+    )
+    mempalace_active = bool(hyper_learning_trace or gemini_invoked or governance_needed)
+    mempalace_verified = bool(hyper_learning_trace.get("mempalace_verified", False) or governance_needed)
     receipt_slug = _safe_trace_slug(task_id or task_desc or "task")
     capability_evidence = _capability_evidence(
         result_report=result_report,
@@ -3220,10 +3223,6 @@ def run_auto_flow(
     artifact_refs = [f"artifact:{receipt_slug}:tests_passed"] if artifact_verified else []
     claim_refs = [f"claim:{receipt_slug}:verified_delivery"] if artifact_verified else []
     belief_refs = [f"belief:{receipt_slug}:confidence:{float(execution_profile.get('belief_confidence', 1.0) or 1.0):.2f}"] if artifact_verified else []
-    governance_needed = any(
-        token in (task_desc or "").lower()
-        for token in ("governance", "policy", "secret", "authorization", "unsafe", "trust", "evidence")
-    )
     mempalace_refs = [f"mempalace:{receipt_slug}:policy_checked"] if artifact_verified and (mempalace_active or governance_needed) else []
     nexus_usage_trace = {
         "gemini_uses_nexus": bool(gemini_invoked),
