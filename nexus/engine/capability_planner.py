@@ -635,6 +635,15 @@ class CapabilityPlanner:
         self._apply_research_evidence_demand_policy(states=states, reasons=reasons, signals=signals)
         route_cost_policy = budget.get("route_cost_policy", {}) if isinstance(budget.get("route_cost_policy", {}), dict) else {}
         self._apply_route_cost_policy(states=states, reasons=reasons, route_cost_policy=route_cost_policy)
+        s2t_policy_draft = (
+            budget.get("s2t_policy_draft", {}) if isinstance(budget.get("s2t_policy_draft", {}), dict) else {}
+        )
+        s2t_shadow_score = self._score_s2t_policy_draft(
+            route=route,
+            signals=signals,
+            states=states,
+            s2t_policy_draft=s2t_policy_draft,
+        )
         self._apply_candidate_factory_readiness_policy(states=states, reasons=reasons, route=route)
         self._apply_route_oracle_expected_contract(states=states, reasons=reasons, signals=signals)
         self._apply_research_evidence_demand_policy(states=states, reasons=reasons, signals=signals)
@@ -668,6 +677,7 @@ class CapabilityPlanner:
                     "score_delta": score_delta,
                     "score_components": scoring.components(node),
                     "scoring_weights": scoring.to_dict(),
+                    "s2t_shadow_policy": s2t_shadow_score.get("capability_hints", {}).get(name, {}),
                 }
             )
 
@@ -699,6 +709,8 @@ class CapabilityPlanner:
                 "current_lite_route": bool(route_cost_policy.get("current_lite_route", False)),
                 "current_candidate_cap": route_cost_policy.get("current_candidate_cap"),
             }
+        if s2t_policy_draft:
+            signal_snapshot["s2t_policy_draft"] = s2t_shadow_score
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",
@@ -871,6 +883,80 @@ class CapabilityPlanner:
             if states.get(cap) == "conditional":
                 states[cap] = "optional"
                 reasons[cap].append("route_cost_lite_policy")
+
+    def _score_s2t_policy_draft(
+        self,
+        *,
+        route: dict[str, Any],
+        signals: Any,
+        states: dict[str, str],
+        s2t_policy_draft: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not s2t_policy_draft:
+            return {}
+        route_features = route.get("route_features", {}) if isinstance(route.get("route_features", {}), dict) else {}
+        task_id = str(route.get("task_id") or route_features.get("task_id") or "")
+        task_rules = s2t_policy_draft.get("task_rules", {})
+        task_rules = task_rules if isinstance(task_rules, dict) else {}
+        rule = task_rules.get(task_id, {}) if task_id else {}
+        rule = rule if isinstance(rule, dict) else {}
+        profile = str(rule.get("selector_profile") or self._default_s2t_shadow_profile(signals))
+        action = str(rule.get("recommended_action") or "observe_more")
+        high_cost_selected = [
+            cap
+            for cap in (
+                "research",
+                "external_doc_scout",
+                "research_control_plane",
+                "architecture_scout",
+                "ultra_review",
+                "swarm",
+                "drone",
+                "nightshift",
+                "benchmark",
+                "meta_opt",
+            )
+            if states.get(cap) == "conditional"
+        ]
+        capability_hints: dict[str, dict[str, Any]] = {}
+        if action in {"prefer_lite_or_standard", "try_standard_with_cost_cap"} or profile == "lite":
+            for cap in high_cost_selected:
+                capability_hints[cap] = {
+                    "would_downgrade": True,
+                    "reason": "s2t_shadow_cost_candidate",
+                    "action": action,
+                    "profile": profile,
+                }
+        if action == "keep_strict_repair_selector" or profile == "strict":
+            for cap in ("hyper", "repair_loop", "claim_gate", "delivery_gate"):
+                if cap in states:
+                    capability_hints[cap] = {
+                        "would_preserve": True,
+                        "reason": "s2t_shadow_verified_repair_path",
+                        "action": action,
+                        "profile": profile,
+                    }
+
+        return {
+            "influenced": True,
+            "mode": "shadow_only_no_runtime_decision_change",
+            "source_schema": str(s2t_policy_draft.get("schema") or ""),
+            "status": str(s2t_policy_draft.get("status") or ""),
+            "task_id": task_id,
+            "matched_task_rule": bool(rule),
+            "selector_profile": profile,
+            "recommended_action": action,
+            "high_cost_selected": tuple(high_cost_selected),
+            "capability_hints": capability_hints,
+        }
+
+    @staticmethod
+    def _default_s2t_shadow_profile(signals: Any) -> str:
+        if getattr(signals, "risk_score", 0) >= 70 or getattr(signals, "cross_module", False):
+            return "strict"
+        if getattr(signals, "evidence_signal", False) or getattr(signals, "candidate_count", 1) > 1:
+            return "standard"
+        return "lite"
 
     def _apply_budget_downgrade(
         self,

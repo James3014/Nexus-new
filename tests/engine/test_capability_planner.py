@@ -5,6 +5,8 @@ from nexus.engine.learning_policy_loader import (
     load_learning_policy_budget,
     load_route_cost_policy_budget,
     load_route_cost_policy_budget_from_env,
+    load_s2t_policy_draft_budget,
+    merge_runtime_s2t_policy_draft,
     route_cost_controls_for_task,
 )
 
@@ -842,6 +844,46 @@ def test_route_cost_policy_loader_reads_task_specific_env_controls(monkeypatch):
     assert budget["route_cost_policy"]["current_candidate_cap"] == 1
 
 
+def test_s2t_policy_draft_loader_feeds_shadow_scoring_without_runtime_promotion(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_s2t_policy_draft.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema": "nexus_promoted_s2t_policy_draft_v1",
+  "status": "DRAFT_SHADOW_ONLY",
+  "source_schema": "nexus_s2t_shadow_report_v1",
+  "trace_event_schema": "nexus_s2t_trace_event_v1",
+  "task_rules": {
+    "task-a": {
+      "selector_profile": "standard",
+      "recommended_action": "try_standard_with_cost_cap"
+    }
+  }
+}""",
+        encoding="utf-8",
+    )
+
+    budget = load_s2t_policy_draft_budget(artifact)
+    merged = merge_runtime_s2t_policy_draft(tmp_path)
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix a public API claim with external research evidence.",
+        task_type="public_feature",
+        route={
+            "task_id": "task-a",
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {"risk_score": 75, "candidate_count": 3, "claim_uncertainty": True},
+            "research_context": {"role": "claim_scout"},
+        },
+        budget=merged,
+    ).to_dict()
+
+    assert budget["s2t_policy_draft"]["status"] == "DRAFT_SHADOW_ONLY"
+    assert merged["s2t_policy_draft"]["task_rules"]["task-a"]["recommended_action"] == "try_standard_with_cost_cap"
+    assert plan["signal_snapshot"]["s2t_policy_draft"]["matched_task_rule"] is True
+    assert plan["signal_snapshot"]["s2t_policy_draft"]["mode"] == "shadow_only_no_runtime_decision_change"
+
+
 def test_route_cost_controls_for_task_applies_current_env_controls(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "NEXUS_ROUTE_COST_CONTROLS",
@@ -877,6 +919,60 @@ def test_capability_planner_lite_route_downgrades_high_cost_conditionals():
     assert "sandbox" not in selected
     assert "research" not in selected
     assert "autoreason" not in selected
+
+
+def test_capability_planner_scores_s2t_policy_draft_without_changing_selection():
+    baseline = CapabilityPlanner().plan(
+        task_desc="Fix a risky public feature with a high-cost research route.",
+        task_type="public_feature",
+        route={
+            "task_id": "task-a",
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 75,
+                "candidate_count": 3,
+                "claim_uncertainty": True,
+            },
+            "research_context": {"role": "claim_scout"},
+            "route_decision": {"selected_capabilities": ["hyper_sprint", "research"]},
+        },
+    ).to_dict()
+    shadow = CapabilityPlanner().plan(
+        task_desc="Fix a risky public feature with a high-cost research route.",
+        task_type="public_feature",
+        route={
+            "task_id": "task-a",
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 75,
+                "candidate_count": 3,
+                "claim_uncertainty": True,
+            },
+            "research_context": {"role": "claim_scout"},
+            "route_decision": {"selected_capabilities": ["hyper_sprint", "research"]},
+        },
+        budget={
+            "s2t_policy_draft": {
+                "schema": "nexus_promoted_s2t_policy_draft_v1",
+                "status": "DRAFT_SHADOW_ONLY",
+                "task_rules": {
+                    "task-a": {
+                        "selector_profile": "standard",
+                        "recommended_action": "try_standard_with_cost_cap",
+                    }
+                },
+            }
+        },
+    ).to_dict()
+
+    assert shadow["selected_capabilities"] == baseline["selected_capabilities"]
+    assert shadow["signal_snapshot"]["s2t_policy_draft"]["mode"] == "shadow_only_no_runtime_decision_change"
+    assert shadow["signal_snapshot"]["s2t_policy_draft"]["matched_task_rule"] is True
+    trace = {item["capability"]: item for item in shadow["decision_trace"]}
+    assert trace["research"]["s2t_shadow_policy"]["would_downgrade"] is True
+    assert trace["research"]["s2t_shadow_policy"]["reason"] == "s2t_shadow_cost_candidate"
 
 
 def test_candidate_factory_ready_alone_does_not_select_research():
