@@ -53,6 +53,7 @@ from scripts.bench.capability_ab_runner import (
     _remaining_leg_timeout,
     _remaining_task_timeout,
     _report_model_label,
+    _runner_overhead_polluted,
     _render_partial_markdown_report,
     _restore_preserved_target,
     _resolve_task_files,
@@ -4090,6 +4091,7 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
             "phase_wall_total_sec": 1.5,
             "cli_uninstrumented_sec": 2.0,
             "runner_overhead_sec": 0.5,
+            "runner_overhead_polluted": True,
             "total_tokens": 200,
             "model_calls": 2,
         },
@@ -4105,6 +4107,13 @@ def test_summarize_benchmark_rows_excludes_infra_invalid_from_solve_rate():
     assert summary["with_nexus"]["avg_phase_wall_total_sec"] == 1.5
     assert summary["with_nexus"]["avg_cli_uninstrumented_sec"] == 2.0
     assert summary["with_nexus"]["avg_runner_overhead_sec"] == 0.5
+    assert summary["with_nexus"]["runner_overhead_polluted_n"] == 1
+
+
+def test_runner_overhead_polluted_flags_subprocess_wrapper_cost():
+    assert _runner_overhead_polluted(181.5, 3.5) is True
+    assert _runner_overhead_polluted(93.4, 89.9) is False
+    assert _runner_overhead_polluted(20.0, None) is False
 
 
 def test_per_task_stop_loss_marks_row_infra_invalid():

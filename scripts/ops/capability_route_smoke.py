@@ -19,6 +19,7 @@ from nexus.engine.capability_receipt_policy import (
     REQUIRED_NINE_CAPABILITIES,
     REQUIRED_ROUTE_RUNTIME_CAPABILITIES,
     ROUTE_QUALITY_THRESHOLDS,
+    is_route_quality_actionable_receipt,
 )
 
 
@@ -167,6 +168,8 @@ def _route_over_selection_hotspots(rows: list[dict[str, Any]]) -> list[dict[str,
     for row in rows:
         for receipt in row.get("capability_receipts", []) or []:
             if not isinstance(receipt, dict) or not receipt.get("selected"):
+                continue
+            if not is_route_quality_actionable_receipt(receipt):
                 continue
             name = str(receipt.get("name") or "").strip()
             if not name:

@@ -218,7 +218,8 @@ def test_summarize_jsonl_reports_over_selection_hotspots(tmp_path: Path):
         },
         "capability_receipts": [
             {"name": "artifact_gate", "selected": True, "invoked": True, "evidence_present": True, "gate_passed": True, "outcome_contributed": True},
-            {"name": "pregate", "selected": True, "invoked": False, "evidence_present": False, "gate_passed": False, "outcome_contributed": False},
+            {"name": "swarm", "selected": True, "invoked": False, "evidence_present": False, "gate_passed": False, "outcome_contributed": False},
+            {"name": "research_route", "selected": True, "invoked": False, "evidence_present": False, "gate_passed": False, "outcome_contributed": False},
         ],
     }
     path.write_text(json.dumps(row), encoding="utf-8")
@@ -227,7 +228,7 @@ def test_summarize_jsonl_reports_over_selection_hotspots(tmp_path: Path):
 
     assert out["route_quality"]["over_selection_hotspots"] == [
         {
-            "capability": "pregate",
+            "capability": "swarm",
             "selected": 1,
             "invoked": 0,
             "selected_not_invoked": 1,

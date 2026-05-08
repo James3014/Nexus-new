@@ -484,6 +484,7 @@ def _summarize_benchmark_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str,
             "avg_phase_wall_total_sec": _avg([float(row.get("phase_wall_total_sec", 0) or 0) for row in eligible]),
             "avg_cli_uninstrumented_sec": _avg([float(row.get("cli_uninstrumented_sec", 0) or 0) for row in eligible]),
             "avg_runner_overhead_sec": _avg([float(row.get("runner_overhead_sec", 0) or 0) for row in eligible]),
+            "runner_overhead_polluted_n": sum(1 for row in eligible if bool(row.get("runner_overhead_polluted"))),
             "avg_tokens": _avg([float(row.get("total_tokens", 0) or 0) for row in eligible]),
             "token_measured_rate": round(len(token_measured) / len(eligible), 4) if eligible else None,
             "provider_token_measured_rate": round(len(provider_token_measured) / len(eligible), 4) if eligible else None,
@@ -1629,6 +1630,17 @@ def _effective_total_timeout_sec(total_timeout_sec: int, stop_loss_sec: int) -> 
     return min(total_timeout_sec, stop_loss_sec)
 
 
+def _runner_overhead_polluted(wall_time_sec: float, cli_elapsed_sec: Any) -> bool:
+    try:
+        cli_elapsed = float(cli_elapsed_sec)
+    except (TypeError, ValueError):
+        return False
+    overhead = _nonnegative_delta(wall_time_sec, cli_elapsed)
+    if overhead <= 0:
+        return False
+    return overhead >= max(30.0, cli_elapsed * 2.0)
+
+
 def _install_total_timeout(total_timeout_sec: int):
     if total_timeout_sec <= 0:
         return None
@@ -1927,6 +1939,7 @@ def _extract_record(
         payload.get("status") == "SUCCESS"
         and semantic_status in {"VERIFIED", "PARTIAL"}
     )
+    runner_overhead_sec = _nonnegative_delta(wall_time_sec, timing.get("cli_elapsed_sec"))
     row = {
         "mode": mode,
         "task_id": task.id,
@@ -1960,7 +1973,8 @@ def _extract_record(
         "receipt_elapsed_sec": timing.get("cli_elapsed_sec"),
         "phase_wall_total_sec": phase_wall_total_sec,
         "cli_uninstrumented_sec": _nonnegative_delta(timing.get("cli_elapsed_sec"), phase_wall_total_sec),
-        "runner_overhead_sec": _nonnegative_delta(wall_time_sec, timing.get("cli_elapsed_sec")),
+        "runner_overhead_sec": runner_overhead_sec,
+        "runner_overhead_polluted": _runner_overhead_polluted(wall_time_sec, timing.get("cli_elapsed_sec")),
         "timing_target_io_sec": timing_breakdown.get("target_io_sec"),
         "timing_codeintel_sec": timing_breakdown.get("codeintel_sec"),
         "timing_context_pack_sec": timing_breakdown.get("context_pack_sec"),
