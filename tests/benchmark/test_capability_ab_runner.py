@@ -2051,6 +2051,19 @@ def test_extract_json_payload_tolerates_trailing_warning():
     assert payload["semantic_status"] == "VERIFIED"
 
 
+def test_extract_json_payload_tolerates_trailing_logs_after_full_payload():
+    raw = """prefix {not json}
+{"schema_version":"1.0","status":"SUCCESS","command_name":"research:auto-flow","result":{"status":"SUCCESS"},"timing":{"cli_elapsed_sec":1.2}}
+learning closure wrote: {"status":"keep"}
+"""
+
+    payload = _extract_json_payload(raw)
+
+    assert payload["status"] == "SUCCESS"
+    assert payload["command_name"] == "research:auto-flow"
+    assert payload["result"]["status"] == "SUCCESS"
+
+
 def test_select_tasks_balances_buckets_for_all_mode():
     tasks = [
         CapabilityTask(id="easy-1", difficulty="easy", task_type="bug", task_desc="e1", target_file="a", test_file="b", success_criteria="x"),

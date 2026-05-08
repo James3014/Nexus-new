@@ -2309,6 +2309,24 @@ def _extract_json_payload(raw_output: str) -> dict[str, Any]:
     if isinstance(payload, dict):
         return payload
     decoder = json.JSONDecoder()
+
+    def is_nexus_payload(candidate_payload: Any) -> bool:
+        if not isinstance(candidate_payload, dict):
+            return False
+        if "status" not in candidate_payload:
+            return False
+        return any(
+            key in candidate_payload
+            for key in (
+                "result",
+                "route",
+                "timing",
+                "command_name",
+                "nexus_usage_trace",
+                "nexus_failure_analysis",
+            )
+        )
+
     brace_positions = [idx for idx, ch in enumerate(text) if ch == "{"]
     for idx in reversed(brace_positions):
         candidate = text[idx:]
@@ -2320,9 +2338,13 @@ def _extract_json_payload(raw_output: str) -> dict[str, Any]:
             except Exception:
                 continue
             trailing = candidate[end:].strip()
-            if trailing and "SyntaxWarning" not in trailing:
+            if trailing and "SyntaxWarning" not in trailing and not is_nexus_payload(payload):
                 continue
-        if isinstance(payload, dict):
+        if isinstance(payload, dict) and (
+            is_nexus_payload(payload)
+            or "semantic_status" in payload
+            or "runtime_classification" in payload
+        ):
             return payload
     return {}
 
