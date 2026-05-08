@@ -3276,18 +3276,26 @@ def run_with_nexus(
                             retry_row.get("cli_elapsed_sec"),
                         )
                         retry_verify_start = time.monotonic()
-                        retry_verify = _run_process_group(
-                            _pytest_verifier_cmd(verification_test_file),
-                            cwd=repo_root,
-                            env=os.environ.copy(),
-                            timeout_sec=_remaining_task_timeout(start + max(1, int(timeout_sec)), timeout_sec),
-                        )
-                        retry_hidden_verifier_wall_sec = time.monotonic() - retry_verify_start
-                        retry_hidden_passed = retry_verify.returncode == 0
+                        try:
+                            retry_verify = _run_process_group(
+                                _pytest_verifier_cmd(verification_test_file),
+                                cwd=repo_root,
+                                env=os.environ.copy(),
+                                timeout_sec=_remaining_task_timeout(start + max(1, int(timeout_sec)), timeout_sec),
+                            )
+                            retry_hidden_verifier_wall_sec = time.monotonic() - retry_verify_start
+                            retry_hidden_passed = retry_verify.returncode == 0
+                            retry_stdout_tail = _tail_text(retry_verify.stdout, max_chars=1000)
+                            retry_stderr_tail = _tail_text(retry_verify.stderr, max_chars=1000)
+                        except subprocess.TimeoutExpired:
+                            retry_hidden_verifier_wall_sec = time.monotonic() - retry_verify_start
+                            retry_hidden_passed = False
+                            retry_stdout_tail = ""
+                            retry_stderr_tail = "benchmark_task_deadline"
                         retry_row["hidden_verifier_file"] = verification_test_file
                         retry_row["hidden_verifier_passed"] = retry_hidden_passed
-                        retry_row["hidden_verifier_stdout_tail"] = _tail_text(retry_verify.stdout, max_chars=1000)
-                        retry_row["hidden_verifier_stderr_tail"] = _tail_text(retry_verify.stderr, max_chars=1000)
+                        retry_row["hidden_verifier_stdout_tail"] = retry_stdout_tail
+                        retry_row["hidden_verifier_stderr_tail"] = retry_stderr_tail
                         retry_row["hidden_retry_used"] = True
                         retry_row["hidden_retry_reason"] = "hidden_verifier_failure_bounded_nexus_retry"
                         retry_row["hidden_retry_verifier_wall_sec"] = round(retry_hidden_verifier_wall_sec, 4)

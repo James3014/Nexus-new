@@ -2920,6 +2920,7 @@ def test_run_with_nexus_can_require_strict_llm_baseline(tmp_path: Path, monkeypa
 
     def fake_run(_cmd, **kwargs):
         captured["cmd"] = _cmd
+        captured["env"] = kwargs.get("env", {})
         return _Proc()
 
     monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
@@ -2938,6 +2939,7 @@ def test_run_with_nexus_can_require_strict_llm_baseline(tmp_path: Path, monkeypa
 
     assert "--llm-baseline-required" in captured["cmd"]
     assert captured["cmd"][captured["cmd"].index("--force-flow") + 1] == "baseline"
+    assert captured["env"]["NEXUS_GATEWAY_MAX_RETRIES"] == "1"
     assert out["baseline_llm_required"] is True
     assert out["baseline_source_policy"] == "strict_llm_no_local_fallback"
     assert out["baseline_provider"] == "gemini"
