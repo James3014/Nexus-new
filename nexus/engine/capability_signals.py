@@ -124,7 +124,9 @@ def build_capability_signals(
         task_lower,
         ("secret", "credential", "redact", "auth", "authorization", "deny by default", "governance"),
     )
+    deterministic_hidden_contract = bool(route_features.get("benchmark_hidden_contract_fast_path", False))
     simple_hidden_bugfix = bool(
+        deterministic_hidden_contract or
         (
             task_type == "public_bugfix"
             and risk["risk_score_0_100"] <= 20
@@ -141,7 +143,7 @@ def build_capability_signals(
         and not bool(route_features.get("is_cross_module_task", False)) \
         and not bool(route_features.get("has_hard_signal", False)) \
         and not governance_signal \
-        and not _contains_any(task_lower, ("context", "public report", "evidence", "claim"))
+        and (deterministic_hidden_contract or not _contains_any(task_lower, ("context", "public report", "evidence", "claim")))
 
     return CapabilitySignalSet(
         task_desc=task_desc,

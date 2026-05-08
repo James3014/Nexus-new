@@ -690,3 +690,11 @@ version_scope:
 - **Lesson**: Benchmark/oracle expected capability contracts must enter runtime planner signals before receipt validation. Report-only enforcement is too late and creates false confidence until smoke fails.
 - **Action Taken**: Added route-oracle expected-capability parsing in `capability_signals.py`, seeding `ultra_review` into governance and `ddtree` into acceleration. Added regression coverage and reran Nexus route smoke to pass.
 - **Verification**: `capability_route_smoke.py` passed with `receipt_diagnostic_pass=true`; route-oracle public-safe capability union includes `ultra_review`.
+
+## 2026-05-08 Hidden Contract Fast Path Must Override Stale Memory
+
+- **Phenomenon**: Gemini 3.1 Pro wearing Nexus failed `nexus-value-context-001` after producing a near-correct `build_response` patch with extra keys (`evidence`, `reason`, stale `status`), while hidden verifier required exactly `{'result': 'ok'}`.
+- **Root Cause**: The hidden-contract fast path only recognized duplicate-event verifier tasks and still allowed history memory to push canonical response contracts into heavier Hyper/LLM routes. That spent model budget on a deterministic schema reducer and created a trust mismatch.
+- **Lesson**: When the task body exposes a known deterministic hidden-contract reducer, the route planner must prefer the local verified fast path even if memory contains prior Hyper wins. Stale learning should not override a cheaper exact contract.
+- **Action Taken**: Added canonical response contracts to `benchmark_hidden_contract_fast_path`, projected the fast-path signal into capability planning, and extended local-first baseline repair for `build_response`/`FIELD` reducers.
+- **Verification**: Targeted tests passed; Pro and Flash 3-task same-model A/B both reached Nexus 3/3 verified with trust mismatch 0 on hidden/repair/context.

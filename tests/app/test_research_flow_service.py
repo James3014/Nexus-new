@@ -763,6 +763,47 @@ def test_build_route_hidden_contract_fast_path_survives_low_confidence_candidate
     assert "research" not in out["capability_plan"]["selected_capabilities"]
 
 
+def test_build_route_response_contract_fast_path_ignores_stale_memory(tmp_path: Path, monkeypatch):
+    history_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-history.json"
+    history_path.parent.mkdir(parents=True)
+    history_path.write_text(
+        json.dumps(
+            {
+                "flow:hyper_sprint": [
+                    {
+                        "status": "SUCCESS",
+                        "flow": "hyper_sprint",
+                        "task_type": "public_docs_code_sync",
+                        "task_desc": "Sync code and docs after a renamed public field and canonical field change.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc=(
+            "Sync code and docs after a renamed public field; the expected fix must infer "
+            "the canonical field from surrounding contract text rather than only the failing assertion."
+            "\n\nNexus wearing contract:"
+            "\n- Artifact/Claim: treat completion claims as valid only when backed by checks."
+            "\n- Governance: keep the solution inside scope."
+        ),
+        task_type="public_docs_code_sync",
+        candidate_count=3,
+        root_cause_confidence=0.9,
+        findings_query=None,
+        target_file="target.py",
+    )
+
+    assert out["recommended_flow"] == "baseline"
+    assert out["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+    assert out["should_research"] is False
+    assert "research" not in out["capability_plan"]["selected_capabilities"]
+
+
 def test_build_route_repair_contract_can_skip_research_under_cost_capped_benchmark(tmp_path: Path):
     out = research_flow_service.build_route(
         repo_root=tmp_path,
@@ -1305,6 +1346,69 @@ def test_hidden_contract_apply_events_uses_local_first_before_llm(tmp_path: Path
         report_file=".nexus/reports/research/auto-flow-report.json",
         output_file=None,
         task_id="case-hidden-local-first",
+    )
+
+    report = payload["result"]["report"]
+    assert payload["result"]["status"] == "SUCCESS"
+    assert payload["strategy"]["path"] == "baseline_only"
+    assert report["source"] == "local_hidden_contract_fast_path"
+    assert report["model_calls"] == 0
+    assert report["baseline_source_policy"] == "hidden_contract_local_first_before_llm"
+    assert payload["route"]["recommended_reason"] == "benchmark_hidden_contract_fast_path"
+
+
+def test_hidden_contract_response_builder_uses_local_first_before_llm(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    test_file = tmp_path / "test_target.py"
+    target.write_text(
+        "FIELD = 'status'\n\n"
+        "def build_response(value):\n"
+        "    return {FIELD: value}\n",
+        encoding="utf-8",
+    )
+    test_file.write_text(
+        "from target import build_response\n\n"
+        "def test_visible_mapping_shape():\n"
+        "    assert isinstance(build_response('ok'), dict)\n",
+        encoding="utf-8",
+    )
+
+    class FailIfCalledLLM:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, **_kwargs):
+            raise AssertionError("response hidden contract local-first should avoid LLM baseline")
+
+    monkeypatch.setattr(research_flow_service, "LLMCandidateGenerator", FailIfCalledLLM)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc=(
+            "Sync code and docs after a renamed public field; the visible test only checks "
+            "mapping shape while the verification test requires the canonical field."
+            "\n\nNexus wearing contract:\n- benchmark contract suffix"
+        ),
+        target_file=str(target),
+        test_file=str(test_file),
+        task_type="public_bugfix",
+        candidate_count=3,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=True,
+        llm_baseline=True,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow=None,
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-response-hidden-local-first",
     )
 
     report = payload["result"]["report"]

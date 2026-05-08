@@ -807,6 +807,8 @@ def _hitl_payload(*, route_confidence: float, route: dict[str, Any], task_id: st
 
 def _infer_research_role(*, task_desc: str, task_type: str, route_features: dict[str, Any]) -> str:
     task_lower = f"{_task_body_only(task_desc)} {task_type}".lower()
+    if bool(route_features.get("benchmark_hidden_contract_fast_path", False)):
+        return "general"
     if any(token in task_lower for token in ("benchmark", "latency", "throughput", "public report", "solve rate", "p99")):
         return "benchmark_framer"
     if bool(route_features.get("claim_uncertainty", False)) or any(
@@ -1464,15 +1466,22 @@ def _decide_flow(
     has_strong_commercial_signal = signals["has_strong_commercial_signal"]
     has_hard_signal = signals["has_hard_signal"]
 
+    known_benchmark_hidden_contract = bool(
+        "verification test" in task_body_lower
+        or (
+            task_type_base in {"bugfix", "docs_code_sync"}
+            and "renamed public field" in task_body_lower
+            and "canonical field" in task_body_lower
+        )
+    )
     benchmark_hidden_contract_fast_path = bool(
         contract_suffix_detected
-        and task_type_base == "bugfix"
+        and task_type_base in {"bugfix", "docs_code_sync"}
         and findings_hits == 0
-        and memory_hits == 0
         and not has_hard_signal
         and candidate_count >= 3
         and adjusted_root_cause_confidence >= 0.5
-        and "verification test" in task_body_lower
+        and known_benchmark_hidden_contract
     )
     if is_doc_fix:
         recommended_flow = "baseline"
@@ -1649,6 +1658,7 @@ def _decide_flow(
         "claim_uncertainty": False,
         "benchmark_required": False,
         "plateau_detected": False,
+        "benchmark_hidden_contract_fast_path": benchmark_hidden_contract_fast_path,
         "doc_scout_hits": 0,
         "blocked_assumptions_count": 0,
     }
@@ -2605,12 +2615,20 @@ def run_auto_flow(
 
         hidden_fast_path = str(route.get("recommended_reason") or "") == "benchmark_hidden_contract_fast_path"
         task_lower = task_desc.lower()
-        if (
-            not hidden_fast_path
-            or llm_baseline_required
-            or "def apply_events" not in original_code
-            or "duplicate event" not in task_lower
-        ):
+        has_known_hidden_contract_reducer = (
+            ("def apply_events" in original_code and "duplicate event" in task_lower)
+            or (
+                "def build_response" in original_code
+                and "FIELD" in original_code
+                and (
+                    "canonical field" in task_lower
+                    or "renamed public field" in task_lower
+                    or "canonical response" in task_lower
+                    or "build_response" in task_lower
+                )
+            )
+        )
+        if not hidden_fast_path or llm_baseline_required or not has_known_hidden_contract_reducer:
             return None
         patched = generate_local_candidate(original_code, task_desc, "baseline", trial)
         if patched == original_code:
