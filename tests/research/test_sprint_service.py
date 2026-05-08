@@ -1012,7 +1012,7 @@ def test_contract_feature_allows_one_line_artifact_fix(monkeypatch, tmp_path: Pa
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "SUCCESS"
-    assert res.winner_source == "llm"
+    assert res.winner_source == "local_preflight"
 
 
 def test_failed_local_fallback_gets_emergency_baseline_attempt(monkeypatch, tmp_path: Path):
@@ -1107,8 +1107,8 @@ def test_local_contract_fallback_repairs_phase_evidence_fields(monkeypatch, tmp_
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "SUCCESS"
-    assert res.fallback_used is True
-    assert res.winner_source == "local"
+    assert res.fallback_used is False
+    assert res.winner_source == "local_preflight"
 
 
 def test_hidden_verifier_mode_adds_local_shadow_for_llm_visible_pass(monkeypatch, tmp_path: Path):
@@ -1172,14 +1172,14 @@ def test_hidden_verifier_mode_adds_local_shadow_for_llm_visible_pass(monkeypatch
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "SUCCESS"
-    assert calls["llm"] == 1
-    assert res.fallback_used is True
-    assert res.winner_source == "local_hidden_shadow"
+    assert calls["llm"] == 0
+    assert res.fallback_used is False
+    assert res.winner_source == "local_hidden_contract_fast_path"
     assert "value is not None" in (res.patch or "")
-    assert "hidden_invariant_shadow_candidate" in res.error_codes or res.winner_source == "local_hidden_shadow"
+    assert "hidden_contract_fast_path_success" in res.error_codes
 
 
-def test_hidden_verifier_mode_prefers_local_shadow_for_remaining_ms_contract(monkeypatch, tmp_path: Path):
+def test_hidden_verifier_mode_uses_fast_path_for_remaining_ms_contract(monkeypatch, tmp_path: Path):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text(
@@ -1195,6 +1195,8 @@ def test_hidden_verifier_mode_prefers_local_shadow_for_remaining_ms_contract(mon
         encoding="utf-8",
     )
 
+    calls = {"llm": 0}
+
     class FakeLLMGenerator:
         source = "llm"
 
@@ -1202,6 +1204,7 @@ def test_hidden_verifier_mode_prefers_local_shadow_for_remaining_ms_contract(mon
             pass
 
         def generate(self, *args, **kwargs):
+            calls["llm"] += 1
             return (
                 "def remaining_ms(start_ms, now_ms, timeout_ms):\n"
                 "    return timeout_ms - (now_ms - start_ms)\n",
@@ -1230,9 +1233,73 @@ def test_hidden_verifier_mode_prefers_local_shadow_for_remaining_ms_contract(mon
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
 
     assert res.status == "SUCCESS"
-    assert res.winner_source == "local_hidden_shadow"
+    assert calls["llm"] == 0
+    assert res.winner_source == "local_hidden_contract_fast_path"
     assert "elapsed = max(0, now_ms - start_ms)" in (res.patch or "")
     assert "return max(0, timeout_ms - elapsed)" in (res.patch or "")
+
+
+def test_hidden_verifier_mode_uses_fast_path_for_belief_budget_contract(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "def rlm_harder_v2_repair_budget(confidence, risk):\n"
+        "    return {'rounds': 1, 'needs_evidence': False}\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import rlm_harder_v2_repair_budget\n\n"
+        "def test_low_confidence_high_risk_requires_more_evidence():\n"
+        "    assert rlm_harder_v2_repair_budget(0.42, 'high') == {'rounds': 3, 'needs_evidence': True}\n"
+        "    assert rlm_harder_v2_repair_budget(0.91, 'low') == {'rounds': 1, 'needs_evidence': False}\n",
+        encoding="utf-8",
+    )
+
+    calls = {"llm": 0}
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            calls["llm"] += 1
+            return (
+                "def rlm_harder_v2_repair_budget(confidence, risk):\n"
+                "    if confidence == 'low' or risk == 'high':\n"
+                "        return {'rounds': 3, 'needs_evidence': True}\n"
+                "    return {'rounds': 1, 'needs_evidence': False}\n",
+                {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "tokens_used": 10,
+                    "token_capture_status": "measured",
+                    "model_patch_generated": True,
+                },
+            )
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+
+    cfg = SprintConfig(
+        task="Fix repair budget selection so low confidence or medium/high risk requires evidence.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert calls["llm"] == 0
+    assert res.winner_source == "local_hidden_contract_fast_path"
+    assert "confidence < 0.8" in (res.patch or "")
+    assert "risk_level in {'medium', 'high'}" in (res.patch or "")
 
 
 def test_llm_mode_blocked_by_learn_slo_guard(monkeypatch, tmp_path: Path):
