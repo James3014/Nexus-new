@@ -24,6 +24,7 @@ version_scope: '[v30]'
 ### 🧩 認識 Nexus (Understand)
 面向產品與生態。
 - **產品首頁**: [[00_Home/README_Product|README_Product]]
+- **數據工程**: [[04_Research/Data_Engineering/NEXUS_FULL_SPECTRUM_DATA_ENGINEERING_ATLAS|Data Engineering Atlas]]
 - **使用者案例**: [[00_Product/User Stories|User Stories]]
 - **商業戰略**: [[05_Commercial/Go-to-Market|Go-to-Market]]
 - **投資人簡報**: [[00_Product/Investor Deck|Investor Deck]]
@@ -31,14 +32,17 @@ version_scope: '[v30]'
 ### ⚙️ 操作 Nexus (Operate)
 面向執行與開發。
 - **最高規約**: [[01_System/MUSE_PROTO|MUSE_PROTO v2.4]]
+- **進化白皮書**: [[01_System/Evolution/LEARNING_EVOLUTION_MANIFESTO|Evolution Manifesto]]
+- **架構藍圖**: [[01_System/SYSTEM_ARCHITECTURE_BLUEPRINT|System Blueprint]]
 - **CLI 手冊**: [[05_Protocols/CLI_Full_Params|CLI Full Parameters]]
-- **故障修復**: [[06_Ops/Ops - CI Failure Playbook|Failure Playbook]]
-- **審計計分**: [[07_Compliance/Hallucination_Guard_Scoring_Spec|HI Scoring Spec]]
+- **能力矩陣**: [[01_System/16_CAPABILITY_SPEC_MATRIX|Capability Matrix]]
 
 ### 📜 追溯 Nexus (Trace)
 面向審計與歷史。
+- **決策日誌 (ADR)**: [[01_System/ADR/|Recent ADRs (2026-05)]]
 - **演化日誌**: [[99_Schema/Wiki_Changelog_Auto|Automatic Changelog]]
-- **健康矩陣**: [[99_Schema/Page_Version_Matrix|Page Maturity Matrix]]
+- **驗收狀態**: [[04_State/NEXUS_FINAL_ACCEPTANCE_MATRIX_2026-05-06|Final Acceptance Matrix]]
+- **路線圖**: [[09_Roadmap/CAPABILITY_ROUTING_MIGRATION_PLAN_2026-04-29|Migration Roadmap]]
 - **文碼對位**: [[08_Diffs/Code_to_Wiki_Alignment_Matrix|Alignment Matrix]]
 
 ---
