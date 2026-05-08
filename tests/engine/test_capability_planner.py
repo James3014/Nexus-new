@@ -841,6 +841,20 @@ def test_route_cost_policy_loader_reads_task_specific_env_controls(monkeypatch):
     assert budget["route_cost_policy"]["current_candidate_cap"] == 1
 
 
+def test_route_cost_controls_for_task_applies_current_env_controls(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "NEXUS_ROUTE_COST_CONTROLS",
+        '{"lite_route": true, "candidate_cap": 1, "hold": true, "policy_source": "env:test"}',
+    )
+
+    controls = route_cost_controls_for_task(tmp_path, "rlm-harder-v2-governance-001")
+
+    assert controls["candidate_cap"] == 1
+    assert controls["lite_route"] is True
+    assert controls["hold"] is True
+    assert controls["policy_source"] == "env:test"
+
+
 def test_capability_planner_lite_route_downgrades_high_cost_conditionals():
     plan = CapabilityPlanner().plan(
         task_desc="Refactor a credential scrubber while preserving governance boundaries and evidence claims",

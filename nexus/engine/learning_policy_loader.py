@@ -116,9 +116,10 @@ def route_cost_controls_for_task(project_root: Path, task_id: str, budget: dict[
     overrides = overrides if isinstance(overrides, dict) else {}
     task_id = str(task_id)
     controls: dict[str, Any] = {
-        "candidate_cap": overrides.get(task_id),
-        "lite_route": task_id in set(policy.get("lite_route_tasks", []) or []),
-        "hold": task_id in set(policy.get("hold_tasks", []) or []),
+        "candidate_cap": overrides.get(task_id) or policy.get("current_candidate_cap"),
+        "lite_route": bool(policy.get("current_lite_route", False))
+        or task_id in set(policy.get("lite_route_tasks", []) or []),
+        "hold": bool(policy.get("current_hold", False)) or task_id in set(policy.get("hold_tasks", []) or []),
     }
     if any(value not in (None, "", False) for value in controls.values()):
         controls["policy_source"] = str(policy.get("source") or "")

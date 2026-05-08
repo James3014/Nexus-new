@@ -283,7 +283,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Compare weak-model Nexus traces against a GPT-5.5+Nexus teacher trace.")
+    parser = argparse.ArgumentParser(description="Compare weak-model Nexus traces against a selectable GPT-5.5 teacher arm.")
     parser.add_argument("--student-run", required=True)
     parser.add_argument("--teacher-run", required=True)
     parser.add_argument("--student-name", default="flash_nexus")
