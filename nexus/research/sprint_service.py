@@ -440,6 +440,18 @@ def _should_try_local_preflight_before_llm(*, task: str, source_code: str) -> bo
     )
 
 
+def _has_hidden_contract_fast_path(source_code: str) -> bool:
+    """Cheap deterministic contracts that can be verified before spending an LLM call."""
+    return any(
+        marker in source_code
+        for marker in (
+            "def merge_limits",
+            "def remaining_ms",
+            "def rlm_harder_v2_repair_budget",
+        )
+    )
+
+
 class SprintExecutor:
     def __init__(self, repo_root: Path, scope_files: list[str], pytest_cmd: list[str], timeout_sec: int, task: str):
         self.repo_root = repo_root
@@ -988,6 +1000,45 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         used_source = "local"
         ev_recorded = False
         try:
+            if llm_generator is not None and hidden_verifier_mode and _has_hidden_contract_fast_path(source_code):
+                fast_code, fast_meta = local_generator.generate(
+                    source_code=source_code,
+                    task=config.task,
+                    mutation_hint=f"{hint}\nhidden_verifier_contract_fast_path",
+                    seed=idx + 5000,
+                )
+                fast_source = str(fast_meta.get("source", "local_hidden_contract_fast_path")) or "local_hidden_contract_fast_path"
+                if fast_source == "local":
+                    fast_source = "local_hidden_contract_fast_path"
+                fast_guard_ok, fast_guard_reason = _semantic_guard(source_code, fast_code, config.task, fast_source)
+                if fast_guard_ok:
+                    fast_ev = executor.evaluate_candidate(
+                        seed=idx + 5000,
+                        hint=f"{hint} | hidden_verifier_contract_fast_path",
+                        code=fast_code,
+                        source=fast_source,
+                    )
+                else:
+                    fast_ev = CandidateEval(
+                        seed=idx + 5000,
+                        score=0.0,
+                        hint=f"{hint} | hidden_verifier_contract_fast_path",
+                        error=fast_guard_reason,
+                        candidate_code=fast_code,
+                        source=fast_source,
+                    )
+                candidates.append(fast_ev)
+                ev_recorded = True
+                learning_trace["hidden_contract_fast_path"] = {
+                    "attempted": True,
+                    "score": fast_ev.score,
+                    "source": fast_source,
+                }
+                if fast_ev.score >= 1.0:
+                    error_codes.append("hidden_contract_fast_path_success")
+                    ev = fast_ev
+                    break
+                error_codes.append("hidden_contract_fast_path_miss")
             if llm_generator is not None and _should_try_local_preflight_before_llm(task=config.task, source_code=source_code):
                 preflight_code, preflight_meta = local_generator.generate(
                     source_code=source_code,
@@ -1105,7 +1156,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             if (
                 hidden_verifier_mode
                 and used_source.startswith("llm")
-                and ("def merge_limits" in source_code or "def remaining_ms" in source_code)
+                and _has_hidden_contract_fast_path(source_code)
             ):
                 local_code, local_meta = local_generator.generate(
                     source_code=source_code,
