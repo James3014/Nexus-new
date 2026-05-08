@@ -107,3 +107,34 @@ def test_promoted_s2t_policy_stays_draft_until_before_after_ab():
     assert policy["promotion_requirements"]["defensive_run_required"] is True
     assert policy["task_rules"]["task-a"]["recommended_action"] == "keep_strict_repair_selector"
     assert policy["task_rules"]["task-b"]["recommended_action"] == "prefer_lite_or_standard"
+
+
+def test_promoted_s2t_policy_uses_paired_bare_success_as_cost_downshift_signal():
+    report = build_s2t_shadow_report(
+        [
+            {
+                "mode": "with_nexus",
+                "task_id": "task-a",
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "model_calls": 2,
+                "total_tokens": 90000,
+                "nexus_winner_source": "llm_self_heal",
+                "run_eligible": True,
+            },
+            {
+                "mode": "without_nexus",
+                "task_id": "task-a",
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "model_calls": 1,
+                "total_tokens": 30000,
+                "run_eligible": True,
+            },
+        ]
+    )
+
+    policy = build_promoted_s2t_policy(report)
+
+    assert policy["task_rules"]["task-a"]["paired_bare_verified"] is True
+    assert policy["task_rules"]["task-a"]["recommended_action"] == "try_lite_with_defensive_gate"

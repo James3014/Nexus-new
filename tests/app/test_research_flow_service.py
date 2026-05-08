@@ -13,6 +13,7 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
         candidate_count=3,
         root_cause_confidence=0.4,
         findings_query=None,
+        task_id="route-task-001",
     )
     
     assert "should_research" in out
@@ -25,6 +26,7 @@ def test_build_route_returns_complete_fields(tmp_path: Path):
     assert "capability_stack" in out
     assert "capability_plan" in out
     assert "route_decision" in out
+    assert out["task_id"] == "route-task-001"
     assert out["capability_stack"]["selected_capabilities"] == ["hyper_sprint", "autoreason"]
     assert out["capability_stack"]["acceleration_layers"] == ["ddtree"]
     assert out["capability_stack"]["governance_layers"] == ["ultra_review"]

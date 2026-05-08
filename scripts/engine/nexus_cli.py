@@ -1580,10 +1580,11 @@ def delegate(task_name, report_file, output_json):
 @click.option("--candidate-count", default=1, type=int)
 @click.option("--root-cause-confidence", default=1.0, type=float)
 @click.option("--findings-query")
+@click.option("--task-id")
 @click.option("--output-json", is_flag=True)
 @click.option("--explain-route", is_flag=True)
 @click.option("--route-decision-report", type=click.Path(path_type=Path))
-def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, output_json, explain_route, route_decision_report):
+def research_route(task_desc, task_type, candidate_count, root_cause_confidence, findings_query, task_id, output_json, explain_route, route_decision_report):
     """🧠 Strategy Routing Layer: Decide whether to research and in what mode."""
     out = research_flow_service.build_route(repo_root=repo_root, 
         task_desc=task_desc,
@@ -1591,6 +1592,7 @@ def research_route(task_desc, task_type, candidate_count, root_cause_confidence,
         candidate_count=candidate_count,
         root_cause_confidence=root_cause_confidence,
         findings_query=findings_query,
+        task_id=task_id,
     )
     if route_decision_report:
         from nexus.engine.capability_planner import CapabilityPlanner

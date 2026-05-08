@@ -35,12 +35,44 @@ def build_export(path: Path) -> dict[str, Any]:
     rows = load_rows_from_evidence_bundle(path)
     report = build_s2t_shadow_report(rows)
     policy = build_promoted_s2t_policy(report)
+    route_cost_policy = build_route_cost_policy_candidate(policy, source=str(path))
     return {
         "schema": "nexus_s2t_shadow_policy_export_v1",
         "source_evidence_bundle": str(path),
         "row_count": len(rows),
         "s2t_shadow_report": report,
         "s2t_policy_draft": policy,
+        "route_cost_policy_candidate": route_cost_policy,
+    }
+
+
+def build_route_cost_policy_candidate(policy: dict[str, Any], *, source: str) -> dict[str, Any]:
+    candidate_cap_actions = {
+        "prefer_lite_or_standard",
+        "try_standard_with_cost_cap",
+        "try_lite_with_defensive_gate",
+    }
+    task_rules = policy.get("task_rules", {})
+    task_rules = task_rules if isinstance(task_rules, dict) else {}
+    # Lite disables bounded self-heal in the current runner. Keep it behind a
+    # stricter future promotion gate; candidate caps are the safe first step.
+    lite_tasks: list[str] = []
+    candidate_cap_tasks = [
+        str(task_id)
+        for task_id, rule in sorted(task_rules.items())
+        if isinstance(rule, dict) and str(rule.get("recommended_action") or "") in candidate_cap_actions
+    ]
+    return {
+        "schema_version": "nexus_promoted_route_cost_policy.v1",
+        "source": source,
+        "candidate_cap_overrides": {task_id: 1 for task_id in candidate_cap_tasks},
+        "lite_route_tasks": lite_tasks,
+        "hold_tasks": [],
+        "promotion_gate": {
+            "source_policy_status": str(policy.get("status") or ""),
+            "requires_same_model_before_after_ab": True,
+            "defensive_run_required": True,
+        },
     }
 
 

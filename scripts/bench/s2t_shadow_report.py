@@ -174,7 +174,13 @@ def build_promoted_s2t_policy(report: dict[str, Any]) -> dict[str, Any]:
     same-model before/after A/B because shadow traces only explain past runs.
     """
 
-    events = [event for event in report.get("events", []) if event.get("mode") == "with_nexus"]
+    all_events = list(report.get("events", []) or [])
+    events = [event for event in all_events if event.get("mode") == "with_nexus"]
+    bare_verified = {
+        str(event.get("task_id") or "")
+        for event in all_events
+        if event.get("mode") == "without_nexus" and bool(event.get("outcome", {}).get("verified", False))
+    }
     profile_counts = Counter(event.get("selector_shadow", {}).get("profile", "lite") for event in events)
     task_rules: dict[str, dict[str, Any]] = {}
     for event in events:
@@ -191,9 +197,10 @@ def build_promoted_s2t_policy(report: dict[str, Any]) -> dict[str, Any]:
             "training_eligible": bool(selector.get("training_eligible", False)),
             "token_efficiency": cost.get("token_efficiency", "unknown"),
             "verified": bool(outcome.get("verified", False)),
+            "paired_bare_verified": task_id in bare_verified,
             "high_cost_selected": list(candidate.get("high_cost_selected") or []),
             "self_heal_used": bool(repair.get("self_heal_used", False)),
-            "recommended_action": _recommended_action(event),
+            "recommended_action": _recommended_action(event, paired_bare_verified=task_id in bare_verified),
         }
 
     return {
@@ -218,7 +225,7 @@ def build_promoted_s2t_policy(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _recommended_action(event: dict[str, Any]) -> str:
+def _recommended_action(event: dict[str, Any], *, paired_bare_verified: bool = False) -> str:
     efficiency = event.get("cost", {}).get("token_efficiency", "unknown")
     verified = bool(event.get("outcome", {}).get("verified", False))
     self_heal = bool(event.get("repair", {}).get("self_heal_used", False))
@@ -228,6 +235,8 @@ def _recommended_action(event: dict[str, Any]) -> str:
         return "hold_for_defensive_run"
     if not verified:
         return "do_not_promote"
+    if paired_bare_verified and efficiency == "verified_but_expensive":
+        return "try_lite_with_defensive_gate"
     if self_heal:
         return "keep_strict_repair_selector"
     if efficiency == "verified_but_expensive" and high_cost:

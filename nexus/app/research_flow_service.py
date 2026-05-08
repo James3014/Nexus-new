@@ -1706,6 +1706,7 @@ def build_route(
     candidate_count: int,
     root_cause_confidence: float,
     findings_query: str | None,
+    task_id: str | None = None,
     target_file: str | None = None,
     routing_hint: dict[str, Any] | None = None,
 ) -> dict:
@@ -1758,6 +1759,7 @@ def build_route(
     )
 
     route_payload = {
+        "task_id": task_id or "",
         "should_research": decision_payload["should_research"],
         "mode": decision_payload["mode"],
         "reason": decision_payload["reason"],

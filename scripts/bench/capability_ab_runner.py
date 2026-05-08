@@ -2800,6 +2800,7 @@ def _run_with_nexus_codex(
         candidate_count=3,
         root_cause_confidence=0.55,
         findings_query=None,
+        task_id=task.task_id,
         target_file=target_file,
     )
     chosen_flow = force_flow or str(route.get("recommended_flow") or "baseline")

@@ -919,7 +919,7 @@ class CapabilityPlanner:
             if states.get(cap) == "conditional"
         ]
         capability_hints: dict[str, dict[str, Any]] = {}
-        if action in {"prefer_lite_or_standard", "try_standard_with_cost_cap"} or profile == "lite":
+        if action in {"prefer_lite_or_standard", "try_standard_with_cost_cap", "try_lite_with_defensive_gate"} or profile == "lite":
             for cap in high_cost_selected:
                 capability_hints[cap] = {
                     "would_downgrade": True,
