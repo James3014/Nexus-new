@@ -60,6 +60,28 @@ uv run python scripts/bench/capability_ab_runner.py \
 
 Result: preflight `PASS`; `same_model=true`; `hidden_verifier_mode=true`.
 
+```bash
+NEXUS_VALUE_HIDDEN_VERIFIER=1 \
+NEXUS_CODEX_MODEL_NAME=gpt-5.5 \
+NEXUS_DIRECT_CODEX_MODEL=gpt-5.5 \
+uv run python scripts/bench/capability_ab_runner.py \
+  --tasks-file scripts/bench/public_benchmark_rlm_harder_v2.json \
+  --output-dir .nexus/reports/phase152_codex55_teacher_live_1task \
+  --max-tasks 1 --repeat-trials 1 --timeout-sec 300 \
+  --task-id-filter rlm-harder-v2-governance-001 \
+  --with-model-provider codex --without-mode codex \
+  --with-nexus-runner subprocess --with-llm-mode all \
+  --evidence-bundle --markdown-report auto
+```
+
+Result:
+
+- GPT-5.5+Nexus: `SUCCESS`, semantic verified rate `1.0`, avg wall `49.1123s`, avg tokens `21883`.
+- GPT-5.5 direct: `FAILED`, semantic verified rate `0.0`, avg wall `10.0754s`, avg tokens `20374`.
+- Evidence bundle: `public_claim_gate=PASS`, `same_model=true`, both arms eligible.
+
+This is a key calibration result: GPT-5.5 direct is a teacher/reference arm, but it is not automatically an oracle. Nexus may still be needed even for the teacher model on governed delivery tasks.
+
 ## Public Claim Boundary
 
 - GPT-5.5 direct can be used as teacher reference for gap analysis.
@@ -70,3 +92,5 @@ Result: preflight `PASS`; `same_model=true`; `hidden_verifier_mode=true`.
 ## Failure Lesson
 
 The original gap matrix made `teacher_run/with_nexus` the primary teacher arm, which did not match the stated target of `GPT-5.5 direct`. The durable fix is an explicit teacher-arm selector rather than renaming files to fake direct rows as `with_nexus`.
+
+The first live teacher smoke also showed that GPT-5.5 direct can fail a governed delivery task that GPT-5.5+Nexus passes. Future reports must treat GPT-5.5 direct as a reference baseline, not as a guaranteed answer key.
