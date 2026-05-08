@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scripts.bench.route_cost_trace_classifier import classify_high_cost_capability_trace
+
 
 @dataclass(frozen=True)
 class TaskArm:
@@ -30,6 +32,7 @@ class TaskArm:
     selected_count: int
     strategy_path: str
     high_cost_selected: tuple[str, ...]
+    high_cost_trace: tuple[dict[str, Any], ...]
 
     @property
     def verified(self) -> bool:
@@ -122,6 +125,7 @@ def _load_arm_rows(run_dir: Path, arm: str) -> dict[str, TaskArm]:
             selected_count=_as_int(row.get("route_decision_selected_count")),
             strategy_path=str(row.get("strategy_path") or ""),
             high_cost_selected=_as_list(row.get("route_profile_high_cost_selected")),
+            high_cost_trace=tuple(classify_high_cost_capability_trace(row)),
         )
     return out
 
@@ -156,11 +160,14 @@ def _recommendation(*, student: TaskArm, teacher: TaskArm, student_bare: TaskArm
     token_ratio = _ratio(float(student.tokens), float(teacher.tokens))
     teacher_direct_failed = bool(teacher_direct and not teacher_direct.verified)
     student_bare_failed = bool(student_bare and not student_bare.verified)
+    student_wasted_high_cost = sum(1 for item in student.high_cost_trace if item.get("classification") != "contributed")
 
     if student.verified and not student.model_uplift_eligible:
         if student.success_source == "local_deterministic_success":
             return "keep_as_nexus_cost_avoidance_not_model_uplift"
         return "separate_nexus_tool_success_from_model_uplift"
+    if student.verified and student_wasted_high_cost > 0 and (wall_ratio and wall_ratio >= 2.0):
+        return "remove_or_gate_high_cost_selected_without_substantive_contribution"
     if not student.verified and teacher.verified:
         return "raise_student_capability_or_context"
     if student.trust_mismatch:
@@ -231,6 +238,10 @@ def build_gap_matrix(
                 "teacher_strategy_path": t.strategy_path,
                 "student_high_cost_selected": list(s.high_cost_selected),
                 "teacher_high_cost_selected": list(t.high_cost_selected),
+                "student_high_cost_trace": list(s.high_cost_trace),
+                "teacher_high_cost_trace": list(t.high_cost_trace),
+                "student_wasted_high_cost_count": sum(1 for item in s.high_cost_trace if item.get("classification") != "contributed"),
+                "teacher_wasted_high_cost_count": sum(1 for item in t.high_cost_trace if item.get("classification") != "contributed"),
                 "recommendation": _recommendation(student=s, teacher=t, student_bare=sb, teacher_direct=td),
             }
         )
@@ -261,8 +272,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- teacher: `{payload['teacher_model']}`",
         f"- teacher_arm: `{payload.get('teacher_arm', 'with_nexus')}`",
         "",
-        "| Task | Bucket | Student | Teacher | Source | Eligible | Wall | Tokens | Strategy | Recommendation |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        "| Task | Bucket | Student | Teacher | Source | Eligible | Wall | Tokens | High-cost waste | Strategy | Recommendation |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | ---: | :--- | :--- |",
     ]
     for row in payload["rows"]:
         lines.append(
@@ -273,6 +284,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             f"{row['student_model_uplift_eligible']} -> {row['teacher_model_uplift_eligible']} | "
             f"{row['student_wall_sec']:.2f}s / {row['teacher_wall_sec']:.2f}s ({_fmt_ratio(row['student_vs_teacher_wall_ratio'])}) | "
             f"{row['student_tokens']} / {row['teacher_tokens']} ({_fmt_ratio(row['student_vs_teacher_token_ratio'])}) | "
+            f"{row['student_wasted_high_cost_count']} / {row['teacher_wasted_high_cost_count']} | "
             f"{row['student_strategy_path']} -> {row['teacher_strategy_path']} | "
             f"{row['recommendation']} |"
         )

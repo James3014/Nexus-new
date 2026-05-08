@@ -143,3 +143,44 @@ def test_gap_matrix_can_use_gpt55_direct_teacher_arm(tmp_path: Path):
     assert row["student_vs_teacher_wall_ratio"] == 3.0
     assert row["teacher_strategy_path"] == "gpt55_direct"
     assert "teacher_arm: `without_nexus`" in out
+
+
+def test_gap_matrix_surfaces_wasted_high_cost_research(tmp_path: Path):
+    student = tmp_path / "student"
+    teacher = tmp_path / "teacher"
+    _write_row(
+        student,
+        "with_nexus",
+        "nexus-value-hidden-001",
+        wall_duration_sec=45.0,
+        total_tokens=9000,
+        route_profile_high_cost_selected=["research"],
+        capability_receipts=[
+            {
+                "name": "research",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "evidence_refs": ["research:nexus-value-hidden-001:route_selected"],
+            }
+        ],
+    )
+    _write_row(student, "without_nexus", "nexus-value-hidden-001", status="FAILED", semantic_status="UNVERIFIED")
+    _write_row(teacher, "without_nexus", "nexus-value-hidden-001", wall_duration_sec=15.0, total_tokens=3000)
+
+    payload = build_gap_matrix(
+        student_run=student,
+        teacher_run=teacher,
+        student_name="flash_nexus",
+        teacher_name="gpt55_direct",
+        teacher_arm="without_nexus",
+    )
+    row = payload["rows"][0]
+    out = render_markdown(payload)
+
+    assert row["student_wasted_high_cost_count"] == 1
+    assert row["student_high_cost_trace"][0]["classification"] == "route_selected_only_evidence"
+    assert row["recommendation"] == "remove_or_gate_high_cost_selected_without_substantive_contribution"
+    assert "High-cost waste" in out

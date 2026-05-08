@@ -1041,6 +1041,10 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "model_name": "gemini-3-flash-preview",
         "run_eligible": True,
         "token_measured": True,
+        "provider_token_measured": True,
+        "token_capture_status": "measured",
+        "gateway_token_source": "stats",
+        "total_tokens": 100,
         "gateway_stats_present": True,
         "nexus_wearing_valid": True,
         "gemini_uses_nexus": True,
@@ -1080,6 +1084,10 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "model_name": "gemini-3-flash-preview",
         "run_eligible": True,
         "token_measured": True,
+        "provider_token_measured": True,
+        "token_capture_status": "measured",
+        "gateway_token_source": "stats",
+        "total_tokens": 100,
         "gateway_stats_present": True,
     }
     write_jsonl(without_path, [without_row])
@@ -1117,11 +1125,13 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["public_claim_gate"]["checks"]["nexus_wearing_valid_rate"] == 1.0
     assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 1.0
     assert payload["public_claim_gate"]["checks"]["route_cost_ledger_schema"] == "nexus_route_cost_ledger_v1"
+    assert payload["public_claim_gate"]["checks"]["route_cost_trace_report_schema"] == "nexus_route_cost_trace_report_v1"
     assert payload["public_claim_gate"]["checks"]["product_kpis_schema"] == "nexus_product_kpis_v1"
     assert payload["public_claim_gate"]["checks"]["openseeker_alignment_schema"] == "nexus_openseeker_benchmark_kpis_v1"
     assert payload["route_cost_ledger"]["scope"] == "measured_benchmark_telemetry_not_billing_cost"
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["rows"] == 1
     assert payload["route_cost_ledger"]["arms"]["without_nexus"]["rows"] == 1
+    assert payload["route_cost_trace_report"]["schema"] == "nexus_route_cost_trace_report_v1"
     assert payload["product_kpis"]["schema"] == "nexus_product_kpis_v1"
     assert payload["product_kpis"]["arms"]["with_nexus"]["avg_time_to_verified_sec"] == 0.0
     assert payload["product_kpis"]["arms"]["without_nexus"]["fail_closed_block_rate"] == 1.0
@@ -1174,6 +1184,77 @@ def test_write_evidence_bundle_fails_gate_when_route_decision_missing(tmp_path: 
     assert payload["public_claim_gate"]["verdict"] == "FAIL"
     assert "route_decision_missing" in payload["public_claim_gate"]["failures"]
     assert payload["public_claim_gate"]["checks"]["route_decision_present_rate"] == 0.0
+
+
+def test_write_evidence_bundle_classifies_route_selected_only_high_cost_research(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_row = {
+        "mode": "with_nexus",
+        "task_id": "task-research",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "token_measured": True,
+        "gateway_stats_present": True,
+        "nexus_wearing_valid": True,
+        "gemini_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "capability_claim_verified": True,
+        "route_decision_schema_version": "nexus_route_decision_v1",
+        "route_profile_high_cost_selected": ["research"],
+        "capability_receipts": [
+            {
+                "name": "research",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "evidence_refs": ["research:task-research:route_selected"],
+            }
+        ],
+    }
+    without_row = {
+        "mode": "without_nexus",
+        "task_id": "task-research",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "token_measured": True,
+        "gateway_stats_present": True,
+    }
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [without_row])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row, without_row],
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 1,
+            "runner_command": "capability_ab_runner.py --tasks-file tasks.json",
+            "hidden_verifier_mode": True,
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+        },
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    report = payload["route_cost_trace_report"]
+
+    assert report["schema"] == "nexus_route_cost_trace_report_v1"
+    assert report["classification_counts"] == {"route_selected_only_evidence": 1}
+    trace = report["rows"][0]["high_cost_trace"][0]
+    assert trace["capability"] == "research"
+    assert trace["substantive_outcome_contributed"] is False
 
 
 def test_write_evidence_bundle_fails_gate_when_with_token_measured_low(tmp_path: Path):

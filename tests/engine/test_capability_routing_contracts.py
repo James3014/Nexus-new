@@ -961,3 +961,21 @@ def test_route_oracle_expected_capability_contract_seeds_governance_and_accelera
     assert "ddtree" in signals.acceleration_seed
     assert "ultra_review" in plan.selected_capabilities
     assert "ddtree" in plan.selected_capabilities
+
+
+def test_research_route_selected_ref_is_not_substantive_evidence():
+    receipt = RECEIPT_ADAPTERS["research"].build(
+        claim_verified=True,
+        payload={
+            "research_used": True,
+            "research_refs": ["research:task:route_selected"],
+            "research_gate_passed": True,
+        },
+    )
+
+    assert receipt.invoked is True
+    assert receipt.evidence_refs == ("research:task:route_selected",)
+    assert receipt.evidence_present is False
+    assert receipt.gate_passed is False
+    assert receipt.outcome_contributed is False
+    assert receipt.public_claim_safe is False

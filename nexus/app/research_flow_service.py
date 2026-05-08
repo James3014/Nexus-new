@@ -3193,8 +3193,13 @@ def run_auto_flow(
     )
     hitl = _hitl_payload(route_confidence=route_confidence, route=route, task_id=task_id)
     if "research" in route_selected_capabilities and not capability_evidence.get("research_used"):
+        retrieval_refs = [
+            str(item)
+            for item in ((route.get("research_context", {}) or {}).get("retrieval_refs", []) or [])
+            if str(item).strip()
+        ]
         capability_evidence["research_used"] = True
-        capability_evidence["research_refs"] = [f"research:{receipt_slug}:route_selected"]
+        capability_evidence["research_refs"] = retrieval_refs[:3] or [f"research:{receipt_slug}:route_selected"]
         capability_evidence["research_gate_passed"] = bool(artifact_verified)
     capability_evidence["research_source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
     autoreason_payload = build_autoreason_payload(

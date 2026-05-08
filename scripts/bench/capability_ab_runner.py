@@ -44,6 +44,7 @@ from nexus.services.gemini_cli import (
     extract_token_info,
     DEFAULT_GEMINI_BIN,
 )
+from scripts.bench.route_cost_trace_classifier import build_route_cost_trace_report
 from scripts.engine.nexus_cli import nexus as nexus_root
 
 DEFAULT_CODEX_BIN = "/Users/jameschen/.npm-global/bin/codex"
@@ -3993,6 +3994,7 @@ def write_evidence_bundle(
     if not config.get("runner_command"):
         delivery_gate_failures.append("runner_command_missing")
     route_cost_ledger = _route_cost_ledger(rows)
+    route_cost_trace_report = build_route_cost_trace_report(rows)
     product_kpis = _product_kpis(rows)
     openseeker_kpis = _openseeker_kpis(rows)
     delivery_gate_passed = not delivery_gate_failures
@@ -4023,6 +4025,8 @@ def write_evidence_bundle(
         "artifact_hash_count": len(artifact_files),
         "route_cost_ledger_present": bool(route_cost_ledger),
         "route_cost_ledger_schema": route_cost_ledger.get("schema", ""),
+        "route_cost_trace_report_present": bool(route_cost_trace_report),
+        "route_cost_trace_report_schema": route_cost_trace_report.get("schema", ""),
         "product_kpis_present": bool(product_kpis),
         "product_kpis_schema": product_kpis.get("schema", ""),
         "openseeker_alignment_present": bool(openseeker_kpis),
@@ -4091,6 +4095,7 @@ def write_evidence_bundle(
             "gateway_stats_source_rate_with": _rate_for(with_rows, "gateway_stats_present"),
         },
         "route_cost_ledger": route_cost_ledger,
+        "route_cost_trace_report": route_cost_trace_report,
         "product_kpis": product_kpis,
         "openseeker_alignment": openseeker_kpis,
         "nexus_wearing": {

@@ -11,7 +11,7 @@ from nexus.engine.learning_policy_loader import (
 
 def test_capability_planner_builds_constrained_composition_trace():
     plan = CapabilityPlanner().plan(
-        task_desc="Fix cross-module websocket timeout race with split worker validation",
+        task_desc="Use research to fix cross-module websocket timeout race with split worker validation.",
         task_type="bug",
         route={
             "should_research": True,
@@ -329,7 +329,8 @@ def test_capability_planner_maps_public_governance_task_to_review_and_reasoning(
     ).to_dict()
 
     selected = set(plan["selected_capabilities"])
-    assert {"codeintel", "research", "ultra_review", "mempalace_gate", "artifact_gate", "claim_gate"} <= selected
+    assert {"codeintel", "ultra_review", "mempalace_gate", "artifact_gate", "claim_gate"} <= selected
+    assert "research" not in selected
 
 
 def test_capability_planner_maps_repair_and_trust_tasks_to_dynamic_controls():
@@ -878,6 +879,131 @@ def test_capability_planner_lite_route_downgrades_high_cost_conditionals():
     assert "autoreason" not in selected
 
 
+def test_candidate_factory_ready_alone_does_not_select_research():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix claim verification so only fully supported successful claims are accepted.",
+        task_type="public_feature",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 55,
+                "adjusted_root_cause_confidence": 0.55,
+                "candidate_count": 3,
+                "candidate_factory_readiness_estimate": {
+                    "ready": True,
+                    "status": "READY",
+                    "estimated_candidates": 3,
+                },
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+                "memory_hits": 0,
+                "findings_hits": 0,
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+    ).to_dict()
+
+    assert "research" not in plan["selected_capabilities"]
+
+
+def test_learning_policy_promoted_research_still_requires_evidence_demand():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix relevance selection so broad same-type history cannot pollute the current task.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 55,
+                "adjusted_root_cause_confidence": 0.55,
+                "candidate_count": 3,
+                "candidate_factory_readiness_estimate": {
+                    "ready": True,
+                    "status": "READY",
+                    "estimated_candidates": 3,
+                },
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"]},
+        },
+        budget={"learning_policy": {"promoted_capabilities": ["research"]}},
+    ).to_dict()
+
+    assert "research" not in plan["selected_capabilities"]
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert "research_no_substantive_evidence_demand_cost_control" in trace["research"]["reasons"]
+
+
+def test_route_seeded_research_still_requires_substantive_evidence_demand():
+    plan = CapabilityPlanner().plan(
+        task_desc="Tighten an action filter so unsafe operations are rejected while ordinary read-only work remains allowed.",
+        task_type="public_ops_research",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 55,
+                "adjusted_root_cause_confidence": 0.55,
+                "candidate_count": 3,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+            },
+            "route_decision": {"selected_capabilities": ["hyper_sprint", "research"]},
+        },
+    ).to_dict()
+
+    assert "research" not in plan["selected_capabilities"]
+
+
+def test_should_research_without_claim_or_role_does_not_force_research():
+    plan = CapabilityPlanner().plan(
+        task_desc="Tighten an action filter so unsafe operations are rejected while ordinary read-only work remains allowed.",
+        task_type="public_ops_research",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 55,
+                "adjusted_root_cause_confidence": 0.55,
+                "candidate_count": 3,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+            },
+            "route_decision": {"selected_capabilities": ["hyper_sprint", "research"]},
+        },
+    ).to_dict()
+
+    assert "research" not in plan["selected_capabilities"]
+
+
+def test_replay_evidence_contract_keeps_research_context():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Fix receipt acceptance so verified claims require a replay command and a clean replay exit code. "
+            "Nexus replay evidence rule: trust receipts only when the claim, replay command, and execution result all agree. "
+            "Nexus replay receipt contract: accept only claim='verified' with a non-empty replay_command and exit_code == 0."
+        ),
+        task_type="public_feature",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {
+                "risk_score": 55,
+                "adjusted_root_cause_confidence": 1.0,
+                "candidate_count": 3,
+                "claim_uncertainty": False,
+                "is_cross_module_task": False,
+            },
+            "route_decision": {"selected_capabilities": ["hyper_sprint", "research"]},
+        },
+        budget={"learning_policy": {"promoted_capabilities": ["research"]}},
+    ).to_dict()
+
+    assert "research" in plan["selected_capabilities"]
+
+
 def test_capability_planner_uses_micro_patch_lane_for_simple_hidden_bugfix():
     plan = CapabilityPlanner().plan(
         task_desc="Fix a small hidden bug in one local file.",
@@ -1008,4 +1134,7 @@ def test_capability_planner_keeps_hidden_contract_fast_path_light_under_learning
     assert "autoreason" not in selected
     assert "judge_panel" not in selected
     trace = {item["capability"]: item for item in plan["decision_trace"]}
-    assert "simple_hidden_contract_fast_path_cost_control" in trace["research"]["reasons"]
+    assert (
+        "simple_hidden_contract_fast_path_cost_control" in trace["research"]["reasons"]
+        or "research_no_substantive_evidence_demand_cost_control" in trace["research"]["reasons"]
+    )

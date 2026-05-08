@@ -632,10 +632,12 @@ class CapabilityPlanner:
         )
         learning_policy = budget.get("learning_policy", {}) if isinstance(budget.get("learning_policy", {}), dict) else {}
         self._apply_learning_policy(states=states, reasons=reasons, learning_policy=learning_policy, enable=enable)
+        self._apply_research_evidence_demand_policy(states=states, reasons=reasons, signals=signals)
         route_cost_policy = budget.get("route_cost_policy", {}) if isinstance(budget.get("route_cost_policy", {}), dict) else {}
         self._apply_route_cost_policy(states=states, reasons=reasons, route_cost_policy=route_cost_policy)
         self._apply_candidate_factory_readiness_policy(states=states, reasons=reasons, route=route)
         self._apply_route_oracle_expected_contract(states=states, reasons=reasons, signals=signals)
+        self._apply_research_evidence_demand_policy(states=states, reasons=reasons, signals=signals)
         self._apply_simple_hidden_contract_policy(states=states, reasons=reasons, signals=signals)
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
@@ -788,6 +790,38 @@ class CapabilityPlanner:
             if states.get(cap) == "conditional":
                 states[cap] = "optional"
                 reasons[cap].append("simple_hidden_contract_fast_path_cost_control")
+
+    def _apply_research_evidence_demand_policy(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        signals: Any,
+    ) -> None:
+        if states.get("research") != "conditional":
+            return
+        task_text = str(getattr(signals, "task_desc", "") or "").lower()
+        explicit_research_demand = bool(
+            signals.claim_uncertainty
+            or signals.autonomic_research_requested
+            or signals.benchmark_required
+            or signals.plateau_detected
+            or signals.research_role in {"claim_scout", "architecture_scout", "benchmark_framer"}
+            or "use research" in task_text
+            or "research control" in task_text
+            or "citation" in task_text
+            or "citations" in task_text
+            or "replay evidence" in task_text
+            or "receipt contract" in task_text
+            or (
+                "expected capability receipts" in task_text
+                and "research" in getattr(signals, "route_oracle_expected_capabilities", ())
+            )
+        )
+        if explicit_research_demand:
+            return
+        states["research"] = "optional"
+        reasons["research"].append("research_no_substantive_evidence_demand_cost_control")
 
     def _apply_candidate_factory_readiness_policy(
         self,
