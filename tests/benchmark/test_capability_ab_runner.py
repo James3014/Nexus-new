@@ -3757,6 +3757,96 @@ def test_hidden_verifier_failure_retries_with_failure_evidence_when_self_heal_en
     assert out["status"] == "SUCCESS"
 
 
+def test_hidden_verifier_failure_retries_inprocess_with_failure_evidence(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="nexus-value-context-001",
+        difficulty="hard",
+        task_type="public_docs_code_sync",
+        task_desc="Sync code and docs after a renamed public field.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_context_docs_contract",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    captured_args: list[list[str]] = []
+
+    def nexus_payload() -> str:
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "nexus_failure_analysis": {
+                    "schema": "nexus_failure_analysis_v1",
+                    "status": "PASS",
+                    "primary_cause": "verified_delivery",
+                    "nexus_gap": "",
+                    "recoverable": False,
+                },
+                "nexus_usage_trace": {
+                    "gemini_uses_nexus": True,
+                    "nexus_context_delivered": True,
+                    "usage_valid": True,
+                    "pillars": {},
+                    "phase_trace": {},
+                    "capabilities": {},
+                },
+                "result": {
+                    "elapsed_sec": 0.1,
+                    "report": {
+                        "model_calls": 1,
+                        "model_name": "gemini-3-flash-preview",
+                        "model_patch_generated": True,
+                        "total_tokens": 10,
+                        "token_capture_status": "measured",
+                    },
+                },
+            }
+        )
+
+    class _InvokeRes:
+        output = nexus_payload()
+
+    def fake_invoke(_self, _cli, args, **_kwargs):
+        captured_args.append(list(args))
+        return _InvokeRes()
+
+    state = {"verify_calls": 0}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        state["verify_calls"] += 1
+        if state["verify_calls"] == 1:
+            return subprocess.CompletedProcess(cmd, 1, stdout="hidden failed: canonical output field is result", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="hidden passed", stderr="")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
+    monkeypatch.setattr("click.testing.CliRunner.invoke", fake_invoke)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="inprocess",
+        with_llm_mode="all",
+    )
+
+    assert len(captured_args) == 2
+    retry_desc = captured_args[-1][captured_args[-1].index("--task-desc") + 1]
+    assert "[Hidden verifier failure]" in retry_desc
+    assert "canonical output field is result" in retry_desc
+    assert "--force-flow" in captured_args[-1]
+    assert out["hidden_retry_used"] is True
+    assert out["hidden_retry_reason"] == "hidden_verifier_failure_bounded_nexus_retry"
+    assert out["hidden_verifier_passed"] is True
+    assert out["status"] == "SUCCESS"
+
+
 def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="easy-quota",

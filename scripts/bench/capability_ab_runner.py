@@ -3027,6 +3027,7 @@ def run_with_nexus(
         os.environ["NEXUS_CAPABILITY_TUNING_FILE"] = str(
             (repo_root / ".nexus" / "config" / f"capability_tuning_{tuning_profile}.json").resolve()
         )
+    runner: CliRunner | None = None
     if runner_mode == "subprocess":
         cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *args]
         env = os.environ.copy()
@@ -3115,7 +3116,6 @@ def run_with_nexus(
                 should_retry_hidden = bool(
                     llm_enabled
                     and effective_llm_self_heal
-                    and runner_mode == "subprocess"
                     and retryable_nexus_gap
                     and int(row.get("model_calls", 0) or 0) > 0
                 )
@@ -3143,16 +3143,22 @@ def run_with_nexus(
                         retry_args[idx] = str(max(2, min(3, int(retry_args[idx]) + 1)))
                     if "--force-flow" not in retry_args:
                         retry_args.extend(["--force-flow", "hyper_sprint"])
-                    retry_cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *retry_args]
                     retry_start = time.monotonic()
                     try:
-                        retry_res = _run_process_group(
-                            retry_cmd,
-                            cwd=repo_root,
-                            env=env if runner_mode == "subprocess" else os.environ.copy(),
-                            timeout_sec=timeout_sec,
-                        )
-                        retry_payload = _extract_json_payload(retry_res.stdout or "")
+                        if runner_mode == "subprocess":
+                            retry_cmd = ["uv", "run", "scripts/engine/nexus_cli.py", *retry_args]
+                            retry_res = _run_process_group(
+                                retry_cmd,
+                                cwd=repo_root,
+                                env=env,
+                                timeout_sec=timeout_sec,
+                            )
+                            retry_output = retry_res.stdout or ""
+                        else:
+                            retry_runner = runner or cli_runner or CliRunner()
+                            retry_res = retry_runner.invoke(nexus_root, retry_args)
+                            retry_output = retry_res.output or ""
+                        retry_payload = _extract_json_payload(retry_output)
                     except subprocess.TimeoutExpired:
                         retry_payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
                     retry_payload = retry_payload if isinstance(retry_payload, dict) else {}
