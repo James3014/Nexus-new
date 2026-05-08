@@ -115,6 +115,7 @@ class CapabilitySignalSet:
     recommended_flow: str = ""
     route_decision_present: bool = False
     selected_seed: tuple[str, ...] = ()
+    route_oracle_expected_capabilities: tuple[str, ...] = ()
     acceleration_seed: tuple[str, ...] = ()
     governance_seed: tuple[str, ...] = ()
     risk_score: int = 0

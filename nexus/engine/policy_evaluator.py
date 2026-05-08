@@ -37,6 +37,8 @@ def apply_signal_policies(
 
     if hyper_selected:
         enable("hyper", "route_selected_hyper")
+    for capability in signals.selected_seed:
+        enable(str(capability), "route_oracle_expected_capability")
     if signals.recommended_flow == "baseline":
         enable("direct_mode", "baseline_execution_path")
     if (

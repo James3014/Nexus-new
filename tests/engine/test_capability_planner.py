@@ -873,6 +873,48 @@ def test_capability_planner_uses_micro_patch_lane_for_simple_hidden_bugfix():
     assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= set(plan["selected_capabilities"])
 
 
+def test_capability_planner_honors_bulleted_route_oracle_expected_receipts():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Use semantic retrieval evidence only when semantic_searcher refs are present."
+            "\n\nNexus route oracle contract:"
+            "\n- Expected capability receipts: semantic_searcher."
+        ),
+        task_type="public_docs_code_sync",
+        route={"recommended_flow": "hyper_sprint", "route_features": {"risk_score": 65, "candidate_count": 3}},
+    ).to_dict()
+
+    assert "semantic_searcher" in plan["selected_capabilities"]
+
+
+def test_capability_planner_keeps_route_oracle_expected_receipts_under_cost_policy():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Select retrieval hits only when semantic score and source identifiers are usable."
+            "\n\nNexus route oracle contract:"
+            "\n- Expected capability receipts: lancedb."
+        ),
+        task_type="public_docs_code_sync",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 20, "candidate_count": 1},
+        },
+        budget={
+            "learning_policy": {
+                "penalized_capabilities": ["lancedb"],
+                "enforce_penalties": True,
+            },
+            "route_cost_policy": {"current_lite_route": True, "source": "test"},
+            "max_cost": 6,
+        },
+    ).to_dict()
+
+    assert "lancedb" in plan["selected_capabilities"]
+    assert "lancedb" in plan["required_capabilities"]
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert "route_oracle_expected_receipt_required" in trace["lancedb"]["reasons"]
+
+
 def test_capability_planner_ignores_wearing_contract_for_costly_lexical_signals():
     plan = CapabilityPlanner().plan(
         task_desc=(

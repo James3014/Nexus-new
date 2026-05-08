@@ -1943,6 +1943,7 @@ def build_route_executor_flags(*, task_desc: str, task_type: str, route: dict[st
 
 def _refresh_route_for_runtime_candidate_factory(
     *,
+    repo_root: Path,
     route: dict[str, Any],
     result: dict[str, Any],
     result_report: dict[str, Any],
@@ -3126,6 +3127,7 @@ def run_auto_flow(
     nexus_rescued = bool((guard_hit or verification_only_rescue) and tests_passed)
     winner_source = result_report.get("winner_source") or guard_fallback_from.get("winner_source") or ("nexus_rescue" if nexus_rescued else "local_only")
     route = _refresh_route_for_runtime_candidate_factory(
+        repo_root=repo_root,
         route=route,
         result=result,
         result_report=result_report,

@@ -635,6 +635,7 @@ class CapabilityPlanner:
         route_cost_policy = budget.get("route_cost_policy", {}) if isinstance(budget.get("route_cost_policy", {}), dict) else {}
         self._apply_route_cost_policy(states=states, reasons=reasons, route_cost_policy=route_cost_policy)
         self._apply_candidate_factory_readiness_policy(states=states, reasons=reasons, route=route)
+        self._apply_route_oracle_expected_contract(states=states, reasons=reasons, signals=signals)
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
@@ -743,6 +744,21 @@ class CapabilityPlanner:
             reasons[cap].append("learning_policy_penalized")
             if learning_policy.get("enforce_penalties") is True and states.get(cap) == "conditional":
                 states[cap] = "optional"
+
+    def _apply_route_oracle_expected_contract(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        signals: Any,
+    ) -> None:
+        for name in getattr(signals, "route_oracle_expected_capabilities", ()) or ():
+            cap = str(name)
+            if cap not in self.nodes:
+                continue
+            if states.get(cap) != "required":
+                states[cap] = "required"
+                reasons[cap].append("route_oracle_expected_receipt_required")
 
     def _apply_candidate_factory_readiness_policy(
         self,

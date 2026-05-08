@@ -354,6 +354,33 @@ def test_compose_capability_plan_keeps_simple_repair_stack_light():
     assert out["stop_policy"]["type"] == "budget"
 
 
+def test_refresh_route_for_runtime_candidate_factory_replans_with_policy_budget(tmp_path: Path):
+    route = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Select the winning repair candidate only when judge score and evidence support agree.",
+        task_type="public_feature",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        target_file="target.py",
+    )
+
+    out = research_flow_service._refresh_route_for_runtime_candidate_factory(
+        repo_root=tmp_path,
+        route=route,
+        result={"flow": "hyper_sprint"},
+        result_report={"candidate_summaries": [{"id": "A"}, {"id": "B"}, {"id": "AB"}]},
+        task_desc="Select the winning repair candidate only when judge score and evidence support agree.",
+        task_type="public_feature",
+    )
+
+    readiness = out["route_features"]["candidate_factory_readiness_estimate"]
+    assert readiness["status"] == "READY"
+    assert out["runtime_candidate_factory_replanned"] is True
+    assert out["route_decision"]["schema_version"] == "nexus_route_decision_v1"
+    assert "autoreason" in out["capability_plan"]["selected_capabilities"]
+
+
 def test_collect_route_signals_includes_history_memory_hits(tmp_path: Path):
     history_path = tmp_path / ".nexus" / "reports" / "research" / "auto-flow-history.json"
     history_path.parent.mkdir(parents=True, exist_ok=True)

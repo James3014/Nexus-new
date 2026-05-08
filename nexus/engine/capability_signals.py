@@ -65,7 +65,7 @@ def _task_body_only(text: str) -> str:
 
 
 def _route_oracle_expected_capabilities(text: str) -> tuple[str, ...]:
-    match = re.search(r"Expected capability receipts:\s*([^\n.]+)", text or "", re.IGNORECASE)
+    match = re.search(r"(?:^|\n)\s*-?\s*Expected capability receipts:\s*([^\n.]+)", text or "", re.IGNORECASE)
     if not match:
         return ()
     raw = re.split(r"[,/]|\band\b", match.group(1), flags=re.IGNORECASE)
@@ -149,6 +149,7 @@ def build_capability_signals(
         recommended_flow=str(route.get("recommended_flow", "") or ""),
         route_decision_present=bool(route_decision),
         selected_seed=tuple(str(item) for item in (decision_selected or [])),
+        route_oracle_expected_capabilities=tuple(str(item) for item in expected_caps),
         acceleration_seed=tuple(str(item) for item in (decision_acceleration or [])),
         governance_seed=tuple(str(item) for item in (decision_governance or [])),
         risk_score=risk["risk_score_0_100"],
