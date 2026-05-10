@@ -101,7 +101,12 @@ class CodeIntelReceiptAdapter:
     name = "codeintel"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        refs = [payload.get("scan_report_path"), payload.get("impact_report_path")]
+        refs = [
+            payload.get("scan_report_path"),
+            payload.get("impact_report_path"),
+            payload.get("dci_locator_report_path"),
+            *_as_refs(payload.get("dci_evidence_refs")),
+        ]
         invoked = bool(payload.get("scan_report_present") or payload.get("impact_report_present"))
         gate_passed = bool(payload.get("impact_report_present") and payload.get("claim_bundle_present"))
         return merge_capability_receipt(
@@ -853,6 +858,213 @@ class RepairLoopReceiptAdapter:
         )
 
 
+class GenericCapabilityReceiptAdapter:
+    """Receipt adapter for capabilities whose runtime evidence follows the common *_used/*_refs pattern."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        executor_id: str | None = None,
+        evidence_keys: tuple[str, ...] = (),
+        used_keys: tuple[str, ...] = (),
+        gate_key: str | None = None,
+    ) -> None:
+        self.name = name
+        self.executor_id = executor_id or name
+        self.evidence_keys = evidence_keys or (
+            f"{name}_refs",
+            f"{name}_ref",
+            f"{name}_report_path",
+            f"{name}_receipt_path",
+        )
+        self.used_keys = used_keys or (f"{name}_used", f"{name}_invoked")
+        self.gate_key = gate_key or f"{name}_gate_passed"
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs: list[str] = []
+        for key in self.evidence_keys:
+            refs.extend(_as_refs(payload.get(key)))
+        refs = list(dict.fromkeys(refs))
+        invoked = bool(refs or any(_as_bool(payload.get(key)) for key in self.used_keys))
+        gate_passed = bool(refs and _as_bool(payload.get(self.gate_key, False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.executor_id,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class HarnessPreflightSensorReceiptAdapter(GenericCapabilityReceiptAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            "harness_preflight_sensor",
+            evidence_keys=("harness_preflight_refs", "harness_preflight_report_path", "cost_lane"),
+            used_keys=("harness_preflight_sensor_used",),
+            gate_key="harness_preflight_sensor_gate_passed",
+        )
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("harness_preflight_refs"))
+        refs.extend(_as_refs(payload.get("harness_preflight_report_path")))
+        cost_lane = str(payload.get("cost_lane") or "").strip()
+        if cost_lane:
+            refs.append(f"cost_lane:{cost_lane}")
+        refs = list(dict.fromkeys(refs))
+        invoked = bool(refs or _as_bool(payload.get("harness_preflight_sensor_used")))
+        gate_passed = bool(
+            invoked
+            and refs
+            and _as_bool(payload.get("harness_preflight_sensor_gate_passed"))
+            and _as_bool(payload.get("capability_wired"))
+            and _as_bool(payload.get("executor_ready"))
+            and cost_lane in {"lite", "standard", "hardened"}
+        )
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
+class SemanticFailureSensorReceiptAdapter(GenericCapabilityReceiptAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            "semantic_failure_sensor",
+            evidence_keys=("semantic_failure_refs", "failure_cause", "likely_fix"),
+            used_keys=("semantic_failure_sensor_used",),
+            gate_key="semantic_failure_sensor_gate_passed",
+        )
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("semantic_failure_refs"))
+        for key in ("failure_cause", "likely_fix"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                refs.append(f"{key}:{value}")
+        retry_policy = payload.get("retry_policy") if isinstance(payload.get("retry_policy"), dict) else {}
+        if retry_policy:
+            refs.append(f"retry_policy:max={retry_policy.get('max_retries')}")
+        refs = list(dict.fromkeys(refs))
+        invoked = bool(refs or _as_bool(payload.get("semantic_failure_sensor_used")))
+        gate_passed = bool(
+            invoked
+            and refs
+            and _as_bool(payload.get("semantic_failure_sensor_gate_passed"))
+            and retry_policy.get("requires_evidence_delta") is True
+            and retry_policy.get("allow_blind_retry") is False
+        )
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
+class BddAcceptanceSkillReceiptAdapter(GenericCapabilityReceiptAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            "bdd_acceptance_skill",
+            evidence_keys=("bdd_acceptance_refs", "bdd_acceptance_report_path"),
+            used_keys=("bdd_acceptance_skill_used",),
+            gate_key="bdd_acceptance_skill_gate_passed",
+        )
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("bdd_acceptance_refs"))
+        refs.extend(_as_refs(payload.get("bdd_acceptance_report_path")))
+        refs = list(dict.fromkeys(refs))
+        invoked = bool(refs or _as_bool(payload.get("bdd_acceptance_skill_used")))
+        business_verified = _as_bool(payload.get("business_verified"))
+        gate_passed = bool(
+            invoked
+            and refs
+            and claim_verified
+            and business_verified
+            and _as_bool(payload.get("bdd_acceptance_skill_gate_passed"))
+        )
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed),
+            executor_id=self.name,
+            failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
+        )
+
+
+class MsaRouterReceiptAdapter(GenericCapabilityReceiptAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            "msa_router",
+            evidence_keys=("msa_router_refs", "msa_rerank_reasons", "msa_router_report_path"),
+            used_keys=("msa_router_used", "msa_routing_used"),
+            gate_key="msa_router_gate_passed",
+        )
+
+    def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
+        refs = _as_refs(payload.get("msa_router_refs"))
+        refs.extend(f"rerank:{item}" for item in _as_refs(payload.get("msa_rerank_reasons")))
+        if payload.get("msa_router_report_path"):
+            refs.append(str(payload.get("msa_router_report_path")))
+        candidate_count = as_int(payload.get("msa_candidate_count", 0))
+        top_score = str(payload.get("msa_top_score", "")).strip()
+        if candidate_count > 0:
+            refs.append(f"candidate_count:{candidate_count}")
+        if top_score:
+            refs.append(f"top_score:{top_score}")
+        refs = list(dict.fromkeys(refs))
+        invoked = bool(refs or payload.get("msa_router_used") or payload.get("msa_routing_used"))
+        gate_passed = bool(refs and _as_bool(payload.get("msa_router_gate_passed", False)))
+        return merge_capability_receipt(
+            name=self.name,
+            selected=True,
+            invoked=invoked,
+            evidence_refs=refs,
+            gate_passed=gate_passed,
+            outcome_contributed=bool(gate_passed and claim_verified),
+            executor_id=self.executor_id,
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+        )
+
+
+class JitValidationReceiptAdapter(GenericCapabilityReceiptAdapter):
+    def __init__(self) -> None:
+        super().__init__(
+            "jit_validation",
+            evidence_keys=("jit_refs", "jit_report_path", "verify_command_refs", "replay_refs"),
+            used_keys=("jit_used", "jit_validation_used", "verify_commands_executed"),
+            gate_key="jit_gate_passed",
+        )
+
+
 RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
     adapter.name: adapter
     for adapter in (
@@ -881,5 +1093,34 @@ RECEIPT_ADAPTERS: dict[str, CapabilityReceiptAdapter] = {
         FormalReportReceiptAdapter(),
         SwarmQuietMomentReceiptAdapter(),
         RepairLoopReceiptAdapter(),
+        MsaRouterReceiptAdapter(),
+        JitValidationReceiptAdapter(),
+        GenericCapabilityReceiptAdapter("acceptance_check", evidence_keys=("acceptance_refs", "acceptance_report", "acceptance_report_path")),
+        GenericCapabilityReceiptAdapter("autonomic_router", evidence_keys=("autonomic_route_refs", "autonomic_route", "policy_reason")),
+        GenericCapabilityReceiptAdapter("benchmark", evidence_keys=("benchmark_refs", "benchmark_report", "benchmark_report_path", "public_claim_gate_ref")),
+        GenericCapabilityReceiptAdapter("direct_mode", evidence_keys=("direct_mode_refs", "run_report", "completion_envelope", "verify_commands")),
+        GenericCapabilityReceiptAdapter("federation", evidence_keys=("federation_refs", "federation_report_path")),
+        GenericCapabilityReceiptAdapter("file_lock", evidence_keys=("file_lock_refs", "locked_files", "conflicts", "denied_paths")),
+        GenericCapabilityReceiptAdapter("forecast_gate", evidence_keys=("forecast_refs", "risk_forecast", "forecast_report_path")),
+        GenericCapabilityReceiptAdapter("integration_manager", evidence_keys=("integration_refs", "merge_result", "evidence_chain")),
+        BddAcceptanceSkillReceiptAdapter(),
+        HarnessPreflightSensorReceiptAdapter(),
+        GenericCapabilityReceiptAdapter("learn_mode", evidence_keys=("learn_refs", "claims_count_ref", "verified_claims_ref", "citations")),
+        GenericCapabilityReceiptAdapter("learn_phase_slo", evidence_keys=("learn_phase_slo_refs", "phase_slo_report_path", "policy_reasoning")),
+        GenericCapabilityReceiptAdapter("learn_scheduler", evidence_keys=("learn_scheduler_refs", "refresh_report_path", "alert_paths")),
+        GenericCapabilityReceiptAdapter("meta_opt", evidence_keys=("meta_opt_refs", "tuning_delta", "rule_lifecycle_decision")),
+        GenericCapabilityReceiptAdapter("metabolism", evidence_keys=("metabolism_refs", "checkpoint", "resume_available")),
+        GenericCapabilityReceiptAdapter("multi_agent", evidence_keys=("multi_agent_refs", "worktree", "gate_status", "allowed_files")),
+        GenericCapabilityReceiptAdapter("oracle_shadow", evidence_keys=("oracle_shadow_refs", "shadow_tid", "promotion_status", "report_path")),
+        GenericCapabilityReceiptAdapter("plan_quality_gate", evidence_keys=("plan_quality_refs", "plan_quality_verdict", "plan_quality_report_path")),
+        GenericCapabilityReceiptAdapter("pregate", evidence_keys=("pregate_refs", "pregate_verdict", "blocked_reason", "cli_pregate_results")),
+        GenericCapabilityReceiptAdapter("registry_sync", evidence_keys=("registry_sync_refs", "skills_count", "sync_delta")),
+        GenericCapabilityReceiptAdapter("research_control_plane", evidence_keys=("research_control_refs", "elimination_matrix", "rollback_trace", "semantic_status")),
+        GenericCapabilityReceiptAdapter("research_route", evidence_keys=("research_route_refs", "recommended_flow", "route_features", "explain_payload")),
+        GenericCapabilityReceiptAdapter("sandbox", evidence_keys=("sandbox_refs", "sandbox_path", "replay_artifact")),
+        SemanticFailureSensorReceiptAdapter(),
+        GenericCapabilityReceiptAdapter("stress_test", evidence_keys=("stress_test_refs", "stress_test_report", "stress_test_report_path")),
+        GenericCapabilityReceiptAdapter("ui_validator", evidence_keys=("ui_validator_refs", "ui_validation_report", "ui_validation_report_path")),
+        GenericCapabilityReceiptAdapter("xray", evidence_keys=("xray_refs", "xray_findings", "xray_report_path")),
     )
 }

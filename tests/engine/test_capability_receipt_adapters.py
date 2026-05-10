@@ -105,6 +105,90 @@ def test_semantic_searcher_receipt_requires_refs_and_gate():
     assert receipts["semantic_searcher"].evidence_refs == ("semantic:policy:r1",)
 
 
+def test_harness_receipts_fail_closed_without_typed_evidence():
+    plan = {
+        "selected_capabilities": [
+            "harness_preflight_sensor",
+            "semantic_failure_sensor",
+            "bdd_acceptance_skill",
+        ]
+    }
+
+    missing = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={
+                "claim_verified": True,
+                "harness_preflight_sensor_used": True,
+                "semantic_failure_sensor_used": True,
+                "bdd_acceptance_skill_used": True,
+            },
+        )
+    }
+    proven = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={
+                "claim_verified": True,
+                "harness_preflight_sensor_used": True,
+                "harness_preflight_refs": [".nexus/reports/capabilities/harness/preflight.json"],
+                "capability_wired": True,
+                "executor_ready": True,
+                "cost_lane": "lite",
+                "harness_preflight_sensor_gate_passed": True,
+                "semantic_failure_sensor_used": True,
+                "semantic_failure_refs": [".nexus/reports/capabilities/failure/sensor.json"],
+                "failure_cause": "assertion_mismatch",
+                "likely_fix": "align implementation with failing assertion and preserve existing contract",
+                "retry_policy": {
+                    "max_retries": 1,
+                    "allow_blind_retry": False,
+                    "requires_evidence_delta": True,
+                },
+                "semantic_failure_sensor_gate_passed": True,
+                "bdd_acceptance_skill_used": True,
+                "bdd_acceptance_refs": [".nexus/reports/capabilities/bdd/receipt.json", "artifact:task:tests_passed"],
+                "business_verified": True,
+                "bdd_acceptance_skill_gate_passed": True,
+            },
+        )
+    }
+
+    assert missing["harness_preflight_sensor"].public_claim_safe is False
+    assert missing["semantic_failure_sensor"].public_claim_safe is False
+    assert missing["bdd_acceptance_skill"].public_claim_safe is False
+    assert proven["harness_preflight_sensor"].public_claim_safe is True
+    assert proven["semantic_failure_sensor"].public_claim_safe is True
+    assert proven["bdd_acceptance_skill"].public_claim_safe is True
+
+
+def test_codeintel_receipt_includes_dci_refs():
+    plan = {"selected_capabilities": ["codeintel"]}
+
+    receipts = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={"claim_verified": True},
+            codeintel={
+                "scan_report_present": True,
+                "impact_report_present": True,
+                "claim_bundle_present": True,
+                "scan_report_path": ".nexus/reports/codeintel/scan.json",
+                "impact_report_path": ".nexus/reports/codeintel/impact.json",
+                "dci_locator_report_path": ".nexus/reports/codeintel/dci.json",
+                "dci_evidence_refs": ["dci:nexus/parser.py:L1"],
+            },
+        )
+    }
+
+    assert receipts["codeintel"].public_claim_safe is True
+    assert ".nexus/reports/codeintel/dci.json" in receipts["codeintel"].evidence_refs
+    assert "dci:nexus/parser.py:L1" in receipts["codeintel"].evidence_refs
+
+
 def test_swarm_quiet_moment_receipt_requires_non_mutating_event():
     plan = {"selected_capabilities": ["swarm_quiet_moment"]}
 

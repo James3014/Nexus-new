@@ -3,6 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, CapabilityScoringConfig
+from nexus.engine.harness_route_policy import (
+    apply_harness_cost_lane_policy,
+    apply_harness_sensor_policy,
+    build_semantic_failure_snapshot,
+)
+from nexus.engine.harness_sensors import build_harness_preflight_sensor
 from nexus.engine.policy_evaluator import apply_signal_policies, apply_tier_policies
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
@@ -20,6 +26,40 @@ def _cost_tier(cost: int) -> str:
 
 def default_capability_nodes() -> dict[str, CapabilityNode]:
     nodes = [
+        CapabilityNode(
+            "harness_preflight_sensor",
+            ("S", "P"),
+            default_state="required",
+            category="governance",
+            maturity="production",
+            dependencies=("pregate",),
+            cost=1,
+            benefit=3,
+            risk_reduction=3,
+            evidence_outputs=("capability_wired", "executor_ready", "cost_lane", "escalation_required"),
+        ),
+        CapabilityNode(
+            "semantic_failure_sensor",
+            ("R", "A"),
+            category="validation",
+            maturity="production",
+            dependencies=("artifact_gate",),
+            cost=1,
+            benefit=3,
+            risk_reduction=3,
+            evidence_outputs=("failure_cause", "likely_fix", "retry_policy"),
+        ),
+        CapabilityNode(
+            "bdd_acceptance_skill",
+            ("A", "C"),
+            category="validation",
+            maturity="beta",
+            dependencies=("acceptance_check", "claim_gate"),
+            cost=2,
+            benefit=4,
+            risk_reduction=3,
+            evidence_outputs=("given_when_then", "business_verified", "evidence_refs"),
+        ),
         CapabilityNode(
             "codeintel",
             ("S", "P", "X", "A"),
@@ -154,6 +194,28 @@ def default_capability_nodes() -> dict[str, CapabilityNode]:
             benefit=3,
             risk_reduction=1,
             evidence_outputs=("pruned_candidates", "saved_steps"),
+        ),
+        CapabilityNode(
+            "msa_router",
+            ("P", "D"),
+            category="routing",
+            maturity="production",
+            dependencies=("lancedb", "belief"),
+            cost=1,
+            benefit=3,
+            risk_reduction=2,
+            evidence_outputs=("candidate_count", "top_score", "rerank_reasons"),
+        ),
+        CapabilityNode(
+            "jit_validation",
+            ("A", "C"),
+            category="validation",
+            maturity="production",
+            dependencies=("artifact_gate", "claim_gate"),
+            cost=1,
+            benefit=3,
+            risk_reduction=4,
+            evidence_outputs=("jit_report", "verify_commands", "replay_refs"),
         ),
         CapabilityNode(
             "memory",
@@ -609,6 +671,7 @@ class CapabilityPlanner:
             reasons[required].append("governance_hard_constraint")
         reasons["delivery_gate"].append("delivery_fail_closed_contract")
         reasons["research_route"].append("routing_contract_required")
+        reasons["harness_preflight_sensor"].append("feed_forward_harness_required")
 
         def enable(name: str, reason: str) -> None:
             if name not in states or states[name] == "required":
@@ -644,10 +707,32 @@ class CapabilityPlanner:
             states=states,
             s2t_policy_draft=s2t_policy_draft,
         )
+        self._apply_s2t_policy_promotion(
+            states=states,
+            reasons=reasons,
+            s2t_shadow_score=s2t_shadow_score,
+            safety_floor=self._budget_safety_floor(signals=signals, routing_tier=routing_tier),
+        )
+        self._apply_mutation_assurance_policy(states=states, reasons=reasons, route=route)
         self._apply_candidate_factory_readiness_policy(states=states, reasons=reasons, route=route)
         self._apply_route_oracle_expected_contract(states=states, reasons=reasons, signals=signals)
         self._apply_research_evidence_demand_policy(states=states, reasons=reasons, signals=signals)
         self._apply_simple_hidden_contract_policy(states=states, reasons=reasons, signals=signals)
+        apply_harness_sensor_policy(
+            states=states,
+            reasons=reasons,
+            route=route,
+            task_desc=task_desc,
+        )
+        harness_cost_lane_policy = apply_harness_cost_lane_policy(
+            states=states,
+            reasons=reasons,
+            route=route,
+            task_desc=task_desc,
+            task_type=task_type,
+            routing_tier=routing_tier,
+            route_oracle_expected_capabilities=getattr(signals, "route_oracle_expected_capabilities", ()) or (),
+        )
 
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         pending = [name for name in selected if name in PENDING_EXECUTOR_CAPABILITIES]
@@ -657,10 +742,32 @@ class CapabilityPlanner:
             reasons=reasons,
             scoring=scoring,
             max_cost=constraint_model.max_cost,
+            safety_floor=self._budget_safety_floor(signals=signals, routing_tier=routing_tier),
         )
+        ssd_route_map = self._build_ssd_route_map(
+            states=states,
+            reasons=reasons,
+            signals=signals,
+            routing_tier=routing_tier,
+            total_cost=total_cost,
+        )
+        context_slimming_policy = self._build_context_slimming_policy(
+            states=states,
+            signals=signals,
+            routing_tier=routing_tier,
+        )
+        harness_preflight_sensor = build_harness_preflight_sensor(
+            task_desc=task_desc,
+            task_type=task_type,
+            route=route,
+            pending_capabilities=pending,
+            selected_capabilities=[name for name, state in states.items() if state in {"required", "conditional"}],
+        )
+        semantic_failure_sensor = build_semantic_failure_snapshot(route=route, task_desc=task_desc)
 
         decision_trace: list[dict[str, Any]] = []
         score = 0
+        leverage_roles = ssd_route_map.get("leverage_roles", {})
         for name, node in self.nodes.items():
             state = states[name]
             score_delta = scoring.score(node) if state in {"required", "conditional"} else 0
@@ -678,6 +785,7 @@ class CapabilityPlanner:
                     "score_components": scoring.components(node),
                     "scoring_weights": scoring.to_dict(),
                     "s2t_shadow_policy": s2t_shadow_score.get("capability_hints", {}).get(name, {}),
+                    "leverage_role": leverage_roles.get(name, ""),
                 }
             )
 
@@ -711,6 +819,12 @@ class CapabilityPlanner:
             }
         if s2t_policy_draft:
             signal_snapshot["s2t_policy_draft"] = s2t_shadow_score
+        signal_snapshot["ssd_route_map"] = ssd_route_map
+        signal_snapshot["context_slimming_policy"] = context_slimming_policy
+        signal_snapshot["harness_cost_lane_policy"] = harness_cost_lane_policy
+        signal_snapshot["harness_preflight_sensor"] = harness_preflight_sensor
+        if semantic_failure_sensor:
+            signal_snapshot["semantic_failure_sensor"] = semantic_failure_sensor
 
         return CapabilityPlan(
             schema_version="nexus_capability_plan_v1",
@@ -860,13 +974,32 @@ class CapabilityPlanner:
         reasons: dict[str, list[str]],
         route_cost_policy: dict[str, Any],
     ) -> None:
-        if route_cost_policy.get("current_lite_route") is not True:
+        route_lane = str(route_cost_policy.get("current_route_lane") or "")
+        capped_lane = route_lane in {
+            "context_sync_capped",
+            "governance_hardened_capped",
+            "hidden_bugfix_supervised",
+            "hidden_lite",
+            "repair_capped",
+        }
+        cost_capped = any(
+            route_cost_policy.get(key) not in (None, "", False)
+            for key in (
+                "current_candidate_cap",
+                "current_context_mode",
+                "current_disable_research",
+                "current_max_rounds",
+                "current_skip_llm_baseline",
+                "current_supervised_bare_first",
+            )
+        )
+        if route_cost_policy.get("current_lite_route") is not True and not capped_lane and not cost_capped:
             return
+        preserve_governance_review = route_lane == "governance_hardened_capped"
+        preserve_autoreason = route_lane == "repair_capped"
         for cap in (
             "research",
-            "ultra_review",
             "sandbox",
-            "autoreason",
             "judge_panel",
             "external_doc_scout",
             "research_control_plane",
@@ -879,10 +1012,156 @@ class CapabilityPlanner:
             "benchmark",
             "meta_opt",
             "stress_test",
+            "formal_report",
+            "oracle_shadow",
+            "federation",
         ):
             if states.get(cap) == "conditional":
                 states[cap] = "optional"
-                reasons[cap].append("route_cost_lite_policy")
+                reasons[cap].append(f"route_cost_capped_lane:{route_lane or 'cost_cap'}")
+        if route_cost_policy.get("current_disable_research") is True and states.get("research_route") == "required":
+            states["research_route"] = "optional"
+            reasons["research_route"].append(f"route_cost_disable_research:{route_lane or 'cost_cap'}")
+        if not preserve_governance_review and states.get("ultra_review") == "conditional":
+            states["ultra_review"] = "optional"
+            reasons["ultra_review"].append(f"route_cost_capped_lane:{route_lane or 'cost_cap'}")
+        if not preserve_autoreason and states.get("autoreason") == "conditional":
+            states["autoreason"] = "optional"
+            reasons["autoreason"].append(f"route_cost_capped_lane:{route_lane or 'cost_cap'}")
+
+    def _apply_s2t_policy_promotion(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        s2t_shadow_score: dict[str, Any],
+        safety_floor: set[str],
+    ) -> None:
+        if not s2t_shadow_score.get("runtime_promotable"):
+            return
+        for cap, hint in (s2t_shadow_score.get("capability_hints", {}) or {}).items():
+            if not isinstance(hint, dict) or hint.get("would_downgrade") is not True:
+                continue
+            if cap in safety_floor or states.get(cap) != "conditional":
+                if cap in states:
+                    reasons[cap].append("s2t_promoted_policy_preserved_by_safety_floor")
+                continue
+            states[cap] = "optional"
+            reasons[cap].append("s2t_promoted_policy_cost_downgrade")
+
+    def _apply_mutation_assurance_policy(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        route: dict[str, Any],
+    ) -> None:
+        assurance = route.get("mutation_assurance", {}) if isinstance(route.get("mutation_assurance", {}), dict) else {}
+        survived = bool(assurance.get("survived_mutants_present", False))
+        required = bool(assurance.get("required", False))
+        if not (required and survived):
+            return
+        for cap in ("ultra_review", "sandbox", "autoreason", "jit_validation"):
+            if cap in states and states[cap] != "required":
+                states[cap] = "conditional"
+                reasons[cap].append("mutation_assurance_blind_spot_escalation")
+
+    def _build_ssd_route_map(
+        self,
+        *,
+        states: dict[str, str],
+        reasons: dict[str, list[str]],
+        signals: Any,
+        routing_tier: str,
+        total_cost: int,
+    ) -> dict[str, Any]:
+        selected = [name for name, state in states.items() if state in {"required", "conditional"}]
+        capability_reasons = {
+            name: list(reasons.get(name) or ["available_but_not_selected"])
+            for name in selected
+        }
+        leverage_roles: dict[str, str] = {}
+        for name in selected:
+            node = self.nodes[name]
+            if node.category in {"governance", "validation"} or name.endswith("_gate"):
+                leverage_roles[name] = "risk_control"
+            elif node.category in {"recon", "memory"}:
+                leverage_roles[name] = "evidence_resolution"
+            elif node.category in {"repair", "execution"}:
+                leverage_roles[name] = "repair_execution"
+            elif node.category in {"reasoning", "acceleration", "routing"}:
+                leverage_roles[name] = "selection_quality"
+            else:
+                leverage_roles[name] = "supporting_capability"
+
+        missing_reason = [
+            name
+            for name, reason_list in capability_reasons.items()
+            if not reason_list or reason_list == ["available_but_not_selected"]
+        ]
+        leverage_points = tuple(dict.fromkeys(leverage_roles.values()))
+        return {
+            "schema_version": "nexus_ssd_route_map_v1",
+            "map_status": "PASS" if not missing_reason else "INCOMPLETE",
+            "routing_tier": routing_tier,
+            "task_risk_score": int(getattr(signals, "risk_score", 0) or 0),
+            "selected_capability_count": len(selected),
+            "total_cost": int(total_cost),
+            "capability_reasons": capability_reasons,
+            "capability_dependencies": {
+                name: list(self.nodes[name].dependencies)
+                for name in selected
+            },
+            "leverage_roles": leverage_roles,
+            "leverage_points": list(leverage_points),
+            "missing_reason_capabilities": missing_reason,
+        }
+
+    def _build_context_slimming_policy(
+        self,
+        *,
+        states: dict[str, str],
+        signals: Any,
+        routing_tier: str,
+    ) -> dict[str, Any]:
+        selected = {name for name, state in states.items() if state in {"required", "conditional"}}
+        if getattr(signals, "simple_hidden_bugfix", False):
+            mode = "dream_micro"
+            max_context_items = 4
+            phase_budgets = {"X": 2, "D": 1, "R": 3, "A": 2}
+            allow_research_context = "research" in selected and "research" in getattr(
+                signals, "route_oracle_expected_capabilities", ()
+            )
+        elif routing_tier == "L3_swarm_deep" or getattr(signals, "risk_score", 0) >= 70:
+            mode = "dream_hardened"
+            max_context_items = 12
+            phase_budgets = {"X": 8, "D": 6, "R": 8, "A": 8}
+            allow_research_context = "research" in selected
+        else:
+            mode = "dream_standard"
+            max_context_items = 8
+            phase_budgets = {"X": 5, "D": 3, "R": 5, "A": 4}
+            allow_research_context = "research" in selected
+        return {
+            "schema_version": "nexus_context_slimming_policy_v1",
+            "mode": mode,
+            "max_context_items": max_context_items,
+            "phase_budgets": phase_budgets,
+            "allow_research_context": bool(allow_research_context),
+            "include_only": [
+                "route_map_leverage_points",
+                "selected_capability_reasons",
+                "direct_evidence_refs",
+                "target_symbols",
+                "verify_commands",
+            ],
+            "drop_by_default": [
+                "unreferenced_codeintel_sections",
+                "duplicate_research_hits",
+                "chat_repetition",
+                "non_evidence_narrative",
+            ],
+        }
 
     def _score_s2t_policy_draft(
         self,
@@ -939,7 +1218,8 @@ class CapabilityPlanner:
 
         return {
             "influenced": True,
-            "mode": "shadow_only_no_runtime_decision_change",
+            "mode": "promoted_runtime_candidate" if s2t_policy_draft.get("runtime_promotable") else "shadow_only_no_runtime_decision_change",
+            "runtime_promotable": bool(s2t_policy_draft.get("runtime_promotable", False)),
             "source_schema": str(s2t_policy_draft.get("schema") or ""),
             "status": str(s2t_policy_draft.get("status") or ""),
             "task_id": task_id,
@@ -965,7 +1245,9 @@ class CapabilityPlanner:
         reasons: dict[str, list[str]],
         scoring: CapabilityScoringConfig,
         max_cost: int,
+        safety_floor: set[str] | None = None,
     ) -> tuple[dict[str, str], dict[str, list[str]], list[str], int]:
+        safety_floor = safety_floor or set()
         selected = [name for name, state in states.items() if state in {"required", "conditional"}]
         total_cost = sum(self.nodes[name].cost for name in selected)
         forbidden: list[str] = []
@@ -978,8 +1260,24 @@ class CapabilityPlanner:
         ):
             if total_cost <= max_cost:
                 break
+            if name in safety_floor:
+                reasons[name].append("budget_safety_floor_preserved")
+                continue
             states[name] = "forbidden"
             forbidden.append(name)
             reasons[name].append("budget_downgrade")
             total_cost -= self.nodes[name].cost
         return states, reasons, forbidden, total_cost
+
+    @staticmethod
+    def _budget_safety_floor(*, signals: Any, routing_tier: str) -> set[str]:
+        floor = {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"}
+        if (
+            routing_tier == "L3_swarm_deep"
+            or getattr(signals, "risk_score", 0) >= 70
+            or getattr(signals, "governance_signal", False)
+            or getattr(signals, "hazard_forced_l3", False)
+        ):
+            floor.update({"ultra_review", "sandbox", "pregate", "plan_quality_gate", "forecast_gate"})
+        floor.update(str(cap) for cap in getattr(signals, "route_oracle_expected_capabilities", ()) or ())
+        return floor

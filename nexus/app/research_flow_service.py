@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, TypedDict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import click
 
 from nexus.engine.policies.research_policy import ResearchPolicy
@@ -23,19 +23,28 @@ from nexus.contracts import RLMTraceEvent, RLMTraceWriter
 from nexus.engine.capability_executor_controls import build_executor_controls
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.capability_selector import CapabilitySelector
+from nexus.engine.local_reflex import assess_local_reflex
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.asi_constraints import ASIConstraintExtractor, ASIConstraintStore
+from nexus.engine.runtime_capability_receipts import emit_harness_runtime_receipts, write_runtime_receipt_json
 from nexus.engine.openseeker_alignment import build_openseeker_trace
 from nexus.contracts.learning_experience import (
+    apply_autodata_quality_gate,
     build_learning_experience,
     project_model_training,
     project_nexus_policy,
     save_promoted_learning_policy,
 )
+from nexus.contracts.s2t_export import write_model_training_export_v3
 from nexus.contracts.s2t_policy import S2TCandidate, S2TSelector
 from nexus.contracts.s2t_trace import S2TDecisionSpan, S2TEpisodeTrace, S2TTraceEvent, S2TTraceWriter
 from nexus.core.event_bus import NexusEventBus
-from nexus.engine.learning_policy_loader import DEFAULT_PROMOTED_POLICY_PATH, merge_runtime_learning_policy
+from nexus.core.learning_steward import LearningSteward
+from nexus.engine.learning_policy_loader import (
+    DEFAULT_PROMOTED_POLICY_PATH,
+    merge_runtime_learning_policy,
+    route_cost_controls_from_env,
+)
 from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
 from nexus.research.formal_report_service import FormalReportService
@@ -46,6 +55,7 @@ from nexus.research.research_runtime_contracts import (
     build_research_doctor,
 )
 from nexus.services.codeintel import analyze_impact, scan_codebase
+from nexus.services.codeintel.dci_locator import locate_dci_evidence, should_enable_dci
 from nexus.app.research_autoreason_runtime import build_autoreason_payload
 from nexus.app.research_receipt_runtime import build_capability_receipt_payloads, runtime_receipt_plan_payload
 
@@ -379,6 +389,7 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
     graph_path = _codeintel_run_cache_graph_path(repo_root) or report_dir / f"{slug}_code_graph.json"
     scan_report_path = report_dir / f"{slug}_scan.json"
     impact_report_path = report_dir / f"{slug}_impact.json"
+    dci_report_path = report_dir / f"{slug}_dci.json"
     changed_file = _rel_path_for_report(repo_root, target_file)
     try:
         cached_graph = _load_codeintel_graph(graph_path) if graph_path.exists() else None
@@ -404,6 +415,23 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
         for path in (str(scan_report_path), str(impact_report_path)):
             if path not in evidence_paths:
                 evidence_paths.append(path)
+        route_controls = route_cost_controls_from_env()
+        route_lane = str(route_controls.get("route_lane") or "")
+        dci_report: dict[str, Any] = {}
+        if should_enable_dci(
+            route_lane=route_lane,
+            codeintel_empty=not bool(impact.get("impacted_files", []) or impact.get("impacted_symbols", [])),
+            explicit_opt_in=bool(route_controls.get("enable_dci_locator", False)),
+        ):
+            dci_report = locate_dci_evidence(
+                repo_root,
+                task_desc=task_desc,
+                target_file=target_file,
+                report_path=dci_report_path,
+                route_lane=route_lane,
+            )
+            if dci_report.get("report_path") and dci_report.get("report_path") not in evidence_paths:
+                evidence_paths.append(str(dci_report["report_path"]))
         impact["evidence_paths"] = evidence_paths
         impact_report_path.write_text(json.dumps(impact, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         return {
@@ -421,6 +449,12 @@ def _build_codeintel_evidence(repo_root: Path, *, target_file: str, task_desc: s
             "risk_reason": list(impact.get("risk_reason", []) or []),
             "impacted_files_count": len(list(impact.get("impacted_files", []) or [])),
             "impacted_symbols_count": len(list(impact.get("impacted_symbols", []) or [])),
+            "dci_locator_present": bool(dci_report.get("invoked", False)),
+            "dci_locator_report_path": str(dci_report.get("report_path") or ""),
+            "dci_evidence_refs": list(dci_report.get("evidence_refs", []) or []),
+            "dci_evidence_count": int(dci_report.get("evidence_count", 0) or 0),
+            "dci_coverage_score": float(dci_report.get("coverage_score", 0.0) or 0.0),
+            "dci_localization_score": float(dci_report.get("localization_score", 0.0) or 0.0),
         }
     except Exception as exc:
         return {
@@ -436,13 +470,31 @@ def _task_with_codeintel_context(task_desc: str, codeintel: dict[str, Any]) -> s
     if not codeintel.get("impact_report_present"):
         return task_desc
     risk_reasons = ", ".join(str(item) for item in codeintel.get("risk_reason", []) or []) or "none"
+    controls = route_cost_controls_from_env()
+    if str(controls.get("context_mode") or "").lower() == "compact":
+        dci_context = ""
+        if codeintel.get("dci_locator_present"):
+            dci_context = (
+                f"\n- dci_evidence_count: {codeintel.get('dci_evidence_count', 0)}"
+                f"\n- dci_report: {codeintel.get('dci_locator_report_path', '')}"
+            )
+        return (
+            f"{task_desc}\n\n"
+            "[Nexus CodeIntel Compact]\n"
+            f"- impact_report: {codeintel.get('impact_report_path', '')}\n"
+            f"- risk_score: {codeintel.get('risk_score', 0)}\n"
+            f"- impacted_files_count: {codeintel.get('impacted_files_count', 0)}\n"
+            f"- risk_reason: {risk_reasons[:240]}"
+            f"{dci_context}"
+        )
     return (
         f"{task_desc}\n\n"
         "[Nexus CodeIntel]\n"
         f"- impact_report: {codeintel.get('impact_report_path', '')}\n"
         f"- risk_score: {codeintel.get('risk_score', 0)}\n"
         f"- impacted_files_count: {codeintel.get('impacted_files_count', 0)}\n"
-        f"- risk_reason: {risk_reasons}"
+        f"- risk_reason: {risk_reasons}\n"
+        f"- dci_evidence_count: {codeintel.get('dci_evidence_count', 0)}"
     )
 
 
@@ -1661,6 +1713,16 @@ def _decide_flow(
         "doc_scout_hits": 0,
         "blocked_assumptions_count": 0,
     }
+    route_features.update(
+        assess_local_reflex(
+            task_desc=task_desc,
+            task_type=task_type,
+            difficulty="hard" if has_hard_signal else "unknown",
+            category="",
+            repo_kind="",
+            fixture_kind="",
+        ).to_route_features()
+    )
     candidate_factory_ready = int(candidate_count) >= 2
     route_features["candidate_factory_readiness_estimate"] = {
         "ready": candidate_factory_ready,
@@ -1734,13 +1796,29 @@ def build_route(
     decision = signals["decision"]
     route_features = decision_payload["route_features"]
     recommended_flow = decision_payload["recommended_flow"]
-    research_context = _build_research_context(
-        repo_root=repo_root,
-        task_desc=task_desc,
-        task_type=task_type,
-        route_features=route_features,
-        historical_hints=list(dict.fromkeys(historical_hints))[:3],
-    )
+    route_cost_controls = route_cost_controls_from_env()
+    if route_cost_controls.get("disable_research") is True:
+        decision_payload["should_research"] = False
+        research_context = {
+            "role": "general",
+            "risk_flags": [],
+            "blocked_assumptions": [],
+            "global_constraints": [],
+            "doc_scout": {"hits_count": 0, "hits": []},
+            "route_cost_policy": {
+                "disable_research": True,
+                "source": str(route_cost_controls.get("policy_source") or ""),
+                "route_lane": str(route_cost_controls.get("route_lane") or ""),
+            },
+        }
+    else:
+        research_context = _build_research_context(
+            repo_root=repo_root,
+            task_desc=task_desc,
+            task_type=task_type,
+            route_features=route_features,
+            historical_hints=list(dict.fromkeys(historical_hints))[:3],
+        )
     route_features = {
         **route_features,
         "research_role": str(research_context.get("role", "general") or "general"),
@@ -1748,6 +1826,9 @@ def build_route(
         "benchmark_required": str(research_context.get("role", "")) == "benchmark_framer",
         "doc_scout_hits": int(((research_context.get("doc_scout") or {}).get("hits_count", 0)) or 0),
         "blocked_assumptions_count": len(research_context.get("blocked_assumptions", []) or []),
+        "route_cost_disable_research": bool(route_cost_controls.get("disable_research", False)),
+        "route_cost_context_mode": str(route_cost_controls.get("context_mode") or ""),
+        "route_lane": str(route_cost_controls.get("route_lane") or ""),
     }
     capability_stack = compose_capability_plan(
         task_desc=task_desc,
@@ -1759,7 +1840,6 @@ def build_route(
     )
 
     route_payload = {
-        "task_id": task_id or "",
         "should_research": decision_payload["should_research"],
         "mode": decision_payload["mode"],
         "reason": decision_payload["reason"],
@@ -1778,6 +1858,8 @@ def build_route(
         "capability_stack": capability_stack,
         "consensus": decision_payload["consensus"],
     }
+    if task_id:
+        route_payload["task_id"] = task_id
     capability_plan, route_decision = _build_capability_plan_and_decision(
         task_desc=task_desc,
         task_type=task_type,
@@ -1911,6 +1993,13 @@ def build_hyper_execution_profile(
             effective_candidate_count = min(effective_candidate_count, max(1, int(llm_candidate_cap)))
         except ValueError:
             pass
+    route_cost_controls = route_cost_controls_from_env()
+    if route_cost_controls.get("max_rounds"):
+        try:
+            effective_max_rounds = min(effective_max_rounds, max(1, int(route_cost_controls["max_rounds"])))
+            tuning_reasons.append(f"route_cost_max_rounds:{route_cost_controls['max_rounds']}")
+        except (TypeError, ValueError):
+            pass
 
     return {
         "is_hard_task": is_hard_task,
@@ -1996,11 +2085,7 @@ def _write_output_file(repo_root: Path, path: Path, payload: dict) -> Path:
 
 
 def _write_runtime_receipt_json(repo_root: Path, *, category: str, receipt_slug: str, payload: dict[str, Any]) -> str:
-    rel = Path(".nexus") / "reports" / "capabilities" / category / f"{receipt_slug}.json"
-    out = repo_root / rel
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    return str(rel)
+    return write_runtime_receipt_json(repo_root, category=category, receipt_slug=receipt_slug, payload=payload)
 
 
 def _clamp_score(value: Any) -> float:
@@ -2171,6 +2256,17 @@ def _augment_semantic_runtime_capabilities(
 ) -> None:
     capabilities = nexus_usage_trace.setdefault("capabilities", {})
     research_context = route.get("research_context", {}) if isinstance(route.get("research_context"), dict) else {}
+
+    emit_harness_runtime_receipts(
+        repo_root=repo_root,
+        task_desc=task_desc,
+        task_type=task_type,
+        receipt_slug=receipt_slug,
+        selected_capabilities=selected_capabilities,
+        capabilities=capabilities,
+        route=route,
+        artifact_verified=artifact_verified,
+    )
 
     if {"judge_panel", "llm_judge_panel"} & selected_capabilities:
         autoreason = nexus_usage_trace.get("autoreason", {}) if isinstance(nexus_usage_trace.get("autoreason"), dict) else {}
@@ -2846,6 +2942,8 @@ def run_auto_flow(
 
     def _run_hyper_apply() -> dict:
         start = time.monotonic()
+        breakdown: dict[str, float] = {}
+        setup_started_at = time.monotonic()
         effective_stage1_timeout = stage1_timeout_sec
         if baseline_probe and baseline_probe.get("elapsed_sec", 0) > 0:
             dynamic_timeout = int(round(float(baseline_probe["elapsed_sec"]) * max(1.0, dynamic_timeout_multiplier)))
@@ -2884,13 +2982,19 @@ def run_auto_flow(
             distant_scout_plan=distant_scout_plan,
             **sprint_executor_flags,
         )
+        breakdown["setup_sec"] = round(time.monotonic() - setup_started_at, 4)
+        sprint_started_at = time.monotonic()
         res = run_hyper_sprint(repo_root=repo_root, config=cfg)
+        breakdown["hyper_sprint_sec"] = round(time.monotonic() - sprint_started_at, 4)
         ok = res.status == "SUCCESS" and bool(res.patch)
         err = ""
+        apply_started_at = time.monotonic()
         if ok:
             _write_source_text(target_path, res.patch)
         else:
             err = res.reason
+        breakdown["patch_apply_sec"] = round(time.monotonic() - apply_started_at, 4)
+        breakdown["total_sec"] = round(time.monotonic() - start, 4)
         return {
             "flow": "hyper_sprint",
             "status": "SUCCESS" if ok else "FAILED",
@@ -2921,6 +3025,7 @@ def run_auto_flow(
                     "candidate_summaries": _candidate_summaries(list(getattr(res, "candidates", []) or [])),
                     "learning_trace": res.learning_trace,
                     "distant_scout_execution": (res.learning_trace or {}).get("distant_scout_execution", {}),
+                    "r_phase_breakdown_sec": breakdown,
                 },
             }
 
@@ -3132,6 +3237,13 @@ def run_auto_flow(
     }
     result_report = result.get("report", {}) if isinstance(result, dict) else {}
     result_report = result_report if isinstance(result_report, dict) else {}
+    r_phase_breakdown = result_report.get("r_phase_breakdown_sec", {})
+    if isinstance(r_phase_breakdown, dict):
+        for key, value in r_phase_breakdown.items():
+            try:
+                timing_breakdown_sec[f"r_{key}"] = round(float(value), 4)
+            except (TypeError, ValueError):
+                continue
     guard_fallback_from = result_report.get("guard_fallback_from", {})
     guard_fallback_from = guard_fallback_from if isinstance(guard_fallback_from, dict) else {}
     hyper_learning_trace = result_report.get("learning_trace") or guard_fallback_from.get("learning_trace") or {}
@@ -3479,16 +3591,61 @@ def run_auto_flow(
         learning_steward_decision=str(learn_phase_slo.get("status") or "shadow"),
     )
     nexus_usage_trace["learning_experience"] = learning_experience.to_dict()
+    learning_decision = LearningSteward().decide_experience(learning_experience)
+    autodata_quality_row = {
+        "task_id": learning_experience.task_id,
+        "eligible_for_training": bool(
+            learning_experience.outcome == "verified_success"
+            and learning_experience.s2t_trace_refs
+            and not openseeker_trace.get("low_step_filtered", False)
+            and not openseeker_trace.get("single_source_claim", False)
+        ),
+        "reasons": [
+            reason
+            for reason, failed in (
+                ("low_step_trajectory", bool(openseeker_trace.get("low_step_filtered", False))),
+                ("single_source_claim", bool(openseeker_trace.get("single_source_claim", False))),
+                ("missing_s2t_trace_refs", not bool(learning_experience.s2t_trace_refs)),
+                ("outcome_not_verified_success", learning_experience.outcome != "verified_success"),
+            )
+            if failed
+        ],
+        "trajectory_steps": int(openseeker_trace.get("trajectory_step_count", 0) or 0),
+        "information_density": float(
+            (
+                int(openseeker_trace.get("evidence_hop_count", 0) or 0)
+                + int(openseeker_trace.get("tool_action_count", 0) or 0)
+            )
+            / max(1, int(openseeker_trace.get("trajectory_step_count", 0) or 0))
+        ),
+    }
     nexus_usage_trace["learning_projection"] = {
         "nexus_policy": project_nexus_policy(learning_experience),
-        "model_training": project_model_training(learning_experience),
+        "model_training": apply_autodata_quality_gate(project_model_training(learning_experience), autodata_quality_row),
+        "dual_learning_decision": asdict(learning_decision),
     }
-    promoted_policy = save_promoted_learning_policy(
-        repo_root / DEFAULT_PROMOTED_POLICY_PATH,
-        [learning_experience],
-    )
-    nexus_usage_trace["learning_projection"]["promoted_policy"] = promoted_policy
-    nexus_usage_trace["learning_projection"]["promoted_policy_path"] = str(DEFAULT_PROMOTED_POLICY_PATH)
+    if learning_decision.nexus_action == "PROMOTE_NEXUS":
+        promoted_policy = save_promoted_learning_policy(
+            repo_root / DEFAULT_PROMOTED_POLICY_PATH,
+            [learning_experience],
+        )
+        nexus_usage_trace["learning_projection"]["promoted_policy"] = promoted_policy
+        nexus_usage_trace["learning_projection"]["promoted_policy_path"] = str(DEFAULT_PROMOTED_POLICY_PATH)
+    else:
+        nexus_usage_trace["learning_projection"]["promoted_policy"] = {"status": "not_promoted"}
+    if s2t_trace.get("event"):
+        training_export_path = Path(".nexus") / "exports" / "model_training" / f"{receipt_slug}.json"
+        training_export = write_model_training_export_v3(
+            repo_root / training_export_path,
+            [S2TTraceEvent.from_dict(s2t_trace["event"])],
+            experiences=[learning_experience],
+            quality_rows=[autodata_quality_row],
+        )
+        nexus_usage_trace["learning_projection"]["model_training_export"] = {
+            "schema_version": training_export["schema_version"],
+            "path": str(training_export_path),
+            **training_export["summary"],
+        }
 
     payload = {
         "schema_version": "1.0",
