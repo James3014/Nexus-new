@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.engine.learning_policy_loader import (
+    audit_route_cost_policy,
     load_learning_policy_budget,
     load_route_cost_policy_budget,
     load_route_cost_policy_budget_from_env,
     load_s2t_policy_draft_budget,
     merge_runtime_s2t_policy_draft,
+    route_cost_controls_from_env,
     route_cost_controls_for_task,
 )
 
@@ -797,6 +799,7 @@ def test_route_cost_policy_loader_exposes_task_controls(tmp_path):
         """{
   "schema_version": "nexus_promoted_route_cost_policy.v1",
   "source": ".nexus/reports/cost",
+  "allow_task_id_runtime_controls": true,
   "candidate_cap_overrides": {"nexus-value-evidence-001": 1},
   "lite_route_tasks": ["nexus-value-trust-001"],
   "hold_tasks": ["nexus-value-repair-001"]
@@ -812,6 +815,195 @@ def test_route_cost_policy_loader_exposes_task_controls(tmp_path):
     assert evidence_controls["candidate_cap"] == 1
     assert trust_controls["lite_route"] is True
     assert repair_controls["hold"] is True
+
+
+def test_route_cost_policy_loader_ignores_task_controls_by_default(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "candidate_cap_overrides": {"nexus-value-evidence-001": 1},
+  "lite_route_tasks": ["nexus-value-trust-001"],
+  "hold_tasks": ["nexus-value-repair-001"]
+}""",
+        encoding="utf-8",
+    )
+
+    budget = load_route_cost_policy_budget(artifact)
+    controls = route_cost_controls_for_task(tmp_path, "nexus-value-evidence-001", budget)
+    audit = audit_route_cost_policy(tmp_path, budget)
+
+    assert controls == {}
+    assert audit["passed"] is True
+    assert audit["task_id_runtime_policy_count"] == 0
+    assert audit["legacy_task_controls_ignored_count"] == 3
+
+
+def test_route_cost_policy_loader_applies_feature_rules_without_task_id(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:bug-lite",
+      "match": {"task_type": "bug", "difficulty": ["easy", "medium"], "repo_kind": "fixture"},
+      "controls": {"candidate_cap": 1, "lite_route": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "unseen-task-id",
+        route_features={"task_type": "bug", "difficulty": "medium", "repo_kind": "fixture"},
+    )
+    miss = route_cost_controls_for_task(
+        tmp_path,
+        "unseen-task-id",
+        route_features={"task_type": "public_feature", "difficulty": "medium", "repo_kind": "fixture"},
+    )
+
+    assert controls["candidate_cap"] == 1
+    assert controls["lite_route"] is True
+    assert controls["policy_source"] == "feature:bug-lite"
+    assert miss == {}
+
+
+def test_route_cost_policy_loader_can_match_local_reflex_features(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:reflex-low-risk-supervised",
+      "match": {"task_type": "public_test_repair", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "unseen-task-id",
+        route_features={
+            "task_type": "public_test_repair",
+            "local_reflex_risk_level": "low",
+            "local_reflex_bare_sufficiency": "high",
+        },
+    )
+    blocked = route_cost_controls_for_task(
+        tmp_path,
+        "unseen-task-id",
+        route_features={
+            "task_type": "public_test_repair",
+            "local_reflex_risk_level": "high",
+            "local_reflex_bare_sufficiency": "low",
+        },
+    )
+
+    assert controls["supervised_bare_first"] is True
+    assert controls["policy_source"] == "feature:reflex-low-risk-supervised"
+    assert blocked == {}
+
+
+def test_route_cost_policy_loader_can_match_public_bugfix_supervised_bare_first(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:public-bugfix-supervised",
+      "match": {"task_type": "public_bugfix", "difficulty": "hard", "category": "bugfix", "repo_kind": "neutral_fixture", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true, "route_lane": "hidden_bugfix_supervised"}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "nexus-value-hidden-002",
+        route_features={
+            "task_type": "public_bugfix",
+            "difficulty": "hard",
+            "category": "bugfix",
+            "repo_kind": "neutral_fixture",
+            "local_reflex_risk_level": "low",
+            "local_reflex_bare_sufficiency": "high",
+        },
+    )
+
+    assert controls["supervised_bare_first"] is True
+    assert controls["route_lane"] == "hidden_bugfix_supervised"
+    assert controls["policy_source"] == "feature:public-bugfix-supervised"
+
+
+def test_route_cost_policy_loader_matches_public_context_and_refactor_lanes(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:public-refactor-capped",
+      "match": {"task_type": "public_refactor", "difficulty": "hard", "category": "refactor", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "context_mode": "compact", "disable_research": true, "max_rounds": 1, "route_lane": "governance_hardened_capped", "skip_llm_baseline": true}
+    },
+    {
+      "id": "feature:public-docs-code-sync-capped",
+      "match": {"task_type": "public_docs_code_sync", "difficulty": "hard", "category": "docs_code_sync", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "context_mode": "compact", "disable_research": true, "max_rounds": 1, "route_lane": "context_sync_capped", "skip_llm_baseline": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    refactor = route_cost_controls_for_task(
+        tmp_path,
+        "nexus-value-gov-002",
+        route_features={
+            "task_type": "public_refactor",
+            "difficulty": "hard",
+            "category": "refactor",
+            "repo_kind": "neutral_fixture",
+        },
+    )
+    context = route_cost_controls_for_task(
+        tmp_path,
+        "nexus-value-context-002",
+        route_features={
+            "task_type": "public_docs_code_sync",
+            "difficulty": "hard",
+            "category": "docs_code_sync",
+            "repo_kind": "neutral_fixture",
+        },
+    )
+
+    assert refactor["route_lane"] == "governance_hardened_capped"
+    assert refactor["disable_research"] is True
+    assert refactor["skip_llm_baseline"] is True
+    assert context["route_lane"] == "context_sync_capped"
+    assert context["disable_research"] is True
+    assert context["skip_llm_baseline"] is True
 
 
 def test_route_cost_policy_loader_can_disable_repo_policy_for_clean_bench(tmp_path, monkeypatch):
@@ -835,13 +1027,24 @@ def test_route_cost_policy_loader_can_disable_repo_policy_for_clean_bench(tmp_pa
 def test_route_cost_policy_loader_reads_task_specific_env_controls(monkeypatch):
     monkeypatch.setenv(
         "NEXUS_ROUTE_COST_CONTROLS",
-        '{"lite_route": true, "candidate_cap": 1, "policy_source": ".nexus/policy/promoted_route_cost_policy.json"}',
+        (
+            '{"lite_route": true, "candidate_cap": 1, "disable_research": true, '
+            '"context_mode": "compact", "max_rounds": 1, "route_lane": "hidden_lite", '
+            '"policy_source": ".nexus/policy/promoted_route_cost_policy.json"}'
+        ),
     )
 
     budget = load_route_cost_policy_budget_from_env()
+    controls = route_cost_controls_from_env()
 
     assert budget["route_cost_policy"]["current_lite_route"] is True
     assert budget["route_cost_policy"]["current_candidate_cap"] == 1
+    assert budget["route_cost_policy"]["current_disable_research"] is True
+    assert budget["route_cost_policy"]["current_context_mode"] == "compact"
+    assert budget["route_cost_policy"]["current_max_rounds"] == 1
+    assert budget["route_cost_policy"]["current_route_lane"] == "hidden_lite"
+    assert controls["disable_research"] is True
+    assert controls["context_mode"] == "compact"
 
 
 def test_s2t_policy_draft_loader_feeds_shadow_scoring_without_runtime_promotion(tmp_path):
@@ -887,7 +1090,12 @@ def test_s2t_policy_draft_loader_feeds_shadow_scoring_without_runtime_promotion(
 def test_route_cost_controls_for_task_applies_current_env_controls(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "NEXUS_ROUTE_COST_CONTROLS",
-        '{"lite_route": true, "candidate_cap": 1, "hold": true, "policy_source": "env:test"}',
+        (
+            '{"lite_route": true, "candidate_cap": 1, "hold": true, '
+            '"disable_research": true, "context_mode": "compact", "max_rounds": 1, '
+            '"route_lane": "repair_capped", "require_llm_baseline": true, '
+            '"skip_llm_baseline": true, "policy_source": "env:test"}'
+        ),
     )
 
     controls = route_cost_controls_for_task(tmp_path, "rlm-harder-v2-governance-001")
@@ -895,7 +1103,51 @@ def test_route_cost_controls_for_task_applies_current_env_controls(monkeypatch, 
     assert controls["candidate_cap"] == 1
     assert controls["lite_route"] is True
     assert controls["hold"] is True
+    assert controls["disable_research"] is True
+    assert controls["context_mode"] == "compact"
+    assert controls["max_rounds"] == 1
+    assert controls["route_lane"] == "repair_capped"
+    assert controls["require_llm_baseline"] is True
+    assert controls["skip_llm_baseline"] is True
     assert controls["policy_source"] == "env:test"
+
+
+def test_route_cost_policy_loader_matches_real_benchmark_category_lane(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:governance-direct-hyper",
+      "match": {"category": "ops_research", "difficulty": "hard", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "context_mode": "compact", "disable_research": true, "max_rounds": 1, "route_lane": "governance_hardened", "require_llm_baseline": true, "skip_llm_baseline": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "rlm-harder-v2-governance-001",
+        route_features={
+            "category": "ops_research",
+            "difficulty": "hard",
+            "repo_kind": "neutral_fixture",
+            "task_type": "",
+        },
+    )
+
+    assert controls["candidate_cap"] == 1
+    assert controls["disable_research"] is True
+    assert controls["context_mode"] == "compact"
+    assert controls["max_rounds"] == 1
+    assert controls["route_lane"] == "governance_hardened"
+    assert controls["require_llm_baseline"] is True
+    assert controls["skip_llm_baseline"] is True
 
 
 def test_capability_planner_lite_route_downgrades_high_cost_conditionals():
@@ -919,6 +1171,89 @@ def test_capability_planner_lite_route_downgrades_high_cost_conditionals():
     assert "sandbox" not in selected
     assert "research" not in selected
     assert "autoreason" not in selected
+
+
+def test_capability_planner_capped_context_lane_prunes_runtime_reopened_research_stack():
+    plan = CapabilityPlanner().plan(
+        task_desc="Sync public docs with fixture behavior without external research.",
+        task_type="public_docs_code_sync",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 70,
+                "has_governance_signal": True,
+                "candidate_count": 1,
+                "route_lane": "context_sync_capped",
+            },
+            "route_decision": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+        budget={
+            "route_cost_policy": {
+                "current_disable_research": True,
+                "current_context_mode": "compact",
+                "current_max_rounds": 1,
+                "current_route_lane": "context_sync_capped",
+                "source": "test",
+            }
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= selected
+    assert "research_route" not in selected
+    assert "research" not in selected
+    assert "architecture_scout" not in selected
+    assert "nightshift" not in selected
+    assert "swarm" not in selected
+    assert "drone" not in selected
+    assert "judge_panel" not in selected
+    assert "formal_report" not in selected
+
+
+def test_capability_planner_capped_governance_lane_preserves_governance_gate_not_swarm_stack():
+    plan = CapabilityPlanner().plan(
+        task_desc="Refactor governance fixture with claim evidence and scoped policy safety.",
+        task_type="public_refactor",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 80,
+                "has_governance_signal": True,
+                "candidate_count": 1,
+                "route_lane": "governance_hardened_capped",
+            },
+            "route_decision": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+        budget={
+            "route_cost_policy": {
+                "current_disable_research": True,
+                "current_context_mode": "compact",
+                "current_max_rounds": 1,
+                "current_route_lane": "governance_hardened_capped",
+                "source": "test",
+            }
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= selected
+    assert "ultra_review" in selected
+    assert "research_route" not in selected
+    assert "research" not in selected
+    assert "architecture_scout" not in selected
+    assert "nightshift" not in selected
+    assert "swarm" not in selected
+    assert "drone" not in selected
+    assert "judge_panel" not in selected
+    assert "formal_report" not in selected
 
 
 def test_capability_planner_scores_s2t_policy_draft_without_changing_selection():

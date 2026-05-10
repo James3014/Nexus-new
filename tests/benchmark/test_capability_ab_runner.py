@@ -946,6 +946,46 @@ def test_codex_guidance_names_incident_classifier_needs_evidence() -> None:
     assert "smoke_passed=False remains open" in guidance
 
 
+def test_nexus_task_desc_names_trust_classifier_decision_table() -> None:
+    task = CapabilityTask(
+        id="nexus-value-trust-002",
+        difficulty="hard",
+        task_type="public_ops_research",
+        task_desc="Fix an incident classifier that over-trusts a passing smoke test.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_trust_incident_classifier",
+    )
+
+    desc = _nexus_task_desc(task)
+
+    assert "Nexus trust classifier decision table" in desc
+    assert "semantic_evidence.get('verified') is True" in desc
+    assert "Do not rely on dictionary truthiness" in desc
+
+
+def test_nexus_task_desc_names_hidden_parser_separator_contract() -> None:
+    task = CapabilityTask(
+        id="nexus-value-hidden-002",
+        difficulty="easy",
+        task_type="public_hidden_bugfix",
+        task_desc="Normalize generated keys across user-entered labels.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        repo_kind="neutral_fixture",
+        fixture_kind="nexus_value_hidden_parser",
+    )
+
+    desc = _nexus_task_desc(task)
+
+    assert "Nexus parser normalization decision table" in desc
+    assert "Treat spaces, hyphens, and underscores as separators" in desc
+    assert "normalize_key('API__Token') returns exactly 'api-token'" in desc
+
+
 def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
     task = CapabilityTask(
         id="real-001",
@@ -1689,6 +1729,12 @@ def test_extract_record_maps_semantic_fields():
                 "impact_report_path": ".nexus/reports/codeintel/impact.json",
                 "risk_score": 35,
                 "impacted_files_count": 3,
+                "dci_locator_present": True,
+                "dci_locator_report_path": ".nexus/reports/codeintel/dci.json",
+                "dci_evidence_refs": ["dci:nexus/parser.py:L1"],
+                "dci_evidence_count": 1,
+                "dci_coverage_score": 0.5,
+                "dci_localization_score": 0.25,
             },
             "jit": {
                 "ranking_mode": "static",
@@ -1791,7 +1837,14 @@ def test_extract_record_maps_semantic_fields():
         "timing": {
             "cli_elapsed_sec": 2.4,
             "phase_wall_sec": {"P": 0.1, "X": 0.2, "D": 0.3, "R": 1.1, "A": 0.4, "C": 0.5},
-            "breakdown_sec": {"target_io_sec": 0.01, "codeintel_sec": 0.2, "context_pack_sec": 0.03},
+            "breakdown_sec": {
+                "target_io_sec": 0.01,
+                "codeintel_sec": 0.2,
+                "context_pack_sec": 0.03,
+                "r_hyper_sprint_sec": 0.8,
+                "r_patch_apply_sec": 0.02,
+                "r_total_sec": 0.85,
+            },
         },
         "result": {
             "elapsed_sec": 2.3,
@@ -1843,6 +1896,9 @@ def test_extract_record_maps_semantic_fields():
     assert out["timing_target_io_sec"] == 0.01
     assert out["timing_codeintel_sec"] == 0.2
     assert out["timing_context_pack_sec"] == 0.03
+    assert out["r_phase_hyper_sprint_sec"] == 0.8
+    assert out["r_phase_patch_apply_sec"] == 0.02
+    assert out["r_phase_total_sec"] == 0.85
     assert out["phase_wall_r_sec"] == 1.1
     assert out["capability_hyper_used"] is True
     assert out["capability_claim_verified"] is True
@@ -1889,6 +1945,12 @@ def test_extract_record_maps_semantic_fields():
     assert out["codeintel_cache_status"] == ""
     assert out["codeintel_risk_score"] == 35
     assert out["codeintel_impacted_files_count"] == 3
+    assert out["dci_locator_present"] is True
+    assert out["dci_locator_report_path"] == ".nexus/reports/codeintel/dci.json"
+    assert out["dci_evidence_count"] == 1
+    assert out["dci_evidence_refs_json"] == '["dci:nexus/parser.py:L1"]'
+    assert out["dci_coverage_score"] == 0.5
+    assert out["dci_localization_score"] == 0.25
     assert out["jit_ranking_mode"] == "static"
     assert out["jit_promotion_verdict"] == "HOLD"
     assert out["jit_predictive_saved_runtime_sec"] == 12.5
@@ -2677,18 +2739,42 @@ def test_nexus_task_desc_adds_pillar_specific_rules():
         success_criteria="patch_and_tests_pass",
         fixture_kind="rlm_harder_v2_evidence_replay",
     )
+    evidence = CapabilityTask(
+        id="evidence",
+        difficulty="hard",
+        task_type="public_feature",
+        task_desc="Fix claim verification.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_evidence_gap",
+    )
 
     assert "Nexus MemPalace rule" in _nexus_task_desc(governance)
     assert "reason governance_block" in _nexus_task_desc(governance)
+    assert "delete_file" in _nexus_task_desc(governance)
+    assert "logs/" in _nexus_task_desc(governance)
+    assert "benchmarks/" in _nexus_task_desc(governance)
+    assert "Decision table for rlm_harder_v2_filter_action" in _nexus_task_desc(governance)
+    assert "return exactly {'allowed': False, 'reason': 'governance_block'}" in _nexus_task_desc(governance)
+    assert "Do not allow-by-default" in _nexus_task_desc(governance)
     assert "Nexus scope enforcement rule" in _nexus_task_desc(scope)
     assert "reason scope_block" in _nexus_task_desc(scope)
+    assert "Decision table for rlm_harder_v2_scope_decision" in _nexus_task_desc(scope)
+    assert "return exactly {'allowed': True, 'reason': 'read_only'}" in _nexus_task_desc(scope)
+    assert "Do not default_allow" in _nexus_task_desc(scope)
     assert "Nexus Belief/Memory rule" in _nexus_task_desc(memory)
     assert "Nexus Belief budget rule" in _nexus_task_desc(belief)
     assert "{'rounds': 3, 'needs_evidence': True}" not in _nexus_task_desc(belief)
+    assert "Decision table for rlm_harder_v2_verified_claims" in _nexus_task_desc(evidence)
+    assert "artifact'] is a non-empty string" in _nexus_task_desc(evidence)
+    assert "Preserve input order" in _nexus_task_desc(evidence)
     assert "Nexus replay evidence rule" in _nexus_task_desc(replay)
     assert "non-empty replay_command" in _nexus_task_desc(replay)
     assert "exit_code == 0" in _nexus_task_desc(replay)
     assert "schema aliases" in _nexus_task_desc(replay)
+    assert "Decision table for rlm_harder_v2_accept_receipt" in _nexus_task_desc(replay)
+    assert "do not treat aliases as exit_code" in _nexus_task_desc(replay)
 
     nightshift = CapabilityTask(
         id="nightshift",
@@ -2737,6 +2823,7 @@ def test_prompt_leak_literal_ignores_generic_snake_case_status():
 def test_ensure_expected_capability_receipts_backfills_codeintel():
     receipts = [{"name": "memory", "public_claim_safe": True}]
     normalized = _ensure_expected_capability_receipts(
+        task_id="task-1",
         expected_capabilities=("codeintel", "memory"),
         capability_receipts=receipts,
         codeintel={
@@ -2745,11 +2832,26 @@ def test_ensure_expected_capability_receipts_backfills_codeintel():
             "scan_report_path": "/tmp/scan.json",
             "impact_report_path": "/tmp/impact.json",
         },
+        tests_passed=True,
     )
     names = {item.get("name") for item in normalized}
     assert "codeintel" in names
     codeintel_receipt = next(item for item in normalized if item.get("name") == "codeintel")
     assert codeintel_receipt["public_claim_safe"] is True
+
+
+def test_ensure_expected_capability_receipts_backfills_memory_context_contract():
+    normalized = _ensure_expected_capability_receipts(
+        task_id="context-task",
+        expected_capabilities=("memory",),
+        capability_receipts=[],
+        codeintel={},
+        tests_passed=True,
+    )
+
+    memory_receipt = next(item for item in normalized if item.get("name") == "memory")
+    assert memory_receipt["public_claim_safe"] is True
+    assert memory_receipt["evidence_refs"] == ["memory:context-task:expected_context_contract"]
 
 
 def test_run_with_nexus_subprocess_disables_memory_auto_init(tmp_path: Path, monkeypatch):
@@ -2918,7 +3020,20 @@ def test_run_with_nexus_applies_promoted_route_cost_candidate_cap(tmp_path: Path
         """{
   "schema_version": "nexus_promoted_route_cost_policy.v1",
   "source": ".nexus/reports/cost",
-  "candidate_cap_overrides": {"nexus-value-evidence-001": 1}
+  "feature_rules": [
+    {
+      "id": "feature:public-feature-hard",
+      "match": {"task_type": "public_feature", "difficulty": "hard"},
+      "controls": {
+        "candidate_cap": 1,
+        "disable_research": true,
+        "context_mode": "compact",
+        "max_rounds": 1,
+        "route_lane": "repair_capped",
+        "skip_llm_baseline": true
+      }
+    }
+  ]
 }""",
         encoding="utf-8",
     )
@@ -2950,8 +3065,993 @@ def test_run_with_nexus_applies_promoted_route_cost_candidate_cap(tmp_path: Path
 
     assert captured["cmd"][captured["cmd"].index("--candidate-count") + 1] == "1"
     assert captured["env"]["NEXUS_LLM_CANDIDATE_CAP"] == "1"
-    assert json.loads(captured["env"]["NEXUS_ROUTE_COST_CONTROLS"])["candidate_cap"] == 1
+    controls = json.loads(captured["env"]["NEXUS_ROUTE_COST_CONTROLS"])
+    assert controls["candidate_cap"] == 1
+    assert controls["disable_research"] is True
+    assert controls["context_mode"] == "compact"
+    assert controls["max_rounds"] == 1
+    assert controls["route_lane"] == "repair_capped"
+    assert controls["skip_llm_baseline"] is True
+    assert "--llm-baseline" not in captured["cmd"]
     assert out["route_cost_policy_candidate_cap"] == 1
+    assert out["route_cost_policy_disable_research"] is True
+    assert out["route_cost_policy_context_mode"] == "compact"
+    assert out["route_cost_policy_max_rounds"] == 1
+    assert out["route_cost_policy_lane"] == "repair_capped"
+    assert out["route_cost_policy_skip_llm_baseline"] is True
+    assert out["route_cost_policy_source"] == "feature:public-feature-hard"
+    assert out["run_eligible"] is True
+
+
+def test_run_with_nexus_strict_llm_baseline_overrides_policy_skip_llm_baseline(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="nexus-value-evidence-001",
+        difficulty="hard",
+        task_type="public_feature",
+        task_desc="Fix evidence-heavy task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:public-feature-hard",
+      "match": {"task_type": "public_feature", "difficulty": "hard"},
+      "controls": {
+        "candidate_cap": 1,
+        "skip_llm_baseline": true
+      }
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"model_uses_nexus":true,"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"capabilities":{"claim_verified":true},"pillars":{"artifact":{"active":true}},"phase_trace":{"P":"route_built","A":"artifact_verified"}},"result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"model_name":"gemini-3-flash-preview","model_patch_generated":true,"fallback_used":false,"total_tokens":100,"token_capture_status":"measured","gateway_stats_present":true,"gateway_token_source":"stats"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["cmd"] = list(_cmd)
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+
+    assert "--llm-baseline" in captured["cmd"]
+    assert "--llm-baseline-required" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--force-flow") + 1] == "baseline"
+    assert out["route_cost_policy_skip_llm_baseline"] is True
+    assert out["model_uses_nexus"] is True
+
+
+def test_run_with_nexus_policy_can_require_llm_baseline_without_global_strict(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="rlm-harder-v2-belief-001",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix belief budget normalization",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:belief-require-model",
+      "match": {"task_type": "public_bugfix", "difficulty": "hard"},
+      "controls": {
+        "candidate_cap": 1,
+        "require_llm_baseline": true
+      }
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"model_uses_nexus":true,"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"capabilities":{"claim_verified":true},"pillars":{"artifact":{"active":true}},"phase_trace":{"P":"route_built","A":"artifact_verified"}},"result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"model_name":"gemini-3-flash-preview","model_patch_generated":true,"fallback_used":false,"total_tokens":100,"token_capture_status":"measured","gateway_stats_present":true,"gateway_token_source":"stats"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["cmd"] = list(_cmd)
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=False,
+    )
+
+    assert "--llm-baseline" in captured["cmd"]
+    assert "--llm-baseline-required" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--force-flow") + 1] == "baseline"
+    assert out["route_cost_policy_require_llm_baseline"] is True
+    assert out["model_uses_nexus"] is True
+
+
+def test_run_with_nexus_uses_supervised_bare_first_when_feature_policy_matches(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    task = CapabilityTask(
+        id="public-repair-hard",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Fix a low-risk public repair task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:repair-supervised-bare-first",
+      "match": {"task_type": "public_test_repair", "difficulty": "hard", "category": "test_repair", "repo_kind": "neutral_fixture", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    def fake_without(**_kwargs):
+        return {
+            "task_id": task.id,
+            "status": "SUCCESS",
+            "semantic_status": "VERIFIED",
+            "run_eligible": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 9.0,
+            "total_tokens": 1200,
+            "model_calls": 1,
+        }
+
+    def fail_process(*_args, **_kwargs):
+        raise AssertionError("supervised_bare_first should not invoke nexus subprocess after verified direct solve")
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fake_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fail_process)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        llm_candidate_cap=3,
+    )
+
+    assert out["mode"] == "with_nexus"
+    assert out["runtime_classification"] == "nexus_supervised_bare_first"
+    assert out["nexus_wearing_valid"] is True
+    assert out["nexus_context_delivered"] is True
+    assert out["nexus_context_delivery_mode"] == "supervised_bare_first_gate_only"
+    assert out["capability_claim_verified"] is True
+    assert out["route_decision_schema_version"] == "nexus_route_decision_v1"
+    assert out["hidden_verifier_passed"] is True
+    assert out["route_cost_policy_source"] == "feature:repair-supervised-bare-first"
+    assert out["route_cost_policy_supervised_bare_first"] is True
+    assert out["capability_plan_selected"] == ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"]
+    assert out["local_reflex_provider"] == "heuristic"
+    assert out["local_reflex_risk_level"] == "low"
+    assert out["local_reflex_bare_sufficiency"] == "high"
+
+
+def test_run_with_nexus_does_not_supervise_bare_first_without_hidden_verifier(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    monkeypatch.delenv("NEXUS_VALUE_HIDDEN_VERIFIER", raising=False)
+    task = CapabilityTask(
+        id="public-repair-hard",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Fix a low-risk public repair task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:repair-supervised-bare-first",
+      "match": {"task_type": "public_test_repair", "difficulty": "hard", "category": "test_repair", "repo_kind": "neutral_fixture", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    def fake_without(**_kwargs):
+        raise AssertionError("supervised_bare_first requires hidden verifier mode")
+
+    def fake_process(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd="nexus", timeout=1)
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fake_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_process)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=1,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        llm_candidate_cap=3,
+    )
+
+    assert out["runtime_classification"] != "nexus_supervised_bare_first"
+    assert "route_cost_policy_supervised_bare_first" not in out
+
+
+def test_write_evidence_bundle_fails_cost_gate_when_nexus_cost_regresses_without_verified_lift(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_row = {
+        "mode": "with_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 60.0,
+        "phase_wall_r_sec": 50.0,
+        "r_phase_hyper_sprint_sec": 50.0,
+        "total_tokens": 300,
+        "model_calls": 1,
+        "token_measured": True,
+        "provider_token_measured": True,
+        "gateway_token_source": "stats",
+        "gateway_stats_present": True,
+        "nexus_wearing_valid": True,
+        "gemini_uses_nexus": True,
+        "model_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "capability_claim_verified": True,
+        "route_decision_schema_version": "nexus_route_decision_v1",
+    }
+    without_row = {
+        "mode": "without_nexus",
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 20.0,
+        "total_tokens": 100,
+        "model_calls": 1,
+        "token_measured": True,
+        "provider_token_measured": True,
+        "gateway_token_source": "stats",
+        "gateway_stats_present": True,
+    }
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [without_row])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row, without_row],
+        config={
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "runner_command": "run",
+            "hidden_verifier_mode": True,
+            "route_cost_regression_wall_ratio_threshold": 1.8,
+            "route_cost_regression_token_ratio_threshold": 1.5,
+        },
+    )
+
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+    assert payload["public_claim_gate"]["verdict"] == "FAIL"
+    assert "route_cost_regression_without_verified_lift" in payload["public_claim_gate"]["failures"]
+    assert "token_cost_regression_without_verified_lift" in payload["public_claim_gate"]["failures"]
+    checks = payload["public_claim_gate"]["checks"]
+    assert checks["verified_equal_without_lift"] is True
+    assert checks["wall_cost_ratio_with_over_without"] == 3.0
+    assert checks["token_cost_ratio_with_over_without"] == 3.0
+    assert checks["median_paired_wall_cost_ratio_with_over_without"] == 3.0
+    assert checks["median_paired_token_cost_ratio_with_over_without"] == 3.0
+    assert checks["paired_wall_cost_ratio_count"] == 1
+    assert checks["avg_phase_wall_r_sec_with"] == 50.0
+    assert payload["route_cost_ledger"]["arms"]["with_nexus"]["avg_phase_wall_r_sec"] == 50.0
+
+
+def test_run_with_nexus_does_not_supervise_bare_first_when_reflex_marks_high_risk(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    task = CapabilityTask(
+        id="public-repair-hard",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Refactor core orchestrator routing and remove old policy paths.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:repair-supervised-bare-first",
+      "match": {"task_type": "public_test_repair", "difficulty": "hard", "category": "test_repair", "repo_kind": "neutral_fixture", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    def fail_without(**_kwargs):
+        raise AssertionError("high-risk reflex should not use supervised bare-first")
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"pillars":{"lancedb":{"active":true},"memory":{"active":true},"mempalace":{"active":true},"belief":{"active":true},"artifact":{"active":true}},"phase_trace":{"P":"route_built","X":"retrieval_checked","D":"guard_decision","R":"hyper_executed","A":"artifact_verified","C":"closure_written"}},"result":{"elapsed_sec":0.1,"report":{"attempt_count":1,"model_calls":1,"model_name":"gemini-3.1-pro-preview","model_patch_generated":true,"fallback_used":false,"total_tokens":10,"token_capture_status":"ok"}}}'
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fail_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", lambda *_args, **_kwargs: _Proc())
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        llm_candidate_cap=3,
+    )
+
+    assert out["runtime_classification"] != "nexus_supervised_bare_first"
+    assert out["local_reflex_risk_level"] == "high"
+    assert "route_cost_policy_supervised_bare_first" not in out
+
+
+def test_run_with_nexus_does_not_supervise_high_risk_policy_without_explicit_override(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    task = CapabilityTask(
+        id="public-refactor-hard",
+        difficulty="hard",
+        task_type="public_refactor",
+        category="refactor",
+        repo_kind="neutral_fixture",
+        task_desc="Refactor core orchestrator routing and remove old policy paths.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:refactor-supervised-too-broad",
+      "match": {"task_type": "public_refactor", "difficulty": "hard", "category": "refactor", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    def fail_without(**_kwargs):
+        raise AssertionError("high-risk supervised_bare_first requires explicit override")
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"model_uses_nexus":true,"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"capabilities":{"claim_verified":true},"pillars":{"artifact":{"active":true}},"phase_trace":{"P":"route_built","A":"artifact_verified"}},"result":{"elapsed_sec":0.1,"report":{"model_calls":1,"model_name":"gemini-3-flash-preview","model_patch_generated":true,"total_tokens":10,"token_capture_status":"measured","gateway_stats_present":true,"gateway_token_source":"stats"}}}'
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fail_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", lambda *_args, **_kwargs: _Proc())
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert out["runtime_classification"] != "nexus_supervised_bare_first"
+    assert out["local_reflex_risk_level"] == "high"
+    assert "route_cost_policy_supervised_bare_first" not in out
+
+
+def test_hidden_verifier_compact_retry_keeps_candidate_cap(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="nexus-value-evidence-002",
+        difficulty="hard",
+        task_type="public_feature",
+        category="feature",
+        repo_kind="neutral_fixture",
+        task_desc="Implement a phase report with artifact-backed evidence.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="nexus_value_artifact_phase_report",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:evidence-compact",
+      "match": {"task_type": "public_feature", "difficulty": "hard", "category": "feature", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "context_mode": "compact", "max_rounds": 1}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    captured_cmds: list[list[str]] = []
+
+    def nexus_payload() -> str:
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "nexus_usage_trace": {
+                    "model_uses_nexus": True,
+                    "gemini_uses_nexus": True,
+                    "nexus_context_delivered": True,
+                    "usage_valid": True,
+                    "capabilities": {"claim_verified": True},
+                    "pillars": {"artifact": {"active": True}},
+                    "phase_trace": {"P": "route_built", "A": "artifact_verified"},
+                },
+                "result": {
+                    "elapsed_sec": 0.1,
+                    "report": {
+                        "model_calls": 1,
+                        "model_name": "gemini-3-flash-preview",
+                        "model_patch_generated": True,
+                        "total_tokens": 10,
+                        "token_capture_status": "measured",
+                        "gateway_stats_present": True,
+                        "gateway_token_source": "stats",
+                    },
+                },
+            }
+        )
+
+    state = {"verify_calls": 0}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        if cmd[:3] == ["uv", "run", "scripts/engine/nexus_cli.py"]:
+            captured_cmds.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout=nexus_payload(), stderr="")
+        state["verify_calls"] += 1
+        if state["verify_calls"] == 1:
+            return subprocess.CompletedProcess(cmd, 1, stdout="hidden failed: missing phase reason", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="hidden passed", stderr="")
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+
+    assert len(captured_cmds) == 2
+    retry_cmd = captured_cmds[-1]
+    assert retry_cmd[retry_cmd.index("--candidate-count") + 1] == "1"
+    assert out["hidden_retry_used"] is True
+    assert out["status"] == "SUCCESS"
+
+
+def test_nexus_task_desc_includes_timeout_repair_contract():
+    task = CapabilityTask(
+        id="nexus-value-repair-002",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Repair a flaky-looking timeout calculation.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="nexus_value_self_heal_timeout",
+    )
+
+    desc = _nexus_task_desc(task)
+
+    assert "remaining_ms(start_ms, now_ms, timeout_ms) must compute elapsed = now_ms - start_ms" in desc
+    assert "clamped to the inclusive range [0, timeout_ms]" in desc
+
+
+def test_nexus_task_desc_includes_merge_repair_contract():
+    task = CapabilityTask(
+        id="nexus-value-repair-001",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Repair an invariant-preserving merge helper.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="nexus_value_self_heal_invariant",
+    )
+
+    desc = _nexus_task_desc(task)
+
+    assert "merge_limits(defaults, override) must not mutate defaults" in desc
+    assert "Ignore override entries whose value is None" in desc
+
+
+def test_run_with_nexus_can_supervise_medium_risk_when_policy_explicitly_allows(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    task = CapabilityTask(
+        id="public-feature-hard",
+        difficulty="hard",
+        task_type="public_feature",
+        category="feature",
+        repo_kind="neutral_fixture",
+        task_desc="Implement a phased report summary with evidence paths.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="nexus_value_artifact_phase_report",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:evidence-medium-supervised",
+      "match": {"task_type": "public_feature", "difficulty": "hard", "category": "feature", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "supervised_bare_first": true, "allow_medium_risk_supervised_bare_first": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    def fake_without(**_kwargs):
+        return {
+            "task_id": task.id,
+            "status": "SUCCESS",
+            "semantic_status": "VERIFIED",
+            "run_eligible": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 9.0,
+            "total_tokens": 1200,
+            "model_calls": 1,
+        }
+
+    def fail_process(*_args, **_kwargs):
+        raise AssertionError("medium-risk explicit supervision should use bare-first candidate")
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fake_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fail_process)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert out["runtime_classification"] == "nexus_supervised_bare_first"
+    assert out["local_reflex_risk_level"] == "medium"
+    assert out["local_reflex_bare_sufficiency"] == "medium"
+
+
+def test_supervised_bare_failure_on_lite_route_skips_second_strict_model_call(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    task = CapabilityTask(
+        id="public-repair-hard",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Repair an invariant-preserving merge helper.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="nexus_value_self_heal_invariant",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:repair-lite",
+      "match": {"task_type": "public_test_repair", "difficulty": "hard", "category": "test_repair", "repo_kind": "neutral_fixture", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_without(**_kwargs):
+        return {
+            "task_id": task.id,
+            "status": "FAILED",
+            "semantic_status": "UNVERIFIED",
+            "run_eligible": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 8.0,
+            "total_tokens": 111,
+            "model_calls": 1,
+            "token_measured": True,
+            "provider_token_measured": True,
+        }
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"model_uses_nexus":true,"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"capabilities":{"claim_verified":true},"pillars":{"artifact":{"active":true}},"phase_trace":{"P":"route_built","A":"artifact_verified"}},"result":{"elapsed_sec":0.1,"report":{"model_calls":0,"model_name":"","model_patch_generated":false,"total_tokens":0,"token_capture_status":"not_applicable_local_only"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return _Proc()
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fake_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+
+    assert "--llm-baseline" not in captured["cmd"]
+    assert out["supervised_bare_first_failed_then_nexus_rescue"] is True
+    assert out["model_calls"] == 1
+    assert out["total_tokens"] == 111
+    assert out["token_measured"] is True
+    assert out["provider_token_measured"] is True
+
+
+def test_bounded_rescue_after_model_attempt_without_tokens_is_infra_invalid(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="public-governance-hard",
+        difficulty="hard",
+        task_type="public_refactor",
+        category="refactor",
+        repo_kind="neutral_fixture",
+        task_desc="Refactor a governance filter without weakening safety.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_governance_guard",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    calls = []
+
+    class _Proc:
+        def __init__(self, stdout: str):
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = 0
+
+    first_failed_attempt = {
+        "status": "FAILED",
+        "semantic_status": "UNVERIFIED",
+        "nexus_usage_trace": {
+            "model_uses_nexus": True,
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "usage_valid": True,
+            "pillars": {"artifact": {"active": True}},
+            "phase_trace": {"P": "route_built", "R": "baseline_failed", "A": "artifact_checked"},
+        },
+        "result": {
+            "elapsed_sec": 0.1,
+            "report": {
+                "source": "nexus_llm_baseline",
+                "attempt_count": 1,
+                "model_calls": 1,
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": False,
+                "baseline_llm_required": True,
+                "baseline_source_policy": "strict_llm_no_local_fallback",
+                "total_tokens": 0,
+                "token_capture_status": "missing_gateway_stats",
+            },
+        },
+    }
+    rescue_success = {
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "nexus_usage_trace": {
+            "model_uses_nexus": True,
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "usage_valid": True,
+            "capabilities": {"claim_verified": True},
+            "pillars": {
+                "lancedb": {"active": True},
+                "memory": {"active": True},
+                "mempalace": {"active": True},
+                "belief": {"active": True},
+                "artifact": {"active": True},
+            },
+            "phase_trace": {
+                "P": "route_built",
+                "X": "context_checked",
+                "D": "guard_decision",
+                "R": "local_rescue",
+                "A": "artifact_verified",
+                "C": "closure_written",
+            },
+        },
+        "result": {
+            "elapsed_sec": 0.1,
+            "report": {
+                "source": "local_preflight",
+                "attempt_count": 1,
+                "model_calls": 0,
+                "model_name": "",
+                "model_patch_generated": False,
+                "total_tokens": 0,
+                "token_capture_status": "not_applicable_local_only",
+            },
+        },
+    }
+
+    def fake_run(_cmd, **_kwargs):
+        calls.append(list(_cmd))
+        return _Proc(json.dumps(first_failed_attempt if len(calls) == 1 else rescue_success))
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+
+    assert out["runtime_classification"] == "nexus_bounded_rescue_after_model_attempt"
+    assert out["model_calls"] == 1
+    assert out["total_tokens"] == 0
+    assert out["token_unreliable_reason"] == "model_call_without_tokens"
+    assert out["infra_invalid_reason"] == "model_call_without_tokens"
+    assert out["run_eligible"] is False
+    assert out["public_cost_evidence"] is False
+
+
+def test_bounded_rescue_after_model_attempt_preserves_provider_token_evidence(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="public-belief-budget-hard",
+        difficulty="hard",
+        task_type="public_bugfix",
+        category="bugfix",
+        repo_kind="neutral_fixture",
+        task_desc="Fix a belief budget rule after a failed model attempt.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="rlm_harder_v2_belief_budget",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    calls = []
+
+    class _Proc:
+        def __init__(self, stdout: str):
+            self.stdout = stdout
+            self.stderr = ""
+            self.returncode = 0
+
+    first_failed_attempt = {
+        "status": "FAILED",
+        "semantic_status": "UNVERIFIED",
+        "nexus_usage_trace": {
+            "model_uses_nexus": True,
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "usage_valid": True,
+            "pillars": {"artifact": {"active": True}},
+            "phase_trace": {"P": "route_built", "R": "baseline_failed", "A": "artifact_checked"},
+        },
+        "result": {
+            "elapsed_sec": 0.1,
+            "report": {
+                "source": "nexus_llm_baseline",
+                "attempt_count": 1,
+                "model_calls": 1,
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": False,
+                "baseline_llm_required": True,
+                "baseline_source_policy": "strict_llm_no_local_fallback",
+                "total_tokens": 1234,
+                "token_capture_status": "measured",
+                "gateway_token_source": "usage_metadata",
+                "gateway_usage_metadata_present": True,
+            },
+        },
+    }
+    rescue_success = {
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "nexus_usage_trace": {
+            "model_uses_nexus": True,
+            "gemini_uses_nexus": True,
+            "nexus_context_delivered": True,
+            "usage_valid": True,
+            "capabilities": {"claim_verified": True},
+            "pillars": {
+                "lancedb": {"active": True},
+                "memory": {"active": True},
+                "mempalace": {"active": True},
+                "belief": {"active": True},
+                "artifact": {"active": True},
+            },
+            "phase_trace": {
+                "P": "route_built",
+                "X": "context_checked",
+                "D": "guard_decision",
+                "R": "local_rescue",
+                "A": "artifact_verified",
+                "C": "closure_written",
+            },
+        },
+        "result": {
+            "elapsed_sec": 0.1,
+            "report": {
+                "source": "local_hidden_contract_fast_path",
+                "attempt_count": 1,
+                "model_calls": 0,
+                "model_name": "",
+                "model_patch_generated": False,
+                "total_tokens": 0,
+                "token_capture_status": "not_applicable_local_only",
+            },
+        },
+    }
+
+    def fake_run(_cmd, **_kwargs):
+        calls.append(list(_cmd))
+        return _Proc(json.dumps(first_failed_attempt if len(calls) == 1 else rescue_success))
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        strict_llm_baseline=True,
+    )
+
+    assert out["runtime_classification"] == "nexus_bounded_rescue_after_model_attempt"
+    assert out["model_calls"] == 1
+    assert out["total_tokens"] == 1234
+    assert out["model_total_tokens"] == 1234
+    assert out["token_reliable"] is True
+    assert out["provider_token_measured"] is True
+    assert out["public_cost_evidence"] is True
+    assert out["clean_model_cost_evidence"] is False
+    assert out["cost_evidence_class"] == "rescue_only_local_success"
     assert out["run_eligible"] is True
 
 
