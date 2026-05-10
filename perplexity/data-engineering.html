@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-Hant" class="scroll-smooth">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <title>NEXUS DATA ENGINEERING ATLAS: 38 DIMENSIONS</title>
+  <meta name="description" content="Nexus 終極數據工程地圖：38 維度完全硬化指南，基於 Data Engineering for Large Models 實踐對位。">
+  <meta property="og:title" content="NEXUS DATA ENGINEERING ATLAS">
+  <meta property="og:description" content="38-Dimension Hardening Guide for AI-Native Data Engineering.">
+  <meta property="og:type" content="article">
+
+  <!-- Tailwind + Dark Mode -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { nexus: { 500: '#58a6ff', 600: '#238636', 700: '#d29922', 800: '#f85149', 900: '#a371f7' } } } } };
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    }
+  </script>
+
+  <!-- Highlighting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+
+  <!-- Mermaid -->
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    const isDark = document.documentElement.classList.contains('dark');
+    mermaid.initialize({ startOnLoad: true, theme: isDark ? 'dark' : 'default', securityLevel: 'loose' });
+    window.__mermaid = mermaid;
+  </script>
+
+  <style>
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+    .toc a { display: block; padding: .3rem 0; opacity: .6; transition: opacity .15s; font-size: 0.85rem; }
+    .toc a:hover, .toc a.active { opacity: 1; color: #58a6ff; }
+    .toc a.active { font-weight: 600; border-left: 2px solid #58a6ff; padding-left: 0.5rem; margin-left: -0.5rem; }
+    .card { background: rgba(22, 27, 34, 0.5); border: 1px solid #30363d; border-radius: 12px; }
+    .badge-nexus { background: #58a6ff; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+    .chapter-num { background: #161b22; border: 1px solid #30363d; color: #8b949e; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; flex-shrink: 0; }
+    .methodology-box { border-left: 3px solid #a371f7; background: rgba(163, 113, 247, 0.05); padding: 1rem; border-radius: 0 8px 8px 0; }
+  </style>
+</head>
+
+<body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans antialiased">
+
+<div class="fixed top-4 right-4 z-50 flex gap-2 no-print">
+  <button id="theme-toggle" class="px-3 py-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/70 backdrop-blur text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+    ☼ / ☾
+  </button>
+</div>
+
+<div class="max-w-7xl mx-auto px-6 py-12 lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-16">
+
+  <!-- Sidebar TOC -->
+  <nav class="toc lg:sticky lg:top-12 self-start mb-8 lg:mb-0 no-print">
+    <div class="font-bold mb-4 text-zinc-500 uppercase tracking-widest text-xs">Data Engineering Atlas</div>
+    <a href="#intro">🚀 Overview</a>
+    <a href="#part-1">🏗️ Infrastructure</a>
+    <a href="#part-2">🧹 Purification</a>
+    <a href="#part-3">🎨 Multimodal</a>
+    <a href="#part-4">🧪 Synthetic Data</a>
+    <a href="#part-5">🧠 Reasoning</a>
+    <a href="#part-6">📚 Applications & RAG</a>
+    <a href="#part-7">🛡️ DataOps & Security</a>
+    <a href="#part-8">🏁 Capstone Projects</a>
+  </nav>
+
+  <main class="min-w-0">
+
+    <header class="mb-16">
+      <div class="flex items-center gap-3 mb-4">
+        <span class="badge-nexus">v26.5 HARDENED</span>
+        <time class="text-xs text-zinc-500 font-mono">2026-05-04</time>
+      </div>
+      <h1 class="text-5xl font-black tracking-tighter mb-4 text-zinc-900 dark:text-white uppercase">Data Engineering Atlas</h1>
+      <p class="text-xl text-zinc-600 dark:text-zinc-400 max-w-3xl leading-relaxed">
+        將《Data Engineering for Large Models》的技術實踐與 Nexus 治理框架 1:1 對位，提供 38 維度的完全硬化路徑。
+      </p>
+    </header>
+
+    <!-- OVERVIEW -->
+    <section id="intro" class="mb-20">
+      <div class="card p-8 bg-black">
+        <pre class="mermaid">
+graph LR
+  RAW[原始數據軌跡] --> PROTO[數據資產化協議]
+  PROTO --> CLEAN[去重/去熵]
+  CLEAN --> FORGE[合成數據工廠]
+  FORGE --> EVOL[自我演化閉環]
+  
+  style PROTO fill:#112d19,stroke:#238636
+  style FORGE fill:#211a3d,stroke:#a371f7
+  style EVOL fill:#3e2e0e,stroke:#d29922
+        </pre>
+      </div>
+    </section>
+
+    <!-- PART 1: Infrastructure -->
+    <section id="part-1" class="mb-20">
+      <h2 class="text-3xl font-bold mb-8 border-b border-zinc-800 pb-2">第一部分：基礎設施與元數據</h2>
+      <div class="space-y-8">
+        <div class="card p-6">
+          <div class="flex gap-4">
+            <div class="chapter-num">01</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">大模型時代的數據革命</h3>
+              <p class="text-sm text-zinc-400 mb-4">強調數據從「靜態存儲」轉向「動態資產」。</p>
+              <div class="methodology-box">
+                <div class="text-xs font-bold text-nexus-900 mb-1">HOW-TO</div>
+                <div class="text-sm">建立 <strong>數據資產化協議</strong>，將 <code>.nexus/memory/</code> JSON 轉化為具備語義標籤的認知資產。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card p-6">
+          <div class="flex gap-4">
+            <div class="chapter-num">02</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">品質評估框架</h3>
+              <div class="methodology-box">
+                <div class="text-xs font-bold text-nexus-900 mb-1">HOW-TO</div>
+                <div class="text-sm">在 <code>LearningSteward</code> 實作 <strong>品質斷路器</strong>，僅允許通過證據完整性測試的數據進入結晶階段。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card p-6">
+          <div class="flex gap-4">
+            <div class="chapter-num">03</div>
+            <div>
+              <h3 class="text-lg font-bold mb-2">成本治理</h3>
+              <div class="methodology-box">
+                <div class="text-xs font-bold text-nexus-900 mb-1">HOW-TO</div>
+                <div class="text-sm">實作 <strong>Token_RoI_Monitor</strong>，優化「每一塊錢 Token 換取的認知增量」。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PART 2: Purification -->
+    <section id="part-2" class="mb-20">
+      <h2 class="text-3xl font-bold mb-8 border-b border-zinc-800 pb-2">第二部分：文本預訓練與純化</h2>
+      <div class="space-y-6">
+        <div class="card p-6">
+          <h3 class="font-bold mb-2">第 5 章：清洗與去重 (MinHash)</h3>
+          <div class="text-sm mb-4">防止記憶庫中充斥大量相似修復教訓。</div>
+          <div class="bg-zinc-950 p-4 rounded font-mono text-xs text-green-500 border border-zinc-800">
+            [MinHash LSH] Analyzing Lesson #402 vs #398...<br>
+            [MATCH] Similarity 94% -> Executing Semantic Merge.
+          </div>
+        </div>
+        <div class="card p-6">
+          <h3 class="font-bold mb-2">第 7 章：品質環與運維迭代</h3>
+          <p class="text-sm text-zinc-400">實作 <strong>失敗驅動去熵環</strong>，利用 Benchmark 失敗案例修正數據清洗規則。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PART 4: Synthetic Data -->
+    <section id="part-4" class="mb-20">
+      <h2 class="text-3xl font-bold mb-8 border-b border-zinc-800 pb-2">第四部分：指令、偏好與合成數據</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="card p-6">
+          <h3 class="font-bold text-nexus-900 mb-2">第 12 章：指令複雜度遞增</h3>
+          <p class="text-sm">在 <code>DataForge</code> 實作難度演化矩陣，訓練 Agent 應對模糊指令。</p>
+        </div>
+        <div class="card p-6 border-nexus-700">
+          <h3 class="font-bold text-nexus-700 mb-2">第 15 章：合成數據工廠</h3>
+          <p class="text-sm">建立 <strong>DataForge_Sandbox</strong>，由強模型出題，戰甲解題，標註黃金軌跡。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PART 8: Capstone -->
+    <section id="part-8" class="mb-20">
+      <h2 class="text-3xl font-bold mb-8 border-b border-zinc-800 pb-2">第八部分：實戰專案強化 (P01–P10)</h2>
+      <div class="overflow-hidden card">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="bg-zinc-100 dark:bg-zinc-900">
+              <th class="px-4 py-3 text-left">Project</th>
+              <th class="px-4 py-3 text-left">Nexus Implementation Path</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y dark:divide-zinc-800">
+            <tr><td class="px-4 py-4 font-bold">P06: CoT & PRM</td><td class="px-4 py-4">建立 <strong>貝式過程獎勵 (BPR)</strong>，將 <code>BeliefEngine</code> 信心轉化為獎勵信號。</td></tr>
+            <tr><td class="px-4 py-4 font-bold">P07: 工具模擬器</td><td class="px-4 py-4">建立 <strong>極端環境對抗集</strong>，模擬 API Timeout 與權限被拒。</td></tr>
+            <tr><td class="px-4 py-4 font-bold">P10: 數據飛輪</td><td class="px-4 py-4 text-green-400 font-bold">打造「Nexus 終極演化閉環」，實現失敗到自動 Patch 的全流程無人化。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="mt-20 pt-8 border-t border-zinc-200 dark:border-zinc-800 text-sm text-zinc-500 text-center leading-relaxed">
+      Generated by <a href="#" class="underline hover:text-blue-500"><code>nexus-html-crystal</code></a>. 
+      <br>Reference: datascale-ai/data_engineering_book
+      <br>[NEXUS IDENTITY: 80230f0b + v2.8]
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  // Theme toggle
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const dark = document.documentElement.classList.toggle('dark');
+    localStorage.theme = dark ? 'dark' : 'light';
+    if (window.__mermaid) {
+      document.querySelectorAll('.mermaid[data-processed]').forEach(el => { el.removeAttribute('data-processed'); el.innerHTML = el.dataset.src || el.textContent; });
+      window.__mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'loose' });
+      window.__mermaid.run();
+    }
+  });
+
+  // Code highlight
+  hljs.highlightAll();
+
+  // Sticky TOC scroll-spy
+  const tocLinks = document.querySelectorAll('.toc a');
+  const sections = [...tocLinks].map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  if (sections.length) {
+    const onScroll = () => {
+      const y = window.scrollY + 100;
+      let active = sections[0];
+      for (const s of sections) if (s.offsetTop <= y) active = s;
+      tocLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + active.id));
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+</script>
+
+</body>
+</html>
