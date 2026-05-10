@@ -1,285 +1,235 @@
-<!DOCTYPE html>
-<html lang="zh-Hant">
+<!doctype html>
+<html lang="zh-Hant" class="scroll-smooth">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI-NATIVE VISION: THE 7-LAYER MOTHER SYSTEM ARCHITECTURE</title>
-    <style>
-        :root {
-            --bg-color: #0d1117;
-            --panel-bg: #161b22;
-            --border-color: #30363d;
-            --text-primary: #c9d1d9;
-            --text-secondary: #8b949e;
-            --accent-color: #58a6ff;
-            --vision-color: #ff7b72;
-            --highlight-color: #f0883e;
-            --forge-color: #a371f7;
-            --font-mono: 'Fira Code', 'Courier New', monospace;
-        }
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 3rem 1rem;
-            line-height: 1.7;
-        }
+  <title>AI-NATIVE VISION: THE 7-LAYER MOTHER SYSTEM</title>
+  <meta name="description" content="將 Diana Hu 的公司 OS 願景轉化為 Nexus 產品母系統的 7 層實作藍圖。">
+  <meta property="og:title" content="AI-NATIVE PRODUCT OS VISION">
+  <meta property="og:description" content="Implementing the Mother System: AI-Native Architecture Deep-Dive.">
+  <meta property="og:type" content="article">
 
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
+  <!-- Tailwind + Dark Mode -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class', theme: { extend: { colors: { vision: { 500: '#ff7b72', 600: '#f0883e' } } } } };
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    }
+  </script>
 
-        header {
-            text-align: center;
-            margin-bottom: 4rem;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 2rem;
-        }
+  <!-- Highlighting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
 
-        h1 { font-size: 2.5rem; margin: 0; color: var(--vision-color); letter-spacing: -1px; }
-        .subtitle { font-size: 1.1rem; color: var(--text-secondary); margin-top: 1rem; }
-
-        .section-title {
-            font-size: 1.8rem;
-            color: var(--accent-color);
-            border-left: 5px solid var(--accent-color);
-            padding-left: 1rem;
-            margin: 4rem 0 2rem 0;
-        }
-
-        .card {
-            background-color: var(--panel-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-        }
-
-        /* 7-Layer Architecture Visuals */
-        .layer-box {
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            background: rgba(255, 255, 255, 0.02);
-        }
-
-        .layer-header {
-            font-family: var(--font-mono);
-            font-weight: bold;
-            color: var(--highlight-color);
-            font-size: 1rem;
-            margin-bottom: 0.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .layer-num { background: var(--highlight-color); color: black; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; }
-
-        .sub-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-top: 1rem;
-        }
-
-        .sub-node {
-            background: #0d1117;
-            border: 1px solid var(--border-color);
-            padding: 0.8rem;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            text-align: center;
-        }
-
-        .sub-node strong { color: var(--accent-color); display: block; margin-bottom: 4px; }
-
-        /* Logic Comparison Table */
-        .comparison-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 2rem;
-            background: #05070a;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .comparison-table th, .comparison-table td {
-            text-align: left;
-            padding: 1.2rem;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .comparison-table th { background: #161b22; color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; }
-        .logic-arrow { color: var(--vision-color); font-weight: bold; padding: 0 1rem; }
-
-        .quote {
-            font-size: 1.2rem;
-            font-style: italic;
-            border-left: 4px solid var(--vision-color);
-            padding-left: 1.5rem;
-            margin: 2rem 0;
-            color: #fff;
-            background: rgba(255, 123, 114, 0.05);
-            padding: 1.5rem;
-        }
-
-        footer {
-            margin-top: 6rem;
-            text-align: center;
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-            border-top: 1px solid var(--border-color);
-            padding-top: 2rem;
-        }
-    </style>
+  <style>
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+    .toc a { display: block; padding: .3rem 0; opacity: .6; transition: opacity .15s; font-size: 0.85rem; }
+    .toc a:hover, .toc a.active { opacity: 1; color: #ff7b72; }
+    .toc a.active { font-weight: 600; border-left: 2px solid #ff7b72; padding-left: 0.5rem; margin-left: -0.5rem; }
+    .card { background: rgba(22, 27, 34, 0.5); border: 1px solid #30363d; border-radius: 12px; }
+    .quote-box { background: rgba(255, 123, 114, 0.05); border-left: 4px solid #ff7b72; padding: 1.5rem; border-radius: 0 8px 8px 0; }
+    .layer-node { background: #0d1117; border: 1px solid #30363d; padding: 1rem; border-radius: 8px; text-align: center; }
+    .parent-node { border: 2px solid #58a6ff; background: rgba(88, 166, 255, 0.05); padding: 1.5rem; border-radius: 12px; text-align: center; font-weight: 800; font-size: 1.25rem; }
+  </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>AI-Native Product Architecture</h1>
-            <div class="subtitle">將「公司 OS」抽象化為「產品母系統」的 7 層實作藍圖</div>
-        </header>
 
-        <section>
-            <div class="quote">
-                "核心觀點：不是在做一堆產品，而是在做一個『會持續孵化產品的母架構』。子產品不是孤島，而是共享同一個產品腦、記憶層與決策層。"
-            </div>
-        </section>
+<body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans antialiased">
 
-        <h2 class="section-title">🏗️ 7-Layer Mother System Blueprint</h2>
+<div class="fixed top-4 right-4 z-50 flex gap-2 no-print">
+  <button id="theme-toggle" class="px-3 py-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/70 backdrop-blur text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+    ☼ / ☾
+  </button>
+</div>
 
-        <!-- Layer 1 -->
-        <div class="layer-box">
-            <div class="layer-header"><span class="layer-num">01</span> PRODUCT OS CORE</div>
-            <p>整個產品宇宙的核心作業層。所有資料、流程、決策、回饋都先進到這裡。</p>
-            <div class="sub-grid">
-                <div class="sub-node"><strong>Identity Layer</strong>使用者/團隊/權限</div>
-                <div class="sub-node"><strong>Context Layer</strong>文件/任務/事件</div>
-                <div class="sub-node"><strong>Memory Layer</strong>歷史/規則/紀錄</div>
-                <div class="sub-node"><strong>Agent Layer</strong>規劃/路由/生成</div>
-            </div>
+<div class="max-w-7xl mx-auto px-6 py-12 lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-16">
+
+  <!-- Sidebar TOC -->
+  <nav class="toc lg:sticky lg:top-12 self-start mb-8 lg:mb-0 no-print">
+    <div class="font-bold mb-4 text-zinc-500 uppercase tracking-widest text-xs">Strategic Vision</div>
+    <a href="#intro">🚀 The Core Vision</a>
+    <a href="#operating-system">🖥️ AI as Company OS</a>
+    <a href="#queryable">🔍 Queryable Org</a>
+    <a href="#software-factory">🏭 Software Factory</a>
+    <a href="#roles">🎭 Future Roles</a>
+    <a href="#mother-system">💎 Nexus Mother System</a>
+    <a href="#blueprint">🏗️ 7-Layer Blueprint</a>
+    <a href="#comparison">📊 Logic Comparison</a>
+  </nav>
+
+  <main class="min-w-0">
+
+    <header class="mb-16">
+      <div class="flex items-center gap-3 mb-4">
+        <span class="px-2 py-1 bg-red-500/20 text-red-500 text-[10px] font-bold rounded border border-red-500/30 uppercase">Visionary Blueprint</span>
+        <time class="text-xs text-zinc-500 font-mono">2026-05-10</time>
+      </div>
+      <h1 class="text-5xl font-black tracking-tighter mb-4 text-zinc-900 dark:text-white">AI-NATIVE VISION</h1>
+      <p class="text-xl text-zinc-600 dark:text-zinc-400 max-w-2xl leading-relaxed font-light">
+        從 Diana Hu 的「公司 OS」概念到 Nexus 「母系統」架構的深度轉譯。
+      </p>
+    </header>
+
+    <!-- INTRO -->
+    <section id="intro" class="mb-20">
+      <div class="quote-box">
+        <p class="text-lg italic text-zinc-200">"AI 不該只是工具，而是公司的作業系統。每個流程都應該通過一個持續學習和改進的智能層。"</p>
+        <footer class="mt-4 text-sm text-zinc-500">— <strong>Diana Hu</strong>, YC Partner</footer>
+      </div>
+    </section>
+
+    <!-- OPERATING SYSTEM -->
+    <section id="operating-system" class="mb-20">
+      <h2 class="text-3xl font-bold mb-6">🖥️ AI 作為公司的作業系統</h2>
+      <div class="card p-6 leading-relaxed">
+        <p class="mb-4">Diana 認為真正的轉變是重新設計組織。公司必須從 <strong>Open-Loop</strong> (做了決策但無反饋) 轉向 <strong>Closed-Loop</strong> (持續監控產出並自動調整)。</p>
+        <p>在 AI OS 中，資訊天生不會流失，因為每個行動都會產生紀錄，供核心智能系統學習與優化。</p>
+      </div>
+    </section>
+
+    <!-- QUERYABLE -->
+    <section id="queryable" class="mb-20">
+      <h2 class="text-3xl font-bold mb-6">🔍 讓組織「可供查詢」 (Queryable)</h2>
+      <p class="text-zinc-400 mb-8">組織對 AI 必須是清晰可讀的，這是發揮 AI 能力的前提。</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="card p-5">
+          <h3 class="font-bold text-vision-500 mb-2">數位留痕 (Digital Trace)</h3>
+          <p class="text-sm">開會錄音、減少私訊、Agent 嵌入溝通管道，確保所有 Context 對 AI 可見。</p>
         </div>
-
-        <!-- Layer 2 -->
-        <div class="layer-box">
-            <div class="layer-header"><span class="layer-num">02</span> QUERYABLE SHARED FOUNDATION</div>
-            <p>讓整個系統「可被查詢」。每個動作都留下 Artifact，讓系統具備學習能力。</p>
-            <div class="sub-grid">
-                <div class="sub-node"><strong>Knowledge</strong>Docs / Messages</div>
-                <div class="sub-node"><strong>Execution</strong>Tasks / Decisions</div>
-                <div class="sub-node"><strong>Results</strong>Outcomes / Metrics</div>
-                <div class="sub-node"><strong>Signals</strong>Rules / Observations</div>
-            </div>
+        <div class="card p-5">
+          <h3 class="font-bold text-vision-500 mb-2">智能分析</h3>
+          <p class="text-sm">Agent 可以分析 Sprint 的真實價值，並根據客戶反饋提出更準確的下一步計畫。</p>
         </div>
+      </div>
+    </section>
 
-        <!-- Layer 3 -->
-        <div class="layer-box">
-            <div class="layer-header"><span class="layer-num">03</span> CLOSED-LOOP CONTROL CENTER</div>
-            <p>統一的閉環控制中心：Observe → Analyze → Act → Evaluate → Re-feed。</p>
-            <div style="text-align: center; font-family: var(--font-mono); font-size: 0.9rem; color: var(--success-color); margin-top: 1rem;">
-                觀察狀態 ─→ 分析差距 ─→ 執行動作 ─→ 評估成效 ─→ 回寫記憶 (Loop)
-            </div>
+    <!-- SOFTWARE FACTORY -->
+    <section id="software-factory" class="mb-20">
+      <h2 class="text-3xl font-bold mb-6">🏭 AI 軟體工廠 (TDD Evolution)</h2>
+      <div class="card p-6">
+        <p class="mb-6">人類負責「定義開發什麼」並評估結果，寫程式則是 Agent 的工作。</p>
+        <div class="bg-black rounded-lg p-6 font-mono text-sm border border-zinc-800">
+          <div class="text-zinc-500">// Factory Workflow</div>
+          <div class="mt-2 text-blue-400">Spec Definition -> Test Case Generation</div>
+          <div class="text-green-500">Agent Iteration (Code Gen) -> Verification</div>
+          <div class="text-purple-400">SUCCESS -> Deployment Artifact</div>
         </div>
+        <p class="mt-6 text-sm text-zinc-500 italic">目標：代碼庫中可能完全沒有手寫代碼，只有規格與測試環境。</p>
+      </div>
+    </section>
 
-        <!-- Layer 4 -->
-        <div class="layer-box">
-            <div class="layer-header"><span class="layer-num">04</span> SHARED PRODUCT CAPABILITIES</div>
-            <p>所有子產品可共用的能力模組，無需重複造輪子。</p>
-            <div class="sub-grid">
-                <div class="sub-node">Search / RAG</div>
-                <div class="sub-node">Planner / Multi-Agent</div>
-                <div class="sub-node">Generator / Personalizer</div>
-                <div class="sub-node">Automation / Dashboard</div>
-            </div>
+    <!-- ROLES -->
+    <section id="roles" class="mb-20">
+      <h2 class="text-3xl font-bold mb-6">🎭 未來組織的三種角色</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="card p-6">
+          <div class="text-2xl font-bold text-white mb-2">IC</div>
+          <div class="text-xs text-zinc-500 uppercase mb-4 tracking-widest">獨立貢獻者</div>
+          <p class="text-sm">打造者與營運者，開會帶 Prototype 而非簡報。</p>
         </div>
-
-        <!-- Layer 5 -->
-        <div class="layer-box" style="border-color: var(--vision-color); background: rgba(255,123,114,0.03);">
-            <div class="layer-header"><span class="layer-num">05</span> CHILD PRODUCT TREE</div>
-            <p>子產品像事業體，從母架構中長出，共享核心 Intelligence。</p>
-            <div class="sub-grid">
-                <div class="sub-node" style="border-color: var(--vision-color);"><strong>Product A</strong>Knowledge App</div>
-                <div class="sub-node" style="border-color: var(--vision-color);"><strong>Product B</strong>GTM Agent</div>
-                <div class="sub-node" style="border-color: var(--vision-color);"><strong>Product C</strong>Workflow App</div>
-                <div class="sub-node" style="border-color: var(--vision-color);"><strong>Product D</strong>Insight App</div>
-            </div>
+        <div class="card p-6 border-vision-500">
+          <div class="text-2xl font-bold text-white mb-2">DRI</div>
+          <div class="text-xs text-zinc-500 uppercase mb-4 tracking-widest">直接負責人</div>
+          <p class="text-sm">專注結果，對單一產出負絕對責任。</p>
         </div>
-
-        <!-- Layer 6 -->
-        <div class="layer-box">
-            <div class="layer-header"><span class="layer-num">06</span> PRODUCT GOVERNANCE LAYER</div>
-            <p>確保子產品不越界、不混亂的統一治理層。</p>
-            <div class="sub-grid">
-                <div class="sub-node">Access Control</div>
-                <div class="sub-node">Policy Enforcement</div>
-                <div class="sub-node">Audit Trail</div>
-                <div class="sub-node">Versioning</div>
-            </div>
+        <div class="card p-6">
+          <div class="text-2xl font-bold text-white mb-2">FOUNDER</div>
+          <div class="text-xs text-zinc-500 uppercase mb-4 tracking-widest">AI 創辦人</div>
+          <p class="text-sm">站在前線親自示範能力提升後的樣子。</p>
         </div>
+      </div>
+    </section>
 
-        <!-- Layer 7 -->
-        <div class="layer-box" style="border: 2px solid var(--accent-color);">
-            <div class="layer-header"><span class="layer-num">07</span> CORE DESIGN LOGIC</div>
-            <table class="comparison-table">
-                <thead>
-                    <tr>
-                        <th>Diana's Company Logic</th>
-                        <th></th>
-                        <th>Nexus Product Logic</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>整家公司變得可查詢</td>
-                        <td class="logic-arrow">→</td>
-                        <td>整個產品宇宙變得可查詢</td>
-                    </tr>
-                    <tr>
-                        <td>AI 是公司的作業系統</td>
-                        <td class="logic-arrow">→</td>
-                        <td>產品核心是作業系統 (Product OS)</td>
-                    </tr>
-                    <tr>
-                        <td>各部門共享同一智能層</td>
-                        <td class="logic-arrow">→</td>
-                        <td>各子產品共享同一智能與記憶層</td>
-                    </tr>
-                    <tr>
-                        <td>Closed-Loop 組織管理</td>
-                        <td class="logic-arrow">→</td>
-                        <td>Closed-Loop 產品自我優化</td>
-                    </tr>
-                    <tr>
-                        <td>組織內的新角色 (IC/DRI)</td>
-                        <td class="logic-arrow">→</td>
-                        <td>平台內的新模組與 Agent Callsigns</td>
-                    </tr>
-                </tbody>
-            </table>
+    <!-- MOTHER SYSTEM -->
+    <section id="mother-system" class="mb-20">
+      <h2 class="text-3xl font-bold mb-8">💎 Nexus 作為母系統 (Mother System)</h2>
+      <p class="mb-10 text-zinc-400">我們將公司組織邏輯抽象化為「產品母系統」：主架構像公司，子產品像事業體。</p>
+      <div class="card p-10 bg-black/40">
+        <div class="parent-node">NEXUS PARENT CORE</div>
+        <div class="w-0.5 h-12 bg-zinc-800 mx-auto"></div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="layer-node text-xs font-bold border-red-500/50">Knowledge App</div>
+          <div class="layer-node text-xs font-bold border-red-500/50">GTM Agent</div>
+          <div class="layer-node text-xs font-bold border-red-500/50">Workflow App</div>
+          <div class="layer-node text-xs font-bold border-red-500/50">Insight App</div>
         </div>
+      </div>
+    </section>
 
-        <section class="card" style="margin-top: 4rem;">
-            <h2>🎯 為什麼 Nexus 就是那個「母系統」？</h2>
-            <p>Nexus 的設計完美契合這 7 層架構：</p>
-            <ul>
-                <li><strong>Wiki Runtime</strong> 提供了 Queryable Foundation (Layer 02)。</li>
-                <li><strong>MSA Routing</strong> 實現了 Shared Capabilities (Layer 04)。</li>
-                <li><strong>Supreme Master Loop</strong> 是 Closed-Loop Control (Layer 03) 的具現。</li>
-                <li><strong>$CRYSTAL 與 Lessons</strong> 則是跨產品的共享記憶 (Layer 01)。</li>
-            </ul>
-        </section>
+    <!-- BLUEPRINT -->
+    <section id="blueprint" class="mb-20">
+      <h2 class="text-3xl font-bold mb-8">🏗️ 7-Layer Mother System Blueprint</h2>
+      <div class="space-y-6">
+        <div class="card p-6 border-l-4 border-yellow-500">
+          <h4 class="font-bold mb-2">L1: PRODUCT OS CORE</h4>
+          <p class="text-sm text-zinc-400">身份、上下文、記憶、Agent 規劃層。</p>
+        </div>
+        <div class="card p-6 border-l-4 border-blue-500">
+          <h4 class="font-bold mb-2">L2: QUERYABLE SHARED FOUNDATION</h4>
+          <p class="text-sm text-zinc-400">所有對話、任務、結果、訊號全 Artifact 化。</p>
+        </div>
+        <div class="card p-6 border-l-4 border-green-500">
+          <h4 class="font-bold mb-2">L3: CLOSED-LOOP CONTROL CENTER</h4>
+          <p class="text-sm text-zinc-400">Observe → Analyze → Act → Evaluate 循環。</p>
+        </div>
+      </div>
+    </section>
 
-        <footer>
-            [STRATEGIC ARCHITECTURE DOCUMENT]
-            <br>Nexus Mother System: The Parent of AI-Native Applications
-            <br>Inspired by Diana Hu (YC) & Your Visionary Blueprint
-            <br>SHA: 80230f0b
-        </footer>
-    </div>
+    <!-- COMPARISON -->
+    <section id="comparison" class="mb-20">
+      <h2 class="text-3xl font-bold mb-8">📊 Logic Comparison</h2>
+      <div class="overflow-hidden card">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="bg-zinc-100 dark:bg-zinc-900">
+              <th class="px-6 py-4 text-left">Company Logic (Diana)</th>
+              <th class="px-6 py-4 text-center">→</th>
+              <th class="px-6 py-4 text-left">Product Logic (Nexus)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y dark:divide-zinc-800">
+            <tr><td class="px-6 py-4">整家公司變得可查詢</td><td class="px-6 py-4 text-center">→</td><td class="px-6 py-4 font-bold text-vision-500">產品宇宙變得可查詢</td></tr>
+            <tr><td class="px-6 py-4">AI 是作業系統</td><td class="px-6 py-4 text-center">→</td><td class="px-6 py-4 font-bold text-vision-500">產品核心是作業系統</td></tr>
+            <tr><td class="px-6 py-4">部門共享智能層</td><td class="px-6 py-4 text-center">→</td><td class="px-6 py-4 font-bold text-vision-500">子產品共享智能與記憶層</td></tr>
+            <tr><td class="px-6 py-4">Closed-Loop 組織管理</td><td class="px-6 py-4 text-center">→</td><td class="px-6 py-4 font-bold text-vision-500">Closed-Loop 產品自我優化</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="mt-20 pt-8 border-t border-zinc-200 dark:border-zinc-800 text-sm text-zinc-500 text-center">
+      Generated by the <a href="#" class="underline hover:text-red-400"><code>nexus-html-crystal</code></a> skill. 
+      <br>Nexus Mother System: Strategic Framework | SHA: 624e75d7
+    </footer>
+
+  </main>
+</div>
+
+<script>
+  // Theme toggle
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const dark = document.documentElement.classList.toggle('dark');
+    localStorage.theme = dark ? 'dark' : 'light';
+  });
+
+  // Code highlight
+  hljs.highlightAll();
+
+  // Sticky TOC scroll-spy
+  const tocLinks = document.querySelectorAll('.toc a');
+  const sections = [...tocLinks].map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  if (sections.length) {
+    const onScroll = () => {
+      const y = window.scrollY + 100;
+      let active = sections[0];
+      for (const s of sections) if (s.offsetTop <= y) active = s;
+      tocLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + active.id));
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+</script>
+
 </body>
 </html>
