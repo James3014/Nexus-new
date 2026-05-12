@@ -1,1 +1,0 @@
-{"schema_version": "1.5.2", "task_id": "new-task", "current_phase": "P", "current_step_id": null, "steps_history": [], "external_needed": false, "external_used": [], "skills_used": [], "metadata": {"skill_used": ["aibdd.spec.user-story.gen", "git-manager"], "router_version": "v0.1", "decision_timestamp": "2026-03-14T08:56:02.408644"}}
