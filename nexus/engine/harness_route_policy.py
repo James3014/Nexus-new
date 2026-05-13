@@ -31,8 +31,6 @@ GOVERNANCE_PROTECTED_CAPABILITIES = {
     "claim_gate",
     "delivery_gate",
     "harness_preflight_sensor",
-    "bdd_acceptance_skill",
-    "semantic_failure_sensor",
 }
 
 
@@ -74,6 +72,65 @@ def apply_harness_sensor_policy(
     if failure_text and states.get("semantic_failure_sensor") != "required":
         states["semantic_failure_sensor"] = "conditional"
         reasons["semantic_failure_sensor"].append("semantic_failure_sensor_required")
+
+
+def apply_harness_relevance_policy(
+    *,
+    states: dict[str, str],
+    reasons: dict[str, list[str]],
+    route: dict[str, Any],
+    task_desc: str,
+    route_oracle_expected_capabilities: tuple[str, ...] | list[str] = (),
+) -> dict[str, Any]:
+    """Drop harness validation sensors when their contract is absent.
+
+    Core governance gates remain protected. BDD and semantic failure sensors are
+    validation tools: useful when their input contract exists, noisy when a high
+    risk route selects them without Given-When-Then or failure text.
+    """
+
+    expected = {str(item) for item in route_oracle_expected_capabilities or ()}
+    features = route.get("route_features", {}) if isinstance(route.get("route_features", {}), dict) else {}
+    text = str(task_desc or "").lower()
+    bdd_required = bool(
+        route.get("bdd_acceptance")
+        or route.get("business_acceptance")
+        or features.get("bdd_acceptance_required")
+        or features.get("bdd_acceptance")
+        or features.get("business_acceptance")
+        or "given-when-then" in text
+        or ("given" in text and "when" in text and "then" in text)
+        or "business acceptance" in text
+    )
+    failure_required = bool(extract_failure_text(route=route, task_desc=task_desc))
+    downgraded: list[str] = []
+
+    if (
+        not bdd_required
+        and "bdd_acceptance_skill" not in expected
+        and states.get("bdd_acceptance_skill") == "conditional"
+    ):
+        states["bdd_acceptance_skill"] = "optional"
+        reasons["bdd_acceptance_skill"].append("harness_relevance_no_bdd_contract")
+        downgraded.append("bdd_acceptance_skill")
+
+    if (
+        not failure_required
+        and "semantic_failure_sensor" not in expected
+        and states.get("semantic_failure_sensor") == "conditional"
+    ):
+        states["semantic_failure_sensor"] = "optional"
+        reasons["semantic_failure_sensor"].append("harness_relevance_no_failure_text")
+        downgraded.append("semantic_failure_sensor")
+
+    return {
+        "schema_version": "nexus_harness_relevance_policy.v1",
+        "applied": bool(downgraded),
+        "downgraded": downgraded,
+        "bdd_required": bdd_required,
+        "failure_required": failure_required,
+        "protected": sorted(expected),
+    }
 
 
 def apply_harness_cost_lane_policy(

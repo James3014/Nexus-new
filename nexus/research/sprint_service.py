@@ -5,6 +5,7 @@ import os
 import sys
 import subprocess
 import time
+import warnings
 from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -18,6 +19,16 @@ from nexus.research.day_shift_optimizer import DayShiftOptimizer
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.swarm_broker import SwarmBroker
 from .runtime.runtime_resilience import compute_time_budget, classify_infra_block, get_retry_delay, RetryParams
+
+
+def _compile_candidate_or_warning(code: str, filename: str) -> str:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", SyntaxWarning)
+        compile(code, filename, "exec")
+    for warning in caught:
+        if issubclass(warning.category, SyntaxWarning):
+            return str(warning.message)
+    return ""
 
 
 @dataclass
@@ -79,6 +90,14 @@ class SprintResult:
     gateway_payload_chars: int = 0
     gateway_total_chars: int = 0
     gateway_timeout_sec: int = 0
+    gateway_total_sec: float = 0.0
+    gateway_invocation_build_sec: float = 0.0
+    gateway_process_sec: float = 0.0
+    gateway_provider_wait_sec: float = 0.0
+    gateway_parse_sec: float = 0.0
+    executor_selected: str = ""
+    executor_forced_inplace: bool = False
+    executor_init_sec: float = 0.0
     model_name: str = ""
     model_patch_generated: bool = False
     fallback_used: bool = False
@@ -169,6 +188,11 @@ class LLMCandidateGenerator:
                     "gateway_payload_chars": int(out.get("gateway_payload_chars", 0) or 0) if isinstance(out, dict) else 0,
                     "gateway_total_chars": int(out.get("gateway_total_chars", 0) or 0) if isinstance(out, dict) else 0,
                     "gateway_timeout_sec": int(out.get("gateway_timeout_sec", 0) or 0) if isinstance(out, dict) else 0,
+                    "gateway_total_sec": float(out.get("gateway_total_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
+                    "gateway_invocation_build_sec": float(out.get("gateway_invocation_build_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
+                    "gateway_process_sec": float(out.get("gateway_process_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
+                    "gateway_provider_wait_sec": float(out.get("gateway_provider_wait_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
+                    "gateway_parse_sec": float(out.get("gateway_parse_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
                     "model_name": model,
                     "model_patch_generated": False,
                     "llm_edit_protocol": str(out.get("operation") or "legacy_patch") if isinstance(out, dict) else "invalid",
@@ -314,6 +338,11 @@ def _resolve_gateway_token_source(sources: set[str]) -> str:
     return "missing"
 
 
+def _is_model_owned_source(source: str) -> bool:
+    normalized = str(source or "").strip().lower()
+    return normalized.startswith(("llm", "model", "nexus_llm"))
+
+
 def _candidate_summaries(items: list[CandidateEval], *, max_text: int = 1200) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     for item in items:
@@ -431,9 +460,16 @@ def _should_try_local_preflight_before_llm(*, task: str, source_code: str) -> bo
             "credential scrubber",
             "secret redaction",
             "def redact",
-            "artifact references",
-            "evidence rollup",
-            "verified_claims",
+            "evidence artifact claim rollup",
+            "governance action filter",
+            "rlm_harder_v2_filter_action",
+            "rlm_harder_v2_scope_decision",
+            "rlm_harder_v2_verified_claims",
+            "rlm_harder_v2_accept_receipt",
+            "rlm_harder_v2_select_memory_hits",
+            "rlm_harder_v2_merge_settings",
+            "rlm_harder_v2_repair_budget",
+            "reason governance_block",
             "phased report summary",
             "phase_ready",
         )
@@ -553,13 +589,23 @@ class InPlaceSprintExecutor:
                 )
             if target_path.suffix == ".py":
                 try:
-                    compile(code, str(target_path), "exec")
+                    syntax_warning = _compile_candidate_or_warning(code, str(target_path))
                 except SyntaxError as exc:
                     return CandidateEval(
                         seed=seed,
                         score=0.0,
                         hint=hint,
                         error=f"syntax_error:{exc.msg}",
+                        candidate_code=code,
+                        source=source,
+                        elapsed_sec=round(time.time() - start, 4),
+                    )
+                if syntax_warning:
+                    return CandidateEval(
+                        seed=seed,
+                        score=0.0,
+                        hint=hint,
+                        error=f"syntax_warning:{syntax_warning}",
                         candidate_code=code,
                         source=source,
                         elapsed_sec=round(time.time() - start, 4),
@@ -651,7 +697,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     test_path = repo_root / config.test_file if config.test_file else None
     test_source = test_path.read_text(encoding="utf-8") if test_path and test_path.exists() else ""
     hidden_verifier_mode = os.environ.get("NEXUS_VALUE_HIDDEN_VERIFIER", "").strip().lower() in {"1", "true", "yes"}
-    initial_test_source = "" if hidden_verifier_mode else test_source
+    model_required_execution_mode = os.environ.get("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "").strip().lower()
+    model_required_final_delivery = model_required_execution_mode.startswith("model_participation")
+    initial_test_source = "" if hidden_verifier_mode and not model_required_final_delivery else test_source
     llm_mode_effective = bool(config.llm_mode)
     learn_slo_guard = {
         "phase_slo_pass": False,
@@ -683,7 +731,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     # Local-first fast path: avoid heavy swarm sync when no external LLM is used.
     force_inplace_executor = os.environ.get("NEXUS_FORCE_INPLACE_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
     enable_local_swarm_executor = os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+    executor_init_start = time.monotonic()
     if (llm_mode_effective or enable_local_swarm_executor) and not force_inplace_executor:
+        executor_selected = "swarm"
         executor = SprintExecutor(
             repo_root,
             scope_files=scope_files,
@@ -692,6 +742,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             task=config.task,
         )
     else:
+        executor_selected = "inplace"
         executor = InPlaceSprintExecutor(
             repo_root=repo_root,
             target_file=config.target_file,
@@ -699,6 +750,7 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             timeout_sec=config.stage1_timeout_sec,
             task=config.task,
         )
+    executor_init_sec = round(time.monotonic() - executor_init_start, 4)
 
     candidates: list[CandidateEval] = []
     routing_autoreason_enabled = _resolve_executor_flag(config.enable_autoreason_executor, "NEXUS_AUTOREASON_EXECUTOR")
@@ -722,6 +774,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     gateway_payload_chars = 0
     gateway_total_chars = 0
     gateway_timeout_sec = 0
+    gateway_total_sec = 0.0
+    gateway_invocation_build_sec = 0.0
+    gateway_process_sec = 0.0
+    gateway_provider_wait_sec = 0.0
+    gateway_parse_sec = 0.0
     quota_backoffs = 0
     test_timeouts = 0
     error_codes: list[str] = []
@@ -732,6 +789,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         "memory_written": False,
         "arweave_tx_id": None,
         "learn_slo_guard": learn_slo_guard,
+        "executor": {
+            "selected": executor_selected,
+            "forced_inplace": force_inplace_executor,
+            "enable_local_swarm_executor": enable_local_swarm_executor,
+            "init_sec": executor_init_sec,
+        },
     }
     distant_plan = config.distant_scout_plan if isinstance(config.distant_scout_plan, dict) else {}
     if distant_plan:
@@ -781,9 +844,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         
         # R7: Strict rejection for invalid AST/syntax
         try:
-            compile(candidate, "<semantic_guard>", "exec")
+            syntax_warning = _compile_candidate_or_warning(candidate, "<semantic_guard>")
         except SyntaxError as exc:
             return False, f"syntax_error: {exc}"
+        if syntax_warning:
+            return False, f"syntax_warning: {syntax_warning}"
 
         src_lines = {ln.strip() for ln in source.splitlines() if ln.strip()}
         cand_lines = {ln.strip() for ln in candidate.splitlines() if ln.strip()}
@@ -832,6 +897,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 key = c.error
                 if c.error.startswith("syntax_error:"):
                     key = "syntax_error"
+                elif c.error.startswith("syntax_warning:"):
+                    key = "semantic_guard_syntax_warning"
                 elif "timed out" in c.error.lower():
                     key = "test_timeout"
                 elif "quota" in c.error.lower() or "429" in c.error.lower():
@@ -885,6 +952,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         nonlocal model_calls, model_patch_generated, total_tokens, gateway_stats_present
         nonlocal gateway_usage_metadata_present, gateway_prompt_chars, gateway_payload_chars
         nonlocal gateway_total_chars, gateway_timeout_sec, quota_backoffs
+        nonlocal gateway_total_sec, gateway_invocation_build_sec, gateway_process_sec
+        nonlocal gateway_provider_wait_sec, gateway_parse_sec
         model_calls += int(meta.get("model_calls", 0) or 0)
         if str(meta.get("model_name", "") or ""):
             model_names.add(str(meta.get("model_name")))
@@ -901,6 +970,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         gateway_payload_chars = max(gateway_payload_chars, int(meta.get("gateway_payload_chars", 0) or 0))
         gateway_total_chars = max(gateway_total_chars, int(meta.get("gateway_total_chars", 0) or 0))
         gateway_timeout_sec = max(gateway_timeout_sec, int(meta.get("gateway_timeout_sec", 0) or 0))
+        gateway_total_sec += float(meta.get("gateway_total_sec", 0.0) or 0.0)
+        gateway_invocation_build_sec += float(meta.get("gateway_invocation_build_sec", 0.0) or 0.0)
+        gateway_process_sec += float(meta.get("gateway_process_sec", 0.0) or 0.0)
+        gateway_provider_wait_sec += float(meta.get("gateway_provider_wait_sec", 0.0) or 0.0)
+        gateway_parse_sec += float(meta.get("gateway_parse_sec", 0.0) or 0.0)
         quota_backoffs += int(meta.get("quota_backoffs", 0) or 0)
 
     def _persist_learning(
@@ -1000,7 +1074,20 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         used_source = "local"
         ev_recorded = False
         try:
-            if llm_generator is not None and hidden_verifier_mode and _has_hidden_contract_fast_path(source_code):
+            hidden_fast_path_disabled = os.environ.get(
+                "NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH",
+                "",
+            ).strip().lower() in {"1", "true", "yes"}
+            hidden_invariant_shadow_disabled = os.environ.get(
+                "NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW",
+                "",
+            ).strip().lower() in {"1", "true", "yes"}
+            if (
+                llm_generator is not None
+                and hidden_verifier_mode
+                and not hidden_fast_path_disabled
+                and _has_hidden_contract_fast_path(source_code)
+            ):
                 fast_code, fast_meta = local_generator.generate(
                     source_code=source_code,
                     task=config.task,
@@ -1118,6 +1205,11 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                         gateway_payload_chars = max(gateway_payload_chars, int(failure_meta.get("gateway_payload_chars", 0) or 0))
                         gateway_total_chars = max(gateway_total_chars, int(failure_meta.get("gateway_total_chars", 0) or 0))
                         gateway_timeout_sec = max(gateway_timeout_sec, int(failure_meta.get("gateway_timeout_sec", 0) or 0))
+                        gateway_total_sec += float(failure_meta.get("gateway_total_sec", 0.0) or 0.0)
+                        gateway_invocation_build_sec += float(failure_meta.get("gateway_invocation_build_sec", 0.0) or 0.0)
+                        gateway_process_sec += float(failure_meta.get("gateway_process_sec", 0.0) or 0.0)
+                        gateway_provider_wait_sec += float(failure_meta.get("gateway_provider_wait_sec", 0.0) or 0.0)
+                        gateway_parse_sec += float(failure_meta.get("gateway_parse_sec", 0.0) or 0.0)
                     if infra_code != "infra_blocked:quota":
                         if not failure_meta or int(failure_meta.get("tokens_used", 0) or 0) <= 0:
                             total_tokens += _estimate_tokens(
@@ -1156,6 +1248,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             if (
                 hidden_verifier_mode
                 and used_source.startswith("llm")
+                and not hidden_fast_path_disabled
+                and not hidden_invariant_shadow_disabled
                 and _has_hidden_contract_fast_path(source_code)
             ):
                 local_code, local_meta = local_generator.generate(
@@ -1179,7 +1273,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             else:
                 ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
             self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
-            if hidden_verifier_mode and llm_generator is not None and used_source.startswith("llm") and "quota" not in error_codes:
+            if (
+                hidden_verifier_mode
+                and llm_generator is not None
+                and used_source.startswith("llm")
+                and "quota" not in error_codes
+                and not hidden_invariant_shadow_disabled
+            ):
                 local_code, local_meta = local_generator.generate(
                     source_code=source_code,
                     task=config.task,
@@ -1223,11 +1323,36 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 candidates.append(ev)
                 ev_recorded = True
                 failure_tail = (ev.error or ev.stdout or "")[-1200:]
+                local_support_block = ""
+                if model_required_final_delivery:
+                    try:
+                        support_code, support_meta = local_generator.generate(
+                            source_code=source_code,
+                            task=config.task,
+                            mutation_hint=f"{hint}\nmodel_required_local_support_hint",
+                            seed=idx + 9000,
+                        )
+                        support_source = str(support_meta.get("source", "local_support_hint"))
+                        support_guard_ok, _support_guard_reason = _semantic_guard(
+                            source_code, support_code, config.task, support_source
+                        )
+                        if support_guard_ok and support_code.strip() and support_code != candidate_code:
+                            fallback_used = True
+                            error_codes.append("model_required_local_support_hint")
+                            local_support_block = (
+                                "\n[NEXUS LOCAL SUPPORT CANDIDATE]\n"
+                                "This candidate is support evidence only, not final delivery. "
+                                "Use it to produce a model-owned corrected patch if it satisfies the visible contract.\n"
+                                f"{support_code}\n"
+                            )
+                    except Exception:  # noqa: BLE001
+                        error_codes.append("model_required_local_support_hint_failed")
                 repair_task = (
                     f"{config.task}\n\n"
                     "Previous candidate failed verification. "
                     "Repair the candidate using the failure evidence below.\n"
-                    f"[FAILURE]\n{failure_tail}"
+                    f"[FAILURE]\n{failure_tail}\n"
+                    f"{local_support_block}"
                 )
                 try:
                     repair_code, repair_meta = llm_generator.generate(
@@ -1276,6 +1401,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 and ev.score < 1.0
                 and "quota" not in error_codes
             ):
+                if model_required_final_delivery and not ev_recorded:
+                    candidates.append(ev)
+                    ev_recorded = True
                 local_code, local_meta = local_generator.generate(
                     source_code=source_code,
                     task=config.task,
@@ -1359,6 +1487,14 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             gateway_payload_chars=gateway_payload_chars,
             gateway_total_chars=gateway_total_chars,
             gateway_timeout_sec=gateway_timeout_sec,
+            gateway_total_sec=round(gateway_total_sec, 4),
+            gateway_invocation_build_sec=round(gateway_invocation_build_sec, 4),
+            gateway_process_sec=round(gateway_process_sec, 4),
+            gateway_provider_wait_sec=round(gateway_provider_wait_sec, 4),
+            gateway_parse_sec=round(gateway_parse_sec, 4),
+            executor_selected=executor_selected,
+            executor_forced_inplace=force_inplace_executor,
+            executor_init_sec=executor_init_sec,
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
             fallback_used=fallback_used,
@@ -1378,6 +1514,69 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         ddtree_max_candidates=config.ddtree_max_candidates,
     )
     candidates = routed_candidates
+    if model_required_final_delivery and not _is_model_owned_source(best.source):
+        model_candidates = [item for item in candidates if _is_model_owned_source(item.source)]
+        best_model = max(model_candidates, key=lambda item: item.score, default=None)
+        local_support_code = "model_required_local_support_not_delivery" if best.score >= 1.0 else ""
+        final_codes = sorted(
+            set(
+                error_codes
+                + ["model_required_model_delivery_failed"]
+                + ([local_support_code] if local_support_code else [])
+            )
+        )
+        rejection_summary = _build_rejection_summary(candidates, final_codes)
+        _persist_learning(
+            status="FAILED",
+            reason="model_required_model_delivery_failed",
+            winner_source=best_model.source if best_model is not None else "model_required_no_model_candidate",
+            final_score=best_model.score if best_model is not None else 0.0,
+            summary=rejection_summary,
+            codes=final_codes,
+        )
+        return SprintResult(
+            status="FAILED",
+            reason="model_required_model_delivery_failed",
+            target_file=config.target_file,
+            winner_source=best_model.source if best_model is not None else "model_required_no_model_candidate",
+            final_score=best_model.score if best_model is not None else 0.0,
+            elapsed_sec=round(time.time() - start, 4),
+            attempt_count=len(candidates),
+            model_calls=model_calls,
+            quota_backoffs=quota_backoffs,
+            test_timeouts=test_timeouts,
+            total_tokens=total_tokens,
+            token_capture_status=_resolve_token_capture_status(
+                total_tokens=total_tokens,
+                model_calls=model_calls,
+                statuses=token_capture_statuses,
+            ),
+            gateway_stats_present=gateway_stats_present,
+            gateway_usage_metadata_present=gateway_usage_metadata_present,
+            gateway_token_source=_resolve_gateway_token_source(gateway_token_sources),
+            gateway_error_category=",".join(sorted(gateway_error_categories)),
+            gateway_prompt_chars=gateway_prompt_chars,
+            gateway_payload_chars=gateway_payload_chars,
+            gateway_total_chars=gateway_total_chars,
+            gateway_timeout_sec=gateway_timeout_sec,
+            gateway_total_sec=round(gateway_total_sec, 4),
+            gateway_invocation_build_sec=round(gateway_invocation_build_sec, 4),
+            gateway_process_sec=round(gateway_process_sec, 4),
+            gateway_provider_wait_sec=round(gateway_provider_wait_sec, 4),
+            gateway_parse_sec=round(gateway_parse_sec, 4),
+            executor_selected=executor_selected,
+            executor_forced_inplace=force_inplace_executor,
+            executor_init_sec=executor_init_sec,
+            model_name=",".join(sorted(model_names)),
+            model_patch_generated=model_patch_generated,
+            fallback_used=fallback_used,
+            error_codes=final_codes,
+            rejection_summary=rejection_summary,
+            learning_trace=learning_trace,
+            candidates=candidates,
+            pytest_cmd=pytest_cmd,
+            patch=best_model.candidate_code if best_model is not None else "",
+        )
     if best.score < 1.0:
         final_codes = sorted(set(error_codes + [SprintOutcome.STAGE1_FAILED.value]))
         rejection_summary = _build_rejection_summary(candidates, final_codes)
@@ -1414,6 +1613,14 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             gateway_payload_chars=gateway_payload_chars,
             gateway_total_chars=gateway_total_chars,
             gateway_timeout_sec=gateway_timeout_sec,
+            gateway_total_sec=round(gateway_total_sec, 4),
+            gateway_invocation_build_sec=round(gateway_invocation_build_sec, 4),
+            gateway_process_sec=round(gateway_process_sec, 4),
+            gateway_provider_wait_sec=round(gateway_provider_wait_sec, 4),
+            gateway_parse_sec=round(gateway_parse_sec, 4),
+            executor_selected=executor_selected,
+            executor_forced_inplace=force_inplace_executor,
+            executor_init_sec=executor_init_sec,
             model_name=",".join(sorted(model_names)),
             model_patch_generated=model_patch_generated,
             fallback_used=fallback_used,
@@ -1499,6 +1706,14 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         gateway_payload_chars=gateway_payload_chars,
         gateway_total_chars=gateway_total_chars,
         gateway_timeout_sec=gateway_timeout_sec,
+        gateway_total_sec=round(gateway_total_sec, 4),
+        gateway_invocation_build_sec=round(gateway_invocation_build_sec, 4),
+        gateway_process_sec=round(gateway_process_sec, 4),
+        gateway_provider_wait_sec=round(gateway_provider_wait_sec, 4),
+        gateway_parse_sec=round(gateway_parse_sec, 4),
+        executor_selected=executor_selected,
+        executor_forced_inplace=force_inplace_executor,
+        executor_init_sec=executor_init_sec,
         model_name=",".join(sorted(model_names)),
         model_patch_generated=model_patch_generated,
         fallback_used=fallback_used,

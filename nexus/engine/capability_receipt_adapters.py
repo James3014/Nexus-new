@@ -22,6 +22,7 @@ def merge_capability_receipt(
     evidence_refs: list[str] | tuple[str, ...] | None = None,
     gate_passed: bool = False,
     outcome_contributed: bool = False,
+    selection_source: str = "planner",
     executor_id: str = "",
     failure_reason: str = "",
 ) -> CapabilityReceipt:
@@ -39,6 +40,7 @@ def merge_capability_receipt(
         evidence_present=bool(refs),
         gate_passed=gate_passed,
         outcome_contributed=outcome_contributed,
+        selection_source=selection_source,
         executor_id=executor_id,
         evidence_refs=refs,
         failure_reason=failure_reason,
@@ -115,7 +117,7 @@ class CodeIntelReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=bool(gate_passed),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -202,7 +204,7 @@ class JudgePanelReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=bool(gate_passed),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -311,6 +313,7 @@ class HyperReceiptAdapter:
             evidence_refs=refs,
             gate_passed=gate_passed,
             outcome_contributed=gate_passed,
+            selection_source=str(payload.get("hyper_selection_source") or "planner"),
             executor_id="hyper_sprint",
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -975,7 +978,7 @@ class SemanticFailureSensorReceiptAdapter(GenericCapabilityReceiptAdapter):
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=bool(gate_passed),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )

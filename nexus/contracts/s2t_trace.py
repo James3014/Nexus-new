@@ -179,3 +179,13 @@ def export_model_training_v2(
     from nexus.contracts.s2t_export import export_model_training_v2 as _export_model_training_v2
 
     return _export_model_training_v2(events, experiences, quality_rows)
+
+
+def export_model_training_v3(
+    events: list[S2TTraceEvent],
+    experiences: list[Any] | None = None,
+    quality_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    from nexus.contracts.s2t_export import export_model_training_v3 as _export_model_training_v3
+
+    return _export_model_training_v3(events, experiences, quality_rows)

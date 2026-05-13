@@ -1198,6 +1198,103 @@ def test_render_markdown_report_allows_public_claim_when_gate_passes(tmp_path):
     assert "On this fixed benchmark set, `nexus` improved eligible solve rate" in out
 
 
+def test_render_markdown_report_uses_split_claim_posture_from_evidence_bundle(tmp_path):
+    without = tmp_path / "without.jsonl"
+    with_nexus = tmp_path / "with.jsonl"
+    bundle = tmp_path / "evidence_bundle.json"
+    without.write_text(
+        json.dumps(
+            {
+                "task_id": "feature",
+                "trial_index": 1,
+                "semantic_status": "UNVERIFIED",
+                "wall_duration_sec": 100,
+                "model_calls": 1,
+                "total_tokens": 1000,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with_nexus.write_text(
+        json.dumps(
+            {
+                "task_id": "feature",
+                "trial_index": 1,
+                "semantic_status": "VERIFIED",
+                "wall_duration_sec": 60,
+                "model_calls": 1,
+                "total_tokens": 900,
+                "token_capture_status": "measured",
+                "run_eligible": True,
+                "gemini_uses_nexus": True,
+                "model_uses_nexus": True,
+                "nexus_context_delivered": True,
+                "nexus_usage_valid": True,
+                "capability_claim_verified": True,
+                "feature_reflex_route": True,
+                "gwt_artifact_present": True,
+                "gwt_semantic_hit_rate": 1.0,
+                "hidden_verifier_passed": True,
+                "phase_wall_r_sec": None,
+                "r_phase_hyper_sprint_sec": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    bundle.write_text(
+        json.dumps(
+            {
+                "public_claim_gate": {"verdict": "PASS", "failures": [], "checks": {}},
+                "public_verified_delivery_claim_gate": {"verdict": "PASS", "failures": [], "checks": {}},
+                "public_cost_claim_gate": {"verdict": "PASS", "failures": [], "checks": {}},
+                "public_cost_efficiency_claim_gate": {
+                    "verdict": "IMPROVED",
+                    "failures": [],
+                    "checks": {"cost_efficiency_status": "IMPROVED"},
+                },
+                "public_claim_posture": {
+                    "delivery": {"status": "PASS", "scope": "same-model verified delivery"},
+                    "cost_safety": {"status": "PASS", "scope": "cost telemetry completeness"},
+                    "cost_efficiency": {
+                        "status": "IMPROVED",
+                        "scope": "wall/token/model-call efficiency",
+                        "pair_count": 3,
+                        "min_required_pairs": 3,
+                        "sample_sufficient": True,
+                        "token_roi_status": "EFFICIENT",
+                        "verified_lift_per_1k_with_tokens": 0.25,
+                        "marginal_token_utility": 0.0,
+                    },
+                    "allowed_public_wording": "verified_delivery_uplift",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out = render_markdown_report(
+        without_path=str(without),
+        with_path=str(with_nexus),
+        label_without="bare",
+        label_with="nexus",
+        benchmark_date="2026-05-13",
+        evidence_bundle_path=str(bundle),
+    )
+
+    assert "Public claim gate: PASS" in out
+    assert "Cost efficiency claim gate: IMPROVED" in out
+    assert "## Claim Posture" in out
+    assert "Cost efficiency: IMPROVED" in out
+    assert "Token ROI: EFFICIENT" in out
+    assert "## Feature Reflex Route" in out
+    assert "| feature | 1 | PASS | 1.00 | PASS | YES |" in out
+    assert "No public performance claim is allowed" not in out
+
+
 def test_render_markdown_report_allows_capability_claim_only_with_receipts(tmp_path):
     without = tmp_path / "without.jsonl"
     with_nexus = tmp_path / "with.jsonl"

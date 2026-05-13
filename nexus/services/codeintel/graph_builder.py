@@ -4,6 +4,7 @@ import ast
 import bisect
 import json
 import os
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -43,7 +44,9 @@ def module_name(root: Path, path: Path) -> str:
 
 def imports_for(path: Path) -> set[str]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (SyntaxError, UnicodeDecodeError):
         return set()
     imports: set[str] = set()

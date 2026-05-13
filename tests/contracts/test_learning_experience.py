@@ -153,6 +153,83 @@ def test_learning_experience_escalates_failed_hyper_and_gates_autodata_export() 
     assert gated["autodata_gate"]["status"] == "fail"
 
 
+def test_model_training_gate_fails_closed_without_autodata_or_s2t_trace() -> None:
+    exp = build_learning_experience(
+        task_id="task-no-trace",
+        task_type="bug",
+        usage_trace={
+            "phase_trace": {"S": "start", "P": "plan", "X": "context", "D": "design", "R": "repair", "A": "audit", "C": "close"},
+            "capabilities": {
+                "artifact_gate_passed": True,
+                "claim_verified": True,
+                "delivery_gate_passed": True,
+            },
+        },
+        capability_receipts=[
+            {
+                "name": "autoreason",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+            }
+        ],
+    )
+
+    gated = apply_autodata_quality_gate(project_model_training(exp), None)
+
+    assert gated["training_eligible"] is False
+    assert gated["targets"] == ["hard_negative"]
+    assert gated["autodata_gate"]["status"] == "not_attached"
+    assert "missing_autodata_quality_row" in gated["model_training_gate"]["reasons"]
+    assert "missing_s2t_trace_refs" in gated["model_training_gate"]["reasons"]
+
+
+def test_model_training_gate_blocks_leakage_and_reward_hacking_risk() -> None:
+    exp = build_learning_experience(
+        task_id="task-risk",
+        task_type="bug",
+        usage_trace={
+            "phase_trace": {"S": "start", "P": "plan", "X": "context", "D": "design", "R": "repair", "A": "audit", "C": "close"},
+            "capabilities": {
+                "artifact_gate_passed": True,
+                "claim_verified": True,
+                "delivery_gate_passed": True,
+            },
+            "s2t": {"trace_path": ".nexus/reports/s2t/task-risk.jsonl"},
+        },
+        capability_receipts=[
+            {
+                "name": "autoreason",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+            }
+        ],
+    )
+
+    gated = apply_autodata_quality_gate(
+        project_model_training(exp),
+        {
+            "task_id": "task-risk",
+            "eligible_for_training": True,
+            "leakage_risk": True,
+            "reward_hacking_risk": True,
+            "trajectory_steps": 9,
+            "information_density": 0.9,
+        },
+    )
+
+    assert gated["training_eligible"] is False
+    assert gated["targets"] == ["hard_negative"]
+    assert gated["model_training_gate"]["status"] == "fail"
+    assert "leakage_risk" in gated["model_training_gate"]["reasons"]
+    assert "reward_hacking_risk" in gated["model_training_gate"]["reasons"]
+
+
 def test_promoted_learning_policy_artifact_round_trips_verified_experience(tmp_path) -> None:
     exp = build_learning_experience(
         task_id="task-3",

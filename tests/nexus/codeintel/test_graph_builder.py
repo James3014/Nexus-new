@@ -1,7 +1,8 @@
 import json
+import warnings
 from pathlib import Path
 
-from nexus.services.codeintel.graph_builder import build_graph, matching_modules, scan_codebase
+from nexus.services.codeintel.graph_builder import build_graph, imports_for, matching_modules, scan_codebase
 
 
 def test_build_graph_records_python_import_edges(tmp_path: Path) -> None:
@@ -41,3 +42,26 @@ def test_scan_codebase_writes_index_and_ignores_nexus_cache(tmp_path: Path) -> N
     assert result.nodes_count == 1
     assert result.index_path == str(index_path)
     assert [node["path"] for node in graph["nodes"]] == ["pkg/core.py"]
+
+
+def test_imports_for_suppresses_candidate_syntax_warnings(tmp_path: Path) -> None:
+    target = tmp_path / "candidate.py"
+    target.write_text(
+        """
+import json
+
+def f():
+    try:
+        pass
+    finally:
+        return json
+""",
+        encoding="utf-8",
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", SyntaxWarning)
+        imports = imports_for(target)
+
+    assert imports == {"json"}
+    assert caught == []

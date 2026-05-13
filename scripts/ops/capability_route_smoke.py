@@ -84,6 +84,15 @@ SMOKE_SUITES: tuple[SmokeSuite, ...] = (
             "route-oracle-swarm-quiet-moment-001",
         ),
     ),
+    SmokeSuite(
+        name="harness_engineering_oracles",
+        manifest="scripts/bench/public_benchmark_route_oracles_v1.json",
+        output_dir=".nexus/reports/bench_route_harness_engineering_smoke",
+        task_ids=(
+            "route-oracle-semantic-failure-sensor-001",
+            "route-oracle-bdd-acceptance-001",
+        ),
+    ),
 )
 
 def build_command(repo_root: Path, suite: SmokeSuite) -> list[str]:

@@ -7,10 +7,12 @@ from nexus.research.sprint_service import (
     _build_llm_candidate_prompt,
     _build_value_task_contract,
     _candidate_code_from_llm_output,
+    _should_try_local_preflight_before_llm,
     _select_candidate_with_routing_layers,
     run_hyper_sprint,
     write_sprint_report,
 )
+from nexus.research.local_sprint_mutator import generate_local_candidate
 
 
 def _write_ready_learn_slo(tmp_path: Path) -> None:
@@ -221,6 +223,91 @@ def test_run_hyper_sprint_success_local(monkeypatch, tmp_path: Path):
     assert "retrieval_hits" in res.learning_trace
 
 
+def test_should_try_local_preflight_before_llm_skips_claim_evidence_contracts():
+    assert (
+        _should_try_local_preflight_before_llm(
+            task="Fix claim verification so only fully supported successful claims are accepted.",
+            source_code="def verified_claims(claims):\n    return claims\n",
+        )
+        is False
+    )
+
+
+def test_should_try_local_preflight_before_llm_keeps_deterministic_contracts():
+    assert (
+        _should_try_local_preflight_before_llm(
+            task="Repair secret redaction for a credential scrubber.",
+            source_code="def redact(secret):\n    return secret\n",
+        )
+        is True
+    )
+
+
+def test_should_try_local_preflight_before_llm_keeps_governance_action_filter():
+    assert (
+        _should_try_local_preflight_before_llm(
+            task="Repair governance action filter; reason governance_block for destructive actions.",
+            source_code="def rlm_harder_v2_filter_action(action):\n    return {'allowed': True, 'reason': 'ok'}\n",
+        )
+        is True
+    )
+
+
+def test_should_try_local_preflight_before_llm_keeps_rlm_evidence_memory_and_second_round_contracts():
+    assert _should_try_local_preflight_before_llm(
+        task="Repair RLM evidence gap.",
+        source_code="def rlm_harder_v2_verified_claims(claims):\n    return []\n",
+    )
+    assert _should_try_local_preflight_before_llm(
+        task="Repair RLM evidence replay.",
+        source_code="def rlm_harder_v2_accept_receipt(receipt):\n    return True\n",
+    )
+    assert _should_try_local_preflight_before_llm(
+        task="Repair memory selection.",
+        source_code="def rlm_harder_v2_select_memory_hits(items, task_type, keywords):\n    return items\n",
+    )
+    assert _should_try_local_preflight_before_llm(
+        task="Repair second round settings merge.",
+        source_code="def rlm_harder_v2_merge_settings(defaults, override):\n    return defaults\n",
+    )
+    assert _should_try_local_preflight_before_llm(
+        task="Repair governance scope decision.",
+        source_code="def rlm_harder_v2_scope_decision(request):\n    return {'allowed': True, 'reason': 'approved'}\n",
+    )
+    assert _should_try_local_preflight_before_llm(
+        task="Repair belief budget selection.",
+        source_code="def rlm_harder_v2_repair_budget(confidence, risk):\n    return {'rounds': 1, 'needs_evidence': False}\n",
+    )
+
+
+def test_local_mutator_patches_rlm_governance_filter_action():
+    source = "def rlm_harder_v2_filter_action(action):\n    return {'allowed': True, 'reason': 'ok'}\n"
+
+    patched = generate_local_candidate(
+        source,
+        task="Repair governance action filter; block destructive tools and forbidden paths.",
+        mutation_hint="local_preflight_before_llm",
+        seed=0,
+    )
+    namespace: dict[str, object] = {}
+    exec(patched, namespace)
+    fn = namespace["rlm_harder_v2_filter_action"]
+
+    assert fn({"tool": "read_file"}) == {"allowed": True, "reason": "ok"}
+    assert fn({"tool": "run_command", "cmd": "rm -rf .nexus"}) == {
+        "allowed": False,
+        "reason": "governance_block",
+    }
+    assert fn({"tool": "delete_file", "path": "logs/run.json"}) == {
+        "allowed": False,
+        "reason": "governance_block",
+    }
+    assert fn({"tool": "write_file", "path": "benchmarks/result.json"}) == {
+        "allowed": False,
+        "reason": "governance_block",
+    }
+
+
 def test_run_hyper_sprint_collects_error_codes(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
@@ -313,6 +400,41 @@ def test_run_hyper_sprint_rejects_hidden_verifier_placeholder_only(monkeypatch, 
     assert res.status == "FAILED"
     assert "semantic_guard" in res.error_codes
     assert res.rejection_summary.get("semantic_guard_placeholder_only", 0) >= 1
+
+
+def test_run_hyper_sprint_rejects_syntax_warning_candidate(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("def value():\n    return 1\n", encoding="utf-8")
+
+    class FakeGenerator:
+        source = "llm"
+
+        def generate(self, *args, **kwargs):
+            return (
+                "def value():\n"
+                "    try:\n"
+                "        return 1\n"
+                "    finally:\n"
+                "        return 2\n",
+                {"source": "llm", "model_calls": 1, "quota_backoffs": 0},
+            )
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **_kwargs):
+            raise AssertionError("SyntaxWarning candidates must be rejected before pytest")
+
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix value", target_file="demo.py", candidate_count=1, llm_mode=False, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "FAILED"
+    assert "semantic_guard" in res.error_codes
+    assert res.rejection_summary.get("semantic_guard_syntax_warning", 0) >= 1
 
 
 def test_run_hyper_sprint_learning_trace_persist_path(monkeypatch, tmp_path: Path):
@@ -467,6 +589,55 @@ def test_llm_mode_propagates_token_observability(monkeypatch, tmp_path: Path):
     assert res.gateway_payload_chars == 20
     assert res.gateway_total_chars == 30
     assert res.gateway_timeout_sec == 60
+
+
+def test_hidden_verifier_shadow_can_be_disabled_for_model_required_benchmark(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 42,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+            }
+
+    class FakeLocalGenerator:
+        source = "local_hidden_shadow"
+
+        def generate(self, *args, **kwargs):
+            raise AssertionError("model-required benchmark must not replace LLM delivery with hidden shadow")
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.winner_source == "llm"
+    assert res.fallback_used is False
+    assert res.model_calls == 1
 
 
 def test_compact_gateway_prompt_is_shorter(monkeypatch):
@@ -844,6 +1015,173 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
     assert res.gateway_error_category == "timeout"
     assert res.winner_source == "local"
     assert "llm_error" in res.error_codes
+
+
+def test_model_required_blocks_local_final_delivery_after_llm_attempt(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            raise RuntimeError("gateway_error")
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *args, **kwargs):
+            return "print('ok')\n", {"source": "local", "model_calls": 0, "quota_backoffs": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "model_participation_only")
+    monkeypatch.setenv("NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "FAILED"
+    assert res.reason == "model_required_model_delivery_failed"
+    assert res.winner_source == "model_required_no_model_candidate"
+    assert res.model_calls == 1
+    assert "model_required_model_delivery_failed" in res.error_codes
+    assert "model_required_local_support_not_delivery" in res.error_codes
+    assert res.patch == ""
+
+
+def test_model_required_does_not_promote_local_guard_fallback_after_llm_patch_failed(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def build():\n    return []\n", encoding="utf-8")
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            return "def build():\n    return []\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 10,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+            }
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *args, **kwargs):
+            return "def build():\n    return ['local']\n", {"source": "local"}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            score = 1.0 if "local" in kwargs["code"] else 0.0
+            return CandidateEval(seed=kwargs["seed"], score=score, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "model_participation_only")
+    monkeypatch.setenv("NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="add feature artifact", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "FAILED"
+    assert res.reason == "model_required_model_delivery_failed"
+    assert res.winner_source == "llm"
+    assert res.final_score == 0.0
+    assert res.model_calls == 1
+    assert res.fallback_used is True
+    assert "model_required_local_support_not_delivery" in res.error_codes
+    assert "local" not in res.winner_source
+    assert "local" not in res.patch
+
+
+def test_model_required_self_heal_can_use_local_support_without_promoting_it(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text("def build():\n    return []\n", encoding="utf-8")
+    calls = {"llm": 0, "local": 0}
+
+    class FakeLLMGenerator:
+        source = "llm"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *args, **kwargs):
+            calls["llm"] += 1
+            if calls["llm"] == 1:
+                return "def build():\n    return []\n", {
+                    "source": "llm",
+                    "model_calls": 1,
+                    "tokens_used": 10,
+                    "token_capture_status": "measured",
+                    "model_patch_generated": True,
+                }
+            assert "Previous candidate failed verification" in kwargs["task"]
+            assert "[NEXUS LOCAL SUPPORT CANDIDATE]" in kwargs["task"]
+            return "def build():\n    return ['artifact']\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "tokens_used": 20,
+                "token_capture_status": "measured",
+                "model_patch_generated": True,
+            }
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *args, **kwargs):
+            calls["local"] += 1
+            return "def build():\n    return ['artifact']\n", {"source": "local"}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            score = 1.0 if "artifact" in kwargs["code"] else 0.0
+            return CandidateEval(seed=kwargs["seed"], score=score, candidate_code=kwargs["code"], source=kwargs["source"])
+
+    monkeypatch.setenv("NEXUS_MODEL_REQUIRED_EXECUTION_MODE", "model_participation_only")
+    monkeypatch.setenv("NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM", "1")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
+
+    cfg = SprintConfig(task="add feature artifact", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.winner_source == "llm_self_heal"
+    assert res.model_calls == 2
+    assert calls == {"llm": 2, "local": 1}
+    assert "model_required_local_support_hint" in res.error_codes
 
 
 def test_llm_self_heal_repairs_failed_candidate(monkeypatch, tmp_path: Path):
@@ -1388,6 +1726,10 @@ def test_llm_mode_can_force_inplace_executor(monkeypatch, tmp_path: Path):
                 "quota_backoffs": 0,
                 "tokens_used": 1,
                 "token_capture_status": "measured",
+                "gateway_total_sec": 1.2,
+                "gateway_process_sec": 1.1,
+                "gateway_provider_wait_sec": 1.1,
+                "gateway_parse_sec": 0.1,
             }
 
     class FakeInPlaceExecutor:
@@ -1411,6 +1753,12 @@ def test_llm_mode_can_force_inplace_executor(monkeypatch, tmp_path: Path):
 
     assert res.status == "SUCCESS"
     assert calls == {"inplace": 1, "swarm": 0}
+    assert res.executor_selected == "inplace"
+    assert res.executor_forced_inplace is True
+    assert res.executor_init_sec >= 0
+    assert res.learning_trace["executor"]["selected"] == "inplace"
+    assert res.gateway_total_sec == 1.2
+    assert res.gateway_provider_wait_sec == 1.1
 
 
 def test_local_mode_uses_inplace_executor(monkeypatch, tmp_path: Path):
@@ -1556,6 +1904,134 @@ def test_run_hyper_sprint_uses_local_preflight_for_governance_redaction(monkeypa
 
     cfg = SprintConfig(
         task="Refactor a credential scrubber while preserving secret redaction",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 0
+    assert res.winner_source == "local_preflight"
+
+
+def test_run_hyper_sprint_uses_local_preflight_for_rlm_governance_guard(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "def rlm_harder_v2_filter_action(action):\n"
+        "    return {'allowed': True, 'reason': 'ok'}\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import rlm_harder_v2_filter_action\n\n"
+        "def test_governance_guard_contract():\n"
+        "    assert rlm_harder_v2_filter_action({'tool': 'read_file'}) == {'allowed': True, 'reason': 'ok'}\n"
+        "    assert rlm_harder_v2_filter_action({'tool': 'delete_file', 'path': 'logs/run.json'}) == {'allowed': False, 'reason': 'governance_block'}\n"
+        "    assert rlm_harder_v2_filter_action({'tool': 'write_file', 'path': 'benchmarks/result.json'}) == {'allowed': False, 'reason': 'governance_block'}\n",
+        encoding="utf-8",
+    )
+
+    class FailIfCalledLLM:
+        model_chain = ["fake-gemini"]
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("LLM should not be called for deterministic governance guard preflight")
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
+
+    cfg = SprintConfig(
+        task="Repair governance action filter; reason governance_block for destructive actions.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 0
+    assert res.winner_source == "local_preflight"
+    assert "local_preflight_before_llm_success" in res.error_codes
+
+
+def test_run_hyper_sprint_uses_local_preflight_for_rlm_evidence_gap(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "def rlm_harder_v2_verified_claims(claims):\n"
+        "    return [claim['id'] for claim in claims if claim.get('status') == 'pass']\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import rlm_harder_v2_verified_claims\n\n"
+        "def test_requires_artifact_reference():\n"
+        "    claims = [{'id': 'a', 'status': 'pass', 'artifact': 'reports/a.json'}, {'id': 'b', 'status': 'pass'}]\n"
+        "    assert rlm_harder_v2_verified_claims(claims) == ['a']\n",
+        encoding="utf-8",
+    )
+
+    class FailIfCalledLLM:
+        model_chain = ["fake-gemini"]
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("LLM should not be called for deterministic evidence-gap preflight")
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
+
+    cfg = SprintConfig(
+        task="Repair RLM evidence gap so verified claims require non-empty artifact references.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+    )
+
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 0
+    assert res.winner_source == "local_preflight"
+
+
+def test_run_hyper_sprint_uses_local_preflight_for_rlm_memory_contract(monkeypatch, tmp_path: Path):
+    _write_ready_learn_slo(tmp_path)
+    target = tmp_path / "demo.py"
+    target.write_text(
+        "def rlm_harder_v2_select_memory_hits(items, task_type, keywords):\n"
+        "    return [item for item in items if item.get('task_type') == task_type]\n",
+        encoding="utf-8",
+    )
+    test_file = tmp_path / "test_demo.py"
+    test_file.write_text(
+        "from demo import rlm_harder_v2_select_memory_hits\n\n"
+        "def test_requires_type_and_keyword_overlap():\n"
+        "    items = [{'id': 'old', 'task_type': 'bug', 'keywords': ['invoice']}, {'id': 'target', 'task_type': 'bug', 'keywords': ['websocket']}]\n"
+        "    assert rlm_harder_v2_select_memory_hits(items, 'bug', ['websocket']) == [items[1]]\n",
+        encoding="utf-8",
+    )
+
+    class FailIfCalledLLM:
+        model_chain = ["fake-gemini"]
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("LLM should not be called for deterministic memory preflight")
+
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", lambda *_args, **_kwargs: FailIfCalledLLM())
+
+    cfg = SprintConfig(
+        task="Repair RLM memory selection so hits require task type and keyword overlap.",
         target_file="demo.py",
         test_file="test_demo.py",
         candidate_count=1,

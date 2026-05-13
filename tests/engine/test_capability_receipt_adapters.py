@@ -163,6 +163,27 @@ def test_harness_receipts_fail_closed_without_typed_evidence():
     assert proven["semantic_failure_sensor"].public_claim_safe is True
     assert proven["bdd_acceptance_skill"].public_claim_safe is True
 
+    diagnostic_only = {
+        item.name: item
+        for item in build_trace_receipts(
+            plan=plan,
+            capabilities={
+                "claim_verified": False,
+                "semantic_failure_sensor_used": True,
+                "semantic_failure_refs": [".nexus/reports/capabilities/failure/sensor.json"],
+                "failure_cause": "assertion_mismatch",
+                "likely_fix": "align implementation with failing assertion and preserve existing contract",
+                "retry_policy": {
+                    "max_retries": 1,
+                    "allow_blind_retry": False,
+                    "requires_evidence_delta": True,
+                },
+                "semantic_failure_sensor_gate_passed": True,
+            },
+        )
+    }
+    assert diagnostic_only["semantic_failure_sensor"].public_claim_safe is True
+
 
 def test_codeintel_receipt_includes_dci_refs():
     plan = {"selected_capabilities": ["codeintel"]}

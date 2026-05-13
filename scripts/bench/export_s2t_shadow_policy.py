@@ -65,13 +65,20 @@ def build_route_cost_policy_candidate(policy: dict[str, Any], *, source: str) ->
     return {
         "schema_version": "nexus_promoted_route_cost_policy.v1",
         "source": source,
-        "candidate_cap_overrides": {task_id: 1 for task_id in candidate_cap_tasks},
+        "feature_rules": [],
+        "candidate_cap_overrides": {},
         "lite_route_tasks": lite_tasks,
         "hold_tasks": [],
+        "legacy_task_policy_source_ids": {
+            "candidate_cap_task_ids": candidate_cap_tasks,
+            "lite_task_ids": lite_tasks,
+            "hold_task_ids": [],
+        },
         "promotion_gate": {
             "source_policy_status": str(policy.get("status") or ""),
             "requires_same_model_before_after_ab": True,
             "defensive_run_required": True,
+            "requires_feature_rule_projection": True,
         },
     }
 

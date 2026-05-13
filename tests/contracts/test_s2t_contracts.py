@@ -19,6 +19,7 @@ from nexus.contracts.s2t_trace import (
     S2TTraceWriter,
     export_agent_lightning_preferences,
     export_model_training_v2,
+    export_model_training_v3,
     redact_s2t_event,
 )
 
@@ -305,6 +306,60 @@ def test_model_training_export_v2_applies_autodata_quality_gate() -> None:
     assert projection["training_eligible"] is False
     assert projection["targets"] == ["hard_negative"]
     assert projection["autodata_gate"]["trajectory_steps"] == 2
+
+
+def test_model_training_export_v3_emits_preference_reward_and_gated_experience_rows() -> None:
+    event = S2TTraceEvent(
+        task_id="task-3",
+        run_id="run-1",
+        model="gemini-3-flash-preview",
+        mode="shadow",
+        phase="R",
+        risk_tier="high",
+        candidate_set_id="candset-1",
+        candidates=[
+            _candidate("A", selector_score=0.95, verifier_result="fail"),
+            _candidate("B", selector_score=0.70, verifier_result="pass"),
+        ],
+        selected_candidate_id="B",
+        verifier_result="pass",
+        verifier_evidence_ref=".nexus/reports/pytest.json",
+        semantic_verified=True,
+        delivery_gate="pass",
+    )
+    experience = build_learning_experience(
+        task_id="task-3",
+        task_type="bug",
+        usage_trace={
+            "phase_trace": {"S": "start", "P": "plan", "X": "context", "D": "design", "R": "repair", "A": "audit", "C": "close"},
+            "capabilities": {
+                "artifact_gate_passed": True,
+                "claim_verified": True,
+                "delivery_gate_passed": True,
+            },
+            "s2t": {"trace_path": ".nexus/reports/s2t/task-3.jsonl"},
+        },
+    )
+
+    exported = export_model_training_v3(
+        [event],
+        experiences=[experience],
+        quality_rows=[
+            {
+                "task_id": "task-3",
+                "eligible_for_training": True,
+                "trajectory_step_count": 12,
+                "information_density": 0.8,
+            }
+        ],
+    )
+
+    row_types = {row["row_type"] for row in exported["training_rows"]}
+    assert exported["schema_version"] == "nexus_model_training_export.v3"
+    assert row_types == {"preference_pair", "reward_row", "experience_projection"}
+    assert exported["summary"]["preference_pair_count"] == 1
+    assert exported["summary"]["reward_row_count"] == 1
+    assert exported["summary"]["training_eligible_count"] == 1
 
 
 def test_s2t_adoption_gate_requires_shadow_and_heldout_lift() -> None:

@@ -111,7 +111,8 @@ def test_export_s2t_shadow_policy_marks_bare_verified_expensive_tasks_as_lite_ca
 
     assert export["s2t_policy_draft"]["task_rules"]["task-a"]["recommended_action"] == "try_lite_with_defensive_gate"
     assert export["route_cost_policy_candidate"]["lite_route_tasks"] == []
-    assert export["route_cost_policy_candidate"]["candidate_cap_overrides"] == {"task-a": 1}
+    assert export["route_cost_policy_candidate"]["candidate_cap_overrides"] == {}
+    assert export["route_cost_policy_candidate"]["legacy_task_policy_source_ids"]["candidate_cap_task_ids"] == ["task-a"]
 
 
 def test_export_s2t_shadow_policy_keeps_lite_routes_empty_until_validated_twice(tmp_path: Path):
@@ -154,5 +155,6 @@ def test_export_s2t_shadow_policy_keeps_lite_routes_empty_until_validated_twice(
     export = build_export(bundle)
 
     assert export["s2t_policy_draft"]["task_rules"]["task-a"]["recommended_action"] == "prefer_lite_or_standard"
-    assert export["route_cost_policy_candidate"]["candidate_cap_overrides"] == {"task-a": 1}
+    assert export["route_cost_policy_candidate"]["candidate_cap_overrides"] == {}
+    assert export["route_cost_policy_candidate"]["legacy_task_policy_source_ids"]["candidate_cap_task_ids"] == ["task-a"]
     assert export["route_cost_policy_candidate"]["lite_route_tasks"] == []

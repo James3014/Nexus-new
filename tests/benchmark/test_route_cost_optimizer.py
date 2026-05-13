@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.bench.route_cost_optimizer import build_optimizer_plan
+from scripts.bench.route_cost_optimizer import build_longtail_cost_recommendations, build_optimizer_plan
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -32,6 +32,8 @@ def test_optimizer_promotes_verified_wall_improvement(tmp_path: Path) -> None:
         [
             {
                 "task_id": "evidence-001",
+                "task_type": "public_feature",
+                "difficulty": "hard",
                 "semantic_status": "VERIFIED",
                 "status": "SUCCESS",
                 "run_eligible": True,
@@ -51,10 +53,38 @@ def test_optimizer_promotes_verified_wall_improvement(tmp_path: Path) -> None:
     out = build_optimizer_plan(baseline_aggregate=baseline, candidate_dir=candidate)
 
     assert out["decision_counts"] == {"promote_cost_tune": 1}
-    assert out["promoted_policy"]["candidate_cap_overrides"] == {"evidence-001": 1}
+    assert out["promoted_policy"]["candidate_cap_overrides"] == {}
+    assert out["promoted_policy"]["feature_rules"][0]["match"] == {"task_type": "public_feature", "difficulty": "hard"}
+    assert out["promoted_policy"]["feature_rules"][0]["controls"] == {"candidate_cap": 1}
     assert out["next_required_action"] == "promote_cost_policy_then_rerun_12_task_fail_fast_loop"
     assert out["cost_truth_table"][0]["candidate_effective_wall_sec"] == 40
     assert out["promoted_policy"]["promotion_gate"]["runner_overhead_polluted"] is False
+
+
+def test_longtail_recommendations_preserve_ddtree_floor_and_governance_gates() -> None:
+    ledger = {
+        "schema": "nexus_route_cost_ledger_v1",
+        "arms": {
+            "with_nexus": {
+                "top_phase_wall_offenders": [
+                    {
+                        "task_id": "route-oracle-ddtree-001",
+                        "task_capability": "ddtree",
+                        "task_type": "public_test_repair",
+                        "dominant_phase": "R",
+                    }
+                ]
+            }
+        },
+    }
+
+    out = build_longtail_cost_recommendations(ledger)
+
+    rec = out["recommendations"][0]
+    assert rec["controls"] == {"context_mode": "compact", "max_rounds": 1, "candidate_cap": 3}
+    assert "ddtree" in rec["safety_floor"]
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= set(rec["safety_floor"])
+    assert out["promotion_gate"]["requires_same_model_rerun"] is True
 
 
 def test_optimizer_holds_runner_overhead_polluted_rows(tmp_path: Path) -> None:
@@ -102,7 +132,8 @@ def test_optimizer_holds_runner_overhead_polluted_rows(tmp_path: Path) -> None:
 
     assert out["decision_counts"] == {"hold_runner_overhead_polluted": 1}
     assert out["promoted_policy"]["candidate_cap_overrides"] == {}
-    assert out["promoted_policy"]["hold_tasks"] == ["context-001"]
+    assert out["promoted_policy"]["hold_tasks"] == []
+    assert out["promoted_policy"]["legacy_task_policy_source_ids"]["hold_task_ids"] == ["context-001"]
     assert out["next_required_action"] == "rerun_polluted_cost_rows_inprocess_before_promotion"
     assert out["cost_truth_table"][0]["candidate_effective_wall_sec"] == 3.5
     assert out["cost_truth_table"][0]["candidate_runner_overhead_polluted"] is True
@@ -194,7 +225,8 @@ def test_optimizer_holds_unreliable_local_fallback(tmp_path: Path) -> None:
     out = build_optimizer_plan(baseline_aggregate=baseline, candidate_dir=candidate)
 
     assert out["decision_counts"] == {"hold_not_model_uplift": 1}
-    assert out["promoted_policy"]["hold_tasks"] == ["repair-001"]
+    assert out["promoted_policy"]["hold_tasks"] == []
+    assert out["promoted_policy"]["legacy_task_policy_source_ids"]["hold_task_ids"] == ["repair-001"]
     assert out["next_required_action"] == "rerun_hold_tasks_with_measured_model_tokens_or_keep_out_of_model_uplift_claim"
 
 
@@ -238,7 +270,8 @@ def test_optimizer_holds_measured_local_success_as_not_model_uplift(tmp_path: Pa
     out = build_optimizer_plan(baseline_aggregate=baseline, candidate_dir=candidate)
 
     assert out["decision_counts"] == {"hold_not_model_uplift": 1}
-    assert out["promoted_policy"]["hold_tasks"] == ["repair-001"]
+    assert out["promoted_policy"]["hold_tasks"] == []
+    assert out["promoted_policy"]["legacy_task_policy_source_ids"]["hold_task_ids"] == ["repair-001"]
     assert out["decisions"][0]["cost_evidence_class"] == "rescue_only_local_success"
 
 
@@ -397,6 +430,8 @@ def test_optimizer_routes_bare_verified_rows_to_lite_when_cost_not_improved(tmp_
         [
             {
                 "task_id": "trust-001",
+                "task_type": "public_bugfix",
+                "difficulty": "easy",
                 "semantic_status": "VERIFIED",
                 "status": "SUCCESS",
                 "run_eligible": True,
@@ -416,4 +451,6 @@ def test_optimizer_routes_bare_verified_rows_to_lite_when_cost_not_improved(tmp_
     out = build_optimizer_plan(baseline_aggregate=baseline, candidate_dir=candidate)
 
     assert out["decision_counts"] == {"route_lite_required": 1}
-    assert out["promoted_policy"]["lite_route_tasks"] == ["trust-001"]
+    assert out["promoted_policy"]["lite_route_tasks"] == []
+    assert out["promoted_policy"]["legacy_task_policy_source_ids"]["lite_required_task_ids"] == ["trust-001"]
+    assert out["promoted_policy"]["feature_rules"][0]["controls"] == {"candidate_cap": 1, "lite_route": True}

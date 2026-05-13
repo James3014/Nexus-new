@@ -68,6 +68,42 @@ def test_gateway_reads_usage_metadata_tokens():
     assert data["gateway_token_source"] == "usage_metadata"
 
 
+def test_gateway_downgrades_cumulative_stats_outlier_to_estimate():
+    cli_stdout = json.dumps(
+        {
+            "response": "{\"status\":\"PASS\",\"summary\":\"ok\"}",
+            "stats": {
+                "models": {
+                    "gemini-3-flash-preview": {
+                        "tokens": {
+                            "total": 999999,
+                        }
+                    }
+                }
+            },
+        }
+    )
+    fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
+
+    gateway = BattlesuitGateway(project_root=".")
+    with patch("nexus.services.gateway._run_cli_with_hard_timeout", return_value=fake_proc):
+        data, _ = gateway.ask_structured(
+            "Return pass JSON",
+            "{}",
+            output_schema={"status": "PASS | FAIL", "summary": "Short explanation"},
+        )
+
+    assert data["tokens_used"] < 1000
+    assert data["token_capture_status"] == "estimated"
+    assert data["gateway_stats_present"] is True
+    assert data["gateway_token_source"] == "estimated_from_stats_outlier"
+    assert data["gateway_token_outlier_reason"] == "stats_outlier_possible_cumulative"
+    assert data["raw_provider_total_tokens"] == 999999
+    assert data["raw_provider_token_source"] == "stats"
+    assert data["provider_stats_cumulative_suspected"] is True
+    assert data["token_accounting_failure_class"] == "provider_stats_outlier"
+
+
 def test_gateway_ignores_hook_text_after_cli_json():
     cli_stdout = json.dumps(
         {
@@ -91,7 +127,7 @@ def test_gateway_ignores_hook_text_after_cli_json():
     assert data["gateway_token_source"] == "missing"
 
 
-def test_gateway_sets_headless_trust_flags_and_neutral_cwd():
+def test_gateway_sets_headless_trust_flags_and_project_cwd(tmp_path):
     cli_stdout = json.dumps({"response": "{\"status\":\"PASS\",\"summary\":\"ok\"}"})
     fake_proc = SimpleNamespace(returncode=0, stdout=cli_stdout, stderr="")
     captured = {}
@@ -102,7 +138,7 @@ def test_gateway_sets_headless_trust_flags_and_neutral_cwd():
         captured["env"] = kwargs.get("env", {})
         return fake_proc
 
-    gateway = BattlesuitGateway(project_root=".")
+    gateway = BattlesuitGateway(project_root=tmp_path)
     with patch("nexus.services.gateway._run_cli_with_hard_timeout", side_effect=fake_run):
         data, _ = gateway.ask_structured(
             "Return pass JSON",
@@ -112,9 +148,9 @@ def test_gateway_sets_headless_trust_flags_and_neutral_cwd():
 
     assert data["status"] == "PASS"
     assert "--skip-trust" in captured["cmd"]
-    assert captured["cmd"][captured["cmd"].index("--approval-mode") + 1] == "plan"
+    assert captured["cmd"][captured["cmd"].index("--approval-mode") + 1] == "auto_edit"
     assert captured["env"]["GEMINI_CLI_TRUST_WORKSPACE"] == "true"
-    assert captured["cwd"] == "/tmp"
+    assert captured["cwd"] == str(tmp_path.resolve())
 
 
 def test_gateway_system_instruction_disables_tools():

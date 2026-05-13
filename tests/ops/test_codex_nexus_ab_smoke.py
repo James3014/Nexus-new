@@ -30,6 +30,7 @@ def test_benchmark_env_locks_same_model(monkeypatch):
     assert env["NEXUS_VALUE_HIDDEN_VERIFIER"] == "1"
     assert env["NEXUS_CODEX_MODEL_NAME"] == "gpt-5.5"
     assert env["NEXUS_DIRECT_CODEX_MODEL"] == "gpt-5.5"
+    assert env["NEXUS_CODEX_IGNORE_USER_CONFIG"] == "1"
     assert "existing" in env["PYTHONPATH"]
 
 

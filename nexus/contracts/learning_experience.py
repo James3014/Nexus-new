@@ -221,20 +221,45 @@ def project_model_training(experience: LearningExperience) -> dict[str, Any]:
 def apply_autodata_quality_gate(projection: dict[str, Any], quality_row: dict[str, Any] | None) -> dict[str, Any]:
     """Fail closed model export when trajectory quality is not training-grade."""
     gated = dict(projection)
-    if not quality_row:
-        gated["autodata_gate"] = {"attached": False, "status": "not_attached"}
-        return gated
-    eligible = bool(quality_row.get("eligible_for_training", False))
-    gated["training_eligible"] = bool(gated.get("training_eligible") and eligible)
-    if not gated["training_eligible"]:
+    reasons: list[str] = []
+
+    def fail_closed() -> None:
+        gated["training_eligible"] = False
         gated["targets"] = ["hard_negative"]
+
+    if not gated.get("source_trace_refs"):
+        reasons.append("missing_s2t_trace_refs")
+    if not quality_row:
+        reasons.append("missing_autodata_quality_row")
+        fail_closed()
+        gated["autodata_gate"] = {"attached": False, "status": "not_attached"}
+        gated["model_training_gate"] = {"status": "fail", "reasons": reasons}
+        return gated
+
+    eligible = bool(quality_row.get("eligible_for_training", False))
+    if not eligible:
+        reasons.append("autodata_not_training_eligible")
+    if bool(quality_row.get("leakage_risk", False)):
+        reasons.append("leakage_risk")
+    if bool(quality_row.get("reward_hacking_risk", False)):
+        reasons.append("reward_hacking_risk")
+    quality_reasons = [str(reason) for reason in quality_row.get("reasons", []) or [] if str(reason).strip()]
+    if any("leakage" in reason for reason in quality_reasons):
+        reasons.append("leakage_risk")
+    if any("reward_hacking" in reason for reason in quality_reasons):
+        reasons.append("reward_hacking_risk")
+
+    gated["training_eligible"] = bool(gated.get("training_eligible") and eligible)
+    if reasons:
+        fail_closed()
     gated["autodata_gate"] = {
         "attached": True,
-        "status": "pass" if eligible else "fail",
-        "reasons": list(quality_row.get("reasons", []) or []),
+        "status": "pass" if eligible and not reasons else "fail",
+        "reasons": quality_reasons,
         "trajectory_steps": int(quality_row.get("trajectory_steps", quality_row.get("trajectory_step_count", 0)) or 0),
         "information_density": float(quality_row.get("information_density", 0.0) or 0.0),
     }
+    gated["model_training_gate"] = {"status": "pass" if gated["training_eligible"] else "fail", "reasons": sorted(set(reasons))}
     return gated
 
 

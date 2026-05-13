@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,27 @@ DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_po
 DEFAULT_ROUTE_COST_POLICY_PATH = Path(".nexus") / "policy" / "promoted_route_cost_policy.json"
 DEFAULT_S2T_POLICY_DRAFT_PATH = Path(".nexus") / "policy" / "promoted_s2t_policy_draft.json"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+EXPECTED_EXECUTOR_CAPABILITIES = frozenset(
+    {
+        "autoreason",
+        "ddtree",
+        "drone",
+        "nightshift",
+        "swarm",
+        "ultra_review",
+    }
+)
+EXPECTED_CANDIDATE_FACTORY_CAPABILITIES = frozenset({"autoreason", "ddtree"})
+GATE_ONLY_SUPERVISED_CAPABILITIES = frozenset(
+    {
+        "artifact_gate",
+        "belief",
+        "claim_gate",
+        "delivery_gate",
+        "mempalace_gate",
+    }
+)
+PREFLIGHT_SUPERVISED_CAPABILITIES = frozenset({"codeintel", "memory"})
 
 
 def load_learning_policy_budget(path: Path) -> dict[str, Any]:
@@ -97,6 +119,7 @@ def audit_route_cost_policy(project_root: Path, budget: dict[str, Any] | None = 
     ignored_count = sum(int(value) for value in ignored_counts.values() if _is_positive_int(value) or value == 0)
     active_count = _task_id_policy_count(policy)
     feature_rule_count = len([rule for rule in policy.get("feature_rules", []) or [] if isinstance(rule, dict)])
+    feature_scope = _feature_rule_scope_summary(policy.get("feature_rules", []))
     task_id_runtime_policy_enabled = bool(policy.get("task_id_runtime_policy_enabled", False))
     failures: list[dict[str, Any]] = []
     if task_id_runtime_policy_enabled and active_count:
@@ -112,6 +135,7 @@ def audit_route_cost_policy(project_root: Path, budget: dict[str, Any] | None = 
         "policy_present": bool(policy),
         "source": str(policy.get("source") or ""),
         "feature_rule_count": feature_rule_count,
+        "feature_rule_scope": feature_scope,
         "task_id_runtime_policy_enabled": task_id_runtime_policy_enabled,
         "task_id_runtime_policy_count": active_count,
         "legacy_task_controls_ignored_count": ignored_count,
@@ -145,7 +169,9 @@ def load_s2t_policy_draft_budget(path: Path) -> dict[str, Any]:
         return {}
     if policy.get("schema") != "nexus_promoted_s2t_policy_draft_v1":
         return {}
-    if policy.get("status") != "DRAFT_SHADOW_ONLY":
+    status = str(policy.get("status") or "")
+    runtime_promotable = status == "PROMOTED_RUNTIME" and _s2t_promotion_gate_passed(policy)
+    if status != "DRAFT_SHADOW_ONLY" and not runtime_promotable:
         return {}
     task_rules = policy.get("task_rules", {})
     task_rules = task_rules if isinstance(task_rules, dict) else {}
@@ -154,9 +180,11 @@ def load_s2t_policy_draft_budget(path: Path) -> dict[str, Any]:
     return {
         "s2t_policy_draft": {
             "schema": str(policy.get("schema") or ""),
-            "status": str(policy.get("status") or ""),
+            "status": status,
             "source_schema": str(policy.get("source_schema") or ""),
             "trace_event_schema": str(policy.get("trace_event_schema") or ""),
+            "runtime_promotable": runtime_promotable,
+            "promotion_gate": policy.get("promotion_gate", {}) if isinstance(policy.get("promotion_gate", {}), dict) else {},
             "task_rules": task_rules,
         }
     }
@@ -195,6 +223,9 @@ def load_route_cost_policy_budget_from_env() -> dict[str, Any]:
         policy["current_skip_llm_baseline"] = True
     if controls.get("require_llm_baseline") is True:
         policy["current_require_llm_baseline"] = True
+    expected = _normalize_expected_capabilities(controls.get("protected_expected_capabilities"))
+    if expected:
+        policy["protected_expected_capabilities"] = sorted(expected)
     if controls.get("disable_research") is True:
         policy["current_disable_research"] = True
     if _is_positive_int(controls.get("candidate_cap")):
@@ -235,6 +266,8 @@ def route_cost_controls_from_env() -> dict[str, Any]:
         "skip_llm_baseline",
         "supervised_bare_first",
         "allow_medium_risk_supervised_bare_first",
+        "expected_capability_protection",
+        "protected_expected_capabilities",
     }
     return {key: value for key, value in controls.items() if key in allowed and value not in (None, "", False)}
 
@@ -244,6 +277,7 @@ def route_cost_controls_for_task(
     task_id: str,
     budget: dict[str, Any] | None = None,
     route_features: dict[str, Any] | None = None,
+    expected_capabilities: Any | None = None,
 ) -> dict[str, Any]:
     merged = merge_runtime_route_cost_policy(project_root, budget)
     policy = merged.get("route_cost_policy", {})
@@ -278,7 +312,96 @@ def route_cost_controls_for_task(
     }
     if any(value not in (None, "", False) for value in controls.values()):
         controls["policy_source"] = str(feature_controls.get("policy_source") or policy.get("source") or "")
-    return {key: value for key, value in controls.items() if value not in (None, "", False)}
+    controls = {key: value for key, value in controls.items() if value not in (None, "", False)}
+    if expected_capabilities is None:
+        expected_capabilities = policy.get("protected_expected_capabilities")
+    controls, _ = protect_expected_capability_controls(controls, expected_capabilities)
+    return controls
+
+
+def build_route_cost_policy_usage_ledger(policy: dict[str, Any], rows: Any) -> dict[str, Any]:
+    """Summarize which promoted feature rules are still earning their keep."""
+    feature_rules = policy.get("feature_rules", []) if isinstance(policy, dict) else []
+    feature_rules = feature_rules if isinstance(feature_rules, list) else []
+    source_rows = [row for row in (rows or []) if isinstance(row, dict)]
+    rules: list[dict[str, Any]] = []
+    for rule in feature_rules:
+        if not isinstance(rule, dict):
+            continue
+        rule_id = str(rule.get("id") or "")
+        match = rule.get("match", {}) if isinstance(rule.get("match"), dict) else {}
+        matched = [row for row in source_rows if _feature_rule_matches(match, {str(k): v for k, v in row.items()})]
+        rules.append(
+            {
+                "id": rule_id,
+                "matched_count": len(matched),
+                "status": "active" if matched else "dehydrate_candidate",
+                "match": match,
+            }
+        )
+    return {
+        "schema_version": "nexus_route_cost_policy_usage_ledger.v1",
+        "rule_count": len(rules),
+        "active_count": sum(1 for rule in rules if rule["status"] == "active"),
+        "dehydrate_candidate_count": sum(1 for rule in rules if rule["status"] == "dehydrate_candidate"),
+        "rules": rules,
+    }
+
+
+def expected_capability_executor_flags(expected_capabilities: Any) -> dict[str, bool]:
+    expected = _normalize_expected_capabilities(expected_capabilities)
+    return {
+        "enable_autoreason_executor": "autoreason" in expected,
+        "enable_ddtree_executor": "ddtree" in expected,
+        "enable_ultra_review_dry_gate": "ultra_review" in expected,
+    }
+
+
+def protect_expected_capability_controls(
+    route_cost_controls: dict[str, Any] | None,
+    expected_capabilities: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Keep route-cost slimming from disconnecting explicitly audited capabilities."""
+
+    controls = dict(route_cost_controls or {})
+    expected = _normalize_expected_capabilities(expected_capabilities)
+    preflight_supervised = bool(
+        controls.get("route_lane") == "context_sync_capped"
+        and expected
+        and expected - GATE_ONLY_SUPERVISED_CAPABILITIES <= PREFLIGHT_SUPERVISED_CAPABILITIES
+    )
+    supervised_baseline = GATE_ONLY_SUPERVISED_CAPABILITIES | (
+        PREFLIGHT_SUPERVISED_CAPABILITIES if preflight_supervised else frozenset()
+    )
+    protected = sorted(expected - supervised_baseline)
+    if not protected:
+        return controls, {}
+
+    overrides: dict[str, Any] = {"protected_expected_capabilities": protected}
+
+    if expected & EXPECTED_CANDIDATE_FACTORY_CAPABILITIES:
+        candidate_cap = _positive_int_or_zero(controls.get("candidate_cap"))
+        if "ddtree" in expected and candidate_cap < 3:
+            overrides["candidate_cap"] = controls.pop("candidate_cap", None)
+            controls["candidate_cap"] = 3
+        elif candidate_cap < 2:
+            overrides["candidate_cap"] = controls.pop("candidate_cap", None)
+        if controls.get("lite_route") is True:
+            overrides["lite_route"] = True
+            controls["lite_route"] = False
+
+    if expected - supervised_baseline and controls.get("supervised_bare_first") is True:
+        overrides["supervised_bare_first"] = True
+        controls["supervised_bare_first"] = False
+
+    if "research" in expected and controls.get("disable_research") is True:
+        overrides["disable_research"] = True
+        controls["disable_research"] = False
+
+    if len(overrides) > 1:
+        controls["expected_capability_protection"] = protected
+        return controls, overrides
+    return controls, {}
 
 
 def _controls_from_feature_rules(rules: Any, route_features: dict[str, Any]) -> dict[str, Any]:
@@ -335,6 +458,56 @@ def _feature_rule_matches(match: dict[str, Any], features: dict[str, Any]) -> bo
     return bool(match)
 
 
+def _normalize_expected_capabilities(value: Any) -> set[str]:
+    if value in (None, "", False):
+        return set()
+    items: list[Any]
+    if isinstance(value, str):
+        items = re.split(r"[,\\s]+", value)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+    else:
+        items = [value]
+    normalized: set[str] = set()
+    for item in items:
+        text = str(item).strip().lower().replace("-", "_").replace(" ", "_")
+        if text:
+            normalized.add(text)
+    return normalized
+
+
+def _positive_int_or_zero(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed >= 1 else 0
+
+
+def _feature_rule_scope_summary(rules: Any) -> dict[str, Any]:
+    valid_rules = [rule for rule in (rules or []) if isinstance(rule, dict)]
+    fixture_locked = 0
+    generic = 0
+    ids: list[str] = []
+    for rule in valid_rules:
+        match = rule.get("match", {})
+        match = match if isinstance(match, dict) else {}
+        rule_id = str(rule.get("id") or "")
+        if rule_id:
+            ids.append(rule_id)
+        if str(match.get("repo_kind") or "") == "neutral_fixture":
+            fixture_locked += 1
+        else:
+            generic += 1
+    return {
+        "total": len(valid_rules),
+        "fixture_locked": fixture_locked,
+        "generic": generic,
+        "fixture_only": bool(valid_rules) and fixture_locked == len(valid_rules),
+        "ids": ids,
+    }
+
+
 def _task_id_route_cost_policy_enabled(policy: dict[str, Any]) -> bool:
     env_value = os.environ.get("NEXUS_ENABLE_TASK_ID_ROUTE_COST_POLICY", "").strip().lower()
     if env_value in _TRUE_VALUES:
@@ -350,6 +523,19 @@ def _task_id_policy_count(policy: dict[str, Any]) -> int:
     hold_tasks = policy.get("hold_tasks", [])
     hold_tasks = hold_tasks if isinstance(hold_tasks, list) else []
     return len(overrides) + len(lite_route_tasks) + len(hold_tasks)
+
+
+def _s2t_promotion_gate_passed(policy: dict[str, Any]) -> bool:
+    gate = policy.get("promotion_gate", {})
+    if not isinstance(gate, dict) or gate.get("passed") is not True:
+        return False
+    try:
+        trust_mismatch_rate = float(gate.get("trust_mismatch_rate", 1.0))
+        sample_count = int(gate.get("sample_count", 0))
+    except (TypeError, ValueError):
+        return False
+    rollback_policy = str(gate.get("rollback_policy") or "").strip()
+    return trust_mismatch_rate == 0.0 and sample_count >= 1 and bool(rollback_policy)
 
 
 def _is_positive_int(value: Any) -> bool:

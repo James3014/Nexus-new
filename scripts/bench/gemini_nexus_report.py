@@ -224,6 +224,77 @@ def _jsonish(value: Any, fallback: Any) -> Any:
     return value if value is not None else fallback
 
 
+def _load_evidence_bundle(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {}
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _bundle_gate(bundle: dict[str, Any], name: str) -> dict[str, Any] | None:
+    value = bundle.get(name)
+    return value if isinstance(value, dict) else None
+
+
+def _claim_posture_lines(bundle: dict[str, Any]) -> list[str]:
+    posture = bundle.get("public_claim_posture")
+    if not isinstance(posture, dict):
+        return []
+    delivery = posture.get("delivery") if isinstance(posture.get("delivery"), dict) else {}
+    cost_safety = posture.get("cost_safety") if isinstance(posture.get("cost_safety"), dict) else {}
+    cost_efficiency = posture.get("cost_efficiency") if isinstance(posture.get("cost_efficiency"), dict) else {}
+    sample_sufficient = bool(cost_efficiency.get("sample_sufficient", False))
+    cost_wording_allowed = bool(posture.get("cost_efficiency_wording_allowed", False))
+    efficiency_label = str(cost_efficiency.get("status", "UNKNOWN"))
+    if not sample_sufficient:
+        efficiency_label = "INCONCLUSIVE"
+    return [
+        "",
+        "## Claim Posture",
+        "",
+        f"- Delivery: {delivery.get('status', 'UNKNOWN')} ({delivery.get('scope', 'n/a')})",
+        f"- Cost safety: {cost_safety.get('status', 'UNKNOWN')} ({cost_safety.get('scope', 'n/a')})",
+        f"- Cost efficiency: {efficiency_label} ({cost_efficiency.get('scope', 'n/a')})",
+        f"- Cost efficiency sample: {cost_efficiency.get('pair_count', 0)}/{cost_efficiency.get('min_required_pairs', 0)} pairs, sufficient={cost_efficiency.get('sample_sufficient', False)}",
+        f"- Token ROI: {cost_efficiency.get('token_roi_status', 'UNKNOWN')}, lift/1k tokens={cost_efficiency.get('verified_lift_per_1k_with_tokens', 0)}, marginal={cost_efficiency.get('marginal_token_utility', 0)}",
+        f"- Public wording key: {posture.get('public_wording_key', posture.get('allowed_public_wording', 'none'))}",
+        f"- Cost-efficiency wording allowed: {cost_wording_allowed}",
+    ]
+
+
+def _feature_reflex_lines(rows: list[dict[str, Any]]) -> list[str]:
+    feature_rows = [row for row in rows if bool(row.get("feature_reflex_route"))]
+    if not feature_rows:
+        return []
+    lines = [
+        "",
+        "## Feature Reflex Route",
+        "",
+        "| Task | Trial | GWT artifact | GWT hit rate | Hidden verifier | Hyper bypass |",
+        "| --- | ---: | --- | ---: | --- | --- |",
+    ]
+    for row in feature_rows:
+        hyper_bypassed = row.get("phase_wall_r_sec") in (None, 0, 0.0) and row.get("r_phase_hyper_sprint_sec") in (None, 0, 0.0)
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(row.get("task_id") or "unknown"),
+                    str(row.get("trial_index") or 1),
+                    "PASS" if row.get("gwt_artifact_present") else "MISSING",
+                    _num(row.get("gwt_semantic_hit_rate"), 2),
+                    "PASS" if row.get("hidden_verifier_passed") else "UNKNOWN",
+                    "YES" if hyper_bypassed else "NO",
+                ]
+            )
+            + " |"
+        )
+    return lines
+
+
 def _research_receipts(row: dict[str, Any]) -> list[dict[str, Any]]:
     receipts = _jsonish(row.get("capability_receipts"), [])
     if not isinstance(receipts, list):
@@ -789,6 +860,7 @@ def render_markdown_report(
     label_without: str,
     label_with: str,
     benchmark_date: str,
+    evidence_bundle_path: str | None = None,
 ) -> str:
     rows_without = load_runs(without_path)
     rows_with = load_runs(with_path)
@@ -817,6 +889,7 @@ def render_markdown_report(
     eligible_solve_with = _eligible_solve_rate(rows_with)
     eligible_solve_delta = eligible_solve_with - eligible_solve_without
     pillar_wins = _pillar_win_rows(rows_without, rows_with)
+    evidence_bundle = _load_evidence_bundle(evidence_bundle_path)
     public_gate = _public_claim_gate(
         rows_without=rows_without,
         rows_with=rows_with,
@@ -824,6 +897,7 @@ def render_markdown_report(
         summary_with=b,
         formal=formal,
     )
+    public_gate = _bundle_gate(evidence_bundle, "public_claim_gate") or public_gate
     capability_gate = _per_capability_public_gate(report)
     route_quality_without = _route_quality_metrics(report, "a")
     route_quality_with = _route_quality_metrics(report, "b")
@@ -838,6 +912,19 @@ def render_markdown_report(
         capability_gate=capability_gate,
         token_public_safe=token_public_safe,
     )
+    delivery_gate = _bundle_gate(evidence_bundle, "public_verified_delivery_claim_gate")
+    cost_gate = _bundle_gate(evidence_bundle, "public_cost_claim_gate")
+    cost_efficiency_gate = _bundle_gate(evidence_bundle, "public_cost_efficiency_claim_gate")
+    if delivery_gate:
+        claim_gates["performance"] = {
+            "verdict": str(delivery_gate.get("verdict") or "FAIL"),
+            "failures": list(delivery_gate.get("failures") or []),
+        }
+    if cost_gate:
+        claim_gates["cost"] = {
+            "verdict": str(cost_gate.get("verdict") or "FAIL"),
+            "failures": list(cost_gate.get("failures") or []),
+        }
     gate_failures = public_gate["failures"]
     solve_delta = float(eligible_solve_delta)
     if solve_delta > 0:
@@ -1022,6 +1109,8 @@ def render_markdown_report(
         f"| estimated | {_count_text(token_without, 'estimated')} | {_count_text(token_with, 'estimated')} |",
         f"| missing/unknown | {_count_text(token_without, 'missing')}/{_count_text(token_without, 'unknown')} | {_count_text(token_with, 'missing')}/{_count_text(token_with, 'unknown')} |",
         f"| not applicable local only | {_count_text(token_without, 'not_applicable_local_only')} | {_count_text(token_with, 'not_applicable_local_only')} |",
+        *_claim_posture_lines(evidence_bundle),
+        *_feature_reflex_lines(rows_with),
         "",
         "## Run Validity",
         "",
@@ -1035,6 +1124,8 @@ def render_markdown_report(
         f"- Capability-specific claim gate failures: {_reasons_text({reason: 1 for reason in claim_gates['capability']['failures']})}",
         f"- Cost claim gate: {claim_gates['cost']['verdict']}",
         f"- Cost claim gate failures: {_reasons_text({reason: 1 for reason in claim_gates['cost']['failures']})}",
+        f"- Cost efficiency claim gate: {cost_efficiency_gate.get('verdict') if cost_efficiency_gate else 'n/a'}",
+        f"- Cost efficiency claim gate failures: {_reasons_text({reason: 1 for reason in (cost_efficiency_gate.get('failures') if cost_efficiency_gate else [])})}",
         f"- Per-capability public gate: {capability_gate['verdict']}",
         f"- Per-capability public-safe capabilities: {', '.join(capability_gate['public_safe']) if capability_gate['public_safe'] else 'none'}",
         f"- Per-capability gate failures: {_reasons_text({reason: 1 for reason in capability_gate['failures']})}",
@@ -1095,6 +1186,7 @@ def main() -> int:
     parser.add_argument("--label-without", default="gemini_3_flash_bare")
     parser.add_argument("--label-with", default="gemini_3_flash_nexus")
     parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument("--evidence-bundle", default="", help="Optional evidence bundle JSON for split claim posture.")
     parser.add_argument("--output", required=True, help="Markdown output path")
     parser.add_argument(
         "--enforce-public-gate",
@@ -1115,6 +1207,7 @@ def main() -> int:
         label_without=args.label_without,
         label_with=args.label_with,
         benchmark_date=args.date,
+        evidence_bundle_path=args.evidence_bundle,
     )
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

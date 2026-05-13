@@ -19,6 +19,18 @@ PUBLIC_CLAIM_CAPABILITIES = frozenset(
     }
 )
 
+INTERNAL_MARKER_CAPABILITIES = frozenset(
+    {
+        "acceptance_check",
+        "learn_mode",
+        "learn_phase_slo",
+        "plan_quality_gate",
+        "pregate",
+        "research_route",
+        "sandbox",
+    }
+)
+
 REQUIRED_NINE_CAPABILITIES = frozenset(
     {
         "autoreason",
@@ -51,29 +63,58 @@ ROUTE_QUALITY_THRESHOLDS = {
 RECEIPT_BACKED_CAPABILITIES = frozenset(
     {
         "artifact_gate",
+        "acceptance_check",
         "architecture_scout",
         "asi_constraint_extractor",
+        "autonomic_router",
         "autoreason",
+        "benchmark",
         "belief",
         "claim_gate",
         "codeintel",
         "ddtree",
         "delivery_gate",
+        "direct_mode",
         "drone",
         "external_doc_scout",
+        "federation",
+        "file_lock",
+        "forecast_gate",
         "formal_report",
+        "bdd_acceptance_skill",
+        "harness_preflight_sensor",
         "hyper",
+        "integration_manager",
+        "jit_validation",
         "judge_panel",
         "lancedb",
+        "learn_mode",
+        "learn_phase_slo",
+        "learn_scheduler",
         "memory",
         "mempalace_gate",
+        "meta_opt",
+        "metabolism",
+        "msa_router",
+        "multi_agent",
         "nightshift",
+        "oracle_shadow",
+        "plan_quality_gate",
+        "pregate",
         "repair_loop",
         "research",
+        "research_control_plane",
+        "research_route",
+        "registry_sync",
+        "sandbox",
+        "semantic_failure_sensor",
         "semantic_searcher",
+        "stress_test",
         "swarm",
         "swarm_quiet_moment",
         "ultra_review",
+        "ui_validator",
+        "xray",
     }
 )
 
@@ -104,6 +145,10 @@ def is_receipt_backed_capability(name: Any) -> bool:
     return normalize_capability_name(name) in RECEIPT_BACKED_CAPABILITIES
 
 
+def is_internal_marker_capability(name: Any) -> bool:
+    return normalize_capability_name(name) in INTERNAL_MARKER_CAPABILITIES
+
+
 def route_quality_ignored_reasons(name: Any) -> set[str]:
     normalized = normalize_capability_name(name)
     return set(NON_ACTIONABLE_CAPABILITY_REASONS) | set(CAPABILITY_NON_ACTIONABLE_REASONS.get(normalized, frozenset()))
@@ -126,6 +171,8 @@ def receipt_has_runtime_signal(receipt: dict[str, Any]) -> bool:
 def is_route_quality_actionable_receipt(receipt: dict[str, Any]) -> bool:
     name = normalize_capability_name(receipt.get("name") or receipt.get("capability"))
     if not name:
+        return False
+    if is_internal_marker_capability(name):
         return False
     if bool(receipt.get("public_claim_safe")):
         return True

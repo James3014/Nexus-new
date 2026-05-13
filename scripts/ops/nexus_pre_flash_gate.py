@@ -15,7 +15,20 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from nexus.app.research_flow_service import _runtime_receipt_plan_payload, build_route
+from nexus.engine.learning_policy_loader import audit_route_cost_policy
+from nexus.engine.local_reflex import assess_local_reflex
+from nexus.engine.mutation_assurance import (
+    build_mutation_assurance_record,
+    evaluate_mutation_assurance,
+    mutation_assurance_required,
+)
+from nexus.engine.capability_wiring_audit import build_capability_wiring_audit
 from nexus.engine.autodata_forge import DataForgeManifestRow, classify_trajectory_quality, write_data_forge_manifest
+from nexus.engine.harness_sensors import (
+    build_bdd_acceptance_receipt,
+    build_harness_preflight_sensor,
+    build_semantic_failure_sensor,
+)
 from nexus.engine.openseeker_alignment import build_openseeker_trace
 from nexus.events.transport import NexusEventBus
 from scripts.ops.codex_nexus_ab_smoke import benchmark_env as codex_smoke_env
@@ -315,6 +328,74 @@ def validate_openseeker_autodata_smoke(repo_root: Path, *, write_manifest: bool 
     ]
 
 
+def _autodata_manifest_counts(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "passed": False, "reason": "autodata_manifest_missing"}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    rows = payload.get("rows", []) if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        return {"path": str(path), "passed": False, "reason": "autodata_manifest_rows_invalid"}
+    missing_evidence = [row.get("task_id", "") for row in rows if isinstance(row, dict) and not row.get("evidence_refs")]
+    return {
+        "path": str(path),
+        "passed": True,
+        "row_count": len(rows),
+        "gold_count": sum(1 for row in rows if isinstance(row, dict) and row.get("label", {}).get("label") == "GOLD"),
+        "training_eligible_count": sum(1 for row in rows if isinstance(row, dict) and row.get("eligible_for_training")),
+        "hard_negative_count": sum(1 for row in rows if isinstance(row, dict) and row.get("hard_negative")),
+        "low_step_filtered_count": sum(
+            1
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("low_step_filter"), dict) and row["low_step_filter"].get("filtered")
+        ),
+        "missing_evidence_task_ids": missing_evidence,
+    }
+
+
+def validate_benchmark_autodata_manifest_gate(
+    repo_root: Path,
+    *,
+    manifest_paths: tuple[Path, ...] | None = None,
+    min_training_eligible: int = 3,
+    min_hard_negative: int = 3,
+) -> list[dict[str, Any]]:
+    paths = manifest_paths or (
+        repo_root / ".nexus" / "reports" / "autodata" / "flash_8x1_autodata_manifest.json",
+        repo_root / ".nexus" / "reports" / "autodata" / "pro_8x1_autodata_manifest.json",
+    )
+    summaries = [_autodata_manifest_counts(path if path.is_absolute() else repo_root / path) for path in paths]
+    failures: list[dict[str, Any]] = []
+    for summary in summaries:
+        if not summary.get("passed"):
+            failures.append({"path": summary["path"], "reason": summary.get("reason", "autodata_manifest_invalid")})
+            continue
+        if int(summary.get("training_eligible_count", 0)) < min_training_eligible:
+            failures.append({"path": summary["path"], "reason": "insufficient_training_eligible_rows"})
+        if int(summary.get("hard_negative_count", 0)) < min_hard_negative:
+            failures.append({"path": summary["path"], "reason": "insufficient_hard_negative_rows"})
+        if summary.get("missing_evidence_task_ids"):
+            failures.append({"path": summary["path"], "reason": "autodata_rows_missing_evidence_refs"})
+    if failures:
+        return [
+            _fail(
+                "benchmark_autodata_manifest_gate",
+                "benchmark_autodata_manifest_gate_failed",
+                manifests=summaries,
+                failures=failures,
+                min_training_eligible=min_training_eligible,
+                min_hard_negative=min_hard_negative,
+            )
+        ]
+    return [
+        _ok(
+            "benchmark_autodata_manifest_gate",
+            manifests=summaries,
+            min_training_eligible=min_training_eligible,
+            min_hard_negative=min_hard_negative,
+        )
+    ]
+
+
 def validate_pipeline_composition_gate(repo_root: Path) -> list[dict[str, Any]]:
     inventory = build_inventory(repo_root)
     details = {
@@ -335,6 +416,199 @@ def validate_pipeline_composition_gate(repo_root: Path) -> list[dict[str, Any]]:
         return [_ok("pipeline_composition_gate", **details)]
     reason = "pipeline_composition_fallback_debt_present" if inventory_passed and fallback_debt_count else "pipeline_composition_inventory_failed"
     return [_fail("pipeline_composition_gate", reason, **details)]
+
+
+def validate_route_cost_policy_audit(repo_root: Path) -> list[dict[str, Any]]:
+    audit = audit_route_cost_policy(repo_root)
+    if audit.get("passed"):
+        return [_ok("route_cost_policy_audit", **audit)]
+    return [_fail("route_cost_policy_audit", "task_id_runtime_route_cost_policy_present", **audit)]
+
+
+def validate_capability_wiring_audit_gate() -> list[dict[str, Any]]:
+    audit = build_capability_wiring_audit().to_dict()
+    if audit.get("passed"):
+        return [_ok("capability_wiring_audit", **audit)]
+    return [_fail("capability_wiring_audit", "capability_wiring_audit_failed", **audit)]
+
+
+def validate_mutation_assurance_gate() -> list[dict[str, Any]]:
+    record = build_mutation_assurance_record(
+        concern="public_claim_safety",
+        mutant_id="public_safe_forced_true",
+        original_passed=True,
+        mutant_failed=True,
+        mutant_diff="- public_claim_safe = gate_passed and evidence_present\n+ public_claim_safe = True",
+        evidence_refs=("tests/engine/test_mutation_assurance.py",),
+    )
+    gate = evaluate_mutation_assurance(
+        [record],
+        required=mutation_assurance_required(risk_score=90, public_claim=True),
+    )
+    if gate.get("passed"):
+        return [_ok("mutation_assurance_gate", record=record, gate=gate)]
+    return [_fail("mutation_assurance_gate", "mutation_assurance_failed", record=record, gate=gate)]
+
+
+def build_scheduled_heavy_audit_plan() -> dict[str, Any]:
+    tasks = [
+        {
+            "id": "mutation_assurance_high_risk_sweep",
+            "capability": "mutation_assurance",
+            "lane": "ralph_background",
+            "foreground_blocking": False,
+            "summary_receipt_required": True,
+            "writeback_target": ".nexus/reports/learn/phase_writeback.jsonl",
+        },
+        {
+            "id": "autodata_quality_manifest_refresh",
+            "capability": "autodata_forge",
+            "lane": "ralph_background",
+            "foreground_blocking": False,
+            "summary_receipt_required": True,
+            "writeback_target": ".nexus/reports/autodata/",
+        },
+        {
+            "id": "nightshift_recovery_audit",
+            "capability": "nightshift",
+            "lane": "ralph_background",
+            "foreground_blocking": False,
+            "summary_receipt_required": True,
+            "writeback_target": ".nexus/reports/nightshift/",
+        },
+    ]
+    return {
+        "schema_version": "nexus_ralph_scheduled_heavy_audit_v1",
+        "status": "SCHEDULED",
+        "foreground_policy": "summary_receipt_only",
+        "tasks": tasks,
+        "task_count": len(tasks),
+        "all_non_blocking": all(not task["foreground_blocking"] for task in tasks),
+        "all_have_writeback": all(bool(task["writeback_target"]) for task in tasks),
+    }
+
+
+def validate_scheduled_heavy_audit_gate() -> list[dict[str, Any]]:
+    plan = build_scheduled_heavy_audit_plan()
+    required = {"mutation_assurance", "autodata_forge", "nightshift"}
+    capabilities = {str(task.get("capability") or "") for task in plan.get("tasks", [])}
+    if (
+        plan.get("schema_version") == "nexus_ralph_scheduled_heavy_audit_v1"
+        and plan.get("all_non_blocking") is True
+        and plan.get("all_have_writeback") is True
+        and required <= capabilities
+    ):
+        return [_ok("ralph_scheduled_heavy_audit", **plan)]
+    return [_fail("ralph_scheduled_heavy_audit", "scheduled_heavy_audit_contract_failed", **plan)]
+
+
+def validate_local_reflex_shadow() -> list[dict[str, Any]]:
+    low = assess_local_reflex(
+        task_desc="Fix a focused public fixture assertion.",
+        task_type="public_test_repair",
+        difficulty="hard",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+    )
+    high = assess_local_reflex(
+        task_desc="Refactor core orchestrator routing and remove old policy paths.",
+        task_type="public_test_repair",
+        difficulty="hard",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+    )
+    destructive = assess_local_reflex(
+        task_desc="Command rm -rf .git and write_file benchmarks/result.json.",
+        task_type="execute",
+        difficulty="hard",
+        category="governance",
+        repo_kind="neutral_fixture",
+    )
+    ollama = assess_local_reflex(
+        task_desc="Probe local Ollama reflex availability.",
+        provider="ollama",
+        timeout_sec=2.0,
+    )
+    bonsai = assess_local_reflex(
+        task_desc="Probe local Bonsai reflex availability.",
+        provider="bonsai",
+        timeout_sec=0.1,
+    )
+    if (
+        low.risk_level == "low"
+        and low.bare_sufficiency == "high"
+        and high.risk_level == "high"
+        and destructive.risk_level == "high"
+        and destructive.bare_sufficiency == "low"
+    ):
+        return [
+            _ok(
+                "local_reflex_shadow",
+                low_risk=low.to_jsonable(),
+                high_risk=high.to_jsonable(),
+                destructive=destructive.to_jsonable(),
+                ollama_probe=ollama.to_jsonable(),
+                bonsai_probe=bonsai.to_jsonable(),
+                actual_local_model_available=bool(low.available or high.available or ollama.available or bonsai.available),
+            )
+        ]
+    return [
+        _fail(
+            "local_reflex_shadow",
+            "local_reflex_contract_mismatch",
+            low_risk=low.to_jsonable(),
+            high_risk=high.to_jsonable(),
+            destructive=destructive.to_jsonable(),
+            ollama_probe=ollama.to_jsonable(),
+            bonsai_probe=bonsai.to_jsonable(),
+        )
+    ]
+
+
+def validate_harness_engineering_gate() -> list[dict[str, Any]]:
+    preflight = build_harness_preflight_sensor(
+        task_desc="Given-When-Then business acceptance for a low risk docs sync.",
+        task_type="business_acceptance",
+        route={
+            "bdd_acceptance": True,
+            "route_features": {"risk_score": 12, "candidate_count": 1, "simple_hidden_bugfix": True},
+        },
+        pending_capabilities=(),
+        selected_capabilities=("harness_preflight_sensor", "bdd_acceptance_skill", "artifact_gate", "claim_gate"),
+    )
+    failure_sensor = build_semantic_failure_sensor(
+        failure_text="Hidden verifier failure: AssertionError expected candidate winner",
+        phase="R",
+    )
+    bdd = build_bdd_acceptance_receipt(
+        given="a merchant has a verified delivery claim",
+        when="the acceptance skill checks the feature workflow",
+        then="the business claim is backed by evidence",
+        evidence_refs=("skill://business-acceptance-smoke",),
+    )
+    if (
+        preflight["capability_wired"] is True
+        and preflight["bdd_acceptance_required"] is True
+        and failure_sensor["retry_policy"]["allow_blind_retry"] is False
+        and bdd["business_verified"] is True
+    ):
+        return [
+            _ok(
+                "harness_engineering_gate",
+                preflight=preflight,
+                semantic_failure_sensor=failure_sensor,
+                bdd_acceptance=bdd,
+            )
+        ]
+    return [
+        _fail(
+            "harness_engineering_gate",
+            "harness_engineering_contract_failed",
+            preflight=preflight,
+            semantic_failure_sensor=failure_sensor,
+            bdd_acceptance=bdd,
+        )
+    ]
 
 
 def repair_subset_command(output_dir: str) -> list[str]:
@@ -545,7 +819,14 @@ def build_payload(
         *validate_codex_nexus_smoke_plan(),
         *validate_brain_hub_coverage_gate(repo_root),
         *validate_openseeker_autodata_smoke(repo_root, write_manifest=write_artifacts),
+        *validate_benchmark_autodata_manifest_gate(repo_root),
         *validate_pipeline_composition_gate(repo_root),
+        *validate_route_cost_policy_audit(repo_root),
+        *validate_capability_wiring_audit_gate(),
+        *validate_mutation_assurance_gate(),
+        *validate_scheduled_heavy_audit_gate(),
+        *validate_local_reflex_shadow(),
+        *validate_harness_engineering_gate(),
     ]
     if run_repair:
         checks.append(run_repair_subset(repo_root, output_dir, timeout_sec=repair_timeout_sec))

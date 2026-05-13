@@ -251,6 +251,7 @@ class BattlesuitGateway:
                 category="binary_missing",
             ), "gemini_missing"
 
+        invocation_build_start = time.monotonic()
         invocation = build_gemini_cli_invocation(
             prompt=sys_msg,
             payload=content,
@@ -258,15 +259,19 @@ class BattlesuitGateway:
             gemini_entry=gemini_entry,
             node_bin=node_bin,
             env=custom_env,
+            cwd=str(self.project_root.resolve()),
         )
+        invocation_build_sec = round(time.monotonic() - invocation_build_start, 4)
         tmp_payload = None
         if invocation.prompt_stdin is not None:
             tmp_payload = (self.project_root / f".nexus/payload_{os.getpid()}.txt").resolve()
             tmp_payload.parent.mkdir(parents=True, exist_ok=True)
             tmp_payload.write_text(invocation.prompt_stdin, encoding="utf-8")
+        gateway_telemetry["gateway_invocation_build_sec"] = invocation_build_sec
         
         for attempt in range(max_retries):
             try:
+                process_start = time.monotonic()
                 res = _run_cli_with_hard_timeout(
                     invocation.command,
                     stdin_path=tmp_payload,
@@ -274,10 +279,12 @@ class BattlesuitGateway:
                     cwd=invocation.cwd,
                     timeout_sec=dynamic_timeout,
                 )
+                gateway_process_sec = round(time.monotonic() - process_start, 4)
                 
                 # Retry with explicit node if gemini shim cannot find node runtime.
                 stderr_lower = (res.stderr or "").lower()
                 if res.returncode != 0 and invocation.command_with_node and "env: node: no such file or directory" in stderr_lower:
+                    process_start = time.monotonic()
                     res = _run_cli_with_hard_timeout(
                         invocation.command_with_node,
                         stdin_path=tmp_payload,
@@ -285,6 +292,7 @@ class BattlesuitGateway:
                         cwd=invocation.cwd,
                         timeout_sec=dynamic_timeout,
                     )
+                    gateway_process_sec = round(time.monotonic() - process_start, 4)
                     stderr_lower = (res.stderr or "").lower()
 
                 if "login" in stderr_lower:
@@ -300,6 +308,7 @@ class BattlesuitGateway:
                 raw_stdout = res.stdout.strip()
 
                 try:
+                    parse_start = time.monotonic()
                     try:
                         resp_json = json.loads(raw_stdout)
                     except json.JSONDecodeError:
@@ -308,8 +317,45 @@ class BattlesuitGateway:
                     
                     token_info = extract_token_info(resp_json)
                     tokens_total = int(token_info["total_tokens"])
+                    token_chars = int(gateway_telemetry.get("gateway_total_chars", 0) or 0) + len(str(output_text or ""))
+                    if (
+                        str(token_info.get("gateway_token_source") or "") == "stats"
+                        and tokens_total > max(200000, token_chars * 40)
+                    ):
+                        raw_provider_total_tokens = tokens_total
+                        tokens_total = max(1, token_chars // 4)
+                        token_info = dict(token_info)
+                        token_info["raw_provider_total_tokens"] = raw_provider_total_tokens
+                        token_info["raw_provider_token_source"] = "stats"
+                        token_info["total_tokens"] = tokens_total
+                        token_info["gateway_token_source"] = "estimated_from_stats_outlier"
+                        token_info["gateway_token_outlier_reason"] = "stats_outlier_possible_cumulative"
+                        token_info["provider_stats_cumulative_suspected"] = True
+                        token_info["token_accounting_failure_class"] = "provider_stats_outlier"
+                        token_info["token_ledger_status"] = "normalized_from_cumulative_stats"
+                        token_info["token_ledger_source"] = "prompt_output_char_estimate"
+                        token_info["token_ledger_normalized_tokens"] = tokens_total
+                        token_info["token_ledger_raw_provider_total_tokens"] = raw_provider_total_tokens
+                    elif tokens_total > 0:
+                        token_info = dict(token_info)
+                        token_info["token_ledger_status"] = "provider_measured"
+                        token_info["token_ledger_source"] = str(token_info.get("gateway_token_source") or "provider")
+                        token_info["token_ledger_normalized_tokens"] = tokens_total
+                        token_info["token_ledger_raw_provider_total_tokens"] = int(
+                            token_info.get("raw_provider_total_tokens", 0) or 0
+                        )
                                 
                     capture_status = "measured" if tokens_total > 0 else "missing_gateway_stats"
+                    if str(token_info.get("gateway_token_source") or "") == "estimated_from_stats_outlier":
+                        capture_status = "estimated"
+                    parse_sec = round(time.monotonic() - parse_start, 4)
+                    gateway_telemetry["gateway_process_sec"] = gateway_process_sec
+                    gateway_telemetry["gateway_provider_wait_sec"] = gateway_process_sec
+                    gateway_telemetry["gateway_parse_sec"] = parse_sec
+                    gateway_telemetry["gateway_total_sec"] = round(
+                        invocation_build_sec + gateway_process_sec + parse_sec,
+                        4,
+                    )
                     parsed = self._parse_json_result(output_text, tokens_total, capture_status, token_info, gateway_telemetry)
                     if tmp_payload is not None and tmp_payload.exists():
                         tmp_payload.unlink()
@@ -370,6 +416,19 @@ class BattlesuitGateway:
                 data["gateway_stats_present"] = bool(token_info.get("gateway_stats_present", False))
                 data["gateway_usage_metadata_present"] = bool(token_info.get("gateway_usage_metadata_present", False))
                 data["gateway_token_source"] = str(token_info.get("gateway_token_source") or "missing")
+                data["gateway_token_outlier_reason"] = str(token_info.get("gateway_token_outlier_reason") or "")
+                data["raw_provider_total_tokens"] = int(token_info.get("raw_provider_total_tokens", 0) or 0)
+                data["raw_provider_token_source"] = str(token_info.get("raw_provider_token_source") or "")
+                data["provider_stats_cumulative_suspected"] = bool(
+                    token_info.get("provider_stats_cumulative_suspected", False)
+                )
+                data["token_accounting_failure_class"] = str(token_info.get("token_accounting_failure_class") or "")
+                data["token_ledger_status"] = str(token_info.get("token_ledger_status") or "")
+                data["token_ledger_source"] = str(token_info.get("token_ledger_source") or "")
+                data["token_ledger_normalized_tokens"] = int(token_info.get("token_ledger_normalized_tokens", 0) or 0)
+                data["token_ledger_raw_provider_total_tokens"] = int(
+                    token_info.get("token_ledger_raw_provider_total_tokens", 0) or 0
+                )
             if isinstance(gateway_telemetry, dict):
                 data.update(gateway_telemetry)
             

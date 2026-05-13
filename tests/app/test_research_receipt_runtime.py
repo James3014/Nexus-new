@@ -75,3 +75,24 @@ def test_build_capability_receipt_payloads_preserves_runtime_repair_loop_receipt
     by_name = {item["name"]: item for item in receipts}
     assert by_name["repair_loop"]["public_claim_safe"] is True
     assert by_name["repair_loop"]["evidence_refs"] == [".nexus/reports/rlm/trace.jsonl"]
+
+
+def test_hyper_runtime_usage_backfill_is_marked_as_supporting_flow():
+    capabilities = {
+        "claim_verified": True,
+        "hyper_used": True,
+        "winner_source": "hyper_sprint",
+        "attempt_count": 1,
+    }
+    receipts = build_capability_receipt_payloads(
+        {"selected_capabilities": ["delivery_gate"]},
+        {"capabilities": capabilities},
+    )
+
+    by_name = {item["name"]: item for item in receipts}
+    assert by_name["hyper"]["invoked"] is True
+    assert by_name["hyper"]["public_claim_safe"] is True
+    assert by_name["hyper"]["selection_source"] == "supporting_flow_forced_hyper_sprint"
+    assert capabilities["runtime_supporting_capabilities"] == {
+        "hyper": "runtime_flow_used_without_route_oracle_expectation"
+    }

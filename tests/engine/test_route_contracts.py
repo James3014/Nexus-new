@@ -87,7 +87,7 @@ def test_route_decision_adapter_preserves_full_capability_space():
     assert {"autoreason", "ddtree", "ultra_review", "swarm", "drone", "nightshift"} <= set(
         decision["conditional_capabilities"]
     )
-    assert {"swarm", "drone", "nightshift"} <= set(decision["pending_capabilities"])
+    assert not ({"swarm", "drone", "nightshift"} & set(decision["pending_capabilities"]))
     assert "ddtree" in decision["acceleration_layers"]
     assert "ultra_review" in decision["governance_layers"]
     assert decision["stop_policy"]["tactical_sequence"][0] == "hyper_sprint"
@@ -97,9 +97,9 @@ def test_route_decision_adapter_preserves_full_capability_space():
         for item in decision["stop_policy"]["tactical_tool_map"]
     )
     assert decision["executor_controls"]["enable_autoreason_executor"] is True
-    assert decision["executor_controls"]["enable_swarm"] is False
-    assert decision["executor_controls"]["enable_drone"] is False
-    assert decision["executor_controls"]["enable_nightshift"] is False
+    assert decision["executor_controls"]["enable_swarm"] is True
+    assert decision["executor_controls"]["enable_drone"] is True
+    assert decision["executor_controls"]["enable_nightshift"] is True
     assert decision["fallback_policy"] == "fail_closed"
     assert decision["public_claim_scope"] == "receipt_backed"
     assert decision["plan_schema_version"] == "nexus_capability_plan_v1"

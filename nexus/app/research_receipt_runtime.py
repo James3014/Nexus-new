@@ -52,6 +52,12 @@ def runtime_receipt_plan_payload(
     if hyper_used and "hyper" not in selected:
         selected.append("hyper")
         plan["selected_capabilities"] = selected
+        capabilities["hyper_selection_source"] = "supporting_flow_forced_hyper_sprint"
+        supporting = capabilities.get("runtime_supporting_capabilities")
+        if not isinstance(supporting, dict):
+            supporting = {}
+        supporting["hyper"] = "runtime_flow_used_without_route_oracle_expectation"
+        capabilities["runtime_supporting_capabilities"] = supporting
 
     if pruned:
         plan["selected_capabilities"] = selected

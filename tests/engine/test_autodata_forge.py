@@ -4,6 +4,9 @@ import json
 
 from nexus.engine.autodata_forge import (
     DataForgeManifestRow,
+    benchmark_row_audit_passed,
+    benchmark_row_score,
+    benchmark_rows_to_data_forge_rows,
     classify_trajectory_quality,
     validate_hard_trajectory_pool,
     write_data_forge_manifest,
@@ -77,3 +80,59 @@ def test_hard_trajectory_pool_requires_gold_negative_and_evidence():
 
     assert payload["passed"] is True
     assert payload["row_count"] == 2
+
+
+def test_benchmark_row_score_requires_verified_success_without_infra_invalid():
+    assert benchmark_row_score({"status": "SUCCESS", "semantic_status": "VERIFIED"}) == 1.0
+    assert benchmark_row_score({"status": "FAILED", "semantic_status": "VERIFIED"}) == 0.0
+    assert benchmark_row_score({"status": "SUCCESS", "semantic_status": "UNVERIFIED"}) == 0.0
+    assert benchmark_row_score({"status": "SUCCESS", "semantic_status": "VERIFIED", "infra_invalid": True}) == 0.0
+    assert benchmark_row_audit_passed({"status": "SUCCESS", "semantic_status": "VERIFIED", "trust_mismatch": True}) is False
+
+
+def test_benchmark_rows_to_data_forge_rows_mines_gold_and_hard_negative():
+    rows = benchmark_rows_to_data_forge_rows(
+        strong_source="with.jsonl",
+        weak_source="without.jsonl",
+        strong_rows=[
+            {
+                "task_id": "governance-001",
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "trajectory_step_count": 18,
+                "evidence_record_file": "with.row.json",
+            },
+            {
+                "task_id": "easy-001",
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "trajectory_step_count": 4,
+                "evidence_record_file": "with-easy.row.json",
+            },
+        ],
+        weak_rows=[
+            {
+                "task_id": "governance-001",
+                "status": "FAILED",
+                "semantic_status": "UNVERIFIED",
+                "evidence_record_file": "without.row.json",
+            },
+            {
+                "task_id": "easy-001",
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "evidence_record_file": "without-easy.row.json",
+            },
+        ],
+    )
+
+    payloads = [row.to_dict() for row in rows]
+
+    assert len(payloads) == 3
+    assert payloads[0]["label"]["label"] == "GOLD"
+    assert payloads[0]["eligible_for_training"] is True
+    assert payloads[1]["task_id"] == "governance-001::weak_failure"
+    assert payloads[1]["hard_negative"] is True
+    assert payloads[1]["eligible_for_training"] is False
+    assert payloads[2]["label"]["label"] == "SILVER"
+    assert payloads[2]["low_step_filter"]["filtered"] is True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from nexus.engine.capability_receipt_policy import (
+    is_internal_marker_capability,
     RECEIPT_BACKED_CAPABILITIES,
     is_public_claim_capability,
     is_receipt_backed_capability,
@@ -67,3 +68,18 @@ def test_public_safe_receipt_names_returns_normalized_names_only():
             {"name": "", "public_claim_safe": True},
         ]
     ) == {"judge_panel"}
+
+
+def test_internal_marker_capability_is_not_route_quality_actionable_even_with_runtime_signal():
+    receipt = {
+        "name": "acceptance_check",
+        "selected": True,
+        "invoked": True,
+        "evidence_present": True,
+        "gate_passed": True,
+        "outcome_contributed": True,
+        "public_claim_safe": False,
+    }
+
+    assert is_internal_marker_capability("acceptance_check") is True
+    assert is_route_quality_actionable_receipt(receipt) is False

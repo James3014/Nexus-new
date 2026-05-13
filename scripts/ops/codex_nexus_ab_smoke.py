@@ -24,6 +24,7 @@ def benchmark_env(model: str) -> dict[str, str]:
     env["NEXUS_VALUE_HIDDEN_VERIFIER"] = "1"
     env["NEXUS_CODEX_MODEL_NAME"] = model
     env["NEXUS_DIRECT_CODEX_MODEL"] = model
+    env["NEXUS_CODEX_IGNORE_USER_CONFIG"] = "1"
     env["NEXUS_RLM_REPAIR_LOOP"] = "1"
     env["NEXUS_DIRECT_CODEX_TIMEOUT_SEC"] = "180"
     env["NEXUS_BENCH_GATEWAY_TIMEOUT_SEC"] = "240"

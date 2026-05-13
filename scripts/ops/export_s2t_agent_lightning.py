@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.contracts.learning_experience import learning_experience_from_dict
-from nexus.contracts.s2t_export import export_agent_lightning_preferences, export_model_training_v2, redact_s2t_event
+from nexus.contracts.s2t_export import export_agent_lightning_preferences, export_model_training_v2, export_model_training_v3, redact_s2t_event
 from nexus.contracts.s2t_trace import S2TTraceEvent
 
 
@@ -71,16 +71,23 @@ def export_s2t_trace_file(
         }
 
     events = _load_events(input_path)
-    if export_format == "v2":
+    if export_format in {"v2", "v3"}:
         experiences = (
             [learning_experience_from_dict(row) for row in _load_json_rows(experience_manifest)]
             if experience_manifest
             else None
         )
         quality_rows = _load_json_rows(autodata_manifest) if autodata_manifest else None
-        export = export_model_training_v2(events, experiences=experiences, quality_rows=quality_rows)
+        export = (
+            export_model_training_v3(events, experiences=experiences, quality_rows=quality_rows)
+            if export_format == "v3"
+            else export_model_training_v2(events, experiences=experiences, quality_rows=quality_rows)
+        )
         payload = {**export, "source": str(input_path)}
-        preference_pairs = export["compat"]["agent_lightning_preferences_v1"]["pair_count"]
+        if export_format == "v3":
+            preference_pairs = export["summary"]["preference_pair_count"]
+        else:
+            preference_pairs = export["compat"]["agent_lightning_preferences_v1"]["pair_count"]
     else:
         export = export_agent_lightning_preferences(events)
         redacted_rows = [redact_s2t_event(event) for event in events]
@@ -98,8 +105,8 @@ def export_s2t_trace_file(
         "source_rows": len(events),
         "preference_pairs": preference_pairs,
         "format": export_format,
-        "experience_rows": len(payload.get("experience_rows", [])) if export_format == "v2" else 0,
-        "autodata_attached": bool(payload.get("quality_gate", {}).get("autodata_attached", False)) if export_format == "v2" else False,
+        "experience_rows": len(payload.get("experience_rows", [])) if export_format == "v2" else len(payload.get("compat", {}).get("v2", {}).get("experience_rows", [])) if export_format == "v3" else 0,
+        "autodata_attached": bool(payload.get("quality_gate", {}).get("autodata_attached", False)) if export_format == "v2" else bool(payload.get("compat", {}).get("v2", {}).get("quality_gate", {}).get("autodata_attached", False)) if export_format == "v3" else False,
     }
     if not dry_run:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export S2T trace JSONL to Agent Lightning preference JSON.")
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--format", choices=("v1", "v2"), default="v1")
+    parser.add_argument("--format", choices=("v1", "v2", "v3"), default="v1")
     parser.add_argument("--experience-manifest", type=Path)
     parser.add_argument("--autodata-manifest", type=Path)
     parser.add_argument("--dry-run", action="store_true")

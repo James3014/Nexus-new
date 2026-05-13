@@ -15,7 +15,7 @@ def test_capability_coverage_gap_report_marks_reserved_and_pending(tmp_path):
     assert report["schema_version"] == "nexus_capability_coverage_gap_v1"
     assert report["unruled_count"] == 0
     assert {item["capability"] for item in report["reserved_capabilities"]} == {"autonomic_router", "learn_scheduler"}
-    assert set(report["pending_executor_capabilities"]) == {"drone", "nightshift", "swarm"}
+    assert report["pending_executor_capabilities"] == []
 
     path = write_capability_coverage_gap_report(tmp_path / "gap.json")
     assert json.loads(path.read_text(encoding="utf-8"))["unruled_count"] == 0

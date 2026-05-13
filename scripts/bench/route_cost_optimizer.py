@@ -6,15 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-LOCAL_SUCCESS_SOURCES = {
-    "local",
-    "local_only",
-    "local_hidden_shadow",
-    "local_preflight",
-    "local_deterministic_success",
-    "nexus_tool_success",
-}
-PROVIDER_TOKEN_SOURCES = {"stats", "usage_metadata", "codex_stdout"}
+from scripts.bench.cost_evidence_classifier import (
+    LOCAL_SUCCESS_SOURCES,
+    model_attempt_runner_overhead_polluted,
+    row_has_measured_provider_tokens,
+)
 
 
 @dataclass(frozen=True)
@@ -114,9 +110,7 @@ def _candidate_bare_rows(run_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def _measured_token_only(row: dict[str, Any]) -> bool:
-    token_status = str(row.get("token_capture_status") or row.get("model_token_capture_status") or "").strip().lower()
-    token_source = str(row.get("gateway_token_source") or "").strip().lower()
-    return bool(row.get("token_measured", False) and token_status == "measured" and token_source in PROVIDER_TOKEN_SOURCES)
+    return row_has_measured_provider_tokens(row)
 
 
 def _clean_model_cost_evidence(row: dict[str, Any]) -> bool:
@@ -151,9 +145,7 @@ def _cost_evidence_class(row: dict[str, Any]) -> str:
 
 
 def _runner_overhead_polluted(row: dict[str, Any]) -> bool:
-    if "model_attempt_runner_overhead_polluted" in row:
-        return bool(row.get("model_attempt_runner_overhead_polluted", False))
-    return bool(row.get("runner_overhead_polluted", False))
+    return model_attempt_runner_overhead_polluted(row)
 
 
 def _effective_candidate_wall(row: dict[str, Any]) -> float:
@@ -250,6 +242,26 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
     promoted = [item.task_id for item in decisions if item.decision == "promote_cost_tune"]
     lite = [item.task_id for item in decisions if item.decision == "route_lite_required"]
     hold = [item.task_id for item in decisions if item.decision.startswith("hold") or item.decision.startswith("reject")]
+    feature_rules = [
+        *_route_cost_feature_rules(
+            decisions,
+            candidate_rows,
+            decision="promote_cost_tune",
+            controls={"candidate_cap": 1},
+        ),
+        *_route_cost_feature_rules(
+            decisions,
+            candidate_rows,
+            decision="route_lite_required",
+            controls={"candidate_cap": 1, "lite_route": True},
+        ),
+        *_route_cost_feature_rules(
+            decisions,
+            candidate_rows,
+            decision_prefixes=("hold", "reject"),
+            controls={"hold": True},
+        ),
+    ]
     return {
         "schema_version": "nexus_route_cost_optimizer_v1",
         "baseline_schema": baseline_aggregate.get("schema_version", ""),
@@ -282,9 +294,15 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         "promoted_policy": {
             "schema_version": "nexus_promoted_route_cost_policy.v1",
             "source": str(candidate_dir),
-            "candidate_cap_overrides": {task_id: 1 for task_id in promoted},
-            "lite_route_tasks": lite,
-            "hold_tasks": hold,
+            "feature_rules": feature_rules,
+            "candidate_cap_overrides": {},
+            "lite_route_tasks": [],
+            "hold_tasks": [],
+            "legacy_task_policy_source_ids": {
+                "promoted_task_ids": promoted,
+                "lite_required_task_ids": lite,
+                "hold_task_ids": hold,
+            },
             "promotion_gate": {
                 "verified_delivery_preserved": all(item.candidate_verified for item in decisions),
                 "trust_mismatch_zero_required": True,
@@ -295,6 +313,110 @@ def build_optimizer_plan(*, baseline_aggregate: dict[str, Any], candidate_dir: P
         },
         "next_required_action": _next_required_action(decisions),
     }
+
+
+def build_longtail_cost_recommendations(route_cost_ledger: dict[str, Any]) -> dict[str, Any]:
+    """Convert route-cost ledger offenders into safe, lane-aware tuning hints."""
+
+    arms = route_cost_ledger.get("arms", {}) if isinstance(route_cost_ledger, dict) else {}
+    with_nexus = arms.get("with_nexus", {}) if isinstance(arms.get("with_nexus", {}), dict) else {}
+    offenders = with_nexus.get("top_phase_wall_offenders") or with_nexus.get("top_wall_offenders") or []
+    recommendations: list[dict[str, Any]] = []
+    for offender in offenders if isinstance(offenders, list) else []:
+        if not isinstance(offender, dict):
+            continue
+        phase = str(offender.get("dominant_phase") or "").upper()
+        capability = str(offender.get("task_capability") or "unknown").strip() or "unknown"
+        task_type = str(offender.get("task_type") or "").strip()
+        controls: dict[str, Any] = {"context_mode": "compact"}
+        safety_floor = ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"]
+        rationale = "compact_context_for_longtail_offender"
+        if phase == "R":
+            controls["max_rounds"] = 1
+            rationale = "cap_repair_phase_rounds_preserve_gates"
+            if capability == "ddtree":
+                controls["candidate_cap"] = 3
+                safety_floor.append("ddtree")
+                rationale = "ddtree_requires_three_candidates_but_single_repair_round"
+            elif capability in {"autoreason", "ultra_review", "research"}:
+                safety_floor.append(capability)
+        elif phase == "X":
+            controls["disable_research"] = capability != "research"
+            rationale = "slim_recon_context_without_disabling_expected_research"
+            if capability == "research":
+                safety_floor.append("research")
+        elif phase == "A":
+            rationale = "audit_phase_longtail_preserve_claim_and_delivery_gates"
+            safety_floor.extend(["claim_gate", "delivery_gate"])
+        match = {"task_capability": capability}
+        if task_type:
+            match["task_type"] = task_type
+        recommendations.append(
+            {
+                "task_id": str(offender.get("task_id") or ""),
+                "match": match,
+                "dominant_phase": phase,
+                "controls": controls,
+                "safety_floor": sorted(set(safety_floor)),
+                "rationale": rationale,
+                "claim_boundary": "recommendation_only_requires_rerun_before_promotion",
+            }
+        )
+    return {
+        "schema_version": "nexus_route_cost_longtail_recommendations_v1",
+        "source_schema": str(route_cost_ledger.get("schema") or ""),
+        "recommendations": recommendations,
+        "promotion_gate": {
+            "requires_verified_delivery_preserved": True,
+            "requires_trust_mismatch_zero": True,
+            "requires_same_model_rerun": True,
+            "do_not_remove_governance_gates": True,
+        },
+    }
+
+
+def _route_cost_feature_rules(
+    decisions: list[TaskCostDecision],
+    rows_by_task_id: dict[str, dict[str, Any]],
+    *,
+    controls: dict[str, Any],
+    decision: str | None = None,
+    decision_prefixes: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    rules: list[dict[str, Any]] = []
+    for item in decisions:
+        if decision is not None and item.decision != decision:
+            continue
+        if decision_prefixes and not item.decision.startswith(decision_prefixes):
+            continue
+        match = _stable_feature_match(rows_by_task_id.get(item.task_id, {}))
+        if not match:
+            continue
+        rule_id = "optimizer:{decision}:{task_id}".format(decision=item.decision, task_id=_slug(item.task_id))
+        rules.append(
+            {
+                "id": rule_id,
+                "match": match,
+                "controls": dict(controls),
+                "source_task_ids": [item.task_id],
+                "evidence": {
+                    "reason": item.reason,
+                    "wall_delta_pct": item.wall_delta_pct,
+                    "token_delta_pct": item.token_delta_pct,
+                    "cost_evidence_class": item.cost_evidence_class,
+                },
+            }
+        )
+    return rules
+
+
+def _stable_feature_match(row: dict[str, Any]) -> dict[str, str]:
+    keys = ("task_type", "difficulty", "category", "repo_kind", "fixture_kind")
+    return {key: str(row.get(key)).strip() for key in keys if str(row.get(key) or "").strip()}
+
+
+def _slug(value: str) -> str:
+    return "".join(ch if ch.isalnum() else "-" for ch in str(value).strip()).strip("-") or "unknown"
 
 
 def _next_required_action(decisions: list[TaskCostDecision]) -> str:

@@ -24,8 +24,10 @@ def test_refine_route_cost_policy_keeps_only_verified_cost_improvements():
 
     refined = refine_policy(baseline_rows=baseline_rows, candidate_rows=candidate_rows, policy=policy)
 
-    assert refined["candidate_cap_overrides"] == {"kept": 1}
-    assert refined["lite_route_tasks"] == ["kept"]
+    assert refined["candidate_cap_overrides"] == {}
+    assert refined["lite_route_tasks"] == []
+    assert refined["legacy_task_policy_source_ids"]["candidate_cap_task_ids"] == ["kept"]
+    assert refined["legacy_task_policy_source_ids"]["lite_task_ids"] == ["kept"]
     assert refined["refinement"]["rejected_task_reasons"] == {
         "failed": "verified_delivery_not_preserved",
         "slower": "cost_not_improved",

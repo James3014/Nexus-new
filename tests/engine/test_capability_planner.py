@@ -3,6 +3,7 @@ from __future__ import annotations
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.engine.learning_policy_loader import (
     audit_route_cost_policy,
+    build_route_cost_policy_usage_ledger,
     load_learning_policy_budget,
     load_route_cost_policy_budget,
     load_route_cost_policy_budget_from_env,
@@ -46,7 +47,7 @@ def test_capability_planner_builds_constrained_composition_trace():
     assert {"codeintel", "research", "hyper", "autoreason", "ddtree", "ultra_review", "swarm", "drone"} <= set(
         plan["conditional_capabilities"]
     )
-    assert {"swarm", "drone"} <= set(plan["pending_capabilities"])
+    assert not ({"swarm", "drone"} & set(plan["pending_capabilities"]))
     assert "claim_fail_closed" in plan["constraints"]
     assert any(item["capability"] == "ultra_review" and item["state"] == "conditional" for item in plan["decision_trace"])
     assert any(item["phase"] == "A" and "claim_and_artifact_fail_closed" in item["replan_reasons"] for item in plan["replan_trace"])
@@ -154,6 +155,127 @@ def test_capability_planner_downgrades_optional_cost_but_keeps_gates():
     assert {"mempalace_gate", "artifact_gate", "claim_gate"} <= set(plan["selected_capabilities"])
     assert plan["forbidden_capabilities"]
     assert not {"mempalace_gate", "artifact_gate", "claim_gate"} & set(plan["forbidden_capabilities"])
+
+
+def test_capability_planner_budget_safety_floor_preserves_high_risk_governance():
+    plan = CapabilityPlanner().plan(
+        task_desc="Refactor credential scrubber without weakening governance or claim evidence.",
+        task_type="bug",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 95,
+                "candidate_count": 4,
+                "is_cross_module_task": True,
+                "has_governance_signal": True,
+            },
+            "capability_stack": {"selected_capabilities": ["hyper_sprint"], "governance_layers": ["ultra_review"]},
+        },
+        budget={"max_cost": 8},
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    forbidden = set(plan["forbidden_capabilities"])
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate", "ultra_review", "sandbox"} <= selected
+    assert not {"ultra_review", "sandbox", "pregate", "plan_quality_gate"} & forbidden
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert "budget_safety_floor_preserved" in trace["ultra_review"]["reasons"]
+
+
+def test_capability_planner_escalates_survived_mutation_blind_spot():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix public claim safety after mutation assurance found a blind spot.",
+        task_type="public_feature",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 30, "candidate_count": 1},
+            "mutation_assurance": {
+                "required": True,
+                "survived_mutants_present": True,
+                "survived_mutant_ids": ["public_safe_forced_true"],
+            },
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"ultra_review", "sandbox", "autoreason", "jit_validation"} <= selected
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert "mutation_assurance_blind_spot_escalation" in trace["ultra_review"]["reasons"]
+
+
+def test_capability_planner_emits_ssd_route_map_for_every_selected_capability():
+    plan = CapabilityPlanner().plan(
+        task_desc="Use research and codeintel to repair cross-module route evidence.",
+        task_type="bug",
+        route={
+            "should_research": True,
+            "route_features": {
+                "risk_score": 76,
+                "candidate_count": 3,
+                "is_cross_module_task": True,
+                "memory_hits": 2,
+            },
+        },
+        pillars={"lancedb": {"hits": 2}},
+    ).to_dict()
+
+    route_map = plan["signal_snapshot"]["ssd_route_map"]
+    assert route_map["schema_version"] == "nexus_ssd_route_map_v1"
+    assert route_map["map_status"] == "PASS"
+    assert set(plan["selected_capabilities"]) == set(route_map["capability_reasons"])
+    assert route_map["leverage_points"]
+    for item in plan["decision_trace"]:
+        if item["state"] in {"required", "conditional"}:
+            assert item["leverage_role"], item["capability"]
+
+
+def test_capability_planner_emits_dream_context_slimming_for_simple_hidden_path():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix a simple hidden fixture assertion without external research.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {
+                "risk_score": 10,
+                "adjusted_root_cause_confidence": 0.95,
+                "candidate_count": 1,
+                "simple_hidden_bugfix": True,
+            },
+        },
+    ).to_dict()
+
+    slimming = plan["signal_snapshot"]["context_slimming_policy"]
+    assert slimming["schema_version"] == "nexus_context_slimming_policy_v1"
+    assert slimming["mode"] == "dream_micro"
+    assert slimming["max_context_items"] <= 4
+    assert slimming["allow_research_context"] is False
+    assert "unreferenced_codeintel_sections" in slimming["drop_by_default"]
+
+
+def test_capability_planner_selects_harness_sensors_without_heavy_route_bloat():
+    plan = CapabilityPlanner().plan(
+        task_desc="Given-When-Then business acceptance after a hidden verifier AssertionError.",
+        task_type="business_acceptance",
+        route={
+            "bdd_acceptance": True,
+            "failure_text": "Hidden verifier failure: AssertionError expected candidate winner",
+            "route_features": {
+                "risk_score": 18,
+                "candidate_count": 1,
+                "simple_hidden_bugfix": True,
+            },
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    snapshot = plan["signal_snapshot"]
+    assert "harness_preflight_sensor" in selected
+    assert "semantic_failure_sensor" in selected
+    assert "bdd_acceptance_skill" in selected
+    assert snapshot["harness_preflight_sensor"]["cost_lane"] == "lite"
+    assert snapshot["harness_preflight_sensor"]["bdd_acceptance_required"] is True
+    assert snapshot["semantic_failure_sensor"]["retry_policy"]["allow_blind_retry"] is False
+    assert "research" not in selected
 
 
 def test_capability_planner_default_scoring_matches_legacy_formula():
@@ -876,6 +998,58 @@ def test_route_cost_policy_loader_applies_feature_rules_without_task_id(tmp_path
     assert miss == {}
 
 
+def test_route_cost_policy_usage_ledger_marks_unmatched_feature_rules_for_dehydration():
+    policy = {
+        "feature_rules": [
+            {
+                "id": "feature:public-bug",
+                "match": {"task_type": "public_test_repair", "difficulty": "hard"},
+                "controls": {"candidate_cap": 1},
+            },
+            {
+                "id": "feature:fixture-only",
+                "match": {"fixture_kind": "neutral_fixture"},
+                "controls": {"lite_route": True},
+            },
+        ]
+    }
+
+    ledger = build_route_cost_policy_usage_ledger(
+        policy,
+        rows=[{"task_type": "public_test_repair", "difficulty": "hard"}],
+    )
+
+    assert ledger["schema_version"] == "nexus_route_cost_policy_usage_ledger.v1"
+    assert ledger["active_count"] == 1
+    assert ledger["dehydrate_candidate_count"] == 1
+    assert ledger["rules"][1]["status"] == "dehydrate_candidate"
+
+
+def test_route_cost_policy_audit_marks_fixture_only_feature_rules(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:fixture-only-lite",
+      "match": {"task_type": "bug", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "lite_route": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    audit = audit_route_cost_policy(tmp_path)
+
+    assert audit["passed"] is True
+    assert audit["feature_rule_scope"]["fixture_only"] is True
+    assert audit["feature_rule_scope"]["generic"] == 0
+
+
 def test_route_cost_policy_loader_can_match_local_reflex_features(tmp_path):
     artifact = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -1087,6 +1261,59 @@ def test_s2t_policy_draft_loader_feeds_shadow_scoring_without_runtime_promotion(
     assert plan["signal_snapshot"]["s2t_policy_draft"]["mode"] == "shadow_only_no_runtime_decision_change"
 
 
+def test_s2t_policy_draft_promoted_runtime_requires_gate(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_s2t_policy_draft.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema": "nexus_promoted_s2t_policy_draft_v1",
+  "status": "PROMOTED_RUNTIME",
+  "promotion_gate": {"passed": false, "trust_mismatch_rate": 0, "sample_count": 5, "rollback_policy": "disable_s2t"},
+  "task_rules": {"task-a": {"selector_profile": "lite", "recommended_action": "try_lite_with_defensive_gate"}}
+}""",
+        encoding="utf-8",
+    )
+
+    assert load_s2t_policy_draft_budget(artifact) == {}
+
+
+def test_s2t_policy_draft_promoted_runtime_can_downgrade_costly_non_floor_caps(tmp_path):
+    artifact = tmp_path / ".nexus" / "policy" / "promoted_s2t_policy_draft.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        """{
+  "schema": "nexus_promoted_s2t_policy_draft_v1",
+  "status": "PROMOTED_RUNTIME",
+  "promotion_gate": {"passed": true, "trust_mismatch_rate": 0, "sample_count": 5, "rollback_policy": "set NEXUS_DISABLE_S2T_POLICY_DRAFT=1"},
+  "task_rules": {
+    "task-a": {
+      "selector_profile": "lite",
+      "recommended_action": "try_lite_with_defensive_gate"
+    }
+  }
+}""",
+        encoding="utf-8",
+    )
+
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix a public API claim with external research evidence.",
+        task_type="public_feature",
+        route={
+            "task_id": "task-a",
+            "recommended_flow": "hyper_sprint",
+            "should_research": True,
+            "route_features": {"risk_score": 55, "candidate_count": 3, "claim_uncertainty": True},
+            "research_context": {"role": "claim_scout"},
+        },
+        budget=load_s2t_policy_draft_budget(artifact),
+    ).to_dict()
+
+    assert plan["signal_snapshot"]["s2t_policy_draft"]["mode"] == "promoted_runtime_candidate"
+    assert "research" not in plan["selected_capabilities"]
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert "s2t_promoted_policy_cost_downgrade" in trace["research"]["reasons"]
+
+
 def test_route_cost_controls_for_task_applies_current_env_controls(monkeypatch, tmp_path):
     monkeypatch.setenv(
         "NEXUS_ROUTE_COST_CONTROLS",
@@ -1148,6 +1375,101 @@ def test_route_cost_policy_loader_matches_real_benchmark_category_lane(tmp_path)
     assert controls["route_lane"] == "governance_hardened"
     assert controls["require_llm_baseline"] is True
     assert controls["skip_llm_baseline"] is True
+
+
+def test_route_cost_controls_protect_expected_capabilities_from_cost_slimming(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:low-cost-lite",
+                    "match": {"task_type": "public_test_repair"},
+                    "controls": {
+                        "candidate_cap": 1,
+                        "lite_route": True,
+                        "supervised_bare_first": True,
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "route-oracle-ddtree-ultra-001",
+        budget=budget,
+        route_features={"task_type": "public_test_repair"},
+        expected_capabilities=("ddtree", "ultra_review"),
+    )
+
+    assert controls["candidate_cap"] == 3
+    assert controls["lite_route"] is False
+    assert controls["supervised_bare_first"] is False
+    assert controls["expected_capability_protection"] == ["ddtree", "ultra_review"]
+
+
+def test_route_cost_controls_do_not_supervise_bare_when_expected_receipt_is_not_gate_only(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:low-cost-lite",
+                    "match": {"task_type": "public_test_repair"},
+                    "controls": {
+                        "lite_route": True,
+                        "supervised_bare_first": True,
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "route-oracle-semantic-failure-sensor-001",
+        budget=budget,
+        route_features={"task_type": "public_test_repair"},
+        expected_capabilities=("semantic_failure_sensor",),
+    )
+
+    assert controls["lite_route"] is True
+    assert controls["supervised_bare_first"] is False
+    assert controls["expected_capability_protection"] == ["semantic_failure_sensor"]
+
+
+def test_context_sync_capped_can_supervise_bare_with_preflight_receipts(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:docs-context-capped",
+                    "match": {"task_type": "public_docs_code_sync"},
+                    "controls": {
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "max_rounds": 1,
+                        "route_lane": "context_sync_capped",
+                        "supervised_bare_first": True,
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "model-required-docs-001",
+        budget=budget,
+        route_features={"task_type": "public_docs_code_sync"},
+        expected_capabilities=("codeintel", "memory", "delivery_gate"),
+    )
+
+    assert controls["route_lane"] == "context_sync_capped"
+    assert controls["supervised_bare_first"] is True
+    assert "expected_capability_protection" not in controls
 
 
 def test_capability_planner_lite_route_downgrades_high_cost_conditionals():
@@ -1504,6 +1826,38 @@ def test_capability_planner_keeps_route_oracle_expected_receipts_under_cost_poli
     assert "route_oracle_expected_receipt_required" in trace["lancedb"]["reasons"]
 
 
+def test_capability_planner_route_cost_policy_respects_expected_safety_floor():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Exercise governance review and candidate factory routing."
+            "\n\nNexus route oracle contract:"
+            "\n- Expected capability receipts: autoreason, ultra_review, research."
+        ),
+        task_type="public_test_repair",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_features": {"risk_score": 35, "candidate_count": 3},
+        },
+        budget={
+            "route_cost_policy": {
+                "current_lite_route": True,
+                "current_disable_research": True,
+                "protected_expected_capabilities": ["autoreason", "ultra_review", "research"],
+                "source": "test",
+            },
+        },
+    ).to_dict()
+
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    for capability in ("autoreason", "ultra_review", "research"):
+        assert capability in plan["selected_capabilities"]
+        assert "route_oracle_expected_receipt_required" in trace[capability]["reasons"]
+        assert not any(
+            str(reason).startswith("route_cost_capped_lane") or str(reason).startswith("route_cost_disable_research")
+            for reason in trace[capability]["reasons"]
+        )
+
+
 def test_capability_planner_ignores_wearing_contract_for_costly_lexical_signals():
     plan = CapabilityPlanner().plan(
         task_desc=(
@@ -1569,3 +1923,88 @@ def test_capability_planner_keeps_hidden_contract_fast_path_light_under_learning
         "simple_hidden_contract_fast_path_cost_control" in trace["research"]["reasons"]
         or "research_no_substantive_evidence_demand_cost_control" in trace["research"]["reasons"]
     )
+
+
+def test_capability_planner_harness_lite_lane_slims_seeded_high_cost_capabilities():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix a simple hidden fixture assertion with supervised bare-first fallback.",
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "baseline",
+            "route_decision": {
+                "selected_capabilities": ["research", "swarm", "nightshift", "ultra_review", "benchmark"],
+            },
+            "route_features": {
+                "risk_score": 10,
+                "candidate_count": 1,
+                "adjusted_root_cause_confidence": 0.98,
+                "simple_hidden_bugfix": True,
+            },
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate", "harness_preflight_sensor"} <= selected
+    assert not {"research", "swarm", "nightshift", "ultra_review", "benchmark"} & selected
+    policy = plan["signal_snapshot"]["harness_cost_lane_policy"]
+    assert policy["cost_lane"] == "lite"
+    assert policy["applied"] is True
+    assert {"swarm", "nightshift", "ultra_review", "benchmark"} <= set(policy["downgraded"])
+    trace = {item["capability"]: item for item in plan["decision_trace"]}
+    assert "harness_lite_lane_cost_slimming" in trace["swarm"]["reasons"]
+
+
+def test_capability_planner_harness_lite_lane_preserves_route_oracle_expected_capability():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Fix a simple hidden fixture assertion with semantic retrieval proof."
+            "\n\nNexus route oracle contract:"
+            "\n- Expected capability receipts: semantic_searcher."
+        ),
+        task_type="public_bugfix",
+        route={
+            "recommended_flow": "baseline",
+            "route_decision": {"selected_capabilities": ["semantic_searcher", "research"]},
+            "route_features": {
+                "risk_score": 10,
+                "candidate_count": 1,
+                "adjusted_root_cause_confidence": 0.98,
+                "simple_hidden_bugfix": True,
+            },
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert "semantic_searcher" in selected
+    assert "research" not in selected
+    policy = plan["signal_snapshot"]["harness_cost_lane_policy"]
+    assert "semantic_searcher" in policy["protected"]
+
+
+def test_capability_planner_drops_unbacked_bdd_and_failure_sensors_for_ops_route_oracles():
+    plan = CapabilityPlanner().plan(
+        task_desc=(
+            "Accept a swarm review only when independent roles provide evidence and consensus is explicit."
+            "\n\nNexus route oracle contract:"
+            "\n- Expected capability receipts: swarm."
+        ),
+        task_type="public_ops_research",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "route_decision": {
+                "selected_capabilities": [
+                    "bdd_acceptance_skill",
+                    "semantic_failure_sensor",
+                    "swarm",
+                ],
+            },
+            "route_features": {"risk_score": 75},
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert "swarm" in selected
+    assert "bdd_acceptance_skill" not in selected
+    assert "semantic_failure_sensor" not in selected
+    relevance = plan["signal_snapshot"]["harness_relevance_policy"]
+    assert set(relevance["downgraded"]) == {"bdd_acceptance_skill", "semantic_failure_sensor"}

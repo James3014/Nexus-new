@@ -5,6 +5,7 @@ import subprocess
 from types import SimpleNamespace
 
 from scripts.ops import nexus_pre_flash_gate
+from nexus.engine.local_reflex import ReflexAssessment
 
 
 def test_repair_factory_skipped_route_blocks_ranking_layers():
@@ -48,7 +49,9 @@ def test_quick_payload_skips_flash_style_repair_subset():
         "codex_nexus_smoke_plan",
         "brain_hub_coverage_gate",
         "openseeker_autodata_smoke",
+        "benchmark_autodata_manifest_gate",
         "pipeline_composition_gate",
+        "route_cost_policy_audit",
     }.issubset({item["name"] for item in payload["checks"]})
 
 
@@ -65,7 +68,9 @@ def test_quick_payload_includes_brain_hub_alignment_gate():
         "codex_nexus_smoke_plan",
         "brain_hub_coverage_gate",
         "openseeker_autodata_smoke",
+        "benchmark_autodata_manifest_gate",
         "pipeline_composition_gate",
+        "route_cost_policy_audit",
     }.issubset(names)
 
 
@@ -171,6 +176,48 @@ def test_quick_payload_includes_openseeker_autodata_smoke(tmp_path: Path):
     assert not (tmp_path / ".nexus" / "reports" / "pre_flash_autodata_manifest.json").exists()
 
 
+def test_benchmark_autodata_manifest_gate_accepts_real_flash_and_pro_manifests():
+    check = nexus_pre_flash_gate.validate_benchmark_autodata_manifest_gate(Path(".").resolve())[0]
+
+    assert check["passed"] is True
+    assert check["name"] == "benchmark_autodata_manifest_gate"
+    assert len(check["details"]["manifests"]) == 2
+    assert all(item["training_eligible_count"] >= 3 for item in check["details"]["manifests"])
+    assert all(item["hard_negative_count"] >= 3 for item in check["details"]["manifests"])
+
+
+def test_benchmark_autodata_manifest_gate_fails_without_manifest(tmp_path: Path):
+    check = nexus_pre_flash_gate.validate_benchmark_autodata_manifest_gate(tmp_path)[0]
+
+    assert check["passed"] is False
+    assert check["reason"] == "benchmark_autodata_manifest_gate_failed"
+    assert {item["reason"] for item in check["details"]["failures"]} == {"autodata_manifest_missing"}
+
+
+def test_benchmark_autodata_manifest_gate_fails_without_hard_negatives(tmp_path: Path):
+    manifest = tmp_path / ".nexus" / "reports" / "autodata" / "flash_8x1_autodata_manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        """{
+  "schema_version": "nexus_autodata_forge_manifest.v1",
+  "rows": [
+    {"task_id": "a", "label": {"label": "GOLD"}, "eligible_for_training": true, "hard_negative": false, "evidence_refs": ["EV-1"], "low_step_filter": {"filtered": false}},
+    {"task_id": "b", "label": {"label": "GOLD"}, "eligible_for_training": true, "hard_negative": false, "evidence_refs": ["EV-2"], "low_step_filter": {"filtered": false}},
+    {"task_id": "c", "label": {"label": "GOLD"}, "eligible_for_training": true, "hard_negative": false, "evidence_refs": ["EV-3"], "low_step_filter": {"filtered": false}}
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    check = nexus_pre_flash_gate.validate_benchmark_autodata_manifest_gate(
+        tmp_path,
+        manifest_paths=(manifest,),
+    )[0]
+
+    assert check["passed"] is False
+    assert check["details"]["failures"][0]["reason"] == "insufficient_hard_negative_rows"
+
+
 def test_quick_payload_includes_pipeline_composition_gate():
     check = nexus_pre_flash_gate.validate_pipeline_composition_gate(Path(".").resolve())[0]
 
@@ -179,6 +226,160 @@ def test_quick_payload_includes_pipeline_composition_gate():
     assert check["details"]["phase_ownership_status"] == "executor_owned_with_legacy_mixins_retained"
     assert check["details"]["runtime_missing_phases"] == []
     assert check["details"]["fallback_debt_phases"] == []
+
+
+def test_quick_payload_includes_route_cost_policy_audit():
+    check = nexus_pre_flash_gate.validate_route_cost_policy_audit(Path(".").resolve())[0]
+
+    assert check["passed"] is True
+    assert check["name"] == "route_cost_policy_audit"
+    assert check["details"]["task_id_runtime_policy_count"] == 0
+
+
+def test_quick_payload_includes_mutation_assurance_gate():
+    check = nexus_pre_flash_gate.validate_mutation_assurance_gate()[0]
+
+    assert check["passed"] is True
+    assert check["name"] == "mutation_assurance_gate"
+    assert check["details"]["gate"]["required"] is True
+    assert check["details"]["gate"]["killed_count"] == 1
+
+
+def test_quick_payload_includes_capability_wiring_and_scheduled_heavy_audit_gates():
+    payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir=".nexus/reports/test")
+    checks = {item["name"]: item for item in payload["checks"]}
+
+    wiring = checks["capability_wiring_audit"]
+    scheduled = checks["ralph_scheduled_heavy_audit"]
+    assert wiring["passed"] is True
+    assert wiring["details"]["pending_executor_without_spec"] == []
+    assert scheduled["passed"] is True
+    assert scheduled["details"]["foreground_policy"] == "summary_receipt_only"
+    assert scheduled["details"]["all_non_blocking"] is True
+    assert {item["capability"] for item in scheduled["details"]["tasks"]} == {
+        "mutation_assurance",
+        "autodata_forge",
+        "nightshift",
+    }
+
+
+def test_quick_payload_includes_harness_engineering_gate():
+    payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir=".nexus/reports/test")
+    checks = {item["name"]: item for item in payload["checks"]}
+
+    harness = checks["harness_engineering_gate"]
+    assert harness["passed"] is True
+    assert harness["details"]["preflight"]["bdd_acceptance_required"] is True
+    assert harness["details"]["semantic_failure_sensor"]["retry_policy"]["allow_blind_retry"] is False
+    assert harness["details"]["bdd_acceptance"]["business_verified"] is True
+
+
+def test_quick_payload_fails_when_mutation_assurance_gate_fails(monkeypatch):
+    monkeypatch.setattr(
+        nexus_pre_flash_gate,
+        "validate_mutation_assurance_gate",
+        lambda: [
+            {
+                "name": "mutation_assurance_gate",
+                "passed": False,
+                "reason": "mutation_assurance_failed",
+                "details": {"gate": {"failures": ["survived_mutants_present"]}},
+            }
+        ],
+    )
+
+    payload = nexus_pre_flash_gate.build_payload(Path(".").resolve(), run_repair=False, output_dir="unused")
+
+    assert payload["passed"] is False
+    assert any(item["name"] == "mutation_assurance_gate" and not item["passed"] for item in payload["checks"])
+
+
+def test_route_cost_policy_audit_ignores_legacy_task_controls(tmp_path: Path):
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "candidate_cap_overrides": {"task-a": 1},
+  "lite_route_tasks": ["task-b"],
+  "hold_tasks": ["task-c"]
+}""",
+        encoding="utf-8",
+    )
+
+    check = nexus_pre_flash_gate.validate_route_cost_policy_audit(tmp_path)[0]
+
+    assert check["passed"] is True
+    assert check["details"]["legacy_task_controls_ignored_count"] == 3
+    assert check["details"]["task_id_runtime_policy_count"] == 0
+
+
+def test_local_reflex_shadow_requires_destructive_probe_high_risk(monkeypatch):
+    def fake_assess(*, task_desc: str, provider: str | None = None, **_kwargs):
+        if provider == "bonsai":
+            return ReflexAssessment(
+                "nexus_local_reflex.v1",
+                "heuristic_fallback",
+                False,
+                "low",
+                "high",
+                False,
+                False,
+                False,
+                0.82,
+                0,
+                ("bonsai_unavailable",),
+            )
+        if "rm -rf" in task_desc:
+            return ReflexAssessment(
+                "nexus_local_reflex.v1",
+                "ollama",
+                True,
+                "low",
+                "high",
+                False,
+                False,
+                False,
+                0.7,
+                10,
+                ("bad_local_false_negative",),
+            )
+        if "Refactor core" in task_desc:
+            return ReflexAssessment(
+                "nexus_local_reflex.v1",
+                "ollama",
+                True,
+                "high",
+                "low",
+                False,
+                True,
+                True,
+                0.82,
+                10,
+                (),
+            )
+        return ReflexAssessment(
+            "nexus_local_reflex.v1",
+            "ollama",
+            True,
+            "low",
+            "high",
+            False,
+            False,
+            False,
+            0.82,
+            10,
+            (),
+        )
+
+    monkeypatch.setattr(nexus_pre_flash_gate, "assess_local_reflex", fake_assess)
+
+    check = nexus_pre_flash_gate.validate_local_reflex_shadow()[0]
+
+    assert check["passed"] is False
+    assert check["reason"] == "local_reflex_contract_mismatch"
+    assert check["details"]["destructive"]["risk_level"] == "low"
 
 
 def test_pipeline_composition_gate_fails_when_inventory_fails(monkeypatch):

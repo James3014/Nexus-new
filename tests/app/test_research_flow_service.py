@@ -1,5 +1,6 @@
 import pytest
 import json
+import subprocess
 from types import SimpleNamespace
 from pathlib import Path
 from nexus.app import research_flow_service
@@ -501,9 +502,21 @@ def test_decide_flow_payload_schema_keys(tmp_path: Path):
         "research_role",
         "claim_uncertainty",
         "benchmark_required",
+        "benchmark_hidden_contract_fast_path",
         "plateau_detected",
         "doc_scout_hits",
         "blocked_assumptions_count",
+        "local_reflex_schema",
+        "local_reflex_provider",
+        "local_reflex_available",
+        "local_reflex_risk_level",
+        "local_reflex_bare_sufficiency",
+        "local_reflex_needs_research",
+        "local_reflex_needs_hyper",
+        "local_reflex_needs_ultra_review",
+        "local_reflex_confidence",
+        "local_reflex_latency_ms",
+        "local_reflex_reasons",
     }
     assert set(payload["consensus"]) == {"votes", "reasons", "winner"}
     assert set(payload["explain_payload"]["history"]) == {"findings_hits", "memory_hits", "hints_count"}
@@ -850,6 +863,117 @@ def test_build_route_repair_contract_can_skip_research_under_cost_capped_benchma
     assert "research" not in out["capability_plan"]["selected_capabilities"]
 
 
+def test_build_route_honors_route_cost_disable_research_env(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv(
+        "NEXUS_ROUTE_COST_CONTROLS",
+        (
+            '{"disable_research": true, "context_mode": "compact", "route_lane": "hidden_lite", '
+            '"policy_source": "test"}'
+        ),
+    )
+
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Fix claim verification where API contract language would normally request research.",
+        task_type="public_feature",
+        candidate_count=3,
+        root_cause_confidence=0.55,
+        findings_query=None,
+        target_file="target.py",
+    )
+
+    assert out["should_research"] is False
+    assert out["research_context"]["route_cost_policy"]["disable_research"] is True
+    assert out["route_features"]["route_cost_disable_research"] is True
+    assert out["route_features"]["route_cost_context_mode"] == "compact"
+    assert "research" not in out["capability_plan"]["selected_capabilities"]
+
+
+def test_build_route_honors_capped_context_lane_at_runtime_plan(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv(
+        "NEXUS_ROUTE_COST_CONTROLS",
+        (
+            '{"disable_research": true, "context_mode": "compact", "max_rounds": 1, '
+            '"route_lane": "context_sync_capped", "policy_source": "test"}'
+        ),
+    )
+
+    out = research_flow_service.build_route(
+        repo_root=tmp_path,
+        task_desc="Synchronize public docs with neutral fixture behavior and keep evidence scoped.",
+        task_type="public_docs_code_sync",
+        candidate_count=1,
+        root_cause_confidence=0.8,
+        findings_query=None,
+        target_file="docs/example.md",
+    )
+
+    selected = set(out["capability_plan"]["selected_capabilities"])
+    assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= selected
+    assert "research_route" not in selected
+    assert "research" not in selected
+    assert "architecture_scout" not in selected
+    assert "nightshift" not in selected
+    assert "swarm" not in selected
+    assert "drone" not in selected
+
+
+def test_codeintel_context_compact_mode_keeps_evidence_but_trims_payload(monkeypatch):
+    monkeypatch.setenv("NEXUS_ROUTE_COST_CONTROLS", '{"context_mode": "compact"}')
+
+    text = research_flow_service._task_with_codeintel_context(
+        "Fix target behavior.",
+        {
+            "impact_report_present": True,
+            "impact_report_path": ".nexus/reports/codeintel/impact.json",
+            "risk_score": 42,
+            "impacted_files_count": 1,
+            "risk_reason": ["x" * 400],
+        },
+    )
+
+    assert "[Nexus CodeIntel Compact]" in text
+    assert "impact_report:" in text
+    assert len(text) < 420
+
+
+def test_codeintel_dci_runs_only_for_evidence_heavy_lane(tmp_path: Path, monkeypatch):
+    target = tmp_path / "target.py"
+    target.write_text(
+        "def canonical_parser(value):\n"
+        "    return value.strip()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_ROUTE_COST_CONTROLS", '{"route_lane": "context_sync_capped", "context_mode": "compact"}')
+
+    evidence = research_flow_service._build_codeintel_evidence(
+        tmp_path,
+        target_file=str(target),
+        task_desc="Synchronize canonical parser evidence.",
+    )
+    text = research_flow_service._task_with_codeintel_context("Fix parser", evidence)
+
+    assert evidence["dci_locator_present"] is True
+    assert evidence["dci_evidence_count"] >= 1
+    assert Path(evidence["dci_locator_report_path"]).exists()
+    assert "dci_evidence_count:" in text
+
+
+def test_hyper_execution_profile_honors_route_cost_max_rounds(monkeypatch):
+    monkeypatch.setenv("NEXUS_ROUTE_COST_CONTROLS", '{"max_rounds": 1}')
+
+    profile = research_flow_service.build_hyper_execution_profile(
+        task_desc="Repair an invariant failure tail that normally needs a second edit.",
+        task_type="public_test_repair",
+        candidate_count=4,
+        root_cause_confidence=0.4,
+        route_recommended_flow="hyper_sprint",
+    )
+
+    assert profile["effective_max_rounds"] == 1
+    assert "route_cost_max_rounds:1" in profile["tuning_reasons"]
+
+
 def test_build_hyper_execution_profile_treats_public_commercial_tasks_as_hard():
     profile = research_flow_service.build_hyper_execution_profile(
         task_desc="Fix claim verification so only fully supported successful claims are accepted.",
@@ -1038,6 +1162,28 @@ def test_local_msa_executor_adds_swarm_receipt_only_after_verified_artifact(tmp_
     assert report["source"] == "local_msa_bench_executor"
     assert report["evidence_count"] == 2
     assert report["quiet_moment"]["allowed_actions"] == ["observe", "report", "rollback"]
+
+
+def test_route_executor_flags_trigger_local_msa_runtime_without_env(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", raising=False)
+    evidence = research_flow_service._capability_evidence(
+        result_report={},
+        learning_trace={},
+        nightshift_recommended=False,
+    )
+
+    updated = research_flow_service._augment_local_msa_bench_evidence(
+        tmp_path,
+        task_id="route-oracle-swarm-001",
+        task_desc="Coordinate swarm review for a cross-module ownership conflict.",
+        task_type="cross_module_refactor_swarm",
+        evidence=evidence,
+        artifact_verified=True,
+        route_executor_flags={"enable_swarm": True},
+    )
+
+    assert updated["swarm_used"] is True
+    assert updated["swarm_report"]["source"] == "local_msa_bench_executor"
 
 
 def test_local_msa_executor_adds_drone_receipt_only_after_verified_artifact(tmp_path: Path, monkeypatch):
@@ -1508,6 +1654,95 @@ def test_strict_llm_baseline_does_not_fallback_to_local(tmp_path: Path, monkeypa
     assert report["fallback_used"] is False
     assert report["baseline_llm_required"] is True
     assert report["baseline_source_policy"] == "strict_llm_no_local_fallback"
+
+
+def test_baseline_apply_restores_target_after_pytest_failure(tmp_path: Path, monkeypatch):
+    target = tmp_path / "demo.py"
+    test_file = tmp_path / "test_demo.py"
+    original = "def value():\n    return 1\n"
+    patched = "def value():\n    return 2\n"
+    target.write_text(original, encoding="utf-8")
+    test_file.write_text("from demo import value\n\ndef test_value():\n    assert value() == 3\n", encoding="utf-8")
+
+    monkeypatch.setattr(research_flow_service, "generate_local_candidate", lambda *_args, **_kwargs: patched)
+    monkeypatch.setattr(
+        research_flow_service.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1, stdout="", stderr="assertion failed"),
+    )
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Add a tiny feature without hyper.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        task_type="feature",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow="baseline",
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-baseline-pytest-failed-restore",
+    )
+
+    assert payload["result"]["status"] == "FAILED"
+    assert payload["result"]["error"] == "pytest_failed"
+    assert target.read_text(encoding="utf-8") == original
+
+
+def test_baseline_apply_restores_target_after_timeout(tmp_path: Path, monkeypatch):
+    target = tmp_path / "demo.py"
+    test_file = tmp_path / "test_demo.py"
+    original = "def value():\n    return 1\n"
+    patched = "def value():\n    return 2\n"
+    target.write_text(original, encoding="utf-8")
+    test_file.write_text("from demo import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8")
+
+    def timeout_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(research_flow_service, "generate_local_candidate", lambda *_args, **_kwargs: patched)
+    monkeypatch.setattr(research_flow_service.subprocess, "run", timeout_run)
+
+    payload, _ = research_flow_service.run_auto_flow(
+        repo_root=tmp_path,
+        task_desc="Add a tiny feature without hyper.",
+        target_file="demo.py",
+        test_file="test_demo.py",
+        task_type="feature",
+        candidate_count=1,
+        root_cause_confidence=1.0,
+        findings_query=None,
+        llm_mode=False,
+        llm_baseline=False,
+        timeout_sec=30,
+        stage1_timeout_sec=10,
+        max_time_ratio_guard=1.5,
+        baseline_fast_sec=0.0,
+        history_window=1,
+        history_fail_threshold=999,
+        dynamic_timeout_multiplier=2.5,
+        min_dynamic_stage1_timeout=1,
+        force_flow="baseline",
+        report_file=".nexus/reports/research/auto-flow-report.json",
+        output_file=None,
+        task_id="case-baseline-timeout-restore",
+    )
+
+    assert payload["result"]["status"] == "FAILED"
+    assert payload["result"]["error"] == "test_timeout"
+    assert target.read_text(encoding="utf-8") == original
 
 
 def test_run_auto_flow_keeps_successful_hyper_when_guard_fallback_fails(tmp_path: Path, monkeypatch):
@@ -2684,6 +2919,10 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     projection = payload["nexus_usage_trace"]["learning_projection"]
     assert projection["nexus_policy"]["s2t_prior_eligible"] is True
     assert projection["model_training"]["training_eligible"] is True
+    assert projection["model_training_export"]["schema_version"] == "nexus_model_training_export.v3"
+    assert projection["model_training_export"]["preference_pair_count"] >= 1
+    training_export = tmp_path / projection["model_training_export"]["path"]
+    assert training_export.exists()
     assert projection["promoted_policy"]["schema_version"] == "nexus_promoted_learning_policy.v1"
     assert "promoted_policy_path" in projection
     promoted_policy = tmp_path / projection["promoted_policy_path"]

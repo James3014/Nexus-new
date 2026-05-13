@@ -156,6 +156,9 @@ def test_executor_controls_are_derived_from_plan_not_raw_keywords():
     assert heavy_controls["enable_autoreason_executor"] is True
     assert heavy_controls["enable_ddtree_executor"] is True
     assert heavy_controls["enable_ultra_review"] is True
+    assert heavy_controls["enable_swarm"] is True
+    assert heavy_controls["enable_drone"] is True
+    assert heavy_controls["enable_nightshift"] is True
 
 
 def test_selected_receipts_do_not_imply_invocation_or_public_claim_safety():
@@ -172,10 +175,9 @@ def test_selected_receipts_do_not_imply_invocation_or_public_claim_safety():
     receipts = {item.name: item for item in selected_receipts(plan)}
 
     assert {"swarm", "drone", "nightshift"} <= set(receipts)
-    assert receipts["swarm"].selected is False
+    assert receipts["swarm"].selected is True
     assert receipts["swarm"].invoked is False
     assert receipts["swarm"].evidence_present is False
-    assert receipts["swarm"].failure_reason == "pending_executor"
     assert receipts["swarm"].public_claim_safe is False
 
 
@@ -325,7 +327,7 @@ def test_planner_composes_core_capabilities_from_commercial_lane_signals():
         "stress_test",
         "benchmark",
     } <= selected
-    assert {"swarm", "drone", "nightshift"} <= set(plan.pending_capabilities)
+    assert not ({"swarm", "drone", "nightshift"} & set(plan.pending_capabilities))
 
 
 def test_planner_covers_public_value_capability_matrix_without_model_calls():

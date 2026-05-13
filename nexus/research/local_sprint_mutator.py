@@ -315,6 +315,54 @@ def _patch_rlm_belief_budget(source: str) -> str:
         return source
 
 
+def _patch_rlm_governance_filter_action(source: str) -> str:
+    """Patch RLM governance action filters with deny-by-default guardrails."""
+    if "def rlm_harder_v2_filter_action" not in source:
+        return source
+    if "governance_block" in source and "delete_file" in source and "benchmarks/" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_filter_action",
+        "action",
+        "    action = action or {}\n"
+        "    tool = str(action.get('tool') or '')\n"
+        "    cmd = str(action.get('cmd') or '')\n"
+        "    path = str(action.get('path') or '')\n"
+        "    if path.startswith(('logs/', 'benchmarks/', '.nexus/')):\n"
+        "        return {'allowed': False, 'reason': 'governance_block'}\n"
+        "    if tool in {'delete_file', 'write_file', 'remove', 'unlink'}:\n"
+        "        return {'allowed': False, 'reason': 'governance_block'}\n"
+        "    if tool == 'run_command' and 'rm' in cmd:\n"
+        "        return {'allowed': False, 'reason': 'governance_block'}\n"
+        "    if tool in {'read_file', 'list_files', 'grep', 'inspect', 'search'}:\n"
+        "        return {'allowed': True, 'reason': 'ok'}\n"
+        "    return {'allowed': False, 'reason': 'governance_block'}",
+        "<rlm_governance_filter_action_patch>",
+    )
+
+
+def _patch_rlm_governance_scope_decision(source: str) -> str:
+    """Patch RLM scope decisions with read-only allow and mutating deny-by-default."""
+    if "def rlm_harder_v2_scope_decision" not in source:
+        return source
+    if "scope_block" in source and "read_only" in source and "approved" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_scope_decision",
+        "request",
+        "    request = request or {}\n"
+        "    action = str(request.get('action') or '').lower()\n"
+        "    if action == 'read':\n"
+        "        return {'allowed': True, 'reason': 'read_only'}\n"
+        "    if action in {'write', 'update', 'create'} and request.get('approved') is True:\n"
+        "        return {'allowed': True, 'reason': 'approved'}\n"
+        "    return {'allowed': False, 'reason': 'scope_block'}",
+        "<rlm_governance_scope_decision_patch>",
+    )
+
+
 def _patch_pricing_invoice(source: str) -> str:
     if "def total" not in source or "tax_for" not in source:
         return source
@@ -633,6 +681,24 @@ def _patch_merge_limits_preserve_inputs(source: str) -> str:
     )
 
 
+def _patch_rlm_merge_settings_preserve_inputs(source: str) -> str:
+    if "def rlm_harder_v2_merge_settings" not in source:
+        return source
+    if "value is not None" in source and "dict(defaults)" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_merge_settings",
+        "defaults, override",
+        "    result = dict(defaults)\n"
+        "    for key, value in (override or {}).items():\n"
+        "        if value is not None:\n"
+        "            result[key] = value\n"
+        "    return result",
+        "<rlm_merge_settings_preserve_inputs_patch>",
+    )
+
+
 def _patch_remaining_ms_elapsed(source: str) -> str:
     if "def remaining_ms" not in source:
         return source
@@ -695,6 +761,66 @@ def _patch_verified_claims_require_artifact(source: str) -> str:
         "claims",
         "    return [claim['id'] for claim in claims if claim.get('status') == 'pass' and claim.get('artifact')]",
         "<verified_claims_require_artifact_patch>",
+    )
+
+
+def _patch_rlm_verified_claims_require_artifact(source: str) -> str:
+    if "def rlm_harder_v2_verified_claims" not in source:
+        return source
+    if "isinstance(artifact, str)" in source and "artifact.strip()" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_verified_claims",
+        "claims",
+        "    verified = []\n"
+        "    for claim in claims:\n"
+        "        artifact = claim.get('artifact')\n"
+        "        if claim.get('status') == 'pass' and isinstance(artifact, str) and artifact.strip():\n"
+        "            verified.append(claim['id'])\n"
+        "    return verified",
+        "<rlm_verified_claims_require_artifact_patch>",
+    )
+
+
+def _patch_rlm_accept_receipt_requires_replay(source: str) -> str:
+    if "def rlm_harder_v2_accept_receipt" not in source:
+        return source
+    if "replay_command" in source and "exit_code" in source and "claim') == 'verified'" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_accept_receipt",
+        "receipt",
+        "    return (\n"
+        "        receipt.get('claim') == 'verified'\n"
+        "        and isinstance(receipt.get('replay_command'), str)\n"
+        "        and bool(receipt.get('replay_command').strip())\n"
+        "        and receipt.get('exit_code') == 0\n"
+        "    )",
+        "<rlm_accept_receipt_requires_replay_patch>",
+    )
+
+
+def _patch_rlm_select_memory_hits_keyword_overlap(source: str) -> str:
+    if "def rlm_harder_v2_select_memory_hits" not in source:
+        return source
+    if "keyword_set" in source and "item_keywords" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_select_memory_hits",
+        "items, task_type, keywords",
+        "    keyword_set = {str(keyword).lower() for keyword in keywords}\n"
+        "    selected = []\n"
+        "    for item in items:\n"
+        "        if item.get('task_type') != task_type:\n"
+        "            continue\n"
+        "        item_keywords = {str(keyword).lower() for keyword in item.get('keywords', [])}\n"
+        "        if keyword_set & item_keywords:\n"
+        "            selected.append(item)\n"
+        "    return selected",
+        "<rlm_select_memory_hits_keyword_overlap_patch>",
     )
 
 
@@ -890,11 +1016,17 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
     for patcher in (
         _patch_normalize_key_boundaries,
         _patch_merge_limits_preserve_inputs,
+        _patch_rlm_merge_settings_preserve_inputs,
         _patch_remaining_ms_elapsed,
         _patch_rlm_belief_budget,
+        _patch_rlm_governance_filter_action,
+        _patch_rlm_governance_scope_decision,
         _patch_redact_secret_fields,
         _patch_can_access_deny_default,
         _patch_verified_claims_require_artifact,
+        _patch_rlm_verified_claims_require_artifact,
+        _patch_rlm_accept_receipt_requires_replay,
+        _patch_rlm_select_memory_hits_keyword_overlap,
         _patch_classify_requires_semantic_evidence,
         _patch_swarm_report_requires_distinct_evidence,
         _patch_ultra_report_requires_repro_evidence,

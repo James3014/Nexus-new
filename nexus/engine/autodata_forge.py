@@ -81,6 +81,90 @@ def classify_trajectory_quality(
     )
 
 
+def benchmark_row_score(row: dict[str, Any]) -> float:
+    """Map a benchmark row to an Autodata quality score.
+
+    The score is deliberately binary for now: Autodata should mine audited
+    strong/weak gaps, not invent partial credit from noisy benchmark fields.
+    """
+    if str(row.get("status", "")).upper() != "SUCCESS":
+        return 0.0
+    if str(row.get("semantic_status", "")).upper() != "VERIFIED":
+        return 0.0
+    if bool(row.get("infra_invalid", False)):
+        return 0.0
+    return 1.0
+
+
+def benchmark_row_audit_passed(row: dict[str, Any]) -> bool:
+    if benchmark_row_score(row) < 1.0:
+        return False
+    if bool(row.get("trust_mismatch", False)):
+        return False
+    return True
+
+
+def benchmark_row_evidence_refs(*rows: dict[str, Any], fallback_refs: tuple[str, ...] = ()) -> tuple[str, ...]:
+    refs: list[str] = []
+    for row in rows:
+        for key in ("evidence_record_file", "evidence_bundle_file", "report_file"):
+            value = row.get(key)
+            if isinstance(value, str) and value and value not in refs:
+                refs.append(value)
+    for ref in fallback_refs:
+        if ref not in refs:
+            refs.append(ref)
+    return tuple(refs)
+
+
+def benchmark_rows_to_data_forge_rows(
+    *,
+    strong_rows: list[dict[str, Any]],
+    weak_rows: list[dict[str, Any]],
+    strong_source: str,
+    weak_source: str,
+    gold_gap_threshold: float = GOLD_GAP_THRESHOLD,
+) -> list[DataForgeManifestRow]:
+    """Convert same-task strong/weak benchmark rows into Autodata rows."""
+    weak_by_task = {str(row.get("task_id", "")): row for row in weak_rows if row.get("task_id")}
+    manifest_rows: list[DataForgeManifestRow] = []
+    for strong in strong_rows:
+        task_id = str(strong.get("task_id", ""))
+        if not task_id:
+            continue
+        weak = weak_by_task.get(task_id, {})
+        strong_score = benchmark_row_score(strong)
+        weak_score = benchmark_row_score(weak)
+        label = classify_trajectory_quality(
+            strong_score=strong_score,
+            weak_score=weak_score,
+            audit_passed=benchmark_row_audit_passed(strong),
+            gold_gap_threshold=gold_gap_threshold,
+        )
+        evidence_refs = benchmark_row_evidence_refs(strong, weak, fallback_refs=(strong_source, weak_source))
+        step_count = int(strong.get("trajectory_step_count") or 0)
+        manifest_rows.append(
+            DataForgeManifestRow(
+                task_id=task_id,
+                label=label,
+                evidence_refs=evidence_refs,
+                trajectory_step_count=step_count,
+            )
+        )
+        if strong_score > weak_score:
+            manifest_rows.append(
+                DataForgeManifestRow(
+                    task_id=f"{task_id}::weak_failure",
+                    label=label,
+                    evidence_refs=evidence_refs,
+                    trajectory_step_count=max(step_count, int(weak.get("trajectory_step_count") or 0)),
+                    hard_negative=True,
+                    low_step_filter={"filtered": False, "min_steps": 10, "reason": "weak_failure_hard_negative"},
+                )
+            )
+    return manifest_rows
+
+
 def write_data_forge_manifest(path: str | Path, rows: list[DataForgeManifestRow]) -> dict:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

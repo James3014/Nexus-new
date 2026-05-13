@@ -615,8 +615,16 @@ def _augment_local_msa_bench_evidence(
     task_type: str,
     evidence: dict[str, Any],
     artifact_verified: bool,
+    route_executor_flags: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    route_executor_flags = route_executor_flags if isinstance(route_executor_flags, dict) else {}
     local_swarm_enabled = os.environ.get("NEXUS_ENABLE_LOCAL_SWARM_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+    local_swarm_enabled = bool(
+        local_swarm_enabled
+        or route_executor_flags.get("enable_swarm")
+        or route_executor_flags.get("enable_drone")
+        or route_executor_flags.get("enable_nightshift")
+    )
     text = f"{task_id or ''} {task_desc} {task_type}".lower()
     if not artifact_verified:
         return evidence
@@ -2710,6 +2718,8 @@ def run_auto_flow(
     def _hidden_contract_local_first_patch(trial: int) -> tuple[str, str, dict[str, Any]] | None:
         """Use deterministic local repair before spending a model call on known hidden-contract reducers."""
 
+        if os.environ.get("NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH", "").strip().lower() in {"1", "true", "yes"}:
+            return None
         hidden_fast_path = str(route.get("recommended_reason") or "") == "benchmark_hidden_contract_fast_path"
         task_lower = task_desc.lower()
         has_known_hidden_contract_reducer = (
@@ -2824,6 +2834,15 @@ def run_auto_flow(
             
         return patched, label, fallback_meta or _local_baseline_meta(fallback_reason=fallback_reason)
 
+    def _restore_baseline_files(restored_files: dict[Path, str | None], *, keep_target: bool) -> None:
+        for path, original_text in restored_files.items():
+            should_restore = not (keep_target and path == target_path)
+            if should_restore and original_text is None:
+                if path.exists():
+                    path.unlink()
+            elif should_restore:
+                _write_source_text(path, original_text)
+
     def _run_baseline_apply() -> dict:
         start = time.monotonic()
         ok = False
@@ -2853,14 +2872,7 @@ def run_auto_flow(
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
-            for path, original_text in restored_files.items():
-                if ok and path == target_path:
-                    continue
-                if original_text is None:
-                    if path.exists():
-                        path.unlink()
-                else:
-                    _write_source_text(path, original_text)
+            _restore_baseline_files(restored_files, keep_target=ok)
         return {
             "flow": "baseline",
             "status": "SUCCESS" if ok else "FAILED",
@@ -2899,12 +2911,7 @@ def run_auto_flow(
         except subprocess.TimeoutExpired:
             err = "test_timeout"
         finally:
-            for path, original_text in restored_files.items():
-                if original_text is None:
-                    if path.exists():
-                        path.unlink()
-                else:
-                    _write_source_text(path, original_text)
+            _restore_baseline_files(restored_files, keep_target=False)
         return {
             "flow": "baseline_probe",
             "status": "SUCCESS" if ok else "FAILED",
@@ -3293,6 +3300,7 @@ def run_auto_flow(
         task_type=task_type,
         evidence=capability_evidence,
         artifact_verified=artifact_verified,
+        route_executor_flags=build_route_executor_flags(task_desc=task_desc, task_type=task_type, route=route),
     )
     capability_evidence = _write_msa_receipt_reports(repo_root, task_id=task_id, evidence=capability_evidence)
     route_decision_payload = route.get("route_decision", {}) if isinstance(route.get("route_decision"), dict) else {}

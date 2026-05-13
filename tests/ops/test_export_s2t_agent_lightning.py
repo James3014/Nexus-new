@@ -162,6 +162,64 @@ def test_export_s2t_trace_file_writes_v2_with_experience_and_autodata_gate(tmp_p
     assert exported["experience_rows"][0]["projection"]["targets"] == ["hard_negative"]
 
 
+def test_export_s2t_trace_file_writes_v3_training_rows(tmp_path: Path) -> None:
+    trace = tmp_path / "trace.jsonl"
+    output = tmp_path / "model_training.json"
+    experience_manifest = tmp_path / "experiences.json"
+    autodata_manifest = tmp_path / "autodata.json"
+    _write_trace(trace)
+    experience_manifest.write_text(
+        json.dumps(
+            [
+                {
+                    "schema_version": "nexus_learning_experience.v1",
+                    "experience_id": "exp:task-1:1",
+                    "task_id": "task-1",
+                    "task_type": "bug",
+                    "phase_continuity": {"complete": True},
+                    "capability_lifecycle": [],
+                    "gate_chain": {"artifact": "pass", "claim": "pass", "delivery": "pass"},
+                    "outcome": "verified_success",
+                    "s2t_trace_refs": [str(trace)],
+                    "promotion_status": "shadow",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    autodata_manifest.write_text(
+        json.dumps(
+            {
+                "quality_rows": [
+                    {
+                        "task_id": "task-1",
+                        "eligible_for_training": True,
+                        "trajectory_step_count": 12,
+                        "information_density": 0.8,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = export_s2t_trace_file(
+        trace,
+        output,
+        dry_run=False,
+        export_format="v3",
+        experience_manifest=experience_manifest,
+        autodata_manifest=autodata_manifest,
+    )
+
+    exported = json.loads(output.read_text(encoding="utf-8"))
+    row_types = {row["row_type"] for row in exported["training_rows"]}
+    assert summary["format"] == "v3"
+    assert summary["preference_pairs"] == 1
+    assert row_types == {"preference_pair", "reward_row", "experience_projection"}
+    assert exported["summary"]["training_eligible_count"] == 1
+
+
 def test_export_s2t_main_returns_nonzero_for_missing_input(tmp_path: Path) -> None:
     rc = main(["--input", str(tmp_path / "missing.jsonl"), "--output", str(tmp_path / "out.json")])
 

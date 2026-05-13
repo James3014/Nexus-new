@@ -73,7 +73,7 @@ def build_gemini_cli_invocation(
     transport: str | None = None,
 ) -> GeminiCliInvocation:
     cli_env = build_gemini_env(env)
-    approval = approval_mode or cli_env.get("NEXUS_GATEWAY_APPROVAL_MODE") or "plan"
+    approval = approval_mode or cli_env.get("NEXUS_GATEWAY_APPROVAL_MODE") or "auto_edit"
     prompt_transport = (transport or cli_env.get("NEXUS_GATEWAY_PROMPT_TRANSPORT") or "stdin").strip().lower()
     if prompt_transport not in {"stdin", "inline"}:
         prompt_transport = "stdin"
@@ -130,7 +130,6 @@ def build_gemini_cli_invocation(
 
 
 def extract_token_info(payload: dict[str, Any]) -> dict[str, Any]:
-    total = 0
     stats_root = payload.get("stats")
     stats = stats_root.get("models", {}) if isinstance(stats_root, dict) else {}
     stats_present = isinstance(stats_root, dict)
@@ -142,7 +141,6 @@ def extract_token_info(payload: dict[str, Any]) -> dict[str, Any]:
                     stats_tokens += int((model_stats.get("tokens") or {}).get("total") or 0)
                 except (TypeError, ValueError):
                     continue
-    total += stats_tokens
 
     usage = payload.get("usageMetadata") or payload.get("usage_metadata") or payload.get("usage")
     usage_present = isinstance(usage, dict)
@@ -156,13 +154,32 @@ def extract_token_info(payload: dict[str, Any]) -> dict[str, Any]:
             if value > 0:
                 usage_tokens = value
                 break
-    total += usage_tokens
+        if usage_tokens <= 0:
+            additive_keys = (
+                ("promptTokenCount", "candidatesTokenCount"),
+                ("prompt_tokens", "completion_tokens"),
+                ("input_tokens", "output_tokens"),
+                ("inputTokens", "outputTokens"),
+            )
+            for input_key, output_key in additive_keys:
+                try:
+                    input_tokens = int(usage.get(input_key) or 0)
+                    output_tokens = int(usage.get(output_key) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if input_tokens > 0 or output_tokens > 0:
+                    usage_tokens = input_tokens + output_tokens
+                    break
 
     source = "missing"
-    if stats_tokens > 0:
-        source = "stats"
-    elif usage_tokens > 0:
+    if usage_tokens > 0:
         source = "usage_metadata"
+        total = usage_tokens
+    elif stats_tokens > 0:
+        source = "stats"
+        total = stats_tokens
+    else:
+        total = 0
     return {
         "total_tokens": total,
         "gateway_stats_present": stats_present,

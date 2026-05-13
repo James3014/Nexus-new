@@ -54,7 +54,7 @@ def test_public_route_oracle_manifest_targets_uncovered_route_capabilities():
 
     assert payload["frozen"] is True
     assert payload["benchmark_id"] == "nexus-public-route-oracles-v1"
-    assert len(tasks) == 10
+    assert len(tasks) == 12
     assert {task["fixture_kind"] for task in tasks} == {
         "rlm_harder_v2_autoreason_judge",
         "rlm_harder_v2_ddtree_pruning",
@@ -78,6 +78,8 @@ def test_public_route_oracle_manifest_targets_uncovered_route_capabilities():
         ("swarm_quiet_moment",),
         ("drone",),
         ("nightshift",),
+        ("semantic_failure_sensor",),
+        ("bdd_acceptance_skill",),
     }
     assert all(task["hidden_oracle_kind"] == "trace_receipt" for task in tasks)
 
@@ -221,3 +223,28 @@ def test_public_nexus_value_manifest_has_value_specific_coverage():
         "docs_code_sync": 2,
         "ops_research": 2,
     }
+
+
+def test_public_docs_lane_manifest_is_frozen_model_required_three_strata():
+    path = Path("scripts/bench/public_benchmark_docs_lane_v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    tasks = payload["tasks"]
+
+    assert payload["frozen"] is True
+    assert payload["benchmark_id"] == "nexus-public-docs-lane-v1"
+    assert len(tasks) == 3
+    assert {task["id"].split("-001")[0] for task in tasks} == {
+        "docs-lane-public-field-contract",
+        "docs-lane-contextual-evidence-contract",
+        "docs-lane-config-contract",
+    }
+    assert {task["eligibility_class"] for task in tasks} == {"model_required"}
+    assert {task["category"] for task in tasks} == {"docs_code_sync"}
+    assert {task["stratum_type"] for task in tasks} == {"pure_docs", "docs_code_sync", "evidence_required_docs"}
+    assert {task["hidden_oracle_kind"] for task in tasks} == {"semantic_fixture"}
+    assert all(task["capability_activation_contract"] == "required" for task in tasks)
+    assert {tuple(task["expected_capabilities"]) for task in tasks} == {
+        ("codeintel", "memory", "delivery_gate"),
+    }
+    assert all("delivery_gate" in task["expected_capabilities"] for task in tasks)
+    assert all("model_uplift_eligible_rate" in task["public_claim_allowed_metrics"] for task in tasks)

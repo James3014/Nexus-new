@@ -66,8 +66,12 @@ def refine_policy(
             kept_lite.append(str(task_id))
 
     refined = dict(policy)
-    refined["candidate_cap_overrides"] = kept_overrides
-    refined["lite_route_tasks"] = kept_lite
+    refined["candidate_cap_overrides"] = {}
+    refined["lite_route_tasks"] = []
+    refined["legacy_task_policy_source_ids"] = {
+        "candidate_cap_task_ids": sorted(kept_overrides),
+        "lite_task_ids": kept_lite,
+    }
     refined["refinement"] = {
         "schema": "nexus_route_cost_policy_refinement_v1",
         "kept_task_ids": sorted(kept_overrides),

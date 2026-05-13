@@ -8,6 +8,7 @@ from nexus.engine.harness_route_policy import extract_failure_text
 from nexus.engine.harness_sensors import (
     build_bdd_acceptance_receipt,
     build_harness_preflight_sensor,
+    build_sensor_fusion_decision,
     build_semantic_failure_sensor,
 )
 
@@ -100,7 +101,17 @@ def emit_harness_runtime_receipts(
         capabilities["semantic_failure_refs"] = [report_path, failure_sensor["summary"]]
         capabilities["failure_cause"] = failure_sensor["cause"]
         capabilities["likely_fix"] = failure_sensor["likely_fix"]
+        capabilities["recommended_escalation"] = failure_sensor["recommended_escalation"]
+        capabilities["semantic_failure_escalation_required"] = failure_sensor["escalation_required"]
         capabilities["retry_policy"] = failure_sensor["retry_policy"]
+        sensor_fusion = build_sensor_fusion_decision(
+            semantic_failure_sensor=failure_sensor,
+            current_route=str(route.get("recommended_flow") or ""),
+            phase="R",
+        )
+        capabilities["sensor_fusion_decision"] = sensor_fusion
+        capabilities["sensor_fusion_recommended_capabilities"] = sensor_fusion["recommended_capabilities"]
+        capabilities["sensor_fusion_escalation_required"] = sensor_fusion["escalation_required"]
         capabilities["semantic_failure_sensor_used"] = True
         capabilities["semantic_failure_sensor_gate_passed"] = bool(
             failure_sensor["retry_policy"].get("requires_evidence_delta")

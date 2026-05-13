@@ -75,6 +75,8 @@ def apply_signal_policies(
         enable("lancedb", "semantic_memory_or_retrieval_signal_available")
     if signals.lancedb_hits or "semantic" in task_lower or "retrieval" in task_lower:
         enable("semantic_searcher", "runtime_semantic_search_signal")
+    if signals.msa_candidate_count > 0 or signals.msa_top_score >= 0.75:
+        enable("msa_router", "msa_rerank_signal")
     if signals.claim_uncertainty:
         enable("research", "claim_uncertainty_requires_research")
         enable("external_doc_scout", "claim_uncertainty_requires_external_fact_check")
@@ -170,6 +172,9 @@ def apply_signal_policies(
         enable("plan_quality_gate", "plan_review_required")
     if signals.acceptance_signal or signals.benchmark_signal or signals.evidence_signal:
         enable("acceptance_check", "acceptance_or_public_claim_signal")
+        enable("jit_validation", "acceptance_or_public_claim_jit_validation")
+    if "jit" in task_lower or "just-in-time" in task_lower:
+        enable("jit_validation", "jit_validation_signal")
     if signals.acceptance_signal or signals.benchmark_signal or signals.benchmark_required or "formal report" in task_lower or "public report" in task_lower:
         enable("formal_report", "formal_or_public_report_requires_evidence_report")
     if signals.forecast_signal or signals.risk_score >= 80 or signals.confidence < 0.6:

@@ -41,6 +41,9 @@
           "repo": {"type": "string"},
           "repo_ref": {"type": "string"},
           "task_desc": {"type": "string"},
+          "stratum_type": {
+            "enum": ["pure_docs", "docs_code_sync", "evidence_required_docs"]
+          },
           "target_file": {"type": "string"},
           "test_file": {"type": "string"},
           "fixture_kind": {"type": "string"},
@@ -78,6 +81,9 @@
           },
           "hidden_oracle_kind": {
             "enum": ["pytest_hidden", "report_claims", "semantic_fixture", "trace_receipt", "cost_guard"]
+          },
+          "eligibility_class": {
+            "enum": ["deterministic_contract", "model_required", "bare_model_only"]
           },
           "cost_budget": {
             "type": "object",
