@@ -698,3 +698,1004 @@ version_scope:
 - **Lesson**: When the task body exposes a known deterministic hidden-contract reducer, the route planner must prefer the local verified fast path even if memory contains prior Hyper wins. Stale learning should not override a cheaper exact contract.
 - **Action Taken**: Added canonical response contracts to `benchmark_hidden_contract_fast_path`, projected the fast-path signal into capability planning, and extended local-first baseline repair for `build_response`/`FIELD` reducers.
 - **Verification**: Targeted tests passed; Pro and Flash 3-task same-model A/B both reached Nexus 3/3 verified with trust mismatch 0 on hidden/repair/context.
+
+## 2026-05-14 Public Lane Flash Smoke Must Distinguish Included Hidden Timing From Zero Fill
+
+- **Phenomenon**: A Flash public-lane 1x1 smoke reached delivery PASS and trust mismatch 0, but `public_cost_efficiency_claim_gate` returned because the with-Nexus wall ledger saw `hidden_verifier_wall_sec=0.0` as suspicious zero-fill.
+- **Root Cause**: The supervised-bare-first path reused a verified model attempt and marked hidden verifier success, but did not record that the verifier timing was already included in `model_attempt_wall_sec`; the wall ledger treated the marker as a separate missing component.
+- **Lesson**: Cost telemetry must distinguish "included in parent timing" from "zero-filled separate timing." Otherwise valid delivery evidence becomes cost-claim-invalid for the wrong reason.
+- **Action Taken**: Added `hidden_verifier_wall_source=included_in_model_attempt_wall_sec` for supervised-bare-first success and taught wall ledger conservation to classify it as `INCLUDED_IN_MODEL_ATTEMPT`.
+- **Verification**: Targeted wall-ledger and supervised-bare-first tests passed. The live rerun was blocked by external data export policy, so final public cost-efficiency promotion remains pending.
+
+## 2026-05-14 Public Benchmark Live Runs Need Data-Export Approval Boundary
+
+- **Phenomenon**: A corrected Flash rerun was rejected because it would transmit local workspace/task/unpublished code context to Gemini.
+- **Root Cause**: The public benchmark runner uses external model calls even for execution-safe fixture tasks, and the current approval boundary treats that as external data export.
+- **Lesson**: Public-lane preflight can run locally, but live external-model benchmark execution needs an explicit data-export approval path or a sanitized remote-safe runner boundary before it can be part of an unattended agent loop.
+- **Action Taken**: Stopped Pro execution, kept Flash-only direction, recorded the blocked rerun, and did not attempt a workaround.
+- **Verification**: Corrected no-model preflight passed; no further external rerun was performed after the policy rejection.
+
+## 2026-05-14 Persistent Worker Benchmarks Need Cross-Process Session Markers
+
+- **Phenomenon**: The intended Flash/Pro/GPT-5.5 worker benchmark should keep one model session open across multiple tasks, but `--with-nexus-runner subprocess` means child processes cannot rely on parent Python globals to know whether a session already started.
+- **Root Cause**: Session reuse was initially modeled as in-process state, while the production benchmark runner can dispatch model work through subprocesses.
+- **Lesson**: Any persistent-worker benchmark contract must be process-boundary aware. Session id, resume state, turn index, and reset boundary need durable evidence fields, and subprocesses need a marker before deciding between "start session" and "resume session."
+- **Action Taken**: Added `--session-worker`, `--session-worker-id`, Gemini `--session-id/--resume`, Codex `exec` then `exec resume --last`, row-level session metadata, reset boundary hashing, and a temp-dir session marker.
+- **Verification**: Session-worker targeted tests passed (`3 passed`), broader public gate subset passed (`19 passed`), and local `parallel-arms smoke-only` wrote an evidence bundle with `session_worker=true` and `session_worker_policy=persistent_worker_with_reset_boundary`.
+
+## 2026-05-14 Targeted Monkeypatches Must Match Real Helper Signatures
+
+- **Phenomenon**: The first session-worker unit test failed with `TypeError: <lambda>() got an unexpected keyword argument 'path'`.
+- **Root Cause**: The test monkeypatched `shutil.which` with a single-argument lambda, but production code calls `shutil.which(binary_name, path=...)` through the Gemini invocation builder.
+- **Lesson**: Test doubles for stdlib helpers should accept the keyword shape used by all call sites, especially when the helper is imported by multiple modules.
+- **Action Taken**: Updated the monkeypatch to accept `**_kwargs`.
+- **Verification**: The session-worker targeted test subset reran green.
+
+## 2026-05-14 Session Worker Live Runs Need Preflight Export Gates
+
+- **Phenomenon**: Live Flash session-worker smoke was still blocked at tool execution time because the command would transmit dirty local benchmark/task context to Gemini.
+- **Root Cause**: The runner had session-worker evidence fields, but did not yet fail closed before live external-model invocation when export policy was unspecified.
+- **Lesson**: External model export boundaries belong in benchmark preflight and live main-entry checks, not only in human/operator policy. The runner must stop before any Gemini/Codex invocation when public session-worker export policy is missing.
+- **Action Taken**: Added `--external-model-export-policy`, preflight `external_model_export` evidence, and live main-entry blocking for session-worker external model runs unless policy is `approved` or `sanitized`.
+- **Verification**: Preflight without policy now fails with `external_model_export_policy_required_for_session_worker`; preflight with `--external-model-export-policy sanitized` passes without invoking external models.
+
+## 2026-05-14 Worker Promotion Needs Contamination Gate And Canonical Contract Hashes
+
+- **Phenomenon**: Persistent worker comparison can become unfair if a later task leaks previous task context, and taskset readiness was claiming fixed public readiness before prompt/verifier hashes were hard requirements.
+- **Root Cause**: The first worker slice captured session metadata but lacked a public gate input for cross-turn contamination and used incomplete readiness semantics for prompt/verifier policy.
+- **Lesson**: Always-on worker benchmarks need both process/session evidence and contamination evidence. Public taskset readiness must require prompt and verifier policy hashes, and those hashes must be canonical JSON rather than Python repr.
+- **Action Taken**: Added canonical prompt/verifier contract hashing, made `fixed_public_taskset_ready` require prompt/verifier hashes, recorded `prompt_sha256`, added `session_worker_contamination`, and blocked public delivery gates when contamination is detected.
+- **Verification**: Targeted contract/export/contamination/session tests passed (`6 passed`); broader public gate subset passed (`22 passed`).
+
+## 2026-05-14 Gap Dashboards Must Not Create Evidence
+
+- **Phenomenon**: The final plan needed a GPT-5.5 vs Flash/Pro gap dashboard, but live external-model evidence was still blocked by export policy.
+- **Root Cause**: Without a separate dashboard tool, agents may be tempted to treat smoke-only or stale evidence as a live comparison.
+- **Lesson**: Gap dashboards should compare existing evidence bundles and explicitly preserve their claim boundaries. They must not synthesize verified delivery evidence or convert smoke-only bundles into promotion evidence.
+- **Action Taken**: Added `persistent_worker_gap_dashboard.py` with readiness checks for taskset, prompt policy, verifier policy, worker cleanliness, trust gap, delivery gap, tokens, and model calls.
+- **Verification**: Dashboard unit test passed and a format smoke wrote `nexus_persistent_worker_gap_dashboard_v1` from local harness evidence; promotion remained false because source bundles were smoke-only.
+
+## 2026-05-14 Sanitized Manifests Are Not A Sanitized Runner
+
+- **Phenomenon**: A sanitized Flash runner package passed local preflight, but the live smoke command was still rejected because it would invoke Gemini from a dirty workspace using the local runner.
+- **Root Cause**: The package sanitized task and disclosure manifests plus Gemini cwd, but execution still depended on unpublished workspace runner code and could expose derived workspace context through prompts, errors, traces, or tool output.
+- **Lesson**: Sanitizing fixture data is necessary but insufficient. Public-lane live external runs need an outbound prompt ledger and a runner boundary proving that external models receive only approved public fixture text and reset-boundary metadata.
+- **Action Taken**: Added strict outbound prompt ledger recording at Gemini/Codex external-model boundaries, then moved live execution to a clean committed temp worktree under `/private/tmp/nexus-live-clean-runner-20260514`.
+- **Verification**: Dirty-workspace package was rejected as expected. Clean temp runner preflight passed with `dirty_entries=[]`; Flash 1x1 live smoke succeeded; outbound prompt ledger wrote 2 strict records with 0 forbidden literal hits.
+
+## 2026-05-14 Flash 3x1 Promotion Needs DCI And Cost-Ledger Semantics
+
+- **Phenomenon**: Flash 3x1 initially failed public delivery gates after successful task execution: first because an exact hidden-only parser literal leaked into guidance, then because protected expected `hyper` was bypassed by hidden-lite supervised bare-first, then because a clean temp runner path triggered strict outbound ledger, and finally because zero-call local fast path was counted as missing provider token telemetry.
+- **Root Cause**: The runner needed DCI-style evidence completeness, not only task success. Prompt sanitation, selected/invoked/evidenced capability contracts, outbound path redaction, and zero-call cost accounting each had separate semantics that were previously collapsed into pass/fail outcome.
+- **Lesson**: Public benchmark success must be decomposed into delivery, evidence completeness, contamination, prompt sanitation, and cost ledger semantics. A verified local Nexus fast path is legitimate delivery evidence, but cost claims must treat it as measured zero provider cost while still disclosing wall cost separately.
+- **Action Taken**: Removed exact hidden-only `API__Token` guidance, blocked hidden-lite baseline fast path when `expected_capability_protection` exists, redacted clean temp runner paths before outbound Gemini prompts while preserving workspace-path fail-closed behavior, and taught cost/wall ledgers how to account for no-model Nexus phase work.
+- **Verification**: Flash 3x1d live run reached `public_verified_delivery_claim_gate=PASS`, trust mismatch 0, contamination 0, outbound ledger 6 strict records with 0 forbidden hits, and 3/3 with-Nexus verified versus 2/3 direct. Cost efficiency remained `REGRESSED` due wall ratio 1.209, so no final promotion or cost-improvement claim was made.
+
+## 2026-05-14 Temp Runner Learn Metadata Needs Package-Level Hooking
+
+- **Phenomenon**: A clean temp runner became dirty after live runs because learn SLO writeback updated `.nexus/reports/learn/phase_slo_summary.json` and `.nexus/reports/learn/phase_writeback.jsonl`, blocking later final-promotion preflight even though the dirty files were run metadata.
+- **Root Cause**: The runner treated all dirty state uniformly and relied on manual `git restore`/commit cleanup after each run. A first hook test also failed because `git status --porcelain` collapsed untracked `.nexus/` into `?? .nexus/`, hiding the concrete allowed file paths from the detector.
+- **Lesson**: Sanitized public-lane packages need a scoped metadata hook, not a global git hook. The hook must run only in sanctioned temp runner roots, commit only explicit learn metadata paths, use `--untracked-files=all`, and leave any other dirty entry visible for fail-closed preflight.
+- **Action Taken**: Added a generated `commit_learn_metadata.sh` to sanitized runner packages, invoked it before preflight and before/after live smoke runs, and guarded it to `/private/tmp/nexus-live-clean-runner-*` with an allowlist of learn metadata files.
+- **Verification**: Targeted tests proved allowed learn metadata is committed to a temp-runner-local commit and mixed dirty state remains unhidden; `5 passed, 258 deselected`.
+
+## 2026-05-14 Sanitized Runner Hooks Need Ignored-File Force Add And Clean Guard
+
+- **Phenomenon**: Flash 3x1 produced evidence, but the package shell exited non-zero because `commit_learn_metadata.sh` tried to `git add` ignored `.nexus/reports/learn/*` files without `-f`. A later run also showed that a stale session marker could make a fresh package appear resumed unless markers were cleared first.
+- **Root Cause**: The first hook was path-scoped but not gitignore-aware, and package preflight recorded dirty entries without forcing a clean-worktree requirement. Session worker state was stored outside the repo in temp marker files and needed package-local reset semantics.
+- **Lesson**: Public-lane sanitized packages need three hooks/guards together: force-add only the allowlisted learn metadata, clear only the current package session marker before a run, and invoke the benchmark with `--require-clean-worktree` after hooks run.
+- **Action Taken**: Added `git add -f` for allowed learn metadata, generated `clear_session_markers.sh`, added `--require-clean-worktree`, raised direct Flash timeout to 240s for slow first-turn direct baseline, and tightened public token gates to require 1.0 measured rates.
+- **Verification**: Flash 3x1 hooks4 run reached `public_verified_delivery_claim_gate=PASS`, `public_cost_claim_gate=PASS`, `public_cost_efficiency_claim_gate=IMPROVED`, trust mismatch 0, token/provider measured rates 1.0 on both arms, contamination 0, and clean temp runner status after hook commit.
+
+## 2026-05-14 No-Model Nexus Wall Ledger Must Include CLI Uninstrumented Time
+
+- **Phenomenon**: Flash 3x1 hooks3 had delivery and cost gates passing, but cost efficiency still returned because a no-model local Nexus fast path had wall ledger reconciliation error 0.0593.
+- **Root Cause**: The local fast path correctly recorded `phase_wall_total_sec` and `hidden_verifier_wall_sec`, but left `cli_uninstrumented_sec` outside the wall ledger attribution. The missing component pushed the drift above the 5 percent conservation threshold.
+- **Lesson**: No-model Nexus delivery can still have CLI orchestration time. Wall-ledger conservation must account for uninstrumented CLI time separately from model gateway and phase timing, or valid local fast paths will be false-returned by cost telemetry.
+- **Action Taken**: Added `cli_uninstrumented_sec` to no-model with-Nexus wall ledger components and covered it with a targeted regression test.
+- **Verification**: Targeted wall-ledger tests passed; Flash 3x1 hooks4 reported with/without wall ledger conserved rate 1.0 and cost efficiency `IMPROVED`.
+
+## 2026-05-14 Outbound Prompt Ledger Must Be Consumed By The Evidence Bundle
+
+- **Phenomenon**: Strict outbound prompt logging existed and preflight required a ledger path, but promotion evidence did not yet parse the JSONL ledger or fail the public gates when the ledger was empty, malformed, non-strict, or had forbidden literal hits.
+- **Root Cause**: The outbound prompt ledger was treated as an execution side artifact rather than a first-class evidence-plane input. That left a gap between "a path was configured" and "every external prompt record was audit-clean."
+- **Lesson**: Public-lane promotion needs the evidence bundle to consume the outbound ledger directly: record count, sha256, providers, models, strict count, invalid records, and forbidden literal count. Preflight path checks are not enough.
+- **Action Taken**: Added `nexus_outbound_prompt_ledger_summary_v1` to evidence bundles and wired dirty ledger failures into the public cost gate. Public gate checks now expose outbound ledger status, count, hash, and forbidden literal count.
+- **Verification**: Targeted tests prove forbidden literal records fail the cost gate. Flash x1b live runs produced ledger summaries with strict records only and forbidden literal count 0.
+
+## 2026-05-14 Gateway Total Fallback Must Not Double Count Hidden Verifier Time
+
+- **Phenomenon**: Flash compatible x1 round 2 returned `current_x1_readiness_not_passed` because one with-Nexus row used `model_gateway=wall_duration_sec` fallback and also counted hidden verifier wall separately, making wall ledger telemetry invalid.
+- **Root Cause**: When all detailed gateway timings are zero or missing, the wall ledger falls back to total wall time for the model gateway. Hidden verifier time is already inside that total, so adding it as a separate component double-counts.
+- **Lesson**: A fallback-to-total model gateway is a conservative measured envelope. Hidden verifier timing should be marked as included in that fallback total rather than separately attributed.
+- **Action Taken**: Added `INCLUDED_IN_MODEL_GATEWAY_FALLBACK_TOTAL` hidden-verifier telemetry status and a regression test.
+- **Verification**: Flash x1b rerun reached `x3_promotion_gate=PASS` with two compatible x1 readiness records, outbound ledger PASS, delivery PASS, cost PASS, trust mismatch 0, and contamination 0.
+
+## 2026-05-14 Hidden Bugfix Supervised Lane Needs Deterministic Pre-Rescue Before Hyper
+
+- **Phenomenon**: Flash x1b reached delivery/trust/x3 readiness, but wall-cost efficiency regressed because `nexus-value-hidden-001` used a failed supervised bare-first probe and then immediately escalated to `hyper_direct_forced`, producing two model calls and a 33.14s with-Nexus row.
+- **Root Cause**: `hidden_bugfix_supervised` had the same compact single-round semantics as other deterministic lanes, but it was not included in the deterministic pre-rescue allowlist. The AutoTTS-style refine step paid for another model call before trying the local hidden-verifier-audited repair.
+- **Lesson**: Test-time orchestration must be fail-closed and cost-aware: compact supervised bugfix lanes should attempt deterministic pre-rescue before any second model call, while still preserving hidden verifier, capability receipts, and trust mismatch gates.
+- **Action Taken**: Added `hidden_bugfix_supervised` to `_route_cost_controls_allow_deterministic_pre_rescue` and covered the route-control contract with a unit test.
+- **Verification**: Targeted route-control test passed before the next live Flash rerun.
+
+## 2026-05-14 Failed Supervised Probes Must Not Pollute Cost Telemetry
+
+- **Phenomenon**: After deterministic pre-rescue was enabled, Flash hidden-001 dropped from 33.14s to 1.79s and still passed, but the row carried one failed supervised model probe with zero provider tokens, lowering `provider_token_measured_rate_with` to 0.6667 and returning x3 readiness.
+- **Root Cause**: The lane still spent a supervised model probe before running a local deterministic repair that was sufficient for hidden verification. When the failed probe had a CLI error and no token stats, final delivery was correct but cost evidence became unclaimable.
+- **Lesson**: For compact hidden bugfix lanes without protected capabilities, deterministic pre-model rescue should run before any external model probe. This keeps cost telemetry auditable: either the model call has measured provider tokens, or the no-model path is explicitly `not_applicable_no_model`.
+- **Action Taken**: Added `_route_cost_controls_allow_pre_model_deterministic_rescue` and a pre-model deterministic rescue branch guarded by route lane, compact policy, hidden verifier, and expected-capability protection.
+- **Verification**: Targeted route-control tests cover both the allowed compact lane and protected-capability block before the next live Flash rerun.
+
+## 2026-05-14 Model-Required Public Rows Cannot Use Pre-Model Local Delivery
+
+- **Phenomenon**: A pre-model deterministic rescue made hidden bugfix rows fast and token-clean, but the evidence bundle marked both rows `nexus_delivery_invalid` because they were `model_required` tasks with zero model calls.
+- **Root Cause**: The attempted optimization moved the row outside the public delivery contract. The cost ledger was cleaner, but the delivery plane correctly rejected it.
+- **Lesson**: Do not trade delivery eligibility for cost telemetry cleanliness. For `model_required` public rows, cost fixes must preserve a measured model call or explicitly return instead of converting the row into local-only delivery.
+- **Action Taken**: Restricted the pre-model deterministic rescue branch behind explicit `allow_pre_model_deterministic_rescue`; public route policies do not set it, so model-comparison smoke rows keep the supervised/model path and fail closed when provider token telemetry is missing.
+- **Verification**: The live run exposed the contract violation (`nexus_delivery_invalid`), and the explicit opt-in guard prevents that path from being used by default in the Flash public smoke set.
+
+## 2026-05-14 Direct Gemini No-Token CLI Errors Need Bounded Infra Retry
+
+- **Phenomenon**: Flash smoke could reach verified delivery, but x1 readiness returned because a direct Gemini row had `cli_error` with zero provider tokens, lowering provider-token measured rate below 1.0.
+- **Root Cause**: The runner treated a transient zero-token CLI failure as the final direct-arm evidence row. Quota/auth/timeout are real infra stops, but transient CLI/no-token responses need one bounded retry before they poison the comparison denominator.
+- **Lesson**: Harness Engineering feed-forward needs an infra retry hook at the model boundary, not after evidence aggregation. Retry only retryable infra signatures, preserve retry telemetry, and keep quota/auth fail-closed.
+- **Action Taken**: Added a direct Gemini infra retry hook controlled by `NEXUS_DIRECT_MODEL_INFRA_RETRY_LIMIT` (default 1 for Gemini). It retries `cli_error` or `parse_failure` only when provider tokens are zero and the output is not quota/auth/permission related.
+- **Verification**: Targeted tests prove a transient zero-token CLI error retries to an eligible measured row, while quota remains infra-invalid and non-retried.
+
+## 2026-05-14 Direct Verifier Wall Must Be In The Wall Ledger
+
+- **Phenomenon**: Flash retry smoke reached delivery PASS, cost claim PASS, trust mismatch 0, and token/provider measured 1.0, but x1 readiness still returned because two fast model rows had wall ledger reconciliation drift just above 5 percent.
+- **Root Cause**: Direct model wall time includes the post-patch verifier process, while the ledger only counted gateway/model timing. For fast rows, the verifier wall was about 0.4s and enough to trip the conservation threshold.
+- **Lesson**: Wall ledger accounting must include every harness-owned stage inside row wall time. Fast rows make small missing components visible, so verifier timing cannot be treated as negligible.
+- **Action Taken**: Added `direct_verifier_wall_sec` to direct model rows and included it as a wall ledger component for model attempts.
+- **Verification**: Added a regression test proving gateway wall plus direct verifier wall conserves a fast direct model row.
+
+## 2026-05-14 Direct Infra Retry Wall Must Be In The Wall Ledger
+
+- **Phenomenon**: After direct verifier wall was accounted for, a second Flash x1 still returned because one with-Nexus row used a bounded direct infra retry. The retry made tokens clean, but about 1.36s of zero-token retry wall was not attributed.
+- **Root Cause**: The retry hook recorded retry count and reason, but not retry wall time. The row wall included the failed first attempt; the ledger only included the successful final gateway and verifier.
+- **Lesson**: Retry hooks must emit both semantic retry evidence and cost telemetry. A retry that protects token completeness still consumes wall time and must be conserved.
+- **Action Taken**: Added `direct_infra_retry_wall_sec` to direct rows and wall-ledger components.
+- **Verification**: Added regression tests covering retry wall conservation and retry hook wall telemetry.
+
+## 2026-05-14 Commercial Model ROI Hooks Must Not Special-Case Public Tasks
+
+- **Phenomenon**: Flash 6x1 x3 passed delivery/public/cost gates, while the second round still showed wall-cost regression despite verified delivery lift and token savings. A first RCA framed the issue around an individual row, which could encourage task-specific tuning.
+- **Root Cause**: The cost learning signal was being interpreted at row narrative level instead of as commercial-model pair telemetry. That risks overfitting hooks to one public task rather than learning from model-vs-Nexus tradeoff classes.
+- **Lesson**: Cost and S2T hooks must classify general commercial-model signals: verified lift against direct model, verified delivery with wall regression, and verified delivery with token savings. The hook must be observation-only and must not affect delivery, trust, cost, or x3 promotion gates.
+- **Action Taken**: Added `commercial_model_roi_shadow_hooks` to the evidence bundle with hashed pair locators, capability/type grouping, reason counts, and an explicit `promotion_effect=none` contract.
+- **Verification**: Flash 6x1 second round reached `x3_promotion_gate=PASS`; targeted regression test proves the shadow hook records commercial telemetry without adding gate failures.
+
+## 2026-05-14 Sanitized Builder Must Be Provider-Parametric
+
+- **Phenomenon**: A new Flash hook package initially failed preflight because the builder defaulted to the dirty workspace runner when no clean runner path was supplied. A follow-up audit found the builder also hard-coded Gemini env vars, `--without-mode gemini`, and a Flash-named run script, which made Pro/GPT-5.5 baseline setup non-isomorphic.
+- **Root Cause**: The package generator encoded the first Flash smoke path instead of the benchmark contract. That left provider identity, model identity, and prompt-policy comparability outside the package manifest.
+- **Lesson**: Public-lane packages must be provider-parametric and must make the model/provider explicit in both env and runner flags. Dashboard promotion must reject bundles whose prompt policy or fixed taskset contract differs, even if task hashes and verifier hashes match.
+- **Action Taken**: Added `--provider gemini|codex`, provider-specific cwd/env, `--with-model-provider`, actual direct actor model labels, and dashboard hard gates for `prompt_policy_identical` plus `all_taskset_contracts_ready`.
+- **Verification**: Flash hook package preflight/live x3 passed from clean temp runner; Pro and GPT-5.5 sanitized preflights passed with explicit provider/model locks.
+
+## 2026-05-14 No-Model Nexus Runner Overhead Residual Must Be Conserved
+
+- **Phenomenon**: Flash full 12x1 reached `public_claim_gate=PASS`, `public_verified_delivery_claim_gate=PASS`, and trust mismatch 0, but `x3_promotion_gate=RETURN` because one no-model with-Nexus row had wall ledger conserved rate below 1.0. The invalid row missed 0.5324s and crossed the 5 percent reconciliation threshold by 0.0002.
+- **Root Cause**: No-model Nexus rows already counted phase wall, CLI uninstrumented wall, and hidden verifier wall, but `model_attempt_runner_overhead_sec` can contain a non-verifier residual outside CLI elapsed time. That residual was not represented as a wall ledger component.
+- **Lesson**: Wall ledger conservation must account for runner overhead residual separately from hidden verifier time on no-model Nexus local/preflight paths. Otherwise valid public delivery rows can be false-returned by cost telemetry.
+- **Action Taken**: Added `runner_overhead_non_verifier` as a no-model with-Nexus wall ledger component computed from `model_attempt_runner_overhead_sec - hidden_verifier_wall_sec`.
+- **Verification**: Added a regression test reproducing the 10.6062s row and proving the residual component restores conservation.
+
+## 2026-05-14 Gemini Session Worker Invalid Resume Must Reset Before Retry
+
+- **Phenomenon**: Pro full sanitized smoke finished with with-Nexus 12/12 semantic verified, but direct Pro 0/12 because every direct row failed fast with `Error resuming session: Invalid session identifier`, zero provider tokens, and no valid cost evidence.
+- **Root Cause**: The benchmark session marker was written before the Gemini CLI session was confirmed recoverable. A stale marker made `_gemini_benchmark_session_meta()` keep emitting `--resume <session_id>`, and the bounded infra retry reused the same broken resume path.
+- **Lesson**: Persistent worker infra needs a reset boundary at the provider/session layer. Invalid session identifiers are retryable only after clearing the marker and in-memory turn state; retrying the same resume command is not a real recovery.
+- **Action Taken**: Added a Gemini session reset hook for `invalid session identifier`, plus direct-arm retry classification `gemini_invalid_session_identifier`.
+- **Verification**: Targeted tests prove the marker/turn state are cleared and `run_without_nexus` retries to a measured successful row after an invalid-session failure.
+
+## 2026-05-14 Helper Tests Must Not Split Existing Assertions
+
+- **Phenomenon**: A new `has_invalid_session_identifier` unit test initially failed with `NameError: name 'invocation' is not defined`.
+- **Root Cause**: The test was inserted between an existing invocation setup and its remaining assertions, accidentally moving those assertions into the new helper test.
+- **Lesson**: When adding narrow helper tests inside dense service test files, inspect the surrounding function boundary before insertion. A helper test should not inherit local variables from a previous test.
+- **Action Taken**: Moved the invocation assertions back into `test_gemini_cli_invocation_defaults_to_auto_edit_approval_and_stdin_transport`.
+- **Verification**: `uv run pytest -q tests/benchmark/test_capability_ab_runner.py -k "invalid_session or session_worker_reuses_one_session or reset_gemini_session_worker or direct_gemini_cli_error_without_tokens" tests/services/test_gemini_cli.py` passed 5/5 selected tests.
+
+## 2026-05-14 Session Worker IDs Must Be CLI-Safe Across Model Names
+
+- **Phenomenon**: Pro rerun still produced direct-arm zero-token CLI failures after invalid-session reset. Retry telemetry showed `gemini_invalid_session_identifier`, and final raw help output indicated the fresh `--session-id` path still failed.
+- **Root Cause**: The sanitized builder generated `session_worker_id` directly from model name. `gemini-3.1-pro-preview` introduced dots into the session id, unlike Flash, creating a provider CLI compatibility gap.
+- **Lesson**: Harness Engineering must normalize model-derived identifiers before they reach provider CLIs. Model labels can keep dots for disclosure, but session ids/filenames must be CLI-safe and provider-agnostic.
+- **Action Taken**: Added `_session_safe_slug()` in the sanitized runner builder and changed session worker ids to use only alphanumeric, underscore, and hyphen characters.
+- **Verification**: Added a package-builder regression asserting Pro session ids use `gemini-3_1-pro-preview` and contain no dots.
+
+## 2026-05-14 Direct Baseline Usability Must Be Split From Baseline Bundle Public Claim
+
+- **Phenomenon**: GPT-5.5 package produced a valid direct baseline (`without_nexus`) with measured tokens, conserved wall ledger, and trust mismatch 0, but the full evidence bundle public claim failed because the Codex with-arm had receipt and outbound-ledger issues.
+- **Root Cause**: The gap dashboard treated the baseline bundle as a single public-claim artifact. For the final objective, GPT-5.5 is the direct baseline, so unrelated baseline with-arm contamination should remain visible but must not erase direct-baseline usability.
+- **Lesson**: Publication-plane dashboards need separate fields for source-bundle public claim and direct-baseline usability. Otherwise a failed auxiliary arm can hide a valid direct comparison anchor.
+- **Action Taken**: Added `baseline_direct_usable` and `baseline_direct_verified_rate` to the persistent-worker gap dashboard, based only on direct-arm eligibility, provider-token measurement, wall-ledger conservation, and trust mismatch.
+- **Verification**: Added a dashboard regression and rebuilt the final gap dashboard from Flash, Pro, and GPT-5.5 evidence bundles.
+
+## 2026-05-14 Codex Direct Baseline Must Not Resume The Ambient Session
+
+- **Phenomenon**: A GPT-5.5 direct-only rerun avoided the with-arm, but the second row parsed a Codex response containing the live Codex progress message from this thread. A follow-up rerun with resume disabled then hit a Codex usage limit and returned zero-token CLI errors.
+- **Root Cause**: The Codex session worker used `codex exec resume --last`, which can attach to the most recent ambient Codex session instead of the benchmark task stream. The isolated provider cwd also needed `--skip-git-repo-check`, and the usage-limit string was not classified as quota.
+- **Lesson**: Provider session workers are not interchangeable. Gemini supports explicit session ids; Codex `--last` is not a public-lane-safe boundary. Until a real Codex session id is captured, direct Codex baseline packages must prefer fresh isolated execs and classify usage limits as infra, not model failure.
+- **Action Taken**: Added `--without-only` direct baseline packages, disabled Codex resume-last by default with `exec_fresh_no_resume`, added `--skip-git-repo-check` for isolated Codex cwd, allowed fresh-no-resume rows in the contamination gate, and classified `usage limit` as `quota_exhausted`.
+- **Verification**: Targeted regression tests cover without-only preflight/building, Codex fresh-no-resume command shape, contamination gating, and quota usage-limit classification.
+
+## 2026-05-14 Provider Transport Must Not Poison Prompt Policy Identity
+
+- **Phenomenon**: Flash/Pro and GPT-5.5 used the same fixed public taskset and verifier, but the gap dashboard reported `prompt_policy_identical=false`.
+- **Root Cause**: The prompt contract hash mixed provider transport fields (`without_mode`, `with_llm_mode`, `with_model_provider`) into the provider-neutral prompt policy. The final benchmark contract intentionally compares Gemini treatment arms against a Codex direct baseline, so provider identity cannot be part of the task prompt policy hash.
+- **Lesson**: Publication dashboards must separate task prompt policy from provider transport. Cross-provider comparison requires provider-neutral prompt identity plus transparent transport disclosure, not identical transport.
+- **Action Taken**: Upgraded the prompt contract to v2, removed provider fields from its hash, added `provider_transport_contract`, and changed the dashboard to disclose but not require provider transport identity for cross-provider promotion.
+- **Verification**: Targeted tests prove Gemini/Codex provider transport hashes differ while provider-neutral prompt hashes match, and dashboard promotion is not blocked solely by transport differences.
+
+## 2026-05-14 Flash Delivery Lift Needs Cost Policy Hook, Not Cost Overclaim
+
+- **Phenomenon**: Flash + Nexus reached public delivery PASS and trust mismatch 0 against GPT-5.5 direct, but final dashboard still blocked Flash promotion because `public_cost_efficiency_claim_gate=REGRESSED`.
+- **Root Cause**: Flash improved delivery and reduced tokens/model calls, but wall cost ratio was above the public threshold (`1.8516 > 1.8`). Existing commercial ROI shadow hooks captured the signal, but the publication dashboard only returned a boolean cost block and did not expose the general policy next step.
+- **Lesson**: A delivery-ready/cost-regressed model should not be promoted or overclaimed. The dashboard should emit an observation-only policy recommendation, such as light routing low-risk tasks while keeping full Nexus for high-risk delivery, without changing delivery, trust, cost, or promotion gates.
+- **Action Taken**: Added `cost_policy_hook` to the persistent-worker gap dashboard and wall-regression concentration buckets to `commercial_model_roi_shadow_hooks`. They record wall/token ratios, route/strategy concentration, shadow reason counts, and an observation-only recommendation while preserving `promotion_ready=false` when cost readiness is false.
+- **Verification**: Targeted dashboard and bundle tests prove cost-regressed Flash remains blocked while emitting `light_route_low_risk_full_nexus_high_risk` and route/strategy wall-regression buckets; `/private/tmp/nexus-public-gap-dashboard-20260514-v5.json` records the same recommendation for Flash.
+
+## 2026-05-14 High-Risk Supervised Bare-First Must Be Explicit, Not Implicit
+
+- **Phenomenon**: Flash wall regression concentrated in governance/refactor/trust rows where direct Flash often verified faster, but existing policy controls could only explicitly admit medium-risk supervised bare-first. A first regression test also used a non-existent fixture kind, proving the hook path could look tested without touching the real fixture catalog.
+- **Root Cause**: `allow_high_risk_supervised_bare_first` was not carried by the route-cost policy loader or env controls, so high-risk feature rules with `supervised_bare_first=true` still fell back to expensive Hyper. Test fixture names were not anchored to `_nexus_value_fixture_sources`.
+- **Lesson**: High-risk cost slimming must be opt-in at the feature-rule level and still guarded by hidden verifier / artifact / claim / delivery gates. Tests for policy hooks must use existing fixture kinds so a false fixture does not create fake confidence.
+- **Action Taken**: Added explicit `allow_high_risk_supervised_bare_first` support in `learning_policy_loader`, updated governance/refactor feature rules, and added benchmark/loader regressions proving high-risk supervision only activates when policy explicitly allows it.
+- **Verification**: `uv run pytest -q tests/engine/test_capability_planner.py -k "route_cost_policy_loader or route_cost_controls"` passed 12/12 selected; `uv run pytest -q tests/benchmark/test_capability_ab_runner.py -k "supervised_bare_first or persistent_worker_gap_dashboard or commercial_model_roi_shadow_hooks"` passed 4/4 selected.
+
+## 2026-05-14 Supervised Bare-First Must Backfill MemPalace Receipts
+
+- **Phenomenon**: The first clean Flash high-risk smoke made `nexus-value-gov-002` semantically VERIFIED through `nexus_supervised_bare_first`, but row eligibility was false with `receipt_data_contract_violation` and `missing_expected_capability_receipts`.
+- **Root Cause**: The supervised receipt backfill covered `artifact_gate` and `claim_gate`, but not `mempalace_gate`, even though governance/refactor tasks can explicitly require `mempalace_gate` as public evidence.
+- **Lesson**: Any supervised route that claims Nexus governance must backfill every expected gate receipt it invokes. Semantic success without expected receipt coverage is not promotion evidence.
+- **Action Taken**: Extended `_ensure_expected_capability_receipts` to backfill `mempalace_gate` alongside artifact/claim gates, and added a high-risk supervised regression with `expected_capabilities=("mempalace_gate", "claim_gate")`.
+- **Verification**: Clean runner smoke `/private/tmp/nexus-flash-highrisk-supervised-smoke2-20260514/evidence_bundle.json` produced 2/2 eligible, 2/2 VERIFIED, trust mismatch 0, outbound ledger PASS, session contamination 0, warning gate PASS, wall ledger conserved 1.0.
+
+## 2026-05-14 Public Gap Dashboards Must Use Disclosure Manifests, Not Raw Repo Manifests
+
+- **Phenomenon**: A full Flash paired rerun reached `public_claim_gate=PASS`, `public_verified_delivery_claim_gate=PASS`, and trust mismatch 0, but the cross-model dashboard still returned `all_taskset_contracts_ready=false`.
+- **Root Cause**: The run used the repo execution manifest directly. Its task hash matched the public taskset, but it did not pass the sanitized package's `--public-disclosure-manifest`, so `fixed_public_taskset_ready` remained false for publication-plane comparison.
+- **Lesson**: Public comparison readiness requires both the immutable execution taskset and the public disclosure manifest. A matching task hash is necessary but not sufficient because disclosure is part of the audit contract.
+- **Action Taken**: Reran Flash from the sanitized package with `tasks.execution_safe.json`, `tasks.disclosure.json`, clean worker cwd, outbound prompt ledger, and learn metadata hook hygiene before/after the run.
+- **Verification**: `/private/tmp/nexus-public-gap-dashboard-20260514-v7.json` reports `all_taskset_contracts_ready=true`, `all_workers_clean=true`, `baseline_direct_usable=true`, and Flash `delivery_promotion_ready=true`.
+
+## 2026-05-14 Flash Delivery Ready Is Not Final Promotion When Wall Cost Regresses
+
+- **Phenomenon**: Public-safe Flash + Nexus verified 12/12 rows with trust mismatch 0 and exceeded GPT-5.5 direct verified delivery by 41.67pp, but Flash `promotion_ready=false`.
+- **Root Cause**: `public_cost_efficiency_claim_gate=REGRESSED` with `wall_cost_not_improved`. Flash reduced tokens and model calls, but the public wall criterion still regressed, and `x3_promotion_gate=RETURN` still needs two valid x1 readiness rounds.
+- **Lesson**: A delivery-ready run can support a narrow verified-delivery claim, but final public promotion must remain blocked until delivery, trust, replay, taskset disclosure, warning/token/wall telemetry, and cost readiness all pass together.
+- **Action Taken**: Kept the dashboard hook observation-only: `light_route_low_risk_full_nexus_high_risk` is emitted as policy guidance, not as a promotion override.
+- **Verification**: `/private/tmp/nexus-flash-full-supervised-public-20260514/reports/evidence_bundle.json` records Flash 12/12 verified, trust mismatch 0, outbound ledger PASS, wall ledger conserved; `/private/tmp/nexus-public-gap-dashboard-20260514-v7.json` records Flash `delivery_promotion_ready=true`, `cost_promotion_ready=false`, `promotion_ready=false`.
+
+## 2026-05-14 Route Cost Must Split Performance, Load, And Stress Questions
+
+- **Phenomenon**: Flash route-cost discussion kept collapsing into a single "wall cost regressed" verdict, even though the evidence showed three different signals: normal-mix token savings, public-load delivery readiness, and high-risk wall-regression hotspots.
+- **Root Cause**: The dashboard had an observation-only cost policy hook, but it did not name which benchmark question was failing. That made a Performance issue, a Load/promotion issue, and a Stress/RCA issue look like the same blocker.
+- **Lesson**: Route-cost optimization needs separate lenses: Performance for normal-mix cost per verified success, Load for public-promotion readiness under fixed taskset/disclosure/verifier, and Stress for high-risk route breakpoints. These lenses may recommend RCA or routing policy candidates, but must not change delivery/trust/cost/x3 gates.
+- **Action Taken**: Added `performance_load_stress_hook` to the persistent-worker gap dashboard with `promotion_effect=none`, preserving `commercial_model_roi_shadow_hooks` and `cost_policy_hook` as observation-only signals.
+- **Verification**: Targeted dashboard regression passed and `/private/tmp/nexus-public-gap-dashboard-20260514-v8.json` now reports Flash Performance=`WATCH`, Load=`RETURN`, Stress=`NEEDS_ROUTE_COST_RCA` while keeping Flash `promotion_ready=false`.
+
+## 2026-05-14 Flash Round2 Confirms Delivery Lift But Route-Cost Stress Hotspots Remain
+
+- **Phenomenon**: A second public-safe Flash x1 round again verified 12/12 with Nexus and trust mismatch 0, while direct Flash verified 7/12. The dashboard still kept Flash `promotion_ready=false`.
+- **Root Cause**: The round remained wall-cost regressed: avg wall with Nexus was 19.9424s versus direct 13.8545s, and `public_cost_efficiency_claim_gate=REGRESSED` with `wall_cost_not_improved`. Stress buckets concentrated in `hidden_lite` repair, `hidden_bugfix_supervised`, `governance_hardened_capped`, `governance_hardened` hyper direct, and `context_sync_capped`.
+- **Lesson**: Re-running readiness can strengthen the delivery/trust claim, but it does not resolve always-on cost. The next fix must target general route-cost buckets, not task ids, and keep delivery/trust gates fail-closed.
+- **Action Taken**: Rebuilt the gap dashboard as `/private/tmp/nexus-public-gap-dashboard-20260514-v9.json`; Flash remains Load=`RETURN`, Performance=`WATCH`, Stress=`NEEDS_ROUTE_COST_RCA`.
+- **Verification**: `/private/tmp/nexus-flash-full-supervised-public2-20260514/reports/evidence_bundle.json` records public delivery PASS, cost claim PASS, cost efficiency REGRESSED, outbound ledger PASS, contamination 0, and wall/token/provider telemetry conserved.
+
+## 2026-05-14 Sanitized Flash Reruns May Need Escalated UV Cache Access
+
+- **Phenomenon**: The second public-safe Flash x1 command failed before model execution with `failed to open file /Users/jameschen/.cache/uv/sdists-v9/.git: Operation not permitted`.
+- **Root Cause**: The sanitized runner itself was clean and public-safe, but `uv` needed to read the user's package cache outside the workspace sandbox.
+- **Lesson**: Sandbox filesystem denial is an execution-environment issue, not a benchmark failure. For sanitized public runners, rerun the same command with approved escalation instead of changing task content, manifest, prompts, or evidence policy.
+- **Action Taken**: Re-ran the identical sanitized Flash command with escalation, preserving `--external-model-export-policy sanitized`, disclosure manifest, outbound ledger, and clean runner guard.
+- **Verification**: The escalated command completed and produced `/private/tmp/nexus-flash-full-supervised-public2-20260514/reports/evidence_bundle.json`.
+
+## 2026-05-14 Route-Cost Policy Controls Must Express Pre-Model Rescue Explicitly
+
+- **Phenomenon**: Flash round2 stress hooks showed `hidden_bugfix_supervised` and `governance_hardened` as wall-regression buckets. The code already had a fail-closed pre-model deterministic rescue switch, but the promoted policy loader could not read it from feature rules.
+- **Root Cause**: `allow_pre_model_deterministic_rescue` existed in runner logic but was not part of the route-cost policy loader contract. Separately, `governance_hardened` said the baseline model call was wasteful while still allowing high-risk supervised bare-first, creating a contradictory extra probe path.
+- **Lesson**: Route-cost controls must be explicit and non-contradictory. Hidden bugfix can enable pre-model deterministic rescue only under hidden-verifier and unprotected-capability guards; governance hardened should skip redundant baseline probes while preserving governance review.
+- **Action Taken**: Added `allow_pre_model_deterministic_rescue` to env/feature policy loading, enabled it for the low-risk hidden bugfix feature rule, removed high-risk supervised bare-first from `governance_hardened`, and preserved `ultra_review` for hardened governance lanes.
+- **Verification**: Targeted planner/runner tests passed; policy inspection shows hidden bugfix now emits `allow_pre_model_deterministic_rescue=true`, while governance hardened emits `skip_llm_baseline=true` without high-risk supervised bare-first.
+
+## 2026-05-14 Stress Hook Needs Bucket Candidates, Not Just Status
+
+- **Phenomenon**: `performance_load_stress_hook` correctly said Flash Stress=`NEEDS_ROUTE_COST_RCA`, but the first version still required manually reading `commercial_model_roi_shadow_hooks` to know which lanes to fix.
+- **Root Cause**: The dashboard imported shadow reason counts but not the wall-regression concentration buckets.
+- **Lesson**: A usable route-cost hook should surface bucket-level RCA candidates without task ids: lane, strategy, task type, wall ratio, wall delta, reason codes, and suggested non-gate action.
+- **Action Taken**: Added `top_wall_regression_buckets` to the stress hook, sourced from observation-only ROI shadow concentration.
+- **Verification**: `/private/tmp/nexus-public-gap-dashboard-20260514-v10.json` lists hidden repair, hidden bugfix, governance capped, governance hardened, and context sync buckets with suggested actions while Flash `promotion_ready=false`.
+
+## 2026-05-14 Deterministic Local Rescue Must Be Eligible And Conserved
+
+- **Phenomenon**: A clean Flash rerun made low-risk hidden bugfix rows finish in under 1s, but public gates still returned because the new local rescue source was marked `nexus_delivery_invalid` and wall ledger rows double-counted `cli_uninstrumented_sec`.
+- **Root Cause**: `local_deterministic_pre_model_rescue` was missing from the public internal delivery source allowlist, and no-model local rescue ledger accounting treated CLI elapsed time as independent even when it already contained hidden verifier and deterministic rescue time.
+- **Lesson**: A fail-closed local rescue needs three contracts at once: delivery-source eligibility, Nexus pillar/receipt evidence, and conserved residual wall accounting. Fast local success without those contracts is not promotion evidence.
+- **Action Taken**: Added deterministic pre-model rescue as an eligible internal delivery source, backfilled Nexus pillar markers on the rescue row, and changed no-model wall ledger accounting so `cli_uninstrumented` becomes residual after local components.
+- **Verification**: Clean runner targeted tests passed; Flash round8 reached public claim PASS, verified delivery PASS, cost gate PASS, cost efficiency IMPROVED, wall ledger conserved rate 1.0, and trust mismatch 0.
+
+## 2026-05-14 X1 Readiness History Must Be Stable Across Output Dirs
+
+- **Phenomenon**: Flash round6 and round7 both produced valid x1 readiness, but `x3_promotion_gate` still returned `missing_two_valid_x1_readiness_rounds`.
+- **Root Cause**: `x1_readiness_history.json` was written inside each run's output directory, so every run saw only its own single history entry.
+- **Lesson**: Promotion history is state, not per-run evidence. Per-run bundles should reference gate results, but the readiness history used for consecutive-run promotion must live in a stable repo-level learn path.
+- **Action Taken**: Added a stable history resolver that writes to `.nexus/reports/learn/x1_readiness_history.json` when `repo_root` is available, with an explicit override hook for tests or isolated runners.
+- **Verification**: Targeted x1/x3 tests passed; Flash round8 read two prior compatible x1 entries and produced `x3_promotion_gate=PASS`.
+
+## 2026-05-14 Git Staging In One Worktree Must Be Serialized
+
+- **Phenomenon**: Parallel `git add` calls in the same clean runner twice produced `index.lock` contention.
+- **Root Cause**: The implementation used tool-level parallelism for commands that mutate the same git index.
+- **Lesson**: File reads and independent diagnostics can run in parallel, but git index mutation must be serialized per worktree.
+- **Action Taken**: Retried staging sequentially and kept policy files under `.nexus` staged with `git add -f` because that path is ignored.
+- **Verification**: Subsequent clean runner commits passed pre-commit and the worktree returned to a clean state before public Flash reruns.
+
+## 2026-05-14 X1 Readiness History Is Learn Metadata For Temp Runner Hooks
+
+- **Phenomenon**: The sanitized runner learn metadata hook skipped cleanup after a Flash public run because `.nexus/reports/learn/x1_readiness_history.json` remained dirty.
+- **Root Cause**: The hook allowlist covered `phase_slo_summary.json` and `phase_writeback.jsonl`, but x3 promotion now writes stable x1 readiness history into the same learn metadata directory.
+- **Lesson**: Any file produced by the public promotion readiness loop must either be committed by the temp-runner metadata hook or explicitly marked non-public; otherwise clean-runner preflight will keep stopping on a known benign metadata file.
+- **Action Taken**: Added `.nexus/reports/learn/x1_readiness_history.json` to the generated sanitized-runner metadata hook allowlist and regression tests.
+- **Verification**: Targeted hook tests cover both all-allowed metadata commits and mixed dirty-state fail-closed behavior.
+
+## 2026-05-14 Route Execution Decisions Need A Small Policy Module
+
+- **Phenomenon**: Flash 12x1 reached delivery/trust/x3 PASS but final promotion returned because wall cost regressed. The repair hotspot showed `hidden_lite` rows running an expensive `probe_then_hyper` path while the route policy also exposed deterministic rescue controls.
+- **Root Cause**: `run_with_nexus` mixed route policy predicates, model-required constraints, supervised bare-first, deterministic rescue, force-flow, subprocess execution, verifier work, and row annotation. The reason `model_required` blocked pre-model rescue was implicit in orchestration code rather than visible as a policy decision.
+- **Lesson**: Route execution decisions are a harness contract and need their own small Module. The Module should output booleans plus reason codes before execution, so wall-cost RCA can distinguish intended model participation from accidental expensive routing.
+- **Action Taken**: Added `scripts/bench/route_execution_policy.py`, delegated the existing route predicate wrappers to it, recorded `route_execution_policy` on with-Nexus rows, and added tests for `hidden_lite` model-required versus non-model-required pre-model rescue decisions.
+- **Verification**: Targeted route policy and public gate tests passed.
+
+## 2026-05-14 Clean Runner Sync Must Include Dependent Bench Modules
+
+- **Phenomenon**: Clean runner verification failed during test collection with `ImportError: cannot import name 'build_public_promotion_readiness_contract' from scripts.bench.public_lane_contract`.
+- **Root Cause**: The clean runner received the edited runner and tests before all dependent bench modules were synchronized, so the isolated verification environment was internally inconsistent even though the main workspace test slice passed.
+- **Lesson**: Clean runner synchronization is a module-closure operation, not a single-file copy. When runner tests import public gate, sanitized runner, dashboard, or taskset helpers, those dependencies must be copied and verified together before a public smoke run.
+- **Action Taken**: Synchronized `public_lane_contract.py`, `build_sanitized_runner.py`, `persistent_worker_gap_dashboard.py`, and `taskset_contract.py` into the clean runner along with the route policy module and runner.
+- **Verification**: Clean runner targeted tests passed, py_compile passed, and sanitized preflight passed at clean commit `b6d97696d8df8f6d37e2a8d801fa430a2ddf26b2`.
+
+## 2026-05-14 Spec Kit Should Shape The Contract, Not Rewrite The Dirty Repo
+
+- **Phenomenon**: Spec Kit looked useful for the public-promotion blocker, but initializing it directly in the dirty Nexus worktree would add `.specify` and agent command files before the benchmark fix was stable.
+- **Root Cause**: The problem needs spec discipline, but the repo is already carrying many benchmark artifacts and clean-runner mirrors. A broad scaffold would increase the change surface while the active blocker is a small route-cost policy exception.
+- **Lesson**: Use Spec Kit as a contract-shaping tool first: pin the official GitHub release, verify CLI readiness, avoid community extensions, and write the benchmark contract into `docs/plans` before changing runner behavior.
+- **Action Taken**: Installed `specify-cli==0.8.9` from `github/spec-kit` tag `v0.8.9`, verified `specify version` and `specify check`, and added a public-promotion spec bridge under `docs/plans`.
+- **Verification**: `specify version` reported CLI 0.8.9; `specify check` reported Codex CLI, Gemini CLI, and Git available; no `.specify` files were created in the Nexus worktree.
+
+## 2026-05-14 Cost-Capped Capability Protection Needs A Verified Rescue Clause
+
+- **Phenomenon**: Flash full smoke reached 12/12 with Nexus versus 9/12 direct, but promotion still returned because repair rows spent 28s and 57s in the R phase before a local hidden-contract fast path succeeded.
+- **Root Cause**: `expected_capability_protection` blocked pre-model deterministic rescue even for `capability_activation_contract=cost_capped` repair tasks. That preserved safety, but it forced a costly route before the same hidden verifier-confirmed local repair could be accepted.
+- **Lesson**: `required` capability protection and `cost_capped` capability protection need different route semantics. Cost-capped lanes may use deterministic pre-model rescue only when low-risk/high-sufficiency local reflex and hidden verifier pass, with reason codes recorded on the row.
+- **Action Taken**: Updated `route_execution_policy` to allow verified pre-model rescue for cost-capped protected lanes while keeping required protected lanes blocked.
+- **Verification**: Route policy regression tests passed and py_compile passed.
+
+## 2026-05-14 Direct Model Calls Without Tokens Must Be Infra Invalid
+
+- **Phenomenon**: The Pro full sanitized rerun produced direct-arm rows with `model_calls=1`, `total_tokens=0`, and `token_capture_status=unknown`, but those rows were still counted as run-eligible.
+- **Root Cause**: `model_call_without_tokens` was only classified as infra-invalid for baseline-required rows. Direct commercial-model baselines can also produce tokenless model calls, so the gate let invalid provider telemetry pollute the denominator.
+- **Lesson**: Any model-required row with a model call and missing provider tokens is telemetry-invalid, regardless of whether the row is with-Nexus or direct baseline. Public cost and delivery comparison must fail closed rather than treating tokenless model calls as ordinary failures.
+- **Action Taken**: Updated `classify_infra_invalid_reason` to return `model_call_without_tokens` for all model-required tokenless model calls, and added a direct baseline regression test.
+- **Verification**: Targeted benchmark eligibility tests passed; py_compile passed for the runner, public lane contract, eligibility module, and benchmark tests.
+
+## 2026-05-14 Route Policy Evidence Must Be A Public Gate Input
+
+- **Phenomenon**: Cost-capped deterministic rescue could make Flash reach public gates, but the route-policy reason codes were not yet a first-class public promotion input.
+- **Root Cause**: The policy module emitted the right execution decision, but the evidence bundle did not independently verify that public with-Nexus rows carried route policy evidence and that rescue rows preserved hidden-verifier/local-reflex causality.
+- **Lesson**: Public promotion needs both result evidence and route-policy evidence. A successful row without `route_execution_policy`, or a cost-capped rescue without hidden verifier and low-risk/high-sufficiency guards, is a trust mismatch risk.
+- **Action Taken**: Added `build_route_policy_evidence_contract`, wired it into the evidence bundle before public claim gates, and made promotion readiness require `route_policy_evidence_pass`.
+- **Verification**: Route-policy evidence contract tests passed, including missing policy, valid verified cost-capped rescue, and unverified rescue blockers.
+
+## 2026-05-14 Old Sanitized Runner Hooks Must Commit X1 Metadata
+
+- **Phenomenon**: The Pro full sanitized package rerun left `.nexus/reports/learn/x1_readiness_history.json` dirty in the clean runner after writing learn metadata.
+- **Root Cause**: The package had an older temp-runner learn metadata hook that allowed `phase_slo_summary.json` and `phase_writeback.jsonl`, but not the stable x1 readiness history added for x3 promotion.
+- **Lesson**: Existing sanitized packages can outlive hook improvements. Before reruns, their metadata commit hook must be brought forward or preflight will keep stopping on known learn-state files.
+- **Action Taken**: Patched the Pro full package hook to commit `.nexus/reports/learn/x1_readiness_history.json` with the rest of allowed learn metadata, then committed it inside the clean runner.
+- **Verification**: The Pro full package preflight passed after the metadata commit at clean-runner commit `eb049c8b`.
+
+## 2026-05-14 Full Runner Contract Tests Catch Cross-Gate Semantics
+
+- **Phenomenon**: The small route-policy evidence test slice passed, but the full benchmark runner test file exposed older fixtures missing route policy evidence, bounded rescue skipping after a `nexus_delivery_invalid` first attempt, and wall-ledger fallback semantics that should be invalid only when the hidden verifier is not explicitly included.
+- **Root Cause**: Public gate, rescue admission, and wall-ledger accounting are coupled through row annotations. A focused helper test can miss the way `_extract_record`, eligibility annotation, and evidence bundle gates interact.
+- **Lesson**: Any new public promotion hook must be verified against the whole benchmark runner contract file, not only the new helper tests. `nexus_delivery_invalid` on a failed first model attempt can still be repairable for bounded rescue, while tokenless model calls remain infra-invalid.
+- **Action Taken**: Updated full-file fixtures to carry route policy evidence, allowed bounded rescue admission through `nexus_delivery_invalid` when provider tokens exist, and kept gateway-total fallback PASS only when hidden verifier wall is explicitly included.
+- **Verification**: `uv run pytest -q tests/benchmark/test_capability_ab_runner.py` passed all 300 tests.
+
+## 2026-05-14 Promotion Readiness Contract Must Be Emitted By The Bundle
+
+- **Phenomenon**: The Flash route-policy run reached public verified delivery PASS, public cost PASS, cost efficiency IMPROVED, x3 PASS, and trust mismatch 0, but the evidence bundle still had no `public_promotion_readiness_contract`.
+- **Root Cause**: `build_public_promotion_readiness_contract` existed in the public lane contract module, but `write_evidence_bundle` did not call it, so downstream dashboards could not audit the single promotion readiness decision.
+- **Lesson**: A public-promotion helper is not part of the evidence chain until the bundle emits it. Promotion readiness must be serialized next to the gates it depends on, and tests must assert the emitted contract, not only helper behavior.
+- **Action Taken**: Wired `build_public_promotion_readiness_contract` into `write_evidence_bundle`, added full-runner contract assertions for `route_policy_evidence_pass`, and synchronized the hook into the clean runner.
+- **Verification**: Main and clean-runner `uv run pytest -q tests/benchmark/test_capability_ab_runner.py` both passed 300 tests; the rerolled Flash bundle now reports `public_promotion_readiness_contract.status=PASS`.
+
+## 2026-05-14 Evidence Rollup Must Preserve Model Identity Env
+
+- **Phenomenon**: Rerolling the Flash evidence bundle from existing raw JSONL without model environment variables temporarily changed x3 readiness from PASS to RETURN with `missing_two_valid_x1_readiness_rounds`.
+- **Root Cause**: X1 history compatibility uses the report model label. When `NEXUS_GEMINI_MODEL_NAME` and `NEXUS_DIRECT_GEMINI_MODEL` were absent, the reroll label no longer matched the live Flash run label.
+- **Lesson**: Offline evidence rollup is still part of the benchmark execution contract. It must preserve model identity, provider mode, taskset, and disclosure parameters, or it can invalidate otherwise correct readiness history.
+- **Action Taken**: Rerolled with `NEXUS_GEMINI_MODEL_NAME=gemini-3-flash-preview` and `NEXUS_DIRECT_GEMINI_MODEL=gemini-3-flash-preview`, then committed generated learn metadata through the temp-runner hook.
+- **Verification**: The Flash bundle returned to `x3_promotion_gate=PASS`, `public_promotion_readiness_contract.status=PASS`, `route_policy_evidence_contract.status=PASS`, and sanitized preflight reported a clean runner.
+
+## 2026-05-14 Provider Quota Blocks Pro Promotion Without Implicating Nexus Delivery
+
+- **Phenomenon**: The Pro route-policy rerun produced with-Nexus 12/12 verified rows, but the second direct Pro baseline round hit `quota_exhausted` on `nexus-value-trust-002`, leaving without-Nexus provider token measured rate at 0.9091.
+- **Root Cause**: The fail-closed public gates require complete direct-arm provider telemetry. A single quota-exhausted direct row makes public delivery/cost claims incomplete even when Nexus delivery, trust, route-policy evidence, and clean runner preflight are healthy.
+- **Lesson**: Provider quota is an external baseline completeness blocker, not a local route correctness blocker. The next action should be a quota-aware direct baseline retry window or a clean direct-only refill for the missing row, not weakening Nexus gates or mutating route policy.
+- **Action Taken**: Kept the Pro bundle as non-promotion, regenerated the public gap dashboard with Pro labeled `pro_nexus_route_policy_quota_blocked`, and preserved fail-closed readiness failures.
+- **Verification**: Pro preflight stayed PASS with dirty entries 0; dashboard generation passed and marks Flash promotion-ready while Pro and GPT-5.5 Nexus remain non-promotion.
+
+## 2026-05-15 Direct-Arm Refill Needs A Small Evidence Module
+
+- **Phenomenon**: Pro delivery and route-policy evidence were healthy, but public promotion stayed blocked first by `quota_exhausted`, then by a direct row with `token_capture_status=estimated` and missing provider-token measurement.
+- **Root Cause**: The runner could produce targeted `--without-only --task-id-filter` rows, but there was no small fail-closed module to merge only evidence-completeness refills back into the original paired bundle.
+- **Lesson**: Refill is an evidence operation, not a benchmark-runner responsibility. It must be explicit, row-keyed by mode/task/trial, restricted to allowed reasons such as `quota_exhausted` and `provider_token_unmeasured`, and must reject replacement rows that remain infra-invalid.
+- **Action Taken**: Added `scripts/bench/refill_evidence_bundle.py`, targeted Pro direct-only refills for `nexus-value-trust-002` and `nexus-value-evidence-001`, and rebuilt the Pro public bundle with refill disclosure.
+- **Verification**: `uv run pytest -q tests/benchmark/test_refill_evidence_bundle.py tests/benchmark/test_capability_ab_runner.py` passed 303 tests; Pro refilled bundle reports promotion readiness PASS, route-policy evidence PASS, public delivery PASS, cost PASS, cost efficiency IMPROVED, and x3 PASS.
+
+## 2026-05-15 GPT-5.5 Codex Provider Boundary Is Observation-Only Until Rebuilt
+
+- **Phenomenon**: GPT-5.5 with-Nexus hook4 remained non-promotion even though the direct baseline is usable.
+- **Root Cause**: The with-Nexus package carried Codex prompt-wearing-only provider limitations, outbound prompt ledger forbidden literals, session worker contamination, receipt contract violations, and incomplete provider-token telemetry.
+- **Lesson**: A GPT-5.5 direct baseline can remain a reference while GPT-5.5 with-Nexus is observation-only. Do not convert prompt-wearing Codex evidence into public parity, public cost, or same-model uplift wording.
+- **Action Taken**: Regenerated the public dashboard with GPT-5.5 Nexus labeled observation-only and updated the promotion state contract in the Spec Kit bridge and learning sync master docs.
+- **Verification**: Dashboard generation passed and marks Flash and Pro promotion-ready while GPT-5.5 Nexus stays non-promotion.
+
+## 2026-05-15 Codex Provider Boundary Must Be A Bundle Contract
+
+- **Phenomenon**: GPT-5.5 with-Nexus evidence can look superficially comparable because the model names match, but the Codex provider path is prompt-wearing-only for external public model claims.
+- **Root Cause**: The previous public promotion readiness contract did not separately encode provider-boundary eligibility, so a future clean-looking Codex run could be misread as public-safe.
+- **Lesson**: Provider-boundary eligibility is a first-class public promotion input. Codex-backed external-model evidence must remain observation-only unless a separate public-safe provider boundary is proven.
+- **Action Taken**: Added `nexus_external_provider_claim_boundary_contract_v1`, wired it into evidence bundles, and made `public_promotion_readiness_contract` require `external_provider_public_claim_allowed`.
+- **Verification**: Targeted provider-boundary tests passed in the main workspace and clean runner; GPT-5.5 hook5 bundle now emits `external_provider_claim_boundary_contract.status=OBSERVATION_ONLY`.
+
+## 2026-05-15 GPT-5.5 Hook5 Improved Isolation But Still Fails Closed
+
+- **Phenomenon**: Rebuilt GPT-5.5 hook5 used a new temp package, new session id, new provider cwd, and new outbound ledger. It improved over hook4 but still returned non-promotion.
+- **Root Cause**: Hook5 still had Codex prompt-wearing-only provider boundary, four outbound prompt ledger forbidden literal hits, two trust-row receipt contract violations, two contaminated session-worker rows, model annotation mismatch on local with-Nexus rows, and incomplete with-arm provider-token telemetry.
+- **Lesson**: Rebuilding a sanitized package can remove stale-state contamination, but it does not by itself prove public-safe GPT-5.5 Nexus treatment. The next fix should target trust-row prompt/receipt hygiene and model annotation consistency before another public attempt.
+- **Action Taken**: Built `/private/tmp/nexus-sanitized-runner-gpt55-hook5-20260515`, ran preflight and live observation smoke, regenerated the gap dashboard with hook5, and updated promotion truth tables to point at hook5 evidence.
+- **Verification**: Hook5 preflight PASS; live run completed; dashboard generation PASS; Flash and Pro remain promotion-ready while GPT-5.5 hook5 remains observation-only.
+
+## 2026-05-15 Codex Prompt Hygiene And Row Evidence Must Close Together
+
+- **Phenomenon**: GPT-5.5 hook5/hook6 showed that fixing one Codex benchmark boundary at a time can expose the next evidence hole: path literal leakage, local-row model annotation mismatch, missing reset boundary hashes, then missing `route_execution_policy` on Codex-with-Nexus rows.
+- **Root Cause**: The Gemini outbound path already redacted sanitized runner paths before ledger/invocation, but the Codex direct path recorded and sent raw prompts. Local deterministic with-Nexus rows also used Gemini-oriented model defaults, and Codex-with-Nexus rows did not serialize the same route/session evidence expected by public gates.
+- **Lesson**: Public runner fixes must close the whole row-evidence contract: sanitized outbound prompt, provider-specific model identity, reset boundary hash, route execution policy, receipt coverage, and provider-token evidence. Otherwise the run can be behaviorally correct but still fail public gates.
+- **Action Taken**: Added Codex prompt redaction before ledger/invocation, provider-specific model naming for Codex local rescue rows, Codex-with-Nexus reset boundary hashes, and route execution policy serialization. Rebuilt hook8 from clean runner commit `19f8ef7d`.
+- **Verification**: Hook8 reports with-Nexus 12/12 eligible, verified delivery 1.0, trust mismatch 0, same-model true, session contamination 0, outbound ledger PASS with forbidden literal count 0, provider-token measured rates 1.0/1.0, and route-policy evidence PASS. GPT-5.5+Nexus remains observation-only because Codex provider boundary is prompt-wearing-only and cost gates still fail on prompt-purity/wall-ledger telemetry.
+
+## 2026-05-15 Codex Direct Wall Ledger Needs Gateway Timing
+
+- **Phenomenon**: Hook8 cleared session, receipt, model, token, and route-policy blockers, but GPT-5.5 observation cost gates still had `wall_ledger_telemetry_invalid` because direct Codex rows fell back to total wall as the model gateway component.
+- **Root Cause**: `_ask_direct_codex_patch()` measured tokens from Codex stdout but did not serialize gateway invocation/process/parse timing, so the wall ledger could only infer gateway time from total row wall and then double-count direct verifier wall.
+- **Lesson**: Token measurement without wall timing is not sufficient for public cost evidence. Every external provider path needs provider wait/process timing before cost-efficiency claims can be audited.
+- **Action Taken**: Added Codex gateway timing fields (`gateway_invocation_build_sec`, `gateway_process_sec`, `gateway_provider_wait_sec`, `gateway_parse_sec`, `gateway_total_sec`) and rebuilt hook9 from clean runner commit `c86e73c5`.
+- **Verification**: Hook9 reports wall-ledger conserved rate 1.0 on both with-Nexus and without-Nexus arms, `wall_ledger_conservation.telemetry_invalid=false`, provider-token measured rates 1.0/1.0, and GPT-5.5+Nexus remains observation-only only because of the Codex provider boundary plus prompt-purity/x3 blockers.
+
+## 2026-05-15 Codex Prompt Purity Must Attribute Control Plane Separately
+
+- **Phenomenon**: Hook9 cleared wall-ledger telemetry but still failed public cost and efficiency gates on `prompt_purity_above_threshold`, even though the added text was Nexus routing, code-intel, profile, executor, and verifier control-plane guidance rather than extra task payload.
+- **Root Cause**: Codex with-Nexus prompt attribution was recorded as one blended prompt. The public gate could not distinguish Nexus control-plane instructions from task-side contamination, so a legitimate orchestrator envelope looked like prompt impurity.
+- **Lesson**: Prompt purity has to be causally attributed. Public rows must separate task payload, governance contract, route control, code-intel context, runtime profile, executor contract, and hidden-verifier guidance before comparing prompt boundaries.
+- **Action Taken**: Split Codex with-Nexus prompt construction into attributed components, recorded `prompt_purity_index`, `prompt_nexus_control_chars`, and governance/control counts in row evidence, then rebuilt hook10 from clean runner commit `ed4047df`.
+- **Verification**: Hook10 reports `public_claim_gate=PASS`, `public_verified_delivery_claim_gate=PASS`, `public_cost_claim_gate=PASS`, `public_cost_efficiency_claim_gate=IMPROVED`, `prompt_purity_index_max=1.0`, wall-ledger conserved rates 1.0/1.0, provider-token measured rates 1.0/1.0, trust mismatch 0, and remains `RETURN` only because `external_provider_claim_boundary_contract=OBSERVATION_ONLY`.
+
+## 2026-05-15 Gap Dashboard Must Consume Source Promotion Boundary
+
+- **Phenomenon**: The hook10 evidence bundle correctly returned `public_promotion_readiness_contract=RETURN`, but the gap dashboard initially marked `gpt5.5_nexus_hook10_observation_only` as `promotion_ready=true` because delivery and cost gates passed.
+- **Root Cause**: `persistent_worker_gap_dashboard.py` derived dashboard promotion from delivery and cost readiness only. It did not consume the source bundle's `public_promotion_readiness_contract` or `external_provider_claim_boundary_contract`.
+- **Lesson**: Dashboards are publication-plane artifacts and must be strictly downstream of the evidence-plane promotion contract. Delivery PASS plus cost PASS is not enough when provider-boundary or other source promotion requirements return.
+- **Action Taken**: Added `public_promotion_readiness_status`, `external_provider_public_claim_allowed`, and `source_promotion_ready` to dashboard arms/comparisons, and made `promotion_ready` require all three: delivery, cost, and source promotion readiness.
+- **Verification**: Regenerated hook10 dashboard now marks Flash and Pro `promotion_ready=true`, while GPT-5.5 hook10 remains `source_promotion_ready=false` and `promotion_ready=false` despite delivery/cost readiness.
+
+## 2026-05-15 Smoke Promotion Is Not Commercial-Basis Final Goal Readiness
+
+- **Phenomenon**: Flash and Pro bundles were correctly promotion-ready for the fixed 12-task smoke, but that could still be misread as completing the broader goal of matching GPT-5.5 direct on commercial-model-basis tasks.
+- **Root Cause**: The taskset contract recorded fixed-public readiness but did not classify whether the bundle came from the compiled commercial benchmark lane manifest.
+- **Lesson**: Smoke promotion and final-goal readiness need separate fields. The final goal must require a commercial benchmark basis in addition to delivery, trust, cost, replay, and source-promotion gates.
+- **Action Taken**: Added `nexus_benchmark_basis_contract_v1` to taskset contracts and `final_goal_ready` to the gap dashboard. `final_goal_ready` requires delivery readiness, cost readiness, source promotion readiness, and `commercial_model_basis_ready`.
+- **Verification**: Regenerated hook10 dashboard shows Flash/Pro `promotion_ready=true` but `final_goal_ready=false`; GPT-5.5 hook10 remains false on both source/final readiness.
+
+## 2026-05-15 DDTree Cost Floor Is Pool Quality, Not LLM Candidate Count
+
+- **Phenomenon**: Flash commercial 28-task rerun cleared delivery/trust evidence after route-policy fixes, but `route-oracle-ddtree-001` remained a top wall/token offender with `model_calls=2` and DDTree selected two LLM candidates.
+- **Root Cause**: Expected DDTree protection correctly prevented `candidate_cap=1`, but the implementation equated "DDTree needs a prunable pool" with "every pool member must be LLM-owned". That overpaid for the evidence contract even when one model candidate plus deterministic support candidates is enough to preserve pruning receipts and model-owned final delivery.
+- **Lesson**: Route-cost floors should encode the capability's real invariant, not an incidental implementation count. For DDTree the invariant is a public-safe pruning opportunity plus a model-owned winner, so the pool policy can use `1 LLM + local support` while keeping delivery/trust gates fail-closed.
+- **Action Taken**: Added `nexus.research.candidate_pool_policy`, propagated `ddtree_mixed_candidate_pool` through protected route-cost controls, and used local support candidates inside `run_hyper_sprint` only when DDTree is enabled, LLM mode is active, and compact cost controls explicitly allow the mixed pool.
+- **Verification**: Targeted Flash DDTREE live smoke on the sanitized clean runner stayed `SUCCESS`, `semantic_status=VERIFIED`, `trust=false`, expected DDTree receipt `missing=[]`, and reduced the row from the prior `model_calls=2`, `tokens=143962`, `wall=72.3075s` to `model_calls=1`, `tokens=72301`, `wall=36.65s`. Full Flash commercial 28-task rerun then reported with-Nexus 28/28 verified, trust mismatch 0, direct baseline 20/28 verified, token ratio 0.5338, and public delivery/cost gates PASS; cost efficiency still RETURN/REGRESSED on wall because avg wall ratio is 1.3648 and hidden retry wall share is non-zero.
+
+## 2026-05-15 Autoreason Cost Floor Must Preserve Evidence, Not Duplicate LLM Candidates
+
+- **Phenomenon**: After DDTree cost hardening, Flash commercial `route-oracle-autoreason-001` stayed a top wall offender in the full 28-task bundle with `model_calls=2`, `tokens=145042`, and `wall=73.8598s`.
+- **Root Cause**: Expected Autoreason protection still treated the minimum viable reasoning pool as two LLM candidates. That protected the receipt but overpaid for the invariant; Autoreason needs one model-owned candidate plus bounded local support for judge comparison, not two provider calls.
+- **Lesson**: Candidate-pool cost policy should be capability-specific but invariant-based. For Autoreason the invariant is public-safe judge evidence and a model-owned winner, so `1 LLM + local support` is valid only when receipt coverage, invocation coverage, delivery, and trust gates remain fail-closed.
+- **Action Taken**: Extended `nexus.research.candidate_pool_policy` with `autoreason_mixed_candidate_pool`, propagated the protected route-cost flag from `protect_expected_capability_controls`, and wired `run_hyper_sprint` to build local support candidates for Autoreason under compact cost controls.
+- **Verification**: Targeted Flash Autoreason live smoke on the sanitized clean runner stayed `SUCCESS`, `semantic_status=VERIFIED`, `report_trust_mismatch=false`, `run_eligible=true`, expected Autoreason receipt/invocation `missing=[]`, and reduced the row to `model_calls=1`, `tokens=68843`, `wall=20.6658s`. Full Flash 28-task commercial rerun stayed with-Nexus 28/28 verified and trust mismatch 0; public verified delivery PASS; cost efficiency remains REGRESSED because wall ratio is 1.5104 and one with-Nexus row has `provider_token_measured=false`.
+
+## 2026-05-15 Local-Winner Rows Need Provider-Token Semantics Before Promotion
+
+- **Phenomenon**: The Flash P1 full 28-task rerun improved Autoreason cost and kept delivery/trust intact, but `public_promotion_readiness_contract` stayed RETURN with `provider_tokens_measured` and cost-gate token measurement failures.
+- **Root Cause**: `nexus-value-trust-002` produced a verified, eligible row with `model_calls=1`, `winner_source=local`, `total_tokens=632`, but `provider_token_measured=false`. The evidence bundle therefore failed the provider-token measurement threshold even though delivery and trust were clean.
+- **Lesson**: A row can be behaviorally correct and still be non-promotable if model-call/provider-token semantics are ambiguous. Local-winner rows that still made a provider call must either carry auditable provider-token evidence or be classified so cost gates do not mix local delivery with provider billing claims.
+- **Action Taken**: Kept the gate fail-closed and recorded the blocker as the next route-cost seam. The next fix should separate local-winner/provider-call accounting from trust/gov receipt-lite routing before another final-promotion claim.
+- **Verification**: `reports_full_cost_p1/evidence_bundle.json` reports `public_verified_delivery_claim_gate=PASS`, `valid_comparison_readiness_gate=PASS`, `trust_mismatch_zero=true`, but `public_cost_efficiency_claim_gate=REGRESSED` with `wall_cost_not_improved`, `with_provider_token_measured_below_threshold`, and `with_token_measured_below_threshold`.
+
+## 2026-05-15 Receipt-Lite Hooks Must Preserve Expected Capability Causality
+
+- **Phenomenon**: Flash P3 full commercial rerun cleared delivery/trust/provider-token gates but remained cost-regressed because route-oracle and RLM governance lanes spent full model calls on deterministic evidence contracts.
+- **Root Cause**: The runner treated `swarm`, `ultra_review`, and `belief` receipt obligations as model-call obligations even when the hidden verifier plus deterministic mutator could prove the exact public contract.
+- **Lesson**: Cost routing should optimize the real invariant. For receipt-only public tasks, the invariant is expected capability receipt coverage tied to hidden-verifier evidence, not a mandatory provider call.
+- **Action Taken**: Added route-cost controls for `route_oracle_receipt_lite` and `belief_receipt_lite`, allowed model-required pre-model deterministic rescue only under those explicit controls, and backfilled public-safe expected receipts with hidden-verifier evidence refs.
+- **Verification**: Targeted Flash P4 receipt-lite smoke reported `route-oracle-ultra-review-001`, `rlm-harder-v2-belief-001`, and `route-oracle-swarm-001` all `SUCCESS/VERIFIED`, trust mismatch 0, provider token measured true, model calls 0, wall about 0.75s each, and expected receipt/invocation `missing=[]`.
+
+## 2026-05-15 Infra-Invalid Refill Is Valid Only For Accounting Repair
+
+- **Phenomenon**: Flash P4 full commercial rerun improved wall/token cost sharply but one row, `rlm-harder-v2-second-round-002`, timed out through provider and fell back locally with `model_calls=1`, `total_tokens=0`, and `infra_invalid_reason=model_call_without_tokens`.
+- **Root Cause**: The provider call returned no auditable token accounting before the local fallback produced a verified patch. The behavior was successful, but the row could not support a public cost claim.
+- **Lesson**: Provider variance should be repaired by an auditable refill path, not hidden or hand-waved. A replacement row is acceptable only for explicit infra-invalid reasons and must be marked with source and replaced reason.
+- **Action Taken**: Reran the single invalid row in the sanitized runner, then rebuilt the P4 evidence bundle with `scripts/bench/refill_evidence_bundle.py`, replacing only the `model_call_without_tokens` row and recording `refill_source=nexus_refill_evidence_bundle_v1`.
+- **Verification**: Refilled P4 bundle reports with-Nexus 28/28 verified, direct 20/28 verified, trust mismatch 0, provider token measured rate 1.0, wall ratio 0.4363, token ratio 0.3245, `public_claim_gate=PASS`, `public_verified_delivery_claim_gate=PASS`, `public_cost_claim_gate=PASS`, and `public_cost_efficiency_claim_gate=IMPROVED`; it remains `RETURN` only for missing two valid x1 readiness rounds.
+
+## 2026-05-15 Expected Capability Evidence Must Gate Promotion
+
+- **Phenomenon**: Flash P4 refill cleared public delivery/cost gates, but rubric/training posture could still stay observation-only when expected capabilities had missing receipt evidence on repair/second-round rows.
+- **Root Cause**: Expected capability receipt/invocation coverage was row-local report evidence, not an aggregate public promotion contract. A bundle could therefore pass delivery while leaving a capability causality gap easy to miss.
+- **Lesson**: Public promotion must require expected capability causality, not just verified outputs. If a lane declares `hyper`, `belief`, `swarm`, `ultra_review`, or route-oracle capability expectations, the bundle needs public-safe receipt evidence and invocation evidence or it must fail closed.
+- **Action Taken**: Added `expected_capability_evidence_contract` to evidence bundles and wired it into public promotion readiness. Added `hyper_receipt_lite` for compact repair lanes where hidden-verifier refs prove the capability invariant without another provider call.
+- **Verification**: Focused tests for hyper receipt-lite and expected capability failures pass in both main and clean runner. Flash P7 full 28-task x1 reports `expected=PASS`, delivery PASS, trust 0, token ratio 0.2695, but remains RETURN for missing x1 history. Flash P8 refilled x1 reports promotion PASS, x3 PASS, delivery PASS, cost efficiency IMPROVED, trust 0, and expected capability PASS.
+
+## 2026-05-15 Expanded Commercial Lane Must Preflight Public Schema Before Live Runs
+
+- **Phenomenon**: The first 50-task expansion attempt used cross-module task refs that compiled to 50 unique tasks but failed public preflight because 12 tasks lacked public manifest fields and expected capability declarations.
+- **Root Cause**: The lane compiler can dedupe arbitrary manifest refs, but the public benchmark preflight requires category, mutation, repo, setup, verification, and expected capability metadata. Expanding task count without this schema only creates dirty denominator risk.
+- **Lesson**: Expanded commercial lanes need a schema-clean task source before live model runs. Anti-overfit expansion should add negative/model-required fixtures with public disclosure metadata, not reuse internal task manifests that were never public-lane contracts.
+- **Action Taken**: Added `public_benchmark_commercial_expansion_v1.json`, replaced non-public xmod refs in the expanded lane, and added tests that the compiled `all` lane has exactly 50 unique public tasks.
+- **Verification**: Focused tests pass in main and clean runner. Clean runner preflight for `/private/tmp/nexus-commercial-50/tasks.execution_safe.json` reports `status=PASS`, `selected_n=50`, `tasks_missing_expected=[]`, disclosure `status=PASS`, and clean worktree.
+
+## 2026-05-15 Expanded Lane Exposes Capability Dispatch Gaps Before Pro
+
+- **Phenomenon**: The first Flash 50-task live attempt exposed 19 with-Nexus failures, all fast `receipt_data_contract_violation`, and then direct baseline began repeated 239s provider timeouts.
+- **Root Cause**: The 28-task route-cost policy was promotion-ready for the smaller lane but did not dispatch public-safe receipts for several expanded expected capabilities (`autoreason`, `ddtree`, `research`, `lancedb`, `drone`, `nightshift`, `semantic_searcher`, `semantic_failure_sensor`, `bdd_acceptance_skill`). The direct provider session also became unsuitable for a clean comparison once repeated timeouts appeared.
+- **Lesson**: Do not proceed to Pro when Flash 50-task with-arm delivery is below gate. The next fix is route dispatch/receipt causality for expanded expected capabilities, followed by a fresh Flash 50 x1 from a clean session.
+- **Action Taken**: Stopped the live run to avoid wasting provider budget, preserved partial row evidence under `/private/tmp/nexus-commercial-50/reports_flash50_x1/evidence_1778806898`, and killed the lingering runner/Gemini processes.
+- **Verification**: Partial evidence shows the failure class is deterministic and row-local: 19 with-Nexus rows failed with `receipt_data_contract_violation`; no commercial-50 runner process remains after cleanup.
+
+## 2026-05-15 Receipt-Lite Rescue Must Cover Gate And Preflight Lanes
+
+- **Phenomenon**: The expanded Flash targeted replay improved from 15 infra-invalid rows to 4, but `route-oracle-ddtree-001`, `commercial-reasoning-ddtree-002`, `rlm-harder-v2-governance-002`, and `rlm-harder-v2-memory-001` still failed with `receipt_data_contract_violation`.
+- **Root Cause**: DDTree deterministic pruning preserved the hidden high-risk invariant but broke equal-risk visible score order. Governance, memory, feature-reflex, and hidden-bugfix lanes were compact/gate or preflight-safe, but the route execution taxonomy only treated route-oracle/belief/hyper flags as pre-model receipt-lite.
+- **Lesson**: Receipt-lite is a causality contract, not a capability name list. Gate-only and preflight lanes may use deterministic rescue only when hidden-verifier evidence can produce complete receipts; deterministic patches must also preserve visible behavior while adding hidden invariants.
+- **Action Taken**: Added `gate_only_receipt_lite` and `preflight_receipt_lite` to pre-model rescue eligibility, included feature-reflex and hidden-bugfix lanes in the gate-only taxonomy, allowed memory compact lanes to keep their two-round budget while using deterministic preflight rescue, and fixed DDTree tie-breaking to choose by `(risk, score)`.
+- **Verification**: Targeted main and clean-runner tests pass. A direct deterministic DDTree rescue repro now returns `passed=True` on the visible verifier instead of selecting the low-score first row during equal-risk ties. Full Flash 50 nexus-only replay reports `eligible_n=50`, `infra_invalid_n=0`, `trust_mismatch_rate=0.0`, and `expected_capability_evidence_contract=PASS`.
+
+## 2026-05-15 Direct Baseline Timeout Must Fail Closed Early
+
+- **Phenomenon**: After Flash 50 with-Nexus cleared delivery/trust evidence, the paired direct baseline leg repeatedly spent about 239 seconds per row and returned provider timeout failures.
+- **Root Cause**: The paired runner had total and per-task stop-loss controls, but no direct-arm streak detector. A repeated provider-timeout mode could therefore consume the comparison budget while producing rows that cannot support a clean public baseline.
+- **Lesson**: Baseline collection is part of the evidence plane. When the direct provider enters a repeated timeout mode, the harness should preserve partial evidence and stop with an explicit partial-timeout reason instead of diluting the comparison denominator.
+- **Action Taken**: Added a direct-provider timeout detector and `--direct-timeout-abort-threshold` hook. The hook marks the trigger row with `direct_timeout_abort_*`, emits `direct_timeout_abort`, and returns a partial run rather than continuing to spend the full lane on one provider failure mode.
+- **Verification**: Added targeted tests for direct timeout detection and abort threshold behavior. The first Flash paired hook smoke exposed that `_emit_progress` rejects extra fields; the fix keeps structured trigger data on the row and emits the abort reason through the existing status field. The interrupted Flash 50 paired run was stopped after repeated direct timeouts; the next paired run should use the hook before expanding to Flash 100.
+
+## 2026-05-15 Direct Gemini Baseline Must Not Auto-Edit
+
+- **Phenomenon**: Flash paired direct baseline either failed quickly with `auth_confirmation_required` when no session was used or hung around provider/tool-policy behavior when a session id was used.
+- **Root Cause**: The direct Gemini baseline inherited the general Gemini CLI `auto_edit` approval mode. Even with a no-tool prompt, the CLI could attempt tool calls or workspace reads, turning a direct model baseline into a transport/tool-policy artifact instead of a pure patch-generation comparison.
+- **Lesson**: Direct baselines should run as read-only model calls. A baseline may output a full-file patch, but it must not be allowed to use editor/tool affordances that Nexus itself is supposed to provide and measure.
+- **Action Taken**: Changed direct Gemini baseline invocation to default `NEXUS_DIRECT_GEMINI_APPROVAL_MODE=plan`, with an explicit environment override for diagnostics.
+- **Verification**: Manual Gemini headless `--approval-mode plan` smoke returned JSON with zero tool calls. Targeted tests assert the direct Gemini command defaults to `plan` and can be overridden to `auto_edit` only when explicitly requested.
+
+## 2026-05-15 Direct Baseline Infra Failures Must Abort Before Denominator Pollution
+
+- **Phenomenon**: Plan-mode direct baseline still failed in the benchmark subprocess with `auth_failed`, even though manual headless Gemini could return JSON. This means a direct comparison can be blocked by provider transport/auth state rather than model capability.
+- **Root Cause**: The existing early-abort hook only counted provider timeouts. Fast infra-invalid rows such as `auth_failed` would continue across the lane and pollute the paired comparison denominator.
+- **Lesson**: Direct baseline collection needs a provider-infra streak gate in addition to timeout detection. Auth, quota, gateway, and timeout failures are baseline transport evidence, not model solve evidence.
+- **Action Taken**: Added `--direct-infra-abort-threshold` and `direct_provider_abort` row markers so consecutive infra-invalid direct rows stop the run fail-closed.
+- **Verification**: Targeted tests cover direct infra row detection and threshold behavior.
+
+## 2026-05-15 Skill Inventory Must Separate Canonical Roots From Candidate Noise
+
+- **Phenomenon**: Nexus skill optimization could not start from a clean catalog because Skill files are spread across `.agents`, Hermes, Codex, Claude, OpenClaw, and Nexus-local roots, with generated candidates mixed into active-looking directories.
+- **Root Cause**: Runtime skill discovery roots grew organically and were reused as both production catalogs and inbox/archive locations. A broad home-directory scan also hits unrelated OpenClaw backups and runtime state, so root-scoped inventory is safer than unrestricted search.
+- **Lesson**: Nexus should not build a second global skill router over all discovered skills. It needs a curated capability-skill mount contract that treats candidate, archive, vendor, and worktree-copy skills as separate classes.
+- **Action Taken**: Generated `docs/reports/NEXUS_SKILL_INVENTORY_2026-05-15.json`, added `docs/plans/NEXUS_SKILL_INVENTORY_AND_MOUNT_CONTRACT_2026-05-15.md`, implemented `nexus.learning.skill_catalog`, added `scripts/ops/check_skill_catalog_policy.py`, and wired `skill_mount_evidence_contract` into the benchmark evidence bundle so declared skill mounts must carry causal evidence.
+- **Verification**: Inventory found 1759 `SKILL.md` files: 1562 active-root files, 49 vendor files, 136 worktree copies, 12 archive files, 574 candidate inbox entries, and 114 duplicate skill names. `uv run python -m json.tool` was blocked by `/Users/jameschen/.cache/uv/sdists-v9/.git` permissions in the sandbox, so JSON verification should use `python3 -m json.tool` for docs-only artifact checks when no project dependency import is required. Direct `python3 scripts/ops/check_skill_catalog_policy.py` initially failed with `ModuleNotFoundError: No module named 'nexus'`; ops scripts under nested directories must insert the project root into `sys.path` when they are intended to run without `uv run`. The first catalog check also exposed same-name worktree copies shadowing repo-local curated skills, so catalog lookup must prefer canonical runtime entries over quarantine duplicates before evaluating mount eligibility. `ci_gate.py --changed-only` later exposed a brittle test that assumed selector target order; tests should assert required targets are present because high-risk/history ranking may legitimately move `tests/services/test_policy_gate.py` ahead of the directly matched target. A local Python 3.14.4 run also exposed `pyexpat` dynamic-link failure while parsing JUnit XML, so `_extract_junit_target_durations` must fail soft on `ImportError` and keep the CI decision tied to pytest exit status.
+- **Follow-Up Lesson**: `ci_gate.py --changed-only ... scripts/bench/capability_ab_runner.py` selected the whole `tests/benchmark` directory through the coarse `scripts/bench` impact-map row and hit an unrelated collection error (`cannot import name 'PROVIDER_TOKEN_SOURCES'`). Narrowing only to `tests/benchmark/test_capability_ab_runner.py` was still too broad because that file contains unrelated dirty-worktree failures. High-risk benchmark files need nodeid-specific impact-map rows so JIT validation stays targeted and does not turn every small contract change into a broad benchmark-suite gate.
+
+## 2026-05-15 Skill Mount Receipts Must Be Runtime-Confirmed
+
+- **Phenomenon**: Planner-level skill signals could be serialized as `skill_mount_contracts`, which made a selected skill look like it had been injected, evidenced, and outcome-contributing.
+- **Root Cause**: The planner is a dry-run decision module. It can say which skill should be eligible for a capability mount, but it cannot prove runtime causality because capability receipts are produced later in `research_flow_service`.
+- **Lesson**: Skill governance needs two separate contracts. Planner output should be `planned_skill_mount_contracts`; final `skill_mount_contracts` may only be emitted after a runtime capability receipt confirms invocation, evidence, gate pass, and outcome contribution.
+- **Action Taken**: Renamed planner output to `planned_skill_mount_contracts`, added runtime promotion in `research_flow_service` after `capability_receipts`, and fail-closed planned mounts without confirmed runtime evidence as `skill_mount_not_confirmed_by_runtime_receipt`.
+- **Verification**: Targeted tests cover planner planned contracts, confirmed runtime mount promotion, and unconfirmed runtime mount blocking. Changed-only CI also selects the nodeid-specific planner/runtime skill mount tests through `docs/testing/test_impact_map.md`.
+
+## 2026-05-15 Flash Route Validation Must Require Real Model Participation
+
+- **Phenomenon**: A 50-task Flash commercial-lane run reported 50/50 verified delivery, but `avg_model_calls=0` and `skill_mount_contract` was empty on every row. A later Flash 3 smoke still produced one `no_model_call` row and two `final_delivery_not_model_source` rows.
+- **Root Cause**: The model-participation guard only checked `eligibility_class=model_required`, while the expanded commercial manifest contains older public tasks without that field. Subprocess local fast paths were also disabled only for `model_required`, and `supervised_bare_first` rows were labeled as non-model delivery despite using a model patch path.
+- **Lesson**: Route-validation mode is a harness contract, not just a task-manifest property. When `NEXUS_REQUIRE_MODEL_PARTICIPATION=1`, every LLM-enabled row must disable pre-model deterministic rescue/local hidden fast paths and must record a model delivery source before it can support Flash+Nexus evidence.
+- **Action Taken**: Added a run-level `require_model_participation_for_run` guard, propagated it into route-cost controls and subprocess env, taught model-required execution policy to respect `require_model_participation`, and labeled supervised bare-first delivery as `model_supervised_bare_first`.
+- **Verification**: Flash 3 v3 reported `avg_model_calls=1.0`, `model_uplift_eligible_rate=1.0`, token evidence 100%, and trust mismatch 0. Flash 50 v2 later reported 50/50 SUCCESS, `avg_model_calls=1.0`, `model_uplift_eligible_rate=1.0`, provider token measured rate 1.0, and trust mismatch 0.
+
+## 2026-05-15 Deterministic Rescue Must Backfill Expected Capability Receipts
+
+- **Phenomenon**: Flash 50 model-participation delivery/trust passed, but the bundle returned `expected_capability_evidence_contract=RETURN` because `rlm-harder-v2-belief-001` declared expected capability `belief` and only had a non-public `selected_without_invocation` receipt.
+- **Root Cause**: Post-model deterministic rescue updated delivery and hidden-verifier status but did not rerun the expected-capability receipt completion path before final data-contract annotation. The row was honestly solved, but the capability causality contract stayed stale.
+- **Lesson**: Deterministic rescue is only public-auditable when it writes the same capability receipt evidence as supervised receipt-lite paths: executor, hidden-verifier refs, replay refs, distinct roles, semantic completeness, and public-safe status.
+- **Action Taken**: Added final-path receipt completion for `model_supervised_bare_first` and `nexus_llm_deterministic_pre_rescue` rows when semantic completion and hidden verifier pass are present.
+- **Verification**: Single-task rerun for `rlm-harder-v2-belief-001` reports `expected_capability_evidence_contract=PASS` and belief receipt with `invoked=true`, hidden-verifier evidence refs, replay refs, `distinct_roles=["capability_executor","hidden_verifier"]`, and `public_claim_safe=true`. Flash 50 v2 reports `expected_capability_evidence_contract=PASS` with no missing expected capabilities.
+
+## 2026-05-15 Strict Baseline Must Not Be Preempted By Pre-Model Rescue
+
+- **Phenomenon**: A targeted strict-baseline test unexpectedly returned `nexus_deterministic_pre_model_rescue` instead of the expected supervised model-first rescue path.
+- **Root Cause**: The pre-model deterministic rescue block did not check `strict_llm_baseline`, so a strict baseline request could still be short-circuited before the model attempt.
+- **Lesson**: Strict baseline is a trust boundary. If a run requests strict model participation, local deterministic rescue may repair after a model attempt, but it must not preempt the first model attempt.
+- **Action Taken**: Blocked pre-model deterministic rescue whenever `strict_llm_baseline` is true.
+- **Verification**: Targeted benchmark tests now pass for model participation env, model-required local fast-path disablement, supervised bare-first source labeling, and strict baseline hidden-verified deterministic pre-rescue behavior.
+
+## 2026-05-15 Skill Mount Validation Needs A Runtime Entry Point And Visible Row Summary
+
+- **Phenomenon**: Flash 50 delivery/trust evidence could report `skill_mount_evidence_contract=PASS` while every row had `skill_mount_contract=[]`, making it impossible to judge which curated skill was actually selected, injected, evidenced, or outcome-contributing.
+- **Root Cause**: `CapabilityPlanner.plan(..., skills=...)` already supported skill candidates, but `CapabilitySelector`, `research_flow_service`, and the benchmark runner did not pass candidates into the runtime plan. A first smoke also showed that route-local deterministic pre-model rescue can bypass the subprocess where benchmark skill request env is consumed.
+- **Lesson**: Skill routing must stay subordinate to capability routing, but it still needs an explicit benchmark-only mount request seam and row-level observability. A gate-level PASS with zero checked mounts is only "no bad mount observed"; it is not evidence that skill selection was useful.
+- **Action Taken**: Added `skills` passthrough to `CapabilitySelector`, benchmark-only `NEXUS_BENCH_SKILL_MOUNT_REQUESTS` parsing in `research_flow_service`, capability-to-skill request mapping in `capability_ab_runner`, and row-level `skill_mount_count`, `skill_mount_contract_status`, and `skill_mount_violations` fields.
+- **Verification**: Targeted unit tests pass for skill mapping, explicit env override, benchmark env injection, planned contract construction, runtime mount promotion, and row summary extraction. A clean-runner Flash 1 model-participation smoke on `nexus-value-context-001` returned `SUCCESS`, `semantic_status=VERIFIED`, `model_calls=1`, `total_tokens=77868`, `trust_mismatch=false`, and a runtime-confirmed `improve-codebase-architecture` skill mount with codeintel evidence refs; the bundle's `skill_mount_evidence_contract=PASS`.
+
+## 2026-05-15 Flash Skill Route Validation Must Fail Fast But Not Overclaim Cost
+
+- **Phenomenon**: Flash 50 skill-routing validation exposed three non-delivery blockers: model-required rows without provider-measured tokens when Gemini returned cumulative stats outliers, stale `skill_mount_not_confirmed_by_runtime_receipt` violations after final receipt backfill, and unmapped long-tail capabilities (`memory`, `semantic_searcher`, `swarm_quiet_moment`, `bdd_acceptance_skill`) that produced `skill_mount_contract=EMPTY`.
+- **Root Cause**: The row finalization path was split across early returns and the normal path, so some rows skipped post-annotation skill reconciliation. The fail-fast hook also treated normalized cumulative token stats as missing tokens, and the capability-to-skill map covered the initial 28-task lane but not the expanded commercial long tail.
+- **Lesson**: Skill validation needs a single row-finalization choke point: annotate capability receipts, reconcile requested skill mounts from final receipts, clear stale violations only when the same skill is confirmed, then audit. Token recording and public cost eligibility are separate gates; normalized token estimates allow route validation to continue but must keep cost claims at RETURN.
+- **Action Taken**: Added `_finalize_with_nexus_row`, post-annotation benchmark skill reconciliation, stale-violation cleanup for confirmed skills, `NEXUS_BENCH_FAIL_FAST_ON_ROW_FAILURE`, long-tail capability mappings, and a fail-fast token rule that blocks only true missing-token rows while preserving cost RETURN for cumulative-stats estimates.
+- **Verification**: Targeted tests pass for long-tail skill mapping, normalized cumulative token handling, stale violation cleanup, post-receipt skill backfill, and deterministic rescue receipt handling. Clean-runner Flash validation produced an aggregate 50-row set with `success=50`, `semantic_verified=50`, `trust_mismatch=0`, `skill_pass=50`, `skill_violations=[]`, `model_calls_min=1`, and `token_recorded=50`; `provider_token_measured=49` because `model-required-feature-001` used normalized cumulative stats and remains a cost-RETURN row.
+
+## 2026-05-15 Cost Cleanup Must Distinguish Route Validation From Public Cost Claiming
+
+- **Phenomenon**: The Flash 50 aggregate had one cost-RETURN row (`model-required-feature-001`) due to a Gemini cumulative-stats outlier, while delivery, trust, model participation, and skill evidence were already clean.
+- **Root Cause**: Provider stats can be transiently cumulative in a session worker. Normalizing the token count is enough for route-validation continuity, but it is not enough for clean public cost evidence. A later targeted rerun of the same task returned provider-measured stats and clean cost evidence.
+- **Lesson**: Route validation and public cost claiming must remain separate gates. A normalized token ledger may keep delivery/skill validation moving, but only provider-measured reliable tokens can support clean cost or training-cost evidence.
+- **Action Taken**: Kept the fail-fast token hook limited to true missing-token rows and left cumulative-stats normalization as cost RETURN. Verified the targeted rerun can upgrade to cost PASS only when `provider_token_measured=true` and `token_reliable=true`.
+- **Verification**: Targeted clean-runner rerun for `model-required-feature-001` returned `SUCCESS`, `semantic_status=VERIFIED`, `trust_mismatch=false`, `model_calls=1`, `total_tokens=67110`, `provider_token_measured=true`, `token_reliable=true`, `cost_rubric_status=PASS`, `public_cost_evidence=true`, and `skill_mount_contract_status=PASS`. Single-arm public claim gates still fail as expected because `nexus_only` and missing paired direct baseline make the run non-public-promotion eligible.
+
+## 2026-05-15 Flash 100 Route Stability Must Not Reuse Public Promotion Gates
+
+- **Phenomenon**: A Flash 100 session-worker route validation run produced 100/100 `SUCCESS`, 100/100 semantic verification, 100/100 trust-clean rows, 100/100 model-call rows, and 100/100 skill-mount PASS rows, but the evidence bundle public gates correctly failed on `single_arm_run`, `non_public_shortcut:nexus_only`, missing direct arm, and `session_worker_contamination_detected`.
+- **Root Cause**: Public promotion gates answer a different question from route-stability validation. Reusing them as the only exit condition makes a valid diagnostic session look like a failed delivery run, while weakening them would risk false public claims.
+- **Lesson**: Session-worker Flash lanes may validate route stability, skill mount coverage, model participation, trust mismatch, and token accounting, but they must emit a separate diagnostic verdict. Public promotion remains blocked until paired clean arms pass the public gates.
+- **Action Taken**: Added `scripts/bench/route_stability_validation.py` to produce a single-arm route-stability verdict while preserving observed public gate failures as claim-boundary evidence.
+- **Verification**: `uv run pytest tests/benchmark/test_route_stability_validation.py` passed. Running the hook on `/private/tmp/nexus_flash100_skill_routing_validation_20260515/with_nexus_1778851666.jsonl` produced `route_stability_validation.json` with `status=PASS`, `row_count=100`, `success_count=100`, `semantic_verified_count=100`, `trust_clean_count=100`, `model_call_count=100`, `provider_token_measured_count=100`, `skill_mount_pass_count=100`, and `public_cost_evidence_count=100`.
+
+## 2026-05-15 Fair Skill Fit Must Separate Ablation Eligibility From Runtime Mounting
+
+- **Phenomenon**: A fair skill-fit plan cannot treat Nexus-local skills as primary by default or treat all external skills as runtime-safe. Doing either would bias ablation or weaken the runtime mount boundary.
+- **Root Cause**: The previous runtime skill catalog only answered whether a skill may be mounted by Nexus. It did not provide a source-neutral pool for controlled ablation, so `runtime_eligible` and `candidate_for_testing` were easy to conflate.
+- **Lesson**: Skill-fit evaluation needs two explicit gates. `ablation_eligible` means the skill may be tested in a controlled, receipt-backed arm; `runtime_eligible` remains limited to reviewed Nexus-local curated candidates until ablation evidence promotes a policy change.
+- **Action Taken**: Added `nexus.learning.fair_skill_candidate_pool` and `scripts/ops/build_fair_skill_candidate_pool.py` to generate `docs/reports/NEXUS_FAIR_SKILL_CANDIDATE_POOL_2026-05-15.json` with source-neutral candidates, capability candidates, metadata quality, safety status, quarantine reason, evidence refs, and duplicate shadow policy.
+- **Verification**: `uv run pytest tests/learning/test_fair_skill_candidate_pool.py tests/learning/test_skill_catalog.py` passed with 7 tests. The generated pool reports `total_candidates=1759`, `ablation_eligible_count=684`, `runtime_eligible_count=17`, `quarantine_count=771`, and `violation_count=0`; `python3 -m json.tool docs/reports/NEXUS_FAIR_SKILL_CANDIDATE_POOL_2026-05-15.json` validated the artifact JSON.
+
+## 2026-05-15 Skill-Fit Ablation Needs Runtime Baseline And Receipt Gate
+
+- **Phenomenon**: The first fair ablation plan could select four source-neutral external candidates for `repair_and_coding` while omitting the reviewed Nexus runtime skill, making the run fair by source order but unable to compare the current Nexus pairing against alternatives. A unit test also failed because it assumed pure hash ordering after the selector was corrected to include one runtime-reviewed candidate.
+- **Root Cause**: Candidate-pool fairness and policy-baseline coverage are different concerns. Source-neutral candidate ordering avoids root bias, but skill-fit evaluation also needs at least one reviewed runtime candidate when available so the benchmark can compare current default behavior with external alternatives.
+- **Lesson**: Fair skill ablation plans must include `capability_only`, at least one reviewed runtime skill when available, anonymous alternative skill arms, and a wrong/quarantined negative control. Promotion or replacement must be gated by row receipts: `selected`, `injected`, `used`, `evidence_present`, `gate_passed`, `outcome_contributed`, `evidence_path`, `receipt_path`, and `trust_mismatch=false`.
+- **Action Taken**: Added `nexus.learning.skill_fit_ablation`, `scripts/ops/build_skill_fit_ablation_plan.py`, and tests for anonymous arms, runtime baseline inclusion, selected-only rejection, receipt-backed acceptance, and wrong/quarantined skill blocking. Generated `docs/reports/NEXUS_SKILL_FIT_ABLATION_PLAN_REPAIR_AND_CODING_2026-05-15.json`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py tests/learning/test_fair_skill_candidate_pool.py tests/learning/test_skill_catalog.py` passed with 13 tests. `uv run python scripts/ops/build_skill_fit_ablation_plan.py` produced `status=PASS`, `arm_count=6`, `skill_arm_count=4`, `runtime_eligible_skill_arm_count=1`, and `negative_control_count=1`. `python3 -m json.tool docs/reports/NEXUS_SKILL_FIT_ABLATION_PLAN_REPAIR_AND_CODING_2026-05-15.json` and `python3 -m py_compile nexus/learning/skill_fit_ablation.py scripts/ops/build_skill_fit_ablation_plan.py` passed.
+
+## 2026-05-15 Skill-Fit Flash Matrix Must Carry Benchmark Readiness Flags
+
+- **Phenomenon**: A preflight-only check for the first Flash skill-fit row failed before live execution because the generated runner contract omitted `NEXUS_VALUE_HIDDEN_VERIFIER=1`, the same-model direct Gemini lock, and capability readiness flags for Autoreason, DDTree, Ultra Review, and `llm_candidate_cap>=3`.
+- **Root Cause**: The execution matrix initially described task/arm/skill selection but did not encode the benchmark preflight contract needed by `capability_ab_runner.py`. A matrix without these flags can look runnable while failing before the first model call.
+- **Lesson**: Skill-fit execution matrices need full row-level runner contracts, not just task ids and skill ids. Each row should carry env and args that satisfy hidden verifier, same-model lock, capability readiness, and evidence-bundle requirements before live Flash is attempted.
+- **Action Taken**: Extended `nexus.learning.skill_fit_ablation.build_skill_fit_execution_matrix` to emit per-row `runner_env` and `runner_args`, including hidden verifier env, same-model env, skill status report path, `--task-id-filter`, `--nexus-only`, readiness flags, `--llm-candidate-cap 3`, and evidence bundle args. Regenerated `docs/reports/NEXUS_SKILL_FIT_EXECUTION_MATRIX_REPAIR_AND_CODING_FLASH30_2026-05-15.json`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py tests/learning/test_fair_skill_candidate_pool.py tests/learning/test_skill_catalog.py` passed with 15 tests. `uv run python scripts/ops/build_skill_fit_ablation_plan.py` produced matrix `status=PASS`, `matrix_task_count=5`, and `matrix_row_count=30`. The first row preflight initially failed with hidden verifier/readiness failures, then passed after the contract fix with `status=PASS`, `same_model=true`, `hidden_verifier_enabled=true`, and `capability_readiness.status=PASS`.
+
+## 2026-05-15 Skill-Fit Catalog Must Not Confuse Runtime Policy Blocks With Skill Quality
+
+- **Phenomenon**: The first Flash 30 live ablation passed delivery/trust for all rows, but external reference skill arms were rejected by runtime mount policy before they could be evaluated as candidate skills. The first catalog write also missed `source_root` and `runtime_eligible` metadata, causing the Nexus-local `zoom-out` arm to appear non-runtime.
+- **Root Cause**: Runtime mount eligibility and controlled ablation eligibility were still sharing the same planner validation path. The execution matrix also carried skill id and request fields but not enough source/runtime metadata for catalog verdicts.
+- **Lesson**: Fair skill-fit evaluation needs a benchmark-only `allow_ablation_skill_mounts` boundary. It may allow audited reference candidates to form receipt-backed ablation contracts, while quarantined candidates must still fail closed. Catalog verdicts must be derived from receipt-backed rows and retain source/runtime metadata.
+- **Action Taken**: Added `NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS`, `SkillCatalog.ablation_allowed`, ablation-mode validation for reference candidates, planner support for `benchmark_ablation_only_mount`, matrix source/runtime metadata, `run_skill_fit_ablation_matrix.py`, and `nexus.skill_fit_catalog.v1` output.
+- **Verification**: Targeted tests passed with 21 tests. Flash 30 ablation-only live run completed `30/30 PASS`, negative controls blocked `5/5`, and `docs/reports/NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json` reports `status=PASS`, `reject_count=3`, `needs_more_data_count=1`, `keep_count=0`, and `replace_candidate_count=0`. `zoom-out` is now correctly recorded as `source_root=nexus_repo`, `runtime_eligible=true`, `effective_rows=4/5`, verdict `needs_more_data`.
+
+## 2026-05-16 Repair Skill-Fit Must Filter Tasks By Capability And Prefer Domain Candidates
+
+- **Phenomenon**: The first repair/coding Flash 30 v2 failed at `model-required-repair-001` because the matrix used the runner's default 30 second timeout. Earlier, `rlm-harder-v2-belief-001` made `zoom-out` look incomplete even though that row expected `belief`, not repair/coding. Candidate selection also picked generic gstack skills before stronger TDD/debug/clean-code references.
+- **Root Cause**: The matrix treated lane membership as sufficient task relevance and sorted candidates primarily by runtime/hash/relevance. It did not filter referenced task manifests by expected capability, encode benchmark-ready timeouts, or prefer curated repair/debug/TDD candidate ids.
+- **Lesson**: Single-capability skill-fit tests need three contracts before live comparison: task refs must match the capability under test, runner args must carry realistic benchmark timeouts, and candidate selection should use domain-specific preferred ids after one runtime baseline. Otherwise the benchmark measures harness mismatch rather than skill fit.
+- **Action Taken**: Added capability-to-expected-capability filtering, preferred repair candidate ids (`tdd`, `test-driven-development`, `systematic-debugging`, `wondelai-clean-code`, etc.), one-runtime-baseline-plus-external-candidate selection, and row-level timeout args. Regenerated the repair/coding matrix with 5 matching tasks and candidates `tdd`, `test-driven-development`, `systematic-debugging`, and `wondelai-clean-code`.
+- **Verification**: Targeted tests passed with 24 tests. Flash 30 v2b live run completed `30/30 PASS`; the catalog reports `tdd=keep` with `5/5 effective`, three external candidates as `needs_more_data` with `1/5 effective`, negative controls blocked `5/5`, and trust mismatch 0.
+
+## 2026-05-16 Skill-Fit Live Summary Must Persist Catalog Paths
+
+- **Phenomenon**: `run_skill_fit_ablation_matrix.py` returned `skill_fit_catalog_path` and `docs_skill_fit_catalog_path` in memory, but wrote `live_summary.json` before those fields were added.
+- **Root Cause**: The summary file was flushed before post-run catalog generation, leaving the durable evidence index weaker than the returned CLI payload.
+- **Lesson**: Evidence runners must write the final summary only after every generated artifact path is attached. A returned Python object is not sufficient audit evidence.
+- **Action Taken**: Moved summary file writing after catalog generation and added a live stub regression test that verifies persisted catalog paths without overwriting the real docs report.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py tests/learning/test_fair_skill_candidate_pool.py tests/learning/test_skill_catalog.py tests/engine/test_capability_planner.py::test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill tests/engine/test_capability_planner.py::test_capability_planner_allows_reference_skill_only_for_ablation tests/app/test_research_flow_service.py::test_benchmark_skill_mount_env_feeds_planned_contract` passed with 25 tests. `python3 -m py_compile nexus/learning/skill_fit_ablation.py nexus/learning/skill_catalog.py nexus/engine/capability_planner.py nexus/app/research_flow_service.py scripts/ops/build_skill_fit_ablation_plan.py scripts/ops/run_skill_fit_ablation_matrix.py` passed.
+
+## 2026-05-16 Expanded Skill-Fit Tasksets Must Separate Public Claim Basis From Ablation Coverage
+
+- **Phenomenon**: Repair/coding skill-fit had only 5 unique tasks, while the commercial public lane has 50 tasks but only a small repair/coding subset. A helper inspection also found that running `python3 -B scripts/bench/commercial_lane_tasks.py --lane all` directly can fail with `ModuleNotFoundError: No module named 'scripts'`.
+- **Root Cause**: Commercial public promotion and single-capability skill-fit answer different questions. The former proves commercial-model-basis readiness across lanes; the latter needs enough capability-matching rows to compare skill arms. Direct script invocation may also lack the project import path that `uv run python ...` supplies.
+- **Lesson**: Do not inflate repair/coding Flash50/100 by repeating tasks or mixing unrelated commercial lane rows. Build expanded tasksets from fixed public manifests with capability/category filtering and use `uv run python` for repo scripts that import the `scripts` package.
+- **Action Taken**: Extended skill-fit matrix generation to merge lane refs with extra fixed public task manifests, filter by capability/category/keyword, dedupe refs, expose `--extra-task-manifest`, raise the default matrix to 30 unique tasks / 180 rows, rename the expanded report outputs, and expose `--docs-catalog-path` for clean per-run evidence.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py tests/learning/test_fair_skill_candidate_pool.py tests/learning/test_skill_catalog.py tests/engine/test_capability_planner.py::test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill tests/engine/test_capability_planner.py::test_capability_planner_allows_reference_skill_only_for_ablation tests/app/test_research_flow_service.py::test_benchmark_skill_mount_env_feeds_planned_contract` passed with 27 tests. `uv run python scripts/ops/build_skill_fit_ablation_plan.py` produced `matrix_task_count=30`, `matrix_row_count=180`, `matrix_status=PASS`. `uv run python scripts/ops/run_skill_fit_ablation_matrix.py --matrix docs/reports/NEXUS_SKILL_FIT_EXECUTION_MATRIX_REPAIR_AND_CODING_FLASH180_2026-05-16.json --preflight-only --max-rows 12 --output-root /private/tmp/nexus_skill_fit_flash180_preflight_20260516` produced `status=PASS`.
+
+## 2026-05-16 Skill-Fit Discovery Must Exclude Local Workspace Context From External-Safe Matrices
+
+- **Phenomenon**: A Flash180 skill-fit live run stopped at 67/180 rows after `pub-bug-001::capability_only` returned. The row referenced `repo_kind=nexus_internal`, `repo_ref=current-worktree`, `nexus/engine/coordinator.py`, and `tests/engine/test_coordinator.py`, then timed out at the row timeout boundary.
+- **Root Cause**: Expanded skill-fit taskset ingestion accepted extra public manifests without rejecting local workspace/current-worktree tasks. That mixed local Nexus code context into a Flash skill-fit matrix that should be external-safe and capability-focused, so the row measured workspace repair drift instead of skill fit.
+- **Lesson**: Discovery and ablation lanes may broaden coverage, but extra manifests must be filtered for local context before execution. Any task with `repo_kind=nexus_internal` or `repo_ref=current-worktree` belongs in an internal diagnostic lane, not in a model/skill comparison matrix or public-claim basis.
+- **Action Taken**: Added local-context filtering to `nexus.learning.skill_fit_ablation`, regenerated the expanded Flash180 matrix, confirmed `pub-bug-001` was absent, and kept commercial public-claim basis separated with a gate that rejects skill-fit matrices as public promotion input.
+- **Verification**: `uv run python scripts/ops/build_skill_fit_ablation_plan.py` produced `matrix_task_count=30`, `matrix_row_count=180`, `matrix_status=PASS`; matrix inspection returned `pub-bug-001-present False`; `uv run python scripts/ops/run_skill_fit_ablation_matrix.py --matrix docs/reports/NEXUS_SKILL_FIT_EXECUTION_MATRIX_REPAIR_AND_CODING_FLASH180_2026-05-16.json --preflight-only --max-rows 12 --output-root /private/tmp/nexus_skill_fit_flash180_preflight_after_local_filter_20260516` produced `status=PASS`, `completed_rows=12`, `return_count=0`; targeted regression tests passed with 33 tests.
+
+## 2026-05-16 Commercial Model Basis Gate Must Reject Diagnostic Matrices
+
+- **Phenomenon**: Skill-fit matrices and commercial public manifests can both contain public-looking tasks, but they support different claims. Without a hard gate, a diagnostic ablation matrix could be accidentally supplied as the public benchmark basis.
+- **Root Cause**: Existing benchmark-basis metadata recorded whether a manifest was commercial-model-ready, but the preflight path did not enforce that requirement when the run intended to support a public commercial-model-basis claim.
+- **Lesson**: Public delivery/cost promotion must require a compiled commercial execution-safe manifest and matching disclosure manifest. Diagnostic matrices with `arm_type`, `nexus.skill_fit_execution_matrix.v1`, or non-commercial benchmark basis must fail preflight under a commercial-basis requirement.
+- **Action Taken**: Added `commercial_model_basis_gate_failures`, wired `--require-commercial-model-basis` into `capability_ab_runner.py` preflight/evidence config, generated `commercial_all.runner.json`, `commercial_all.execution_safe.json`, and `commercial_all.disclosure.json`, and added regression tests for accepted compiled commercial manifests and rejected skill-fit matrices.
+- **Verification**: Commercial preflight with `--require-commercial-model-basis` passed on `.nexus/reports/public_benchmark_manifests/commercial_all.execution_safe.json` with matching disclosure and required Gemini hidden-verifier env. The same preflight failed as expected on `docs/reports/NEXUS_SKILL_FIT_EXECUTION_MATRIX_REPAIR_AND_CODING_FLASH180_2026-05-16.json` with `commercial_model_basis:skill_fit_matrix_not_public_claim_basis`, `commercial_model_basis:ablation_rows_not_public_claim_basis`, `commercial_model_basis:not_commercial_model_basis`, and `commercial_model_basis:not_ready`.
+
+## 2026-05-16 Skill-Fit Catalog Must Fail Incomplete Matrix Runs And Apply Candidate Stop-Loss
+
+- **Phenomenon**: A repaired Flash180 rerun progressed past the prior local-workspace blocker but stopped at row 70 when `systematic-debugging` timed out on `pub-bug-002` after 300 seconds. The catalog generated by the older runner code still showed `PASS` despite only `70/180` rows completing.
+- **Root Cause**: The catalog gate only checked negative controls and trust mismatch. It did not require `completed_rows == planned_rows`, so a fail-fast partial run could look like a complete skill-fit result. The repair/coding candidate list also kept a long-running debugging skill in the discovery lane after live evidence showed it was timeout-unstable for neutral fixtures.
+- **Lesson**: Skill-fit discovery needs both matrix completion gating and candidate stop-loss. Incomplete runs must be `RETURN`, and timeout-unstable candidates should be removed from the current discovery matrix before rerun instead of blocking all other candidates.
+- **Action Taken**: Added `matrix_completion_gate_return`, persisted planned/completed/matrix_complete fields in the catalog summary, added `--row-timeout-sec` to the matrix runner, excluded `systematic-debugging` from repair/coding discovery, regenerated the Flash180 plan/matrix with `workos-live-preview-debug-loop` as the replacement candidate, and rewrote the failed catalog as `RETURN`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_plan_blocks_timeout_unstable_repair_discovery_candidate tests/learning/test_skill_fit_ablation.py::test_plan_prefers_named_repair_candidates_over_generic_candidates tests/learning/test_skill_fit_ablation.py::test_skill_fit_catalog_returns_when_matrix_incomplete` passed. `uv run python scripts/ops/build_skill_fit_ablation_plan.py` produced `matrix_row_count=180`, `matrix_status=PASS`, with skill arms `tdd`, `test-driven-development`, `wondelai-clean-code`, and `workos-live-preview-debug-loop`. `uv run python scripts/ops/run_skill_fit_ablation_matrix.py --preflight-only --max-rows 12 ...` produced `status=PASS`.
+
+## 2026-05-16 Skill-Fit Matrices Must Exclude External Tasks Without Clone Adapters
+
+- **Phenomenon**: The next Flash180 rerun stopped at row 85 on `pub-bug-005::capability_only` before a model result because `capability_ab_runner.py` raised `NotImplementedError: pub-bug-005 is external; clone/setup adapter is required before public execution`.
+- **Root Cause**: Skill-fit task ingestion had filtered local Nexus workspace context but still admitted `repo_kind=external` tasks from extra public manifests. Those tasks require clone/setup adapters that are not part of the skill-fit ablation runner path.
+- **Lesson**: Diagnostic skill-fit matrices should include only executable fixed fixtures unless the row contract carries a complete clone/setup adapter. External tasks belong in compiled commercial execution-safe lanes or a separate adapter-backed benchmark, not in the default skill-fit matrix.
+- **Action Taken**: Replaced the local-context-only filter with an unsupported-execution-context filter that excludes `repo_kind=external`, `repo_kind=nexus_internal`, and `repo_ref=current-worktree`. Regenerated the Flash180 matrix; `pub-bug-005-present` returned `False`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_write_execution_matrix_includes_extra_public_manifests_with_capability_filter tests/learning/test_skill_fit_ablation.py::test_write_execution_matrix_filters_non_matching_capability_tasks tests/learning/test_skill_fit_ablation.py::test_plan_blocks_timeout_unstable_repair_discovery_candidate` passed. `uv run python scripts/ops/build_skill_fit_ablation_plan.py` produced `matrix_row_count=180`, `matrix_status=PASS`. `uv run python scripts/ops/run_skill_fit_ablation_matrix.py --preflight-only --max-rows 12 ...` produced `status=PASS`.
+
+## 2026-05-16 Skill-Fit Stop-Loss Must Remove Repeated Timeout Candidates
+
+- **Phenomenon**: After removing the external task blocker, the next Flash180 rerun stopped at row 82 when `wondelai-clean-code` timed out on `pub-bug-004` after 300 seconds.
+- **Root Cause**: `wondelai-clean-code` remained in the repair/coding discovery matrix after another reference candidate had already shown the same timeout pattern. The lane still lacked a persistent stop-loss list for timeout-unstable skill arms.
+- **Lesson**: A skill that repeatedly causes timeout on neutral fixtures is a poor default candidate for always-on routing, even if it may be useful manually. Discovery should demote it immediately and continue with a lighter candidate.
+- **Action Taken**: Added `wondelai-clean-code` to the repair/coding discovery blocklist alongside `systematic-debugging`, regenerated the matrix, and moved the fourth candidate slot to `python-debugpy`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_plan_blocks_timeout_unstable_repair_discovery_candidates tests/learning/test_skill_fit_ablation.py::test_plan_prefers_named_repair_candidates_over_generic_candidates` passed. Rebuilding the plan produced skill arms `tdd`, `test-driven-development`, `workos-live-preview-debug-loop`, and `python-debugpy`.
+
+## 2026-05-16 Skill-Fit Needs Bounded Row Probes Before Full Reruns
+
+- **Phenomenon**: Repeated Flash180 reruns had to replay dozens of already-clean rows before reaching the next failing `pub-bug-004` arm. A later bounded probe showed `pub-bug-004::capability_only` itself can alternate between success and timeout before receipt.
+- **Root Cause**: The matrix runner only supported prefix truncation with `--max-rows`, not direct row selection. The taskset also kept a provider-variance-sensitive hard task in the default skill-fit discovery lane.
+- **Lesson**: Fail-fast should be paired with bounded replay. After a row fails, the harness must support rerunning only the implicated row/task/arm; unstable capability-only tasks should move to long-tail/stress lanes instead of driving skill-fit verdicts.
+- **Action Taken**: Added `--row-id-filter` to `run_skill_fit_ablation_matrix.py`, added a stub regression test, filtered `grill-me`-style weak capability signals, and blocked `pub-bug-004` from the repair/coding skill-fit discovery taskset.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_matrix_runner_filters_specific_row_ids_with_stub_runner tests/learning/test_skill_fit_ablation.py::test_plan_ignores_capability_candidate_without_repair_signal` passed. A bounded `pub-bug-004` probe reproduced capability-only timeout, and the regenerated Flash180 matrix reports `pub-bug-004-present False`.
+
+## 2026-05-16 Runtime Repair Skills Need Stop-Loss Before Always-On Promotion
+
+- **Phenomenon**: `zoom-out` timed out on `pub-test-002` after 300 seconds, while later reference-only candidates passed the same bounded task probe. Earlier runtime candidates `tdd`, `improve-codebase-architecture`, and broad reference candidates also timed out on hard repair rows.
+- **Root Cause**: Runtime eligibility was being treated as a reason to keep a Nexus-local skill in the ablation plan even after live evidence showed poor always-on cost behavior. The selector also admitted weak repair signals through broad keywords like `test`, allowing non-repair skills such as `grill-me` to enter the candidate set.
+- **Lesson**: Runtime eligibility is not a quality claim. Always-on skill routing must apply stop-loss before promotion, and capability matching must require a real preferred/relevance signal, not just a coarse `capability_candidates` tuple.
+- **Action Taken**: Added `zoom-out`, `tdd`, `improve-codebase-architecture`, `systematic-debugging`, and `wondelai-clean-code` to repair/coding discovery stop-loss; removed the broad `test` relevance keyword; added capability-signal filtering; regenerated the matrix with reference-only candidates `test-driven-development`, `workos-live-preview-debug-loop`, `python-debugpy`, and `wondelai-refactoring-patterns`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_plan_blocks_timeout_unstable_repair_discovery_candidates tests/learning/test_skill_fit_ablation.py::test_plan_ignores_capability_candidate_without_repair_signal` passed. Bounded `pub-test-002` rerun completed `6/6 PASS` with the updated candidates.
+
+## 2026-05-16 Reference Repair Skills Also Need Live Timeout Stop-Loss
+
+- **Phenomenon**: Flash180 rerun7 stopped at row 70 when `wondelai-refactoring-patterns` timed out on `pub-bug-002` after 300 seconds, despite earlier bounded probes passing other rows.
+- **Root Cause**: The repair/coding discovery lane still treated a reference skill as viable after repeated evidence showed long-context repair/refactor skills can exceed the live Flash row timeout on neutral fixtures.
+- **Lesson**: Reference-pool status is not enough to keep a skill in always-on discovery. Any candidate that times out in live matrix execution must be demoted from the current skill-fit lane and reintroduced only through a separate stress/long-tail lane with explicit timeout budget.
+- **Action Taken**: Added `wondelai-refactoring-patterns` to the repair/coding discovery stop-loss list and extended the candidate-block regression assertion.
+- **Verification**: Pending rerun after matrix regeneration.
+
+## 2026-05-16 Skill-Fit Candidate Arms Must Dedupe By Skill Id
+
+- **Phenomenon**: After demoting timeout-unstable repair skills, the rebuilt Flash180 matrix selected `codex` twice from different roots, creating two skill arms with the same `skill_id`.
+- **Root Cause**: Candidate selection deduped by mapping identity/path, not canonical `skill_id`. This allowed duplicate logical skills to consume multiple ablation arms and bias the fair comparison.
+- **Lesson**: Fair skill ablation must compare distinct canonical skills. Provider/source copies can remain in the inventory, but a single matrix should select at most one row per `skill_id` unless the experiment explicitly targets source-root variance.
+- **Action Taken**: Added `skill_id`-level dedupe to `_selected_skill_candidates` and a regression test.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Bounded Probe Pass Is Not Enough For Always-On Skill Promotion
+
+- **Phenomenon**: `workos-live-preview-debug-loop` passed a bounded `pub-bug-002` probe but timed out on the same row during the subsequent full Flash180 rerun.
+- **Root Cause**: A single bounded probe only proves that the row can pass once; it does not prove the skill is stable enough for always-on discovery under full-matrix execution. The promotion path still needed a stop-loss rule for probe/full-run divergence.
+- **Lesson**: Bounded probes are diagnostic, not promotion evidence. If a candidate later times out in the full matrix, demote it from the discovery lane and keep the probe as evidence of variance, not as an override.
+- **Action Taken**: Added `workos-live-preview-debug-loop` to the repair/coding discovery stop-loss list and extended the regression assertion.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Repeated Skill Timeouts Should Promote Task To Long-Tail Lane
+
+- **Phenomenon**: Multiple distinct repair/coding skill candidates timed out on `pub-bug-002`, including candidates that could pass bounded probes on the same task.
+- **Root Cause**: The discovery lane kept treating repeated per-skill timeout as independent skill failures. In reality, the row had become a provider-variance/stress signal and was no longer a clean skill-fit discriminator.
+- **Lesson**: When one task repeatedly triggers timeouts across different skill candidates, demote the task to a long-tail/stress lane instead of burning down the candidate pool. Skill-fit discovery should use stable discriminators; stress rows belong in a separate robustness test.
+- **Action Taken**: Added `pub-bug-002` to the repair/coding discovery task blocklist while keeping the failure evidence available for long-tail routing work.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Codex-Labeled Reference Skills Need Separate Stability Proof
+
+- **Phenomenon**: After `pub-bug-002` was moved out of discovery, rerun9 stopped at `pub-test-002` when `gstack-codex` timed out after 300 seconds.
+- **Root Cause**: The selector treated a Codex-labeled reference skill as another viable repair/coding candidate after `skill_id` dedupe removed the exact duplicate. It still lacked live stability evidence under Flash skill-fit execution.
+- **Lesson**: Similar agent-wrapper/reference skills should not be promoted by name proximity. They need their own full-matrix stability proof, and timeout evidence should demote them from the current discovery lane.
+- **Action Taken**: Added `gstack-codex` to the repair/coding discovery stop-loss list and extended the regression assertion.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Skill-Fit Failures Need Machine-Readable Classifications
+
+- **Phenomenon**: Flash180 reruns exposed distinct blockers, but the runner only surfaced `delivery_or_ablation_gate_return`; the next action still required manually reading stdout/stderr tails.
+- **Root Cause**: Failure classification lived in operator judgement instead of the skill-fit runner contract. That made task instability, skill stop-loss, adapter gaps, and negative-control violations harder to handle consistently.
+- **Lesson**: Skill-fit discovery needs a machine-readable failure classifier. Each RETURN row should carry a policy kind and action so later agents can continue without re-deriving the same decision table.
+- **Action Taken**: Added `classify_skill_fit_failure`, wired it into live runner RETURN rows, and added timeout/adapter classification regression tests.
+- **Verification**: Pending targeted test run.
+
+## 2026-05-16 Negative Skill-Fit Controls Must Not Mount Explicit Skills When Ablation Is Disallowed
+
+- **Phenomenon**: A wrong/quarantined skill control row set `NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS=0`, but the explicit `NEXUS_BENCH_SKILL_MOUNT_REQUESTS` value still reached the benchmark/runtime path and the row timed out in Gemini instead of fail-closing as a negative control.
+- **Root Cause**: `benchmark_skill_mount_requests` and `_benchmark_skill_mount_requests_from_env` honored explicit mount requests before checking the ablation-allow flag. The matrix contract expressed the boundary, but the runtime parser did not enforce it.
+- **Lesson**: Negative controls must be blocked before model execution. An explicit benchmark skill request is only valid when ablation mounts are explicitly allowed; otherwise it should resolve to an empty mount request and fail closed through the contract gate.
+- **Action Taken**: Updated benchmark and runtime skill-mount env parsing to ignore explicit requests when `NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS=0`, and added regression tests.
+- **Verification**: Pending targeted test run.
+
+## 2026-05-16 Capability-Only Timeout Classifier Must Drive Task Demotion
+
+- **Phenomenon**: After negative-control mounting was fixed, rerun11 stopped on `pub-test-002::capability_only` with `timeout_during_gemini`.
+- **Root Cause**: The task itself was unstable under the current Flash skill-fit lane; earlier skill-arm failures on the same task were symptoms of row instability rather than isolated skill defects.
+- **Lesson**: A capability-only timeout is decisive task evidence. The task must move to long-tail/stress validation and must not remain in the stable skill-fit discovery matrix.
+- **Action Taken**: Added `pub-test-002` to the repair/coding discovery task blocklist and extended the extra-manifest filtering regression fixture.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Repeated Test-Repair Capability Timeouts Belong In Long-Tail Lane
+
+- **Phenomenon**: After `pub-test-002` was removed, rerun12 stopped on `pub-test-003::capability_only` with the same `timeout_during_gemini` pattern.
+- **Root Cause**: The stable repair/coding discovery matrix still admitted `test_repair` category rows even though repeated capability-only timeouts showed that category is provider-variance/stress-prone under the current Flash lane.
+- **Lesson**: Once a task category repeatedly fails at capability-only, the stable discovery lane should block the category, not chase individual task ids. The category can be reintroduced through a long-tail/stress task card with different timeout and variance expectations.
+- **Action Taken**: Added a capability-specific blocked task category policy and moved `repair_and_coding` `test_repair` rows out of the stable skill-fit discovery matrix.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Skill-Fit Full Runs Need A Capability-Only Sweep Before Skill Arms
+
+- **Phenomenon**: After test-repair rows were moved out, rerun13 stopped on `pub-ref-002::capability_only` with `timeout_during_gemini`.
+- **Root Cause**: The full matrix interleaved capability-only, skill arms, and negative controls per task, so unstable tasks were discovered only after replaying many unrelated rows. The taskset still lacked a cheap capability-only stability sweep before skill comparison.
+- **Lesson**: Stable skill-fit discovery should first prove every task's capability-only baseline before spending rows on skill arms. Capability-only failures are task/provider variance evidence, not skill-fit evidence.
+- **Action Taken**: Added `pub-ref-002` to the repair/coding discovery blocklist and switched the next validation step to a capability-only sweep before full matrix rerun.
+- **Verification**: Pending targeted test, matrix regeneration, and capability-only sweep.
+
+## 2026-05-16 Full Skill-Fit Matrices Must Run Baseline Rows First
+
+- **Phenomenon**: Rerun14 found `hard-neutral-bug-001::capability_only` only after 108 rows had already passed, because rows were ordered task-by-task with skill arms interleaved.
+- **Root Cause**: Matrix row ordering delayed baseline instability detection until after expensive skill-arm execution. This made full sealing runs behave like a costly mixed debugger instead of a staged controller.
+- **Lesson**: Full matrices should execute all capability-only rows before skill arms and negative controls. If a baseline row is unstable, fail-fast should happen before any skill verdict work consumes model budget.
+- **Action Taken**: Reordered generated matrix rows to `capability_only -> skill_ablation -> wrong_or_quarantined_skill` while keeping row ids and evidence contracts stable.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Skill Stop-Loss Classifier Must Demote Timed-Out Skill Arms
+
+- **Phenomenon**: With baseline-first ordering, rerun15 passed the capability-only segment and then stopped at `pub-doc-002::wondelai-clean-architecture` with `timeout_during_gemini`.
+- **Root Cause**: The taskset was stable, but the selected skill arm was too expensive or unstable for the current always-on Flash discovery lane.
+- **Lesson**: Once baseline rows pass and a skill arm times out, the classifier should drive skill demotion for that capability. This preserves task coverage while removing the unstable skill from the discovery candidate set.
+- **Action Taken**: Added `wondelai-clean-architecture` to the repair/coding discovery stop-loss list and extended the regression assertion.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Skill Candidate Relevance Must Not Match Path Incidental Substrings
+
+- **Phenomenon**: After demoting unstable repair skills, the selector admitted a `health` skill because its filesystem path contained `.opencode`, which matched the broad repair keyword `code`.
+- **Root Cause**: `_candidate_relevance` counted keywords across the full path, so directory names could masquerade as domain intent.
+- **Lesson**: Skill relevance should come from canonical skill metadata such as `skill_id` and `load_when`, not incidental filesystem path segments. Paths are provenance, not semantic routing evidence.
+- **Action Taken**: Removed `path` from candidate relevance scoring and added a regression for path-only repair keyword matches.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Repair Skill Relevance Must Avoid Generic Code Quality Keywords
+
+- **Phenomenon**: After removing path scoring, `gstack-health` still entered repair/coding because its `load_when` included generic `code quality` wording.
+- **Root Cause**: Repair/coding relevance keywords included overly broad terms (`code`, `quality`) that describe many engineering utilities but not repair-specific skill behavior.
+- **Lesson**: Capability-skill matching should prefer action-specific terms. For repair/coding, `repair`, `debug`, `tdd`, `refactor`, `simplification`, `clean`, and `architecture` are stronger than generic code-quality dashboard wording.
+- **Action Taken**: Removed broad `code` and `quality` keywords from repair/coding relevance and added a regression for generic code-quality dashboard skills.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Repair Skill Relevance Must Not Pull Planning Review Skills By Architecture
+
+- **Phenomenon**: Once generic code-quality matches were removed, `plan-eng-review` entered the repair/coding candidate arms because its description mentioned architecture.
+- **Root Cause**: `architecture` is useful context for some code changes but is too broad as a repair/coding skill-fit trigger; it admits planning/review skills that do not directly execute repair.
+- **Lesson**: Repair/coding skill-fit should privilege direct action terms such as repair, debug, TDD, refactor, simplification, clean, and investigate. Planning/review skills need a separate capability or explicit promotion evidence.
+- **Action Taken**: Removed `architecture` and the still-too-broad `coding` keyword from repair/coding relevance and added a regression for planning-review architecture-only matches.
+- **Verification**: The first regression run failed because `coding` still admitted `plan-eng-review`; the keyword was removed and the test was rerun.
+
+## 2026-05-16 Skill-Fit Arms Must Dedupe Provider Alias Prefixes
+
+- **Phenomenon**: The repair/coding plan selected both `gstack-investigate` and `investigate`, two aliases of the same underlying gstack skill family.
+- **Root Cause**: The selector deduped exact `skill_id` values but did not canonicalize provider/prefix aliases such as `gstack-`.
+- **Lesson**: Fair ablation should compare distinct skill behaviors, not duplicate aliases. Source-root variance belongs in a separate experiment; discovery arms should canonicalize obvious aliases.
+- **Action Taken**: Added canonical skill id dedupe that strips the `gstack-` prefix and a regression test for alias pairs.
+- **Verification**: Pending targeted test and matrix regeneration.
+
+## 2026-05-16 Stable Discovery Needs Arm-Type Targeted Replay
+
+- **Phenomenon**: After baseline-first ordering, operators still had to manually construct row-id filters for capability-only sweeps and skill-arm replays.
+- **Root Cause**: The matrix runner supported exact row ids but not arm-type stages, so the controller existed as operating procedure instead of a reusable hook.
+- **Lesson**: Stable discovery should expose first-class arm-type replay. `capability_only`, `skill_ablation`, and `wrong_or_quarantined_skill` are contract stages, not ad hoc grep filters.
+- **Action Taken**: Added `--arm-type-filter` to `run_skill_fit_ablation_matrix.py` and a stub regression test.
+- **Verification**: Pending targeted test run.
+
+## 2026-05-16 Stable Discovery Controller Must Be First-Class
+
+- **Phenomenon**: Even after arm-type replay existed, the operator still had to remember when to run `capability_only`, when to replay `needs_more_data`, and when a full seal run was allowed.
+- **Root Cause**: The controller was described in task cards but not encoded as a reusable hook. That left rerun phase order vulnerable to manual drift and accidental Flash100/Pro18 escalation before a stable skill verdict existed.
+- **Lesson**: Stable skill discovery needs a first-class controller phase contract: `capability_sweep`, `targeted_replay`, then `full_seal`. Targeted replay must derive row ids from the rerun queue, not from hand-built filters.
+- **Action Taken**: Added `select_skill_discovery_replay_row_ids`, `run_discovery_controller`, `--controller-phase`, and `--rerun-queue`; wired RETURN rows to include `failure_action`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_select_skill_discovery_replay_row_ids_from_queue tests/learning/test_skill_fit_ablation.py::test_discovery_controller_runs_capability_sweep_with_stub_runner tests/learning/test_skill_fit_ablation.py::test_discovery_controller_runs_targeted_replay_from_queue`
+
+## 2026-05-16 Multi-Capability Skill-Fit Needs Regression Coverage Before 7R
+
+- **Phenomenon**: Governance and research matrices could be generated, but the regression suite mostly covered repair/coding and did not lock capability-specific matrix output.
+- **Root Cause**: 6R expanded the discovery surface faster than tests encoded the new capability boundaries. That made it possible to confuse a single-capability repair path with a multi-capability skill-fit readiness signal.
+- **Lesson**: Before 7R Flash100, each added capability must have a small plan/matrix regression proving verdict keys stay capability-specific and do not collapse into global skill verdicts.
+- **Action Taken**: Added governance/research plan+matrix tests and verified actual controller preflight sweeps for both generated matrices.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_governance_skill_fit_plan_and_matrix_are_capability_specific tests/learning/test_skill_fit_ablation.py::test_research_skill_fit_plan_and_matrix_are_capability_specific`
+
+## 2026-05-16 Promotion Thresholds Must Be Machine-Readable Before Flash100
+
+- **Phenomenon**: The promotion draft correctly kept `runtime_update_allowed=false`, but the Flash100 gate still depended on an operator remembering that `needs_more_data` is not alternate/default readiness.
+- **Root Cause**: Promotion threshold rules were written in task cards but not emitted as a JSON contract. That made the 7R gate easy to misread after a successful diagnostic run.
+- **Lesson**: Skill promotion must have a machine-readable threshold contract before any Flash100 or Pro sanity lane. `default`, `alternate`, `needs_more_data`, and `reject` must be derived from receipt-backed effective rate, task bucket spread, evidence refs, and runtime update boundaries.
+- **Action Taken**: Added `build_skill_promotion_threshold_contract`, `write_skill_promotion_threshold_contract`, and `scripts/ops/build_skill_promotion_threshold_contract.py`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_promotion_threshold_contract_keeps_needs_more_data_out_of_runtime tests/learning/test_skill_fit_ablation.py::test_promotion_threshold_contract_allows_flash100_only_after_positive_verdict tests/learning/test_skill_fit_ablation.py::test_write_skill_promotion_threshold_contract_outputs_json`
+
+## 2026-05-16 Targeted Replay Pass Does Not Equal Skill Promotion
+
+- **Phenomenon**: The 5R-R1 live targeted replay completed `90/90` rows with no RETURN, but all three queued skills still remained `needs_more_data`.
+- **Root Cause**: Row delivery passed, but skill causality was not strong enough for alternate/default promotion. Effective rows were below the promotion thresholds even though evidence and receipt paths existed.
+- **Lesson**: A targeted replay can prove lane stability without proving skill value. Promotion must depend on receipt-backed outcome contribution and effective rate, not only live row pass count.
+- **Action Taken**: Generated targeted replay catalog, promotion draft, rerun queue, and threshold contract; kept `flash100_allowed=false`.
+- **Verification**: `/private/tmp/nexus_skill_fit_repair_targeted_replay_live_20260516/live_summary.json` shows `90/90 PASS`; `docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_REPAIR_AND_CODING_TARGETED_REPLAY_2026-05-16.json` shows `promotion_ready_count=0`.
+
+## 2026-05-16 Long Flash Skill-Fit Runs Need Per-Row Checkpoints
+
+- **Phenomenon**: A governance full live sealing run produced 47 row artifacts and then stalled after Flash quota was exhausted, but the runner had not yet emitted `live_summary.json` because final summaries were written only after the whole matrix finished.
+- **Root Cause**: Long model-backed matrices treated summary emission as an end-of-run action. If quota exhaustion, SIGTERM, or operator stop occurs mid-run, the completed-row denominator must be reconstructed from artifacts instead of a machine-readable checkpoint.
+- **Lesson**: Long Flash/Pro skill-fit runs need a per-row checkpoint summary. Each completed row should update planned/completed/pass/return counts and last result so quota exhaustion remains auditable without pretending the matrix sealed.
+- **Action Taken**: Added `checkpoint_summary.json` emission after every row in `run_skill_fit_ablation_matrix.py`, plus `nexus.skill_fit_resume_manifest.v1` generation from existing row artifacts.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_resume_manifest_reports_completed_and_remaining_rows tests/learning/test_skill_fit_ablation.py::test_matrix_runner_filters_specific_row_ids_with_stub_runner`
+
+## 2026-05-16 Negative Controls Can Pass By Being Blocked
+
+- **Phenomenon**: Governance resume stopped on `wrong_or_quarantined_skill` even though the ablation gate marked the row as `BLOCK` and the gate itself returned `PASS`.
+- **Root Cause**: The matrix runner required the underlying benchmark row to be `SUCCESS` for every arm. For negative controls, the expected behavior is the opposite: a wrong or quarantined skill should be blocked, and the underlying benchmark status may be `FAILED` while the control still passes the skill-fit gate.
+- **Lesson**: Negative-control semantics must be evaluated through the ablation gate, not generic delivery success. A blocked wrong/quarantined skill with no trust mismatch is valid evidence that the quarantine boundary held.
+- **Action Taken**: Added `_result_status_from_gate` so `wrong_or_quarantined_skill` rows pass when the ablation gate passes, regardless of benchmark delivery status.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py::test_matrix_runner_accepts_blocked_negative_control_with_failed_benchmark_status tests/learning/test_skill_fit_ablation.py::test_run_resume_manifest_merges_existing_and_new_rows`
+
+## 2026-05-16 Task Cards Must Follow Matrix SSOT Denominators
+
+- **Phenomenon**: The research/source-discipline task card described a `180`-row full live sealing run, but the generated matrix SSOT contained `132` planned rows.
+- **Root Cause**: The prose task card inherited the governance denominator instead of deriving the count from `NEXUS_SKILL_FIT_EXECUTION_MATRIX_RESEARCH_AND_SOURCE_DISCIPLINE_FLASH180_2026-05-16.json`.
+- **Lesson**: Live sealing exit conditions must use the matrix manifest denominator, not the phase label or copied task-card prose. `Flash180` can describe the lane family, but `planned_rows` is the authoritative completion gate.
+- **Action Taken**: Treated research full live sealing as complete at `132/132`, then updated the milestone document to record the matrix SSOT denominator.
+- **Verification**: `/private/tmp/nexus_skill_fit_research_full_live_20260516/live_summary.json` reports `planned_rows=132`, `completed_rows=132`, `return_count=0`.
+
+## 2026-05-16 Full Live Sealing PASS Does Not Unlock Flash100 Without Positive Skill Verdicts
+
+- **Phenomenon**: Governance full live sealing passed `180/180` and research full live sealing passed `132/132`, but no capability produced a default or alternate skill candidate.
+- **Root Cause**: The sealing runs proved execution completeness and fail-closed controls, not sufficient skill outcome contribution. Governance still had only `needs_more_data` plus one reject; research candidates were all rejected.
+- **Lesson**: Flash100/Pro18 gates must remain blocked until at least one receipt-backed `(capability, skill_id)` reaches alternate/default threshold. Matrix PASS is necessary evidence, but not promotion readiness.
+- **Action Taken**: Generated capability-specific promotion drafts, rerun queues, threshold contracts, and a multi-capability RCA with `flash100_allowed=false`.
+- **Verification**: `docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_RCA_MULTI_CAPABILITY_2026-05-16.json` records `capabilities_with_default_or_alternate=0` and blocks `7R Flash100 Route-Cost Regression`, `8R Pro18 Sanity`, and `9 GPT-5.5 Paired Baseline`.
+
+## 2026-05-17 Governance Needs Row-Level RCA Before More Targeted Replay
+
+- **Phenomenon**: Governance full live sealing showed `nexus-root-cause-probe` at `15/30`, close enough to justify a targeted replay, while other governance candidates were much weaker.
+- **Root Cause**: The prior catalog summarized skill verdicts but did not preserve a machine-readable row-level explanation for why a `needs_more_data` skill should be rerun instead of replaced.
+- **Lesson**: Targeted replay should be RCA-driven. The replay queue must be derived from row-level effective rate, missing effective fields, trust status, task buckets, and evidence/receipt paths, not from a human narrative.
+- **Action Taken**: Added `build_skill_fit_row_level_rca`, wrote `NEXUS_SKILL_FIT_ROW_LEVEL_RCA_GOVERNANCE_AND_TRUST_2026-05-17.json`, and generated a one-skill targeted replay queue for `nexus-root-cause-probe`.
+- **Verification**: Governance targeted replay completed `30/30 PASS`, but the skill remained `needs_more_data` at `15/30`; Flash100 stayed blocked.
+
+## 2026-05-17 Research Candidate V2 Must Exclude Already-Rejected Skills
+
+- **Phenomenon**: The first research/source-discipline candidate set completed live sealing but all four candidates were rejected with `0/22` effective rows.
+- **Root Cause**: The first candidate selector favored generic research/browser skills without enough source-discipline-specific behavior, then left no explicit v2 replacement contract.
+- **Lesson**: Research candidate replacement should be a fail-closed candidate-pool rewrite: exclude prior rejects, require source/citation/evidence/retrieval signals to beat platform-only penalties, keep a negative control, and remain ablation-only until live receipts prove value.
+- **Action Taken**: Added `build_research_candidate_v2_report`, wrote `NEXUS_RESEARCH_CANDIDATE_V2_REPORT_2026-05-17.json`, and generated a v2 matrix with `gbrain-data-research`, `gbrain-perplexity-research`, `gbrain-concept-synthesis`, and `research-paper-writing`.
+- **Verification**: Research v2 preflight completed `132/132 PASS`; runtime update remains disabled.
