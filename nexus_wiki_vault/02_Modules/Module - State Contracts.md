@@ -2,87 +2,69 @@
 aliases:
 - State Contracts
 - JSON Schemas
+- Pydantic Enforced
 confidence: high
-last_compiled: 2026-04-06
+last_compiled: '2026-05-17'
 owner: agent
 raw_sources:
-- plan_schema.json
-- diagnosis_schema.json
-- repair_final_schema.json
-- audit_result_schema.json
-- manifest_schema.json
+- nexus/engine/completion_contract.py
+- nexus/engine/capability_contracts.py
+- nexus/engine/phases/base.py
 related_pages:
-- '[State - Lifecycle](../04_State/State - Lifecycle.md)'
-- '[State - Schemas](../04_State/State - Schemas.md)'
-- '[System Overview](../00_Home/System Overview.md)'
-- '[Unknowns](../01_System/System - Unknowns and Conflicts.md) and Conflicts|[[System - [[System
-  - Unknowns and Conflicts|Unknowns]] and Conflicts|System - [[System - Unknowns and
-  Conflicts|Unknowns]] and Conflicts]]]]'
-source_of_truth: /Users/jameschen/Workspace/schemas/
+- '[[04_State/State - Lifecycle.md]]'
+- '[[04_State/State - Schemas.md]]'
+- '[[00_Home/System Overview.md]]'
+source_of_truth: nexus/engine/completion_contract.py
 status: active
 tags:
 - module
 - state
 - contracts
-- json-schema
+- pydantic
 title: Module - State Contracts
 type: module
 version_scope:
-- v17.1
-- v22
-- v23
+- v26
 ---
 
-
-
-# Module - State Contracts
+# Module - State Contracts (v26 Pydantic Enforced)
 
 ## One-sentence summary
-本頁定義 Nexus 任務執行過程中必須遵循的 5 大 JSON 狀態契約與跨檔案不變量。 [Reference: Spec v22]
+本頁定義 Nexus v26 的狀態契約，全面採用 Pydantic 硬化驗證，確保任務工件在 P-X-D-R-A-C 閉環中的結構一致性與證據完整性。 [Source: nexus/engine/completion_contract.py]
 
 ## Role / responsibility
-- **結構校驗**: 確保所有任務工件符合 `plan`, `diagnosis`, `repair`, `audit`, `manifest` 結構。 [Reference: manifest_schema.json]
-- **不變量維護**: 強制要求 `task_id` 與 `trace_id` 在整個 Evidence Chain 中保持一致。 [Reference: Spec v22 Part 4.1]
-- **風險分級**: 根據 `audit_result.json` 的 `risk_score` 決定門禁通過與否。 [Source: scripts/ops/ci_gate.py]
+- **強型別校驗**: 透過 Pydantic 模型強制執行 `Task`, `ExecutionPlan`, `NexusReceipt` 的欄位規範。
+- **不變量維護**: 物理保證 `task_name` 與 `execution_path` 在整個 Evidence Chain 中不可篡改。
+- **證據封裝**: 透過 `build_completion_envelope` 產出具備語義標籤 (Semantic Status) 的最終工件。
 
-## Core Contracts Matrix
+## Core Contracts Matrix (v26)
 
-| Contract | Purpose | Key ID | Source Provenance |
+| Contract | Purpose | Data Model | Source Provenance |
 |---|---|---|---|
-| `plan.json` | 任務目標與 TODO | `task_id` | [Reference: plan_schema.json] |
-| `diagnosis.json` | 現狀診斷與 Trace | `trace_id` | [Reference: diagnosis_schema.json] |
-| `repair_final.json`| 修復方案與 Patch | `patch_hash` | [Reference: repair_final_schema.json] |
-| `audit_result.json`| 審計風險評估 | `risk_score` | [Reference: audit_result_schema.json] |
-| `manifest.json` | 最終證據封裝 | `seal_status` | [Reference: manifest_schema.json] |
+| **Completion Envelope** | 任務最終狀態與證據封裝 | `dict (Future: Pydantic)` | [Source: nexus/engine/completion_contract.py] |
+| **Capability Plan** | 路由選定的能力與待執行項目 | `CapabilityPlan` | [Source: nexus/engine/capability_contracts.py] |
+| **Capability Receipt** | 執行證據與 Gate 驗證結果 | `CapabilityReceipt` | [Source: nexus/engine/capability_contracts.py] |
+| **Skill Receipt** | 特定技能調用的原子證據 | `SkillReceipt` | [Source: nexus/engine/capability_contracts.py] |
+| **Nexus State** | 核心運行時狀態機 | `NexusState` | [Source: nexus/core/state_contracts.py] |
 
 ## Upstream
-- **Phase Runners**: 產出符合這些 Schema 的實體 JSON。 [Source: scripts/engine/nexus_cli.py]
-- **Core Orchestrator**: 根據契約內容進行相位調度。 [Source: nexus/core/orchestrator.py]
-- `nexus/core/handoff_bundle.py`: 狀態交接封裝邏輯。 [Source: nexus/core/handoff_bundle.py]
-- v22 Engine Spec: 確立 `manifest.json` 為唯一權威索引。 [Reference: Spec v22]
+- **Phase Runners**: 產出符合模型定義的實體數據。 [Source: nexus/engine/phases/base.py]
+- **Capability Router**: 根據路由結果生成 `CapabilityPlan`。 [Source: nexus/engine/autonomic_router.py]
 
 ## Downstream
-- **[System - Unknowns and Conflicts](../01_System/System - Unknowns and Conflicts.md)**: 登記 Schema 漂移衝突。
+- **[[04_State/State - Schemas|State - Schemas]]**: 定義狀態枚舉與轉移規則。
 - **[[Ops - CI/CD Promotion Gate]]**: 基於契約數值執行發佈決策。
 
 ## Related modules / files
-- `/Users/jameschen/Workspace/schemas/`: 實體 JSON Schema 定義。
-- `nexus/core/handoff_bundle.py`: 狀態交接封裝邏輯。 [Code: 00_Home/System Overview.md]
+- `nexus/engine/completion_contract.py`: 任務完成封裝邏輯。
+- `nexus/engine/capability_contracts.py`: 能力與收據模型定義。
+- `nexus/core/state_contracts.py`: 核心狀態機。
 
 ## Source notes
-- Hardened v17.1 Spec: 建立最初的 4 相位工件對位要求。
-- v22 Engine Spec: 確立 `manifest.json` 為唯一權威索引。 [Source: MUSE-NEXUS-Engine-Specification-v22-Eternal.md]
+- v26 Pydantic Enforced: 廢棄舊版 `json-schema` 物理檔案校驗，全面轉向代碼內置的 Pydantic 模型驗證，提升開發效率與運行時安全性。 [Source: nexus/engine/completion_contract.py]
 
 ## Open questions / conflicts
-- [ ] **Contract Versioning**: 預留 `contract_version` 欄位以支援跨版本的 Schema 兼容性。
-- [ ] **Schema Evolution**: v23 智慧層是否應具備動態調整 Audit 閾值的能力。
+- [ ] **Protobuf Integration**: 評估是否將高性能路徑 (High-path) 的狀態交換轉換為 Protobuf 以支援 Swarm 大規模通訊。
 
 ---
 [System Overview](../00_Home/System Overview.md)
-
-
----
-[System Overview](../00_Home/System Overview.md)
-
----
-[[System Overview]]

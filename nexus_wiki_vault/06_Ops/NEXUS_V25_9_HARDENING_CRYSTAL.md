@@ -1,73 +1,71 @@
 ---
-id: nexus_v24_hardening_crystal
-title: "Nexus v24.1 Governance Hardening Crystal"
+id: nexus_v26_hardening_crystal
+title: "Nexus v26.0 Governance Hardening Crystal (AOS 135.2)"
 type: spec
 status: active
-version: v24.1
-version_scope: "[v24.1]"
+version: v26.0
+version_scope: "[v26.0]"
 owner: agent
 tags:
   - governance
   - hardening
+  - AOS
 source_of_truth: 06_Ops/Ops - Closeout Hard Gate.md
 confidence: high
-aliases: [Hardening Crystal, V25.9]
+aliases: [Hardening Crystal, V26.0, AOS 135.2]
 ---
 
-# 🛡️ Nexus v24.1 治理硬化：水晶協議 (Hardening Crystal)
+# 🛡️ Nexus v26.0 治理硬化：水晶協議 (Hardening Crystal) - AOS 135.2
 
-## 1. 核心硬化階段 (Stages A-G)
-系統已完成以下物理硬化，確保交付路徑不可竄改且 Fail-Closed：
+## 1. 核心硬化與演化 (Stages A-H)
+系統已完成 AOS 135.2 級別的物理硬化，確保交付路徑不僅不可竄改，且具備自主對位能力：
 
-- **Stage A (Baseline Contract)**: 統一基線路徑於 `.nexus/reports/baseline/`，強化 Schema 雜湊鎖定。
-- **Stage B (Replay Hard Fail)**: 無 `test_artifacts` 證據時，回放引擎強制攔截，拒絕 PASS。
-- **Stage C (Lineage Chain)**: 建立 `lineage_chain.jsonl`，基於雜湊鏈防止歷史記錄靜默竄改。
-- **Stage D (Regression Metrics)**: 回歸判定由「旗標式」升級為「指標式」，對比最近 N 次數據。
-- **Stage E (Immutable Root)**: 鎖定核心治理腳本（`diagnose_regression.py` 等），偵測到漂移則自動報廢交付。
-- **Stage F (Canonical Flow)**: 固化單一交付路徑：Dual-SHA -> Integrity -> Anti-Drift -> Lineage -> Replay -> Tests -> Regression -> Acceptance。
-- **Stage G (Qualification Suite)**: 通過 10 任務（含 5 個對抗性攻擊）的資格認證。
+- **Stage A (Pydantic Contract)**: 全面廢棄 JSON-Schema，改由 Pydantic 模型強制執行 `NexusReceipt` 的強型別鎖定。
+- **Stage B (Replay Hard Fail)**: 嚴格校驗 `capability_receipts`。若缺少核心收據（如 `lancedb`），即便行為正確亦拒絕 PASS。
+- **Stage C (Lineage Chain)**: 建立 `lineage_chain.jsonl`，確保從 `TaskRequest` 到 `CompletionEnvelope` 的因果鏈不可靜默竄改。
+- **Stage D (Regression Metrics)**: 整合 `benchmark_eligibility.py`，將回歸判定與 Nexus 穿戴狀態 (Wearing State) 掛鉤。
+- **Stage E (Immutable Root)**: 鎖定 `nexus/engine/completion_enforcer.py`，偵測到漂移則自動報廢交付。
+- **Stage F (Canonical Flow)**: 固化單一交付路徑：Dual-SHA -> Integrity -> Anti-Drift -> Wearing Gate -> Replay -> Tests -> Regression -> Acceptance。
+- **Stage G (AOS 135.2 Qualification)**: 通過 12x2 並發任務壓力測試與 38 維度數據工程地圖校準。
+- **Stage H (Wearing Gate Stabilization)**: 實作 `ADR-2026-05-14`，物理保證治理探針在執行過程中始終處於 Active 狀態。
 
 ## 2. 交付政策 (NEXUS_ACCEPTANCE_POLICY)
 
 | 模式 | 描述 | 行為 |
 | :--- | :--- | :--- |
 | **DEV** | 開發引導模式 | 允許 `UNVERIFIED_COLD_START` 狀態，支援引導，不強制阻塞。 |
-| **PROD** | 生產嚴格模式 | 嚴格執行 Fail-Closed。若觸發 **Code 16**，必須附帶 `CODE16_ROOT_CAUSE` 證據。 |
+| **PROD** | 生產嚴格模式 | 嚴格執行 Fail-Closed。必須通過 `Wearing Gate` 與所有 `CapabilityReceipt` 校驗。 |
 
-## 3. Code 16 故障排除協議
-若交付門禁返回 Code 16，嚴禁重複空跑。必須執行：
-1. 讀取 `.nexus/reports/acceptance_check.json`。
-2. 提取 `CODE16_ROOT_CAUSE`（例如 `phantom_false_positive_rate:UNVERIFIED`）。
-3. 針對性補充指標數據或修復邏輯。
+## 3. 故障排除協議
+若交付門禁攔截，嚴禁重複空跑。必須執行：
+1. 讀取 `.nexus/reports/done_contract.json`。
+2. 檢查 `semantic_failures` 與 `gate_verdict`。
+3. 確認 `Nexus Wearing Gate` 是否為 `PASS`。若為 `FAIL`，需重新校準路由傳感器。
 
 ## One-sentence summary
-本規格定義 Nexus 交付路徑的完整硬化、鎖定與資格通關流程，確保生產門禁可追溯、可回滾且不可假陽性闖關。
+本規格定義 Nexus v26.0 的完整硬化、鎖定與 AOS 135.2 演化通關流程，確保生產門禁具備物理級別的證據誠實性。
 
 ## Role / responsibility
-- 制定並落地交付硬化標準，確保每次變更可被 replay、lineage 與回歸指標共同驗證。 [Source: scripts/ops/ci_gate.py]
-- 在生產模式下強制 fail-closed，避免缺失證據導致錯誤 PASS。 [Source: 06_Ops/Ops - Closeout Hard Gate.md]
+- 制定並落地交付硬化標準，確保每次變更可被 `Wearing Gate`、`Lineage` 與回歸指標共同驗證。
+- 在生產模式下強制 Fail-Closed，確保證據 (Evidence) 即為產品。
 
 ## Upstream
-- **[System Overview](../00_Home/System Overview.md)**: 提供治理主體範圍與上下游對位。 [Source: 00_Home/System Overview.md]
-- **[Protocol - Evidence Map](../05_Protocols/Protocol - Evidence Map.md)**: 對應 evidence_bundle 與證據可追溯規範。 [Source: 05_Protocols/Protocol - Evidence Map.md]
+- **[System Overview](../00_Home/System Overview.md)**: 治理主體對位。
+- **[Protocol - Evidence Map](../05_Protocols/Protocol - Evidence Map.md)**: 證據可追溯規範。
 
 ## Downstream
-- **[06_Ops/Ops - Closeout Hard Gate.md](Ops - Closeout Hard Gate.md)**: 產生交付封關決策。 [Source: 06_Ops/Ops - Closeout Hard Gate.md]
-- **[06_Ops/Ops - Acceptance and Release.md](Ops - Acceptance and Release.md)**: 作為交付最終驗收入口。 [Source: 06_Ops/Ops - Acceptance and Release.md]
+- **[Ops - Closeout Hard Gate.md](Ops - Closeout Hard Gate.md)**: 產生交付封關決策。
+- **[Ops - Acceptance and Release.md](Ops - Acceptance and Release.md)**: 交付最終驗收入口。
 
 ## Related modules / files
-- `scripts/ops/ci_gate.py`
-- `scripts/ops/qualification_suite.py`
-- `nexus/core/hardening_controls.py`
-- `06_Ops/Ops - Closeout Hard Gate.md`
+- `nexus/engine/completion_enforcer.py`
+- `scripts/bench/benchmark_eligibility.py`
+- `ADR-2026-05-14-nexus-wearing-gate-stabilization.md`
 
 ## Source notes
-- 交付硬化路徑依據 scripts/ops 內既有門禁流程與 NEXUS 報告輸出規範定義。 [Source: scripts/ops/ci_gate.py]
-- 鎖定項目與證據封存依據現行 closeout 管線。 [Source: 06_Ops/Ops - Closeout Hard Gate.md]
-
-## Open questions / conflicts
-- [ ] 是否將 Stage G 測試規模固定為 10 還是根據版本動態調整？
-- [ ] 是否要把 replay/lineage 失敗與 Code 16 合併到同一個 fail-close 總則？
+- v26.0 演化依據 2026-05-16 Code Scan 與最近一週 Git 提交歷史定義。
+- AOS 135.2 代表 Nexus 已具備工業級的自癒與證據閉環能力。
 
 ---
 [[System Overview]]
+
