@@ -22,6 +22,7 @@ PHASE_OBSERVATION_FIELDS = {
 }
 LOCAL_INTERNAL_DELIVERY_SOURCES = {
     "local_hidden_contract_fast_path",
+    "local_deterministic_pre_model_rescue",
     "local_preflight",
     "local",
 }
@@ -96,7 +97,13 @@ def classify_infra_invalid_reason(
         and len(phases) >= len(PHASE_OBSERVATION_FIELDS)
     )
 
-    if "quota" in combined or "resource exhausted" in combined or "rate limit" in combined or "429" in combined:
+    if (
+        "quota" in combined
+        or "resource exhausted" in combined
+        or "rate limit" in combined
+        or "usage limit" in combined
+        or "429" in combined
+    ):
         return "quota_exhausted"
     if (
         "oauth" in combined
@@ -122,8 +129,7 @@ def classify_infra_invalid_reason(
         return str(row.get("timeout_stage") or "timeout_before_receipt")
     if model_required and gateway_error == "timeout" and model_calls == 0:
         return "timeout_before_model_call"
-    baseline_required = bool(row.get("baseline_llm_required", False))
-    if model_required and model_calls > 0 and baseline_required:
+    if model_required and model_calls > 0:
         total_tokens = int(row.get("total_tokens", 0) or 0)
         token_status = str(row.get("token_capture_status") or row.get("model_token_capture_status") or "").strip().lower()
         if total_tokens <= 0 and token_status not in {"measured", "ok"}:

@@ -1699,3 +1699,163 @@ version_scope:
 - **Lesson**: Research candidate replacement should be a fail-closed candidate-pool rewrite: exclude prior rejects, require source/citation/evidence/retrieval signals to beat platform-only penalties, keep a negative control, and remain ablation-only until live receipts prove value.
 - **Action Taken**: Added `build_research_candidate_v2_report`, wrote `NEXUS_RESEARCH_CANDIDATE_V2_REPORT_2026-05-17.json`, and generated a v2 matrix with `gbrain-data-research`, `gbrain-perplexity-research`, `gbrain-concept-synthesis`, and `research-paper-writing`.
 - **Verification**: Research v2 preflight completed `132/132 PASS`; runtime update remains disabled.
+
+## 2026-05-17 Candidate V2 PASS Still Needs Outcome Contribution
+
+- **Phenomenon**: Research v2 full live sealing completed `132/132 PASS`, but all four research candidates were rejected. Governance v2 Flash30 completed `30/30 PASS`, but produced only three `needs_more_data` candidates and one reject.
+- **Root Cause**: Candidate replacement improved discovery hygiene and lane completeness, but did not yet create enough receipt-backed `outcome_contributed` rows to meet alternate/default thresholds.
+- **Lesson**: Candidate-v2 success is only an input-quality gate. Flash100 and Pro18 must remain blocked until a threshold contract reports at least one alternate/default `(capability, skill_id)`; live row pass count alone is not skill-fit promotion evidence.
+- **Action Taken**: Added governance candidate-v2 selection, generated research/governance v2 live catalogs, promotion drafts, rerun queues, threshold contracts, and row-level RCA artifacts with `flash100_allowed=false`.
+- **Verification**: `/private/tmp/nexus_skill_fit_research_v2_full_live_20260517/live_summary.json` reports `132/132 PASS`; `/private/tmp/nexus_skill_fit_governance_v2_flash30_live_20260517/live_summary.json` reports `30/30 PASS`; `docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_RESEARCH_AND_SOURCE_DISCIPLINE_V2_FULL_LIVE_2026-05-17.json` and `docs/reports/NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_GOVERNANCE_AND_TRUST_V2_FLASH30_LIVE_2026-05-17.json` both keep `flash100_allowed=false`.
+
+## 2026-05-17 Stop-Loss and Task Instability Must Not Become Skill Verdicts
+
+- **Phenomenon**: Governance V2 targeted replay stopped at `3/15` because `claudeosint-safe-surface-audit` timed out before receipt. Governance V2B then stopped on the first capability-only row because `pub-ref-002` timed out before receipt.
+- **Root Cause**: Two different failure classes appeared in sequence: `skill_stop_loss` for a candidate-specific timeout, then `task_unstable_long_tail` for a baseline task timeout. Treating both as ordinary skill effectiveness would have polluted the catalog.
+- **Lesson**: Candidate demotion and task quarantine are different hooks. A skill timeout should demote only that `(capability, skill_id)` candidate; a capability-only timeout should move that task to long-tail and rebuild the matrix denominator before rerunning.
+- **Action Taken**: Generated Governance V2B without `claudeosint-safe-surface-audit`, then generated Governance V2C excluding long-tail `pub-ref-002`; V2C completed `30/30 PASS` before producing final rejection verdicts.
+- **Verification**: `/private/tmp/nexus_skill_fit_governance_v2_targeted_replay_20260517/live_summary.json` records `demote_skill_for_capability:claudeosint-safe-surface-audit`; `/private/tmp/nexus_skill_fit_governance_v2b_flash30_live_20260517/live_summary.json` records `move_task_to_long_tail_lane`; `/private/tmp/nexus_skill_fit_governance_v2c_flash30_live_20260517/live_summary.json` reports `30/30 PASS`.
+
+## 2026-05-17 Cost RCA Should Stop Low-Yield Skill Discovery
+
+- **Phenomenon**: Governance V2C completed `30/30 PASS`, but every candidate was rejected and the run still consumed `645906` tokens, `1667.9133` wall seconds, and `14` model calls.
+- **Root Cause**: The discovery lane was still evaluating candidate families after the evidence showed no receipt-backed outcome contribution. Without a cost/phase contract, the next task card could misread lane success as permission to spend more Flash.
+- **Lesson**: Skill-fit RCA needs a cost/phase contract next to the promotion threshold contract. If effective rows remain zero, cost data should redirect to candidate/taskset redesign, not to more live reruns.
+- **Action Taken**: Added `build_skill_fit_cost_phase_contract` and `build_skill_fit_redesign_contract`; emitted cost/phase and redesign reports that keep `flash100_allowed=false`.
+- **Verification**: `docs/reports/NEXUS_SKILL_FIT_COST_PHASE_CONTRACT_GOVERNANCE_AND_TRUST_V2C_2026-05-17.json` reports `skills_with_effective_rows=0`; `docs/reports/NEXUS_SKILL_FIT_REDESIGN_CONTRACT_2026-05-17.json` blocks both governance and research from additional Flash spend until taskset/candidate redesign.
+
+## 2026-05-17 Research V3 Needs Observable Source-Discipline Behavior
+
+- **Phenomenon**: The stricter Research Candidate V3 selector found zero eligible candidates in the current fair skill pool, even though V2 had selected four candidates.
+- **Root Cause**: Existing research candidates mostly advertise broad research/search/synthesis behavior, but do not expose at least two observable source-discipline behavior groups such as citation-chain, source-conflict, and source-validation.
+- **Lesson**: Generic research wrappers should not enter the skill-fit live lane for `research_and_source_discipline`. Candidate eligibility should require observable behaviors that the verifier can distinguish from ordinary delivery.
+- **Action Taken**: Added `build_research_candidate_v3_report` and CLI wiring. The report now returns `RETURN` instead of spending Flash when no candidate satisfies the behavior contract.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py` reports `49 passed`; `docs/reports/NEXUS_RESEARCH_CANDIDATE_V3_REPORT_2026-05-17.json` records `selected_candidate_count=0`, `skip_missing_observable_source_discipline_behavior=45`, and `skip_previously_rejected=4`.
+
+## 2026-05-17 Governance Taskset Expansion Must Check Bucket Balance
+
+- **Phenomenon**: Existing public manifests contain enough claim/evidence governance-like tasks, but not enough audit or redaction coverage for a balanced 15-20 task governance expansion lane.
+- **Root Cause**: Prior governance skill-fit matrices over-sampled broad claim/evidence tasks. That made delivery rows pass, but did not create enough distinct pressure on audit and redaction skills to separate candidate value.
+- **Lesson**: Governance expansion needs bucket-balanced taskset contracts before live spend. A selected task count is not enough; each governance bucket must meet a minimum count and proposed missing tasks must be materialized with hidden verifiers first.
+- **Action Taken**: Added `build_governance_taskset_expansion_contract` and CLI wiring. The report selects existing tasks, counts buckets, and emits missing task specs with `live_ready=false` when materialization is required.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py` reports `50 passed`; `docs/reports/NEXUS_GOVERNANCE_TASKSET_EXPANSION_CONTRACT_2026-05-17.json` selects 20 existing tasks and requires 3 new hidden-verifier tasks before live spend.
+
+## 2026-05-17 Research Supply Gap Must Not Recycle Rejected Candidates
+
+- **Phenomenon**: A proposed research-candidate list included skills that had already been live-tested and rejected, including `arxiv`, `browserbase-company-research`, `browserbase-search`, `gbrain-academic-verify`, `gbrain-data-research`, and `gbrain-perplexity-research`.
+- **Root Cause**: Candidate supply advice mixed stale reference-pool availability with current receipt-backed verdicts. Existing catalog presence does not reset a rejected `(capability, skill_id)` verdict.
+- **Lesson**: Research supply recovery must classify rejected, missing-behavior, and ingest-only candidates before live spend. External or GitHub candidates may enter only candidate pool until pinned-source, license, security, and observable source-discipline behavior receipts exist.
+- **Action Taken**: Added `build_research_skill_supply_gap_contract`, CLI wiring, and a regression test. The contract blocks live research spend when no candidate has at least two source-discipline behavior groups.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py` reports `51 passed`; `docs/reports/NEXUS_RESEARCH_SKILL_SUPPLY_GAP_CONTRACT_2026-05-17.json` records `candidate_count=49`, `prior_reject_count=8`, `ready_candidate_count=0`, and `research_live_allowed=false`.
+
+## 2026-05-17 Governance Expansion Needs Materialized Hidden-Verifier Pressure
+
+- **Phenomenon**: The governance taskset expansion contract proposed one audit task and two redaction tasks, but proposed task specs were not runnable live evidence.
+- **Root Cause**: The taskset contract could diagnose bucket gaps, but `_governance_missing_task_spec` intentionally emits TODO specs instead of mutating public manifests or creating hidden verifiers.
+- **Lesson**: Bucket expansion needs materialized manifest rows backed by existing or new hidden-verifier fixture kinds before any live Flash spend. A balanced bucket report is not enough unless `live_ready=true` and `proposed_new_task_count=0`.
+- **Action Taken**: Added `governance-expansion-audit-003`, `governance-expansion-redaction-002`, and `governance-expansion-redaction-003` to `public_benchmark_commercial_expansion_v1.json`; regenerated the expansion contract.
+- **Verification**: `docs/reports/NEXUS_GOVERNANCE_TASKSET_EXPANSION_CONTRACT_2026-05-17.json` records `live_ready=true`, `proposed_new_task_count=0`, and bucket coverage audit `4`, redaction `3`, auth `3`, claim-gate `10`, evidence-review `9`.
+
+## 2026-05-17 Governance Promotion Requires Mutant-Kill Evidence
+
+- **Phenomenon**: Governance delivery tasks can pass without proving a skill blocks forged PASS, missing evidence, redaction regression, authorization bypass, or incomplete receipt-lite mutants.
+- **Root Cause**: Normal delivery rows measure solution success, while governance skill value depends on anti-false-positive behavior. Without a mutant lane, promotion could over-credit generic delivery.
+- **Lesson**: Governance skill promotion must require fail-closed mutant kill evidence keyed by `(capability, skill_id, mutant_id)`. A normal delivery PASS does not imply mutant kill PASS.
+- **Action Taken**: Added `build_governance_mutant_lane_contract`, CLI wiring, and a regression test. The contract generates one mutant per governance bucket and keeps runtime updates disabled.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py` reports `52 passed`; `docs/reports/NEXUS_GOVERNANCE_MUTANT_LANE_CONTRACT_2026-05-17.json` records `mutant_count=5`, `missing_buckets=[]`, and `live_ready=true`.
+
+## 2026-05-17 Mutant Matrix Must Stay Separate From Commercial Denominator
+
+- **Phenomenon**: Governance expansion tasks were materialized, but adding them directly to the commercial 50 lane would change the fixed denominator and blur skill-fit diagnostics with commercial-lane claims.
+- **Root Cause**: The expansion taskset was ready for governance validation, but it did not yet have a separate mutant matrix and promotion gate artifact.
+- **Lesson**: Governance mutant validation should become its own preflight/live lane. It may reference commercial-expansion task rows, but must not mutate the commercial 50 denominator or claim basis.
+- **Action Taken**: Added `nexus/learning/governance_mutants.py`, `build_governance_mutant_matrix_preflight`, and `build_governance_mutant_promotion_gate`; generated matrix and promotion-gate reports.
+- **Verification**: `docs/reports/NEXUS_GOVERNANCE_MUTANT_MATRIX_PREFLIGHT_2026-05-17.json` reports `row_count=5`, `missing_required_task_count=0`, and `commercial_50_denominator_mutation_allowed=false`; `docs/reports/NEXUS_GOVERNANCE_MUTANT_PROMOTION_GATE_2026-05-17.json` keeps `promotion_allowed=false` until live mutant-kill evidence exists.
+
+## 2026-05-17 Research Skill Supply Needs Creation Specs Before Live
+
+- **Phenomenon**: Research candidate v3 found zero ready candidates, so live research skill-fit would only repeat the known supply gap.
+- **Root Cause**: Existing candidates lacked observable citation-chain, source-conflict, and source-validation behavior receipts.
+- **Lesson**: Research/source-discipline recovery should first emit skill creation and external ingest contracts, then regenerate candidate v3. GitHub or external skills may enter candidate pool only with pinned-source and safety receipts.
+- **Action Taken**: Added `build_research_source_discipline_skill_specs` and generated `NEXUS_RESEARCH_SOURCE_DISCIPLINE_SKILL_SPECS_2026-05-17.json`.
+- **Verification**: The specs report records `creation_spec_count=3`, `external_ingest_guard_present=true`, and `research_live_allowed=false`; `uv run pytest tests/learning/test_skill_fit_ablation.py -q` reports `54 passed`.
+
+## 2026-05-17 Local Mutant Sealing Is Not Candidate Kill Evidence
+
+- **Phenomenon**: The governance mutant matrix can be sealed locally with fail-closed BLOCK/RETURN receipts, but that still does not prove any skill candidate killed those mutants.
+- **Root Cause**: The mutant matrix rows were capability/governance-gate rows, not candidate-bound ablation rows keyed by `(capability, skill_id, mutant_id)`.
+- **Lesson**: Mutant live sealing should report two counters: sealed row count and candidate-bound kill evidence count. Promotion may use only candidate-bound kill evidence, not local gate sealing alone.
+- **Action Taken**: Added `build_governance_mutant_live_sealing` and generated `NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json`.
+- **Verification**: The sealing report records `sealed_row_count=5`, `failed_row_count=0`, `candidate_bound_kill_evidence_count=0`, and `promotion_allowed=false`.
+
+## 2026-05-17 Research External Ingest Must Be No-Mount By Default
+
+- **Phenomenon**: Research supply needs external candidates, but direct external skill mounting would bypass source, license, security, and behavior receipts.
+- **Root Cause**: Candidate supply and runtime promotion are separate seams; treating ingest as runtime availability would recreate selected-only evidence risk.
+- **Lesson**: External research ingest should be no-network/no-mount by default and should only emit candidate-pool schema requirements until pinned source and security receipts exist.
+- **Action Taken**: Added `build_research_external_ingest_guard` and generated `NEXUS_RESEARCH_EXTERNAL_INGEST_GUARD_2026-05-17.json`.
+- **Verification**: The guard reports `required_field_count=7`, `required_check_count=6`, `runtime_mount_allowed=false`, and `network_fetch_performed=false`.
+
+## 2026-05-17 Skill-Fit Ablation Needs A Facade/Core Split
+
+- **Phenomenon**: `skill_fit_ablation.py` had become both the public import surface and the implementation holder, while follow-up, promotion, and mutant contracts were already moving into separate Modules.
+- **Root Cause**: Keeping the compatibility path and implementation in one file reduced locality and made every new hook look like it belonged in the same file.
+- **Lesson**: Preserve the old import interface as a facade, but move implementation into a deep core Module so later follow-up/promotion/mutant seams can evolve independently.
+- **Action Taken**: Created `nexus/learning/skill_fit_ablation_core.py` and reduced `nexus/learning/skill_fit_ablation.py` to a compatibility facade.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py -q` reports `55 passed`; CLI help for `build_skill_fit_ablation_plan.py` and `run_skill_fit_ablation_matrix.py` still works.
+
+## 2026-05-17 6R Completion Is Route-Cost Entry, Not Public Promotion
+
+- **Phenomenon**: Candidate-bound governance mutants produced two alternate suitability verdicts, while research external candidates became v3-selectable metadata-only candidates.
+- **Root Cause**: 6R gates now prove route-cost regression readiness, but still do not prove public delivery/cost superiority or Pro/GPT baseline readiness.
+- **Lesson**: The 6R completion report must distinguish `route_cost_7r_allowed` from `public_claim_allowed`, `pro18_allowed`, and `gpt55_paired_baseline_allowed`.
+- **Action Taken**: Added `NEXUS_6R_COMPLETION_READINESS_2026-05-17.json` with 7R allowed only for Flash100 route-cost regression.
+- **Verification**: The readiness report sets `route_cost_7r_allowed=true`, `public_claim_allowed=false`, `pro18_allowed=false`, and `gpt55_paired_baseline_allowed=false`.
+
+## 2026-05-17 Flash100 Preflight Must Verify Denominator Before Live
+
+- **Phenomenon**: The named commercial route-cost lanes initially contained only 28 unique task refs, despite the 7R task card saying Flash100.
+- **Root Cause**: Lane names and benchmark size had drifted; existing lane refs were sufficient for earlier diagnostics but not for a 100-task route-cost regression.
+- **Lesson**: Flash100 live must be preceded by a frozen taskset contract with exactly 100 selected tasks and a taskset hash. A route-cost preflight over 28 tasks must RETURN even if policy simulation itself passes.
+- **Action Taken**: Generated `NEXUS_7R_FLASH100_TASKSET_CONTRACT_2026-05-17.json` from 111 available public tasks, then regenerated `NEXUS_7R_ROUTE_COST_PREFLIGHT_2026-05-17.json`.
+- **Verification**: The corrected 7R preflight reports `selected_task_count=100`, `tasks_checked=100`, `failure_count=0`, and `route_cost_7r_live_allowed=true`.
+
+## 2026-05-17 Flash100 Live Must Be Execution-Safe, Not Just 100-Count
+
+- **Phenomenon**: 7R-B Flash100 live stopped after `pub-doc-001` failed. The row came from `repo_kind=nexus_internal`, `repo=local://nexus`, and `repo_ref=current-worktree`, which caused sanitized external model export to block model invocation and fall back to local delivery with `no_mutation_generated`.
+- **Root Cause**: The 7R-A denominator counted local current-worktree and external adapter-missing tasks as public route-cost candidates. They can be useful for internal diagnostics, but they are not execution-safe for a sanitized commercial-model live lane.
+- **Lesson**: Flash100 public/commercial live needs two gates: exactly 100 selected tasks and exactly 100 execution-safe tasks. Local current-worktree rows and external rows without clone/setup adapters must be excluded before live spend. Delivery fail-fast should be enabled with `NEXUS_BENCH_FAIL_FAST_ON_ROW_FAILURE=1`.
+- **Action Taken**: Stopped the partial 7R-B run, generated `NEXUS_7R_FLASH100_EXECUTION_SAFE_DENOMINATOR_GUARD_2026-05-17.json`, and generated corrected execution-safe manifests.
+- **Verification**: The guard reports `execution_safe_count=99`, `flash100_live_allowed=false`, and `reason=execution_safe_denominator_below_100`; the corrected Flash99 execution-safe preflight PASS confirms the remaining denominator is runnable but not sufficient for Flash100 promotion.
+
+## 2026-05-17 Flash100 Fail-Fast Needs Targeted Replay Before Full Rerun
+
+- **Phenomenon**: Corrected 7R-B execution-safe Flash100 live passed preflight and then stopped at row `20/100` on `governance-expansion-audit-003`.
+- **Root Cause**: The failed row had governance/capability evidence present, but `artifact_gate`, `claim_gate`, `delivery_gate`, and `mempalace_gate` all reported `evidence_without_gate_pass`; the partial run also left public claim gates invalid due to single-arm execution and outbound prompt ledger forbidden literals.
+- **Lesson**: A Flash100 fail-fast stop must generate observation-only claim separation and targeted RCA/replay before any full rerun or 8R unlock. Partial delivery, cost, and skill-fit signals must not be merged into a public promotion claim.
+- **Action Taken**: Added `scripts/ops/build_7r_claim_separation_report.py`, generated `NEXUS_7R_CLAIM_SEPARATION_REPORT_2026-05-17.json` with `status=RETURN`, blocked 8R, and queued 7R-D/7R-E/7R-F/7R-G follow-up cards.
+- **Verification**: The 7R-C report records `executed_with_nexus_rows=20`, `completed_full_flash100=false`, `first_failed_task_id=governance-expansion-audit-003`, and `8r_ready=false`.
+
+## 2026-05-17 Process Checks May Need Escalation In Desktop Sandbox
+
+- **Phenomenon**: A sandboxed `ps aux | rg capability_ab_runner.py|nexus-7r-flash100` check returned `operation not permitted`.
+- **Root Cause**: Desktop sandbox process inspection can be restricted even when the command is read-only.
+- **Lesson**: After long Flash/Gemini runs, process cleanup verification should use an approved escalated `ps aux` check rather than assuming the sandboxed process list is authoritative.
+- **Action Taken**: Re-ran the process check with approved escalation.
+- **Verification**: The escalated process check showed only the `ps`/`rg` query itself and no lingering `capability_ab_runner.py` or `nexus-7r-flash100` process.
+
+## 2026-05-17 Sanitized Export Must Redact Workspace Paths Before Ledger
+
+- **Phenomenon**: 7R-B outbound prompt ledger recorded `12` forbidden literal hits, all matching the repo root hash for `/Users/jameschen/Workspace/nexus`.
+- **Root Cause**: Sanitized export adds repo root to `NEXUS_OUTBOUND_FORBIDDEN_LITERALS`, but Gemini prompt redaction only replaced `/private/tmp/nexus-live-clean-runner-*` paths before strict ledger recording.
+- **Lesson**: Strict outbound ledger checks should redact absolute forbidden paths before recording, then fail only on remaining unredacted forbidden literals. The existing contaminated bundle remains non-public and requires targeted replay.
+- **Action Taken**: Updated `nexus/services/gemini_cli.py` to redact absolute forbidden paths as `$SANITIZED_PATH`; added `scripts/ops/build_7r_blocker_reports.py` for row and ledger RCA reports.
+- **Verification**: `docs/reports/NEXUS_7R_E_OUTBOUND_LEDGER_RCA_2026-05-17.json` records `repo_root_hit_count=12`; `uv run pytest tests/services/test_gemini_cli.py tests/benchmark/test_public_benchmark_commercial_lanes.py tests/benchmark/test_capability_tasks_schema.py -q` reports `22 passed`.
+
+## 2026-05-17 Flash100 Full Live Needs Durable Resume, Not Detached Partial Rows
+
+- **Phenomenon**: 7R-G V3 full live continued after interruption and produced `9` with-Nexus row files, but the background process ended without final `with_nexus_*.jsonl`, `without_nexus_*.jsonl`, or `evidence_bundle.json`.
+- **Root Cause**: The interactive tool session was interrupted while the runner was still active; the detached process left partial row artifacts but not the final aggregation bundle required for public claims.
+- **Lesson**: Long Flash100 runs need durable supervisor/resume output before they can be considered 7R-G evidence. Partial row files may seed a resume manifest, but they must not be promoted to full live evidence or used to unlock 8R.
+- **Action Taken**: Generated `NEXUS_7R_G_INTERRUPTED_FULL_LIVE_RESUME_MANIFEST_2026-05-17.json` with completed and remaining task IDs.
+- **Verification**: The resume manifest records `completed_with_nexus_count=9`, `remaining_task_count=91`, `bundle_present=false`, and `claim_allowed=false`.

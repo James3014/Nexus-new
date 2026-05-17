@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.engine.learning_policy_loader import (
     audit_route_cost_policy,
@@ -801,6 +803,135 @@ def test_capability_planner_consumes_provider_signals_without_executor_side_effe
     assert payload["signal_snapshot"]["msa_rerank_reasons"] == ("source:lancedb", "sot:code")
 
 
+def test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill(tmp_path):
+    status_report = tmp_path / "skill_status.json"
+    status_report.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.skill_status.v1",
+                "skills": [
+                    {
+                        "name": "nexus-benchmark-public-report",
+                        "path": "/repo/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+                        "root": "nexus_repo",
+                        "skill_status": "nexus_curated_candidate",
+                        "test_level": "routing_plus_e2e",
+                        "action": "eligible_for_capability_mount_review",
+                        "capability_mount": "benchmark",
+                        "reason_codes": ["repo_local_nexus_skill"],
+                    },
+                    {
+                        "name": "candidate-skill-from-run-001",
+                        "path": "/Users/jameschen/.agents/skills/candidate-skill-from-run-001/SKILL.md",
+                        "root": "agents",
+                        "skill_status": "candidate_quarantine",
+                        "test_level": "quarantine",
+                        "action": "review_before_promotion",
+                        "capability_mount": None,
+                        "reason_codes": ["generated_or_candidate_inbox"],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    plan = CapabilityPlanner().plan(
+        task_desc="Prepare public benchmark promotion report.",
+        task_type="benchmark",
+        route={
+            "recommended_flow": "baseline",
+            "route_features": {"risk_score": 20, "candidate_count": 1},
+        },
+        budget={"skill_status_report": str(status_report)},
+        skills=[
+            {"skill_id": "nexus-benchmark-public-report", "score": 0.91},
+            {"skill_id": "candidate-skill-from-run-001", "score": 0.7},
+        ],
+    ).to_dict()
+
+    snapshot = plan["signal_snapshot"]
+    assert snapshot["planned_skill_mount_contracts"] == [
+        {
+            "skill_id": "nexus-benchmark-public-report",
+            "skill_status": "nexus_curated_candidate",
+            "capability_mount": "benchmark",
+            "capability": "benchmark",
+            "load_reason_codes": [
+                "capability_planner_skill_signal",
+                "catalog_status:nexus_curated_candidate",
+            ],
+            "evidence_refs": [
+                "skill_catalog:nexus-benchmark-public-report",
+                "skill_path:/repo/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+            ],
+            "planner_selected_capability": True,
+        }
+    ]
+    assert snapshot["skill_mount_violations"] == [
+        {
+            "skill_name": "candidate-skill-from-run-001",
+            "path": "/Users/jameschen/.agents/skills/candidate-skill-from-run-001/SKILL.md",
+            "reason": "quarantined_status:candidate_quarantine",
+        }
+    ]
+
+
+def test_capability_planner_allows_reference_skill_only_for_ablation(tmp_path):
+    status_report = tmp_path / "skill_status.json"
+    status_report.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.skill_status.v1",
+                "skills": [
+                    {
+                        "name": "hermes-debugging",
+                        "path": "/Users/jameschen/Workspace/hermes-agent/skills/debugging/SKILL.md",
+                        "root": "hermes",
+                        "skill_status": "external_reference_candidate",
+                        "test_level": "routing_reference",
+                        "action": "reference_only_until_imported",
+                        "capability_mount": "reference:repair_and_coding",
+                        "reason_codes": ["structured_hermes_reference_catalog"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    plan = CapabilityPlanner().plan(
+        task_desc="Repair code with external skill ablation.",
+        task_type="benchmark",
+        route={"recommended_flow": "baseline", "route_features": {"risk_score": 20, "candidate_count": 1}},
+        budget={"skill_status_report": str(status_report), "allow_ablation_skill_mounts": True},
+        skills=[{"skill_id": "hermes-debugging", "score": 0.7}],
+    ).to_dict()
+
+    snapshot = plan["signal_snapshot"]
+    assert snapshot["skill_mount_violations"] == []
+    assert snapshot["planned_skill_mount_contracts"] == [
+        {
+            "skill_id": "hermes-debugging",
+            "skill_status": "external_reference_candidate",
+            "capability_mount": "repair_and_coding",
+            "capability": "repair_and_coding",
+            "load_reason_codes": [
+                "capability_planner_skill_signal",
+                "catalog_status:external_reference_candidate",
+                "benchmark_ablation_only_mount",
+            ],
+            "evidence_refs": [
+                "skill_catalog:hermes-debugging",
+                "skill_path:/Users/jameschen/Workspace/hermes-agent/skills/debugging/SKILL.md",
+            ],
+            "planner_selected_capability": False,
+        }
+    ]
+
+
 def test_capability_planner_applies_promoted_learning_policy_only_when_opt_in():
     baseline = CapabilityPlanner().plan(
         task_desc="Simple typo repair with no research need.",
@@ -1103,7 +1234,7 @@ def test_route_cost_policy_loader_can_match_public_bugfix_supervised_bare_first(
     {
       "id": "feature:public-bugfix-supervised",
       "match": {"task_type": "public_bugfix", "difficulty": "hard", "category": "bugfix", "repo_kind": "neutral_fixture", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
-      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true, "route_lane": "hidden_bugfix_supervised"}
+      "controls": {"candidate_cap": 1, "lite_route": true, "supervised_bare_first": true, "allow_pre_model_deterministic_rescue": true, "route_lane": "hidden_bugfix_supervised"}
     }
   ]
 }""",
@@ -1124,6 +1255,7 @@ def test_route_cost_policy_loader_can_match_public_bugfix_supervised_bare_first(
     )
 
     assert controls["supervised_bare_first"] is True
+    assert controls["allow_pre_model_deterministic_rescue"] is True
     assert controls["route_lane"] == "hidden_bugfix_supervised"
     assert controls["policy_source"] == "feature:public-bugfix-supervised"
 
@@ -1204,6 +1336,7 @@ def test_route_cost_policy_loader_reads_task_specific_env_controls(monkeypatch):
         (
             '{"lite_route": true, "candidate_cap": 1, "disable_research": true, '
             '"context_mode": "compact", "max_rounds": 1, "route_lane": "hidden_lite", '
+            '"allow_high_risk_supervised_bare_first": true, '
             '"policy_source": ".nexus/policy/promoted_route_cost_policy.json"}'
         ),
     )
@@ -1217,8 +1350,10 @@ def test_route_cost_policy_loader_reads_task_specific_env_controls(monkeypatch):
     assert budget["route_cost_policy"]["current_context_mode"] == "compact"
     assert budget["route_cost_policy"]["current_max_rounds"] == 1
     assert budget["route_cost_policy"]["current_route_lane"] == "hidden_lite"
+    assert budget["route_cost_policy"]["current_allow_high_risk_supervised_bare_first"] is True
     assert controls["disable_research"] is True
     assert controls["context_mode"] == "compact"
+    assert controls["allow_high_risk_supervised_bare_first"] is True
 
 
 def test_s2t_policy_draft_loader_feeds_shadow_scoring_without_runtime_promotion(tmp_path):
@@ -1350,7 +1485,7 @@ def test_route_cost_policy_loader_matches_real_benchmark_category_lane(tmp_path)
     {
       "id": "feature:governance-direct-hyper",
       "match": {"category": "ops_research", "difficulty": "hard", "repo_kind": "neutral_fixture"},
-      "controls": {"candidate_cap": 1, "context_mode": "compact", "disable_research": true, "max_rounds": 1, "route_lane": "governance_hardened", "require_llm_baseline": true, "skip_llm_baseline": true}
+      "controls": {"candidate_cap": 1, "context_mode": "compact", "disable_research": true, "max_rounds": 1, "route_lane": "governance_hardened", "skip_llm_baseline": true}
     }
   ]
 }""",
@@ -1373,8 +1508,166 @@ def test_route_cost_policy_loader_matches_real_benchmark_category_lane(tmp_path)
     assert controls["context_mode"] == "compact"
     assert controls["max_rounds"] == 1
     assert controls["route_lane"] == "governance_hardened"
-    assert controls["require_llm_baseline"] is True
     assert controls["skip_llm_baseline"] is True
+
+
+def test_route_cost_controls_enable_gate_only_receipt_lite_for_governance_lane(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:governance-hard-neutral",
+                    "match": {
+                        "task_type": "public_ops_research",
+                        "category": "ops_research",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                    },
+                    "controls": {
+                        "allow_pre_model_deterministic_rescue": True,
+                        "candidate_cap": 1,
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "max_rounds": 1,
+                        "route_lane": "governance_hardened",
+                        "skip_llm_baseline": True,
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "nexus-value-trust-002",
+        budget=budget,
+        route_features={
+            "task_type": "public_ops_research",
+            "category": "ops_research",
+            "difficulty": "hard",
+            "repo_kind": "neutral_fixture",
+        },
+        expected_capabilities=("claim_gate", "delivery_gate"),
+    )
+
+    assert controls["gate_only_receipt_lite"] is True
+    assert controls["supervised_bare_first"] is True
+    assert controls["allow_medium_risk_supervised_bare_first"] is True
+    assert controls["allow_pre_model_deterministic_rescue"] is True
+    assert "expected_capability_protection" not in controls
+
+
+def test_route_cost_controls_enable_swarm_receipt_executor_for_swarm_lane(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:governance-hard-neutral",
+                    "match": {
+                        "task_type": "public_ops_research",
+                        "category": "ops_research",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                    },
+                    "controls": {
+                        "allow_pre_model_deterministic_rescue": True,
+                        "candidate_cap": 1,
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "max_rounds": 1,
+                        "route_lane": "governance_hardened",
+                        "skip_llm_baseline": True,
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "route-oracle-swarm-001",
+        budget=budget,
+        route_features={
+            "task_type": "public_ops_research",
+            "category": "ops_research",
+            "difficulty": "hard",
+            "repo_kind": "neutral_fixture",
+        },
+        expected_capabilities=("swarm",),
+    )
+
+    assert controls["swarm_receipt_executor"] is True
+    assert controls["route_oracle_receipt_lite"] is True
+    assert "expected_capability_protection" not in controls
+
+
+def test_route_cost_controls_enable_belief_receipt_lite_for_capped_lane(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:belief-capped",
+                    "match": {"task_type": "public_bugfix"},
+                    "controls": {
+                        "candidate_cap": 1,
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "max_rounds": 1,
+                        "route_lane": "belief_budget_hardened_capped",
+                        "require_llm_baseline": True,
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "rlm-harder-v2-belief-001",
+        budget=budget,
+        route_features={"task_type": "public_bugfix"},
+        expected_capabilities=("belief",),
+    )
+
+    assert controls["belief_receipt_lite"] is True
+    assert controls["allow_pre_model_deterministic_rescue"] is True
+    assert "expected_capability_protection" not in controls
+
+
+def test_route_cost_controls_enable_hyper_receipt_lite_for_repair_capped_lane(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:repair-capped",
+                    "match": {"task_type": "public_test_repair"},
+                    "controls": {
+                        "candidate_cap": 1,
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "max_rounds": 1,
+                        "route_lane": "repair_capped",
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "rlm-harder-v2-second-round-002",
+        budget=budget,
+        route_features={"task_type": "public_test_repair"},
+        expected_capabilities=("hyper", "delivery_gate"),
+    )
+
+    assert controls["hyper_receipt_lite"] is True
+    assert controls["allow_pre_model_deterministic_rescue"] is True
+    assert "expected_capability_protection" not in controls
 
 
 def test_route_cost_controls_protect_expected_capabilities_from_cost_slimming(tmp_path):
@@ -1387,6 +1680,8 @@ def test_route_cost_controls_protect_expected_capabilities_from_cost_slimming(tm
                     "match": {"task_type": "public_test_repair"},
                     "controls": {
                         "candidate_cap": 1,
+                        "context_mode": "compact",
+                        "disable_research": True,
                         "lite_route": True,
                         "supervised_bare_first": True,
                     },
@@ -1406,10 +1701,11 @@ def test_route_cost_controls_protect_expected_capabilities_from_cost_slimming(tm
     assert controls["candidate_cap"] == 3
     assert controls["lite_route"] is False
     assert controls["supervised_bare_first"] is False
+    assert controls["ddtree_mixed_candidate_pool"] is True
     assert controls["expected_capability_protection"] == ["ddtree", "ultra_review"]
 
 
-def test_route_cost_controls_do_not_supervise_bare_when_expected_receipt_is_not_gate_only(tmp_path):
+def test_route_cost_controls_allow_deterministic_route_oracle_receipt_lite(tmp_path):
     budget = {
         "route_cost_policy": {
             "source": "test",
@@ -1418,7 +1714,12 @@ def test_route_cost_controls_do_not_supervise_bare_when_expected_receipt_is_not_
                     "id": "feature:low-cost-lite",
                     "match": {"task_type": "public_test_repair"},
                     "controls": {
+                        "allow_pre_model_deterministic_rescue": True,
+                        "context_mode": "compact",
+                        "disable_research": True,
                         "lite_route": True,
+                        "max_rounds": 1,
+                        "route_lane": "governance_hardened_capped",
                         "supervised_bare_first": True,
                     },
                 }
@@ -1435,8 +1736,147 @@ def test_route_cost_controls_do_not_supervise_bare_when_expected_receipt_is_not_
     )
 
     assert controls["lite_route"] is True
-    assert controls["supervised_bare_first"] is False
-    assert controls["expected_capability_protection"] == ["semantic_failure_sensor"]
+    assert controls["route_oracle_receipt_lite"] is True
+    assert controls["allow_pre_model_deterministic_rescue"] is True
+    assert "expected_capability_protection" not in controls
+
+
+def test_route_cost_controls_enable_preflight_receipt_lite_for_memory_lane(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:memory-contract-compact",
+                    "match": {"task_type": "public_bugfix"},
+                    "controls": {
+                        "candidate_cap": 2,
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "max_rounds": 2,
+                        "route_lane": "memory_contract_compact",
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "rlm-harder-v2-memory-001",
+        budget=budget,
+        route_features={"task_type": "public_bugfix"},
+        expected_capabilities=("memory",),
+    )
+
+    assert controls["preflight_receipt_lite"] is True
+    assert controls["allow_pre_model_deterministic_rescue"] is True
+    assert "expected_capability_protection" not in controls
+
+
+def test_route_cost_controls_enable_gate_receipt_lite_for_feature_and_hidden_lanes(tmp_path):
+    for route_lane, task_type in (
+        ("feature_reflex", "public_feature"),
+        ("hidden_bugfix_supervised", "public_bugfix"),
+    ):
+        budget = {
+            "route_cost_policy": {
+                "source": "test",
+                "feature_rules": [
+                    {
+                        "id": f"feature:{route_lane}",
+                        "match": {"task_type": task_type},
+                        "controls": {
+                            "candidate_cap": 1,
+                            "context_mode": "compact",
+                            "disable_research": True,
+                            "max_rounds": 1,
+                            "route_lane": route_lane,
+                            "supervised_bare_first": True,
+                        },
+                    }
+                ],
+            }
+        }
+
+        controls = route_cost_controls_for_task(
+            tmp_path,
+            f"{route_lane}-gate-task",
+            budget=budget,
+            route_features={"task_type": task_type},
+            expected_capabilities=("artifact_gate", "claim_gate", "delivery_gate"),
+        )
+
+        assert controls["gate_only_receipt_lite"] is True
+        assert controls["allow_pre_model_deterministic_rescue"] is True
+        assert "expected_capability_protection" not in controls
+
+
+def test_route_cost_controls_allow_autoreason_mixed_candidate_pool(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:autoreason-cost-cap",
+                    "match": {"task_type": "public_feature"},
+                    "controls": {
+                        "candidate_cap": 1,
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "route_lane": "feature_reflex",
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "route-oracle-autoreason-001",
+        budget=budget,
+        route_features={"task_type": "public_feature"},
+        expected_capabilities=("autoreason",),
+    )
+
+    assert "candidate_cap" not in controls
+    assert controls["autoreason_mixed_candidate_pool"] is True
+    assert controls["expected_capability_protection"] == ["autoreason"]
+
+
+def test_route_cost_controls_keep_model_path_for_non_receipt_lite_expected_capabilities(tmp_path):
+    budget = {
+        "route_cost_policy": {
+            "source": "test",
+            "feature_rules": [
+                {
+                    "id": "feature:research-cost-cap",
+                    "match": {"task_type": "public_feature"},
+                    "controls": {
+                        "candidate_cap": 1,
+                        "context_mode": "compact",
+                        "disable_research": True,
+                        "max_rounds": 1,
+                        "route_lane": "feature_reflex",
+                        "skip_llm_baseline": True,
+                    },
+                }
+            ],
+        }
+    }
+
+    controls = route_cost_controls_for_task(
+        tmp_path,
+        "commercial-reasoning-judge-panel-002",
+        budget=budget,
+        route_features={"task_type": "public_feature"},
+        expected_capabilities=("judge_panel",),
+    )
+
+    assert controls["require_llm_baseline"] is True
+    assert "skip_llm_baseline" not in controls
+    assert controls["disable_research"] is True
+    assert controls["expected_capability_protection"] == ["judge_panel"]
 
 
 def test_context_sync_capped_can_supervise_bare_with_preflight_receipts(tmp_path):
@@ -1569,6 +2009,42 @@ def test_capability_planner_capped_governance_lane_preserves_governance_gate_not
     assert {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"} <= selected
     assert "ultra_review" in selected
     assert "research_route" not in selected
+
+
+def test_capability_planner_hardened_governance_lane_preserves_governance_gate_not_swarm_stack():
+    plan = CapabilityPlanner().plan(
+        task_desc="Classify a governance incident with trust-safe public evidence.",
+        task_type="public_ops_research",
+        route={
+            "recommended_flow": "hyper_sprint",
+            "should_research": False,
+            "route_features": {
+                "risk_score": 85,
+                "has_governance_signal": True,
+                "candidate_count": 1,
+                "route_lane": "governance_hardened",
+            },
+            "route_decision": {
+                "selected_capabilities": ["hyper_sprint", "autoreason"],
+                "governance_layers": ["ultra_review"],
+            },
+        },
+        budget={
+            "route_cost_policy": {
+                "current_disable_research": True,
+                "current_context_mode": "compact",
+                "current_max_rounds": 1,
+                "current_route_lane": "governance_hardened",
+                "source": "test",
+            }
+        },
+    ).to_dict()
+
+    selected = set(plan["selected_capabilities"])
+    assert "ultra_review" in selected
+    assert "research_route" not in selected
+    assert "swarm" not in selected
+    assert "nightshift" not in selected
     assert "research" not in selected
     assert "architecture_scout" not in selected
     assert "nightshift" not in selected

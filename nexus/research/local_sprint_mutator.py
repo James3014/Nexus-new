@@ -902,6 +902,150 @@ def _patch_semantic_refs_require_source_gate(source: str) -> str:
     )
 
 
+def _patch_rlm_choose_candidate_supported(source: str) -> str:
+    if "def rlm_harder_v2_choose_candidate" not in source:
+        return source
+    if "evidence_refs" in source and "status" in source and "supported.append" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_choose_candidate",
+        "candidates",
+        "    supported = []\n"
+        "    for candidate in candidates:\n"
+        "        if candidate.get('status', 'pass') != 'pass':\n"
+        "            continue\n"
+        "        if not candidate.get('evidence_refs'):\n"
+        "            continue\n"
+        "        supported.append(candidate)\n"
+        "    if not supported:\n"
+        "        return None\n"
+        "    return max(supported, key=lambda item: item.get('score', 0)).get('id')",
+        "<rlm_choose_candidate_supported_patch>",
+    )
+
+
+def _patch_rlm_prune_candidates_risk_first(source: str) -> str:
+    if "def rlm_harder_v2_prune_candidates" not in source:
+        return source
+    if "riskiest =" in source and "risk', 0), item.get('score', 0)" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_prune_candidates",
+        "candidates, max_candidates",
+        "    if max_candidates <= 0:\n"
+        "        return []\n"
+        "    riskiest = max(candidates, key=lambda item: (item.get('risk', 0), item.get('score', 0)), default=None)\n"
+        "    ordered = sorted(candidates, key=lambda item: item.get('score', 0), reverse=True)\n"
+        "    selected = []\n"
+        "    for item in ([riskiest] if riskiest is not None else []) + ordered:\n"
+        "        if item not in selected:\n"
+        "            selected.append(item)\n"
+        "        if len(selected) >= max_candidates:\n"
+        "            break\n"
+        "    return [item.get('id') for item in selected]",
+        "<rlm_prune_candidates_risk_first_patch>",
+    )
+
+
+def _patch_rlm_choose_research_claim_cited(source: str) -> str:
+    if "def rlm_harder_v2_choose_research_claim" not in source:
+        return source
+    if "citation" in source and "is True" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_choose_research_claim",
+        "claims, topic",
+        "    for claim in claims:\n"
+        "        if claim.get('topic') != topic:\n"
+        "            continue\n"
+        "        if claim.get('supported') is not True:\n"
+        "            continue\n"
+        "        citation = claim.get('citation')\n"
+        "        if isinstance(citation, str) and citation.strip():\n"
+        "            return claim.get('id')\n"
+        "    return None",
+        "<rlm_choose_research_claim_cited_patch>",
+    )
+
+
+def _patch_rlm_select_vector_hits_source_gate(source: str) -> str:
+    if "def rlm_harder_v2_select_vector_hits" not in source:
+        return source
+    if "source_id" in source and "topic_pack" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_select_vector_hits",
+        "hits, topic_pack, min_score",
+        "    return [\n"
+        "        hit.get('id')\n"
+        "        for hit in hits\n"
+        "        if hit.get('topic_pack') == topic_pack\n"
+        "        and hit.get('score', 0) >= min_score\n"
+        "        and hit.get('source_id')\n"
+        "    ]",
+        "<rlm_select_vector_hits_source_gate_patch>",
+    )
+
+
+def _patch_rlm_accept_drone_artifacts(source: str) -> str:
+    if "def rlm_harder_v2_accept_drone_artifacts" not in source:
+        return source
+    if "owner" in source and "path" in source and "expected_count" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_accept_drone_artifacts",
+        "artifacts, expected_count",
+        "    if len(artifacts) != expected_count:\n"
+        "        return False\n"
+        "    return all(item.get('owner') and item.get('path') for item in artifacts)",
+        "<rlm_accept_drone_artifacts_patch>",
+    )
+
+
+def _patch_rlm_accept_nightshift_report(source: str) -> str:
+    if "def rlm_harder_v2_accept_nightshift" not in source:
+        return source
+    if "report_path" in source and "invoked" in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_accept_nightshift",
+        "report",
+        "    return bool(\n"
+        "        report.get('recommended')\n"
+        "        and report.get('invoked')\n"
+        "        and report.get('recovered')\n"
+        "        and report.get('report_path')\n"
+        "    )",
+        "<rlm_accept_nightshift_report_patch>",
+    )
+
+
+def _patch_rlm_accept_quiet_moment_contract(source: str) -> str:
+    if "def rlm_harder_v2_accept_quiet_moment" not in source:
+        return source
+    if "event.get('production_writes_allowed') is not False" in source or 'event.get("production_writes_allowed") is not False' in source:
+        return source
+    return _replace_simple_function(
+        source,
+        "rlm_harder_v2_accept_quiet_moment",
+        "event",
+        "    if event.get('schema_version') != 'nexus_quiet_moment.v1':\n"
+        "        return False\n"
+        "    if event.get('production_writes_allowed') is not False:\n"
+        "        return False\n"
+        "    if event.get('allowed_actions') != ['observe', 'report', 'rollback']:\n"
+        "        return False\n"
+        "    return bool((event.get('observe') or {}).get('status') and (event.get('rollback') or {}).get('status'))",
+        "<rlm_accept_quiet_moment_contract_patch>",
+    )
+
+
 def generate_local_companion_edits(
     repo_root: Path,
     target_path: Path,
@@ -1031,6 +1175,13 @@ def generate_local_candidate(source: str, task: str, mutation_hint: str, seed: i
         _patch_swarm_report_requires_distinct_evidence,
         _patch_ultra_report_requires_repro_evidence,
         _patch_semantic_refs_require_source_gate,
+        _patch_rlm_choose_candidate_supported,
+        _patch_rlm_prune_candidates_risk_first,
+        _patch_rlm_choose_research_claim_cited,
+        _patch_rlm_select_vector_hits_source_gate,
+        _patch_rlm_accept_drone_artifacts,
+        _patch_rlm_accept_nightshift_report,
+        _patch_rlm_accept_quiet_moment_contract,
     ):
         patched = patcher(source)
         if patched != source:

@@ -1410,9 +1410,16 @@ def _build_capability_plan_and_decision(
     route: dict[str, Any],
     task_id: str | None = None,
     budget: dict[str, Any] | None = None,
+    skills: list[dict[str, Any]] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     decision_route = {key: value for key, value in route.items() if key != "capability_stack"}
-    plan = CapabilitySelector().select(task_desc=task_desc, task_type=task_type, route=decision_route, budget=budget)
+    plan = CapabilitySelector().select(
+        task_desc=task_desc,
+        task_type=task_type,
+        route=decision_route,
+        budget=budget,
+        skills=skills,
+    )
     decision = build_route_decision(
         task_id=task_id or _safe_trace_slug(task_desc),
         task_desc=task_desc,
@@ -1421,6 +1428,43 @@ def _build_capability_plan_and_decision(
         plan=plan,
     ).to_dict()
     return plan, decision
+
+
+def _benchmark_skill_mount_requests_from_env(*, task_id: str | None) -> list[dict[str, str]]:
+    """Parse benchmark-only skill mount requests without changing normal runtime routing."""
+    if not task_id:
+        return []
+    allow_ablation = os.environ.get("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "").strip().lower()
+    if allow_ablation in {"0", "false", "no", "off"}:
+        return []
+    raw = os.environ.get("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = [item.strip() for item in raw.split(",") if item.strip()]
+    if not isinstance(parsed, list):
+        return []
+    requests: list[dict[str, str]] = []
+    for item in parsed:
+        if isinstance(item, dict):
+            skill_id = str(item.get("skill_id") or item.get("task_id") or "").strip()
+        else:
+            skill_id = str(item).strip()
+        if skill_id:
+            requests.append({"skill_id": skill_id, "source": "benchmark_env_request"})
+    return requests
+
+
+def _runtime_capability_budget(repo_root: Path) -> dict[str, Any]:
+    budget = merge_runtime_learning_policy(repo_root)
+    status_report = os.environ.get("NEXUS_BENCH_SKILL_STATUS_REPORT", "").strip()
+    if status_report:
+        budget["skill_status_report"] = status_report
+    if os.environ.get("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        budget["allow_ablation_skill_mounts"] = True
+    return budget
 
 
 def _collect_route_signals(
@@ -2500,6 +2544,106 @@ def _runtime_receipt_plan_payload(
     return runtime_receipt_plan_payload(capability_plan_payload, nexus_usage_trace)
 
 
+SKILL_MOUNT_CAPABILITY_ALIASES: dict[str, tuple[str, ...]] = {
+    "benchmark_and_promotion": ("claim_gate", "artifact_gate", "jit_validation", "harness_preflight_sensor"),
+    "governance_and_trust": ("claim_gate", "pregate", "ultra_review", "mempalace"),
+    "notebook_and_knowledge_injection": ("research", "memory", "lancedb", "semantic_searcher"),
+    "planning_and_handoff": ("plan_quality_gate", "research", "memory"),
+    "repair_and_coding": ("hyper", "codeintel", "jit_validation", "semantic_failure_sensor"),
+}
+
+
+def _skill_mount_receipt_names(capability_mount: str) -> set[str]:
+    names = {capability_mount}
+    names.update(SKILL_MOUNT_CAPABILITY_ALIASES.get(capability_mount, ()))
+    return {name for name in names if name}
+
+
+def _confirmed_skill_mount_receipt(
+    planned: dict[str, Any],
+    receipts_by_name: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    capability_mount = str(planned.get("capability_mount") or planned.get("capability") or "").strip()
+    for receipt_name in _skill_mount_receipt_names(capability_mount):
+        receipt = receipts_by_name.get(receipt_name)
+        if not receipt:
+            continue
+        if bool(receipt.get("public_claim_safe")) or (
+            bool(receipt.get("invoked"))
+            and bool(receipt.get("evidence_present"))
+            and bool(receipt.get("gate_passed"))
+            and bool(receipt.get("outcome_contributed"))
+        ):
+            return receipt
+    return None
+
+
+def _build_runtime_skill_mount_contracts(
+    *,
+    capability_plan_payload: dict[str, Any],
+    route_decision_payload: dict[str, Any],
+    capability_receipts: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    signal_snapshot = (
+        capability_plan_payload.get("signal_snapshot", {})
+        if isinstance(capability_plan_payload.get("signal_snapshot"), dict)
+        else {}
+    )
+    planned_contracts = [
+        item for item in (signal_snapshot.get("planned_skill_mount_contracts", []) or []) if isinstance(item, dict)
+    ]
+    violations = [
+        item for item in (signal_snapshot.get("skill_mount_violations", []) or []) if isinstance(item, dict)
+    ]
+    receipts_by_name = {
+        str(item.get("name") or "").strip(): item
+        for item in capability_receipts
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    route_ref = str(route_decision_payload.get("task_id") or route_decision_payload.get("schema_version") or "").strip()
+    contracts: list[dict[str, Any]] = []
+    for planned in planned_contracts:
+        skill_id = str(planned.get("skill_id") or "").strip()
+        if not skill_id:
+            continue
+        receipt = _confirmed_skill_mount_receipt(planned, receipts_by_name)
+        if not receipt:
+            violations.append(
+                {
+                    "skill_name": skill_id,
+                    "path": "",
+                    "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+                }
+            )
+            continue
+        evidence_refs = [
+            str(ref)
+            for ref in (planned.get("evidence_refs", []) or [])
+            if str(ref).strip()
+        ]
+        evidence_refs.extend(
+            str(ref)
+            for ref in (receipt.get("evidence_refs", []) or [])
+            if str(ref).strip()
+        )
+        if route_ref:
+            evidence_refs.append(f"route_decision:{route_ref}")
+        evidence_refs.append(f"capability_receipt:{receipt.get('name')}")
+        contracts.append(
+            {
+                "skill_id": skill_id,
+                "skill_status": str(planned.get("skill_status") or ""),
+                "capability_mount": str(planned.get("capability_mount") or planned.get("capability") or ""),
+                "capability": str(receipt.get("name") or planned.get("capability") or ""),
+                "load_reason_codes": list(planned.get("load_reason_codes", []) or [])
+                + ["runtime_capability_receipt_confirmed"],
+                "evidence_refs": list(dict.fromkeys(evidence_refs)),
+                "outcome_contributed": True,
+            }
+        )
+    return {"skill_mount_contracts": contracts, "skill_mount_violations": violations}
+
+
 def run_auto_flow(
     *,
     repo_root: Path,
@@ -2533,6 +2677,7 @@ def run_auto_flow(
     flow_started_at = time.monotonic()
     phase_wall_sec: dict[str, float] = {}
     timing_breakdown_sec: dict[str, float] = {}
+    benchmark_skill_mount_requests = _benchmark_skill_mount_requests_from_env(task_id=task_id)
     phase_started_at = time.monotonic()
     route = build_route(
         repo_root=repo_root,
@@ -2544,6 +2689,17 @@ def run_auto_flow(
         target_file=target_file,
         routing_hint=routing_hint,
     )
+    if benchmark_skill_mount_requests:
+        capability_plan, route_decision = _build_capability_plan_and_decision(
+            task_desc=task_desc,
+            task_type=task_type,
+            route=route,
+            task_id=task_id,
+            budget=_runtime_capability_budget(repo_root),
+            skills=benchmark_skill_mount_requests,
+        )
+        route["capability_plan"] = capability_plan.to_dict()
+        route["route_decision"] = route_decision
     phase_wall_sec["P"] = round(time.monotonic() - phase_started_at, 4)
     phase_started_at = time.monotonic()
     tuning_payload = read_capability_tuning_fast(repo_root)
@@ -2620,7 +2776,8 @@ def run_auto_flow(
             task_desc=task_desc,
             task_type=task_type,
             route=route,
-            budget=merge_runtime_learning_policy(repo_root),
+            budget=_runtime_capability_budget(repo_root),
+            skills=benchmark_skill_mount_requests,
         )
         route["capability_plan"] = capability_plan.to_dict()
         route["route_decision"] = route_decision
@@ -3480,7 +3637,7 @@ def run_auto_flow(
     nexus_usage_trace["capabilities"]["claim_probe_eligible"] = claim_probe["eligible"]
     nexus_usage_trace["capabilities"]["claim_probe_invoked"] = claim_probe["invoked"]
     nexus_usage_trace["capabilities"]["claim_probe_gate_passed"] = claim_probe["gate_passed"]
-    runtime_budget = merge_runtime_learning_policy(repo_root)
+    runtime_budget = _runtime_capability_budget(repo_root)
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
         capability_plan = CapabilityPlanner().plan(
@@ -3491,6 +3648,7 @@ def run_auto_flow(
             codeintel=codeintel_evidence,
             phase_trace=nexus_usage_trace["phase_trace"],
             budget=runtime_budget,
+            skills=benchmark_skill_mount_requests,
         )
         capability_plan_payload = capability_plan.to_dict()
     nexus_usage_trace["capability_plan"] = capability_plan_payload
@@ -3507,6 +3665,7 @@ def run_auto_flow(
             codeintel=codeintel_evidence,
             phase_trace=nexus_usage_trace["phase_trace"],
             budget=runtime_budget,
+            skills=benchmark_skill_mount_requests,
         ),
     ).to_dict()
     selected_for_runtime_receipts = {
@@ -3581,6 +3740,15 @@ def run_auto_flow(
         if isinstance(receipt, dict) and receipt.get("name") == "research":
             receipt["source_projects"] = list(RESEARCH_SOURCE_PROJECTS)
             receipt["research_stack"] = research_stack_contract()
+    skill_mount_runtime = _build_runtime_skill_mount_contracts(
+        capability_plan_payload=capability_plan_payload,
+        route_decision_payload=nexus_usage_trace.get("route_decision", {}),
+        capability_receipts=nexus_usage_trace["capability_receipts"],
+    )
+    if skill_mount_runtime["skill_mount_contracts"]:
+        nexus_usage_trace["skill_mount_contracts"] = skill_mount_runtime["skill_mount_contracts"]
+    if skill_mount_runtime["skill_mount_violations"]:
+        nexus_usage_trace["skill_mount_violations"] = skill_mount_runtime["skill_mount_violations"]
     openseeker_trace = build_openseeker_trace(
         usage_trace=nexus_usage_trace,
         capability_receipts=nexus_usage_trace["capability_receipts"],

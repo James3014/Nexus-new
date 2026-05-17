@@ -71,6 +71,9 @@ def row_has_measured_provider_tokens(row: dict[str, Any]) -> bool:
     model_token_status = str(row.get("model_token_capture_status") or "").strip().lower()
     token_source = str(row.get("gateway_token_source") or "").strip().lower()
     model_total_tokens = int(row.get("model_total_tokens", 0) or 0)
+    model_calls = int(row.get("model_calls", 0) or 0)
+    if model_calls <= 0 and token_status in {"not_applicable_local_only", "not_applicable_no_model"}:
+        return True
     direct_provider_tokens = bool(
         row.get("token_measured", False)
         and token_status == "measured"

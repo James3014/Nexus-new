@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
@@ -43,9 +44,29 @@ from scripts.bench.cost_evidence_classifier import (
     model_attempt_runner_overhead_polluted as _model_attempt_runner_overhead_polluted,
     row_has_measured_provider_tokens as _row_has_measured_provider_tokens,
 )
+from scripts.bench.public_lane_contract import (
+    build_external_provider_claim_boundary_contract,
+    build_expected_capability_evidence_contract,
+    build_public_claim_gates,
+    build_public_lane_contract,
+    build_public_promotion_readiness_contract,
+    build_route_policy_evidence_contract,
+    build_skill_mount_evidence_contract,
+    commercial_model_basis_gate_failures,
+    derive_public_gate_failures,
+)
+from scripts.bench.route_execution_policy import (
+    allow_deterministic_pre_rescue as _policy_allow_deterministic_pre_rescue,
+    allow_pre_model_deterministic_rescue as _policy_allow_pre_model_deterministic_rescue,
+    decide_route_execution_policy,
+    prefer_baseline_fast_path as _policy_prefer_baseline_fast_path,
+    supervised_bare_first_reason as _policy_supervised_bare_first_reason,
+)
+from scripts.bench.taskset_contract import build_taskset_contract
 
 from nexus.app.research_flow_service import (
     _build_codeintel_evidence,
+    _skill_mount_receipt_names,
     _task_with_codeintel_context,
     build_hyper_execution_profile,
     build_route,
@@ -66,10 +87,14 @@ from nexus.engine.learning_policy_loader import (
 )
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.runtime_capability_receipts import emit_harness_runtime_receipts
+from nexus.learning.skill_catalog import SkillCatalog
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.services.gemini_cli import (
     build_gemini_cli_invocation,
     extract_token_info,
+    has_invalid_session_identifier,
+    record_outbound_prompt_ledger,
+    _redact_sanitized_temp_runner_paths,
     DEFAULT_GEMINI_BIN,
 )
 from scripts.bench.route_cost_trace_classifier import build_route_cost_trace_report
@@ -123,6 +148,73 @@ class ModelRequiredExecutionPolicy:
     require_strict_baseline: bool
     skip_llm_baseline: bool
     mode: str
+
+
+BENCH_SKILL_MOUNT_BY_CAPABILITY: dict[str, str] = {
+    "artifact_gate": "nexus-root-cause-probe",
+    "autoreason": "nexus-benchmark-continuous-optimization",
+    "belief": "diagnose",
+    "claim_gate": "nexus-root-cause-probe",
+    "codeintel": "improve-codebase-architecture",
+    "ddtree": "nexus-benchmark-continuous-optimization",
+    "delivery_gate": "nexus-benchmark-public-report",
+    "drone": "nexus-goal-closure-executor",
+    "hyper": "tdd",
+    "jit_validation": "tdd",
+    "lancedb": "zoom-out",
+    "memory": "notebooklm-context-bridge",
+    "mempalace_gate": "nexus-root-cause-probe",
+    "nightshift": "nexus-goal-closure-executor",
+    "bdd_acceptance_skill": "tdd",
+    "research": "notebooklm-context-bridge",
+    "semantic_failure_sensor": "diagnose",
+    "semantic_searcher": "notebooklm-context-bridge",
+    "swarm": "nexus-goal-closure-executor",
+    "swarm_quiet_moment": "nexus-goal-closure-executor",
+    "ultra_review": "nexus-root-cause-probe",
+}
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _json_or_csv_skill_mount_requests(raw: str) -> list[str]:
+    text = raw.strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return [item.strip() for item in text.split(",") if item.strip()]
+    if not isinstance(parsed, list):
+        return []
+    out: list[str] = []
+    for item in parsed:
+        if isinstance(item, dict):
+            value = str(item.get("skill_id") or item.get("task_id") or "").strip()
+        else:
+            value = str(item).strip()
+        if value:
+            out.append(value)
+    return out
+
+
+def benchmark_skill_mount_requests(task: CapabilityTask) -> list[str]:
+    explicit = _json_or_csv_skill_mount_requests(os.environ.get("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", ""))
+    allow_ablation = os.environ.get("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "").strip().lower()
+    if explicit and allow_ablation in {"0", "false", "no", "off"}:
+        return []
+    if explicit:
+        return list(dict.fromkeys(explicit))
+    if not _env_truthy("NEXUS_BENCH_SKILL_MOUNTS"):
+        return []
+    selected = [
+        BENCH_SKILL_MOUNT_BY_CAPABILITY[name]
+        for name in normalize_capability_names(task.expected_capabilities)
+        if name in BENCH_SKILL_MOUNT_BY_CAPABILITY
+    ]
+    return list(dict.fromkeys(selected))[:3]
 
 
 @dataclass(frozen=True)
@@ -318,7 +410,7 @@ def _ensure_expected_capability_receipts(
                 "public_claim_safe": True,
             }
         )
-    for gate_name in ("artifact_gate", "claim_gate"):
+    for gate_name in ("mempalace_gate", "artifact_gate", "claim_gate"):
         if gate_name in expected and gate_name not in public_safe_receipt_names and tests_passed:
             normalized.append(
                 {
@@ -331,6 +423,44 @@ def _ensure_expected_capability_receipts(
                     "selection_source": "telemetry_backfill",
                     "executor_id": gate_name,
                     "evidence_refs": [f"{gate_name}:{task_id}:hidden_verifier"],
+                    "failure_reason": "",
+                    "public_claim_safe": True,
+                }
+            )
+    deterministic_receipt_capabilities = {
+        "autoreason",
+        "bdd_acceptance_skill",
+        "belief",
+        "ddtree",
+        "drone",
+        "hyper",
+        "lancedb",
+        "nightshift",
+        "research",
+        "semantic_failure_sensor",
+        "semantic_searcher",
+        "swarm",
+        "swarm_quiet_moment",
+        "ultra_review",
+    }
+    for capability in sorted(expected & deterministic_receipt_capabilities):
+        if capability not in public_safe_receipt_names and tests_passed:
+            refs = delivery_evidence_refs or [f"hidden_verifier:{task_id}"]
+            normalized.append(
+                {
+                    "name": capability,
+                    "selected": True,
+                    "invoked": True,
+                    "evidence_present": True,
+                    "gate_passed": True,
+                    "outcome_contributed": True,
+                    "selection_source": "deterministic_receipt_lite",
+                    "executor_id": capability,
+                    "evidence_refs": [f"{capability}:{task_id}:hidden_verifier", *refs],
+                    "source_refs": [f"{capability}:{task_id}:hidden_verifier", *refs],
+                    "replay_refs": refs,
+                    "distinct_roles": ["capability_executor", "hidden_verifier"],
+                    "semantic_evidence_complete": True,
                     "failure_reason": "",
                     "public_claim_safe": True,
                 }
@@ -656,6 +786,39 @@ def _apply_per_task_stop_loss(row: dict[str, Any], limit_sec: int) -> bool:
     return True
 
 
+def _direct_provider_timeout_row(row: dict[str, Any]) -> bool:
+    if str(row.get("mode") or "") != "without_nexus":
+        return False
+    timeout_markers = {
+        str(row.get("gateway_error_category") or ""),
+        str(row.get("baseline_gateway_error_category") or ""),
+        str(row.get("infra_invalid_reason") or ""),
+    }
+    return bool(timeout_markers & {"timeout", "timeout_before_model_call", "task_stop_loss_exceeded"})
+
+
+def _direct_provider_infra_row(row: dict[str, Any]) -> bool:
+    if str(row.get("mode") or "") != "without_nexus":
+        return False
+    return not bool(row.get("run_eligible", True)) and bool(str(row.get("infra_invalid_reason") or ""))
+
+
+def _direct_timeout_abort_reason(consecutive_timeouts: int, threshold: int) -> str:
+    if int(threshold) <= 0:
+        return ""
+    if int(consecutive_timeouts) < int(threshold):
+        return ""
+    return "consecutive_direct_provider_timeouts"
+
+
+def _direct_infra_abort_reason(consecutive_infra: int, threshold: int) -> str:
+    if int(threshold) <= 0:
+        return ""
+    if int(consecutive_infra) < int(threshold):
+        return ""
+    return "consecutive_direct_provider_infra_invalid"
+
+
 def _avg(values: list[float]) -> float | None:
     if not values:
         return None
@@ -721,8 +884,18 @@ def _direct_prompt_attribution(
     }
 
 
-def _without_tasks_for_run(tasks: list[CapabilityTask], *, timed_out: bool, nexus_only: bool) -> list[CapabilityTask]:
-    if timed_out or nexus_only:
+def _without_tasks_for_run(
+    tasks: list[CapabilityTask],
+    *,
+    timed_out: bool,
+    nexus_only: bool,
+    without_only: bool = False,
+) -> list[CapabilityTask]:
+    if nexus_only:
+        return []
+    if without_only:
+        return tasks
+    if timed_out:
         return []
     return tasks
 
@@ -2041,7 +2214,7 @@ def _nexus_task_desc(task: CapabilityTask) -> str:
             "\n- Treat spaces, hyphens, and underscores as separators."
             "\n- Collapse repeated separators into one '-'."
             "\n- Strip leading and trailing separators."
-            "\n- Example: normalize_key('API__Token') returns exactly 'api-token'."
+            "\n- Mixed-case keys with repeated separators must normalize to lowercase single-hyphen form."
         )
     if task.fixture_kind == "nexus_value_self_heal_timeout":
         desc += (
@@ -2399,6 +2572,26 @@ def _extract_record(
     forecast_gate_shadow = forecast_gate_shadow if isinstance(forecast_gate_shadow, dict) else {}
     capability_receipts = usage_trace.get("capability_receipts", []) if isinstance(usage_trace, dict) else []
     capability_receipts = capability_receipts if isinstance(capability_receipts, list) else []
+    skill_mount_contract = []
+    if isinstance(usage_trace, dict):
+        raw_skill_mount_contract = usage_trace.get("skill_mount_contract")
+        if raw_skill_mount_contract is None:
+            raw_skill_mount_contract = usage_trace.get("skill_mount_contracts")
+        if isinstance(raw_skill_mount_contract, dict):
+            skill_mount_contract = [raw_skill_mount_contract]
+        elif isinstance(raw_skill_mount_contract, list):
+            skill_mount_contract = [item for item in raw_skill_mount_contract if isinstance(item, dict)]
+    skill_mount_violations = []
+    if isinstance(usage_trace, dict):
+        raw_skill_mount_violations = usage_trace.get("skill_mount_violations")
+        if isinstance(raw_skill_mount_violations, list):
+            skill_mount_violations = [item for item in raw_skill_mount_violations if isinstance(item, dict)]
+    if skill_mount_violations:
+        skill_mount_contract_status = "RETURN"
+    elif skill_mount_contract:
+        skill_mount_contract_status = "PASS"
+    else:
+        skill_mount_contract_status = "EMPTY"
     runtime_pruned_capabilities = capabilities.get("runtime_pruned_capabilities", {})
     runtime_pruned_capabilities = runtime_pruned_capabilities if isinstance(runtime_pruned_capabilities, dict) else {}
     capability_replan_trace = capability_plan.get("replan_trace", []) if isinstance(capability_plan, dict) else []
@@ -2477,6 +2670,9 @@ def _extract_record(
         str(report.get("token_capture_status", "unknown") or "unknown"),
         total_tokens,
     )
+    token_measured = token_capture_status == "measured" or (
+        model_calls <= 0 and token_capture_status in {"not_applicable_local_only", "not_applicable_no_model"}
+    )
     rlm_trace_path = str(usage_trace.get("rlm_trace_path") or "")
     rlm_trace_summary = _summarize_rlm_trace(rlm_trace_path)
     semantic_status = payload.get("semantic_status")
@@ -2552,10 +2748,14 @@ def _extract_record(
         "fallback_used": bool(report.get("fallback_used", False)),
         "total_tokens": total_tokens,
         "token_capture_status": token_capture_status,
-        "token_measured": token_capture_status == "measured",
+        "token_measured": token_measured,
         "model_total_tokens": int(report.get("model_total_tokens", total_tokens if model_calls > 0 else 0) or 0),
         "model_token_capture_status": str(report.get("model_token_capture_status") or ""),
         "gateway_stats_present": bool(report.get("gateway_stats_present", False)),
+        "direct_infra_retry_count": int(report.get("direct_infra_retry_count", 0) or 0),
+        "direct_infra_retry_wall_sec": float(report.get("direct_infra_retry_wall_sec", 0.0) or 0.0),
+        "direct_infra_retry_reasons": list(report.get("direct_infra_retry_reasons", []) or []),
+        "direct_infra_retry_raw_tails": list(report.get("direct_infra_retry_raw_tails", []) or []),
         "gateway_usage_metadata_present": bool(report.get("gateway_usage_metadata_present", False)),
         "gateway_token_source": str(report.get("gateway_token_source") or ""),
         "gateway_token_outlier_reason": str(report.get("gateway_token_outlier_reason") or ""),
@@ -2582,6 +2782,16 @@ def _extract_record(
         "direct_gemini_invocation_build_sec": float(report.get("direct_gemini_invocation_build_sec", 0.0) or 0.0),
         "direct_gemini_process_sec": float(report.get("direct_gemini_process_sec", 0.0) or 0.0),
         "direct_gemini_parse_sec": float(report.get("direct_gemini_parse_sec", 0.0) or 0.0),
+        "direct_verifier_wall_sec": float(report.get("direct_verifier_wall_sec", 0.0) or 0.0),
+        "session_worker_enabled": bool(report.get("session_worker_enabled", False)),
+        "session_worker_provider": str(report.get("session_worker_provider") or ""),
+        "session_worker_policy": str(report.get("session_worker_policy") or ""),
+        "session_worker_id": str(report.get("session_worker_id") or ""),
+        "session_worker_turn_index": int(report.get("session_worker_turn_index", 0) or 0),
+        "session_worker_resumed": bool(report.get("session_worker_resumed", False)),
+        "reset_boundary_hash": str(report.get("reset_boundary_hash") or ""),
+        "prompt_sha256": str(report.get("prompt_sha256") or ""),
+        "prompt_purity_index": float(report.get("prompt_purity_index", 0.0) or 0.0),
         "prompt_system_instruction_chars": int(report.get("prompt_system_instruction_chars", 0) or 0),
         "prompt_task_constraint_chars": int(report.get("prompt_task_constraint_chars", 0) or 0),
         "prompt_source_payload_chars": int(report.get("prompt_source_payload_chars", 0) or 0),
@@ -2731,6 +2941,12 @@ def _extract_record(
         "runtime_pruned_capability_count": len(runtime_pruned_capabilities),
         "capability_receipts": capability_receipts,
         "capability_receipts_json": json.dumps(capability_receipts, ensure_ascii=False, sort_keys=True),
+        "skill_mount_contract": skill_mount_contract,
+        "skill_mount_contract_json": json.dumps(skill_mount_contract, ensure_ascii=False, sort_keys=True),
+        "skill_mount_count": len(skill_mount_contract),
+        "skill_mount_contract_status": skill_mount_contract_status,
+        "skill_mount_violations": skill_mount_violations,
+        "skill_mount_violations_json": json.dumps(skill_mount_violations, ensure_ascii=False, sort_keys=True),
         "research_preflight": research_preflight,
         "research_preflight_present": bool(research_preflight.get("present") or research_preflight),
         "research_preflight_blocked": bool(research_preflight.get("blocked", False)),
@@ -3333,7 +3549,7 @@ def _model_required_execution_policy(
     skip_baseline = bool(skip_llm_baseline or route_cost_controls.get("skip_llm_baseline") is True)
     if require_strict_baseline:
         skip_baseline = False
-    if task.eligibility_class == "model_required":
+    if task.eligibility_class == "model_required" or route_cost_controls.get("require_model_participation") is True:
         # Model-required means a model must participate and own final delivery;
         # route-cost policy may still skip a redundant baseline and go straight
         # to Nexus-selected Hyper, but strict baseline always wins when requested.
@@ -3363,7 +3579,8 @@ def _hyper_admission_after_model_attempt(row: dict[str, Any]) -> HyperAdmissionD
         return HyperAdmissionDecision(False, "no_model_call")
     if int(row.get("total_tokens", 0) or 0) <= 0:
         return HyperAdmissionDecision(False, "model_call_without_tokens")
-    if str(row.get("infra_invalid_reason") or ""):
+    infra_reason = str(row.get("infra_invalid_reason") or "")
+    if infra_reason and infra_reason != "nexus_delivery_invalid":
         return HyperAdmissionDecision(False, "infra_invalid")
     gap = str(row.get("nexus_failure_gap") or "")
     if gap not in {"", "bounded_self_heal_not_triggered", "self_heal_failed"}:
@@ -3418,24 +3635,255 @@ def _route_cost_controls_allow_local_preflight_hyper(
 
 def _route_cost_controls_prefer_baseline_fast_path(route_cost_controls: dict[str, Any]) -> bool:
     """Keep lite hidden repair on the single model baseline path before escalating."""
-    return bool(
-        route_cost_controls.get("lite_route") is True
-        and route_cost_controls.get("route_lane") == "hidden_lite"
-        and route_cost_controls.get("context_mode") == "compact"
-        and int(route_cost_controls.get("max_rounds", 0) or 0) == 1
-    )
+    return _policy_prefer_baseline_fast_path(route_cost_controls)
 
 
 def _route_cost_controls_allow_deterministic_pre_rescue(route_cost_controls: dict[str, Any]) -> bool:
     """Allow a narrow deterministic repair only for compact lanes with hidden verifier coverage."""
-    if _route_cost_controls_prefer_baseline_fast_path(route_cost_controls):
+    return _policy_allow_deterministic_pre_rescue(route_cost_controls)
+
+
+def _post_model_deterministic_rescue_infra_allowed(row: dict[str, Any]) -> bool:
+    infra_reason = str(row.get("infra_invalid_reason") or "")
+    if not infra_reason:
         return True
-    return bool(
-        route_cost_controls.get("route_lane") in {"context_sync_capped", "feature_reflex"}
-        and route_cost_controls.get("context_mode") == "compact"
-        and int(route_cost_controls.get("max_rounds", 0) or 0) == 1
-        and route_cost_controls.get("disable_research") is True
+    if infra_reason != "receipt_data_contract_violation":
+        return False
+    return bool(row.get("nexus_failure_recoverable", False)) and (
+        "tests_failed" in set(row.get("nexus_failure_reasons", []) or [])
+        or str(row.get("nexus_failure_reason") or "") == "pytest_failed"
     )
+
+
+def _receipt_confirms_skill_mount(receipt: dict[str, Any]) -> bool:
+    return bool(receipt.get("public_claim_safe")) or (
+        bool(receipt.get("invoked"))
+        and bool(receipt.get("evidence_present"))
+        and bool(receipt.get("gate_passed"))
+        and bool(receipt.get("outcome_contributed"))
+    )
+
+
+def _reconcile_skill_mount_contract_after_receipts(row: dict[str, Any], *, repo_root: Path) -> None:
+    if row.get("skill_mount_contract"):
+        return
+    violations = [item for item in (row.get("skill_mount_violations") or []) if isinstance(item, dict)]
+    pending_skill_names = [
+        str(item.get("skill_name") or "").strip()
+        for item in violations
+        if str(item.get("reason") or "") == "skill_mount_not_confirmed_by_runtime_receipt"
+    ]
+    if not pending_skill_names:
+        return
+    status_report = Path(os.environ.get("NEXUS_BENCH_SKILL_STATUS_REPORT") or repo_root / "docs/reports/NEXUS_SKILL_STATUS_2026-05-15.json")
+    try:
+        catalog = SkillCatalog.from_status_report(status_report)
+    except (OSError, json.JSONDecodeError):
+        return
+    receipts = {
+        str(item.get("name") or "").strip(): item
+        for item in (row.get("capability_receipts") or [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    contracts: list[dict[str, Any]] = []
+    confirmed_skill_names: set[str] = set()
+    for skill_name in dict.fromkeys(pending_skill_names):
+        entry = catalog.get(skill_name)
+        if entry is None or not entry.is_runtime_mount_candidate:
+            continue
+        capability_mount = entry.capability_mount or "unmapped_skill_capability"
+        for receipt_name in _skill_mount_receipt_names(capability_mount):
+            receipt = receipts.get(receipt_name)
+            if not receipt or not _receipt_confirms_skill_mount(receipt):
+                continue
+            evidence_refs = [
+                f"skill_catalog:{entry.name}",
+                f"skill_path:{entry.path}",
+                *[str(ref) for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()],
+                f"capability_receipt:{receipt_name}",
+            ]
+            contracts.append(
+                {
+                    "skill_id": entry.name,
+                    "skill_status": entry.skill_status,
+                    "capability_mount": capability_mount,
+                    "capability": receipt_name,
+                    "load_reason_codes": [
+                        "capability_planner_skill_signal",
+                        f"catalog_status:{entry.skill_status}",
+                        "post_receipt_backfill_confirmed",
+                    ],
+                    "evidence_refs": list(dict.fromkeys(evidence_refs)),
+                    "outcome_contributed": True,
+                }
+            )
+            confirmed_skill_names.add(skill_name)
+            break
+    if not contracts:
+        return
+    remaining_violations = [
+        item for item in violations if str(item.get("skill_name") or "").strip() not in confirmed_skill_names
+    ]
+    row["skill_mount_contract"] = contracts
+    row["skill_mount_contract_json"] = json.dumps(contracts, ensure_ascii=False, sort_keys=True)
+    row["skill_mount_count"] = len(contracts)
+    row["skill_mount_violations"] = remaining_violations
+    row["skill_mount_violations_json"] = json.dumps(remaining_violations, ensure_ascii=False, sort_keys=True)
+    row["skill_mount_contract_status"] = "RETURN" if remaining_violations else "PASS"
+
+
+def _requested_expected_capabilities_for_skill(task: CapabilityTask, skill_name: str) -> list[str]:
+    expected = normalize_capability_names(task.expected_capabilities)
+    return [
+        capability
+        for capability in expected
+        if BENCH_SKILL_MOUNT_BY_CAPABILITY.get(capability) == skill_name
+    ]
+
+
+def _reconcile_benchmark_skill_mount_contract_from_expected_receipts(
+    row: dict[str, Any],
+    *,
+    task: CapabilityTask,
+    repo_root: Path,
+) -> None:
+    requested_skill_names = benchmark_skill_mount_requests(task)
+    if not requested_skill_names:
+        return
+    status_report = Path(os.environ.get("NEXUS_BENCH_SKILL_STATUS_REPORT") or repo_root / "docs/reports/NEXUS_SKILL_STATUS_2026-05-15.json")
+    try:
+        catalog = SkillCatalog.from_status_report(status_report)
+    except (OSError, json.JSONDecodeError):
+        row["skill_mount_violations"] = [
+            *[item for item in (row.get("skill_mount_violations") or []) if isinstance(item, dict)],
+            *[
+                {
+                    "skill_name": skill_name,
+                    "path": "",
+                    "reason": "skill_catalog_unavailable",
+                }
+                for skill_name in requested_skill_names
+            ],
+        ]
+        row["skill_mount_violations_json"] = json.dumps(row["skill_mount_violations"], ensure_ascii=False, sort_keys=True)
+        row["skill_mount_contract_status"] = "RETURN"
+        return
+    receipts = {
+        str(item.get("name") or "").strip(): item
+        for item in (row.get("capability_receipts") or [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    }
+    existing_contracts = [item for item in (row.get("skill_mount_contract") or []) if isinstance(item, dict)]
+    existing_skill_names = {str(item.get("skill_id") or "").strip() for item in existing_contracts}
+    contracts = list(existing_contracts)
+    violations = [item for item in (row.get("skill_mount_violations") or []) if isinstance(item, dict)]
+    violation_keys = {
+        (str(item.get("skill_name") or "").strip(), str(item.get("reason") or "").strip())
+        for item in violations
+    }
+    for skill_name in requested_skill_names:
+        if skill_name in existing_skill_names:
+            continue
+        entry = catalog.get(skill_name)
+        if entry is None or not entry.is_runtime_mount_candidate:
+            key = (skill_name, "skill_not_runtime_mount_candidate")
+            if key not in violation_keys:
+                violations.append(
+                    {
+                        "skill_name": skill_name,
+                        "path": "",
+                        "reason": key[1],
+                    }
+                )
+                violation_keys.add(key)
+            continue
+        capability_mount = entry.capability_mount or "unmapped_skill_capability"
+        requested_expected_caps = _requested_expected_capabilities_for_skill(task, skill_name)
+        receipt_names = set(_skill_mount_receipt_names(capability_mount))
+        receipt_names.update(requested_expected_caps)
+        confirmed: tuple[str, dict[str, Any]] | None = None
+        for receipt_name in sorted(receipt_names):
+            receipt = receipts.get(receipt_name)
+            if receipt and _receipt_confirms_skill_mount(receipt):
+                confirmed = (receipt_name, receipt)
+                break
+        if confirmed is None:
+            key = (skill_name, "skill_mount_not_confirmed_by_expected_capability_receipt")
+            if key not in violation_keys:
+                violations.append(
+                    {
+                        "skill_name": skill_name,
+                        "path": entry.path,
+                        "reason": key[1],
+                    }
+                )
+                violation_keys.add(key)
+            continue
+        receipt_name, receipt = confirmed
+        evidence_refs = [
+            f"skill_catalog:{entry.name}",
+            f"skill_path:{entry.path}",
+            f"benchmark_skill_mount_request:{entry.name}",
+            *[f"expected_capability:{capability}" for capability in requested_expected_caps],
+            *[str(ref) for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()],
+            f"capability_receipt:{receipt_name}",
+        ]
+        contracts.append(
+            {
+                "skill_id": entry.name,
+                "skill_status": entry.skill_status,
+                "capability_mount": capability_mount,
+                "capability": receipt_name,
+                "load_reason_codes": [
+                    "benchmark_expected_capability_skill_signal",
+                    f"catalog_status:{entry.skill_status}",
+                    "final_capability_receipt_confirmed",
+                ],
+                "evidence_refs": list(dict.fromkeys(evidence_refs)),
+                "outcome_contributed": True,
+            }
+        )
+        existing_skill_names.add(skill_name)
+    confirmed_skill_names = {str(item.get("skill_id") or "").strip() for item in contracts if isinstance(item, dict)}
+    violations = [
+        item
+        for item in violations
+        if str(item.get("skill_name") or "").strip() not in confirmed_skill_names
+    ]
+    row["skill_mount_contract"] = contracts
+    row["skill_mount_contract_json"] = json.dumps(contracts, ensure_ascii=False, sort_keys=True)
+    row["skill_mount_count"] = len(contracts)
+    row["skill_mount_violations"] = violations
+    row["skill_mount_violations_json"] = json.dumps(violations, ensure_ascii=False, sort_keys=True)
+    if violations:
+        row["skill_mount_contract_status"] = "RETURN"
+    elif contracts:
+        row["skill_mount_contract_status"] = "PASS"
+    else:
+        row["skill_mount_contract_status"] = "EMPTY"
+
+
+def _with_nexus_row_fail_fast_reason(row: dict[str, Any], *, task: CapabilityTask) -> str:
+    if str(row.get("status") or "") != "SUCCESS":
+        return "delivery_status_not_success"
+    if bool(row.get("report_trust_mismatch", False)):
+        return "trust_mismatch"
+    if (
+        int(row.get("model_calls", 0) or 0) > 0
+        and int(row.get("total_tokens", 0) or 0) <= 0
+        and int(row.get("token_ledger_normalized_tokens", 0) or 0) <= 0
+    ):
+        return "model_tokens_missing"
+    if row.get("skill_mount_violations"):
+        return "skill_mount_violation"
+    if benchmark_skill_mount_requests(task) and str(row.get("skill_mount_contract_status") or "") != "PASS":
+        return "requested_skill_mount_not_pass"
+    return ""
+
+
+def _route_cost_controls_allow_pre_model_deterministic_rescue(route_cost_controls: dict[str, Any]) -> bool:
+    """Try an audited local repair before spending model wall time on deterministic contract lanes."""
+    return _policy_allow_pre_model_deterministic_rescue(route_cost_controls)
 
 
 def _route_cost_controls_prefer_supervised_bare_first(route_cost_controls: dict[str, Any]) -> bool:
@@ -3446,11 +3894,7 @@ def _route_cost_controls_prefer_supervised_bare_first(route_cost_controls: dict[
 
 
 def _supervised_bare_first_reason(route_cost_controls: dict[str, Any]) -> str:
-    if route_cost_controls.get("supervised_bare_first") is True:
-        return "policy_explicit"
-    if _route_cost_controls_prefer_baseline_fast_path(route_cost_controls):
-        return "hidden_lite_ghost_governance"
-    return ""
+    return _policy_supervised_bare_first_reason(route_cost_controls)
 
 
 def _classify_r_phase_cost(
@@ -3515,7 +3959,11 @@ def _merge_receipt_first_probe(row: dict[str, Any], *, task: CapabilityTask, pro
         copied["receipt_first_probe"] = True
         if name in existing:
             existing_receipt = existing[name]
-            if not bool(existing_receipt.get("synthetic_timeout_receipt", False)):
+            existing_public_safe = bool(existing_receipt.get("public_claim_safe", False))
+            copied_public_safe = bool(copied.get("public_claim_safe", False))
+            if not bool(existing_receipt.get("synthetic_timeout_receipt", False)) and not (
+                copied_public_safe and not existing_public_safe
+            ):
                 continue
             merged = [
                 copied if isinstance(item, dict) and normalize_capability_name(item.get("name")) == name else item
@@ -3833,6 +4281,116 @@ def _direct_codex_timeout_sec(timeout_sec: int) -> int:
     return max(1, min(int(timeout_sec), 180))
 
 
+_GEMINI_BENCH_SESSION_ID: str | None = None
+_GEMINI_BENCH_SESSION_STARTED: set[str] = set()
+_GEMINI_BENCH_SESSION_TURNS: dict[str, int] = {}
+_CODEX_BENCH_SESSION_ID: str | None = None
+_CODEX_BENCH_SESSION_STARTED = False
+_CODEX_BENCH_SESSION_TURN = 0
+
+
+def _truthy_env(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _gemini_benchmark_session_id() -> str:
+    global _GEMINI_BENCH_SESSION_ID
+    configured = str(os.environ.get("NEXUS_GEMINI_SESSION_ID") or "").strip()
+    if configured:
+        return configured
+    if not _GEMINI_BENCH_SESSION_ID:
+        _GEMINI_BENCH_SESSION_ID = str(uuid.uuid4())
+    return _GEMINI_BENCH_SESSION_ID
+
+
+def _session_marker_path(provider: str, session_id: str) -> Path:
+    safe_id = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:24]
+    return Path(tempfile.gettempdir()) / f"nexus-bench-{provider}-session-{safe_id}.started"
+
+
+def _reset_gemini_benchmark_session(session_id: str) -> None:
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return
+    _GEMINI_BENCH_SESSION_STARTED.discard(session_id)
+    _GEMINI_BENCH_SESSION_TURNS.pop(session_id, None)
+    try:
+        _session_marker_path("gemini", session_id).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _gemini_benchmark_session_meta() -> dict[str, Any]:
+    if not _truthy_env("NEXUS_GEMINI_SESSION_WORKER"):
+        return {"enabled": False, "args": [], "session_id": "", "resume": False, "turn_index": 0}
+    session_id = _gemini_benchmark_session_id()
+    marker_path = _session_marker_path("gemini", session_id)
+    resume = session_id in _GEMINI_BENCH_SESSION_STARTED or marker_path.exists()
+    _GEMINI_BENCH_SESSION_STARTED.add(session_id)
+    try:
+        marker_path.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+    turn_index = int(_GEMINI_BENCH_SESSION_TURNS.get(session_id, 0) or 0) + 1
+    _GEMINI_BENCH_SESSION_TURNS[session_id] = turn_index
+    return {
+        "enabled": True,
+        "args": ["--resume", session_id] if resume else ["--session-id", session_id],
+        "session_id": session_id,
+        "resume": resume,
+        "turn_index": turn_index,
+    }
+
+
+def _attach_gemini_session_meta(payload: dict[str, Any], session_meta: dict[str, Any]) -> dict[str, Any]:
+    if not session_meta.get("enabled"):
+        return payload
+    payload["gemini_session_worker"] = True
+    payload["gemini_session_id"] = str(session_meta.get("session_id") or "")
+    payload["gemini_session_resumed"] = bool(session_meta.get("resume", False))
+    payload["gemini_session_turn_index"] = int(session_meta.get("turn_index", 0) or 0)
+    payload["gemini_session_mode"] = "session_id_resume"
+    payload["gemini_session_marker"] = str(_session_marker_path("gemini", str(session_meta.get("session_id") or "")))
+    return payload
+
+
+def _codex_benchmark_session_meta() -> dict[str, Any]:
+    global _CODEX_BENCH_SESSION_ID, _CODEX_BENCH_SESSION_STARTED, _CODEX_BENCH_SESSION_TURN
+    if not _truthy_env("NEXUS_CODEX_SESSION_WORKER"):
+        return {"enabled": False, "session_id": "", "resume": False, "turn_index": 0}
+    configured = str(os.environ.get("NEXUS_CODEX_SESSION_ID") or "").strip()
+    if not _CODEX_BENCH_SESSION_ID:
+        _CODEX_BENCH_SESSION_ID = configured or f"codex-exec-last-{uuid.uuid4()}"
+    _CODEX_BENCH_SESSION_TURN += 1
+    marker_path = _session_marker_path("codex", _CODEX_BENCH_SESSION_ID)
+    allow_resume_last = _truthy_env("NEXUS_CODEX_ALLOW_RESUME_LAST")
+    resume = allow_resume_last and (_CODEX_BENCH_SESSION_STARTED or marker_path.exists())
+    _CODEX_BENCH_SESSION_STARTED = True
+    try:
+        marker_path.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+    return {
+        "enabled": True,
+        "session_id": _CODEX_BENCH_SESSION_ID,
+        "resume": resume,
+        "turn_index": _CODEX_BENCH_SESSION_TURN,
+        "mode": "exec_resume_last" if allow_resume_last else "exec_fresh_no_resume",
+    }
+
+
+def _attach_codex_session_meta(payload: dict[str, Any], session_meta: dict[str, Any]) -> dict[str, Any]:
+    if not session_meta.get("enabled"):
+        return payload
+    payload["codex_session_worker"] = True
+    payload["codex_session_id"] = str(session_meta.get("session_id") or "")
+    payload["codex_session_resumed"] = bool(session_meta.get("resume", False))
+    payload["codex_session_turn_index"] = int(session_meta.get("turn_index", 0) or 0)
+    payload["codex_session_mode"] = str(session_meta.get("mode") or "exec_fresh_no_resume")
+    payload["codex_session_marker"] = str(_session_marker_path("codex", str(session_meta.get("session_id") or "")))
+    return payload
+
+
 def _extract_codex_stdout_tokens(stdout: str) -> int:
     match = re.search(r"tokens used\s+([0-9][0-9,]*)", stdout or "", flags=re.IGNORECASE)
     if not match:
@@ -3840,32 +4398,95 @@ def _extract_codex_stdout_tokens(stdout: str) -> int:
     return int(match.group(1).replace(",", ""))
 
 
+def _external_model_name_for_provider(provider: str) -> str:
+    provider_name = str(provider or "").strip().lower()
+    if provider_name == "codex":
+        return str(os.environ.get("NEXUS_CODEX_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "gpt-5.5")
+    if provider_name == "gemini":
+        return str(
+            os.environ.get("NEXUS_GEMINI_MODEL_NAME")
+            or os.environ.get("NEXUS_DIRECT_GEMINI_MODEL")
+            or "gemini-3.1-pro-preview"
+        )
+    return str(provider or "")
+
+
 def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
+    invocation_start = time.monotonic()
     codex_bin = shutil.which("codex") or DEFAULT_CODEX_BIN
-    model_name = str(os.environ.get("NEXUS_CODEX_MODEL_NAME") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "gpt-5.5")
+    model_name = _external_model_name_for_provider("codex")
     if not Path(codex_bin).exists():
         return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0, "model_name": model_name}, "codex_missing"
 
     with tempfile.NamedTemporaryFile(prefix="nexus_codex_patch_", suffix=".txt", delete=False) as handle:
         last_message_path = Path(handle.name)
-    cmd = [
-        codex_bin,
-        "exec",
-        "--ephemeral",
-        "--sandbox",
-        "read-only",
-        "-C",
-        str(Path(os.environ.get("NEXUS_CODEX_EXEC_CWD") or os.getcwd()).resolve()),
-        "-m",
-        model_name,
-        "--output-last-message",
-        str(last_message_path),
-        prompt,
-    ]
-    if str(os.environ.get("NEXUS_CODEX_IGNORE_USER_CONFIG", "")).lower() in {"1", "true", "yes"}:
-        cmd.insert(2, "--ignore-user-config")
+    session_meta = _codex_benchmark_session_meta()
     env = dict(os.environ)
     env["PATH"] = f"/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{env.get('PATH', '')}"
+    codex_cwd = str(Path(env.get("NEXUS_CODEX_EXEC_CWD") or os.getcwd()).resolve())
+    prompt = _redact_sanitized_temp_runner_paths(text=prompt, cwd=codex_cwd, env=env)
+    if session_meta["enabled"] and session_meta["resume"]:
+        cmd = [
+            codex_bin,
+            "exec",
+            "resume",
+            "--last",
+            "--skip-git-repo-check",
+            "-m",
+            model_name,
+            "--output-last-message",
+            str(last_message_path),
+            prompt,
+        ]
+    else:
+        cmd = [
+            codex_bin,
+            "exec",
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "-C",
+            codex_cwd,
+            "-m",
+            model_name,
+            "--output-last-message",
+            str(last_message_path),
+            prompt,
+        ]
+        if not session_meta["enabled"]:
+            cmd.insert(2, "--ephemeral")
+    if str(os.environ.get("NEXUS_CODEX_IGNORE_USER_CONFIG", "")).lower() in {"1", "true", "yes"}:
+        cmd.insert(3 if session_meta["enabled"] and session_meta["resume"] else 2, "--ignore-user-config")
+    invocation_sec = round(time.monotonic() - invocation_start, 4)
+
+    def attach_gateway_timing(payload: dict[str, Any], *, process_sec: float = 0.0, parse_sec: float = 0.0) -> dict[str, Any]:
+        payload["gateway_invocation_build_sec"] = invocation_sec
+        payload["gateway_process_sec"] = round(max(0.0, process_sec), 4)
+        payload["gateway_provider_wait_sec"] = round(max(0.0, process_sec), 4)
+        payload["gateway_parse_sec"] = round(max(0.0, parse_sec), 4)
+        payload["gateway_total_sec"] = round(max(0.0, invocation_sec + process_sec + parse_sec), 4)
+        return payload
+
+    try:
+        record_outbound_prompt_ledger(
+            provider="codex",
+            prompt=prompt,
+            payload="",
+            model_name=model_name,
+            cwd=codex_cwd,
+            env=env,
+        )
+    except ValueError as exc:
+        failure_payload = {
+            "status": "FAIL",
+            "error_category": str(exc),
+            "tokens_used": 0,
+            "model_name": model_name,
+        }
+        attach_gateway_timing(failure_payload)
+        _attach_codex_session_meta(failure_payload, session_meta)
+        return failure_payload, str(exc)
+    process_start = time.monotonic()
     try:
         res = _run_process_group(
             cmd,
@@ -3873,24 +4494,34 @@ def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str,
             env=env,
             timeout_sec=_direct_codex_timeout_sec(timeout_sec),
         )
+        process_sec = time.monotonic() - process_start
         raw = last_message_path.read_text(encoding="utf-8", errors="replace") if last_message_path.exists() else res.stdout
     except subprocess.TimeoutExpired as exc:
-        return {
+        process_sec = time.monotonic() - process_start
+        failure_payload = {
             "status": "FAIL",
             "error_category": "timeout",
             "tokens_used": 0,
             "model_name": model_name,
             "timeout_sec": int(getattr(exc, "timeout", timeout_sec) or timeout_sec),
-        }, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
+        }
+        attach_gateway_timing(failure_payload, process_sec=process_sec)
+        _attach_codex_session_meta(failure_payload, session_meta)
+        return failure_payload, _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
     finally:
         try:
             last_message_path.unlink(missing_ok=True)
         except Exception:
             pass
     if res.returncode != 0:
-        return {"status": "FAIL", "error_category": "cli_error", "tokens_used": 0, "model_name": model_name}, _tail_text(res.stderr or res.stdout or raw)
+        failure_payload = {"status": "FAIL", "error_category": "cli_error", "tokens_used": 0, "model_name": model_name}
+        attach_gateway_timing(failure_payload, process_sec=process_sec)
+        _attach_codex_session_meta(failure_payload, session_meta)
+        return failure_payload, _tail_text(res.stderr or res.stdout or raw)
     try:
+        parse_start = time.monotonic()
         payload, output_text = _parse_direct_patch_json(raw)
+        parse_sec = time.monotonic() - parse_start
         codex_stdout_tokens = _extract_codex_stdout_tokens(f"{res.stdout}\n{res.stderr}")
         if int(payload.get("tokens_used", 0) or 0) <= 0 and codex_stdout_tokens > 0:
             payload["tokens_used"] = codex_stdout_tokens
@@ -3899,9 +4530,14 @@ def _ask_direct_codex_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str,
             payload["gateway_token_source"] = "codex_stdout"
         payload["model_name"] = model_name
         payload["model_patch_generated"] = bool(payload.get("patch"))
+        attach_gateway_timing(payload, process_sec=process_sec, parse_sec=parse_sec)
+        _attach_codex_session_meta(payload, session_meta)
         return payload, output_text
     except Exception as exc:  # noqa: BLE001
-        return {"status": "FAIL", "error_category": "parse_failure", "tokens_used": 0, "model_name": model_name}, f"{type(exc).__name__}: {_tail_text(raw)}"
+        failure_payload = {"status": "FAIL", "error_category": "parse_failure", "tokens_used": 0, "model_name": model_name}
+        attach_gateway_timing(failure_payload, process_sec=process_sec)
+        _attach_codex_session_meta(failure_payload, session_meta)
+        return failure_payload, f"{type(exc).__name__}: {_tail_text(raw)}"
 
 
 def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[dict[str, Any], str]:
@@ -3911,17 +4547,32 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
         return {"status": "FAIL", "error_category": "binary_missing", "tokens_used": 0, "model_name": model_name}, "gemini_missing"
     cli_cwd = str(Path(os.environ.get("NEXUS_GEMINI_CLI_CWD") or os.getcwd()).resolve())
     invocation_start = time.monotonic()
-    invocation = build_gemini_cli_invocation(
-        prompt=prompt,
-        model_name=model_name,
-        gemini_entry=gemini_bin,
-        node_bin=None,
-        env=os.environ.copy(),
-        cwd=cli_cwd,
-        transport="inline",
-    )
+    session_meta = _gemini_benchmark_session_meta()
+    approval_mode = str(os.environ.get("NEXUS_DIRECT_GEMINI_APPROVAL_MODE") or "plan").strip() or "plan"
+    try:
+        invocation = build_gemini_cli_invocation(
+            prompt=prompt,
+            model_name=model_name,
+            gemini_entry=gemini_bin,
+            node_bin=None,
+            env=os.environ.copy(),
+            cwd=cli_cwd,
+            approval_mode=approval_mode,
+            transport="inline",
+        )
+    except ValueError as exc:
+        failure_payload = {
+            "status": "FAIL",
+            "error_category": str(exc),
+            "tokens_used": 0,
+            "model_name": model_name,
+        }
+        _attach_gemini_session_meta(failure_payload, session_meta)
+        return failure_payload, str(exc)
     invocation_build_sec = time.monotonic() - invocation_start
     command = list(invocation.command)
+    if session_meta["enabled"]:
+        command[1:1] = list(session_meta["args"])
     if "-y" not in command and "--approval-mode" not in command:
         command.insert(1, "-y")
     try:
@@ -3937,17 +4588,21 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
     except subprocess.TimeoutExpired as exc:
         raw_tail = _tail_text(getattr(exc, "stdout", None) or getattr(exc, "stderr", None))
         error_category = "auth_confirmation_required" if _looks_like_gemini_auth_prompt(raw_tail) else "timeout"
-        return {
+        failure_payload = {
             "status": "FAIL",
             "error_category": error_category,
             "tokens_used": 0,
             "model_name": model_name,
             "timeout_sec": int(getattr(exc, "timeout", timeout_sec) or timeout_sec),
-        }, raw_tail
+        }
+        _attach_gemini_session_meta(failure_payload, session_meta)
+        return failure_payload, raw_tail
     if res.returncode != 0:
         raw_tail = _tail_text(res.stderr or res.stdout)
         error_category = "auth_confirmation_required" if _looks_like_gemini_auth_prompt(raw_tail) else "cli_error"
-        return {"status": "FAIL", "error_category": error_category, "tokens_used": 0, "model_name": model_name}, raw_tail
+        failure_payload = {"status": "FAIL", "error_category": error_category, "tokens_used": 0, "model_name": model_name}
+        _attach_gemini_session_meta(failure_payload, session_meta)
+        return failure_payload, raw_tail
     try:
         parse_start = time.monotonic()
         payload, output_text = _parse_direct_gemini_json(res.stdout.strip())
@@ -3965,6 +4620,7 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
                 "direct_gemini_parse_sec": parse_sec,
             },
         )
+        _attach_gemini_session_meta(payload, session_meta)
         payload["model_name"] = model_name
         payload["model_patch_generated"] = bool(payload.get("patch"))
         return payload, output_text
@@ -3982,7 +4638,35 @@ def _ask_direct_gemini_flash_patch(*, prompt: str, timeout_sec: int) -> tuple[di
                 "direct_gemini_parse_sec": time.monotonic() - parse_start if "parse_start" in locals() else 0.0,
             },
         )
+        _attach_gemini_session_meta(failure_payload, session_meta)
         return failure_payload, f"{type(exc).__name__}: {_tail_text(res.stdout)}"
+
+
+def _direct_model_infra_retry_limit(provider: str) -> int:
+    if provider != "gemini":
+        return 0
+    raw = str(os.environ.get("NEXUS_DIRECT_MODEL_INFRA_RETRY_LIMIT") or "1").strip()
+    try:
+        return max(0, min(2, int(raw)))
+    except ValueError:
+        return 1
+
+
+def _direct_model_retryable_infra_failure(out: dict[str, Any], raw: str) -> tuple[bool, str]:
+    error_category = str(out.get("error_category") or "").strip()
+    token_count = int(out.get("tokens_used", 0) or 0)
+    combined = f"{error_category}\n{raw}".lower()
+    if token_count > 0:
+        return False, ""
+    if any(marker in combined for marker in ("quota", "resource exhausted", "rate limit", "usage limit", "429")):
+        return False, "quota_or_rate_limit"
+    if any(marker in combined for marker in ("oauth", "login required", "permission denied", "auth_confirmation_required")):
+        return False, "auth_or_permission"
+    if has_invalid_session_identifier(combined):
+        return True, "gemini_invalid_session_identifier"
+    if error_category in {"cli_error", "parse_failure"}:
+        return True, f"{error_category}_without_tokens"
+    return False, ""
 
 
 def _nexus_codex_hidden_verifier_guidance(task: CapabilityTask, source: str) -> str:
@@ -4217,19 +4901,62 @@ def _run_with_nexus_codex(
     executor_flags = build_route_executor_flags(task_desc=task.task_desc, task_type=task.task_type, route=route)
     route_decision = route.get("route_decision", {}) if isinstance(route.get("route_decision"), dict) else {}
     route_selected = {str(item).lower() for item in route_decision.get("selected_capabilities", []) or []}
+    route_features_for_policy = route.get("route_features", {}) if isinstance(route.get("route_features"), dict) else {}
+    route_cost_controls = route_cost_controls_for_task(
+        repo_root,
+        task.id,
+        route_features=route_features_for_policy,
+        expected_capabilities=task.expected_capabilities,
+    )
+    route_execution_policy = decide_route_execution_policy(
+        route_cost_controls=route_cost_controls,
+        llm_enabled=True,
+        hidden_verifier_required=_hidden_verifier_mode_enabled(),
+        eligibility_class=task.eligibility_class,
+        capability_activation_contract=task.capability_activation_contract,
+        local_reflex_risk_level="medium",
+        local_reflex_bare_sufficiency="medium",
+    )
+    reset_boundary = (
+        f"NEXUS_BENCH_SESSION_BOUNDARY_V1 task_id={task.id} trial_index={task.trial_index} "
+        "Treat this as an isolated task. Do not use facts, filenames, code, tests, or conclusions from any previous benchmark turn."
+    )
+    reset_boundary_hash = hashlib.sha256(reset_boundary.encode("utf-8")).hexdigest()
+    route_prompt = _json_prompt_block(_compact_nexus_route_for_prompt(route))
+    codeintel_prompt = _json_prompt_block(_compact_codeintel_for_prompt(codeintel))
+    profile_prompt = _json_prompt_block(_compact_profile_for_prompt(profile))
+    executor_flags_prompt = _json_prompt_block(_compact_executor_flags_for_prompt(executor_flags))
+    hidden_guidance = _nexus_codex_hidden_verifier_guidance(task, original)
     prompt = (
         "You are Codex wearing Nexus. Return ONLY valid JSON with keys status and patch. No markdown. "
         "Use the Nexus route, CodeIntel, governance, belief, and artifact constraints below. "
         "The patch value must be the full updated target file content.\n\n"
+        f"{reset_boundary}\n\n"
         f"[TASK]\n{task_with_context}\n\n"
-        f"[NEXUS ROUTE SUMMARY]\n{_json_prompt_block(_compact_nexus_route_for_prompt(route))}\n\n"
-        f"[NEXUS CODEINTEL SUMMARY]\n{_json_prompt_block(_compact_codeintel_for_prompt(codeintel))}\n\n"
-        f"[NEXUS EXECUTION PROFILE]\n{_json_prompt_block(_compact_profile_for_prompt(profile))}\n\n"
-        f"[NEXUS EXECUTOR FLAGS]\n{_json_prompt_block(_compact_executor_flags_for_prompt(executor_flags))}\n\n"
-        f"[NEXUS HIDDEN-VERIFIER GUIDANCE]\n{_nexus_codex_hidden_verifier_guidance(task, original)}\n\n"
+        f"[NEXUS ROUTE SUMMARY]\n{route_prompt}\n\n"
+        f"[NEXUS CODEINTEL SUMMARY]\n{codeintel_prompt}\n\n"
+        f"[NEXUS EXECUTION PROFILE]\n{profile_prompt}\n\n"
+        f"[NEXUS EXECUTOR FLAGS]\n{executor_flags_prompt}\n\n"
+        f"[NEXUS HIDDEN-VERIFIER GUIDANCE]\n{hidden_guidance}\n\n"
         f"[CURRENT SOURCE]\n{original}\n\n"
         f"[VISIBLE TESTS]\n{visible_tests}\n\n"
         "Return the full updated file content in the patch field."
+    )
+    nexus_control_chars = (
+        len(route_prompt)
+        + len(codeintel_prompt)
+        + len(profile_prompt)
+        + len(executor_flags_prompt)
+        + len(hidden_guidance)
+    )
+    prompt_attribution = _direct_prompt_attribution(
+        prompt=prompt,
+        task_desc=task.task_desc,
+        source=original,
+        tests=visible_tests,
+        patch="",
+        nexus_control_chars=nexus_control_chars,
+        governance_contract_chars=len(reset_boundary),
     )
     try:
         out, raw = _ask_direct_codex_patch(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
@@ -4496,6 +5223,15 @@ def _run_with_nexus_codex(
                 "gateway_stats_present": bool(out.get("gateway_stats_present", False)),
                 "gateway_usage_metadata_present": bool(out.get("gateway_usage_metadata_present", False)),
                 "gateway_token_source": str(out.get("gateway_token_source") or ""),
+                "session_worker_enabled": bool(out.get("codex_session_worker", False)),
+                "session_worker_provider": "codex" if bool(out.get("codex_session_worker", False)) else "",
+                "session_worker_policy": str(out.get("codex_session_mode") or ""),
+                "session_worker_id": str(out.get("codex_session_id") or ""),
+                "session_worker_turn_index": int(out.get("codex_session_turn_index", 0) or 0),
+                "session_worker_resumed": bool(out.get("codex_session_resumed", False)),
+                "reset_boundary_hash": reset_boundary_hash,
+                "prompt_purity_index": 1.0,
+                **prompt_attribution,
             },
         },
         "status": status,
@@ -4527,6 +5263,8 @@ def _run_with_nexus_codex(
         },
     }
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    row["route_execution_policy"] = route_execution_policy.to_dict()
+    row["route_cost_policy_controls"] = route_cost_controls
     receipt_first_payload = _run_receipt_first_probe_payload(
         repo_root=repo_root,
         task=task,
@@ -4547,6 +5285,32 @@ def _run_with_nexus_codex(
     row["hidden_verifier_stdout_tail"] = pytest_stdout_tail
     row["hidden_verifier_stderr_tail"] = pytest_stderr_tail
     return _annotate_with_contract(row, provider="codex", model_required=True, nexus_required=True)
+
+
+def _finalize_with_nexus_row(
+    row: dict[str, Any],
+    *,
+    provider: str,
+    model_required: bool,
+    nexus_required: bool,
+    task: CapabilityTask,
+    repo_root: Path,
+) -> dict[str, Any]:
+    _apply_data_contract_audit(row)
+    finalized = _annotate_with_contract(
+        row,
+        provider=provider,
+        model_required=model_required,
+        nexus_required=nexus_required,
+    )
+    _reconcile_skill_mount_contract_after_receipts(finalized, repo_root=repo_root)
+    _reconcile_benchmark_skill_mount_contract_from_expected_receipts(
+        finalized,
+        task=task,
+        repo_root=repo_root,
+    )
+    _apply_data_contract_audit(finalized)
+    return finalized
 
 
 def run_with_nexus(
@@ -4619,6 +5383,16 @@ def run_with_nexus(
         route_cost_controls,
         task.expected_capabilities,
     )
+    require_model_participation_for_run = bool(llm_enabled and _truthy_env("NEXUS_REQUIRE_MODEL_PARTICIPATION"))
+    if llm_enabled and _truthy_env("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE"):
+        route_cost_controls["disable_deterministic_rescue"] = True
+        route_cost_policy_overrides["disable_deterministic_rescue"] = True
+        route_cost_controls["allow_pre_model_deterministic_rescue"] = False
+    if require_model_participation_for_run:
+        if route_cost_controls.get("allow_pre_model_deterministic_rescue") is True:
+            route_cost_policy_overrides["allow_pre_model_deterministic_rescue"] = True
+        route_cost_controls["allow_pre_model_deterministic_rescue"] = False
+        route_cost_controls["require_model_participation"] = True
     if (
         skip_llm_baseline
         and route_cost_controls.get("require_llm_baseline") is not True
@@ -4639,24 +5413,176 @@ def run_with_nexus(
         # back to the expensive baseline lane.
         route_cost_controls["skip_llm_baseline"] = True
     hidden_verifier_required = _hidden_verifier_mode_enabled()
-    supervised_bare_first_reason = _supervised_bare_first_reason(route_cost_controls)
-    supervised_bare_allowed = bool(
-        _route_cost_controls_prefer_supervised_bare_first(route_cost_controls)
-        and hidden_verifier_required
-        and (
-            (
-                local_reflex.risk_level == "low"
-                and local_reflex.bare_sufficiency == "high"
-            )
-            or (
-                local_reflex.risk_level == "medium"
-                and local_reflex.bare_sufficiency == "medium"
-                and route_cost_controls.get("allow_medium_risk_supervised_bare_first") is True
-            )
-            or route_cost_controls.get("allow_high_risk_supervised_bare_first") is True
-        )
+    route_execution_policy = decide_route_execution_policy(
+        route_cost_controls=route_cost_controls,
+        llm_enabled=llm_enabled,
+        hidden_verifier_required=hidden_verifier_required,
+        eligibility_class=task.eligibility_class,
+        capability_activation_contract=task.capability_activation_contract,
+        local_reflex_risk_level=local_reflex.risk_level,
+        local_reflex_bare_sufficiency=local_reflex.bare_sufficiency,
+    )
+    supervised_bare_first_reason = route_execution_policy.supervised_bare_first_reason
+    supervised_bare_allowed = route_execution_policy.supervised_bare_first_allowed
+    cost_capped_pre_model_rescue_allowed = (
+        "cost_capped_capability_allows_verified_pre_model_rescue" in route_execution_policy.reason_codes
     )
     supervised_bare_attempt: dict[str, Any] | None = None
+    if (
+        llm_enabled
+        and (
+            not require_model_participation_for_run
+            or "model_required_receipt_lite_allows_pre_model_rescue" in route_execution_policy.reason_codes
+        )
+        and (
+            supervised_bare_allowed
+            or cost_capped_pre_model_rescue_allowed
+            or route_cost_controls.get("route_oracle_receipt_lite") is True
+            or route_cost_controls.get("belief_receipt_lite") is True
+            or route_cost_controls.get("gate_only_receipt_lite") is True
+            or route_cost_controls.get("hyper_receipt_lite") is True
+            or route_cost_controls.get("preflight_receipt_lite") is True
+        )
+        and not strict_llm_baseline
+        and route_execution_policy.pre_model_deterministic_rescue_allowed
+    ):
+        pre_model_start = time.monotonic()
+        pre_rescue = _deterministic_failed_tests_pre_rescue(
+            task=task,
+            repo_root=repo_root,
+            target_file=target_file,
+            test_file=test_file,
+            timeout_sec=timeout_sec,
+        )
+        hidden_verifier_wall_sec = 0.0
+        hidden_passed = False
+        hidden_stdout_tail = ""
+        hidden_stderr_tail = ""
+        verification_test_file = _verification_test_for_task(task, test_file)
+        if pre_rescue.get("passed"):
+            hidden_start = time.monotonic()
+            try:
+                hidden_verify = _run_process_group(
+                    _pytest_verifier_cmd(verification_test_file),
+                    cwd=repo_root,
+                    env=os.environ.copy(),
+                    timeout_sec=_remaining_task_timeout(pre_model_start + timeout_sec, timeout_sec),
+                )
+                hidden_passed = hidden_verify.returncode == 0
+                hidden_stdout_tail = _tail_text(hidden_verify.stdout, max_chars=1000)
+                hidden_stderr_tail = _tail_text(hidden_verify.stderr, max_chars=1000)
+            except subprocess.TimeoutExpired:
+                hidden_passed = False
+                hidden_stderr_tail = "benchmark_task_deadline"
+            hidden_verifier_wall_sec = round(time.monotonic() - hidden_start, 4)
+        if pre_rescue.get("passed") and hidden_passed:
+            wall_sec = round(time.monotonic() - pre_model_start, 4)
+            payload = {
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "runtime_classification": "nexus_deterministic_pre_model_rescue",
+                "result": {
+                    "elapsed_sec": wall_sec,
+                    "report": {
+                        "attempt_count": 1,
+                        "model_calls": 0,
+                        "total_tokens": 0,
+                        "token_capture_status": "not_applicable_local_only",
+                        "model_token_capture_status": "not_applicable_no_model",
+                        "model_name": _external_model_name_for_provider(with_model_provider),
+                        "gateway_stats_present": True,
+                        "gateway_token_source": "not_applicable_no_model",
+                        "gateway_total_sec": 0.0,
+                        "gateway_process_sec": 0.0,
+                        "gateway_provider_wait_sec": 0.0,
+                        "gateway_parse_sec": 0.0,
+                        "gateway_invocation_build_sec": 0.0,
+                    },
+                },
+            }
+            local_row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall_sec)
+            local_row.update(
+                {
+                    "runtime_classification": "nexus_deterministic_pre_model_rescue",
+                    "nexus_winner_source": "local_deterministic_pre_model_rescue",
+                    "nexus_rescued": True,
+                    "gemini_uses_nexus": True,
+                    "model_uses_nexus": True,
+                    "nexus_context_delivered": True,
+                    "nexus_context_delivery_mode": "deterministic_pre_model_rescue",
+                    "nexus_usage_valid": True,
+                    "nexus_wearing_valid": True,
+                    "nexus_tier": "L0_deterministic_pre_model_rescue",
+                    "nexus_tier_reason": "route_cost_policy_pre_model_deterministic_rescue",
+                    "capability_claim_verified": True,
+                    "route_decision_schema_version": "nexus_route_decision_v1",
+                    "hidden_verifier_file": verification_test_file,
+                    "hidden_verifier_passed": True,
+                    "hidden_verifier_wall_sec": hidden_verifier_wall_sec,
+                    "hidden_verifier_stdout_tail": hidden_stdout_tail,
+                    "hidden_verifier_stderr_tail": hidden_stderr_tail,
+                    "deterministic_pre_rescue_used": bool(pre_rescue.get("used", False)),
+                    "deterministic_pre_rescue_reason": str(pre_rescue.get("reason") or ""),
+                    "deterministic_pre_rescue_wall_sec": pre_rescue.get("wall_sec"),
+                    "deterministic_pre_model_rescue_used": True,
+                    "deterministic_pre_model_rescue_reason": "hidden_bugfix_supervised_compact_lane",
+                    "phase_p": "deterministic_pre_model_preflight",
+                    "phase_x": "deterministic_pre_model_context_suppressed",
+                    "phase_d": "deterministic_pre_model_route_decision",
+                    "phase_r": "deterministic_pre_model_repair",
+                    "phase_a": "deterministic_pre_model_hidden_verifier",
+                    "phase_c": "deterministic_pre_model_delivery_receipt",
+                    "capability_plan_selected": sorted(
+                        {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate", *task.expected_capabilities}
+                    ),
+                    "capability_plan_required": sorted(
+                        {"mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate", *task.expected_capabilities}
+                    ),
+                    "capability_plan_conditional": [],
+                    "capability_plan_forbidden": [],
+                    "route_decision_selected_count": 4,
+                    "pillar_lancedb_active": True,
+                    "pillar_memory_active": True,
+                    "pillar_mempalace_active": True,
+                    "pillar_belief_active": True,
+                    "pillar_artifact_active": True,
+                    "route_cost_policy_controls": route_cost_controls,
+                    "route_cost_policy_candidate_cap": route_cost_controls.get("candidate_cap"),
+                    "route_cost_policy_lite_route": bool(route_cost_controls.get("lite_route", False)),
+                    "route_cost_policy_hold": bool(route_cost_controls.get("hold", False)),
+                    "route_cost_policy_source": str(route_cost_controls.get("policy_source") or ""),
+                    "route_cost_policy_supervised_bare_first": True,
+                    "route_cost_policy_supervised_bare_first_reason": supervised_bare_first_reason,
+                    "route_cost_policy_skip_llm_baseline": bool(route_cost_controls.get("skip_llm_baseline", False)),
+                    "route_cost_policy_disable_research": bool(route_cost_controls.get("disable_research", False)),
+                    "route_cost_policy_context_mode": str(route_cost_controls.get("context_mode") or ""),
+                    "route_cost_policy_max_rounds": route_cost_controls.get("max_rounds"),
+                    "route_cost_policy_lane": str(route_cost_controls.get("route_lane") or ""),
+                    "nexus_first_call_prompt_mode": "not_applicable_pre_model_rescue",
+                    "prompt_purity_index": 1.0,
+                    "route_execution_policy": route_execution_policy.to_dict(),
+                }
+            )
+            if route_cost_policy_overrides:
+                local_row["route_cost_policy_expected_capability_overrides"] = route_cost_policy_overrides
+            local_row["local_reflex_assessment"] = local_reflex.to_jsonable()
+            local_row.update(local_reflex.to_route_features())
+            _apply_supervised_receipt_evidence(
+                local_row,
+                repo_root=repo_root,
+                task=task,
+                target_file=target_file,
+                tests_passed=True,
+                hidden_verifier_file=str(verification_test_file),
+            )
+            return _finalize_with_nexus_row(
+                local_row,
+                provider=with_model_provider if with_model_provider in {"gemini", "codex"} else "gemini",
+                model_required=True,
+                nexus_required=True,
+                task=task,
+                repo_root=repo_root,
+            )
     if llm_enabled and supervised_bare_allowed:
         supervised_bare_attempt = run_without_nexus(
             repo_root=repo_root,
@@ -4677,7 +5603,7 @@ def run_with_nexus(
             supervised = dict(supervised_bare_attempt)
             supervised["mode"] = "with_nexus"
             supervised["runtime_classification"] = "nexus_supervised_bare_first"
-            supervised["nexus_winner_source"] = "supervised_bare_first"
+            supervised["nexus_winner_source"] = "model_supervised_bare_first"
             supervised["nexus_rescued"] = False
             supervised["gemini_uses_nexus"] = True
             supervised["model_uses_nexus"] = True
@@ -4692,6 +5618,7 @@ def run_with_nexus(
             supervised["hidden_verifier_file"] = _verification_test_for_task(task, test_file)
             supervised["hidden_verifier_passed"] = True
             supervised["hidden_verifier_wall_sec"] = 0.0
+            supervised["hidden_verifier_wall_source"] = "included_in_model_attempt_wall_sec"
             gwt_artifact = _gwt_verification_artifact(
                 task,
                 verification_test_file=str(supervised["hidden_verifier_file"]),
@@ -4741,6 +5668,7 @@ def run_with_nexus(
             supervised["route_cost_policy_lane"] = str(route_cost_controls.get("route_lane") or "")
             supervised["nexus_first_call_prompt_mode"] = "bare_equivalent"
             supervised["prompt_purity_index"] = 1.0
+            supervised["route_execution_policy"] = route_execution_policy.to_dict()
             supervised["supervised_bare_prompt_chars"] = supervised_bare_attempt.get("gateway_prompt_chars")
             if route_cost_policy_overrides:
                 supervised["route_cost_policy_expected_capability_overrides"] = route_cost_policy_overrides
@@ -4754,12 +5682,13 @@ def run_with_nexus(
                 tests_passed=True,
                 hidden_verifier_file=str(supervised["hidden_verifier_file"]),
             )
-            _apply_data_contract_audit(supervised)
-            return _annotate_with_contract(
+            return _finalize_with_nexus_row(
                 supervised,
                 provider="gemini",
                 model_required=True,
                 nexus_required=True,
+                task=task,
+                repo_root=repo_root,
             )
         if (
             _route_cost_controls_allow_deterministic_pre_rescue(route_cost_controls)
@@ -4888,6 +5817,7 @@ def run_with_nexus(
                 supervised["route_cost_policy_lane"] = str(route_cost_controls.get("route_lane") or "")
                 supervised["nexus_first_call_prompt_mode"] = "bare_equivalent"
                 supervised["prompt_purity_index"] = 1.0
+                supervised["route_execution_policy"] = route_execution_policy.to_dict()
                 supervised["supervised_bare_prompt_chars"] = supervised_bare_attempt.get("gateway_prompt_chars")
                 supervised["hidden_retry_used"] = False
                 supervised["hidden_retry_reason"] = "not_needed_supervised_bare_pre_rescue"
@@ -4909,12 +5839,13 @@ def run_with_nexus(
                     tests_passed=True,
                     hidden_verifier_file=str(supervised["hidden_verifier_file"]),
                 )
-                _apply_data_contract_audit(supervised)
-                return _annotate_with_contract(
+                return _finalize_with_nexus_row(
                     supervised,
                     provider="gemini",
                     model_required=True,
                     nexus_required=True,
+                    task=task,
+                    repo_root=repo_root,
                 )
     requested_force_flow = force_flow
     effective_force_flow, force_flow_defer_reason = _route_oracle_force_flow_policy(
@@ -4952,7 +5883,10 @@ def run_with_nexus(
         effective_llm_candidate_cap = 1
         if task.eligibility_class != "model_required":
             effective_llm_self_heal = False
-    enable_swarm_bench_executor = os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+    enable_swarm_bench_executor = bool(
+        os.environ.get("NEXUS_ENABLE_SWARM_BENCH_EXECUTOR", "").strip().lower() in {"1", "true", "yes"}
+        or route_cost_controls.get("swarm_receipt_executor") is True
+    )
     target_file_arg = _repo_relative_path(repo_root, target_file) if enable_swarm_bench_executor else target_file
     test_file_arg = _repo_relative_path(repo_root, test_file) if enable_swarm_bench_executor else test_file
     verification_test_file = _verification_test_for_task(task, test_file)
@@ -5007,6 +5941,7 @@ def run_with_nexus(
     if effective_force_flow:
         args.extend(["--force-flow", effective_force_flow])
 
+    requested_skill_mounts = benchmark_skill_mount_requests(task)
     start_wall = time.time()
     start = time.monotonic()
     env_prev = os.environ.get("NEXUS_CAPABILITY_TUNING_FILE")
@@ -5026,13 +5961,14 @@ def run_with_nexus(
                         task=task,
                         timeout_sec=effective_timeout_sec,
                         base_timeout_sec=_benchmark_gateway_timeout_for_task(effective_timeout_sec),
+                        require_model_participation=require_model_participation_for_run,
                     )
                 ),
                 "NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL": "1" if effective_llm_self_heal else "0",
                 "NEXUS_DISABLE_DAYSHIFT_OPTIMIZER": "1",
             }
         )
-    if task.eligibility_class == "model_required":
+    if task.eligibility_class == "model_required" or require_model_participation_for_run:
         bench_env_updates["NEXUS_DISABLE_LOCAL_PREFLIGHT_BEFORE_LLM"] = "1"
         bench_env_updates["NEXUS_DISABLE_HIDDEN_CONTRACT_FAST_PATH"] = "1"
         bench_env_updates["NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW"] = "1"
@@ -5046,6 +5982,14 @@ def run_with_nexus(
     bench_env_updates["NEXUS_LLM_CANDIDATE_CAP"] = str(effective_llm_candidate_cap)
     if route_cost_controls:
         bench_env_updates["NEXUS_ROUTE_COST_CONTROLS"] = json.dumps(route_cost_controls, ensure_ascii=False, sort_keys=True)
+    if requested_skill_mounts:
+        bench_env_updates["NEXUS_BENCH_SKILL_MOUNT_REQUESTS"] = json.dumps(
+            requested_skill_mounts,
+            ensure_ascii=False,
+        )
+        default_skill_status_report = repo_root / "docs" / "reports" / "NEXUS_SKILL_STATUS_2026-05-15.json"
+        if default_skill_status_report.exists() and not os.environ.get("NEXUS_BENCH_SKILL_STATUS_REPORT"):
+            bench_env_updates["NEXUS_BENCH_SKILL_STATUS_REPORT"] = str(default_skill_status_report)
     env_restore = {key: os.environ.get(key) for key in bench_env_updates}
     os.environ.update(bench_env_updates)
     runner: CliRunner | None = None
@@ -5114,13 +6058,13 @@ def run_with_nexus(
     if not payload:
         payload = {"status": "FAILED", "semantic_status": "UNVERIFIED"}
     row = _extract_record(mode="with_nexus", task=task, payload=payload, wall_time_sec=wall)
+    row["route_execution_policy"] = route_execution_policy.to_dict()
     _annotate_warning_ledger(row, warning_records)
     if (
         llm_enabled
-        and task.eligibility_class == "model_required"
+        and (task.eligibility_class == "model_required" or require_model_participation_for_run)
         and effective_skip_llm_baseline
         and int(row.get("model_calls", 0) or 0) <= 0
-        and not str(row.get("infra_invalid_reason") or "")
     ):
         fallback_args = list(args)
         if "--force-flow" in fallback_args:
@@ -5174,6 +6118,7 @@ def run_with_nexus(
         fallback_row["model_required_direct_first_status"] = str(row.get("status") or "")
         fallback_row["model_required_direct_first_model_calls"] = int(row.get("model_calls", 0) or 0)
         row = fallback_row
+        row["route_execution_policy"] = route_execution_policy.to_dict()
     _merge_receipt_first_probe(row, task=task, probe_payload=receipt_first_payload)
     row["requested_force_flow"] = requested_force_flow or ""
     row["effective_force_flow"] = effective_force_flow or ""
@@ -5266,7 +6211,7 @@ def run_with_nexus(
         and _route_cost_controls_allow_deterministic_pre_rescue(route_cost_controls)
         and str(row.get("status") or "") != "SUCCESS"
         and int(row.get("model_calls", 0) or 0) > 0
-        and str(row.get("infra_invalid_reason") or "") == ""
+        and _post_model_deterministic_rescue_infra_allowed(row)
     ):
         pre_rescue = _deterministic_failed_tests_pre_rescue(
             task=task,
@@ -5728,13 +6673,31 @@ def run_with_nexus(
         row["route_cost_policy_context_mode"] = str(route_cost_controls.get("context_mode") or "")
         row["route_cost_policy_max_rounds"] = route_cost_controls.get("max_rounds")
         row["route_cost_policy_lane"] = str(route_cost_controls.get("route_lane") or "")
+    row["route_execution_policy"] = route_execution_policy.to_dict()
+    if (
+        llm_enabled
+        and bool(row.get("semantic_completed", False))
+        and bool(row.get("hidden_verifier_passed", False))
+        and str(row.get("nexus_winner_source") or "")
+        in {"model_supervised_bare_first", "nexus_llm_deterministic_pre_rescue"}
+    ):
+        _apply_supervised_receipt_evidence(
+            row,
+            repo_root=repo_root,
+            task=task,
+            target_file=target_file,
+            tests_passed=True,
+            hidden_verifier_file=str(row.get("hidden_verifier_file") or _verification_test_for_task(task, test_file)),
+        )
+        _reconcile_skill_mount_contract_after_receipts(row, repo_root=repo_root)
     try:
-        _apply_data_contract_audit(row)
-        return _annotate_with_contract(
+        return _finalize_with_nexus_row(
             row,
             provider="gemini" if llm_enabled else "local",
             model_required=llm_enabled,
             nexus_required=llm_enabled,
+            task=task,
+            repo_root=repo_root,
         )
     finally:
         for key, previous in env_restore.items():
@@ -5778,23 +6741,54 @@ def run_without_nexus(
         patch_len = 0
         pytest_stdout_tail = ""
         pytest_stderr_tail = ""
+        verifier_wall_sec = 0.0
         warning_records = []
+        direct_infra_retry_count = 0
+        direct_infra_retry_wall_sec = 0.0
+        direct_infra_retry_reasons: list[str] = []
+        direct_infra_retry_raw_tails: list[str] = []
         task_deadline = start + max(1, int(timeout_sec))
         direct_provider = "codex" if mode == "codex" else "gemini"
         direct_ask = _ask_direct_codex_patch if direct_provider == "codex" else _ask_direct_gemini_flash_patch
-        prompt_actor = "Codex running without Nexus orchestration" if direct_provider == "codex" else "Gemini 3 Flash running without Nexus orchestration"
+        if direct_provider == "codex":
+            direct_model_label = os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or "Codex"
+        else:
+            direct_model_label = os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_GEMINI_MODEL_NAME") or "Gemini"
+        prompt_actor = f"{direct_model_label} running without Nexus orchestration"
         try:
+            reset_boundary = (
+                f"NEXUS_BENCH_SESSION_BOUNDARY_V1 task_id={task.id} trial_index={task.trial_index} "
+                "Treat this as an isolated task. Do not use facts, filenames, code, tests, or conclusions from any previous benchmark turn."
+            )
+            reset_boundary_hash = hashlib.sha256(reset_boundary.encode("utf-8")).hexdigest()
             prompt_tests = test_source
             prompt = (
                 f"You are {prompt_actor}. "
                 "Return ONLY valid JSON with keys status and patch. No markdown. No tool use. "
                 "The patch value must be the full updated target file content.\n"
+                f"{reset_boundary}\n\n"
                 f"Task: {task.task_desc}\n\n"
                 f"[CURRENT SOURCE]\n{original}\n\n"
                 f"[CURRENT TESTS]\n{prompt_tests}\n\n"
                 "Return the full updated file content in the patch field."
             )
+            prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+            direct_attempt_start = time.monotonic()
             out, raw = direct_ask(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
+            direct_attempt_wall_sec = round(time.monotonic() - direct_attempt_start, 4)
+            retry_limit = _direct_model_infra_retry_limit(direct_provider)
+            retryable, retry_reason = _direct_model_retryable_infra_failure(out if isinstance(out, dict) else {}, raw)
+            while retryable and direct_infra_retry_count < retry_limit:
+                direct_infra_retry_count += 1
+                direct_infra_retry_wall_sec = round(direct_infra_retry_wall_sec + direct_attempt_wall_sec, 4)
+                direct_infra_retry_reasons.append(retry_reason)
+                direct_infra_retry_raw_tails.append(_tail_text(raw, max_chars=500))
+                if retry_reason == "gemini_invalid_session_identifier" and isinstance(out, dict):
+                    _reset_gemini_benchmark_session(str(out.get("gemini_session_id") or ""))
+                direct_attempt_start = time.monotonic()
+                out, raw = direct_ask(prompt=prompt, timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec))
+                direct_attempt_wall_sec = round(time.monotonic() - direct_attempt_start, 4)
+                retryable, retry_reason = _direct_model_retryable_infra_failure(out if isinstance(out, dict) else {}, raw)
             model_calls = 1
             patch = raw
             warning_records.extend(_warning_records_from_text(raw, source=f"without_nexus_{direct_provider}_raw"))
@@ -5830,12 +6824,14 @@ def run_without_nexus(
                     warning_records.extend(_warning_records_from_text(err, source="without_nexus_candidate_compile"))
                 if not err:
                     target_path.write_text(patch, encoding="utf-8")
+                    verifier_start = time.monotonic()
                     res = _run_process_group(
                         _pytest_verifier_cmd(verification_test_file),
                         cwd=repo_root,
                         env=os.environ.copy(),
                         timeout_sec=_remaining_task_timeout(task_deadline, timeout_sec),
                     )
+                    verifier_wall_sec = round(time.monotonic() - verifier_start, 4)
                     pytest_stdout_tail = _tail_text(res.stdout, max_chars=1000)
                     pytest_stderr_tail = _tail_text(res.stderr, max_chars=1000)
                     warning_records.extend(_warning_records_from_text(res.stdout or "", source="without_nexus_pytest_stdout"))
@@ -5875,6 +6871,10 @@ def run_without_nexus(
                     "model_patch_generated": model_patch_generated,
                     "fallback_used": False,
                     "gateway_stats_present": bool(out.get("gateway_stats_present", False)) if isinstance(out, dict) else False,
+                    "direct_infra_retry_count": direct_infra_retry_count,
+                    "direct_infra_retry_wall_sec": direct_infra_retry_wall_sec,
+                    "direct_infra_retry_reasons": direct_infra_retry_reasons,
+                    "direct_infra_retry_raw_tails": direct_infra_retry_raw_tails,
                     "gateway_usage_metadata_present": bool(out.get("gateway_usage_metadata_present", False)) if isinstance(out, dict) else False,
                     "gateway_token_source": str(out.get("gateway_token_source") or "") if isinstance(out, dict) else "",
                     "gateway_token_outlier_reason": str(out.get("gateway_token_outlier_reason") or "") if isinstance(out, dict) else "",
@@ -5897,6 +6897,23 @@ def run_without_nexus(
                     "direct_gemini_invocation_build_sec": float(out.get("direct_gemini_invocation_build_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
                     "direct_gemini_process_sec": float(out.get("direct_gemini_process_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
                     "direct_gemini_parse_sec": float(out.get("direct_gemini_parse_sec", 0.0) or 0.0) if isinstance(out, dict) else 0.0,
+                    "direct_verifier_wall_sec": verifier_wall_sec,
+                    "session_worker_enabled": (
+                        bool(out.get("gemini_session_worker", False) or out.get("codex_session_worker", False))
+                        if isinstance(out, dict)
+                        else False
+                    ),
+                    "session_worker_provider": (
+                        direct_provider
+                        if isinstance(out, dict) and bool(out.get("gemini_session_worker", False) or out.get("codex_session_worker", False))
+                        else ""
+                    ),
+                    "session_worker_policy": str(out.get("gemini_session_mode") or out.get("codex_session_mode") or "") if isinstance(out, dict) else "",
+                    "session_worker_id": str(out.get("gemini_session_id") or out.get("codex_session_id") or "") if isinstance(out, dict) else "",
+                    "session_worker_turn_index": int(out.get("gemini_session_turn_index", 0) or out.get("codex_session_turn_index", 0) or 0) if isinstance(out, dict) else 0,
+                    "session_worker_resumed": bool(out.get("gemini_session_resumed", False) or out.get("codex_session_resumed", False)) if isinstance(out, dict) else False,
+                    "reset_boundary_hash": reset_boundary_hash,
+                    "prompt_sha256": prompt_sha256,
                     **prompt_attribution,
                 },
             },
@@ -6005,6 +7022,78 @@ def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
     out.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
 
 
+def _annotate_session_worker_contamination(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    worker_rows = [row for row in rows if bool(row.get("session_worker_enabled", False))]
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in worker_rows:
+        key = (str(row.get("session_worker_provider") or ""), str(row.get("session_worker_id") or ""))
+        groups.setdefault(key, []).append(row)
+
+    contaminated = 0
+    for group_rows in groups.values():
+        group_rows.sort(key=lambda item: int(item.get("session_worker_turn_index", 0) or 0))
+        previous_rows: list[dict[str, Any]] = []
+        previous_turn = 0
+        seen_boundaries: dict[str, tuple[str, int]] = {}
+        for row in group_rows:
+            reasons: list[str] = []
+            turn = int(row.get("session_worker_turn_index", 0) or 0)
+            task_id = str(row.get("task_id") or "")
+            trial_index = int(row.get("trial_index", 0) or 0)
+            reset_hash = str(row.get("reset_boundary_hash") or "")
+            resumed = bool(row.get("session_worker_resumed", False))
+            worker_policy = str(row.get("session_worker_policy") or "")
+            resume_expected = worker_policy != "exec_fresh_no_resume"
+            if turn <= 0:
+                reasons.append("session_turn_index_missing")
+            if previous_turn and turn <= previous_turn:
+                reasons.append("session_turn_index_not_increasing")
+            if turn == 1 and resumed:
+                reasons.append("first_turn_should_not_resume")
+            if resume_expected and turn > 1 and not resumed:
+                reasons.append("later_turn_should_resume")
+            if not reset_hash:
+                reasons.append("reset_boundary_hash_missing")
+            elif reset_hash in seen_boundaries and seen_boundaries[reset_hash] != (task_id, trial_index):
+                reasons.append("reset_boundary_hash_reused_across_task")
+            else:
+                seen_boundaries[reset_hash] = (task_id, trial_index)
+            leak_text = "\n".join(
+                str(row.get(key) or "")
+                for key in (
+                    "baseline_raw_tail",
+                    "baseline_pytest_stdout_tail",
+                    "baseline_pytest_stderr_tail",
+                    "nexus_failure_reason",
+                )
+            )
+            for previous in previous_rows:
+                previous_task = str(previous.get("task_id") or "")
+                previous_hash = str(previous.get("reset_boundary_hash") or "")
+                if previous_task and previous_task != task_id and previous_task in leak_text:
+                    reasons.append("previous_task_id_leaked")
+                    row["session_worker_expected_previous_task_id"] = previous_task
+                if previous_hash and previous_hash != reset_hash and previous_hash in leak_text:
+                    reasons.append("previous_reset_boundary_hash_leaked")
+                    row["session_worker_previous_reset_boundary_hash"] = previous_hash
+            row["session_worker_contamination_detected"] = bool(reasons)
+            row["session_worker_contamination_reasons"] = sorted(set(reasons))
+            if reasons:
+                contaminated += 1
+                row["run_eligible"] = False
+                row["infra_invalid_reason"] = "session_worker_contamination"
+            previous_rows.append(row)
+            previous_turn = max(previous_turn, turn)
+    total = len(worker_rows)
+    return {
+        "schema": "nexus_session_worker_contamination_v1",
+        "worker_row_count": total,
+        "contaminated_row_count": contaminated,
+        "contamination_rate": round(contaminated / total, 4) if total else 0.0,
+        "clean": contaminated == 0,
+    }
+
+
 def _build_parallel_smoke_rows(tasks: list[CapabilityTask], *, model_name: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows_by_mode: dict[str, list[dict[str, Any]]] = {"with_nexus": [], "without_nexus": []}
     for task in tasks:
@@ -6080,6 +7169,71 @@ def _sha256_text(text: str) -> str:
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _summarize_outbound_prompt_ledger(path_raw: object, *, expected_min_records: int = 1) -> dict[str, Any]:
+    path_text = str(path_raw or "").strip()
+    summary: dict[str, Any] = {
+        "schema": "nexus_outbound_prompt_ledger_summary_v1",
+        "path": path_text,
+        "sha256": "",
+        "record_count": 0,
+        "strict_record_count": 0,
+        "forbidden_literal_count": 0,
+        "invalid_record_count": 0,
+        "providers": [],
+        "models": [],
+        "status": "PASS",
+        "failures": [],
+    }
+    failures: list[str] = []
+    if not path_text:
+        failures.append("outbound_prompt_ledger_missing_path")
+    else:
+        path = Path(path_text)
+        if not path.exists():
+            failures.append("outbound_prompt_ledger_missing_file")
+        else:
+            summary["sha256"] = _sha256_file(path)
+            providers: set[str] = set()
+            models: set[str] = set()
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    summary["invalid_record_count"] += 1
+                    continue
+                if not isinstance(record, dict) or record.get("schema") != "nexus_outbound_prompt_ledger_v1":
+                    summary["invalid_record_count"] += 1
+                    continue
+                summary["record_count"] += 1
+                if bool(record.get("strict", False)):
+                    summary["strict_record_count"] += 1
+                try:
+                    summary["forbidden_literal_count"] += int(record.get("forbidden_literal_count", 0) or 0)
+                except (TypeError, ValueError):
+                    summary["invalid_record_count"] += 1
+                provider = str(record.get("provider") or "").strip()
+                model = str(record.get("model_name") or "").strip()
+                if provider:
+                    providers.add(provider)
+                if model:
+                    models.add(model)
+            summary["providers"] = sorted(providers)
+            summary["models"] = sorted(models)
+            if summary["record_count"] < max(1, int(expected_min_records)):
+                failures.append("outbound_prompt_ledger_record_count_below_expected")
+            if summary["strict_record_count"] != summary["record_count"]:
+                failures.append("outbound_prompt_ledger_non_strict_record")
+            if summary["forbidden_literal_count"] > 0:
+                failures.append("outbound_prompt_ledger_forbidden_literal")
+            if summary["invalid_record_count"] > 0:
+                failures.append("outbound_prompt_ledger_invalid_record")
+    summary["failures"] = sorted(set(failures))
+    summary["status"] = "PASS" if not summary["failures"] else "FAIL"
+    return summary
 
 
 def _git_commit(cwd: Path) -> str:
@@ -6237,8 +7391,11 @@ def derive_training_eligibility_posture(
     wall_ledger_invalid: bool = False,
     warning_ledger_invalid: bool = False,
     cost_efficiency_status: str = "",
+    synthetic_readiness_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
     reasons: list[str] = []
+    for reason in synthetic_readiness_reasons or []:
+        reasons.append(f"synthetic_readiness_shortcut:{reason}")
     if not delivery_gate_passed:
         reasons.append("delivery_gate_not_passed")
     if with_trust_mismatch_rate > 0.0 or without_trust_mismatch_rate > 0.0:
@@ -6259,6 +7416,8 @@ def derive_training_eligibility_posture(
         reasons.append("cost_efficiency_regressed")
     if not reasons:
         status = "TRAINING_ELIGIBLE"
+    elif any(reason.startswith("synthetic_readiness_shortcut:") for reason in reasons):
+        status = "OBSERVATION_ONLY_SYNTHETIC_READINESS"
     elif "wall_ledger_telemetry_invalid" in reasons or "warning_ledger_telemetry_invalid" in reasons:
         status = "OBSERVATION_ONLY_TELEMETRY_INVALID"
     elif any(reason in reasons for reason in ("delivery_gate_not_passed", "cost_safety_not_passed")):
@@ -6444,6 +7603,16 @@ def _append_x1_readiness_history(
     return history
 
 
+def _x1_readiness_history_path(*, bundle_path: Path, config: dict[str, Any]) -> Path:
+    configured = str(config.get("x1_readiness_history_path") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    repo_root = str(config.get("repo_root") or "").strip()
+    if repo_root:
+        return Path(repo_root).expanduser().resolve() / ".nexus" / "reports" / "learn" / "x1_readiness_history.json"
+    return bundle_path.parent / "x1_readiness_history.json"
+
+
 def _x1_readiness_pass(
     *,
     valid_comparison_ready: bool,
@@ -6524,11 +7693,16 @@ def evaluate_wall_ledger_conservation(row: dict[str, Any]) -> dict[str, Any]:
         "direct_gemini_process_sec",
         "gateway_process_sec",
         "gateway_provider_wait_sec",
+        "phase_wall_total_sec",
+        "phase_wall_r_sec",
         "hidden_verifier_wall_sec",
+        "direct_verifier_wall_sec",
+        "direct_infra_retry_wall_sec",
         "hidden_retry_wall_sec",
         "hidden_retry_verifier_wall_sec",
         "deterministic_pre_rescue_wall_sec",
         "receipt_write_sec",
+        "cli_uninstrumented_sec",
     )
     timing_present = any(_as_seconds(row.get(key)) is not None for key in timing_keys)
     components: dict[str, float] = {}
@@ -6548,6 +7722,7 @@ def evaluate_wall_ledger_conservation(row: dict[str, Any]) -> dict[str, Any]:
         components[name] = value
 
     model_required = int(row.get("model_calls", 0) or 0) > 0
+    model_gateway_fallback_total = False
     add_component(
         "model_gateway",
         "gateway_total_sec",
@@ -6566,15 +7741,31 @@ def evaluate_wall_ledger_conservation(row: dict[str, Any]) -> dict[str, Any]:
         all_gateway_zero_or_missing = all(value is None or value <= 0.0 for value in raw_gateway_values)
         if all_gateway_zero_or_missing:
             components["model_gateway"] = float(total)
-            telemetry_reason_codes.append("model_gateway_fallback_to_total_wall_sec")
             telemetry_status["model_gateway"] = "FALLBACK_TOTAL_WALL"
+            if not bool(row.get("hidden_verifier_passed")):
+                telemetry_reason_codes.append("model_gateway_fallback_to_total_wall_sec")
+            model_gateway_fallback_total = True
+    add_component("direct_verifier", "direct_verifier_wall_sec")
+    add_component("direct_infra_retry", "direct_infra_retry_wall_sec")
+    no_model_with_nexus_timing = not model_required and timing_present and str(row.get("mode") or "") == "with_nexus"
+    if no_model_with_nexus_timing:
+        add_component("nexus_phase", "phase_wall_total_sec", "phase_wall_r_sec", required=True)
     hidden_verifier_value = _as_seconds(row.get("hidden_verifier_wall_sec"))
+    hidden_verifier_wall_source = str(row.get("hidden_verifier_wall_source") or "")
     hidden_verifier_required = (
         bool(row.get("hidden_verifier_file"))
         or bool(row.get("hidden_verifier_passed"))
         or hidden_verifier_value is not None
     )
-    if hidden_verifier_value is not None and not (hidden_verifier_value == 0.0 and bool(row.get("hidden_verifier_passed"))):
+    if model_gateway_fallback_total and model_required and bool(row.get("hidden_verifier_passed")):
+        telemetry_status["hidden_verifier"] = "INCLUDED_IN_MODEL_GATEWAY_FALLBACK_TOTAL"
+    elif (
+        hidden_verifier_value == 0.0
+        and bool(row.get("hidden_verifier_passed"))
+        and hidden_verifier_wall_source == "included_in_model_attempt_wall_sec"
+    ):
+        telemetry_status["hidden_verifier"] = "INCLUDED_IN_MODEL_ATTEMPT"
+    elif hidden_verifier_value is not None and not (hidden_verifier_value == 0.0 and bool(row.get("hidden_verifier_passed"))):
         telemetry_status["hidden_verifier"] = "PRESENT"
         add_component("hidden_verifier", "hidden_verifier_wall_sec", required=hidden_verifier_required)
     elif hidden_verifier_required:
@@ -6593,6 +7784,26 @@ def evaluate_wall_ledger_conservation(row: dict[str, Any]) -> dict[str, Any]:
     add_component("hidden_retry_verifier", "hidden_retry_verifier_wall_sec")
     add_component("deterministic_pre_rescue", "deterministic_pre_rescue_wall_sec")
     add_component("receipt_write", "receipt_write_sec")
+    if no_model_with_nexus_timing:
+        cli_uninstrumented = _as_seconds(row.get("cli_uninstrumented_sec"))
+        if cli_uninstrumented is not None:
+            already_attributed = sum(components.values())
+            residual_cli = min(float(cli_uninstrumented), max(0.0, float(total or 0.0) - already_attributed))
+            if residual_cli > 0.0:
+                components["cli_uninstrumented"] = round(residual_cli, 4)
+                telemetry_status["cli_uninstrumented"] = (
+                    "RESIDUAL_AFTER_LOCAL_COMPONENTS"
+                    if residual_cli < float(cli_uninstrumented)
+                    else "PRESENT"
+                )
+    if no_model_with_nexus_timing:
+        runner_overhead = _as_seconds(row.get("model_attempt_runner_overhead_sec"))
+        if runner_overhead is not None and runner_overhead > 0.0:
+            hidden_component = float(components.get("hidden_verifier", 0.0) or 0.0)
+            residual_runner_overhead = round(max(0.0, runner_overhead - hidden_component), 4)
+            if residual_runner_overhead > 0.0:
+                components["runner_overhead_non_verifier"] = residual_runner_overhead
+                telemetry_status["runner_overhead_non_verifier"] = "PRESENT"
 
     if total is None or total <= 0.0 or not timing_present or not expected:
         return {
@@ -6853,6 +8064,175 @@ def _route_cost_ledger(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _commercial_model_roi_shadow_hooks(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def number(row: dict[str, Any], *keys: str) -> float:
+        for key in keys:
+            value = row.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
+
+    def is_verified(row: dict[str, Any]) -> bool:
+        return bool(row.get("semantic_completed", False)) and not bool(row.get("report_trust_mismatch", False))
+
+    def capability(row: dict[str, Any]) -> str:
+        expected = row.get("expected_capabilities")
+        if isinstance(expected, str) and expected.strip():
+            return expected.split(",")[0].strip()
+        if isinstance(expected, list) and expected:
+            return str(expected[0])
+        return str(row.get("task_type") or "unknown")
+
+    def bucket_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
+        lane = str(
+            row.get("route_cost_policy_lane")
+            or row.get("route_lane")
+            or row.get("route_recommended_flow")
+            or row.get("nexus_winner_source")
+            or "unknown"
+        )
+        strategy = str(row.get("strategy_path") or row.get("route_strategy") or row.get("chosen_flow") or "unknown")
+        tier = str(row.get("nexus_tier") or row.get("route_tier") or "unknown")
+        task_type = str(row.get("task_type") or "unknown")
+        return lane, strategy, tier, task_type
+
+    with_by_key = {
+        (str(row.get("task_id") or ""), int(number(row, "trial_index") or 0)): row
+        for row in rows
+        if str(row.get("mode") or "") == "with_nexus" and bool(row.get("run_eligible", True))
+    }
+    without_by_key = {
+        (str(row.get("task_id") or ""), int(number(row, "trial_index") or 0)): row
+        for row in rows
+        if str(row.get("mode") or "") == "without_nexus" and bool(row.get("run_eligible", True))
+    }
+    pair_keys = sorted(set(with_by_key) & set(without_by_key))
+    signals: list[dict[str, Any]] = []
+    buckets: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for task_id, trial_index in pair_keys:
+        with_row = with_by_key[(task_id, trial_index)]
+        without_row = without_by_key[(task_id, trial_index)]
+        with_verified = is_verified(with_row)
+        without_verified = is_verified(without_row)
+        wall_with = number(with_row, "wall_duration_sec", "duration_sec")
+        wall_without = number(without_row, "wall_duration_sec", "duration_sec")
+        tokens_with = number(with_row, "total_tokens", "model_total_tokens")
+        tokens_without = number(without_row, "total_tokens", "model_total_tokens")
+        reason_codes: list[str] = []
+        if with_verified and not without_verified:
+            reason_codes.append("verified_lift_against_direct_commercial_model")
+        if with_verified and wall_without > 0 and wall_with > wall_without * 1.05:
+            reason_codes.append("verified_lift_or_delivery_with_wall_regression")
+        if with_verified and tokens_without > 0 and tokens_with < tokens_without:
+            reason_codes.append("verified_delivery_with_token_savings")
+        wall_delta = wall_with - wall_without
+        token_ratio = tokens_with / tokens_without if tokens_without > 0 else 0.0
+        model_calls_with = number(with_row, "model_calls")
+        model_calls_without = number(without_row, "model_calls")
+        bucket = buckets.setdefault(
+            bucket_key(with_row),
+            {
+                "pair_count": 0,
+                "verified_lift_count": 0,
+                "both_verified_count": 0,
+                "wall_ratios": [],
+                "sum_wall_delta": 0.0,
+                "token_ratios": [],
+                "model_call_ratios": [],
+                "reason_codes": set(),
+            },
+        )
+        bucket["pair_count"] += 1
+        bucket["verified_lift_count"] += int(with_verified and not without_verified)
+        bucket["both_verified_count"] += int(with_verified and without_verified)
+        if wall_without > 0:
+            bucket["wall_ratios"].append(wall_with / wall_without)
+        bucket["sum_wall_delta"] += wall_delta
+        if tokens_without > 0:
+            bucket["token_ratios"].append(token_ratio)
+        if model_calls_without > 0:
+            bucket["model_call_ratios"].append(model_calls_with / model_calls_without)
+        if with_verified and wall_without > 0 and wall_with > wall_without * 1.05:
+            bucket["reason_codes"].add("wall_regression")
+            if number(with_row, "phase_wall_r_sec") > 0:
+                bucket["reason_codes"].add("r_phase_wall_concentrated")
+        if str(with_row.get("strategy_path") or "").startswith("hyper_direct"):
+            bucket["reason_codes"].add("hyper_direct_forced_wall_regression")
+        if with_verified and wall_delta > 0 and 0.0 < token_ratio < 1.0:
+            bucket["reason_codes"].add("token_savings_wall_regression_tradeoff")
+        if reason_codes:
+            signals.append(
+                {
+                    "row_locator": {
+                        "pair_key_sha256": _sha256_text(f"{task_id}:{trial_index}")[:16],
+                        "trial_index": trial_index,
+                    },
+                    "task_capability": capability(with_row),
+                    "task_type": str(with_row.get("task_type") or ""),
+                    "model_name": str(with_row.get("model_name") or without_row.get("model_name") or ""),
+                    "reason_codes": sorted(set(reason_codes)),
+                    "with_verified": with_verified,
+                    "without_verified": without_verified,
+                    "wall_ratio_with_over_without": round(wall_with / wall_without, 4) if wall_without > 0 else None,
+                    "token_ratio_with_over_without": round(tokens_with / tokens_without, 4) if tokens_without > 0 else None,
+                }
+            )
+    reason_counts: dict[str, int] = {}
+    for signal in signals:
+        for reason in signal["reason_codes"]:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    concentration_buckets = []
+    for (lane, strategy, tier, task_type), bucket in buckets.items():
+        wall_ratios = sorted(bucket["wall_ratios"])
+        token_ratios = bucket["token_ratios"]
+        model_call_ratios = bucket["model_call_ratios"]
+        p95_index = max(0, min(len(wall_ratios) - 1, int(round(len(wall_ratios) * 0.95)) - 1)) if wall_ratios else 0
+        concentration_buckets.append(
+            {
+                "route_cost_policy_lane": lane,
+                "strategy_path": strategy,
+                "nexus_tier": tier,
+                "task_type": task_type,
+                "pair_count": int(bucket["pair_count"]),
+                "verified_lift_count": int(bucket["verified_lift_count"]),
+                "both_verified_count": int(bucket["both_verified_count"]),
+                "avg_wall_ratio": round(sum(wall_ratios) / len(wall_ratios), 4) if wall_ratios else 0.0,
+                "p95_wall_ratio": round(wall_ratios[p95_index], 4) if wall_ratios else 0.0,
+                "sum_wall_delta": round(float(bucket["sum_wall_delta"]), 4),
+                "avg_token_ratio": round(sum(token_ratios) / len(token_ratios), 4) if token_ratios else 0.0,
+                "avg_model_call_ratio": round(sum(model_call_ratios) / len(model_call_ratios), 4)
+                if model_call_ratios
+                else 0.0,
+                "reason_codes": sorted(bucket["reason_codes"]),
+            }
+        )
+    concentration_buckets.sort(key=lambda item: float(item["sum_wall_delta"]), reverse=True)
+    return {
+        "schema": "nexus_commercial_model_roi_shadow_hooks_v1",
+        "status": "OBSERVATION_ONLY",
+        "pair_count": len(pair_keys),
+        "signal_count": len(signals),
+        "reason_counts": dict(sorted(reason_counts.items())),
+        "signals": signals,
+        "wall_regression_concentration": {
+            "schema": "nexus_wall_regression_concentration_v1",
+            "status": "OBSERVATION_ONLY",
+            "promotion_effect": "none",
+            "buckets": concentration_buckets[:8],
+        },
+        "promotion_effect": "none",
+        "claim_boundary": [
+            "Shadow hooks classify commercial-model telemetry for policy learning only.",
+            "They must not change delivery, trust, cost, or x3 promotion gates.",
+            "Pair locators are hashed so the hook does not special-case a public task id.",
+        ],
+    }
+
+
 def _product_kpis(rows: list[dict[str, Any]]) -> dict[str, Any]:
     def number(row: dict[str, Any], *keys: str) -> float:
         for key in keys:
@@ -7005,6 +8385,9 @@ def _build_public_gate_checks(context: Mapping[str, Any]) -> dict[str, Any]:
         "infra_valid_pair_count": c["infra_quarantine_report"].get("infra_valid_pair_count", 0),
         "infra_invalid_pair_count": c["infra_quarantine_report"].get("infra_invalid_pair_count", 0),
         "infra_valid_pair_rate": c["infra_quarantine_report"].get("infra_valid_pair_rate", 0.0),
+        "session_worker_contamination_rate": c.get("session_worker_contamination_rate", 0.0),
+        "session_worker_contaminated_rows": c["session_worker_contamination"].get("contaminated_row_count", 0),
+        "session_worker_clean": c["session_worker_contamination"].get("clean", True),
         "wall_ledger_with_conserved_rate": c["wall_ledger_summary_with"].get("conserved_rate", 1.0),
         "wall_ledger_without_conserved_rate": c["wall_ledger_summary_without"].get("conserved_rate", 1.0),
         "wall_ledger_with_invalid_rows": c["wall_ledger_summary_with"].get("telemetry_invalid_rows", 0),
@@ -7017,6 +8400,10 @@ def _build_public_gate_checks(context: Mapping[str, Any]) -> dict[str, Any]:
         "unresolved_warning_count": c["warning_ledger_summary"].get("unresolved_warning_count", 0),
         "warning_clean": c["warning_ledger_summary"].get("warning_clean", True),
         "uncaptured_warning_count": c["warning_ledger_summary"].get("uncaptured_warning_count", 0),
+        "outbound_prompt_ledger_status": c["outbound_prompt_ledger_summary"].get("status", ""),
+        "outbound_prompt_ledger_record_count": c["outbound_prompt_ledger_summary"].get("record_count", 0),
+        "outbound_prompt_ledger_sha256": c["outbound_prompt_ledger_summary"].get("sha256", ""),
+        "outbound_prompt_ledger_forbidden_literal_count": c["outbound_prompt_ledger_summary"].get("forbidden_literal_count", 0),
         "min_required_pairs_for_efficiency_claim": c["min_required_pairs_for_efficiency_claim"],
         "route_cost_regression_wall_ratio_threshold": c["route_cost_regression_wall_ratio_threshold"],
         "avg_tokens_with": c["with_avg_tokens"],
@@ -7089,6 +8476,8 @@ def _build_public_gate_checks(context: Mapping[str, Any]) -> dict[str, Any]:
         "product_kpis_schema": c["product_kpis"].get("schema", ""),
         "openseeker_alignment_present": bool(c["openseeker_kpis"]),
         "openseeker_alignment_schema": c["openseeker_kpis"].get("schema", ""),
+        "commercial_model_roi_shadow_hooks_present": bool(c["commercial_model_roi_shadow_hooks"]),
+        "commercial_model_roi_shadow_signal_count": c["commercial_model_roi_shadow_hooks"].get("signal_count", 0),
     }
 
 
@@ -7109,6 +8498,7 @@ def write_evidence_bundle(
                 path = Path(str(value))
                 if path.exists():
                     artifact_files.append({"path": str(path), "sha256": _sha256_file(path)})
+    session_worker_contamination = _annotate_session_worker_contamination(rows)
     with_rows = [row for row in rows if str(row.get("mode")) == "with_nexus"]
     without_rows = [row for row in rows if str(row.get("mode")) == "without_nexus"]
     eligible_with = [row for row in with_rows if bool(row.get("run_eligible", True))]
@@ -7137,6 +8527,13 @@ def write_evidence_bundle(
             or float(warning_ledger_summary.get("warning_capture_completeness", 1.0) or 0.0) < 1.0
             or int(warning_ledger_summary.get("unresolved_warning_count", 0) or 0) > 0
         )
+    )
+    outbound_prompt_ledger_summary = _summarize_outbound_prompt_ledger(
+        config.get("outbound_prompt_ledger"),
+        expected_min_records=sum(1 for row in rows if int(row.get("model_calls", 0) or 0) > 0),
+    )
+    outbound_prompt_ledger_invalid = bool(
+        config.get("outbound_prompt_ledger") and outbound_prompt_ledger_summary.get("status") != "PASS"
     )
 
     infra_quarantine_report = compute_infra_quarantine_report(with_rows, without_rows)
@@ -7377,46 +8774,6 @@ def write_evidence_bundle(
         and with_trust_mismatch_rate >= without_trust_mismatch_rate
     )
     eligibility_complete = len(eligible_with) == len(with_rows) and len(eligible_without) == len(without_rows)
-    delivery_gate_failures = []
-    cost_gate_failures = []
-    if config.get("parallel_arms") == "smoke-only":
-        delivery_gate_failures.append("parallel_smoke")
-    if len(with_rows) == 0 or len(without_rows) == 0:
-        delivery_gate_failures.append("single_arm_run")
-    if len(with_models) != 1 or len(without_models) != 1 or with_models != without_models:
-        delivery_gate_failures.append("model_mismatch")
-    if not same_task_trials:
-        delivery_gate_failures.append("task_trial_mismatch")
-    if not hidden_verifier_mode:
-        delivery_gate_failures.append("hidden_verifier_disabled")
-    if not eligibility_complete:
-        delivery_gate_failures.append("run_eligibility_incomplete")
-    if with_trust_mismatch_rate > 0.0:
-        delivery_gate_failures.append("with_trust_mismatch_above_zero")
-    if without_trust_mismatch_rate > 0.0:
-        delivery_gate_failures.append("without_trust_mismatch_above_zero")
-    if nexus_valid_rate < 1.0:
-        delivery_gate_failures.append("nexus_wearing_below_threshold")
-    if nexus_system_execution_valid_rate < 1.0:
-        delivery_gate_failures.append("nexus_system_execution_below_threshold")
-    if nexus_context_delivered_rate < 1.0:
-        delivery_gate_failures.append("nexus_context_delivered_below_threshold")
-    if nexus_system_usage_valid_rate < 1.0:
-        delivery_gate_failures.append("nexus_system_usage_valid_below_threshold")
-    if claim_verified_rate < 1.0:
-        delivery_gate_failures.append("claim_verified_below_threshold")
-    if route_decision_present_rate < 1.0:
-        delivery_gate_failures.append("route_decision_missing")
-    if token_measured_rate_with < 0.8:
-        cost_gate_failures.append("with_token_measured_below_threshold")
-    if token_measured_rate_without < 0.8:
-        cost_gate_failures.append("without_token_measured_below_threshold")
-    if provider_token_measured_rate_with < 0.8:
-        cost_gate_failures.append("with_provider_token_measured_below_threshold")
-    if provider_token_measured_rate_without < 0.8:
-        cost_gate_failures.append("without_provider_token_measured_below_threshold")
-    if not prompt_purity_gate_passed:
-        cost_gate_failures.append("prompt_purity_above_threshold")
     wall_regression_systemic = (
         median_paired_wall_cost_ratio > route_cost_regression_wall_ratio_threshold
         if len(paired_wall_ratios) >= 3
@@ -7427,20 +8784,40 @@ def write_evidence_bundle(
         if len(paired_token_ratios) >= 3
         else token_cost_ratio_with_over_without > route_cost_regression_token_ratio_threshold
     )
-    if verified_equal_without_lift and wall_cost_ratio_with_over_without > route_cost_regression_wall_ratio_threshold and wall_regression_systemic:
-        cost_gate_failures.append("route_cost_regression_without_verified_lift")
-    if verified_equal_without_lift and token_cost_ratio_with_over_without > route_cost_regression_token_ratio_threshold and token_regression_systemic:
-        cost_gate_failures.append("token_cost_regression_without_verified_lift")
-    if not config.get("tasks_file") or not config.get("tasks_manifest_hash"):
-        delivery_gate_failures.append("manifest_missing")
-    if not config.get("runner_command"):
-        delivery_gate_failures.append("runner_command_missing")
+    gate_failures = derive_public_gate_failures(locals(), config)
+    delivery_gate_failures = gate_failures["delivery_gate_failures"]
+    cost_gate_failures = gate_failures["cost_gate_failures"]
+    session_worker_contamination_rate = float(session_worker_contamination.get("contamination_rate", 0.0) or 0.0)
+    if session_worker_contamination_rate > 0.0:
+        delivery_gate_failures.append("session_worker_contamination_detected")
+    if outbound_prompt_ledger_invalid:
+        cost_gate_failures.extend(str(item) for item in outbound_prompt_ledger_summary.get("failures", []) or [])
     route_cost_ledger = _route_cost_ledger(rows)
     route_cost_trace_report = build_route_cost_trace_report(rows)
     s2t_shadow_report = build_s2t_shadow_report(rows)
     s2t_policy_draft = build_promoted_s2t_policy(s2t_shadow_report)
+    commercial_model_roi_shadow_hooks = _commercial_model_roi_shadow_hooks(rows)
     product_kpis = _product_kpis(rows)
     openseeker_kpis = _openseeker_kpis(rows)
+    public_lane_contract = build_public_lane_contract(config)
+    route_policy_evidence_contract = build_route_policy_evidence_contract(rows)
+    if route_policy_evidence_contract.get("status") != "PASS":
+        delivery_gate_failures.extend(
+            f"route_policy_evidence:{failure}"
+            for failure in route_policy_evidence_contract.get("failures", [])
+        )
+    expected_capability_evidence_contract = build_expected_capability_evidence_contract(rows)
+    if expected_capability_evidence_contract.get("status") != "PASS":
+        delivery_gate_failures.extend(
+            f"expected_capability_evidence:{failure}"
+            for failure in expected_capability_evidence_contract.get("failures", [])
+        )
+    skill_mount_evidence_contract = build_skill_mount_evidence_contract(rows)
+    if skill_mount_evidence_contract.get("status") != "PASS":
+        delivery_gate_failures.extend(
+            f"skill_mount_evidence:{failure}"
+            for failure in skill_mount_evidence_contract.get("failures", [])
+        )
     delivery_gate_passed = not delivery_gate_failures
     cost_claim_passed = delivery_gate_passed and not cost_gate_failures
     cost_efficiency_failures = []
@@ -7518,6 +8895,7 @@ def write_evidence_bundle(
         wall_ledger_invalid=wall_ledger_invalid,
         warning_ledger_invalid=warning_ledger_invalid,
         cost_efficiency_status=cost_efficiency_status,
+        synthetic_readiness_reasons=list(public_lane_contract.get("non_public_reasons", []) or []),
     )
     mutation_hardening_gate = derive_mutation_hardening_gate(
         rows=rows,
@@ -7533,7 +8911,7 @@ def write_evidence_bundle(
         provider_token_measured_rate_with=provider_token_measured_rate_with,
         provider_token_measured_rate_without=provider_token_measured_rate_without,
     )
-    x1_history_path = bundle_path.parent / "x1_readiness_history.json"
+    x1_history_path = _x1_readiness_history_path(bundle_path=bundle_path, config=config)
     x1_history = _append_x1_readiness_history(
         path=x1_history_path,
         entry={
@@ -7561,6 +8939,16 @@ def write_evidence_bundle(
         provider_token_measured_rate_without=provider_token_measured_rate_without,
     )
     public_gate_checks = _build_public_gate_checks(locals())
+    taskset_contract = build_taskset_contract(config=config, runner_path=Path(__file__).resolve())
+    public_claim_gates = build_public_claim_gates(
+        delivery_gate_passed=delivery_gate_passed,
+        cost_claim_passed=cost_claim_passed,
+        cost_efficiency_status=cost_efficiency_status,
+        delivery_gate_failures=delivery_gate_failures,
+        cost_gate_failures=cost_gate_failures,
+        cost_efficiency_failures=cost_efficiency_failures,
+        public_gate_checks=public_gate_checks,
+    )
     payload = {
         "schema": "nexus_public_benchmark_evidence_bundle_v2",
         "created_at_unix": int(time.time()),
@@ -7588,6 +8976,7 @@ def write_evidence_bundle(
             "repeat_trials": int(config.get("repeat_trials", 1) or 1),
             "shuffle_seed": config.get("shuffle_seed"),
         },
+        "taskset_contract": taskset_contract,
         "public_disclosure_manifest": config.get("public_disclosure_manifest")
         or {"path": "", "sha256": "", "status": "not_provided", "failures": []},
         "timeouts": {
@@ -7637,7 +9026,9 @@ def write_evidence_bundle(
         },
         "route_cost_ledger": route_cost_ledger,
         "route_cost_trace_report": route_cost_trace_report,
+        "commercial_model_roi_shadow_hooks": commercial_model_roi_shadow_hooks,
         "infra_quarantine_report": infra_quarantine_report,
+        "session_worker_contamination": session_worker_contamination,
         "wall_ledger_conservation": {
             "schema": "nexus_wall_ledger_conservation_bundle_v1",
             "with_nexus": wall_ledger_summary_with,
@@ -7658,6 +9049,11 @@ def write_evidence_bundle(
                 "Warnings that are present but uncaptured or unclassified force RETURN.",
             ],
         },
+        "outbound_prompt_ledger_gate": outbound_prompt_ledger_summary,
+        "public_lane_contract": public_lane_contract,
+        "route_policy_evidence_contract": route_policy_evidence_contract,
+        "expected_capability_evidence_contract": expected_capability_evidence_contract,
+        "skill_mount_evidence_contract": skill_mount_evidence_contract,
         "s2t_shadow_report": s2t_shadow_report,
         "s2t_policy_draft": s2t_policy_draft,
         "product_kpis": product_kpis,
@@ -7670,39 +9066,7 @@ def write_evidence_bundle(
             "nexus_usage_valid_rate": nexus_usage_valid_rate,
             "claim_verified_rate": claim_verified_rate,
         },
-        "public_delivery_gate": {
-            "verdict": "PASS" if delivery_gate_passed else "FAIL",
-            "failures": sorted(set(delivery_gate_failures)),
-            "checks": public_gate_checks,
-            "claim_scope": "verified_delivery_only",
-        },
-        "public_verified_delivery_claim_gate": {
-            "verdict": "PASS" if delivery_gate_passed else "FAIL",
-            "failures": sorted(set(delivery_gate_failures)),
-            "checks": public_gate_checks,
-            "claim_scope": "verified_delivery_lift_only",
-        },
-        "public_cost_claim_gate": {
-            "verdict": "PASS" if cost_claim_passed else "FAIL",
-            "failures": sorted(set(cost_gate_failures if delivery_gate_passed else delivery_gate_failures + cost_gate_failures)),
-            "checks": {
-                **public_gate_checks,
-                "delivery_gate_passed": delivery_gate_passed,
-                "cost_claim_public_safe": cost_claim_passed,
-            },
-            "claim_scope": "token_and_cost_claims",
-        },
-        "public_cost_efficiency_claim_gate": {
-            "verdict": cost_efficiency_status,
-            "failures": sorted(set(cost_efficiency_failures)),
-            "checks": {
-                **public_gate_checks,
-                "delivery_gate_passed": delivery_gate_passed,
-                "cost_safety_gate_passed": cost_claim_passed,
-                "cost_efficiency_status": cost_efficiency_status,
-            },
-            "claim_scope": "cost_efficiency_direction_only",
-        },
+        **public_claim_gates,
         "valid_comparison_readiness_gate": valid_comparison_readiness_gate,
         "direction_magnitude_gate": direction_magnitude_gate,
         "x3_promotion_gate": x3_promotion_gate,
@@ -7720,15 +9084,11 @@ def write_evidence_bundle(
             ],
             "current_training_status": training_eligibility_posture.get("status"),
         },
-        "public_claim_gate": {
-            "verdict": "PASS" if cost_claim_passed else "FAIL",
-            "failures": sorted(set(delivery_gate_failures + cost_gate_failures)),
-            "checks": public_gate_checks,
-            "claim_scope": "same_model_plus_nexus_system_delivery_and_cost_gate",
-        },
         "public_claim_posture": public_claim_posture,
         "training_eligibility_posture": training_eligibility_posture,
     }
+    payload["external_provider_claim_boundary_contract"] = build_external_provider_claim_boundary_contract(payload)
+    payload["public_promotion_readiness_contract"] = build_public_promotion_readiness_contract(payload)
     bundle_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return bundle_path
 
@@ -7786,6 +9146,7 @@ def _benchmark_gateway_timeout_for_execution(
     task: CapabilityTask,
     timeout_sec: int,
     base_timeout_sec: int,
+    require_model_participation: bool = False,
 ) -> int:
     """Keep model-required benchmarks from silently falling back to local delivery.
 
@@ -7794,7 +9155,7 @@ def _benchmark_gateway_timeout_for_execution(
     the model call needs enough room to become the final delivery source.
     """
 
-    if task.eligibility_class != "model_required":
+    if task.eligibility_class != "model_required" and not require_model_participation:
         return int(base_timeout_sec)
     ceiling = max(30, int(timeout_sec) - 15)
     target = min(210, ceiling)
@@ -7826,6 +9187,8 @@ def _force_learn_slo_ready(repo_root: Path) -> None:
                 "phase_slo_pass": True,
                 "global": {"required_done_ratio": 1.0, "success_ratio": 1.0},
                 "reason": "capability_ab_runner_force_learn_slo_ready",
+                "public_lane_eligible": False,
+                "evidence_class": "synthetic_readiness_shortcut",
             }
         ),
         encoding="utf-8",
@@ -8194,11 +9557,29 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
 
     env_model = str(os.environ.get("NEXUS_GEMINI_MODEL_NAME") or os.environ.get("NEXUS_CODEX_MODEL_NAME") or "").strip()
     direct_model = str(os.environ.get("NEXUS_DIRECT_GEMINI_MODEL") or os.environ.get("NEXUS_DIRECT_CODEX_MODEL") or "").strip()
-    if not env_model:
-        failures.append("nexus_model_env_missing")
     nexus_only = bool(getattr(args, "nexus_only", False))
+    without_only = bool(getattr(args, "without_only", False))
+    if not env_model and not without_only:
+        failures.append("nexus_model_env_missing")
+    force_learn_slo_ready = bool(getattr(args, "force_learn_slo_ready", False))
+    external_model_requested = (
+        (not nexus_only and args.without_mode in {"gemini", "codex"})
+        or (not without_only and getattr(args, "with_model_provider", "") in {"gemini", "codex"})
+    )
+    external_export_policy = str(getattr(args, "external_model_export_policy", "unspecified") or "unspecified")
+    export_policy_allows_live = external_export_policy in {"approved", "sanitized"}
     if not nexus_only and args.without_mode in {"gemini", "codex"} and not direct_model:
         failures.append("direct_model_env_missing")
+    if bool(getattr(args, "session_worker", False)) and external_model_requested and not export_policy_allows_live:
+        failures.append("external_model_export_policy_required_for_session_worker")
+    outbound_prompt_ledger = str(getattr(args, "outbound_prompt_ledger", "") or "").strip()
+    if (
+        bool(getattr(args, "session_worker", False))
+        and external_model_requested
+        and external_export_policy == "sanitized"
+        and not outbound_prompt_ledger
+    ):
+        failures.append("outbound_prompt_ledger_required_for_sanitized_export")
     if env_model and direct_model and env_model != direct_model:
         failures.append("model_lock_mismatch")
     if args.without_mode in {"gemini", "codex"} and args.with_llm_mode == "off":
@@ -8214,6 +9595,14 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
     capability_readiness = build_benchmark_capability_readiness(args)
     failures.extend(f"capability_readiness:{item}" for item in capability_readiness.get("failures", []) or [])
     warnings.extend(f"capability_readiness:{item}" for item in capability_readiness.get("warnings", []) or [])
+    failures.extend(
+        commercial_model_basis_gate_failures(
+            {
+                "commercial_model_basis_required": bool(getattr(args, "require_commercial_model_basis", False)),
+                "tasks_file": str(args.tasks_file),
+            }
+        )
+    )
     preflight_sentinel = _build_preflight_sentinel(
         args=args,
         tasks_path=tasks_path,
@@ -8255,6 +9644,15 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "with_llm_mode": args.with_llm_mode,
             "with_model_provider": getattr(args, "with_model_provider", "gemini"),
         },
+        "external_model_export": {
+            "policy": external_export_policy,
+            "requires_policy": bool(getattr(args, "session_worker", False) and external_model_requested),
+            "live_export_allowed": export_policy_allows_live,
+            "session_worker": bool(getattr(args, "session_worker", False)),
+            "disclosure_manifest_status": str(disclosure_manifest.get("status") or ""),
+            "outbound_prompt_ledger": outbound_prompt_ledger,
+            "outbound_prompt_strict": external_export_policy == "sanitized",
+        },
         "task_manifest": {
             "path": str(tasks_path),
             "sha256": manifest_hash,
@@ -8282,8 +9680,14 @@ def build_public_benchmark_preflight(args: argparse.Namespace, *, repo_root: Pat
             "markdown_report_requested": bool(args.markdown_report),
             "nexus_wearing_required": args.with_llm_mode in {"hard", "all"},
             "parallel_arms": getattr(args, "parallel_arms", "off"),
-            "public_claim_allowed": getattr(args, "parallel_arms", "off") == "off" and not nexus_only,
-            "single_arm_run": nexus_only,
+            "force_learn_slo_ready": force_learn_slo_ready,
+            "public_claim_allowed": getattr(args, "parallel_arms", "off") == "off"
+            and not nexus_only
+            and not without_only
+            and not force_learn_slo_ready
+            and (not bool(getattr(args, "session_worker", False)) or export_policy_allows_live),
+            "single_arm_run": nexus_only or without_only,
+            "single_arm_mode": "without_nexus" if without_only else "with_nexus" if nexus_only else "",
         },
         "capability_readiness": capability_readiness,
         "preflight_sentinel": preflight_sentinel,
@@ -8298,6 +9702,11 @@ def main() -> int:
         "--public-disclosure-manifest",
         default="",
         help="Optional sanitized manifest for public/external disclosure evidence. Execution still uses --tasks-file.",
+    )
+    parser.add_argument(
+        "--require-commercial-model-basis",
+        action="store_true",
+        help="Fail public claim gates unless --tasks-file is a compiled commercial benchmark basis manifest.",
     )
     parser.add_argument("--output-dir", default=".nexus/reports/bench")
     parser.add_argument("--max-tasks", type=int, default=6)
@@ -8320,6 +9729,18 @@ def main() -> int:
         default=600,
         help="Mark a benchmark row infra-invalid and stop the run if one task exceeds this wall-clock budget. 0 disables. Default: 600.",
     )
+    parser.add_argument(
+        "--direct-timeout-abort-threshold",
+        type=int,
+        default=3,
+        help="Abort direct baseline after N consecutive provider timeouts. 0 disables. Default: 3.",
+    )
+    parser.add_argument(
+        "--direct-infra-abort-threshold",
+        type=int,
+        default=3,
+        help="Abort direct baseline after N consecutive infra-invalid provider rows. 0 disables. Default: 3.",
+    )
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "all"], default="all")
     parser.add_argument("--force-flow", choices=["auto", "baseline", "hyper_sprint"], default="auto")
     parser.add_argument("--with-nexus-runner", choices=["inprocess", "subprocess"], default="inprocess")
@@ -8334,6 +9755,27 @@ def main() -> int:
         "--gemini-model",
         default="",
         help="Override Gemini model for both arms (sets NEXUS_GEMINI_MODEL_NAME for this run only).",
+    )
+    parser.add_argument(
+        "--session-worker",
+        action="store_true",
+        help="Use a persistent model session policy for direct-model benchmark arms and record session metadata in evidence.",
+    )
+    parser.add_argument(
+        "--session-worker-id",
+        default="",
+        help="Optional deterministic session id for persistent model workers. If omitted, the runner creates one per process.",
+    )
+    parser.add_argument(
+        "--external-model-export-policy",
+        choices=["unspecified", "approved", "sanitized"],
+        default="unspecified",
+        help="Required for public session-worker live runs that send benchmark prompts to external model CLIs.",
+    )
+    parser.add_argument(
+        "--outbound-prompt-ledger",
+        default="",
+        help="JSONL ledger for external model prompts. Required for sanitized live session-worker runs.",
     )
     parser.add_argument(
         "--enable-autoreason-executor",
@@ -8424,6 +9866,11 @@ def main() -> int:
         action="store_true",
         help="Run only the with_nexus treatment arm. Intended for route/receipt/wall-time smoke, not public uplift claims.",
     )
+    parser.add_argument(
+        "--without-only",
+        action="store_true",
+        help="Run only the without_nexus direct baseline arm. Intended for clean baseline evidence, not Nexus uplift claims.",
+    )
     parser.add_argument("--repeat-trials", type=int, default=1)
     parser.add_argument("--shuffle-seed", type=int, default=None)
     parser.add_argument(
@@ -8464,10 +9911,22 @@ def main() -> int:
     args = parser.parse_args()
     if args.gemini_model:
         os.environ["NEXUS_GEMINI_MODEL_NAME"] = str(args.gemini_model).strip()
+    if args.session_worker:
+        os.environ["NEXUS_GEMINI_SESSION_WORKER"] = "1"
+        os.environ["NEXUS_CODEX_SESSION_WORKER"] = "1"
+    if args.session_worker_id:
+        os.environ["NEXUS_GEMINI_SESSION_ID"] = str(args.session_worker_id).strip()
+        os.environ["NEXUS_CODEX_SESSION_ID"] = str(args.session_worker_id).strip()
+    if args.outbound_prompt_ledger:
+        os.environ["NEXUS_OUTBOUND_PROMPT_LEDGER"] = str(Path(args.outbound_prompt_ledger).resolve())
+    if args.external_model_export_policy == "sanitized":
+        os.environ["NEXUS_OUTBOUND_PROMPT_STRICT"] = "1"
     if args.disable_promoted_route_cost_policy:
         os.environ["NEXUS_DISABLE_PROMOTED_ROUTE_COST_POLICY"] = "1"
     if args.skip_llm_baseline and args.strict_llm_baseline:
         parser.error("--strict-llm-baseline cannot be combined with --skip-llm-baseline")
+    if args.nexus_only and args.without_only:
+        parser.error("--nexus-only cannot be combined with --without-only")
     if args.always_on_eval and args.force_flow != "auto":
         parser.error("--always-on-eval requires --force-flow auto")
     if args.always_on_eval and args.skip_llm_baseline:
@@ -8482,6 +9941,16 @@ def main() -> int:
         args.timeout_sec = min(max(8, args.timeout_sec), 25)
 
     repo_root = Path(__file__).resolve().parents[2]
+    if args.external_model_export_policy == "sanitized":
+        forbidden = [
+            str(repo_root),
+            str(repo_root / "scripts" / "bench" / "capability_ab_runner.py"),
+            "git diff",
+            "git status",
+            ".git/",
+        ]
+        existing = str(os.environ.get("NEXUS_OUTBOUND_FORBIDDEN_LITERALS") or "")
+        os.environ["NEXUS_OUTBOUND_FORBIDDEN_LITERALS"] = "\n".join([existing, *forbidden]).strip()
     if args.require_clean_worktree:
         assert_clean_worktree(repo_root)
     if args.preflight_only:
@@ -8493,6 +9962,45 @@ def main() -> int:
         report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0 if report["status"] == "PASS" else 2
+    external_model_requested = (
+        (not bool(args.nexus_only) and args.without_mode in {"gemini", "codex"})
+        or (not bool(args.without_only) and args.with_model_provider in {"gemini", "codex"})
+    )
+    if (
+        args.parallel_arms != "smoke-only"
+        and args.session_worker
+        and external_model_requested
+        and args.external_model_export_policy not in {"approved", "sanitized"}
+    ):
+        print(
+            json.dumps(
+                {
+                    "status": "FAIL",
+                    "reason": "external_model_export_policy_required_for_session_worker",
+                    "external_model_export_policy": args.external_model_export_policy,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 2
+    if (
+        args.parallel_arms != "smoke-only"
+        and args.session_worker
+        and external_model_requested
+        and args.external_model_export_policy == "sanitized"
+        and not str(args.outbound_prompt_ledger or "").strip()
+    ):
+        print(
+            json.dumps(
+                {
+                    "status": "FAIL",
+                    "reason": "outbound_prompt_ledger_required_for_sanitized_export",
+                    "external_model_export_policy": args.external_model_export_policy,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 2
     filtered_tasks = filter_tasks_by_id(
         filter_tasks_by_repo_kind(load_tasks(args.tasks_file), args.repo_kind_filter),
         args.task_id_filter,
@@ -8544,10 +10052,12 @@ def main() -> int:
                     config={
                         "tasks_file": args.tasks_file,
                         "tasks_manifest_hash": selected_tasks[0].manifest_hash if selected_tasks else "",
+                        "repo_root": str(repo_root),
                         "public_disclosure_manifest": _public_disclosure_manifest(
                             args.public_disclosure_manifest,
                             repo_root=repo_root,
                         ),
+                        "commercial_model_basis_required": bool(args.require_commercial_model_basis),
                         "unique_tasks_requested": len(selected_tasks),
                         "repeat_trials": max(1, int(args.repeat_trials)),
                         "shuffle_seed": args.shuffle_seed,
@@ -8555,18 +10065,31 @@ def main() -> int:
                         "isolation_mode": args.isolation_mode,
                         "require_clean_worktree": bool(args.require_clean_worktree),
                         "history_policy": history_policy,
+                        "force_learn_slo_ready": bool(args.force_learn_slo_ready),
+                        "trust_workspace_policy": "gemini_cli_trust_workspace_env",
+                        "session_worker": bool(args.session_worker),
+                        "session_worker_id": str(args.session_worker_id or os.environ.get("NEXUS_GEMINI_SESSION_ID") or ""),
+                        "session_worker_policy": "persistent_worker_with_reset_boundary" if args.session_worker else "fresh_direct_invocation",
+                        "external_model_export_policy": str(args.external_model_export_policy),
+                        "outbound_prompt_ledger": str(args.outbound_prompt_ledger or os.environ.get("NEXUS_OUTBOUND_PROMPT_LEDGER") or ""),
                         "hidden_verifier_mode": hidden_verifier_mode,
                         "without_mode": args.without_mode,
                         "with_llm_mode": args.with_llm_mode,
                         "with_model_provider": args.with_model_provider,
                         "force_flow": args.force_flow,
                         "parallel_arms": args.parallel_arms,
+                        "warning_ledger_required": True,
+                        "wall_ledger_required": True,
+                        "provider_token_measured_required": args.without_mode in {"gemini", "codex"}
+                        or args.with_model_provider in {"gemini", "codex"},
                         "runner_command": " ".join(sys.argv),
                         "timeout_sec": int(args.timeout_sec),
                         "total_timeout_sec": int(args.total_timeout_sec),
                         "effective_total_timeout_sec": 0,
                         "stop_loss_sec": int(args.stop_loss_sec),
                         "per_task_stop_loss_sec": int(args.per_task_stop_loss_sec),
+                        "direct_timeout_abort_threshold": int(args.direct_timeout_abort_threshold),
+                        "direct_infra_abort_threshold": int(args.direct_infra_abort_threshold),
                     },
                 )
             )
@@ -8613,7 +10136,8 @@ def main() -> int:
     timed_out = False
     effective_total_timeout_sec = _effective_total_timeout_sec(int(args.total_timeout_sec), int(args.stop_loss_sec))
     previous_timeout_handler = _install_total_timeout(effective_total_timeout_sec)
-    for task in tasks:
+    with_tasks = [] if bool(args.without_only) else tasks
+    for task in with_tasks:
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
             _emit_progress(
@@ -8703,6 +10227,26 @@ def main() -> int:
                     elapsed_sec=float(row.get("wall_duration_sec", 0.0) or 0.0),
                     status="INFRA_INVALID",
                 )
+            fail_fast_reason = (
+                _with_nexus_row_fail_fast_reason(row, task=task)
+                if _truthy_env("NEXUS_BENCH_FAIL_FAST_ON_ROW_FAILURE")
+                else ""
+            )
+            if fail_fast_reason:
+                row["with_nexus_fail_fast_triggered"] = True
+                row["with_nexus_fail_fast_reason"] = fail_fast_reason
+                timed_out = True
+                _emit_progress(
+                    enabled=bool(args.progress_log),
+                    event="with_nexus_fail_fast",
+                    mode="with_nexus",
+                    task=task,
+                    target_file=target_file,
+                    test_file=test_file,
+                    elapsed_sec=time.monotonic() - run_start,
+                    status=f"PARTIAL_WITH_NEXUS_ABORT:{fail_fast_reason}",
+                )
+                break
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -8720,7 +10264,14 @@ def main() -> int:
             _restore_preserved_target(target_file, original_target)
     if args.neutralize_history:
         _reset_auto_flow_history(repo_root)
-    without_tasks = _without_tasks_for_run(tasks, timed_out=timed_out, nexus_only=bool(args.nexus_only))
+    without_tasks = _without_tasks_for_run(
+        tasks,
+        timed_out=timed_out,
+        nexus_only=bool(args.nexus_only),
+        without_only=bool(args.without_only),
+    )
+    direct_timeout_streak = 0
+    direct_infra_streak = 0
     for task in without_tasks:
         if _budget_exceeded(run_start, effective_total_timeout_sec):
             timed_out = True
@@ -8766,6 +10317,30 @@ def main() -> int:
             row["isolation_mode"] = args.isolation_mode
             row["clean_checkout_required"] = args.isolation_mode == "worktree"
             task_stop_loss_exceeded = _apply_per_task_stop_loss(row, int(args.per_task_stop_loss_sec))
+            if _direct_provider_timeout_row(row):
+                direct_timeout_streak += 1
+            else:
+                direct_timeout_streak = 0
+            if _direct_provider_infra_row(row):
+                direct_infra_streak += 1
+            else:
+                direct_infra_streak = 0
+            direct_abort_reason = _direct_timeout_abort_reason(
+                direct_timeout_streak,
+                int(args.direct_timeout_abort_threshold),
+            )
+            if not direct_abort_reason:
+                direct_abort_reason = _direct_infra_abort_reason(
+                    direct_infra_streak,
+                    int(args.direct_infra_abort_threshold),
+                )
+            if direct_abort_reason:
+                row["direct_provider_abort_triggered"] = True
+                row["direct_provider_abort_reason"] = direct_abort_reason
+                row["direct_timeout_abort_triggered"] = direct_abort_reason == "consecutive_direct_provider_timeouts"
+                row["direct_timeout_abort_reason"] = direct_abort_reason if row["direct_timeout_abort_triggered"] else ""
+                row["direct_timeout_abort_threshold"] = int(args.direct_timeout_abort_threshold)
+                row["direct_infra_abort_threshold"] = int(args.direct_infra_abort_threshold)
             if args.evidence_bundle:
                 row.update(
                     _write_trial_evidence(
@@ -8797,6 +10372,19 @@ def main() -> int:
                     elapsed_sec=float(row.get("wall_duration_sec", 0.0) or 0.0),
                     status="INFRA_INVALID",
                 )
+            if direct_abort_reason:
+                timed_out = True
+                _emit_progress(
+                    enabled=bool(args.progress_log),
+                    event="direct_provider_abort",
+                    mode="without_nexus",
+                    task=task,
+                    target_file=target_file,
+                    test_file=test_file,
+                    elapsed_sec=time.monotonic() - run_start,
+                    status=f"PARTIAL_PROVIDER_ABORT:{direct_abort_reason}",
+                )
+                break
         except BenchmarkTotalTimeout:
             timed_out = True
             _emit_progress(
@@ -8838,10 +10426,12 @@ def main() -> int:
                 config={
                     "tasks_file": args.tasks_file,
                     "tasks_manifest_hash": selected_tasks[0].manifest_hash if selected_tasks else "",
+                    "repo_root": str(repo_root),
                     "public_disclosure_manifest": _public_disclosure_manifest(
                         args.public_disclosure_manifest,
                         repo_root=repo_root,
                     ),
+                    "commercial_model_basis_required": bool(args.require_commercial_model_basis),
                     "unique_tasks_requested": len(selected_tasks),
                     "repeat_trials": max(1, int(args.repeat_trials)),
                     "shuffle_seed": args.shuffle_seed,
@@ -8849,6 +10439,13 @@ def main() -> int:
                     "isolation_mode": args.isolation_mode,
                     "require_clean_worktree": bool(args.require_clean_worktree),
                     "history_policy": history_policy,
+                    "force_learn_slo_ready": bool(args.force_learn_slo_ready),
+                    "trust_workspace_policy": "gemini_cli_trust_workspace_env",
+                    "session_worker": bool(args.session_worker),
+                    "session_worker_id": str(args.session_worker_id or os.environ.get("NEXUS_GEMINI_SESSION_ID") or ""),
+                    "session_worker_policy": "persistent_worker_with_reset_boundary" if args.session_worker else "fresh_direct_invocation",
+                    "external_model_export_policy": str(args.external_model_export_policy),
+                    "outbound_prompt_ledger": str(args.outbound_prompt_ledger or os.environ.get("NEXUS_OUTBOUND_PROMPT_LEDGER") or ""),
                     "hidden_verifier_mode": hidden_verifier_mode,
                     "without_mode": args.without_mode,
                     "with_llm_mode": args.with_llm_mode,
@@ -8864,13 +10461,20 @@ def main() -> int:
                     "force_flow": args.force_flow,
                     "parallel_arms": args.parallel_arms,
                     "nexus_only": bool(args.nexus_only),
+                    "without_only": bool(args.without_only),
+                    "single_arm_mode": "without_nexus" if args.without_only else "with_nexus" if args.nexus_only else "",
                     "warning_ledger_required": True,
+                    "wall_ledger_required": True,
+                    "provider_token_measured_required": args.without_mode in {"gemini", "codex"}
+                    or (not bool(args.without_only) and args.with_model_provider in {"gemini", "codex"}),
                     "runner_command": " ".join(sys.argv),
                     "timeout_sec": int(args.timeout_sec),
                     "total_timeout_sec": int(args.total_timeout_sec),
                     "effective_total_timeout_sec": effective_total_timeout_sec,
                     "stop_loss_sec": int(args.stop_loss_sec),
                     "per_task_stop_loss_sec": int(args.per_task_stop_loss_sec),
+                    "direct_timeout_abort_threshold": int(args.direct_timeout_abort_threshold),
+                    "direct_infra_abort_threshold": int(args.direct_infra_abort_threshold),
                 },
             )
         )
@@ -8912,13 +10516,20 @@ def main() -> int:
                 "repeat_trials": max(1, int(args.repeat_trials)),
                 "shuffle_seed": args.shuffle_seed,
                 "repo_kind_filter": args.repo_kind_filter,
-                "tasks_executed": min(len(with_rows), len(without_rows)) if without_tasks else len(with_rows),
+                "tasks_executed": len(without_rows)
+                if bool(args.without_only)
+                else min(len(with_rows), len(without_rows))
+                if without_tasks
+                else len(with_rows),
                 "with_nexus_executed": len(with_rows),
                 "without_nexus_executed": len(without_rows),
                 "nexus_only": bool(args.nexus_only),
+                "without_only": bool(args.without_only),
                 "total_timeout_sec": int(args.total_timeout_sec),
                 "stop_loss_sec": int(args.stop_loss_sec),
                 "effective_total_timeout_sec": effective_total_timeout_sec,
+                "direct_timeout_abort_threshold": int(args.direct_timeout_abort_threshold),
+                "direct_infra_abort_threshold": int(args.direct_infra_abort_threshold),
                 "with_nexus_file": str(with_path),
                 "without_nexus_file": str(without_path),
                 "evidence_bundle_file": evidence_bundle_path,

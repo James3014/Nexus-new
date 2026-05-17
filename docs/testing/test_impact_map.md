@@ -3,7 +3,9 @@
 | :--- | :--- | :--- | :--- | :--- |
 | nexus/core | tests/core, tests/test_core_*.py | active | high | core_contract |
 | nexus/services | tests/services, tests/test_services_*.py | active | medium | service_contract |
+| nexus/engine/capability_planner.py | tests/engine/test_capability_planner.py::test_capability_planner_emits_planned_skill_mount_contract_for_curated_skill | active | high | skill_mount_planner_contract |
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
+| nexus/app/research_flow_service.py | tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_requires_confirmed_capability_receipt, tests/app/test_research_flow_service.py::test_runtime_skill_mount_contract_blocks_unconfirmed_planned_mount | active | high | skill_mount_runtime_contract |
 | nexus/app | tests/app | active | medium | app_flow |
 | nexus/research | tests/research | active | medium | research_loop |
 | nexus/benchmark | tests/benchmark | active | medium | benchmark_contract |
@@ -14,6 +16,7 @@
 | nexus_dag_workflow.py | tests/test_async_dag_workflow.py | active | medium | workflow_contract |
 | scripts/engine/nexus_cli.py | tests/test_cli_learn_mode.py, tests/test_cli_commands.py | active | high | governance |
 | scripts/ops/ci_gate.py | tests/ops/test_ci_gate_report_trust_audit.py, tests/ops/test_ci_gate_closeout_contract.py, tests/ops/test_ci_gate_wiki_sync_block.py | active | high | governance |
+| scripts/ops/check_skill_catalog_policy.py | tests/learning/test_skill_catalog.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_catalog_governance |
 | scripts/ops/ultra_gate.py | tests/ops/test_ultra_gate.py | active | high | governance |
 | scripts/ops/__init__.py | tests/ops/test_anti_drift_gate.py, tests/ops/test_soul_artifact_vault.py | active | medium | compatibility |
 | scripts/ops/select_tests.py | tests/ops/test_select_tests.py | active | high | jit_selector |
@@ -21,7 +24,10 @@
 | scripts/ops/build_test_impact_index.py | tests/ops/test_build_test_impact_index.py | active | medium | jit_index |
 | scripts/ops/test_changed.sh | tests/ops/test_select_tests.py | active | medium | jit_entrypoint |
 | scripts/ops | tests/ops | active | medium | ops_tooling |
+| scripts/bench/capability_ab_runner.py | tests/benchmark/test_capability_ab_runner.py::test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
+| scripts/bench/public_lane_contract.py | tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_accepts_causal_runtime_mount, tests/benchmark/test_capability_ab_runner.py::test_skill_mount_evidence_contract_rejects_quarantined_mount | active | high | benchmark_contract |
 | scripts/bench | tests/benchmark | active | medium | benchmark_contract |
+| nexus/learning/skill_catalog.py | tests/learning/test_skill_catalog.py, tests/ops/test_ci_gate_report_trust_audit.py | active | high | skill_catalog_governance |
 | tests/ops/test_ci_gate_report_trust_audit.py | tests/ops/test_ci_gate_report_trust_audit.py | active | medium | test_contract |
 | tests/ops/test_select_tests.py | tests/ops/test_select_tests.py | active | medium | test_contract |
 ## Candidate Legacy Tests

@@ -73,5 +73,24 @@
     *   **漸進式揭露**：新 Task 啟動 (`SessionStart`) 時，`ContextHub` 的 L1 Index 只會注入最近 5 條記憶的「標題與 ID」，如 `[MEM-102: Auth Session Timeout Fix]`。若 Agent 需要細節，必須主動調用 `get_observations("MEM-102")`。
 
 ---
-**[NEXUS CONTEXT ENGINEERING UNIFIED SPEC v1.5 | 2026-05-17]**
+
+## 🗄️ V. 混合檢索與增量同步 (Hybrid Search & Incremental Sync - `zilliztech/claude-context`)
+
+### 9. 混合搜尋架構 (Hybrid Search)
+*   **底層機制**：單一的向量檢索 (Dense Vector) 容易遺漏精確的符號名稱；純文字搜尋 (BM25) 無法理解語意。必須結合兩者。
+*   **Nexus 實作細節 (X/R 階段)**：
+    *   優化 `Palace Search` 與 `WisdomVault` 的檢索策略。實作 **BM25 + Dense Vector** 的雙軌檢索，解決變數名稱拼寫與語意意圖的雙重對位問題。
+
+### 10. 增量索引與 AST 分塊 (Incremental Indexing & AST Chunking)
+*   **底層機制**：龐大的程式碼庫每次全量重新索引成本極高，必須基於 AST 進行智慧分塊並使用 Merkle Tree 進行增量更新。
+*   **Nexus 實作細節**：
+    *   在 `nexus/research/msa_indexer.py` 中引入 **Merkle Tree 檔案雜湊比對**。僅在檔案變動時，利用 Tree-sitter 進行 AST 分塊 (Intelligent Chunking) 並更新 LanceDB，取代定期全量重掃。
+
+### 11. Token 節約度量 (Efficiency Mapping)
+*   **底層機制**：透過外接向量資料庫，能在同等檢索品質下減少約 40% 的 Token 消耗。
+*   **Nexus 實作細節**：
+    *   強化 `cost_efficiency_claim_gate`。當 Nexus 使用 `lancedb` 取代直接讀取全量檔案時，在 `CapabilityReceipt` 中計算並標註 `token_saved_estimate`，作為成本優化的物理證據。
+
+---
+**[NEXUS CONTEXT ENGINEERING UNIFIED SPEC v1.6 | 2026-05-17]**
 **[Status: DEEP MECHANICS & CODE-LEVEL MAPPING ENFORCED]**

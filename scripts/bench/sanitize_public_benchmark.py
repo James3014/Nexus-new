@@ -55,6 +55,10 @@ def sanitize_manifest(payload: dict[str, Any]) -> dict[str, Any]:
         tasks.append(_base_task(row, allowed_keys=ALLOWED_TASK_KEYS))
     return {
         "schema": "nexus_public_benchmark_sanitized_manifest_v1",
+        "version": payload.get("version", "public-disclosure-v1"),
+        "frozen": bool(payload.get("frozen", True)),
+        "benchmark_id": str(payload.get("benchmark_id", "nexus-public-benchmark")) + "-disclosure",
+        "commercial_lane_source": str(payload.get("commercial_lane_source") or ""),
         "source_schema": payload.get("schema", ""),
         "sanitization": {
             "removed_fields": ["allowed_files", "forbidden_files"],
@@ -82,6 +86,7 @@ def sanitize_execution_manifest(payload: dict[str, Any]) -> dict[str, Any]:
         "frozen": True,
         "benchmark_id": str(payload.get("benchmark_id", "nexus-public-benchmark")) + "-execution-safe",
         "description": str(payload.get("description", "")),
+        "commercial_lane_source": str(payload.get("commercial_lane_source") or ""),
         "schema": "nexus_public_benchmark_execution_safe_manifest_v1",
         "source_schema": payload.get("schema", ""),
         "sanitization": {

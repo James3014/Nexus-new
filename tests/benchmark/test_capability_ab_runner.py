@@ -5,19 +5,47 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import warnings
 from pathlib import Path
 
 import pytest
 
 import scripts.bench.capability_ab_runner as capability_ab_runner
+from scripts.bench.build_sanitized_runner import (
+    _learn_metadata_commit_hook,
+    _session_marker_paths,
+    _session_marker_reset_hook,
+    build_sanitized_runner,
+)
 from scripts.bench.gemini_nexus_report import _claim_posture_lines
+from scripts.bench.persistent_worker_gap_dashboard import build_gap_dashboard
+from scripts.bench.public_lane_contract import (
+    build_external_provider_claim_boundary_contract,
+    build_expected_capability_evidence_contract,
+    build_public_claim_gates,
+    build_public_promotion_readiness_contract,
+    build_route_policy_evidence_contract,
+    build_skill_mount_evidence_contract,
+    commercial_model_basis_gate_failures,
+    derive_public_gate_failures,
+)
+from scripts.bench.route_execution_policy import decide_route_execution_policy
+from scripts.bench.taskset_contract import (
+    build_benchmark_basis_contract,
+    build_prompt_contract_hash,
+    build_provider_transport_contract_hash,
+    build_taskset_contract,
+)
 from scripts.bench.warning_ledger import annotate_row as annotate_warning_row
 from scripts.bench.warning_ledger import capture_python_warnings
 from scripts.bench.warning_ledger import records_from_text as warning_records_from_text
+from nexus.research.local_sprint_mutator import generate_local_candidate
 from scripts.bench.capability_ab_runner import (
     CapabilityTask,
     _annotate_benchmark_eligibility,
+    _annotate_with_contract,
+    _apply_data_contract_audit,
     _apply_per_task_stop_loss,
     _benchmark_memory_db_path,
     _budget_exceeded,
@@ -27,8 +55,14 @@ from scripts.bench.capability_ab_runner import (
     _hidden_verifier_infra_reason,
     _nexus_cli_subprocess_cmd,
     _direct_gemini_timeout_sec,
+    _direct_provider_infra_row,
+    _direct_provider_timeout_row,
+    _direct_infra_abort_reason,
+    _direct_timeout_abort_reason,
+    _ask_direct_codex_patch,
     _emit_progress,
     _effective_total_timeout_sec,
+    _external_model_name_for_provider,
     _extract_record,
     _extract_json_payload,
     _summarize_rlm_trace,
@@ -56,9 +90,11 @@ from scripts.bench.capability_ab_runner import (
     _benchmark_gateway_timeout_for_task,
     _benchmark_gateway_timeout_for_execution,
     _benchmark_gateway_timeout_sec,
+    benchmark_skill_mount_requests,
     _build_parallel_smoke_rows,
     build_public_benchmark_preflight,
     _materialize_fixture,
+    _merge_receipt_first_probe,
     _model_required_execution_policy,
     main,
     _nexus_task_desc,
@@ -67,11 +103,16 @@ from scripts.bench.capability_ab_runner import (
     _parse_direct_gemini_json,
     _python_syntax_warning,
     _apply_direct_gemini_stats_outlier_policy,
+    _post_model_deterministic_rescue_infra_allowed,
+    _reconcile_benchmark_skill_mount_contract_from_expected_receipts,
+    _reconcile_skill_mount_contract_after_receipts,
+    _with_nexus_row_fail_fast_reason,
     _pytest_verifier_cmd,
     _read_preserved_target,
     _remaining_leg_timeout,
     _remaining_task_timeout,
     _report_model_label,
+    _route_cost_controls_prefer_baseline_fast_path,
     _runner_overhead_polluted,
     _runner_overhead_class,
     _route_oracle_force_flow_policy,
@@ -97,11 +138,1114 @@ from scripts.bench.capability_ab_runner import (
 )
 
 
+def test_benchmark_skill_mount_requests_maps_expected_capabilities(monkeypatch):
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNTS", "1")
+    task = CapabilityTask(
+        id="skill-map-001",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix a semantic failure",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=("hyper", "codeintel", "claim_gate", "hyper"),
+    )
+
+    assert benchmark_skill_mount_requests(task) == [
+        "tdd",
+        "improve-codebase-architecture",
+        "nexus-root-cause-probe",
+    ]
+
+
+def test_benchmark_skill_mount_requests_maps_research_capability(monkeypatch):
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNTS", "1")
+    task = CapabilityTask(
+        id="skill-map-research",
+        difficulty="medium",
+        task_type="public_docs_code_sync",
+        task_desc="Research supporting evidence",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=("research",),
+    )
+
+    assert benchmark_skill_mount_requests(task) == ["notebooklm-context-bridge"]
+
+
+def test_benchmark_skill_mount_requests_maps_skill_validation_long_tail(monkeypatch):
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNTS", "1")
+    task = CapabilityTask(
+        id="skill-map-long-tail",
+        difficulty="medium",
+        task_type="public_ops_research",
+        task_desc="Validate long-tail skill mounts",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=(
+            "memory",
+            "semantic_searcher",
+            "swarm_quiet_moment",
+            "bdd_acceptance_skill",
+        ),
+    )
+
+    assert benchmark_skill_mount_requests(task) == [
+        "notebooklm-context-bridge",
+        "nexus-goal-closure-executor",
+        "tdd",
+    ]
+
+
+def test_reconcile_benchmark_skill_mount_from_expected_receipts(tmp_path, monkeypatch):
+    status_report = tmp_path / "skill_status.json"
+    status_report.write_text(
+        json.dumps(
+            {
+                "skills": [
+                    {
+                        "name": "nexus-root-cause-probe",
+                        "path": "/repo/.agents/skills/nexus-root-cause-probe/SKILL.md",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "governance_and_trust",
+                        "action": "eligible_for_capability_mount_review",
+                    },
+                    {
+                        "name": "nexus-benchmark-public-report",
+                        "path": "/repo/.agents/skills/nexus-benchmark-public-report/SKILL.md",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "benchmark_and_promotion",
+                        "action": "eligible_for_capability_mount_review",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNTS", "1")
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_STATUS_REPORT", str(status_report))
+    task = CapabilityTask(
+        id="skill-reconcile-001",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix hidden verifier claim",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=("claim_gate", "delivery_gate"),
+    )
+    row = {
+        "status": "SUCCESS",
+        "provider_token_measured": True,
+        "model_calls": 1,
+        "total_tokens": 10,
+        "capability_receipts": [
+            {
+                "name": "claim_gate",
+                "public_claim_safe": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "evidence_refs": ["claim_gate:evidence"],
+            },
+            {
+                "name": "delivery_gate",
+                "public_claim_safe": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "evidence_refs": ["delivery_gate:evidence"],
+            },
+        ],
+        "skill_mount_contract": [],
+        "skill_mount_violations": [
+            {
+                "skill_name": "nexus-root-cause-probe",
+                "path": "",
+                "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+            }
+        ],
+        "skill_mount_contract_status": "EMPTY",
+    }
+
+    _reconcile_benchmark_skill_mount_contract_from_expected_receipts(row, task=task, repo_root=tmp_path)
+
+    assert row["skill_mount_contract_status"] == "PASS"
+    assert row["skill_mount_count"] == 2
+    assert {item["skill_id"] for item in row["skill_mount_contract"]} == {
+        "nexus-root-cause-probe",
+        "nexus-benchmark-public-report",
+    }
+    assert row["skill_mount_violations"] == []
+    assert _with_nexus_row_fail_fast_reason(row, task=task) == ""
+
+
+def test_with_nexus_fail_fast_allows_normalized_cumulative_token_stats():
+    task = CapabilityTask(
+        id="token-normalized-001",
+        difficulty="medium",
+        task_type="public_feature",
+        task_desc="Implement feature",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=(),
+    )
+    row = {
+        "status": "SUCCESS",
+        "report_trust_mismatch": False,
+        "model_calls": 1,
+        "provider_token_measured": False,
+        "total_tokens": 313,
+        "token_ledger_normalized_tokens": 313,
+        "token_ledger_status": "normalized_from_cumulative_stats",
+        "skill_mount_contract_status": "EMPTY",
+        "skill_mount_violations": [],
+    }
+
+    assert _with_nexus_row_fail_fast_reason(row, task=task) == ""
+
+
+def test_benchmark_skill_mount_requests_honors_explicit_env(monkeypatch):
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", '["diagnose", {"skill_id": "tdd"}, "diagnose"]')
+    task = CapabilityTask(
+        id="skill-map-explicit",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix a semantic failure",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=("hyper",),
+    )
+
+    assert benchmark_skill_mount_requests(task) == ["diagnose", "tdd"]
+
+
+def test_benchmark_skill_mount_requests_ignores_explicit_env_when_ablation_disallowed(monkeypatch):
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", '["candidate-skill"]')
+    monkeypatch.setenv("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "0")
+    task = CapabilityTask(
+        id="skill-map-explicit-blocked",
+        difficulty="medium",
+        task_type="public_bugfix",
+        task_desc="Fix a semantic failure",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=("hyper",),
+    )
+
+    assert benchmark_skill_mount_requests(task) == []
+
+
+def _route_policy(reason_codes: list[str] | None = None) -> dict[str, object]:
+    return {
+        "reason_codes": list(reason_codes or []),
+        "pre_model_deterministic_rescue_allowed": False,
+    }
+
+
+def test_post_model_deterministic_rescue_allows_recoverable_receipt_violation():
+    assert _post_model_deterministic_rescue_infra_allowed({"infra_invalid_reason": ""}) is True
+    assert (
+        _post_model_deterministic_rescue_infra_allowed(
+            {
+                "infra_invalid_reason": "receipt_data_contract_violation",
+                "nexus_failure_recoverable": True,
+                "nexus_failure_reasons": ["tests_failed"],
+            }
+        )
+        is True
+    )
+    assert (
+        _post_model_deterministic_rescue_infra_allowed(
+            {
+                "infra_invalid_reason": "receipt_data_contract_violation",
+                "nexus_failure_recoverable": False,
+                "nexus_failure_reasons": ["tests_failed"],
+            }
+        )
+        is False
+    )
+    assert _post_model_deterministic_rescue_infra_allowed({"infra_invalid_reason": "model_call_without_tokens"}) is False
+
+
+def test_reconcile_skill_mount_after_receipt_backfill(tmp_path: Path, monkeypatch):
+    status_report = tmp_path / "skill_status.json"
+    status_report.write_text(
+        json.dumps(
+            {
+                "skills": [
+                    {
+                        "name": "nexus-root-cause-probe",
+                        "path": "/repo/.agents/skills/nexus-root-cause-probe/SKILL.md",
+                        "root": "nexus_repo",
+                        "skill_status": "nexus_curated_candidate",
+                        "test_level": "routing_plus_e2e",
+                        "action": "eligible_for_capability_mount_review",
+                        "capability_mount": "governance_and_trust",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_STATUS_REPORT", str(status_report))
+    row = {
+        "skill_mount_contract": [],
+        "skill_mount_violations": [
+            {
+                "skill_name": "nexus-root-cause-probe",
+                "path": "",
+                "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+            }
+        ],
+        "capability_receipts": [
+            {
+                "name": "ultra_review",
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": True,
+                "evidence_refs": ["ultra_review:verified"],
+            }
+        ],
+    }
+
+    _reconcile_skill_mount_contract_after_receipts(row, repo_root=tmp_path)
+
+    assert row["skill_mount_count"] == 1
+    assert row["skill_mount_contract_status"] == "PASS"
+    assert row["skill_mount_violations"] == []
+    assert row["skill_mount_contract"][0]["skill_id"] == "nexus-root-cause-probe"
+    assert row["skill_mount_contract"][0]["capability"] == "ultra_review"
+
+
 def test_python_syntax_warning_detects_return_in_finally():
     warning = _python_syntax_warning("def f():\n    try:\n        pass\n    finally:\n        return 1\n")
 
     assert "return" in warning
     assert "finally" in warning
+
+
+def test_public_claim_gate_builder_keeps_delivery_and_cost_scopes_separate():
+    gates = build_public_claim_gates(
+        delivery_gate_passed=True,
+        cost_claim_passed=False,
+        cost_efficiency_status="REGRESSED",
+        delivery_gate_failures=[],
+        cost_gate_failures=["with_token_measured_below_threshold"],
+        cost_efficiency_failures=["token_cost_not_improved"],
+        public_gate_checks={"hidden_verifier_mode": True},
+    )
+
+    assert gates["public_delivery_gate"]["verdict"] == "PASS"
+    assert gates["public_cost_claim_gate"]["verdict"] == "FAIL"
+    assert gates["public_claim_gate"]["verdict"] == "FAIL"
+    assert gates["public_cost_claim_gate"]["checks"]["delivery_gate_passed"] is True
+    assert gates["public_cost_claim_gate"]["checks"]["cost_claim_public_safe"] is False
+    assert gates["public_cost_efficiency_claim_gate"]["claim_scope"] == "cost_efficiency_direction_only"
+
+
+def test_public_claim_gate_builder_blocks_cost_claim_when_delivery_fails_without_cost_failure():
+    gates = build_public_claim_gates(
+        delivery_gate_passed=False,
+        cost_claim_passed=False,
+        cost_efficiency_status="REGRESSED",
+        delivery_gate_failures=["hidden_verifier_disabled"],
+        cost_gate_failures=[],
+        cost_efficiency_failures=["hidden_verifier_disabled"],
+        public_gate_checks={"hidden_verifier_mode": False},
+    )
+
+    assert gates["public_delivery_gate"]["verdict"] == "FAIL"
+    assert gates["public_delivery_gate"]["failures"] == ["hidden_verifier_disabled"]
+    assert gates["public_cost_claim_gate"]["verdict"] == "FAIL"
+    assert gates["public_cost_claim_gate"]["failures"] == ["hidden_verifier_disabled"]
+    assert gates["public_cost_claim_gate"]["checks"]["cost_claim_public_safe"] is False
+    assert "with_token_measured_below_threshold" not in gates["public_cost_claim_gate"]["failures"]
+
+
+def test_public_promotion_readiness_contract_requires_all_public_gates():
+    bundle = {
+        "public_claim_gate": {
+            "checks": {
+                "with_trust_mismatch_rate": 0.0,
+                "without_trust_mismatch_rate": 0.0,
+                "wall_ledger_with_conserved_rate": 1.0,
+                "wall_ledger_without_conserved_rate": 1.0,
+                "provider_token_measured_rate_with": 1.0,
+                "provider_token_measured_rate_without": 1.0,
+            }
+        },
+        "public_verified_delivery_claim_gate": {"verdict": "PASS", "failures": []},
+        "public_cost_claim_gate": {"verdict": "PASS", "failures": []},
+        "public_cost_efficiency_claim_gate": {"verdict": "IMPROVED", "failures": []},
+        "x3_promotion_gate": {"status": "PASS", "failures": []},
+        "valid_comparison_readiness_gate": {"status": "PASS", "failures": []},
+        "route_policy_evidence_contract": {"status": "PASS", "failures": []},
+        "external_provider_claim_boundary_contract": {"status": "PASS", "public_claim_allowed": True, "failures": []},
+        "taskset_contract": {"fixed_public_taskset_ready": True},
+        "session_worker_contamination": {"clean": True, "contamination_rate": 0.0},
+        "outbound_prompt_ledger_gate": {"status": "PASS", "forbidden_literal_count": 0},
+    }
+
+    ready = build_public_promotion_readiness_contract(bundle)
+    assert ready["status"] == "PASS"
+    assert ready["promotion_allowed"] is True
+
+    bundle["public_cost_efficiency_claim_gate"] = {"verdict": "REGRESSED", "failures": ["wall_cost_not_improved"]}
+    blocked = build_public_promotion_readiness_contract(bundle)
+    assert blocked["status"] == "RETURN"
+    assert blocked["promotion_allowed"] is False
+    assert "public_cost_efficiency_non_regressed" in blocked["failures"]
+    assert "public_cost_efficiency_claim_gate:wall_cost_not_improved" in blocked["failures"]
+
+
+def test_external_provider_claim_boundary_blocks_codex_public_claims():
+    contract = build_external_provider_claim_boundary_contract(
+        {
+            "config": {"with_model_provider": "codex", "without_mode": "codex"},
+            "model_lock": {"codex_model_name": "gpt-5.5", "direct_codex_model_name": "gpt-5.5"},
+        }
+    )
+
+    assert contract["schema"] == "nexus_external_provider_claim_boundary_contract_v1"
+    assert contract["status"] == "OBSERVATION_ONLY"
+    assert contract["public_claim_allowed"] is False
+    assert "codex_provider_prompt_wearing_only_for_external_model_claims" in contract["failures"]
+
+
+def test_expected_capability_evidence_contract_fails_missing_receipt():
+    contract = build_expected_capability_evidence_contract(
+        [
+            {
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "task_id": "route-oracle-swarm-001",
+                "trial_index": 1,
+                "expected_capability_receipt_coverage": {
+                    "expected": ["swarm"],
+                    "public_safe": [],
+                    "missing": ["swarm"],
+                    "all_public_safe": False,
+                },
+                "expected_capability_invocation_coverage": {
+                    "expected": ["swarm"],
+                    "invoked": ["swarm"],
+                    "missing": [],
+                    "all_invoked_with_evidence": True,
+                },
+            }
+        ]
+    )
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["route-oracle-swarm-001:1:receipt_missing:swarm"]
+
+
+def test_expected_capability_evidence_contract_fails_missing_invocation():
+    contract = build_expected_capability_evidence_contract(
+        [
+            {
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "task_id": "rlm-harder-v2-second-round-002",
+                "trial_index": 1,
+                "expected_capability_receipt_coverage": {
+                    "expected": ["hyper"],
+                    "public_safe": ["hyper"],
+                    "missing": [],
+                    "all_public_safe": True,
+                },
+                "expected_capability_invocation_coverage": {
+                    "expected": ["hyper"],
+                    "invoked": [],
+                    "missing": ["hyper"],
+                    "all_invoked_with_evidence": False,
+                },
+            }
+        ]
+    )
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["rlm-harder-v2-second-round-002:1:invocation_missing:hyper"]
+
+
+def _receipt_lite_contract_for(receipt_overrides: dict[str, object], *, semantic_status: str = "VERIFIED") -> dict[str, object]:
+    receipt = {
+        "name": "hyper",
+        "selected": True,
+        "invoked": True,
+        "evidence_present": True,
+        "gate_passed": True,
+        "outcome_contributed": True,
+        "selection_source": "deterministic_receipt_lite",
+        "evidence_refs": ["hyper:t:hidden_verifier"],
+        "source_refs": ["hyper:t:hidden_verifier"],
+        "replay_refs": ["hidden_verifier:t"],
+        "distinct_roles": ["capability_executor", "hidden_verifier"],
+        "semantic_evidence_complete": True,
+        "public_claim_safe": True,
+    }
+    receipt.update(receipt_overrides)
+    return build_expected_capability_evidence_contract(
+        [
+            {
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "task_id": "t",
+                "trial_index": 1,
+                "semantic_status": semantic_status,
+                "expected_capabilities": ["hyper"],
+                "capability_receipts": [receipt],
+                "expected_capability_receipt_coverage": {
+                    "expected": ["hyper"],
+                    "public_safe": ["hyper"],
+                    "missing": [],
+                    "all_public_safe": True,
+                },
+                "expected_capability_invocation_coverage": {
+                    "expected": ["hyper"],
+                    "invoked": ["hyper"],
+                    "missing": [],
+                    "all_invoked_with_evidence": True,
+                },
+            }
+        ]
+    )
+
+
+def test_expected_capability_evidence_contract_rejects_receipt_lite_missing_evidence_refs():
+    contract = _receipt_lite_contract_for({"evidence_refs": []})
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["t:1:receipt_lite_missing_evidence_refs:hyper"]
+
+
+def test_expected_capability_evidence_contract_rejects_receipt_lite_missing_distinct_roles():
+    contract = _receipt_lite_contract_for({"distinct_roles": ["hidden_verifier"]})
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["t:1:receipt_lite_missing_distinct_roles:hyper"]
+
+
+def test_expected_capability_evidence_contract_rejects_receipt_lite_missing_replay_refs():
+    contract = _receipt_lite_contract_for({"replay_refs": []})
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["t:1:receipt_lite_missing_replay_refs:hyper"]
+
+
+def test_expected_capability_evidence_contract_rejects_receipt_lite_missing_source_refs():
+    contract = _receipt_lite_contract_for({"source_refs": []})
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["t:1:receipt_lite_missing_source_refs:hyper"]
+
+
+def test_expected_capability_evidence_contract_rejects_receipt_lite_incomplete_semantic_evidence():
+    contract = _receipt_lite_contract_for({"semantic_evidence_complete": False}, semantic_status="UNVERIFIED")
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["t:1:receipt_lite_semantic_evidence_incomplete:hyper"]
+
+
+def test_public_promotion_readiness_contract_requires_external_provider_boundary():
+    bundle = {
+        "public_claim_gate": {
+            "checks": {
+                "with_trust_mismatch_rate": 0.0,
+                "without_trust_mismatch_rate": 0.0,
+                "wall_ledger_with_conserved_rate": 1.0,
+                "wall_ledger_without_conserved_rate": 1.0,
+                "provider_token_measured_rate_with": 1.0,
+                "provider_token_measured_rate_without": 1.0,
+            }
+        },
+        "public_verified_delivery_claim_gate": {"verdict": "PASS", "failures": []},
+        "public_cost_claim_gate": {"verdict": "PASS", "failures": []},
+        "public_cost_efficiency_claim_gate": {"verdict": "IMPROVED", "failures": []},
+        "x3_promotion_gate": {"status": "PASS", "failures": []},
+        "valid_comparison_readiness_gate": {"status": "PASS", "failures": []},
+        "route_policy_evidence_contract": {"status": "PASS", "failures": []},
+        "external_provider_claim_boundary_contract": {
+            "status": "OBSERVATION_ONLY",
+            "public_claim_allowed": False,
+            "failures": ["codex_provider_prompt_wearing_only_for_external_model_claims"],
+        },
+        "taskset_contract": {"fixed_public_taskset_ready": True},
+        "session_worker_contamination": {"clean": True, "contamination_rate": 0.0},
+        "outbound_prompt_ledger_gate": {"status": "PASS", "forbidden_literal_count": 0},
+    }
+
+    blocked = build_public_promotion_readiness_contract(bundle)
+
+    assert blocked["status"] == "RETURN"
+    assert blocked["promotion_allowed"] is False
+    assert "external_provider_public_claim_allowed" in blocked["failures"]
+    assert (
+        "external_provider_claim_boundary_contract:codex_provider_prompt_wearing_only_for_external_model_claims"
+        in blocked["failures"]
+    )
+
+
+def test_route_policy_evidence_contract_blocks_missing_public_route_policy():
+    contract = build_route_policy_evidence_contract(
+        [
+            {
+                "task_id": "public-a",
+                "trial_index": 1,
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "semantic_status": "VERIFIED",
+            }
+        ]
+    )
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["public-a:1:route_execution_policy_missing"]
+
+
+def test_route_policy_evidence_contract_accepts_verified_cost_capped_rescue():
+    contract = build_route_policy_evidence_contract(
+        [
+            {
+                "task_id": "public-a",
+                "trial_index": 1,
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "capability_activation_contract": "cost_capped",
+                "hidden_verifier_passed": True,
+                "local_reflex_risk_level": "low",
+                "local_reflex_bare_sufficiency": "high",
+                "nexus_winner_source": "local_deterministic_pre_model_rescue",
+                "route_execution_policy": {
+                    "reason_codes": ["cost_capped_capability_allows_verified_pre_model_rescue"],
+                    "pre_model_deterministic_rescue_allowed": True,
+                },
+            }
+        ]
+    )
+
+    assert contract["status"] == "PASS"
+    assert contract["cost_capped_rescue_rows"] == 1
+    assert contract["failures"] == []
+
+
+def test_route_policy_evidence_contract_blocks_unverified_cost_capped_rescue():
+    contract = build_route_policy_evidence_contract(
+        [
+            {
+                "task_id": "public-a",
+                "trial_index": 1,
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "capability_activation_contract": "cost_capped",
+                "hidden_verifier_passed": False,
+                "local_reflex_risk_level": "low",
+                "local_reflex_bare_sufficiency": "high",
+                "nexus_winner_source": "local_deterministic_pre_model_rescue",
+                "route_execution_policy": {
+                    "reason_codes": ["cost_capped_capability_allows_verified_pre_model_rescue"],
+                    "pre_model_deterministic_rescue_allowed": True,
+                },
+            }
+        ]
+    )
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == ["public-a:1:cost_capped_rescue_without_hidden_verifier_pass"]
+
+
+def test_skill_mount_evidence_contract_accepts_causal_runtime_mount():
+    contract = build_skill_mount_evidence_contract(
+        [
+            {
+                "task_id": "skill-route-a",
+                "trial_index": 1,
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "skill_mount_contract": {
+                    "skill_id": "nexus-benchmark-public-report",
+                    "skill_status": "nexus_curated_candidate",
+                    "capability_mount": "benchmark_and_promotion",
+                    "load_reason_codes": ["public_benchmark_report_required"],
+                    "evidence_refs": ["row:skill-route-a:route_policy"],
+                    "outcome_contributed": True,
+                },
+            }
+        ]
+    )
+
+    assert contract["status"] == "PASS"
+    assert contract["checked_mounts"] == 1
+    assert contract["failures"] == []
+
+
+def test_skill_mount_evidence_contract_rejects_quarantined_mount():
+    contract = build_skill_mount_evidence_contract(
+        [
+            {
+                "task_id": "skill-route-a",
+                "trial_index": 1,
+                "mode": "with_nexus",
+                "run_eligible": True,
+                "skill_mount_contract": {
+                    "skill_id": "candidate-skill-from-run-001",
+                    "skill_status": "candidate_quarantine",
+                    "capability_mount": "repair_and_coding",
+                    "load_reason_codes": [],
+                    "evidence_refs": [],
+                    "outcome_contributed": False,
+                },
+            }
+        ]
+    )
+
+    assert contract["status"] == "RETURN"
+    assert contract["failures"] == [
+        "skill-route-a:1:skill_mount_missing_evidence_refs:candidate-skill-from-run-001",
+        "skill-route-a:1:skill_mount_missing_load_reason_codes:candidate-skill-from-run-001",
+        "skill-route-a:1:skill_mount_missing_outcome_contribution:candidate-skill-from-run-001",
+        "skill-route-a:1:skill_mount_non_runtime_status:candidate-skill-from-run-001:candidate_quarantine",
+    ]
+
+
+def test_public_gate_requires_full_token_ledger_for_public_cost_claim():
+    context = {
+        "with_rows": [{"task_id": "a"}],
+        "without_rows": [{"task_id": "a"}],
+        "with_models": {"gemini-3-flash-preview"},
+        "without_models": {"gemini-3-flash-preview"},
+        "same_task_trials": True,
+        "hidden_verifier_mode": True,
+        "eligibility_complete": True,
+        "with_trust_mismatch_rate": 0.0,
+        "without_trust_mismatch_rate": 0.0,
+        "nexus_valid_rate": 1.0,
+        "nexus_system_execution_valid_rate": 1.0,
+        "nexus_context_delivered_rate": 1.0,
+        "nexus_system_usage_valid_rate": 1.0,
+        "claim_verified_rate": 1.0,
+        "route_decision_present_rate": 1.0,
+        "token_measured_rate_with": 0.9999,
+        "token_measured_rate_without": 1.0,
+        "provider_token_measured_rate_with": 1.0,
+        "provider_token_measured_rate_without": 1.0,
+        "prompt_purity_gate_passed": True,
+        "verified_equal_without_lift": False,
+        "wall_cost_ratio_with_over_without": 1.0,
+        "route_cost_regression_wall_ratio_threshold": 1.8,
+        "wall_regression_systemic": False,
+        "token_cost_ratio_with_over_without": 1.0,
+        "route_cost_regression_token_ratio_threshold": 1.5,
+        "token_regression_systemic": False,
+    }
+
+    failures = derive_public_gate_failures(context, {"tasks_file": "tasks.json", "tasks_manifest_hash": "abc", "runner_command": "cmd"})
+
+    assert failures["delivery_gate_failures"] == []
+    assert failures["cost_gate_failures"] == ["with_token_measured_below_threshold"]
+
+
+def test_commercial_model_basis_gate_rejects_skill_fit_matrix_as_public_claim_basis(tmp_path: Path):
+    matrix = tmp_path / "skill_fit_matrix.json"
+    matrix.write_text(
+        json.dumps(
+            {
+                "schema": "nexus.skill_fit_execution_matrix.v1",
+                "rows": [{"arm_type": "skill_ablation"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    failures = commercial_model_basis_gate_failures(
+        {"commercial_model_basis_required": True, "tasks_file": str(matrix)}
+    )
+
+    assert "commercial_model_basis:not_ready" in failures
+    assert "commercial_model_basis:not_commercial_model_basis" in failures
+    assert "commercial_model_basis:skill_fit_matrix_not_public_claim_basis" in failures
+    assert "commercial_model_basis:ablation_rows_not_public_claim_basis" in failures
+
+
+def test_commercial_model_basis_gate_accepts_compiled_commercial_manifest(tmp_path: Path):
+    manifest = tmp_path / "commercial.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "nexus-public-commercial-lanes-v1:all",
+                "commercial_lane_source": "scripts/bench/public_benchmark_commercial_lanes_v1.json",
+                "tasks": [{"id": "task-1", "commercial_lane": "governed_delivery"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert commercial_model_basis_gate_failures(
+        {"commercial_model_basis_required": True, "tasks_file": str(manifest)}
+    ) == []
+
+
+def test_expected_capability_protection_blocks_hidden_lite_baseline_fast_path():
+    assert not _route_cost_controls_prefer_baseline_fast_path(
+        {
+            "lite_route": True,
+            "route_lane": "hidden_lite",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "expected_capability_protection": ["hyper"],
+        }
+    )
+
+
+def test_hidden_bugfix_supervised_lane_allows_deterministic_pre_rescue():
+    controls = {
+        "route_lane": "hidden_bugfix_supervised",
+        "context_mode": "compact",
+        "max_rounds": 1,
+        "disable_research": True,
+    }
+
+    assert capability_ab_runner._route_cost_controls_allow_deterministic_pre_rescue(controls) is True
+
+
+def test_hidden_bugfix_supervised_lane_allows_pre_model_deterministic_rescue_without_protected_capabilities():
+    controls = {
+        "route_lane": "hidden_bugfix_supervised",
+        "context_mode": "compact",
+        "max_rounds": 1,
+        "disable_research": True,
+    }
+
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is False
+
+    controls["allow_pre_model_deterministic_rescue"] = True
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is True
+
+    controls["expected_capability_protection"] = ["hyper"]
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is False
+
+
+def test_hidden_lite_lane_allows_explicit_pre_model_deterministic_rescue_without_protected_capabilities():
+    controls = {
+        "route_lane": "hidden_lite",
+        "context_mode": "compact",
+        "max_rounds": 1,
+        "disable_research": True,
+        "lite_route": True,
+    }
+
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is False
+
+    controls["allow_pre_model_deterministic_rescue"] = True
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is True
+
+    controls["expected_capability_protection"] = ["hyper"]
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is False
+
+
+def test_route_execution_policy_records_model_required_pre_model_rescue_blocker():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "hidden_lite",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "lite_route": True,
+            "supervised_bare_first": True,
+            "allow_pre_model_deterministic_rescue": True,
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="model_required",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+
+    assert policy.supervised_bare_first_allowed is True
+    assert policy.baseline_fast_path_preferred is True
+    assert policy.pre_model_deterministic_rescue_allowed is False
+    assert policy.deterministic_pre_rescue_allowed is True
+    assert policy.supervised_bare_first_reason == "policy_explicit"
+    assert "model_required_blocks_pre_model_rescue" in policy.reason_codes
+
+
+def test_route_execution_policy_allows_pre_model_rescue_for_non_model_required_hidden_lite():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "hidden_lite",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "lite_route": True,
+            "allow_pre_model_deterministic_rescue": True,
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="standard",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+
+    assert policy.supervised_bare_first_allowed is True
+    assert policy.pre_model_deterministic_rescue_allowed is True
+    assert policy.supervised_bare_first_reason == "hidden_lite_ghost_governance"
+    assert "model_required_blocks_pre_model_rescue" not in policy.reason_codes
+
+
+def test_route_execution_policy_allows_cost_capped_protected_pre_model_rescue():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "hidden_lite",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "lite_route": True,
+            "allow_pre_model_deterministic_rescue": True,
+            "expected_capability_protection": ["hyper"],
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="standard",
+        capability_activation_contract="cost_capped",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+
+    assert policy.pre_model_deterministic_rescue_allowed is True
+    assert "cost_capped_capability_allows_verified_pre_model_rescue" in policy.reason_codes
+    assert "expected_capability_protection" not in policy.reason_codes
+
+
+def test_route_execution_policy_blocks_required_protected_pre_model_rescue():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "route_lane": "hidden_lite",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "lite_route": True,
+            "allow_pre_model_deterministic_rescue": True,
+            "expected_capability_protection": ["hyper"],
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="standard",
+        capability_activation_contract="required",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+
+    assert policy.pre_model_deterministic_rescue_allowed is False
+    assert "expected_capability_protection" in policy.reason_codes
+    assert "pre_model_rescue_configured_but_blocked" in policy.reason_codes
+
+
+@pytest.mark.parametrize(
+    "route_lane",
+    [
+        "context_sync_capped",
+        "feature_reflex",
+        "governance_hardened",
+        "governance_hardened_capped",
+    ],
+)
+def test_deterministic_contract_lanes_allow_explicit_pre_model_rescue(route_lane: str):
+    controls = {
+        "route_lane": route_lane,
+        "context_mode": "compact",
+        "max_rounds": 1,
+        "disable_research": True,
+        "allow_pre_model_deterministic_rescue": True,
+    }
+
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is True
+
+    controls["expected_capability_protection"] = ["hyper"]
+    assert capability_ab_runner._route_cost_controls_allow_pre_model_deterministic_rescue(controls) is False
+
+
+def test_no_model_local_fast_path_counts_zero_provider_cost_as_measured():
+    assert capability_ab_runner._row_has_measured_provider_tokens(
+        {
+            "model_calls": 0,
+            "total_tokens": 0,
+            "token_capture_status": "not_applicable_local_only",
+            "model_token_capture_status": "not_applicable_no_model",
+        }
+    )
+
+
+def test_extract_record_marks_no_model_local_fast_path_token_measured():
+    task = CapabilityTask(
+        id="local-fast-path",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Local verified fast path",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+    )
+    row = _extract_record(
+        mode="with_nexus",
+        task=task,
+        payload={
+            "status": "SUCCESS",
+            "semantic_status": "VERIFIED",
+            "runtime_classification": "verified_pass",
+            "result": {
+                "elapsed_sec": 1.0,
+                "report": {
+                    "model_calls": 0,
+                    "total_tokens": 0,
+                    "token_capture_status": "not_applicable_local_only",
+                },
+            },
+        },
+        wall_time_sec=1.0,
+    )
+
+    assert row["token_measured"] is True
+    assert row["provider_token_measured"] is True
+
+
+def test_wall_ledger_conserves_no_model_nexus_phase_work():
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "wall_duration_sec": 10.0,
+        "phase_wall_total_sec": 9.8,
+        "hidden_verifier_wall_sec": 0.1,
+        "hidden_verifier_passed": True,
+    }
+
+    ledger = evaluate_wall_ledger_conservation(row)
+
+    assert ledger["status"] == "PASS"
+    assert ledger["wall_ledger_conserved"] is True
+    assert ledger["wall_ledger_components"]["nexus_phase"] == 9.8
+
+
+def test_wall_ledger_conserves_no_model_nexus_cli_uninstrumented_work():
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "wall_duration_sec": 38.4316,
+        "phase_wall_total_sec": 35.8169,
+        "hidden_verifier_wall_sec": 0.3343,
+        "cli_uninstrumented_sec": 1.9231,
+        "hidden_verifier_passed": True,
+    }
+
+    ledger = evaluate_wall_ledger_conservation(row)
+
+    assert ledger["status"] == "PASS"
+    assert ledger["wall_ledger_conserved"] is True
+    assert ledger["wall_ledger_components"]["cli_uninstrumented"] == 1.9231
+
+
+def test_wall_ledger_counts_cli_uninstrumented_as_residual_after_deterministic_rescue():
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "wall_duration_sec": 0.7524,
+        "phase_wall_total_sec": 0.0,
+        "hidden_verifier_wall_sec": 0.3221,
+        "deterministic_pre_rescue_wall_sec": 0.4301,
+        "cli_uninstrumented_sec": 0.7524,
+        "hidden_verifier_passed": True,
+    }
+
+    ledger = evaluate_wall_ledger_conservation(row)
+
+    assert ledger["status"] == "PASS"
+    assert ledger["wall_ledger_conserved"] is True
+    assert ledger["wall_ledger_components"]["cli_uninstrumented"] == pytest.approx(0.0002)
+    assert (
+        ledger["wall_ledger_component_telemetry_status"]["cli_uninstrumented"]
+        == "RESIDUAL_AFTER_LOCAL_COMPONENTS"
+    )
+
+
+def test_wall_ledger_conserves_no_model_nexus_runner_overhead_residual():
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 0,
+        "wall_duration_sec": 10.6062,
+        "phase_wall_total_sec": 7.0392,
+        "hidden_verifier_wall_sec": 0.4262,
+        "cli_uninstrumented_sec": 2.6084,
+        "model_attempt_runner_overhead_sec": 0.9586,
+        "hidden_verifier_passed": True,
+    }
+
+    ledger = evaluate_wall_ledger_conservation(row)
+
+    assert ledger["status"] == "PASS"
+    assert ledger["wall_ledger_conserved"] is True
+    assert ledger["wall_ledger_components"]["runner_overhead_non_verifier"] == 0.5324
+
+
+def test_wall_ledger_model_gateway_fallback_includes_hidden_verifier_wall():
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 1,
+        "wall_duration_sec": 31.2429,
+        "gateway_total_sec": 0.0,
+        "gateway_process_sec": 0.0,
+        "gateway_provider_wait_sec": 0.0,
+        "hidden_verifier_wall_sec": 0.3127,
+        "hidden_verifier_passed": True,
+    }
+
+    ledger = evaluate_wall_ledger_conservation(row)
+
+    assert ledger["status"] == "PASS"
+    assert ledger["wall_ledger_conserved"] is True
+    assert ledger["wall_ledger_components"]["model_gateway"] == 31.2429
+    assert ledger["wall_ledger_component_telemetry_status"]["hidden_verifier"] == "INCLUDED_IN_MODEL_GATEWAY_FALLBACK_TOTAL"
+
+
+def test_wall_ledger_includes_direct_verifier_wall_for_model_attempt():
+    row = {
+        "mode": "without_nexus",
+        "model_calls": 1,
+        "wall_duration_sec": 7.206,
+        "gateway_total_sec": 6.7831,
+        "direct_verifier_wall_sec": 0.4229,
+    }
+
+    ledger = evaluate_wall_ledger_conservation(row)
+
+    assert ledger["status"] == "PASS"
+    assert ledger["wall_ledger_conserved"] is True
+    assert ledger["wall_ledger_components"]["direct_verifier"] == 0.4229
+
+
+def test_wall_ledger_includes_direct_infra_retry_wall_for_model_attempt():
+    row = {
+        "mode": "with_nexus",
+        "model_calls": 1,
+        "wall_duration_sec": 14.3018,
+        "gateway_total_sec": 12.5125,
+        "direct_verifier_wall_sec": 0.4221,
+        "direct_infra_retry_wall_sec": 1.3672,
+    }
+
+    ledger = evaluate_wall_ledger_conservation(row)
+
+    assert ledger["status"] == "PASS"
+    assert ledger["wall_ledger_conserved"] is True
+    assert ledger["wall_ledger_components"]["direct_infra_retry"] == 1.3672
 
 
 def test_load_tasks_parses_capability_schema(tmp_path: Path):
@@ -376,6 +1520,15 @@ def test_non_model_required_gateway_timeout_keeps_base_policy():
         success_criteria="verified",
     )
     assert _benchmark_gateway_timeout_for_execution(task=task, timeout_sec=240, base_timeout_sec=120) == 120
+    assert (
+        _benchmark_gateway_timeout_for_execution(
+            task=task,
+            timeout_sec=240,
+            base_timeout_sec=120,
+            require_model_participation=True,
+        )
+        == 210
+    )
 
 
 def test_remaining_task_timeout_uses_shared_deadline(monkeypatch):
@@ -483,6 +1636,7 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
         enable_ultra_review_dry_gate=True,
         llm_candidate_cap=3,
         nexus_only=False,
+        force_learn_slo_ready=False,
     )
 
     report = build_public_benchmark_preflight(args, repo_root=tmp_path)
@@ -509,6 +1663,156 @@ def test_public_benchmark_preflight_passes_without_model_invocation(tmp_path: Pa
     assert report["preflight_sentinel"]["checks"]["dci_raw_warning_pointer_required"] is True
     assert "any_stratum_warning_clean_false" in report["preflight_sentinel"]["controller_policy"]["stop_conditions"]
     assert report["preflight_sentinel"]["ach_canary_mutations"]["status"] == "PASS"
+
+
+def test_public_benchmark_preflight_requires_export_policy_for_session_worker(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    disclosure_manifest = tmp_path / "tasks.public.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix the hidden bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "expected_capabilities": ["codeintel", "hyper", "autoreason"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    disclosure_manifest.write_text(
+        json.dumps(
+            {
+                "schema": "nexus_public_benchmark_sanitized_manifest_v1",
+                "tasks": [{"id": "task-1", "repo": "fixture://sanitized", "task_desc": "Fix the hidden bug."}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        public_disclosure_manifest=str(disclosure_manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="hard",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+        with_nexus_runner="subprocess",
+        with_model_provider="gemini",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+        nexus_only=False,
+        force_learn_slo_ready=False,
+        session_worker=True,
+        external_model_export_policy="unspecified",
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "FAIL"
+    assert "external_model_export_policy_required_for_session_worker" in report["failures"]
+    assert report["public_claim_requirements"]["public_claim_allowed"] is False
+    assert report["external_model_export"]["requires_policy"] is True
+
+    args.external_model_export_policy = "sanitized"
+    approved = build_public_benchmark_preflight(args, repo_root=tmp_path)
+    assert "external_model_export_policy_required_for_session_worker" not in approved["failures"]
+    assert approved["external_model_export"]["live_export_allowed"] is True
+
+
+def test_public_benchmark_preflight_marks_force_ready_non_public(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-force-ready-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix a governance bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_hidden_governance",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        public_disclosure_manifest="",
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="all",
+        with_model_provider="gemini",
+        with_nexus_runner="subprocess",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+        nexus_only=False,
+        force_learn_slo_ready=True,
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["public_claim_requirements"]["force_learn_slo_ready"] is True
+    assert report["public_claim_requirements"]["public_claim_allowed"] is False
 
 
 def test_public_benchmark_preflight_sentinel_blocks_incomplete_docs_strata(tmp_path: Path, monkeypatch):
@@ -999,6 +2303,81 @@ def test_public_benchmark_preflight_allows_nexus_only_without_direct_model(tmp_p
     assert report["public_claim_requirements"]["public_claim_allowed"] is False
 
 
+def test_public_benchmark_preflight_allows_without_only_without_nexus_model(tmp_path: Path, monkeypatch):
+    manifest = tmp_path / "tasks.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "preflight-without-only-demo",
+                "description": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix a governance bug.",
+                        "success_criteria": "patch_and_tests_pass",
+                        "mutation_required": True,
+                        "allowed_files": ["target.py"],
+                        "forbidden_files": [],
+                        "setup_command": "",
+                        "verification_command": "pytest",
+                        "fixture_kind": "rlm_harder_v2_hidden_governance",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.delenv("NEXUS_GEMINI_MODEL_NAME", raising=False)
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_MODEL", "gemini-3-flash-preview")
+    args = argparse.Namespace(
+        tasks_file=str(manifest),
+        repo_kind_filter="all",
+        task_id_filter="all",
+        difficulty="all",
+        max_tasks=1,
+        repeat_trials=1,
+        shuffle_seed=None,
+        without_mode="gemini",
+        with_llm_mode="all",
+        with_model_provider="gemini",
+        with_nexus_runner="subprocess",
+        timeout_sec=300,
+        total_timeout_sec=1800,
+        stop_loss_sec=1800,
+        per_task_stop_loss_sec=600,
+        require_clean_worktree=False,
+        evidence_bundle=True,
+        markdown_report="auto",
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=True,
+        enable_ultra_review_dry_gate=True,
+        llm_candidate_cap=3,
+        nexus_only=False,
+        without_only=True,
+        external_model_export_policy="sanitized",
+        session_worker=True,
+        outbound_prompt_ledger=str(tmp_path / "ledger.jsonl"),
+        force_learn_slo_ready=False,
+    )
+
+    report = build_public_benchmark_preflight(args, repo_root=tmp_path)
+
+    assert report["status"] == "PASS"
+    assert "nexus_model_env_missing" not in report["failures"]
+    assert "direct_model_env_missing" not in report["failures"]
+    assert report["public_claim_requirements"]["single_arm_run"] is True
+    assert report["public_claim_requirements"]["single_arm_mode"] == "without_nexus"
+    assert report["public_claim_requirements"]["public_claim_allowed"] is False
+
+
 def test_parse_direct_gemini_json_marks_stats_tokens_measured():
     raw = json.dumps(
         {
@@ -1294,7 +2673,8 @@ def test_nexus_task_desc_names_hidden_parser_separator_contract() -> None:
 
     assert "Nexus parser normalization decision table" in desc
     assert "Treat spaces, hyphens, and underscores as separators" in desc
-    assert "normalize_key('API__Token') returns exactly 'api-token'" in desc
+    assert "Mixed-case keys with repeated separators" in desc
+    assert "API__Token" not in desc
 
 
 def test_resolve_task_files_can_fail_closed_without_materializing(tmp_path: Path):
@@ -1470,6 +2850,24 @@ def test_wall_ledger_rejects_hidden_verifier_zero_fill_when_passed():
     assert "hidden_verifier" in result["wall_ledger_missing_components"]
 
 
+def test_wall_ledger_allows_hidden_verifier_timing_included_in_model_attempt():
+    row = {
+        "wall_duration_sec": 10.0,
+        "model_calls": 1,
+        "gateway_total_sec": 9.8,
+        "hidden_verifier_file": "test_hidden.py",
+        "hidden_verifier_passed": True,
+        "hidden_verifier_wall_sec": 0.0,
+        "hidden_verifier_wall_source": "included_in_model_attempt_wall_sec",
+    }
+
+    result = evaluate_wall_ledger_conservation(row)
+
+    assert result["status"] == "PASS"
+    assert result["wall_ledger_component_telemetry_status"]["hidden_verifier"] == "INCLUDED_IN_MODEL_ATTEMPT"
+    assert "hidden_verifier_wall_suspicious_zero_fill" not in result["reason_codes"]
+
+
 def test_wall_ledger_conservation_is_not_applicable_for_legacy_rows_without_timing():
     row = {
         "wall_duration_sec": 10.0,
@@ -1518,6 +2916,239 @@ def test_expected_receipt_backfill_replaces_non_public_safe_receipts():
     assert coverage["missing"] == []
 
 
+def test_taskset_contract_hashes_are_canonical_and_policy_sensitive(tmp_path: Path):
+    runner = tmp_path / "runner.py"
+    runner.write_text("print('runner')\n", encoding="utf-8")
+    config_a = {
+        "tasks_file": "tasks.json",
+        "tasks_manifest_hash": "a" * 64,
+        "public_disclosure_manifest": {"path": "tasks.public.json", "sha256": "b" * 64, "status": "PASS"},
+        "hidden_verifier_mode": True,
+        "session_worker": True,
+        "session_worker_policy": "persistent_worker_with_reset_boundary",
+        "warning_ledger_required": True,
+        "wall_ledger_required": True,
+        "provider_token_measured_required": True,
+    }
+    config_b = dict(reversed(list(config_a.items())))
+
+    contract_a = build_taskset_contract(config=config_a, runner_path=runner)
+    contract_b = build_taskset_contract(config=config_b, runner_path=runner)
+    config_changed = {**config_a, "session_worker_policy": "fresh_direct_invocation"}
+    config_codex = {
+        **config_a,
+        "without_mode": "codex",
+        "with_model_provider": "codex",
+        "with_llm_mode": "hard",
+    }
+    config_gemini = {
+        **config_a,
+        "without_mode": "gemini",
+        "with_model_provider": "gemini",
+        "with_llm_mode": "hard",
+    }
+
+    assert contract_a["prompt_contract"]["sha256"] == contract_b["prompt_contract"]["sha256"]
+    assert contract_a["verifier_contract"]["sha256"] == contract_b["verifier_contract"]["sha256"]
+    assert contract_a["fixed_public_taskset_ready"] is True
+    assert build_prompt_contract_hash(config_a) != build_prompt_contract_hash(config_changed)
+    assert build_prompt_contract_hash(config_codex) == build_prompt_contract_hash(config_gemini)
+    assert build_provider_transport_contract_hash(config_codex) != build_provider_transport_contract_hash(config_gemini)
+    assert contract_a["provider_transport_contract"]["hash_present"] is True
+    assert contract_a["benchmark_basis_contract"]["commercial_model_basis_ready"] is False
+
+    commercial_manifest = tmp_path / "commercial.json"
+    commercial_manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "nexus-public-commercial-lanes-v1:all",
+                "commercial_lane_source": "scripts/bench/public_benchmark_commercial_lanes_v1.json",
+                "tasks": [{"id": "task-1", "commercial_lane": "governed_delivery"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    basis = build_benchmark_basis_contract(commercial_manifest)
+    assert basis["schema"] == "nexus_benchmark_basis_contract_v1"
+    assert basis["status"] == "PASS"
+    assert basis["commercial_model_basis_ready"] is True
+
+
+def test_persistent_worker_gap_dashboard_compares_existing_bundles(tmp_path: Path):
+    def bundle(path: Path, *, with_rate: float, without_rate: float, provider: str = "gemini") -> None:
+        path.write_text(
+            json.dumps(
+                {
+                    "config": {
+                        "session_worker": True,
+                        "session_worker_policy": "persistent_worker_with_reset_boundary",
+                        "hidden_verifier_mode": True,
+                        "without_mode": provider,
+                        "with_llm_mode": "hard",
+                        "with_model_provider": provider,
+                        "external_model_export_policy": "sanitized",
+                        "outbound_prompt_ledger": "ledger.jsonl",
+                    },
+                    "task_manifest": {"sha256": "taskset"},
+                    "taskset_contract": {
+                        "prompt_contract": {"sha256": f"source-prompt-{provider}"},
+                        "provider_transport_contract": {"sha256": f"transport-{provider}"},
+                        "verifier_contract": {"sha256": "verifier"},
+                        "runner_contract": {"sha256": "runner"},
+                        "fixed_public_taskset_ready": True,
+                    },
+                    "session_worker_contamination": {"contamination_rate": 0.0, "clean": True},
+                    "public_verified_delivery_claim_gate": {"verdict": "PASS"},
+                    "public_cost_claim_gate": {"verdict": "PASS"},
+                    "public_cost_efficiency_claim_gate": {"verdict": "NEUTRAL"},
+                    "commercial_model_roi_shadow_hooks": {
+                        "status": "OBSERVATION_ONLY",
+                        "reason_counts": {"verified_lift_or_delivery_with_wall_regression": 1},
+                        "wall_regression_concentration": {
+                            "buckets": [
+                                {
+                                    "route_cost_policy_lane": "governance_hardened",
+                                    "strategy_path": "hyper_direct_forced",
+                                    "task_type": "public_ops_research",
+                                    "pair_count": 1,
+                                    "verified_lift_count": 1,
+                                    "avg_wall_ratio": 2.1,
+                                    "sum_wall_delta": 12.0,
+                                    "reason_codes": ["hyper_direct_forced_wall_regression"],
+                                }
+                            ]
+                        },
+                    },
+                    "public_claim_gate": {
+                        "checks": {
+                            "eligible_without_nexus": 12,
+                            "with_semantic_verified_rate": with_rate,
+                            "without_semantic_verified_rate": without_rate,
+                            "provider_token_measured_rate_without": 1.0,
+                            "wall_ledger_without_conserved_rate": 1.0,
+                            "with_trust_mismatch_rate": 0.0,
+                            "without_trust_mismatch_rate": 0.0,
+                            "avg_tokens_with": 120.0,
+                            "avg_tokens_without": 100.0,
+                            "avg_model_calls_with": 1.0,
+                            "avg_model_calls_without": 1.0,
+                            "wall_cost_ratio_with_over_without": 1.0,
+                            "token_cost_ratio_with_over_without": 1.2,
+                            "route_cost_regression_wall_ratio_threshold": 1.8,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    baseline = tmp_path / "gpt55.json"
+    flash = tmp_path / "flash.json"
+    bundle(baseline, with_rate=0.0, without_rate=0.8, provider="codex")
+    bundle(flash, with_rate=0.75, without_rate=0.6, provider="gemini")
+
+    dashboard = build_gap_dashboard(
+        baseline=str(baseline),
+        treatments=[str(flash)],
+        labels=["gpt5.5_direct_worker", "flash_nexus_worker"],
+    )
+
+    assert dashboard["schema"] == "nexus_persistent_worker_gap_dashboard_v1"
+    assert dashboard["readiness"]["taskset_identical"] is True
+    assert dashboard["readiness"]["prompt_policy_identical"] is True
+    assert dashboard["readiness"]["provider_transport_recorded"] is True
+    assert dashboard["readiness"]["provider_transport_identical"] is False
+    assert dashboard["readiness"]["provider_transport_identical_required"] is False
+    assert dashboard["readiness"]["verifier_policy_identical"] is True
+    assert dashboard["readiness"]["baseline_direct_usable"] is True
+    assert dashboard["comparisons"][0]["baseline_direct_verified_rate"] == 0.8
+    assert dashboard["comparisons"][0]["verified_delivery_gap_vs_baseline"] == -0.05
+    assert dashboard["comparisons"][0]["trust_gap_vs_baseline"] == 0.0
+    assert dashboard["comparisons"][0]["delivery_promotion_ready"] is True
+    assert dashboard["comparisons"][0]["cost_promotion_ready"] is True
+    assert dashboard["comparisons"][0]["source_promotion_ready"] is True
+    assert dashboard["comparisons"][0]["promotion_ready"] is True
+    assert dashboard["comparisons"][0]["final_goal_ready"] is False
+
+    payload = json.loads(flash.read_text(encoding="utf-8"))
+    payload["taskset_contract"]["benchmark_basis_contract"] = {"commercial_model_basis_ready": True}
+    flash.write_text(json.dumps(payload), encoding="utf-8")
+    final_ready = build_gap_dashboard(
+        baseline=str(baseline),
+        treatments=[str(flash)],
+        labels=["gpt5.5_direct_worker", "flash_nexus_worker"],
+    )
+    assert final_ready["comparisons"][0]["promotion_ready"] is True
+    assert final_ready["comparisons"][0]["final_goal_ready"] is True
+
+    payload = json.loads(flash.read_text(encoding="utf-8"))
+    payload["public_cost_efficiency_claim_gate"]["verdict"] = "REGRESSED"
+    payload["public_claim_gate"]["checks"]["wall_cost_ratio_with_over_without"] = 1.9
+    payload["public_claim_gate"]["checks"]["token_cost_ratio_with_over_without"] = 0.8
+    flash.write_text(json.dumps(payload), encoding="utf-8")
+    cost_blocked = build_gap_dashboard(
+        baseline=str(baseline),
+        treatments=[str(flash)],
+        labels=["gpt5.5_direct_worker", "flash_nexus_worker"],
+    )
+    assert cost_blocked["comparisons"][0]["delivery_promotion_ready"] is True
+    assert cost_blocked["comparisons"][0]["cost_promotion_ready"] is False
+    assert cost_blocked["comparisons"][0]["promotion_ready"] is False
+    assert cost_blocked["comparisons"][0]["cost_policy_hook"]["promotion_effect"] == "none"
+    assert cost_blocked["comparisons"][0]["cost_policy_hook"]["recommendation"] == "light_route_low_risk_full_nexus_high_risk"
+    assert "wall_ratio_above_threshold" in cost_blocked["comparisons"][0]["cost_policy_hook"]["reason_codes"]
+    triage_hook = cost_blocked["comparisons"][0]["performance_load_stress_hook"]
+    assert triage_hook["schema"] == "nexus_performance_load_stress_cost_hook_v1"
+    assert triage_hook["promotion_effect"] == "none"
+    assert triage_hook["performance_test"]["status"] == "REGRESSED"
+    assert triage_hook["load_test"]["status"] == "RETURN"
+    assert triage_hook["stress_test"]["status"] == "NEEDS_ROUTE_COST_RCA"
+    assert triage_hook["stress_test"]["top_wall_regression_buckets"][0]["route_cost_policy_lane"] == "governance_hardened"
+    assert (
+        triage_hook["stress_test"]["top_wall_regression_buckets"][0]["suggested_action"]
+        == "cap_hyper_or_try_supervised_preflight_before_second_model_call"
+    )
+    assert "bucket_high_risk_routes_and_light_route_low_risk_tasks" in triage_hook["next_actions"]
+
+    payload = json.loads(flash.read_text(encoding="utf-8"))
+    payload["public_cost_efficiency_claim_gate"]["verdict"] = "NEUTRAL"
+    payload["config"]["session_worker_policy"] = "different-prompt-policy"
+    flash.write_text(json.dumps(payload), encoding="utf-8")
+    blocked = build_gap_dashboard(
+        baseline=str(baseline),
+        treatments=[str(flash)],
+        labels=["gpt5.5_direct_worker", "flash_nexus_worker"],
+    )
+    assert blocked["readiness"]["prompt_policy_identical"] is False
+    assert blocked["comparisons"][0]["promotion_ready"] is False
+
+    payload = json.loads(flash.read_text(encoding="utf-8"))
+    payload["config"]["session_worker_policy"] = "persistent_worker_with_reset_boundary"
+    payload["public_promotion_readiness_contract"] = {
+        "schema": "nexus_public_promotion_readiness_contract_v1",
+        "status": "RETURN",
+        "failures": ["external_provider_public_claim_allowed"],
+    }
+    payload["external_provider_claim_boundary_contract"] = {
+        "schema": "nexus_external_provider_claim_boundary_contract_v1",
+        "status": "OBSERVATION_ONLY",
+        "public_claim_allowed": False,
+        "failures": ["codex_provider_prompt_wearing_only_for_external_model_claims"],
+    }
+    flash.write_text(json.dumps(payload), encoding="utf-8")
+    source_blocked = build_gap_dashboard(
+        baseline=str(baseline),
+        treatments=[str(flash)],
+        labels=["gpt5.5_direct_worker", "gpt5.5_nexus_observation_only"],
+    )
+    assert source_blocked["comparisons"][0]["delivery_promotion_ready"] is True
+    assert source_blocked["comparisons"][0]["cost_promotion_ready"] is True
+    assert source_blocked["comparisons"][0]["source_promotion_ready"] is False
+    assert source_blocked["comparisons"][0]["promotion_ready"] is False
+
+
 def test_write_trial_evidence_and_bundle(tmp_path: Path):
     row = {
         "mode": "with_nexus",
@@ -1535,6 +3166,7 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "total_tokens": 100,
         "model_calls": 2,
         "wall_duration_sec": 42.0,
+        "gateway_total_sec": 42.0,
         "phase_wall_total_sec": 32.0,
         "phase_wall_p_sec": 2.0,
         "phase_wall_x_sec": 1.0,
@@ -1556,6 +3188,7 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
         "rubric_contract_status": "PASS",
         "openseeker_schema_version": "nexus_openseeker_alignment.v1",
         "trajectory_step_count": 12,
@@ -1648,9 +3281,19 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["public_claim_posture"]["cost_efficiency"]["min_required_pairs"] == 3
     assert payload["public_claim_posture"]["public_wording_key"] == "promising_but_insufficient_sample"
     assert payload["public_claim_posture"]["public_wording_allowed"] is True
+    assert payload["public_promotion_readiness_contract"]["schema"] == "nexus_public_promotion_readiness_contract_v1"
+    assert payload["public_promotion_readiness_contract"]["requirements"]["route_policy_evidence_pass"] is True
+    assert payload["external_provider_claim_boundary_contract"]["schema"] == (
+        "nexus_external_provider_claim_boundary_contract_v1"
+    )
+    assert payload["external_provider_claim_boundary_contract"]["status"] == "PASS"
+    assert payload["public_promotion_readiness_contract"]["requirements"][
+        "external_provider_public_claim_allowed"
+    ] is True
     assert payload["public_claim_posture"]["cost_efficiency_wording_allowed"] is False
     assert payload["public_claim_posture"]["allowed_public_wording"] == "promising_but_insufficient_sample"
     assert "cost_improved" not in payload["public_claim_posture"]["allowed_public_wording"]
+    assert payload["public_lane_contract"]["non_public_eligible"] is True
     assert payload["training_eligibility_posture"]["status"] == "OBSERVATION_ONLY_SAMPLE_INSUFFICIENT"
     assert payload["training_eligibility_posture"]["reason_codes"] == ["sample_insufficient"]
     assert payload["infra_quarantine_report"]["infra_valid_pair_count"] == 1
@@ -1663,6 +3306,73 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["route_cost_ledger"]["scope"] == "measured_benchmark_telemetry_not_billing_cost"
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["rows"] == 1
     assert payload["route_cost_ledger"]["arms"]["without_nexus"]["rows"] == 1
+
+    codex_bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row, without_row],
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 1,
+            "runner_command": "capability_ab_runner.py --tasks-file tasks.json",
+            "hidden_verifier_mode": True,
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+            "with_model_provider": "codex",
+            "without_mode": "codex",
+        },
+    )
+    codex_payload = json.loads(codex_bundle.read_text(encoding="utf-8"))
+    assert codex_payload["external_provider_claim_boundary_contract"]["status"] == "OBSERVATION_ONLY"
+    assert codex_payload["external_provider_claim_boundary_contract"]["public_claim_allowed"] is False
+    assert codex_payload["public_promotion_readiness_contract"]["requirements"][
+        "external_provider_public_claim_allowed"
+    ] is False
+
+    forced_bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[row, without_row],
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 1,
+            "runner_command": "capability_ab_runner.py --tasks-file tasks.json --force-learn-slo-ready",
+            "hidden_verifier_mode": True,
+            "force_learn_slo_ready": True,
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+        },
+    )
+    forced_payload = json.loads(forced_bundle.read_text(encoding="utf-8"))
+    assert forced_payload["public_lane_contract"]["non_public_eligible"] is False
+    assert forced_payload["public_lane_contract"]["non_public_reasons"] == ["force_learn_slo_ready"]
+    assert forced_payload["public_verified_delivery_claim_gate"]["verdict"] == "FAIL"
+    assert "non_public_shortcut:force_learn_slo_ready" in forced_payload["public_verified_delivery_claim_gate"]["failures"]
+    assert forced_payload["training_eligibility_posture"]["status"] == "OBSERVATION_ONLY_SYNTHETIC_READINESS"
+    assert (
+        "synthetic_readiness_shortcut:force_learn_slo_ready"
+        in forced_payload["training_eligibility_posture"]["reason_codes"]
+    )
+    assert forced_payload["taskset_contract"]["taskset"]["hash_present"] is True
+    assert forced_payload["taskset_contract"]["prompt_contract"]["hash_present"] is True
+    assert len(forced_payload["taskset_contract"]["prompt_contract"]["sha256"]) == 64
+    assert forced_payload["taskset_contract"]["verifier_contract"]["hash_present"] is True
+    assert forced_payload["taskset_contract"]["verifier_contract"]["hidden_verifier_mode"] is True
+    assert len(forced_payload["taskset_contract"]["verifier_contract"]["sha256"]) == 64
+    assert forced_payload["taskset_contract"]["runner_contract"]["hash_present"] is True
+    assert forced_payload["taskset_contract"]["fixed_public_taskset_ready"] is False
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["phase_wall_share"]["R"] == 0.875
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["top_wall_offenders"][0]["task_capability"] == "ddtree"
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["top_phase_wall_offenders"][0]["dominant_phase"] == "R"
@@ -1682,6 +3392,86 @@ def test_write_trial_evidence_and_bundle(tmp_path: Path):
     assert payload["openseeker_alignment"]["arms"]["with_nexus"]["avg_route_tactical_tool_count"] == 4.0
     assert payload["openseeker_alignment"]["arms"]["with_nexus"]["avg_route_evidence_required_count"] == 3.0
     assert payload["openseeker_alignment"]["arms"]["with_nexus"]["long_horizon_ready_rate"] == 1.0
+
+
+def test_session_worker_contamination_fails_public_claim_gate(tmp_path: Path):
+    def row(mode: str, task_id: str, turn: int, raw_tail: str = "") -> dict[str, object]:
+        return {
+            "mode": mode,
+            "task_id": task_id,
+            "trial_index": 1,
+            "status": "SUCCESS",
+            "semantic_status": "VERIFIED",
+            "model_name": "gemini-3-flash-preview",
+            "run_eligible": True,
+            "token_measured": True,
+            "provider_token_measured": True,
+            "token_capture_status": "measured",
+            "gateway_token_source": "stats",
+            "total_tokens": 100,
+            "model_calls": 1,
+            "wall_duration_sec": 10.0,
+            "gateway_total_sec": 9.5,
+            "gateway_stats_present": True,
+            "nexus_wearing_valid": mode == "with_nexus",
+            "gemini_uses_nexus": mode == "with_nexus",
+            "nexus_context_delivered": mode == "with_nexus",
+            "nexus_usage_valid": mode == "with_nexus",
+            "capability_claim_verified": mode == "with_nexus",
+            "route_decision_schema_version": "nexus_route_decision_v1" if mode == "with_nexus" else "",
+            "route_execution_policy": _route_policy() if mode == "with_nexus" else {},
+            "rubric_contract_status": "PASS",
+            "session_worker_enabled": True,
+            "session_worker_provider": "gemini",
+            "session_worker_id": f"{mode}-session",
+            "session_worker_turn_index": turn,
+            "session_worker_resumed": turn > 1,
+            "reset_boundary_hash": f"reset-{task_id}",
+            "baseline_raw_tail": raw_tail,
+        }
+
+    rows = [
+        row("with_nexus", "task-a", 1),
+        row("without_nexus", "task-a", 1),
+        row("with_nexus", "task-b", 2, raw_tail="accidentally reused task-a context"),
+        row("without_nexus", "task-b", 2),
+    ]
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    write_jsonl(with_path, [r for r in rows if r["mode"] == "with_nexus"])
+    write_jsonl(without_path, [r for r in rows if r["mode"] == "without_nexus"])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=rows,  # type: ignore[arg-type]
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 2,
+            "runner_command": "capability_ab_runner.py --session-worker",
+            "hidden_verifier_mode": True,
+            "session_worker": True,
+            "session_worker_policy": "persistent_worker_with_reset_boundary",
+            "warning_ledger_required": True,
+            "wall_ledger_required": True,
+            "provider_token_measured_required": True,
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+        },
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+
+    assert payload["session_worker_contamination"]["contaminated_row_count"] == 1
+    assert payload["session_worker_contamination"]["clean"] is False
+    assert payload["public_claim_gate"]["checks"]["session_worker_contamination_rate"] > 0.0
+    assert "session_worker_contamination_detected" in payload["public_verified_delivery_claim_gate"]["failures"]
+    assert payload["public_verified_delivery_claim_gate"]["verdict"] == "FAIL"
 
 
 def test_write_evidence_bundle_separates_delivery_lift_from_cost_efficiency_regression(tmp_path: Path):
@@ -1716,6 +3506,7 @@ def test_write_evidence_bundle_separates_delivery_lift_from_cost_efficiency_regr
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
         "rubric_contract_status": "PASS",
     }
     without_row = {
@@ -1797,6 +3588,107 @@ def test_write_evidence_bundle_separates_delivery_lift_from_cost_efficiency_regr
     assert payload["public_cost_efficiency_claim_gate"]["checks"]["retry_cost_share_tokens"] == 0.5
 
 
+def test_evidence_bundle_adds_commercial_model_roi_shadow_hooks_without_changing_gates(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    with_rows = []
+    without_rows = []
+    for index in range(3):
+        task_id = f"commercial-row-{index}"
+        with_rows.append(
+            {
+                "mode": "with_nexus",
+                "task_id": task_id,
+                "trial_index": 1,
+                "model_name": "gemini-3-flash-preview",
+                "task_type": "public_test_repair",
+                "expected_capabilities": ["hyper"],
+                "run_eligible": True,
+                "status": "SUCCESS",
+                "semantic_completed": True,
+                "report_trust_mismatch": False,
+                "wall_duration_sec": 12.0,
+                "phase_wall_r_sec": 9.0,
+                "route_cost_policy_lane": "governance_hardened",
+                "strategy_path": "hyper_direct_forced",
+                "nexus_tier": "full",
+                "total_tokens": 1000,
+                "model_calls": 1,
+                "token_measured": True,
+                "provider_token_measured": True,
+                "model_token_capture_status": "measured",
+                "token_capture_status": "measured",
+                "gateway_token_source": "stats",
+            }
+        )
+        without_rows.append(
+            {
+                "mode": "without_nexus",
+                "task_id": task_id,
+                "trial_index": 1,
+                "model_name": "gemini-3-flash-preview",
+                "task_type": "public_test_repair",
+                "expected_capabilities": ["hyper"],
+                "run_eligible": True,
+                "status": "FAILED",
+                "semantic_completed": False,
+                "report_trust_mismatch": False,
+                "wall_duration_sec": 8.0,
+                "total_tokens": 3000,
+                "model_calls": 1,
+                "token_measured": True,
+                "provider_token_measured": True,
+                "model_token_capture_status": "measured",
+                "token_capture_status": "measured",
+                "gateway_token_source": "stats",
+            }
+        )
+    write_jsonl(with_path, with_rows)
+    write_jsonl(without_path, without_rows)
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[*with_rows, *without_rows],
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 3,
+            "runner_command": "capability_ab_runner.py --tasks-file tasks.json",
+            "hidden_verifier_mode": True,
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+        },
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+
+    shadow = payload["commercial_model_roi_shadow_hooks"]
+    assert shadow["schema"] == "nexus_commercial_model_roi_shadow_hooks_v1"
+    assert shadow["status"] == "OBSERVATION_ONLY"
+    assert shadow["promotion_effect"] == "none"
+    assert shadow["pair_count"] == 3
+    assert shadow["signal_count"] == 3
+    assert shadow["reason_counts"]["verified_lift_against_direct_commercial_model"] == 3
+    assert shadow["reason_counts"]["verified_lift_or_delivery_with_wall_regression"] == 3
+    assert shadow["reason_counts"]["verified_delivery_with_token_savings"] == 3
+    concentration = shadow["wall_regression_concentration"]
+    assert concentration["promotion_effect"] == "none"
+    assert concentration["buckets"][0]["route_cost_policy_lane"] == "governance_hardened"
+    assert concentration["buckets"][0]["strategy_path"] == "hyper_direct_forced"
+    assert concentration["buckets"][0]["sum_wall_delta"] == 12.0
+    assert "r_phase_wall_concentrated" in concentration["buckets"][0]["reason_codes"]
+    assert "token_savings_wall_regression_tradeoff" in concentration["buckets"][0]["reason_codes"]
+    assert "task_id" not in shadow["signals"][0]["row_locator"]
+    assert all("commercial_model_roi_shadow" not in item for item in payload["public_claim_gate"]["failures"])
+    assert all("commercial_model_roi_shadow" not in item for item in payload["public_cost_efficiency_claim_gate"]["failures"])
+    assert payload["public_claim_gate"]["checks"]["commercial_model_roi_shadow_signal_count"] == 3
+
+
 def test_write_evidence_bundle_returns_cost_efficiency_when_wall_ledger_invalid(tmp_path: Path):
     with_path = tmp_path / "with.jsonl"
     without_path = tmp_path / "without.jsonl"
@@ -1825,6 +3717,7 @@ def test_write_evidence_bundle_returns_cost_efficiency_when_wall_ledger_invalid(
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
         "rubric_contract_status": "PASS",
     }
     without_row = {
@@ -1910,6 +3803,7 @@ def test_write_evidence_bundle_returns_when_warning_ledger_dirty(tmp_path: Path)
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
         "rubric_contract_status": "PASS",
         "warning_capture_status": "captured",
         "warning_capture_complete": True,
@@ -2079,6 +3973,7 @@ def test_write_evidence_bundle_returns_when_warning_capture_missing(tmp_path: Pa
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
         "rubric_contract_status": "PASS",
     }
     without_row = {
@@ -2152,6 +4047,7 @@ def test_write_evidence_bundle_fails_cost_safety_when_prompt_purity_regresses(tm
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
     }
     without_row = {
         "mode": "without_nexus",
@@ -2265,6 +4161,7 @@ def test_write_evidence_bundle_classifies_route_selected_only_high_cost_research
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
         "route_profile_high_cost_selected": ["research"],
         "capability_receipts": [
             {
@@ -2336,6 +4233,7 @@ def test_write_evidence_bundle_fails_gate_when_with_token_measured_low(tmp_path:
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
     }
     without_row = {
         "mode": "without_nexus",
@@ -2398,6 +4296,7 @@ def test_write_evidence_bundle_fails_cost_gate_when_provider_token_source_missin
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
     }
     without_row = {
         "mode": "without_nexus",
@@ -2439,6 +4338,80 @@ def test_write_evidence_bundle_fails_cost_gate_when_provider_token_source_missin
     assert "with_provider_token_measured_below_threshold" in payload["public_cost_claim_gate"]["failures"]
     assert payload["public_claim_gate"]["checks"]["provider_token_measured_rate_with"] == 0.0
     assert payload["route_cost_ledger"]["arms"]["with_nexus"]["provider_token_source_counts"] == {"missing": 1}
+
+
+def test_write_evidence_bundle_fails_cost_gate_when_outbound_ledger_dirty(tmp_path: Path):
+    with_path = tmp_path / "with.jsonl"
+    without_path = tmp_path / "without.jsonl"
+    ledger_path = tmp_path / "outbound_prompt_ledger.jsonl"
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "schema": "nexus_outbound_prompt_ledger_v1",
+                "provider": "gemini",
+                "model_name": "gemini-3-flash-preview",
+                "strict": True,
+                "forbidden_literal_count": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    base_row = {
+        "task_id": "task/1",
+        "trial_index": 1,
+        "model_name": "gemini-3-flash-preview",
+        "run_eligible": True,
+        "token_measured": True,
+        "provider_token_measured": True,
+        "token_capture_status": "measured",
+        "gateway_token_source": "stats",
+        "gateway_stats_present": True,
+        "total_tokens": 10,
+        "model_calls": 1,
+        "wall_duration_sec": 1.0,
+    }
+    with_row = {
+        **base_row,
+        "mode": "with_nexus",
+        "nexus_wearing_valid": True,
+        "model_uses_nexus": True,
+        "nexus_context_delivered": True,
+        "nexus_usage_valid": True,
+        "capability_claim_verified": True,
+        "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
+    }
+    without_row = {**base_row, "mode": "without_nexus"}
+    write_jsonl(with_path, [with_row])
+    write_jsonl(without_path, [without_row])
+
+    bundle = write_evidence_bundle(
+        out_dir=tmp_path,
+        with_path=with_path,
+        without_path=without_path,
+        rows=[with_row, without_row],
+        config={
+            "repeat_trials": 1,
+            "tasks_file": "tasks.json",
+            "tasks_manifest_hash": "abc",
+            "unique_tasks_requested": 1,
+            "runner_command": "capability_ab_runner.py --tasks-file tasks.json",
+            "hidden_verifier_mode": True,
+            "outbound_prompt_ledger": str(ledger_path),
+            "timeout_sec": 30,
+            "total_timeout_sec": 60,
+            "effective_total_timeout_sec": 60,
+            "stop_loss_sec": 60,
+            "per_task_stop_loss_sec": 30,
+        },
+    )
+    payload = json.loads(bundle.read_text(encoding="utf-8"))
+
+    assert payload["outbound_prompt_ledger_gate"]["status"] == "FAIL"
+    assert payload["outbound_prompt_ledger_gate"]["record_count"] == 1
+    assert "outbound_prompt_ledger_forbidden_literal" in payload["public_cost_claim_gate"]["failures"]
+    assert payload["public_claim_gate"]["checks"]["outbound_prompt_ledger_forbidden_literal_count"] == 1
 
 
 def test_write_evidence_bundle_v2_fails_gate_for_missing_hidden_verifier_and_trust_mismatch(tmp_path: Path):
@@ -2589,6 +4562,7 @@ def test_without_tasks_for_run_skips_bare_arm_for_nexus_only():
     assert _without_tasks_for_run([task], timed_out=False, nexus_only=False) == [task]
     assert _without_tasks_for_run([task], timed_out=False, nexus_only=True) == []
     assert _without_tasks_for_run([task], timed_out=True, nexus_only=False) == []
+    assert _without_tasks_for_run([task], timed_out=True, nexus_only=False, without_only=True) == [task]
 
 
 def test_total_timeout_budget_helper():
@@ -3533,6 +5507,7 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
 
     def fake_ask_direct_codex_patch(*, prompt, timeout_sec):
         assert "You are Codex wearing Nexus" in prompt
+        assert "NEXUS_BENCH_SESSION_BOUNDARY_V1 task_id=codex-nexus-001 trial_index=1" in prompt
         assert "[NEXUS ROUTE SUMMARY]" in prompt
         assert "[NEXUS CODEINTEL SUMMARY]" in prompt
         assert "[NEXUS EXECUTION PROFILE]" in prompt
@@ -3568,6 +5543,11 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert out["status"] == "SUCCESS"
     assert out["provider"] == "codex"
     assert out["model_name"] == "gpt-5.5"
+    assert out["reset_boundary_hash"]
+    assert "reason_codes" in out["route_execution_policy"]
+    assert out["prompt_purity_index"] == 1.0
+    assert out["prompt_nexus_control_chars"] > 0
+    assert out["prompt_governance_contract_chars"] > 0
     assert out["gemini_uses_nexus"] is True
     assert out["nexus_context_delivered"] is True
     assert set(out["nexus_pillars_observed"]) == {"lancedb", "memory", "mempalace", "belief", "artifact"}
@@ -3600,6 +5580,38 @@ def test_run_with_nexus_codex_provider_delivers_nexus_context(tmp_path: Path, mo
     assert out["gateway_stats_present"] is True
     assert out["gateway_token_source"] == "codex_stdout"
     assert out["gateway_prompt_chars"] > 0
+
+
+def test_codex_patch_redacts_sanitized_runner_path_before_ledger(tmp_path: Path, monkeypatch):
+    runner_root = "/private/tmp/nexus-live-clean-runner-test"
+    ledger_path = tmp_path / "outbound.jsonl"
+    monkeypatch.setenv("NEXUS_OUTBOUND_PROMPT_STRICT", "1")
+    monkeypatch.setenv("NEXUS_OUTBOUND_PROMPT_LEDGER", str(ledger_path))
+    monkeypatch.setenv("NEXUS_OUTBOUND_FORBIDDEN_LITERALS", runner_root)
+    monkeypatch.setenv("NEXUS_CODEX_EXEC_CWD", runner_root)
+    monkeypatch.setenv("NEXUS_CODEX_MODEL_NAME", "gpt-5.5")
+    monkeypatch.delenv("NEXUS_CODEX_SESSION_WORKER", raising=False)
+    monkeypatch.setattr(capability_ab_runner.shutil, "which", lambda name: "/bin/echo" if name == "codex" else None)
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        output_path = Path(cmd[cmd.index("--output-last-message") + 1])
+        output_path.write_text('{"status":"SUCCESS","patch":"def ok():\\n    return True\\n"}', encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="tokens used 12", stderr="")
+
+    monkeypatch.setattr(capability_ab_runner, "_run_process_group", fake_run_process_group)
+
+    payload, _ = _ask_direct_codex_patch(prompt=f"inspect {runner_root}/target.py", timeout_sec=10)
+
+    assert payload["status"] == "SUCCESS"
+    record = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert record["forbidden_literal_count"] == 0
+
+
+def test_external_model_name_for_provider_uses_codex_env(monkeypatch):
+    monkeypatch.delenv("NEXUS_GEMINI_MODEL_NAME", raising=False)
+    monkeypatch.setenv("NEXUS_CODEX_MODEL_NAME", "gpt-5.5")
+
+    assert _external_model_name_for_provider("codex") == "gpt-5.5"
 
 
 def test_compact_nexus_route_for_prompt_excludes_verbose_payload():
@@ -4242,6 +6254,24 @@ def test_training_posture_observation_only_when_cost_efficiency_regresses():
     assert posture["reason_codes"] == ["cost_efficiency_regressed"]
 
 
+def test_training_posture_blocks_synthetic_readiness_shortcut():
+    posture = capability_ab_runner.derive_training_eligibility_posture(
+        delivery_gate_passed=False,
+        cost_claim_passed=False,
+        cost_efficiency_sample_sufficient=True,
+        prompt_purity_gate_passed=True,
+        with_trust_mismatch_rate=0.0,
+        without_trust_mismatch_rate=0.0,
+        eligible_with=[{"rubric_contract_status": "PASS"}],
+        infra_quarantine_report={"infra_valid_pair_count": 3, "infra_invalid_pair_count": 0},
+        cost_efficiency_status="IMPROVED",
+        synthetic_readiness_reasons=["force_learn_slo_ready"],
+    )
+
+    assert posture["status"] == "OBSERVATION_ONLY_SYNTHETIC_READINESS"
+    assert "synthetic_readiness_shortcut:force_learn_slo_ready" in posture["reason_codes"]
+
+
 def test_valid_comparison_readiness_gate_requires_two_thirds_bare_eligibility():
     gate = capability_ab_runner.derive_valid_comparison_readiness_gate(
         eligible_without_count=1,
@@ -4429,6 +6459,26 @@ def test_append_x1_readiness_history_caps_entries(tmp_path: Path):
     assert [item["timestamp"] for item in out] == [2, 3]
 
 
+def test_x1_readiness_history_path_prefers_repo_stable_learn_dir(tmp_path: Path):
+    out = capability_ab_runner._x1_readiness_history_path(
+        bundle_path=tmp_path / "run" / "evidence_bundle.json",
+        config={"repo_root": str(tmp_path)},
+    )
+
+    assert out == tmp_path / ".nexus" / "reports" / "learn" / "x1_readiness_history.json"
+
+
+def test_x1_readiness_history_path_allows_explicit_override(tmp_path: Path):
+    configured = tmp_path / "custom" / "x1.json"
+
+    out = capability_ab_runner._x1_readiness_history_path(
+        bundle_path=tmp_path / "run" / "evidence_bundle.json",
+        config={"repo_root": str(tmp_path), "x1_readiness_history_path": str(configured)},
+    )
+
+    assert out == configured
+
+
 def test_data_contract_violation_is_not_run_eligible():
     row = {
         "mode": "with_nexus",
@@ -4606,6 +6656,59 @@ def test_run_with_nexus_model_required_disables_local_fast_paths(tmp_path: Path,
     assert out["model_uplift_eligible"] is True
     assert out["model_required_execution_mode"] == "model_participation_only"
     assert out["model_required_require_strict_baseline"] is False
+
+
+def test_run_with_nexus_model_participation_env_blocks_receipt_lite_pre_rescue(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="flash-route-validation",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix public bug",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        expected_capabilities=("claim_gate", "delivery_gate"),
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    captured = {}
+
+    class _Proc:
+        stdout = '{"status":"SUCCESS","semantic_status":"VERIFIED","nexus_usage_trace":{"model_uses_nexus":true,"gemini_uses_nexus":true,"nexus_context_delivered":true,"usage_valid":true,"pillars":{"lancedb":{"active":true},"memory":{"active":true},"mempalace":{"active":true},"belief":{"active":true},"artifact":{"active":true}},"phase_trace":{"P":"route_built","X":"retrieval_checked","D":"guard_decision","R":"baseline_executed","A":"artifact_verified","C":"closure_written"}},"result":{"elapsed_sec":0.1,"report":{"source":"nexus_llm_baseline","attempt_count":1,"model_calls":1,"model_name":"gemini-3.1-pro-preview","model_patch_generated":true,"fallback_used":false,"total_tokens":10,"token_capture_status":"ok"}}}'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(_cmd, **kwargs):
+        captured["env"] = kwargs.get("env", {})
+        return _Proc()
+
+    monkeypatch.setenv("NEXUS_REQUIRE_MODEL_PARTICIPATION", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run)
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner.route_cost_controls_for_task",
+        lambda *_args, **_kwargs: {
+            "route_lane": "trust_supervised_scope_only",
+            "context_mode": "compact",
+            "max_rounds": 1,
+            "disable_research": True,
+            "allow_pre_model_deterministic_rescue": True,
+        },
+    )
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    controls = json.loads(captured["env"]["NEXUS_ROUTE_COST_CONTROLS"])
+    assert controls["allow_pre_model_deterministic_rescue"] is False
+    assert controls["require_model_participation"] is True
+    assert out["model_uplift_eligible"] is True
 
 
 def test_run_with_nexus_can_enable_local_swarm_executor_without_llm(tmp_path: Path, monkeypatch):
@@ -4885,6 +6988,8 @@ def test_run_with_nexus_auto_enables_expected_ddtree_and_ultra_review(tmp_path: 
       "match": {"task_type": "public_test_repair", "difficulty": "hard"},
       "controls": {
         "candidate_cap": 1,
+        "context_mode": "compact",
+        "disable_research": true,
         "lite_route": true,
         "supervised_bare_first": true
       }
@@ -4986,6 +7091,7 @@ def test_run_with_nexus_auto_enables_expected_ddtree_and_ultra_review(tmp_path: 
     assert captured["env"]["NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL"] == "1"
     controls = json.loads(captured["env"]["NEXUS_ROUTE_COST_CONTROLS"])
     assert controls["candidate_cap"] == 3
+    assert controls["ddtree_mixed_candidate_pool"] is True
     assert controls["lite_route"] is False
     assert controls["supervised_bare_first"] is False
     assert controls["expected_capability_protection"] == ["ddtree", "ultra_review"]
@@ -5160,6 +7266,60 @@ def test_run_with_nexus_receipt_first_preserves_capability_on_model_timeout(tmp_
     receipt_by_name = {item["name"]: item for item in out["capability_receipts"]}
     assert receipt_by_name["autoreason"]["receipt_first_probe"] is True
     assert receipt_by_name["autoreason"]["public_claim_safe"] is True
+
+
+def test_receipt_first_replaces_disabled_expected_capability_receipt():
+    row = {
+        "task_id": "route-oracle-ddtree-001",
+        "mode": "with_nexus",
+        "capability_receipts": [
+            {
+                "name": "ddtree",
+                "selected": True,
+                "invoked": False,
+                "evidence_present": False,
+                "gate_passed": False,
+                "outcome_contributed": False,
+                "failure_reason": "feature_flag_disabled",
+                "public_claim_safe": False,
+            }
+        ],
+    }
+    task = CapabilityTask(
+        id="route-oracle-ddtree-001",
+        difficulty="hard",
+        task_type="public_test_repair",
+        task_desc="Expected capability receipts: ddtree",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+        expected_capabilities=("ddtree",),
+    )
+    probe_payload = {
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "nexus_usage_trace": {
+            "capability_receipts": [
+                {
+                    "name": "ddtree",
+                    "selected": True,
+                    "invoked": True,
+                    "evidence_present": True,
+                    "gate_passed": True,
+                    "outcome_contributed": True,
+                    "evidence_refs": ["ddtree:selected_candidate_ids:candidate-2"],
+                    "public_claim_safe": True,
+                }
+            ]
+        },
+    }
+
+    _merge_receipt_first_probe(row, task=task, probe_payload=probe_payload)
+
+    receipt_by_name = {item["name"]: item for item in row["capability_receipts"]}
+    assert receipt_by_name["ddtree"]["receipt_first_probe"] is True
+    assert receipt_by_name["ddtree"]["public_claim_safe"] is True
+    assert row["expected_capability_receipt_coverage"]["missing"] == []
 
 
 def test_expected_capability_invocation_coverage_tracks_call_without_outcome():
@@ -5386,10 +7546,78 @@ def test_run_with_nexus_uses_supervised_bare_first_when_feature_policy_matches(t
     assert out["hidden_verifier_passed"] is True
     assert out["route_cost_policy_source"] == "feature:repair-supervised-bare-first"
     assert out["route_cost_policy_supervised_bare_first"] is True
+    assert out["hidden_verifier_wall_source"] == "included_in_model_attempt_wall_sec"
     assert out["capability_plan_selected"] == ["mempalace_gate", "artifact_gate", "claim_gate", "delivery_gate"]
     assert out["local_reflex_provider"] == "heuristic"
     assert out["local_reflex_risk_level"] == "low"
     assert out["local_reflex_bare_sufficiency"] == "high"
+
+
+def test_run_with_nexus_uses_cost_capped_pre_model_rescue_when_protected(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    task = CapabilityTask(
+        id="public-repair-cost-capped",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Repair a low-risk cost-capped public task",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        expected_capabilities=("hyper", "delivery_gate"),
+        capability_activation_contract="cost_capped",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:repair-cost-capped-pre-model-rescue",
+      "match": {"task_type": "public_test_repair", "difficulty": "hard", "category": "test_repair", "repo_kind": "neutral_fixture", "local_reflex_risk_level": "low", "local_reflex_bare_sufficiency": "high"},
+      "controls": {"candidate_cap": 1, "context_mode": "compact", "disable_research": true, "lite_route": true, "max_rounds": 1, "route_lane": "hidden_lite", "supervised_bare_first": true, "allow_pre_model_deterministic_rescue": true}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    class _Proc:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(
+        "scripts.bench.capability_ab_runner._deterministic_failed_tests_pre_rescue",
+        lambda **_kwargs: {"used": True, "passed": True, "reason": "deterministic_pre_rescue_passed", "wall_sec": 0.2},
+    )
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", lambda *_args, **_kwargs: _Proc())
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+        llm_candidate_cap=3,
+    )
+
+    assert out["runtime_classification"] == "nexus_deterministic_pre_model_rescue"
+    assert out["nexus_winner_source"] == "local_deterministic_pre_model_rescue"
+    assert out["model_calls"] == 0
+    assert out["route_cost_policy_expected_capability_overrides"]["supervised_bare_first"] is True
+    assert (
+        "cost_capped_capability_allows_verified_pre_model_rescue"
+        in out["route_execution_policy"]["reason_codes"]
+    )
 
 
 def test_run_with_nexus_bypasses_supervised_bare_when_expected_receipt_is_not_gate_only(
@@ -5551,6 +7779,7 @@ def test_write_evidence_bundle_fails_cost_gate_when_nexus_cost_regresses_without
         "nexus_usage_valid": True,
         "capability_claim_verified": True,
         "route_decision_schema_version": "nexus_route_decision_v1",
+            "route_execution_policy": _route_policy(),
     }
     without_row = {
         "mode": "without_nexus",
@@ -6137,6 +8366,115 @@ def test_hidden_lite_failed_model_attempt_uses_deterministic_pre_rescue(tmp_path
     assert out["total_tokens"] == 10
 
 
+def test_benchmark_disable_deterministic_rescue_keeps_model_cost_path(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="model-required-repair-001",
+        difficulty="hard",
+        task_type="public_test_repair",
+        category="test_repair",
+        repo_kind="neutral_fixture",
+        task_desc="Repair async timeout tests without hiding the timeout contract.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="pytest_async_repair",
+        eligibility_class="model_required",
+    )
+    target_file, visible_test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:public-test-repair-hard-neutral-fixture-lite",
+      "match": {"task_type": "public_test_repair", "difficulty": "hard", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "lite_route": true, "disable_research": true, "max_rounds": 1, "context_mode": "compact", "route_lane": "hidden_lite"}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+    captured_cmds: list[list[str]] = []
+
+    def fake_without(**_kwargs):
+        return {
+            "task_id": task.id,
+            "status": "FAILED",
+            "semantic_status": "UNVERIFIED",
+            "run_eligible": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 8.0,
+            "total_tokens": 10,
+            "model_calls": 1,
+            "token_measured": True,
+            "provider_token_measured": True,
+            "gateway_prompt_chars": 2000,
+        }
+
+    class _Proc:
+        stdout = json.dumps(
+            {
+                "status": "SUCCESS",
+                "semantic_status": "VERIFIED",
+                "nexus_usage_trace": {
+                    "model_uses_nexus": True,
+                    "gemini_uses_nexus": True,
+                    "nexus_context_delivered": True,
+                    "usage_valid": True,
+                    "capabilities": {"claim_verified": True, "delivery_gate": True},
+                    "pillars": {"artifact": {"active": True}},
+                    "phase_trace": {"P": "route", "R": "model", "A": "verify"},
+                },
+                "result": {
+                    "elapsed_sec": 0.1,
+                    "report": {
+                        "attempt_count": 1,
+                        "model_calls": 1,
+                        "model_name": "gemini-3-flash-preview",
+                        "model_patch_generated": True,
+                        "fallback_used": False,
+                        "total_tokens": 100,
+                        "token_capture_status": "measured",
+                        "gateway_stats_present": True,
+                        "gateway_token_source": "stats",
+                    },
+                },
+            }
+        )
+        stderr = ""
+        returncode = 0
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured_cmds.append(list(cmd))
+        return _Proc()
+
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.setenv("NEXUS_BENCH_DISABLE_DETERMINISTIC_RESCUE", "1")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fake_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=visible_test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert captured_cmds
+    assert out["route_cost_policy_controls"]["disable_deterministic_rescue"] is True
+    assert out["route_execution_policy"]["deterministic_pre_rescue_allowed"] is False
+    assert out["nexus_winner_source"] != "nexus_llm_deterministic_pre_rescue"
+    assert out["clean_model_cost_evidence"] is True
+    assert out["cost_evidence_class"] == "clean_model_cost"
+
+
 def test_hidden_verifier_retry_can_be_disabled_for_receipt_oracle(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="route-oracle-autoreason-001",
@@ -6335,6 +8673,76 @@ def test_run_with_nexus_can_supervise_medium_risk_when_policy_explicitly_allows(
     assert out["local_reflex_bare_sufficiency"] == "medium"
     assert out["gwt_artifact_present"] is True
     assert out["gwt_verification_artifact"]["status"] == "PASS"
+
+
+def test_run_with_nexus_can_supervise_high_risk_when_policy_explicitly_allows(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_VALUE_HIDDEN_VERIFIER", "1")
+    monkeypatch.delenv("NEXUS_LOCAL_REFLEX_PROVIDER", raising=False)
+    task = CapabilityTask(
+        id="public-refactor-hard",
+        difficulty="hard",
+        task_type="public_refactor",
+        category="refactor",
+        repo_kind="neutral_fixture",
+        task_desc="Refactor a credential scrubber while preserving governance boundaries.",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="patch_and_tests_pass",
+        fixture_kind="nexus_value_mempalace_secret_redaction",
+        expected_capabilities=("mempalace_gate", "claim_gate"),
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+    policy = tmp_path / ".nexus" / "policy" / "promoted_route_cost_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(
+        """{
+  "schema_version": "nexus_promoted_route_cost_policy.v1",
+  "source": ".nexus/reports/cost",
+  "feature_rules": [
+    {
+      "id": "feature:governance-high-supervised",
+      "match": {"task_type": "public_refactor", "difficulty": "hard", "category": "refactor", "repo_kind": "neutral_fixture"},
+      "controls": {"candidate_cap": 1, "supervised_bare_first": true, "allow_high_risk_supervised_bare_first": true, "context_mode": "compact", "disable_research": true, "max_rounds": 1, "route_lane": "governance_supervised"}
+    }
+  ]
+}""",
+        encoding="utf-8",
+    )
+
+    def fake_without(**_kwargs):
+        return {
+            "task_id": task.id,
+            "status": "SUCCESS",
+            "semantic_status": "VERIFIED",
+            "run_eligible": True,
+            "report_trust_mismatch": False,
+            "wall_duration_sec": 9.0,
+            "total_tokens": 1200,
+            "model_calls": 1,
+        }
+
+    def fail_process(*_args, **_kwargs):
+        raise AssertionError("explicit high-risk supervision should use bare-first candidate")
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.run_without_nexus", fake_without)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fail_process)
+
+    out = run_with_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        runner_mode="subprocess",
+        with_llm_mode="all",
+    )
+
+    assert out["runtime_classification"] == "nexus_supervised_bare_first"
+    assert out["local_reflex_risk_level"] == "high"
+    assert out["route_cost_policy_controls"]["allow_high_risk_supervised_bare_first"] is True
+    assert out["capability_claim_verified"] is True
+    assert out["expected_capability_receipt_coverage"]["missing"] == []
 
 
 def test_feature_reflex_uses_supervised_bare_first_with_gwt_artifact(tmp_path: Path, monkeypatch):
@@ -7146,6 +9554,161 @@ def test_route_oracle_msa_capability_preserves_forced_hyper():
     assert reason == ""
 
 
+def test_receipt_lite_allows_model_required_pre_model_rescue():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "allow_pre_model_deterministic_rescue": True,
+            "context_mode": "compact",
+            "disable_research": True,
+            "expected_capability_protection": ["swarm"],
+            "max_rounds": 1,
+            "route_lane": "governance_hardened",
+            "route_oracle_receipt_lite": True,
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="model_required",
+        capability_activation_contract="required",
+        local_reflex_risk_level="medium",
+        local_reflex_bare_sufficiency="medium",
+    )
+
+    assert policy.pre_model_deterministic_rescue_allowed is True
+    assert "model_required_receipt_lite_allows_pre_model_rescue" in policy.reason_codes
+    assert "expected_capability_protection" not in policy.reason_codes
+
+
+def test_gate_and_preflight_receipt_lite_allow_pre_model_rescue():
+    for flag, lane, max_rounds in (
+        ("gate_only_receipt_lite", "trust_supervised_scope_only", 1),
+        ("preflight_receipt_lite", "memory_contract_compact", 2),
+    ):
+        policy = decide_route_execution_policy(
+            route_cost_controls={
+                "allow_pre_model_deterministic_rescue": True,
+                "context_mode": "compact",
+                "disable_research": True,
+                flag: True,
+                "max_rounds": max_rounds,
+                "route_lane": lane,
+            },
+            llm_enabled=True,
+            hidden_verifier_required=True,
+            eligibility_class="",
+            capability_activation_contract="required",
+            local_reflex_risk_level="medium",
+            local_reflex_bare_sufficiency="medium",
+        )
+
+        assert policy.pre_model_deterministic_rescue_allowed is True
+
+
+def test_hyper_receipt_lite_allows_cost_capped_pre_model_rescue():
+    policy = decide_route_execution_policy(
+        route_cost_controls={
+            "allow_pre_model_deterministic_rescue": True,
+            "context_mode": "compact",
+            "disable_research": True,
+            "expected_capability_protection": ["hyper"],
+            "hyper_receipt_lite": True,
+            "max_rounds": 1,
+            "route_lane": "repair_capped",
+        },
+        llm_enabled=True,
+        hidden_verifier_required=True,
+        eligibility_class="",
+        capability_activation_contract="cost_capped",
+        local_reflex_risk_level="low",
+        local_reflex_bare_sufficiency="high",
+    )
+
+    assert policy.pre_model_deterministic_rescue_allowed is True
+    assert "expected_capability_protection" not in policy.reason_codes
+
+
+def test_expected_receipts_backfill_receipt_lite_capabilities():
+    receipts = _ensure_expected_capability_receipts(
+        task_id="route-oracle-swarm-001",
+        expected_capabilities=("semantic_failure_sensor", "swarm"),
+        capability_receipts=[],
+        codeintel={},
+        tests_passed=True,
+        delivery_evidence_refs=["test_hidden.py"],
+    )
+
+    coverage = _expected_capability_receipt_coverage(("semantic_failure_sensor", "swarm"), receipts)
+
+    assert coverage["all_public_safe"] is True
+    assert coverage["missing"] == []
+    assert receipts[0]["selection_source"] == "deterministic_receipt_lite"
+    assert {receipt["name"] for receipt in receipts} == {"semantic_failure_sensor", "swarm"}
+    assert all("test_hidden.py" in receipt["evidence_refs"] for receipt in receipts)
+
+
+def test_local_mutator_covers_expanded_commercial_contract_helpers():
+    cases = [
+        (
+            "def rlm_harder_v2_choose_candidate(candidates):\n    return max(candidates, key=lambda item: item.get('score', 0)).get('id')\n",
+            "rlm_harder_v2_choose_candidate",
+            lambda fn: fn(
+                [
+                    {"id": "unsupported", "score": 0.99, "evidence_refs": []},
+                    {"id": "winner", "score": 0.7, "status": "pass", "evidence_refs": ["winner.json"]},
+                ]
+            )
+            == "winner",
+        ),
+        (
+            "def rlm_harder_v2_prune_candidates(candidates, max_candidates):\n    return [item.get('id') for item in sorted(candidates, key=lambda item: item.get('score', 0), reverse=True)[:max_candidates]]\n",
+            "rlm_harder_v2_prune_candidates",
+            lambda fn: fn(
+                [
+                    {"id": "safe-high-score", "score": 0.95, "risk": 1},
+                    {"id": "risky-required", "score": 0.5, "risk": 9},
+                    {"id": "middle", "score": 0.7, "risk": 2},
+                ],
+                2,
+            )
+            == ["risky-required", "safe-high-score"],
+        ),
+        (
+            "def rlm_harder_v2_accept_drone_artifacts(artifacts, expected_count):\n    return len(artifacts) == expected_count and all(item.get('path') for item in artifacts)\n",
+            "rlm_harder_v2_accept_drone_artifacts",
+            lambda fn: fn([{"owner": "a"}, {"owner": "b", "path": "reports/b.json"}], 2) is False,
+        ),
+        (
+            "def rlm_harder_v2_accept_nightshift(report):\n    return bool(report.get('recommended') and report.get('invoked') and report.get('recovered'))\n",
+            "rlm_harder_v2_accept_nightshift",
+            lambda fn: fn({"recommended": True, "invoked": True, "recovered": True}) is False,
+        ),
+    ]
+
+    for source, function_name, assertion in cases:
+        patched = generate_local_candidate(source, "expanded commercial contract helper", "local", 0)
+        namespace: dict[str, object] = {}
+        exec(patched, namespace)
+        assert assertion(namespace[function_name])
+
+
+def test_local_mutator_ddtree_preserves_score_order_when_risk_ties():
+    source = (
+        "def rlm_harder_v2_prune_candidates(candidates, max_candidates):\n"
+        "    ordered = sorted(candidates, key=lambda item: item.get('score', 0), reverse=True)\n"
+        "    return [item.get('id') for item in ordered[:max_candidates]]\n"
+    )
+
+    patched = generate_local_candidate(source, "ddtree pruning", "local", 0)
+    namespace: dict[str, object] = {}
+    exec(patched, namespace)
+
+    candidates = [
+        {"id": "a", "score": 0.2, "risk": 1},
+        {"id": "b", "score": 0.9, "risk": 1},
+        {"id": "c", "score": 0.6, "risk": 1},
+    ]
+    assert namespace["rlm_harder_v2_prune_candidates"](candidates, 2) == ["b", "c"]
+
+
 def test_public_non_hyper_expected_capability_defers_forced_hyper_to_route():
     task = CapabilityTask(
         id="rlm-harder-v2-belief-001",
@@ -7737,6 +10300,7 @@ def test_run_with_nexus_can_enable_routing_layer_executors_without_llm(tmp_path:
 
 
 def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNTS", "1")
     task = CapabilityTask(
         id="pub-routing-receipts-no-llm",
         difficulty="hard",
@@ -7790,6 +10354,14 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
             "gemini_uses_nexus": True,
             "nexus_context_delivered": True,
             "usage_valid": True,
+            "skill_mount_contract": {
+                "skill_id": "nexus-benchmark-public-report",
+                "skill_status": "nexus_curated_candidate",
+                "capability_mount": "benchmark_and_promotion",
+                "load_reason_codes": ["public_benchmark_report_required"],
+                "evidence_refs": ["route:pub-routing-receipts-no-llm"],
+                "outcome_contributed": True,
+            },
             "pillars": {
                 "lancedb": {"active": True},
                 "memory": {"active": True},
@@ -7870,8 +10442,26 @@ def test_run_with_nexus_subprocess_preserves_executor_receipts_without_llm(tmp_p
     assert captured["env"]["NEXUS_AUTOREASON_EXECUTOR"] == "1"
     assert captured["env"]["NEXUS_DDTREE_EXECUTOR"] == "1"
     assert captured["env"]["NEXUS_ULTRA_REVIEW_DRY_GATE"] == "1"
+    assert json.loads(captured["env"]["NEXUS_BENCH_SKILL_MOUNT_REQUESTS"]) == [
+        "nexus-benchmark-continuous-optimization",
+        "nexus-root-cause-probe",
+    ]
     assert out["capability_receipts"] == receipts
     assert json.loads(out["capability_receipts_json"]) == receipts
+    assert out["skill_mount_contract"] == [
+        {
+            "skill_id": "nexus-benchmark-public-report",
+            "skill_status": "nexus_curated_candidate",
+            "capability_mount": "benchmark_and_promotion",
+            "load_reason_codes": ["public_benchmark_report_required"],
+            "evidence_refs": ["route:pub-routing-receipts-no-llm"],
+            "outcome_contributed": True,
+        }
+    ]
+    assert out["skill_mount_count"] == 1
+    assert out["skill_mount_contract_status"] == "PASS"
+    assert out["skill_mount_violations"] == []
+    assert json.loads(out["skill_mount_contract_json"]) == out["skill_mount_contract"]
     assert out["research_preflight_present"] is True
     assert out["research_preflight_requires_evidence"] is True
     assert out["research_preflight_blocked"] is False
@@ -8107,6 +10697,108 @@ def test_run_without_nexus_gemini_mode_uses_direct_flash_baseline(tmp_path: Path
     assert out["baseline_patch_len"] > 0
 
 
+def test_direct_gemini_session_worker_reuses_one_session(tmp_path: Path, monkeypatch):
+    gemini_bin = tmp_path / "gemini"
+    gemini_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    capability_ab_runner._GEMINI_BENCH_SESSION_ID = None
+    capability_ab_runner._GEMINI_BENCH_SESSION_STARTED.clear()
+    capability_ab_runner._GEMINI_BENCH_SESSION_TURNS.clear()
+    capability_ab_runner._session_marker_path("gemini", "bench-session-001").unlink(missing_ok=True)
+    monkeypatch.setenv("NEXUS_GEMINI_SESSION_WORKER", "1")
+    monkeypatch.setenv("NEXUS_GEMINI_SESSION_ID", "bench-session-001")
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3-flash-preview")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.shutil.which", lambda _name, **_kwargs: str(gemini_bin))
+
+    def fake_run_process_group(cmd, **_kwargs):
+        commands.append(list(cmd))
+        outer = {
+            "output": json.dumps({"status": "SUCCESS", "patch": "patched"}),
+            "usageMetadata": {"totalTokenCount": 42},
+        }
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(outer), stderr="")
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    first, _ = _ask_direct_gemini_flash_patch(prompt="task one", timeout_sec=10)
+    second, _ = _ask_direct_gemini_flash_patch(prompt="task two", timeout_sec=10)
+
+    assert commands[0][1:3] == ["--session-id", "bench-session-001"]
+    assert commands[1][1:3] == ["--resume", "bench-session-001"]
+    assert first["gemini_session_worker"] is True
+    assert first["gemini_session_resumed"] is False
+    assert first["gemini_session_turn_index"] == 1
+    assert second["gemini_session_resumed"] is True
+    assert second["gemini_session_turn_index"] == 2
+
+
+def test_reset_gemini_session_worker_clears_marker_and_turn_state(monkeypatch):
+    capability_ab_runner._GEMINI_BENCH_SESSION_ID = None
+    capability_ab_runner._GEMINI_BENCH_SESSION_STARTED.clear()
+    capability_ab_runner._GEMINI_BENCH_SESSION_TURNS.clear()
+    marker_path = capability_ab_runner._session_marker_path("gemini", "bench-session-reset")
+    marker_path.write_text("started", encoding="utf-8")
+    capability_ab_runner._GEMINI_BENCH_SESSION_STARTED.add("bench-session-reset")
+    capability_ab_runner._GEMINI_BENCH_SESSION_TURNS["bench-session-reset"] = 7
+
+    capability_ab_runner._reset_gemini_benchmark_session("bench-session-reset")
+
+    assert "bench-session-reset" not in capability_ab_runner._GEMINI_BENCH_SESSION_STARTED
+    assert "bench-session-reset" not in capability_ab_runner._GEMINI_BENCH_SESSION_TURNS
+    assert not marker_path.exists()
+
+
+def test_run_without_nexus_session_worker_records_row_metadata(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="easy-001",
+        difficulty="easy",
+        task_type="bug",
+        task_desc="Fix text normalization",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+    )
+    target_file, test_file = _materialize_fixture(tmp_path, task)
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        assert "NEXUS_BENCH_SESSION_BOUNDARY_V1" in prompt
+        return (
+            {
+                "patch": "def normalize_flag(text: str) -> str:\n    return text.strip().lower()\n",
+                "tokens_used": 123,
+                "token_capture_status": "measured",
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": True,
+                "gemini_session_worker": True,
+                "gemini_session_id": "bench-session-001",
+                "gemini_session_turn_index": 1,
+                "gemini_session_resumed": False,
+                "gemini_session_mode": "session_id_resume",
+            },
+            "",
+        )
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=target_file,
+        test_file=test_file,
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert out["status"] == "SUCCESS"
+    assert out["session_worker_enabled"] is True
+    assert out["session_worker_provider"] == "gemini"
+    assert out["session_worker_policy"] == "session_id_resume"
+    assert out["session_worker_id"] == "bench-session-001"
+    assert out["session_worker_turn_index"] == 1
+    assert out["reset_boundary_hash"]
+
+
 def test_run_without_nexus_codex_mode_uses_direct_codex_baseline(tmp_path: Path, monkeypatch):
     task = CapabilityTask(
         id="easy-codex-001",
@@ -8150,6 +10842,79 @@ def test_run_without_nexus_codex_mode_uses_direct_codex_baseline(tmp_path: Path,
     assert out["token_reliable"] is False
     assert out["token_unreliable_reason"] == "estimated_tokens"
     assert out["runtime_classification"] == "direct_codex"
+
+
+def test_direct_codex_session_worker_avoids_resume_last_by_default(tmp_path: Path, monkeypatch):
+    codex_bin = tmp_path / "codex"
+    codex_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    capability_ab_runner._CODEX_BENCH_SESSION_ID = None
+    capability_ab_runner._CODEX_BENCH_SESSION_STARTED = False
+    capability_ab_runner._CODEX_BENCH_SESSION_TURN = 0
+    capability_ab_runner._session_marker_path("codex", "gpt55-session-001").unlink(missing_ok=True)
+    monkeypatch.setenv("NEXUS_CODEX_SESSION_WORKER", "1")
+    monkeypatch.setenv("NEXUS_CODEX_SESSION_ID", "gpt55-session-001")
+    monkeypatch.setenv("NEXUS_CODEX_MODEL_NAME", "gpt-5.5")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.shutil.which", lambda _name: str(codex_bin))
+
+    def fake_run_process_group(cmd, **_kwargs):
+        commands.append(list(cmd))
+        output_path = Path(cmd[cmd.index("--output-last-message") + 1])
+        output_path.write_text(json.dumps({"status": "SUCCESS", "patch": "patched"}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="tokens used 1,234", stderr="")
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+
+    first, _ = _ask_direct_codex_patch(prompt="task one", timeout_sec=10)
+    second, _ = _ask_direct_codex_patch(prompt="task two", timeout_sec=10)
+
+    assert commands[0][:3] == [str(codex_bin), "exec", "--sandbox"]
+    assert "--skip-git-repo-check" in commands[0]
+    assert "--ephemeral" not in commands[0]
+    assert commands[1][:3] == [str(codex_bin), "exec", "--sandbox"]
+    assert "--skip-git-repo-check" in commands[1]
+    assert first["codex_session_worker"] is True
+    assert first["codex_session_resumed"] is False
+    assert first["codex_session_turn_index"] == 1
+    assert first["codex_session_mode"] == "exec_fresh_no_resume"
+    assert second["codex_session_resumed"] is False
+    assert second["codex_session_turn_index"] == 2
+
+
+def test_codex_fresh_no_resume_session_policy_is_not_contamination():
+    rows = [
+        {
+            "task_id": "task-a",
+            "trial_index": 1,
+            "session_worker_enabled": True,
+            "session_worker_provider": "codex",
+            "session_worker_policy": "exec_fresh_no_resume",
+            "session_worker_id": "codex-public-baseline",
+            "session_worker_turn_index": 1,
+            "session_worker_resumed": False,
+            "reset_boundary_hash": "hash-a",
+            "run_eligible": True,
+        },
+        {
+            "task_id": "task-b",
+            "trial_index": 1,
+            "session_worker_enabled": True,
+            "session_worker_provider": "codex",
+            "session_worker_policy": "exec_fresh_no_resume",
+            "session_worker_id": "codex-public-baseline",
+            "session_worker_turn_index": 2,
+            "session_worker_resumed": False,
+            "reset_boundary_hash": "hash-b",
+            "run_eligible": True,
+        },
+    ]
+
+    report = capability_ab_runner._annotate_session_worker_contamination(rows)
+
+    assert report["clean"] is True
+    assert all(not row.get("session_worker_contamination_detected") for row in rows)
+    assert all(row["run_eligible"] is True for row in rows)
 
 
 def test_run_without_nexus_hidden_verifier_omits_tests_from_prompt(tmp_path: Path, monkeypatch):
@@ -8680,7 +11445,7 @@ def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeyp
                 "tokens_used": 0,
                 "model_name": "gemini-3-flash-preview",
             },
-            "Resource exhausted: quota exceeded",
+            "ERROR: You've hit your usage limit. Try again later.",
         )
 
     monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
@@ -8699,6 +11464,144 @@ def test_run_without_nexus_gemini_quota_is_infra_invalid(tmp_path: Path, monkeyp
     assert out["model_calls"] == 1
     assert out["invocation_started"] is True
     assert out["model_response_received"] is False
+
+
+def test_run_without_nexus_retries_direct_gemini_cli_error_without_tokens(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="retry-cli-error",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix normalization",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file = tmp_path / "target.py"
+    test_file = tmp_path / "test_target.py"
+    target_file.write_text("def normalize(value):\n    return value\n", encoding="utf-8")
+    test_file.write_text(
+        "from target import normalize\n\n"
+        "def test_normalize():\n"
+        "    assert normalize('  A  ') == 'a'\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return (
+                {
+                    "status": "FAIL",
+                    "error_category": "cli_error",
+                    "tokens_used": 0,
+                    "model_name": "gemini-3-flash-preview",
+                },
+                "transient empty CLI response",
+            )
+        return (
+            {
+                "status": "SUCCESS",
+                "patch": "def normalize(value):\n    return value.strip().lower()\n",
+                "tokens_used": 321,
+                "token_capture_status": "measured",
+                "gateway_stats_present": True,
+                "gateway_token_source": "stats",
+                "model_name": "gemini-3-flash-preview",
+                "model_patch_generated": True,
+            },
+            '{"status":"SUCCESS"}',
+        )
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=str(target_file),
+        test_file=str(test_file),
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert len(calls) == 2
+    assert out["status"] == "SUCCESS"
+    assert out["run_eligible"] is True
+    assert out["provider_token_measured"] is True
+    assert out["direct_infra_retry_count"] == 1
+    assert out["direct_infra_retry_wall_sec"] >= 0
+    assert out["direct_infra_retry_reasons"] == ["cli_error_without_tokens"]
+
+
+def test_run_without_nexus_resets_direct_gemini_invalid_session_before_retry(tmp_path: Path, monkeypatch):
+    task = CapabilityTask(
+        id="retry-invalid-session",
+        difficulty="hard",
+        task_type="public_bugfix",
+        task_desc="Fix normalization",
+        target_file="target.py",
+        test_file="test_target.py",
+        success_criteria="patch_and_tests_pass",
+    )
+    target_file = tmp_path / "target.py"
+    test_file = tmp_path / "test_target.py"
+    target_file.write_text("def normalize(value):\n    return value\n", encoding="utf-8")
+    test_file.write_text(
+        "from target import normalize\n\n"
+        "def test_normalize():\n"
+        "    assert normalize('  A  ') == 'a'\n",
+        encoding="utf-8",
+    )
+    marker_path = capability_ab_runner._session_marker_path("gemini", "bench-session-invalid")
+    marker_path.write_text("started", encoding="utf-8")
+    capability_ab_runner._GEMINI_BENCH_SESSION_STARTED.add("bench-session-invalid")
+    capability_ab_runner._GEMINI_BENCH_SESSION_TURNS["bench-session-invalid"] = 3
+    calls = []
+
+    def fake_ask_direct_gemini_flash_patch(*, prompt, timeout_sec):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return (
+                {
+                    "status": "FAIL",
+                    "error_category": "cli_error",
+                    "tokens_used": 0,
+                    "model_name": "gemini-3.1-pro-preview",
+                    "gemini_session_id": "bench-session-invalid",
+                },
+                'Error resuming session: Invalid session identifier "bench-session-invalid"',
+            )
+        return (
+            {
+                "status": "SUCCESS",
+                "patch": "def normalize(value):\n    return value.strip().lower()\n",
+                "tokens_used": 321,
+                "token_capture_status": "measured",
+                "gateway_stats_present": True,
+                "gateway_token_source": "stats",
+                "model_name": "gemini-3.1-pro-preview",
+                "model_patch_generated": True,
+            },
+            '{"status":"SUCCESS"}',
+        )
+
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._ask_direct_gemini_flash_patch", fake_ask_direct_gemini_flash_patch)
+    out = run_without_nexus(
+        repo_root=tmp_path,
+        task=task,
+        target_file=str(target_file),
+        test_file=str(test_file),
+        timeout_sec=10,
+        force_flow=None,
+        mode="gemini",
+    )
+
+    assert len(calls) == 2
+    assert out["status"] == "SUCCESS"
+    assert out["direct_infra_retry_reasons"] == ["gemini_invalid_session_identifier"]
+    assert "bench-session-invalid" not in capability_ab_runner._GEMINI_BENCH_SESSION_STARTED
+    assert "bench-session-invalid" not in capability_ab_runner._GEMINI_BENCH_SESSION_TURNS
+    assert not marker_path.exists()
 
 
 def test_without_nexus_parse_failure_with_tokens_is_eligible_model_failure():
@@ -8840,6 +11743,32 @@ def test_direct_gemini_patch_runs_from_repo_cwd(monkeypatch, tmp_path: Path):
     assert captured["cwd"] == str(tmp_path.resolve())
     assert "-y" not in captured["cmd"]
     assert "--approval-mode" in captured["cmd"]
+    assert "plan" in captured["cmd"]
+    assert out["patch"] == "x = 1\n"
+
+
+def test_direct_gemini_patch_approval_mode_can_be_overridden(monkeypatch, tmp_path: Path):
+    captured: dict[str, object] = {}
+
+    def fake_run_process_group(cmd, *, cwd, env, timeout_sec):
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps({"response": "{\"status\":\"OK\",\"patch\":\"x = 1\\n\"}"}),
+            stderr="",
+        )
+
+    monkeypatch.setenv("NEXUS_GEMINI_CLI_CWD", str(tmp_path))
+    monkeypatch.setenv("NEXUS_DIRECT_GEMINI_APPROVAL_MODE", "auto_edit")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner._run_process_group", fake_run_process_group)
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.shutil.which", lambda _name, **_kwargs: "/tmp/gemini")
+    monkeypatch.setattr("scripts.bench.capability_ab_runner.Path.exists", lambda _self: True)
+
+    out, _ = _ask_direct_gemini_flash_patch(prompt="fix", timeout_sec=7)
+
+    assert "auto_edit" in captured["cmd"]
+    assert "plan" not in captured["cmd"]
     assert out["patch"] == "x = 1\n"
 
 
@@ -8915,6 +11844,8 @@ def test_direct_codex_patch_uses_read_only_exec(monkeypatch, tmp_path: Path):
     assert out["model_patch_generated"] is True
     assert out["tokens_used"] == 17263
     assert out["token_capture_status"] == "measured"
+    assert out["gateway_total_sec"] >= out["gateway_process_sec"] > 0.0
+    assert out["gateway_provider_wait_sec"] == out["gateway_process_sec"]
 
 
 def test_direct_codex_patch_can_ignore_user_config(monkeypatch, tmp_path: Path):
@@ -8986,6 +11917,8 @@ def test_authorization_task_text_is_not_auth_infra_invalid():
         "baseline_raw_tail": "Refactor authorization helper while preserving deny-by-default behavior.",
         "baseline_gateway_error_category": "",
         "model_calls": 1,
+        "total_tokens": 10,
+        "token_capture_status": "measured",
     }
 
     out = _annotate_benchmark_eligibility(
@@ -9104,7 +12037,7 @@ def test_local_preflight_nexus_delivery_is_eligible_without_model_call():
     assert out["model_uplift_eligible"] is False
     assert out["model_uplift_blocked_by_local_delivery"] is True
     assert out["model_uplift_ineligible_reason"] == "no_model_call"
-    assert out["public_cost_evidence"] is False
+    assert out["public_cost_evidence"] is True
 
 
 def test_local_hidden_contract_fast_path_nexus_delivery_is_eligible_without_model_call():
@@ -9143,6 +12076,62 @@ def test_local_hidden_contract_fast_path_nexus_delivery_is_eligible_without_mode
     assert out["model_uplift_blocked_by_local_delivery"] is True
     assert out["model_uplift_ineligible_reason"] == "no_model_call"
     assert out["cost_evidence_class"] == "rescue_only_no_model_call"
+
+
+def test_final_nexus_retry_row_keeps_route_execution_policy(monkeypatch, tmp_path: Path):
+    route_policy = {"reason_codes": ["bounded_retry_keeps_policy"]}
+    row = {
+        "status": "SUCCESS",
+        "semantic_status": "VERIFIED",
+        "semantic_completed": True,
+        "mode": "with_nexus",
+        "task_id": "retry-row",
+        "trial_index": 1,
+        "route_execution_policy": route_policy,
+    }
+
+    _apply_data_contract_audit(row)
+    out = _annotate_with_contract(row, provider="gemini", model_required=True, nexus_required=True)
+
+    assert out["route_execution_policy"] == route_policy
+    assert "route_execution_policy" in out
+
+
+def test_local_deterministic_pre_model_rescue_is_eligible_without_model_call():
+    row = {
+        "status": "SUCCESS",
+        "semantic_completed": True,
+        "nexus_winner_source": "local_deterministic_pre_model_rescue",
+        "nexus_context_delivered": True,
+        "model_calls": 0,
+        "total_tokens": 0,
+        "token_capture_status": "not_applicable_local_only",
+        "pillar_lancedb_active": True,
+        "pillar_memory_active": True,
+        "pillar_mempalace_active": True,
+        "pillar_belief_active": True,
+        "pillar_artifact_active": True,
+        "phase_p": "deterministic_pre_model_preflight",
+        "phase_x": "deterministic_pre_model_context_suppressed",
+        "phase_d": "deterministic_pre_model_route_decision",
+        "phase_r": "deterministic_pre_model_repair",
+        "phase_a": "deterministic_pre_model_hidden_verifier",
+        "phase_c": "deterministic_pre_model_delivery_receipt",
+    }
+
+    out = _annotate_benchmark_eligibility(
+        row,
+        provider="gemini",
+        model_required=True,
+        nexus_required=True,
+    )
+
+    assert out["run_eligible"] is True
+    assert out["nexus_wearing_valid"] is True
+    assert out["nexus_internal_delivery_valid"] is True
+    assert out["model_uplift_eligible"] is False
+    assert out["model_uplift_blocked_by_local_delivery"] is True
+    assert out["model_uplift_ineligible_reason"] == "no_model_call"
 
 
 def test_model_required_local_final_delivery_after_model_call_fails_closed():
@@ -9391,6 +12380,48 @@ def test_per_task_stop_loss_allows_rows_within_budget():
     assert "infra_invalid_reason" not in row
 
 
+def test_direct_timeout_abort_triggers_only_after_consecutive_without_timeouts():
+    timeout_row = {
+        "mode": "without_nexus",
+        "gateway_error_category": "timeout",
+        "infra_invalid_reason": "timeout_before_model_call",
+    }
+    with_row = {"mode": "with_nexus", "gateway_error_category": "timeout"}
+    failed_non_timeout = {"mode": "without_nexus", "gateway_error_category": "parse_failure"}
+
+    assert _direct_provider_timeout_row(timeout_row) is True
+    assert _direct_provider_timeout_row(with_row) is False
+    assert _direct_provider_timeout_row(failed_non_timeout) is False
+    assert _direct_timeout_abort_reason(2, 3) == ""
+    assert _direct_timeout_abort_reason(3, 3) == "consecutive_direct_provider_timeouts"
+    assert _direct_timeout_abort_reason(3, 0) == ""
+
+
+def test_direct_infra_abort_triggers_on_consecutive_infra_invalid_rows():
+    auth_row = {
+        "mode": "without_nexus",
+        "run_eligible": False,
+        "infra_invalid_reason": "auth_failed",
+    }
+    eligible_failure = {
+        "mode": "without_nexus",
+        "run_eligible": True,
+        "infra_invalid_reason": "",
+    }
+    with_row = {
+        "mode": "with_nexus",
+        "run_eligible": False,
+        "infra_invalid_reason": "auth_failed",
+    }
+
+    assert _direct_provider_infra_row(auth_row) is True
+    assert _direct_provider_infra_row(eligible_failure) is False
+    assert _direct_provider_infra_row(with_row) is False
+    assert _direct_infra_abort_reason(2, 3) == ""
+    assert _direct_infra_abort_reason(3, 3) == "consecutive_direct_provider_infra_invalid"
+    assert _direct_infra_abort_reason(3, 0) == ""
+
+
 def test_partial_markdown_report_marks_public_gate_fail():
     text = _render_partial_markdown_report(
         benchmark_date="2026-04-28",
@@ -9460,11 +12491,38 @@ def test_benchmark_rows_mark_zero_token_model_calls_unreliable():
     assert rows[0]["token_unreliable_reason"] == "model_call_without_tokens"
     assert rows[1]["token_reliable"] is False
     assert rows[1]["token_unreliable_reason"] == "estimated_tokens"
-    assert summary["with_nexus"]["token_reliable_rate"] == 0.0
+    assert rows[0]["run_eligible"] is False
+    assert rows[0]["infra_invalid_reason"] == "model_call_without_tokens"
+    assert summary["with_nexus"]["infra_invalid_n"] == 1
+    assert summary["with_nexus"]["token_reliable_rate"] is None
     assert summary["without_nexus"]["token_reliable_rate"] == 0.0
-    assert summary["with_nexus"]["model_required_n"] == 1
+    assert summary["with_nexus"]["model_required_n"] == 0
     assert summary["with_nexus"]["model_uplift_eligible_n"] == 0
-    assert summary["with_nexus"]["model_uplift_ineligible_reasons"] == ["model_call_without_tokens"]
+    assert summary["with_nexus"]["model_uplift_ineligible_reasons"] == []
+
+
+def test_direct_model_call_without_tokens_is_infra_invalid():
+    row = {
+        "mode": "without_nexus",
+        "status": "FAILED",
+        "semantic_completed": False,
+        "report_trust_mismatch": False,
+        "wall_duration_sec": 2.8,
+        "total_tokens": 0,
+        "model_calls": 1,
+        "token_capture_status": "unknown",
+    }
+
+    _annotate_benchmark_eligibility(
+        row,
+        provider="gemini",
+        model_required=True,
+        nexus_required=False,
+    )
+
+    assert row["run_eligible"] is False
+    assert row["infra_invalid_reason"] == "model_call_without_tokens"
+    assert row["model_uplift_ineligible_reason"] == "infra_invalid:model_call_without_tokens"
 
 
 def test_benchmark_rows_mark_unhelpful_local_fallback():
@@ -9539,8 +12597,10 @@ def test_benchmark_row_classifies_model_timeout_with_local_fallback():
     assert row["rescue_cost_status"] == "local_after_model_timeout"
     assert row["token_reliable"] is False
     assert row["token_unreliable_reason"] == "model_timeout_with_local_fallback"
-    assert summary["with_nexus"]["token_unreliable_reasons"] == ["model_timeout_with_local_fallback"]
-    assert summary["with_nexus"]["model_uplift_eligible_rate"] == 0.0
+    assert row["run_eligible"] is False
+    assert row["infra_invalid_reason"] == "model_call_without_tokens"
+    assert summary["with_nexus"]["token_unreliable_reasons"] == []
+    assert summary["with_nexus"]["model_uplift_eligible_rate"] is None
 
 
 def test_benchmark_row_marks_clean_model_cost_evidence():
@@ -9772,6 +12832,177 @@ def test_force_learn_slo_ready_writes_pass_summary(tmp_path: Path):
     payload = json.loads((tmp_path / ".nexus" / "reports" / "learn" / "phase_slo_summary.json").read_text(encoding="utf-8"))
     assert payload["phase_slo_pass"] is True
     assert payload["global"]["required_done_ratio"] == 1.0
+    assert payload["public_lane_eligible"] is False
+    assert payload["evidence_class"] == "synthetic_readiness_shortcut"
+
+
+def test_sanitized_runner_learn_metadata_hook_commits_only_allowed_files(tmp_path: Path):
+    with tempfile.TemporaryDirectory(prefix="nexus-live-clean-runner-hook-", dir="/private/tmp") as root_str:
+        root = Path(root_str)
+        subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "nexus-temp@example.test"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Nexus Temp Runner"], check=True)
+        (root / "README.md").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-m", "base"], check=True, capture_output=True, text=True)
+        learn_dir = root / ".nexus" / "reports" / "learn"
+        learn_dir.mkdir(parents=True)
+        (learn_dir / "phase_slo_summary.json").write_text('{"phase_slo_pass":true}\n', encoding="utf-8")
+        (learn_dir / "phase_writeback.jsonl").write_text('{"event":"run"}\n', encoding="utf-8")
+        (learn_dir / "x1_readiness_history.json").write_text('[{"x1_readiness_pass":true}]\n', encoding="utf-8")
+        hook = tmp_path / "commit_learn_metadata.sh"
+        hook.write_text(_learn_metadata_commit_hook(runner_root=root), encoding="utf-8")
+
+        subprocess.run(["sh", str(hook)], check=True, capture_output=True, text=True)
+
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--short", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        log = subprocess.run(["git", "-C", str(root), "log", "-1", "--pretty=%s"], check=True, capture_output=True, text=True)
+        assert status.stdout == ""
+        assert log.stdout.strip() == "temp-runner-learn-metadata"
+
+
+def test_sanitized_runner_learn_metadata_hook_does_not_hide_other_dirty_entries(tmp_path: Path):
+    with tempfile.TemporaryDirectory(prefix="nexus-live-clean-runner-hook-", dir="/private/tmp") as root_str:
+        root = Path(root_str)
+        subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "nexus-temp@example.test"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Nexus Temp Runner"], check=True)
+        (root / "README.md").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-m", "base"], check=True, capture_output=True, text=True)
+        learn_dir = root / ".nexus" / "reports" / "learn"
+        learn_dir.mkdir(parents=True)
+        (learn_dir / "phase_slo_summary.json").write_text('{"phase_slo_pass":true}\n', encoding="utf-8")
+        (learn_dir / "x1_readiness_history.json").write_text('[{"x1_readiness_pass":true}]\n', encoding="utf-8")
+        (root / "unexpected.txt").write_text("dirty\n", encoding="utf-8")
+        hook = tmp_path / "commit_learn_metadata.sh"
+        hook.write_text(_learn_metadata_commit_hook(runner_root=root), encoding="utf-8")
+
+        subprocess.run(["sh", str(hook)], check=True, capture_output=True, text=True)
+
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--short", "--untracked-files=all"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        log = subprocess.run(["git", "-C", str(root), "log", "-1", "--pretty=%s"], check=True, capture_output=True, text=True)
+        assert "unexpected.txt" in status.stdout
+        assert ".nexus/reports/learn/phase_slo_summary.json" in status.stdout
+        assert ".nexus/reports/learn/x1_readiness_history.json" in status.stdout
+        assert log.stdout.strip() == "base"
+
+
+def test_sanitized_runner_session_marker_hook_clears_only_current_session(tmp_path: Path):
+    current = "sanitized-gemini-3-flash-preview-current"
+    other = "sanitized-gemini-3-flash-preview-other"
+    current_markers = _session_marker_paths(session_id=current)
+    other_markers = _session_marker_paths(session_id=other)
+    for marker in (*current_markers, *other_markers):
+        marker.write_text("started\n", encoding="utf-8")
+    hook = tmp_path / "clear_session_markers.sh"
+    hook.write_text(_session_marker_reset_hook(session_id=current), encoding="utf-8")
+
+    subprocess.run(["sh", str(hook)], check=True, capture_output=True, text=True)
+
+    assert all(not marker.exists() for marker in current_markers)
+    assert all(marker.exists() for marker in other_markers)
+    for marker in other_markers:
+        marker.unlink(missing_ok=True)
+
+
+def test_sanitized_runner_package_uses_clean_guard_and_direct_timeout(tmp_path: Path):
+    source_manifest = tmp_path / "tasks.json"
+    source_manifest.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "frozen": True,
+                "benchmark_id": "demo",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "category": "bugfix",
+                        "difficulty": "hard",
+                        "repo_kind": "neutral_fixture",
+                        "repo": "fixture://demo",
+                        "repo_ref": "v1",
+                        "task_desc": "Fix demo",
+                        "fixture_kind": "python_demo",
+                        "success_criteria": "patch_and_tests_pass",
+                        "expected_capabilities": ["claim_gate", "delivery_gate"],
+                        "capability_activation_contract": "required",
+                        "hidden_oracle_kind": "pytest_hidden",
+                        "eligibility_class": "model_required",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner_path = tmp_path / "repo" / "scripts" / "bench" / "capability_ab_runner.py"
+    runner_path.parent.mkdir(parents=True)
+    runner_path.write_text("# runner\n", encoding="utf-8")
+
+    manifest = build_sanitized_runner(
+        source_manifest=source_manifest,
+        output_dir=tmp_path / "pkg",
+        runner_path=runner_path,
+        model_name="gemini-3-flash-preview",
+        provider="gemini",
+        max_tasks=1,
+    )
+
+    run_command = manifest["run_command"]
+    assert "NEXUS_DIRECT_GEMINI_TIMEOUT_SEC=240" in run_command
+    assert "--with-model-provider gemini" in run_command
+    assert "--timeout-sec 240" in run_command
+    assert "--require-clean-worktree" in run_command
+
+    pro_manifest = build_sanitized_runner(
+        source_manifest=source_manifest,
+        output_dir=tmp_path / "pkg-pro",
+        runner_path=runner_path,
+        model_name="gemini-3.1-pro-preview",
+        provider="gemini",
+        max_tasks=1,
+    )
+    assert pro_manifest["session_worker_id"].startswith("sanitized-gemini-3_1-pro-preview-")
+    assert "." not in pro_manifest["session_worker_id"]
+
+    codex_manifest = build_sanitized_runner(
+        source_manifest=source_manifest,
+        output_dir=tmp_path / "pkg-codex",
+        runner_path=runner_path,
+        model_name="gpt-5.5",
+        provider="codex",
+        max_tasks=1,
+    )
+    codex_command = codex_manifest["run_command"]
+    assert "NEXUS_DIRECT_CODEX_MODEL=gpt-5.5" in codex_command
+    assert "NEXUS_CODEX_EXEC_CWD=" in codex_command
+    assert "--without-mode codex" in codex_command
+    assert "--with-model-provider codex" in codex_command
+    assert "NEXUS_GEMINI_MODEL_NAME" not in codex_command
+
+    baseline_manifest = build_sanitized_runner(
+        source_manifest=source_manifest,
+        output_dir=tmp_path / "pkg-codex-baseline",
+        runner_path=runner_path,
+        model_name="gpt-5.5",
+        provider="codex",
+        max_tasks=1,
+        baseline_only=True,
+    )
+    baseline_command = baseline_manifest["run_command"]
+    assert baseline_manifest["baseline_only"] == "True"
+    assert "--without-only" in baseline_command
+    assert baseline_manifest["run_script"].endswith("run_codex_gpt_5_5_direct_baseline.sh")
 
 
 def test_main_rejects_always_on_eval_with_forced_hyper(monkeypatch):

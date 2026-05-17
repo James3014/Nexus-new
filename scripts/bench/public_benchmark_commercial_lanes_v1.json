@@ -91,6 +91,44 @@
         {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-belief-001"},
         {"manifest": "scripts/bench/public_benchmark_rlm_harder_v2.json", "task_id": "rlm-harder-v2-memory-001"}
       ]
+    },
+    {
+      "id": "expanded_commercial_50",
+      "name": "Expanded commercial 50",
+      "what": "Expand the commercial-model-basis lane with route-oracle, model-required, negative, and cross-module tasks before Pro comparison.",
+      "primary_metrics": [
+        "verified_delivery_rate",
+        "trust_mismatch_rate",
+        "expected_capability_evidence_pass_rate",
+        "negative_case_fail_closed_rate",
+        "wall_time_per_verified_delivery",
+        "tokens_per_verified_delivery",
+        "long_tail_offender_rate"
+      ],
+      "task_refs": [
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-semantic-searcher-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-swarm-quiet-moment-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-semantic-failure-sensor-001"},
+        {"manifest": "scripts/bench/public_benchmark_route_oracles_v1.json", "task_id": "route-oracle-bdd-acceptance-001"},
+        {"manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json", "task_id": "model-required-repair-001"},
+        {"manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json", "task_id": "model-required-refactor-001"},
+        {"manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json", "task_id": "model-required-feature-001"},
+        {"manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json", "task_id": "model-required-docs-001"},
+        {"manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json", "task_id": "model-required-ops-001"},
+        {"manifest": "scripts/bench/public_benchmark_model_required_uplift_v1.json", "task_id": "model-required-context-001"},
+        {"manifest": "scripts/bench/public_benchmark_docs_lane_v1.json", "task_id": "docs-lane-public-field-contract-001"},
+        {"manifest": "scripts/bench/public_benchmark_docs_lane_v1.json", "task_id": "docs-lane-contextual-evidence-contract-001"},
+        {"manifest": "scripts/bench/public_benchmark_docs_lane_v1.json", "task_id": "docs-lane-config-contract-001"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-negative-replay-001"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-negative-swarm-roles-001"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-negative-ultra-source-001"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-negative-drone-source-001"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-negative-nightshift-replay-001"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-reasoning-autoreason-002"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-reasoning-ddtree-002"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-reasoning-research-002"},
+        {"manifest": "scripts/bench/public_benchmark_commercial_expansion_v1.json", "task_id": "commercial-retrieval-lancedb-002"}
+      ]
     }
   ]
 }

@@ -33,6 +33,30 @@ GATE_ONLY_SUPERVISED_CAPABILITIES = frozenset(
     }
 )
 PREFLIGHT_SUPERVISED_CAPABILITIES = frozenset({"codeintel", "memory"})
+GATE_ONLY_RECEIPT_LITE_LANES = frozenset(
+    {
+        "feature_reflex",
+        "governance_hardened",
+        "governance_hardened_capped",
+        "hidden_bugfix_supervised",
+        "trust_supervised_scope_only",
+    }
+)
+ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES = frozenset({"swarm", "ultra_review"})
+DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES = frozenset(
+    {
+        "autoreason",
+        "bdd_acceptance_skill",
+        "ddtree",
+        "drone",
+        "lancedb",
+        "nightshift",
+        "research",
+        "semantic_failure_sensor",
+        "semantic_searcher",
+        "swarm_quiet_moment",
+    }
+)
 
 
 def load_learning_policy_budget(path: Path) -> dict[str, Any]:
@@ -219,6 +243,10 @@ def load_route_cost_policy_budget_from_env() -> dict[str, Any]:
         policy["current_hold"] = True
     if controls.get("supervised_bare_first") is True:
         policy["current_supervised_bare_first"] = True
+    if controls.get("allow_high_risk_supervised_bare_first") is True:
+        policy["current_allow_high_risk_supervised_bare_first"] = True
+    if controls.get("allow_pre_model_deterministic_rescue") is True:
+        policy["current_allow_pre_model_deterministic_rescue"] = True
     if controls.get("skip_llm_baseline") is True:
         policy["current_skip_llm_baseline"] = True
     if controls.get("require_llm_baseline") is True:
@@ -266,6 +294,16 @@ def route_cost_controls_from_env() -> dict[str, Any]:
         "skip_llm_baseline",
         "supervised_bare_first",
         "allow_medium_risk_supervised_bare_first",
+        "allow_high_risk_supervised_bare_first",
+        "allow_pre_model_deterministic_rescue",
+        "autoreason_mixed_candidate_pool",
+        "ddtree_mixed_candidate_pool",
+        "gate_only_receipt_lite",
+        "route_oracle_receipt_lite",
+        "belief_receipt_lite",
+        "hyper_receipt_lite",
+        "preflight_receipt_lite",
+        "swarm_receipt_executor",
         "expected_capability_protection",
         "protected_expected_capabilities",
     }
@@ -300,6 +338,14 @@ def route_cost_controls_for_task(
             policy.get("current_allow_medium_risk_supervised_bare_first", False)
         )
         or bool(feature_controls.get("allow_medium_risk_supervised_bare_first", False)),
+        "allow_high_risk_supervised_bare_first": bool(
+            policy.get("current_allow_high_risk_supervised_bare_first", False)
+        )
+        or bool(feature_controls.get("allow_high_risk_supervised_bare_first", False)),
+        "allow_pre_model_deterministic_rescue": bool(
+            policy.get("current_allow_pre_model_deterministic_rescue", False)
+        )
+        or bool(feature_controls.get("allow_pre_model_deterministic_rescue", False)),
         "skip_llm_baseline": bool(policy.get("current_skip_llm_baseline", False))
         or bool(feature_controls.get("skip_llm_baseline", False)),
         "disable_research": bool(policy.get("current_disable_research", False))
@@ -365,13 +411,79 @@ def protect_expected_capability_controls(
 
     controls = dict(route_cost_controls or {})
     expected = _normalize_expected_capabilities(expected_capabilities)
+    gate_only_receipt_lite = bool(
+        expected
+        and expected <= GATE_ONLY_SUPERVISED_CAPABILITIES
+        and controls.get("route_lane") in GATE_ONLY_RECEIPT_LITE_LANES
+        and controls.get("context_mode") == "compact"
+        and int(controls.get("max_rounds", 0) or 0) == 1
+        and controls.get("disable_research") is True
+    )
+    if gate_only_receipt_lite:
+        controls["gate_only_receipt_lite"] = True
+        controls["supervised_bare_first"] = True
+        controls["allow_medium_risk_supervised_bare_first"] = True
+        controls["allow_pre_model_deterministic_rescue"] = True
+    route_oracle_receipt_lite = bool(
+        expected
+        and expected <= (ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES | DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES)
+        and controls.get("route_lane")
+        in (
+            GATE_ONLY_RECEIPT_LITE_LANES
+            | {"context_sync_capped", "feature_reflex", "hidden_lite", "memory_contract_compact"}
+        )
+        and controls.get("context_mode") == "compact"
+        and int(controls.get("max_rounds", 0) or 0) == 1
+        and controls.get("disable_research") is True
+    )
+    if route_oracle_receipt_lite:
+        controls["route_oracle_receipt_lite"] = True
+        controls["allow_pre_model_deterministic_rescue"] = True
+    belief_receipt_lite = bool(
+        expected == {"belief"}
+        and controls.get("route_lane") == "belief_budget_hardened_capped"
+        and controls.get("context_mode") == "compact"
+        and int(controls.get("max_rounds", 0) or 0) == 1
+        and controls.get("disable_research") is True
+    )
+    if belief_receipt_lite:
+        controls["belief_receipt_lite"] = True
+        controls["allow_pre_model_deterministic_rescue"] = True
+    hyper_receipt_lite = bool(
+        expected == {"hyper", "delivery_gate"}
+        and controls.get("route_lane") == "repair_capped"
+        and controls.get("context_mode") == "compact"
+        and int(controls.get("max_rounds", 0) or 0) == 1
+        and controls.get("disable_research") is True
+    )
+    if hyper_receipt_lite:
+        controls["hyper_receipt_lite"] = True
+        controls["allow_pre_model_deterministic_rescue"] = True
+    if (
+        "swarm" in expected
+        and controls.get("route_lane") in GATE_ONLY_RECEIPT_LITE_LANES
+        and controls.get("context_mode") == "compact"
+        and int(controls.get("max_rounds", 0) or 0) == 1
+        and controls.get("disable_research") is True
+    ):
+        controls["swarm_receipt_executor"] = True
     preflight_supervised = bool(
-        controls.get("route_lane") == "context_sync_capped"
+        controls.get("route_lane") in (GATE_ONLY_RECEIPT_LITE_LANES | {"context_sync_capped", "memory_contract_compact"})
         and expected
         and expected - GATE_ONLY_SUPERVISED_CAPABILITIES <= PREFLIGHT_SUPERVISED_CAPABILITIES
     )
-    supervised_baseline = GATE_ONLY_SUPERVISED_CAPABILITIES | (
-        PREFLIGHT_SUPERVISED_CAPABILITIES if preflight_supervised else frozenset()
+    if preflight_supervised:
+        controls["preflight_receipt_lite"] = True
+        controls["allow_pre_model_deterministic_rescue"] = True
+    receipt_lite_baseline = (
+        ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES | DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES
+        if route_oracle_receipt_lite
+        else frozenset()
+    )
+    supervised_baseline = (
+        GATE_ONLY_SUPERVISED_CAPABILITIES
+        | receipt_lite_baseline
+        | (PREFLIGHT_SUPERVISED_CAPABILITIES if preflight_supervised else frozenset())
     )
     protected = sorted(expected - supervised_baseline)
     if not protected:
@@ -384,7 +496,21 @@ def protect_expected_capability_controls(
         if "ddtree" in expected and candidate_cap < 3:
             overrides["candidate_cap"] = controls.pop("candidate_cap", None)
             controls["candidate_cap"] = 3
-        elif candidate_cap < 2:
+        if (
+            "ddtree" in expected
+            and controls.get("disable_research") is True
+            and controls.get("context_mode") == "compact"
+        ):
+            controls["ddtree_mixed_candidate_pool"] = True
+        if (
+            "autoreason" in expected
+            and controls.get("disable_research") is True
+            and controls.get("context_mode") == "compact"
+        ):
+            if candidate_cap < 2:
+                overrides["candidate_cap"] = controls.pop("candidate_cap", None)
+            controls["autoreason_mixed_candidate_pool"] = True
+        elif "ddtree" not in expected and candidate_cap < 2:
             overrides["candidate_cap"] = controls.pop("candidate_cap", None)
         if controls.get("lite_route") is True:
             overrides["lite_route"] = True
@@ -397,6 +523,17 @@ def protect_expected_capability_controls(
     if "research" in expected and controls.get("disable_research") is True:
         overrides["disable_research"] = True
         controls["disable_research"] = False
+
+    if controls.get("skip_llm_baseline") is True and not (
+        controls.get("route_oracle_receipt_lite") is True
+        or controls.get("belief_receipt_lite") is True
+        or controls.get("gate_only_receipt_lite") is True
+        or controls.get("hyper_receipt_lite") is True
+        or controls.get("preflight_receipt_lite") is True
+    ):
+        overrides["skip_llm_baseline"] = True
+        controls.pop("skip_llm_baseline", None)
+        controls["require_llm_baseline"] = True
 
     if len(overrides) > 1:
         controls["expected_capability_protection"] = protected
@@ -427,6 +564,10 @@ def _controls_from_feature_rules(rules: Any, route_features: dict[str, Any]) -> 
                 out["supervised_bare_first"] = True
             if controls.get("allow_medium_risk_supervised_bare_first") is True:
                 out["allow_medium_risk_supervised_bare_first"] = True
+            if controls.get("allow_high_risk_supervised_bare_first") is True:
+                out["allow_high_risk_supervised_bare_first"] = True
+            if controls.get("allow_pre_model_deterministic_rescue") is True:
+                out["allow_pre_model_deterministic_rescue"] = True
             if controls.get("skip_llm_baseline") is True:
                 out["skip_llm_baseline"] = True
             if controls.get("require_llm_baseline") is True:

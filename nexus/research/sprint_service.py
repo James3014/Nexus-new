@@ -14,7 +14,9 @@ from typing import Any, Optional
 from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.autoreason_service import AutoreasonService
 from nexus.engine.ddtree_adapter import DDTreeAdapter
+from nexus.engine.learning_policy_loader import route_cost_controls_from_env
 from nexus.engine.policies.research_policy import ResearchPolicy
+from nexus.research.candidate_pool_policy import decide_candidate_pool_policy
 from nexus.research.day_shift_optimizer import DayShiftOptimizer
 from nexus.research.local_sprint_mutator import generate_local_candidate, generate_local_companion_edits
 from nexus.research.swarm_broker import SwarmBroker
@@ -755,6 +757,15 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     candidates: list[CandidateEval] = []
     routing_autoreason_enabled = _resolve_executor_flag(config.enable_autoreason_executor, "NEXUS_AUTOREASON_EXECUTOR")
     routing_ddtree_enabled = _resolve_executor_flag(config.enable_ddtree_executor, "NEXUS_DDTREE_EXECUTOR")
+    route_cost_controls = route_cost_controls_from_env()
+    candidate_pool_policy = decide_candidate_pool_policy(
+        autoreason_enabled=routing_autoreason_enabled,
+        ddtree_enabled=routing_ddtree_enabled,
+        llm_mode=llm_mode_effective,
+        candidate_count=config.candidate_count,
+        ddtree_max_candidates=config.ddtree_max_candidates,
+        route_cost_controls=route_cost_controls,
+    )
     routing_min_pool = 1
     if routing_ddtree_enabled and config.candidate_count > config.ddtree_max_candidates:
         routing_min_pool = min(config.candidate_count, config.ddtree_max_candidates + 1)
@@ -794,6 +805,12 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
             "forced_inplace": force_inplace_executor,
             "enable_local_swarm_executor": enable_local_swarm_executor,
             "init_sec": executor_init_sec,
+        },
+        "candidate_pool_policy": {
+            "enabled": candidate_pool_policy.enabled,
+            "local_support_candidates": candidate_pool_policy.local_support_candidates,
+            "local_support_score_cap": candidate_pool_policy.local_support_score_cap,
+            "reason_codes": list(candidate_pool_policy.reason_codes),
         },
     }
     distant_plan = config.distant_scout_plan if isinstance(config.distant_scout_plan, dict) else {}
@@ -1272,6 +1289,51 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                 error_codes.append("semantic_guard")
             else:
                 ev = executor.evaluate_candidate(seed=idx, hint=hint, code=candidate_code, source=used_source)
+            if (
+                candidate_pool_policy.enabled
+                and idx == 0
+                and llm_generator is not None
+                and used_source.startswith("llm")
+                and ev.score >= 1.0
+            ):
+                for support_idx in range(candidate_pool_policy.local_support_candidates):
+                    support_seed = idx + 8000 + support_idx
+                    support_code, support_meta = local_generator.generate(
+                        source_code=source_code,
+                        task=config.task,
+                        mutation_hint=f"{hint}\nddtree_local_support_pool",
+                        seed=support_seed,
+                    )
+                    support_source = str(support_meta.get("source") or "local")
+                    if support_source == "local":
+                        support_source = "local_ddtree_support"
+                    support_guard_ok, support_guard_reason = _semantic_guard(
+                        source_code,
+                        support_code,
+                        config.task,
+                        support_source,
+                    )
+                    if support_guard_ok:
+                        support_ev = executor.evaluate_candidate(
+                            seed=support_seed,
+                            hint=f"{hint} | ddtree_local_support_pool",
+                            code=support_code,
+                            source=support_source,
+                        )
+                        support_ev.score = min(
+                            support_ev.score,
+                            candidate_pool_policy.local_support_score_cap,
+                        )
+                    else:
+                        support_ev = CandidateEval(
+                            seed=support_seed,
+                            score=0.0,
+                            hint=f"{hint} | ddtree_local_support_pool",
+                            error=support_guard_reason,
+                            candidate_code=support_code,
+                            source=support_source,
+                        )
+                    candidates.append(support_ev)
             self_heal_enabled = os.environ.get("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "1").strip().lower() not in {"0", "false", "no"}
             if (
                 hidden_verifier_mode

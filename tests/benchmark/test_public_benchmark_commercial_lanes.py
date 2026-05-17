@@ -39,6 +39,7 @@ def test_commercial_lanes_reference_existing_public_tasks():
         "capability_lift",
         "governed_delivery",
         "cost_efficiency",
+        "expanded_commercial_50",
     }
 
     tasks_by_manifest = {
@@ -72,6 +73,22 @@ def test_commercial_lane_compiler_outputs_runner_tasks_file():
     }
 
 
+def test_commercial_lane_compiler_expands_all_to_50_unique_tasks():
+    payload = build_lane_tasks(lane="all")
+
+    task_ids = [task["id"] for task in payload["tasks"]]
+
+    assert len(task_ids) == 50
+    assert len(set(task_ids)) == 50
+    assert {
+        "route-oracle-semantic-failure-sensor-001",
+        "model-required-context-001",
+        "docs-lane-config-contract-001",
+        "commercial-negative-swarm-roles-001",
+        "commercial-reasoning-ddtree-002",
+    } <= set(task_ids)
+
+
 def test_commercial_lane_compiler_exports_safe_external_manifests(tmp_path: Path):
     payload = build_lane_tasks(lane="cost_efficiency")
     execution_payload = sanitize_execution_manifest(payload)
@@ -90,6 +107,8 @@ def test_commercial_lane_compiler_exports_safe_external_manifests(tmp_path: Path
     assert all(task["allowed_files"] == ["target.py", "test_target.py"] for task in execution_payload["tasks"])
     assert all("allowed_files" not in task and "forbidden_files" not in task for task in disclosure_payload["tasks"])
     assert {task["commercial_lane"] for task in disclosure_payload["tasks"]} == {"cost_efficiency"}
+    assert execution_payload["commercial_lane_source"] == "scripts/bench/public_benchmark_commercial_lanes_v1.json"
+    assert disclosure_payload["commercial_lane_source"] == "scripts/bench/public_benchmark_commercial_lanes_v1.json"
     assert disclosure["status"] == "PASS"
     assert disclosure["sha256"]
 

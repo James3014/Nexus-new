@@ -6,6 +6,158 @@ from pathlib import Path
 from nexus.app import research_flow_service
 from nexus.research.learn_mode import LearnModeService
 
+
+def test_runtime_skill_mount_contract_requires_confirmed_capability_receipt():
+    result = research_flow_service._build_runtime_skill_mount_contracts(
+        capability_plan_payload={
+            "signal_snapshot": {
+                "planned_skill_mount_contracts": [
+                    {
+                        "skill_id": "tdd",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "repair_and_coding",
+                        "capability": "repair_and_coding",
+                        "load_reason_codes": [
+                            "capability_planner_skill_signal",
+                            "catalog_status:nexus_curated_candidate",
+                        ],
+                        "evidence_refs": ["skill_catalog:tdd"],
+                    }
+                ],
+                "skill_mount_violations": [
+                    {"skill_name": "candidate-skill", "path": "/tmp/skill", "reason": "quarantined_status"}
+                ],
+            }
+        },
+        route_decision_payload={"task_id": "route-001"},
+        capability_receipts=[
+            {
+                "name": "hyper",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": True,
+                "evidence_refs": ["capability:hyper:verified"],
+            }
+        ],
+    )
+
+    assert result["skill_mount_contracts"] == [
+        {
+            "skill_id": "tdd",
+            "skill_status": "nexus_curated_candidate",
+            "capability_mount": "repair_and_coding",
+            "capability": "hyper",
+            "load_reason_codes": [
+                "capability_planner_skill_signal",
+                "catalog_status:nexus_curated_candidate",
+                "runtime_capability_receipt_confirmed",
+            ],
+            "evidence_refs": [
+                "skill_catalog:tdd",
+                "capability:hyper:verified",
+                "route_decision:route-001",
+                "capability_receipt:hyper",
+            ],
+            "outcome_contributed": True,
+        }
+    ]
+    assert result["skill_mount_violations"] == [
+        {"skill_name": "candidate-skill", "path": "/tmp/skill", "reason": "quarantined_status"}
+    ]
+
+
+def test_runtime_skill_mount_contract_blocks_unconfirmed_planned_mount():
+    result = research_flow_service._build_runtime_skill_mount_contracts(
+        capability_plan_payload={
+            "signal_snapshot": {
+                "planned_skill_mount_contracts": [
+                    {
+                        "skill_id": "tdd",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "repair_and_coding",
+                        "capability": "repair_and_coding",
+                        "load_reason_codes": ["capability_planner_skill_signal"],
+                        "evidence_refs": ["skill_catalog:tdd"],
+                    }
+                ],
+            }
+        },
+        route_decision_payload={"task_id": "route-002"},
+        capability_receipts=[
+            {
+                "name": "hyper",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": False,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": False,
+                "evidence_refs": [],
+            }
+        ],
+    )
+
+    assert result["skill_mount_contracts"] == []
+    assert result["skill_mount_violations"] == [
+        {
+            "skill_name": "tdd",
+            "path": "",
+            "reason": "skill_mount_not_confirmed_by_runtime_receipt",
+        }
+    ]
+
+
+def test_benchmark_skill_mount_env_feeds_planned_contract(tmp_path: Path, monkeypatch):
+    status_report = tmp_path / "skill_status.json"
+    status_report.write_text(
+        json.dumps(
+            {
+                "skills": [
+                    {
+                        "name": "tdd",
+                        "path": "/repo/.agents/skills/tdd/SKILL.md",
+                        "root": "nexus_repo",
+                        "skill_status": "nexus_curated_candidate",
+                        "test_level": "routing_plus_e2e",
+                        "action": "eligible_for_capability_mount_review",
+                        "capability_mount": "repair_and_coding",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", '["tdd"]')
+    requests = research_flow_service._benchmark_skill_mount_requests_from_env(task_id="bench-task-001")
+
+    plan, _ = research_flow_service._build_capability_plan_and_decision(
+        task_desc="Fix failing semantic regression",
+        task_type="bug",
+        route={"recommended_flow": "hyper_sprint"},
+        task_id="bench-task-001",
+        budget={"skill_status_report": str(status_report)},
+        skills=requests,
+    )
+
+    snapshot = plan.to_dict()["signal_snapshot"]
+    assert snapshot["planned_skill_mount_contracts"][0]["skill_id"] == "tdd"
+    assert snapshot["planned_skill_mount_contracts"][0]["capability_mount"] == "repair_and_coding"
+    assert snapshot["planned_skill_mount_contracts"][0]["evidence_refs"] == [
+        "skill_catalog:tdd",
+        "skill_path:/repo/.agents/skills/tdd/SKILL.md",
+    ]
+
+
+def test_benchmark_skill_mount_env_ignored_when_ablation_disallowed(monkeypatch):
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", '["tdd"]')
+    monkeypatch.setenv("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "0")
+
+    assert research_flow_service._benchmark_skill_mount_requests_from_env(task_id="bench-task-001") == []
+
+
 def test_build_route_returns_complete_fields(tmp_path: Path):
     out = research_flow_service.build_route(
         repo_root=tmp_path,

@@ -49,15 +49,15 @@ def decide_rlm_rollout(
     requested = (
         _truthy(meta.get("rlm_recursive_repair_enabled"))
         or _truthy(meta.get("rlm_recursive_research_enabled"))
-        or os.getenv("NEXUS_RLM_REPAIR_LOOP") == "1"
-        or os.getenv("NEXUS_RLM_RESEARCH_LOOP") == "1"
+        or _truthy(os.getenv("NEXUS_RLM_REPAIR_LOOP"))
+        or _truthy(os.getenv("NEXUS_RLM_RESEARCH_LOOP"))
     )
     if not requested:
         return RLMRolloutDecision(RLMRolloutMode.DISABLED, "not_requested")
 
     combined = f"{task_type} {task_desc}"
     required = ["rlm_trace_present", "submit_not_success", "ac_gate_verified"]
-    if _truthy(meta.get("rlm_recursive_research_enabled")) or os.getenv("NEXUS_RLM_RESEARCH_LOOP") == "1":
+    if _truthy(meta.get("rlm_recursive_research_enabled")) or _truthy(os.getenv("NEXUS_RLM_RESEARCH_LOOP")):
         return RLMRolloutDecision(
             RLMRolloutMode.RESEARCH_LOOP_CANDIDATE,
             "research_loop_requested",

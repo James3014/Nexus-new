@@ -57,7 +57,7 @@ def _extract_junit_target_durations(junit_path: Path, targets: list[str]) -> dic
         return {}
     try:
         root = ET.fromstring(junit_path.read_text(encoding="utf-8"))
-    except (ET.ParseError, OSError):
+    except (ET.ParseError, ImportError, OSError):
         return {}
 
     durations = {target: 0.0 for target in targets}
@@ -310,6 +310,15 @@ def run_report_trust_audit(dry_run: bool) -> bool:
     return success
 
 
+def run_skill_catalog_policy_check(dry_run: bool) -> bool:
+    label = "(Dry-run)" if dry_run else ""
+    success, _ = run_step(
+        f"Skill Catalog Policy Check {label}".strip(),
+        f'"{VENV_PYTHON}" scripts/ops/check_skill_catalog_policy.py',
+    )
+    return success
+
+
 def run_changed_only_check(changed_paths: list[str]) -> bool:
     from scripts.ops.select_tests import load_impact_rules, select_target_details
 
@@ -503,12 +512,14 @@ def run_dry_run():
     checks["lesson_check"] = run_lesson_check(dry_run=True)
     checks["delivery_tracked"] = run_delivery_tracked_check(dry_run=True)
     checks["report_trust_audit"] = run_report_trust_audit(dry_run=True)
+    checks["skill_catalog_policy"] = run_skill_catalog_policy_check(dry_run=True)
     wiki_sync_status = run_wiki_sync_check(dry_run=True)
     checks["wiki_sync"] = (wiki_sync_status == "OK")
     
     print(f"- protocol_check: {'OK' if checks['protocol_check'] else 'FAIL'}")
     print(f"- lesson_check: {'OK' if checks['lesson_check'] else 'FAIL'}")
     print(f"- report_trust_audit: {'OK' if checks['report_trust_audit'] else 'FAIL'}")
+    print(f"- skill_catalog_policy: {'OK' if checks['skill_catalog_policy'] else 'FAIL'}")
     print(f"- wiki_sync: {wiki_sync_status}")
 
     print("\n📊 [Phase 6] Summary Audit (Dry-Run):")
@@ -804,6 +815,9 @@ def main():
             sys.exit(1)
 
     if not run_report_trust_audit(dry_run=args.dry_run) and not args.dry_run:
+        sys.exit(1)
+
+    if not run_skill_catalog_policy_check(dry_run=args.dry_run) and not args.dry_run:
         sys.exit(1)
 
     if args.strict and args.changed_paths:

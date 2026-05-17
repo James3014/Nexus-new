@@ -18,6 +18,7 @@ class CapabilitySelector:
         codeintel: dict[str, Any] | None = None,
         phase_trace: dict[str, Any] | None = None,
         budget: dict[str, Any] | None = None,
+        skills: list[dict[str, Any]] | None = None,
     ) -> CapabilityPlan:
         from nexus.engine.capability_planner import CapabilityPlanner
 
@@ -29,4 +30,5 @@ class CapabilitySelector:
             codeintel=codeintel,
             phase_trace=phase_trace,
             budget=budget,
+            skills=skills,
         )

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +22,7 @@ DEFAULT_GEMINI_CANDIDATES = (
     "/usr/local/bin/gemini",
 )
 DEFAULT_PATH_PREFIX = "/opt/homebrew/bin:/Users/jameschen/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+INVALID_SESSION_IDENTIFIER_MARKER = "invalid session identifier"
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,81 @@ def build_gemini_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
     env["PATH"] = f"{DEFAULT_PATH_PREFIX}:{env.get('PATH', '')}"
     env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
     return env
+
+
+def has_invalid_session_identifier(text: str) -> bool:
+    return INVALID_SESSION_IDENTIFIER_MARKER in str(text or "").lower()
+
+
+def _split_forbidden_literals(raw: str) -> list[str]:
+    literals: list[str] = []
+    for line in str(raw or "").splitlines():
+        for part in line.split("::"):
+            value = part.strip()
+            if value:
+                literals.append(value)
+    return literals
+
+
+def record_outbound_prompt_ledger(
+    *,
+    provider: str,
+    prompt: str,
+    payload: str = "",
+    model_name: str,
+    cwd: str,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    ledger_path = str(env.get("NEXUS_OUTBOUND_PROMPT_LEDGER") or "").strip()
+    strict = str(env.get("NEXUS_OUTBOUND_PROMPT_STRICT") or "").strip().lower() in {"1", "true", "yes"}
+    text = f"{prompt}\n{payload}"
+    forbidden_literals = _split_forbidden_literals(str(env.get("NEXUS_OUTBOUND_FORBIDDEN_LITERALS") or ""))
+    leaks = [literal for literal in forbidden_literals if literal and literal in text]
+    record = {
+        "schema": "nexus_outbound_prompt_ledger_v1",
+        "provider": provider,
+        "model_name": model_name,
+        "cwd": cwd,
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        "payload_sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest() if payload else "",
+        "prompt_chars": len(prompt),
+        "payload_chars": len(payload),
+        "forbidden_literal_count": len(leaks),
+        "forbidden_literal_hits": [hashlib.sha256(item.encode("utf-8")).hexdigest() for item in leaks[:10]],
+        "strict": strict,
+        "created_at_unix": time.time(),
+    }
+    if ledger_path:
+        path = Path(ledger_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
+    if strict:
+        if not ledger_path:
+            raise ValueError("outbound_prompt_ledger_required")
+        if leaks:
+            raise ValueError("outbound_prompt_forbidden_literal")
+    return record
+
+
+def _redact_sanitized_temp_runner_paths(*, text: str, cwd: str, env: dict[str, str]) -> str:
+    strict = str(env.get("NEXUS_OUTBOUND_PROMPT_STRICT") or "").strip().lower() in {"1", "true", "yes"}
+    if not strict:
+        return text
+    redacted = text
+    literals = sorted(
+        _split_forbidden_literals(str(env.get("NEXUS_OUTBOUND_FORBIDDEN_LITERALS") or "")),
+        key=len,
+        reverse=True,
+    )
+    for literal in literals:
+        if literal.startswith("/private/tmp/nexus-live-clean-runner-"):
+            redacted = redacted.replace(literal, "$SANITIZED_RUNNER_ROOT")
+        elif literal.startswith("/Users/") or literal.startswith("/private/") or literal.startswith("/tmp/"):
+            redacted = redacted.replace(literal, "$SANITIZED_PATH")
+    if cwd.startswith("/private/tmp/nexus-live-clean-runner-"):
+        redacted = redacted.replace(cwd, "$SANITIZED_RUNNER_ROOT")
+    return redacted
 
 
 def resolve_binary(
@@ -78,6 +157,9 @@ def build_gemini_cli_invocation(
     if prompt_transport not in {"stdin", "inline"}:
         prompt_transport = "stdin"
 
+    prompt = _redact_sanitized_temp_runner_paths(text=prompt, cwd=cwd, env=cli_env)
+    payload = _redact_sanitized_temp_runner_paths(text=payload, cwd=cwd, env=cli_env)
+
     prompt_arg = prompt
     stdin_payload: str | None = None
     if payload:
@@ -85,6 +167,15 @@ def build_gemini_cli_invocation(
             prompt_arg = f"{prompt}\n\n{payload}"
         else:
             stdin_payload = payload
+
+    record_outbound_prompt_ledger(
+        provider="gemini",
+        prompt=prompt,
+        payload=payload,
+        model_name=model_name,
+        cwd=cwd,
+        env=cli_env,
+    )
 
     gemini_bin = gemini_entry or resolve_binary(
         env=cli_env,
@@ -101,18 +192,22 @@ def build_gemini_cli_invocation(
             binary_name="node",
         )
 
-    command = [
-        gemini_bin or DEFAULT_GEMINI_BIN,
-        "--skip-trust",
-        "--approval-mode",
-        approval,
-        "-m",
-        model_name,
-        "-p",
-        prompt_arg,
-        "--output-format",
-        "json",
-    ]
+    command = [gemini_bin or DEFAULT_GEMINI_BIN]
+    skip_trust = str(cli_env.get("NEXUS_GEMINI_SKIP_TRUST", "1")).strip().lower() not in {"0", "false", "no"}
+    if skip_trust:
+        command.append("--skip-trust")
+    command.extend(
+        [
+            "--approval-mode",
+            approval,
+            "-m",
+            model_name,
+            "-p",
+            prompt_arg,
+            "--output-format",
+            "json",
+        ]
+    )
     command_with_node = None
     if node and gemini_bin:
         command_with_node = [node, *command]

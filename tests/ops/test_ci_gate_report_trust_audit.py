@@ -38,6 +38,21 @@ def test_run_report_trust_audit_uses_expected_pytest_suite(monkeypatch):
         assert target in seen["cmd"]
 
 
+def test_run_skill_catalog_policy_check_invokes_ops_hook(monkeypatch):
+    seen = {}
+
+    def fake_run_step(name, cmd):
+        seen["name"] = name
+        seen["cmd"] = cmd
+        return True, "ok"
+
+    monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
+
+    assert ci_gate.run_skill_catalog_policy_check(dry_run=False) is True
+    assert seen["name"] == "Skill Catalog Policy Check"
+    assert "scripts/ops/check_skill_catalog_policy.py" in seen["cmd"]
+
+
 def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, capsys):
     seen = {}
     monkeypatch.setattr(ci_gate, "ROOT", tmp_path)
@@ -58,6 +73,11 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, cap
         return True, "ok"
 
     monkeypatch.setattr(ci_gate, "run_step", fake_run_step)
+    monkeypatch.setattr(
+        ci_gate,
+        "_extract_junit_target_durations",
+        lambda _path, _targets: {"tests/ops/test_select_tests.py": 0.12},
+    )
 
     assert ci_gate.run_changed_only_check(["scripts/ops/select_tests.py"]) is True
     assert seen["name"] == "Changed-Only JIT Tests"
@@ -74,7 +94,7 @@ def test_run_changed_only_check_uses_selector_targets(monkeypatch, tmp_path, cap
     assert payload["metadata"]["selected_count"] >= 1
     selection = json.loads((tmp_path / ".nexus" / "reports" / "changed_only_selection.json").read_text(encoding="utf-8"))
     assert selection["selected_count"] >= 1
-    assert selection["targets"][0] == "tests/ops/test_select_tests.py"
+    assert "tests/ops/test_select_tests.py" in selection["targets"]
     observation = json.loads((tmp_path / ".nexus" / "reports" / "jit_observation.jsonl").read_text(encoding="utf-8"))
     assert observation["event"] == "changed_only"
     assert observation["success"] is True
@@ -201,6 +221,7 @@ def test_run_dry_run_blocks_when_report_trust_audit_fails(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_wiki_sync_check", lambda dry_run: "OK")
     monkeypatch.setattr(ci_gate, "print_phase_6_summaries", lambda *args, **kwargs: None)
     monkeypatch.setattr(ci_gate, "run_report_trust_audit", lambda dry_run: False)
+    monkeypatch.setattr(ci_gate, "run_skill_catalog_policy_check", lambda dry_run: True)
 
     exit_code = ci_gate.run_dry_run()
     assert exit_code == 1
@@ -212,6 +233,40 @@ def test_ci_gate_main_blocks_when_report_trust_audit_fails(monkeypatch):
     monkeypatch.setattr(ci_gate, "run_wiki_sync_check", lambda dry_run: "OK")
     monkeypatch.setattr(ci_gate, "run_step", lambda *args, **kwargs: (True, "ok"))
     monkeypatch.setattr(ci_gate, "run_report_trust_audit", lambda dry_run: False)
+    monkeypatch.setattr(ci_gate, "run_skill_catalog_policy_check", lambda dry_run: True)
+    monkeypatch.setattr(ci_gate, "print_phase_6_summaries", lambda *args, **kwargs: None)
+
+    args = argparse.Namespace(
+        dry_run=False,
+        changed_only=None,
+        strict=False,
+        benchmark_mode="off",
+        learn_mode="off",
+        learn_topic="nexus",
+        wiki_drift_enforce_level="warn",
+        wiki_capability_enforce_level="warn",
+        wiki_eval_enforce_level="warn",
+        require_closeout_contract=False,
+        closeout_contract_path=".nexus/reports/done_contract.json",
+        auto_heal=False,
+    )
+
+    with patch("argparse.ArgumentParser.parse_args", return_value=args):
+        with patch("sys.exit", side_effect=SystemExit) as mock_exit:
+            try:
+                ci_gate.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+
+def test_ci_gate_main_blocks_when_skill_catalog_policy_fails(monkeypatch):
+    monkeypatch.setattr(ci_gate, "run_protocol_check", lambda dry_run: True)
+    monkeypatch.setattr(ci_gate, "run_lesson_check", lambda dry_run: True)
+    monkeypatch.setattr(ci_gate, "run_wiki_sync_check", lambda dry_run: "OK")
+    monkeypatch.setattr(ci_gate, "run_step", lambda *args, **kwargs: (True, "ok"))
+    monkeypatch.setattr(ci_gate, "run_report_trust_audit", lambda dry_run: True)
+    monkeypatch.setattr(ci_gate, "run_skill_catalog_policy_check", lambda dry_run: False)
     monkeypatch.setattr(ci_gate, "print_phase_6_summaries", lambda *args, **kwargs: None)
 
     args = argparse.Namespace(

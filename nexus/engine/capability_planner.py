@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, CapabilityScoringConfig
@@ -13,8 +14,11 @@ from nexus.engine.harness_sensors import build_harness_preflight_sensor
 from nexus.engine.policy_evaluator import apply_signal_policies, apply_tier_policies
 from nexus.engine.route_signal_adapter import build_replan_trace, build_signal_snapshot
 from nexus.engine.capability_signals import build_capability_constraints, build_capability_signals
+from nexus.learning.skill_catalog import SkillCatalog
 
 PENDING_EXECUTOR_CAPABILITIES: set[str] = set()
+
+DEFAULT_SKILL_STATUS_REPORT = "docs/reports/NEXUS_SKILL_STATUS_2026-05-15.json"
 
 
 def _cost_tier(cost: int) -> str:
@@ -831,6 +835,14 @@ class CapabilityPlanner:
                 "current_lite_route": bool(route_cost_policy.get("current_lite_route", False)),
                 "current_candidate_cap": route_cost_policy.get("current_candidate_cap"),
             }
+        skill_mount_evidence = self._build_skill_mount_evidence(
+            skills=skills or [],
+            budget=budget,
+            selected_capabilities=[name for name, state in states.items() if state in {"required", "conditional"}],
+        )
+        if skill_mount_evidence["skill_mount_contracts"] or skill_mount_evidence["skill_mount_violations"]:
+            signal_snapshot["planned_skill_mount_contracts"] = skill_mount_evidence["skill_mount_contracts"]
+            signal_snapshot["skill_mount_violations"] = skill_mount_evidence["skill_mount_violations"]
         if s2t_policy_draft:
             signal_snapshot["s2t_policy_draft"] = s2t_shadow_score
         signal_snapshot["ssd_route_map"] = ssd_route_map
@@ -856,6 +868,79 @@ class CapabilityPlanner:
             score=score,
             signal_snapshot=signal_snapshot,
         )
+
+    @staticmethod
+    def _build_skill_mount_evidence(
+        *,
+        skills: list[dict[str, Any]],
+        budget: dict[str, Any],
+        selected_capabilities: list[str],
+    ) -> dict[str, Any]:
+        skill_ids = [
+            str(skill.get("skill_id") or skill.get("task_id") or "").strip()
+            for skill in skills
+            if isinstance(skill, dict) and str(skill.get("skill_id") or skill.get("task_id") or "").strip()
+        ]
+        if not skill_ids:
+            return {"skill_mount_contracts": [], "skill_mount_violations": []}
+
+        status_report = str(
+            budget.get("skill_status_report")
+            or budget.get("skill_catalog_status_report")
+            or DEFAULT_SKILL_STATUS_REPORT
+        )
+        try:
+            catalog = SkillCatalog.from_status_report(status_report)
+        except (OSError, json.JSONDecodeError):
+            return {
+                "skill_mount_contracts": [],
+                "skill_mount_violations": [
+                    {
+                        "skill_name": skill_id,
+                        "path": "",
+                        "reason": "skill_catalog_unavailable",
+                    }
+                    for skill_id in skill_ids
+                ],
+            }
+
+        selected_set = set(selected_capabilities)
+        allow_ablation_skill_mounts = bool(budget.get("allow_ablation_skill_mounts"))
+        contracts: list[dict[str, Any]] = []
+        for skill_id in skill_ids:
+            entry = catalog.get(skill_id)
+            if entry is None:
+                continue
+            if not entry.is_runtime_mount_candidate and not (allow_ablation_skill_mounts and entry.is_reference_only):
+                continue
+            capability_mount = entry.capability_mount or "unmapped_skill_capability"
+            if capability_mount.startswith("reference:"):
+                capability_mount = capability_mount.removeprefix("reference:")
+            load_reason_codes = [
+                "capability_planner_skill_signal",
+                f"catalog_status:{entry.skill_status}",
+            ]
+            if allow_ablation_skill_mounts and entry.is_reference_only:
+                load_reason_codes.append("benchmark_ablation_only_mount")
+            contracts.append(
+                {
+                    "skill_id": entry.name,
+                    "skill_status": entry.skill_status,
+                    "capability_mount": capability_mount,
+                    "capability": capability_mount,
+                    "load_reason_codes": load_reason_codes,
+                    "evidence_refs": [
+                        f"skill_catalog:{entry.name}",
+                        f"skill_path:{entry.path}",
+                    ],
+                    "planner_selected_capability": capability_mount in selected_set,
+                }
+            )
+        violations = [
+            violation.to_dict()
+            for violation in catalog.validate_requested_mounts(skill_ids, allow_ablation=allow_ablation_skill_mounts)
+        ]
+        return {"skill_mount_contracts": contracts, "skill_mount_violations": violations}
 
     @staticmethod
     def _decide_routing_tier(signals: Any) -> tuple[str, str]:
@@ -1013,7 +1098,12 @@ class CapabilityPlanner:
         )
         if route_cost_policy.get("current_lite_route") is not True and not capped_lane and not cost_capped:
             return
-        preserve_governance_review = route_lane == "governance_hardened_capped"
+        preserve_governance_review = route_lane in {
+            "governance_hardened",
+            "governance_hardened_capped",
+            "trust_supervised",
+            "trust_supervised_scope_only",
+        }
         preserve_autoreason = route_lane == "repair_capped"
         for cap in (
             "research",

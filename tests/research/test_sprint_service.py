@@ -148,6 +148,152 @@ def test_run_hyper_sprint_collects_pool_when_route_enables_ddtree(monkeypatch, t
     assert res.learning_trace["autoreason"]["enabled"] is True
 
 
+def test_run_hyper_sprint_uses_local_support_pool_for_ddtree_cost_cap(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    llm_calls: list[int] = []
+
+    class FakeLLMGenerator:
+        model_chain = ["gemini-3-flash-preview"]
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *_args, seed=0, **_kwargs):
+            llm_calls.append(seed)
+            return "print('llm')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "model_name": "gemini-3-flash-preview",
+                "tokens_used": 17,
+                "token_capture_status": "measured",
+            }
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *_args, seed=0, **_kwargs):
+            return f"print('support-{seed}')\n", {"source": "local", "model_calls": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+                stdout="pytest passed",
+            )
+
+    monkeypatch.setenv(
+        "NEXUS_ROUTE_COST_CONTROLS",
+        '{"ddtree_mixed_candidate_pool": true, "candidate_cap": 3, "context_mode": "compact"}',
+    )
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
+    monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    _write_ready_learn_slo(tmp_path)
+
+    cfg = SprintConfig(
+        task="repair ddtree route oracle",
+        target_file="demo.py",
+        candidate_count=3,
+        llm_mode=True,
+        safe_mode=True,
+        enable_autoreason_executor=False,
+        enable_ddtree_executor=True,
+        ddtree_max_candidates=2,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert llm_calls == [0]
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.winner_source == "llm"
+    assert res.learning_trace["candidate_pool_policy"]["enabled"] is True
+    assert res.learning_trace["ddtree"]["eligible"] is True
+    assert res.learning_trace["ddtree"]["actual_saved_steps"] == 1
+    assert "llm:0" in res.learning_trace["ddtree"]["selected_candidate_ids"]
+
+
+def test_run_hyper_sprint_uses_local_support_pool_for_autoreason_cost_cap(monkeypatch, tmp_path: Path):
+    target = tmp_path / "demo.py"
+    target.write_text("print('x')\n", encoding="utf-8")
+    llm_calls: list[int] = []
+
+    class FakeLLMGenerator:
+        model_chain = ["gemini-3-flash-preview"]
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *_args, seed=0, **_kwargs):
+            llm_calls.append(seed)
+            return "print('llm')\n", {
+                "source": "llm",
+                "model_calls": 1,
+                "model_name": "gemini-3-flash-preview",
+                "tokens_used": 17,
+                "token_capture_status": "measured",
+            }
+
+    class FakeLocalGenerator:
+        source = "local"
+
+        def generate(self, *_args, seed=0, **_kwargs):
+            return f"print('support-{seed}')\n", {"source": "local", "model_calls": 0}
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def evaluate_candidate(self, **kwargs):
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+                stdout="pytest passed",
+            )
+
+    monkeypatch.setenv(
+        "NEXUS_ROUTE_COST_CONTROLS",
+        '{"autoreason_mixed_candidate_pool": true, "context_mode": "compact"}',
+    )
+    monkeypatch.setattr("nexus.research.sprint_service.LLMCandidateGenerator", FakeLLMGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
+    monkeypatch.setattr("nexus.research.sprint_service.InPlaceSprintExecutor", FakeExecutor)
+    monkeypatch.setenv("NEXUS_LLM_SELF_HEAL_ON_PYTEST_FAIL", "0")
+    monkeypatch.setenv("NEXUS_DISABLE_HIDDEN_INVARIANT_SHADOW", "1")
+    monkeypatch.setenv("NEXUS_FORCE_INPLACE_EXECUTOR", "1")
+    _write_ready_learn_slo(tmp_path)
+
+    cfg = SprintConfig(
+        task="repair autoreason route oracle",
+        target_file="demo.py",
+        candidate_count=3,
+        llm_mode=True,
+        safe_mode=True,
+        enable_autoreason_executor=True,
+        enable_ddtree_executor=False,
+    )
+    res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+
+    assert llm_calls == [0]
+    assert res.status == "SUCCESS"
+    assert res.model_calls == 1
+    assert res.winner_source == "llm"
+    assert res.learning_trace["candidate_pool_policy"]["enabled"] is True
+    assert res.learning_trace["autoreason"]["enabled"] is True
+    assert res.learning_trace["autoreason"]["winner"] == "llm:0"
+
+
 def test_run_hyper_sprint_applies_distant_scout_hint(monkeypatch, tmp_path: Path):
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
