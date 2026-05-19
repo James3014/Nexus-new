@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from nexus.engine.capability_contracts import CapabilityNode, CapabilityPlan, CapabilityScoringConfig
@@ -870,19 +871,82 @@ class CapabilityPlanner:
         )
 
     @staticmethod
+    def _runtime_policy_overlay_skill_requests(
+        *,
+        budget: dict[str, Any],
+        selected_capabilities: list[str],
+    ) -> list[dict[str, str]]:
+        overlay = budget.get("runtime_skill_policy_overlay")
+        overlay_path = str(budget.get("runtime_skill_policy_overlay_path") or "").strip()
+        if overlay is None and overlay_path:
+            try:
+                overlay = json.loads(Path(overlay_path).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return []
+        if not isinstance(overlay, dict) or overlay.get("status") != "PASS":
+            return []
+        mapping = overlay.get("primary_skill_by_capability")
+        if not isinstance(mapping, dict):
+            return []
+        aliases = overlay.get("capability_aliases")
+        aliases = aliases if isinstance(aliases, dict) else {}
+        selected = set(selected_capabilities)
+        requests: list[dict[str, str]] = []
+        for capability, skill_id in mapping.items():
+            capability_id = str(capability or "").strip()
+            skill_name = str(skill_id or "").strip()
+            capability_aliases = {
+                str(alias)
+                for alias in aliases.get(capability_id, [])
+                if str(alias)
+            }
+            if skill_name and (capability_id in selected or selected.intersection(capability_aliases)):
+                requests.append(
+                    {
+                        "skill_id": skill_name,
+                        "capability_id": capability_id,
+                        "source": "sf_runtime_policy_overlay",
+                    }
+                )
+        return requests
+
+    @staticmethod
     def _build_skill_mount_evidence(
         *,
         skills: list[dict[str, Any]],
         budget: dict[str, Any],
         selected_capabilities: list[str],
     ) -> dict[str, Any]:
-        skill_ids = [
-            str(skill.get("skill_id") or skill.get("task_id") or "").strip()
+        requested_skills = [
+            skill
             for skill in skills
             if isinstance(skill, dict) and str(skill.get("skill_id") or skill.get("task_id") or "").strip()
         ]
+        if not requested_skills:
+            requested_skills = CapabilityPlanner._runtime_policy_overlay_skill_requests(
+                budget=budget,
+                selected_capabilities=selected_capabilities,
+            )
+        skill_ids = [
+            str(skill.get("skill_id") or skill.get("task_id") or "").strip()
+            for skill in requested_skills
+        ]
         if not skill_ids:
             return {"skill_mount_contracts": [], "skill_mount_violations": []}
+        capability_overrides = {
+            str(skill.get("skill_id") or skill.get("task_id") or "").strip(): str(
+                skill.get("capability_id") or skill.get("capability_mount") or ""
+            ).strip()
+            for skill in requested_skills
+            if isinstance(skill, dict)
+            and str(skill.get("skill_id") or skill.get("task_id") or "").strip()
+            and str(skill.get("capability_id") or skill.get("capability_mount") or "").strip()
+        }
+        overlay_skill_ids = {
+            str(skill.get("skill_id") or skill.get("task_id") or "").strip()
+            for skill in requested_skills
+            if isinstance(skill, dict) and str(skill.get("source") or "") == "sf_runtime_policy_overlay"
+        }
 
         status_report = str(
             budget.get("skill_status_report")
@@ -911,9 +975,14 @@ class CapabilityPlanner:
             entry = catalog.get(skill_id)
             if entry is None:
                 continue
-            if not entry.is_runtime_mount_candidate and not (allow_ablation_skill_mounts and entry.is_reference_only):
+            overlay_request = skill_id in overlay_skill_ids
+            if (
+                not entry.is_runtime_mount_candidate
+                and not (allow_ablation_skill_mounts and entry.is_reference_only)
+                and not overlay_request
+            ):
                 continue
-            capability_mount = entry.capability_mount or "unmapped_skill_capability"
+            capability_mount = capability_overrides.get(skill_id) or entry.capability_mount or "unmapped_skill_capability"
             if capability_mount.startswith("reference:"):
                 capability_mount = capability_mount.removeprefix("reference:")
             load_reason_codes = [
@@ -922,6 +991,8 @@ class CapabilityPlanner:
             ]
             if allow_ablation_skill_mounts and entry.is_reference_only:
                 load_reason_codes.append("benchmark_ablation_only_mount")
+            if overlay_request:
+                load_reason_codes.append("sf_runtime_policy_overlay")
             contracts.append(
                 {
                     "skill_id": entry.name,
@@ -933,12 +1004,16 @@ class CapabilityPlanner:
                         f"skill_catalog:{entry.name}",
                         f"skill_path:{entry.path}",
                     ],
-                    "planner_selected_capability": capability_mount in selected_set,
+                    "planner_selected_capability": capability_mount in selected_set or overlay_request,
                 }
             )
+        validation_skill_ids = [skill_id for skill_id in skill_ids if skill_id not in overlay_skill_ids]
         violations = [
             violation.to_dict()
-            for violation in catalog.validate_requested_mounts(skill_ids, allow_ablation=allow_ablation_skill_mounts)
+            for violation in catalog.validate_requested_mounts(
+                validation_skill_ids,
+                allow_ablation=allow_ablation_skill_mounts,
+            )
         ]
         return {"skill_mount_contracts": contracts, "skill_mount_violations": violations}
 

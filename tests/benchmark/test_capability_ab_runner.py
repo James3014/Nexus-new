@@ -280,6 +280,69 @@ def test_reconcile_benchmark_skill_mount_from_expected_receipts(tmp_path, monkey
     assert _with_nexus_row_fail_fast_reason(row, task=task) == ""
 
 
+def test_reconcile_benchmark_skill_mount_allows_reference_ablation_receipt(tmp_path, monkeypatch):
+    status_report = tmp_path / "skill_status.json"
+    status_report.write_text(
+        json.dumps(
+            {
+                "skills": [
+                    {
+                        "name": "research-citation-chain-verifier",
+                        "path": "/repo/.agents/skills/research-citation-chain-verifier/SKILL.md",
+                        "skill_status": "external_reference_candidate",
+                        "capability_mount": "reference:research_and_source_discipline",
+                        "action": "candidate_only_until_live_receipts",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "1")
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", '["research-citation-chain-verifier"]')
+    monkeypatch.setenv("NEXUS_BENCH_SKILL_STATUS_REPORT", str(status_report))
+    task = CapabilityTask(
+        id="research-skill-reconcile-001",
+        difficulty="medium",
+        task_type="public_research",
+        task_desc="Verify source chain",
+        target_file="unused",
+        test_file="unused",
+        success_criteria="all_target_tests_pass",
+        expected_capabilities=("research_and_source_discipline",),
+    )
+    row = {
+        "status": "SUCCESS",
+        "provider_token_measured": True,
+        "model_calls": 1,
+        "total_tokens": 10,
+        "capability_receipts": [
+            {
+                "name": "research",
+                "public_claim_safe": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "evidence_refs": ["source_discipline:evidence"],
+            }
+        ],
+        "skill_mount_contract": [],
+        "skill_mount_violations": [],
+        "skill_mount_contract_status": "EMPTY",
+    }
+
+    _reconcile_benchmark_skill_mount_contract_from_expected_receipts(row, task=task, repo_root=tmp_path)
+
+    assert row["skill_mount_contract_status"] == "PASS"
+    assert row["skill_mount_count"] == 1
+    contract = row["skill_mount_contract"][0]
+    assert contract["skill_id"] == "research-citation-chain-verifier"
+    assert contract["capability_mount"] == "research_and_source_discipline"
+    assert contract["capability"] == "research"
+    assert "benchmark_ablation_only_mount" in contract["load_reason_codes"]
+    assert row["skill_mount_violations"] == []
+    assert _with_nexus_row_fail_fast_reason(row, task=task) == ""
+
+
 def test_with_nexus_fail_fast_allows_normalized_cumulative_token_stats():
     task = CapabilityTask(
         id="token-normalized-001",

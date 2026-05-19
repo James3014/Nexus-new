@@ -1859,3 +1859,785 @@ version_scope:
 - **Lesson**: Long Flash100 runs need durable supervisor/resume output before they can be considered 7R-G evidence. Partial row files may seed a resume manifest, but they must not be promoted to full live evidence or used to unlock 8R.
 - **Action Taken**: Generated `NEXUS_7R_G_INTERRUPTED_FULL_LIVE_RESUME_MANIFEST_2026-05-17.json` with completed and remaining task IDs.
 - **Verification**: The resume manifest records `completed_with_nexus_count=9`, `remaining_task_count=91`, `bundle_present=false`, and `claim_allowed=false`.
+
+## 2026-05-17 Flash100 Chunk Runner Must Stop On Tokenless Timeout Fallback
+
+- **Phenomenon**: 7R-G2 chunk03 stopped on `hard-neutral-bug-001` with `PARTIAL_WITH_NEXUS_ABORT:model_tokens_missing` after a Gemini timeout fell back to local delivery.
+- **Root Cause**: The row had `model_calls=1` but `total_tokens=0`, `provider_token_measured=false`, `gateway_error_category=timeout`, and `winner_source=local(llm_error_timeout_fallback_local)`. Delivery was verified, but model-cost accounting was not.
+- **Lesson**: A model-required public route-cost row cannot be counted when a timeout fallback wins without measured provider tokens. The correct recovery is targeted replay with a longer gateway timeout, not continuing later chunks or treating local fallback as clean model evidence.
+- **Action Taken**: Stopped chunk progression and ran 7R-F targeted replay for `hard-neutral-bug-001` with a longer gateway timeout before any further 7R-G chunks.
+- **Verification**: `NEXUS_7R_G2_CHUNK03_MODEL_COST_ACCOUNTABLE_2026-05-17/evidence_bundle.json` reports `public_claim_gate=FAIL`, `run_eligibility_incomplete`, `single_arm_run`, and token measurement failures. The targeted replay bundle reports provider tokens measured for both arms and `public_verified_delivery_claim_gate=PASS`, while cost gates remain RETURN due route-cost regression.
+
+## 2026-05-17 Blocked Cost-Capped Rescue Reason Is Not Active Rescue Evidence
+
+- **Phenomenon**: 7R-G2 chunk05 initially returned on `model-required-repair-001` with `cost_capped_rescue_without_deterministic_delivery_source`, even though the row was delivered by `llm` with measured provider tokens.
+- **Root Cause**: `route_execution_policy.reason_codes` retained `cost_capped_capability_allows_verified_pre_model_rescue` after `model_required_blocks_pre_model_rescue` disabled active pre-model rescue. The public route policy contract treated the retained reason as active rescue evidence.
+- **Lesson**: Public route-policy evidence must distinguish configured-but-blocked cost-capped rescue from active pre-model deterministic rescue. Only rows with `pre_model_deterministic_rescue_allowed=true` should require `local_deterministic_pre_model_rescue` as the winner source.
+- **Action Taken**: Updated `build_route_policy_evidence_contract` to count cost-capped rescue only when active, added a regression test, and reran chunk05 as `NEXUS_7R_G2_CHUNK05C_MODEL_COST_ACCOUNTABLE_2026-05-17`.
+- **Verification**: `uv run pytest tests/benchmark/test_capability_ab_runner.py -q -k 'route_policy_evidence_contract'` reports `4 passed`; chunk05C reports `route_policy_evidence_contract=PASS` and `public_verified_delivery_claim_gate=PASS`.
+
+## 2026-05-17 Flash100 Chunk Must Stop On Gemini Stats Outlier Token Evidence
+
+- **Phenomenon**: 7R-G2 chunk10 delivered with Nexus on all rows, but the bundle returned with `nexus_wearing_below_threshold`, `run_eligibility_incomplete`, and token measurement threshold failures.
+- **Root Cause**: `pub-feat-004` produced a with-Nexus `parse_error` row with `provider_token_measured=false`, while four without-Nexus rows had `token_unreliable_reason=stats_outlier_possible_cumulative` and tiny token counts inconsistent with full model execution.
+- **Lesson**: Provider token cleanliness is a separate public-cost denominator gate. Delivery/trust success cannot override parse-error or stats-outlier token evidence; the runner must stop before the next chunk and use targeted replay or exclusion.
+- **Action Taken**: Stopped chunk11, generated `NEXUS_7R_I_CHUNK10_TOKEN_CLEANLINESS_RCA_2026-05-17.json`, and kept the 7R rollup at `continue_allowed=false`.
+- **Verification**: The RCA records `affected_row_count=5`, `status=RETURN`, and `continue_allowed=false`; `NEXUS_7R_G2_CHUNK_ROLLUP_2026-05-17.json` records `completed_pair_count=50`, `hard_failures=["nexus_wearing_below_threshold","run_eligibility_incomplete"]`.
+
+## 2026-05-17 Flash100 Duplicate Task IDs Need Manifest-Index Targeting
+
+- **Phenomenon**: 7R-G2 late chunks needed to replay rows whose `task_id` also appeared earlier in the frozen V3 manifest, such as `nexus-value-hidden-*` and `nexus-value-context-*`.
+- **Root Cause**: `--task-id-filter` is task-key based, while the public Flash100 denominator is row/manifest-position based. A task-id-only replay can unintentionally select duplicate rows and contaminate paired denominator accounting.
+- **Lesson**: Public benchmark continuation and targeted replay must support row-keyed or manifest-index filtering whenever a frozen manifest has duplicate task IDs. Task identity and denominator row identity are not equivalent.
+- **Action Taken**: Added `--manifest-index-filter` to `scripts/bench/capability_ab_runner.py`, supporting comma values and half-open ranges, and used it for chunks 17-20 and targeted replays.
+- **Verification**: `uv run pytest tests/benchmark/test_capability_ab_runner.py -q -k 'filter_tasks_by_manifest_index or filter_tasks_by_id'` reports `2 passed, 337 deselected`; 7R-G2 rollup reached `completed_pair_count=100` with `hard_failures=[]`.
+
+## 2026-05-17 Chunk Rollup Is Not A Public Claim Without Audited Combine
+
+- **Phenomenon**: 7R-G2 chunk rollup reached `100/100` paired rows with no hard delivery/trust failures, but still reported `claim_allowed=false` and `promotion_allowed=false`.
+- **Root Cause**: Chunk rollup is an execution-control artifact. It cannot synthesize a public Flash100 claim unless every accepted chunk can be consumed into a single audited evidence bundle with delivery, cost, ledger, token, and promotion gates recomputed over the combined denominator.
+- **Lesson**: After chunked long runs, final promotion needs an explicit chunk-combine gate. Rollup PASS means continuation/completion, not public claim eligibility.
+- **Action Taken**: Added `scripts/ops/build_7r_chunk_combine_bundle.py` to combine validated chunk bundles into one evidence bundle and fail closed on any chunk whose delivery, public cost, or outbound ledger gate is not PASS.
+- **Verification**: `uv run python -m py_compile scripts/ops/build_7r_chunk_combine_bundle.py` passed; the combine hook correctly blocked `NEXUS_7R_G2_CHUNK09_MODEL_COST_ACCOUNTABLE_2026-05-17` because its `public_cost_claim_gate` was not PASS.
+
+## 2026-05-17 Pub-Bug-004 Is A Provider-Token Combine Blocker
+
+- **Phenomenon**: `pub-bug-004` with-Nexus delivered successfully in chunk09 but had `provider_token_measured=false`; targeted replay variants alternated between `model_required_local_delivery_blocked` with measured tokens and `model_call_without_tokens` after timeout fallback.
+- **Root Cause**: The row is model-required for cost accounting, but the available successful replay paths do not simultaneously satisfy model causality, delivery, and provider-token measurement.
+- **Lesson**: A row can be semantically solved and still be unusable for public cost/promotion. Do not lower cost gates or treat local timeout fallback as model evidence; either produce a clean replay or keep 8R blocked.
+- **Action Taken**: Ran bounded replays for `pub-bug-004` with standard, self-heal, and longer timeout settings; all remained non-refillable for the audited combine bundle.
+- **Verification**: `docs/reports/NEXUS_7R_F_TARGETED_REPLAY_PUB_BUG_004_WITH_MODEL_COST_NO_SESSION_HIDDEN_2026-05-17` reports `model_required_local_delivery_blocked`; `docs/reports/NEXUS_7R_F_TARGETED_REPLAY_PUB_BUG_004_WITH_SELF_HEAL_NO_SESSION_HIDDEN_2026-05-17` and `docs/reports/NEXUS_7R_F_TARGETED_REPLAY_PUB_BUG_004_WITH_LONG_TIMEOUT_NO_SESSION_HIDDEN_2026-05-17` report `model_call_without_tokens`.
+
+## 2026-05-17 Skill-Fit Promotion Draft Must Be Rebuilt From Current Catalog
+
+- **Phenomenon**: Dirty workspace cleanup left the current repair/coding raw catalog showing `tdd=keep`, while the promotion draft still had no defaults and referenced a different skill set.
+- **Root Cause**: The promotion-threshold CLI default still pointed at a deleted `FLASH180_RERUN16` catalog, so stale promotion drafts could survive after generated rerun files were cleaned.
+- **Lesson**: Skill-fit cleanup must rebuild promotion drafts from the current catalog before deciding that no skill was found. Raw catalog, promotion draft, and threshold contract are one evidence chain and must not drift.
+- **Action Taken**: Added a focused promotion-draft writer and changed the threshold contract default to the current Flash180 repair/coding catalog.
+- **Verification**: The regenerated policy now reports `defaults.repair_and_coding=tdd`; the threshold contract still blocks runtime/Flash100 promotion because the positive skill has only 11 tested rows, below the 30-row threshold.
+
+## 2026-05-17 Skill-Fit Cleanup Must Preserve Runner Contract Modules
+
+- **Phenomenon**: After dirty workspace cleanup, SF preflight and focused benchmark tests failed because `scripts/bench/public_lane_contract.py`, `route_execution_policy.py`, `taskset_contract.py`, `build_sanitized_runner.py`, and `persistent_worker_gap_dashboard.py` were missing.
+- **Root Cause**: Generated report cleanup was treated too broadly and removed runner contract modules that are source dependencies for SF and public-lane gates.
+- **Lesson**: Cleanup must distinguish generated evidence from runner contract code. Before running SF matrices after cleanup, compile restored contract modules and run the focused route/taskset/skill-mount regression slice.
+- **Action Taken**: Restored the runner contract modules from the clean runner copy and added the missing commercial model-basis helper back to `public_lane_contract.py`.
+- **Verification**: `uv run python -m py_compile scripts/bench/public_lane_contract.py scripts/bench/route_execution_policy.py scripts/bench/taskset_contract.py` passed; focused `tests/benchmark/test_capability_ab_runner.py` commercial/taskset/route/skill-mount slice reported `6 passed`.
+
+## 2026-05-17 Skill-Fit Defaults Must Not Auto-Include Loose Real-World Task Files
+
+- **Phenomenon**: SF tdd seal plan initially returned on `rw-ambiguous-001` because `scripts/bench/real_world_tasks_v1.json` lacked the top-level public manifest contract fields and required task fields expected by SF preflight.
+- **Root Cause**: The default SF extra manifest list included a loose real-world task file that is useful as task material but not a frozen public-safe manifest.
+- **Lesson**: SF default task sources must be manifest-contract-safe. Loose real-world task files require explicit opt-in or an adapter that supplies frozen/disclosure/verifier fields before they can enter an ablation denominator.
+- **Action Taken**: Removed `scripts/bench/real_world_tasks_v1.json` from the default SF extra task manifests while leaving explicit future opt-in possible.
+- **Verification**: Regenerated `NEXUS_SF_TDD_SEAL_EXECUTION_MATRIX_2026-05-17.json`; SF preflight completed `90/90 PASS` with `return_count=0`.
+
+## 2026-05-17 Skill-Fit Resume Must Be Idempotent And Seal Only Selected Rows
+
+- **Phenomenon**: The tdd skill-arm live run completed the intended 30 rows, but final aggregation returned because resume sealing checked the full 90-row matrix and a stale resume manifest could rerun already completed row artifacts.
+- **Root Cause**: Resume manifest execution used the full matrix as the completion denominator and did not first reconcile row IDs against existing artifacts in the output root.
+- **Lesson**: Resume manifests must be row-keyed, idempotent, and denominator-scoped. Existing artifacts should satisfy completed rows, and final seal should only evaluate manifest-selected row IDs.
+- **Action Taken**: Updated `run_skill_fit_ablation_matrix.py` so resume execution skips rows with existing artifacts and seals only the row IDs present in the resume manifest.
+- **Verification**: Rerunning the tdd skill-arm resume produced `completed_rows=30`, `pass_count=30`, `return_count=0`, `status=PASS` without burning a second live run.
+
+## 2026-05-18 Skill-Fit Rollup Must Keep Capability-Local Follow-Up Cards
+
+- **Phenomenon**: After `repair_and_coding/tdd` became an `alternate_candidate`, the SF status rollup only emitted `SF-SEAL`, hiding the fact that `governance_and_trust` and `research_and_source_discipline` still needed capability-local discovery.
+- **Root Cause**: `next_task_cards` was driven only by the existence of any promotion-ready pair, not by per-capability coverage gaps.
+- **Lesson**: SF rollup should treat first found skill as progress, not global completion. It must keep discovery or targeted-replay cards for capabilities that still have no positive candidate.
+- **Action Taken**: Updated `nexus/learning/skill_fit_status.py` to append per-capability targeted replay or discovery cards after `SF-SEAL`.
+- **Verification**: `uv run pytest tests/learning/test_skill_fit_ablation.py -q` reported `67 passed`; `NEXUS_SF_CAPABILITY_SKILL_STATUS_ROLLUP_2026-05-18.json` now lists `SF-SEAL`, `SF-governance_and_trust-TARGETED-REPLAY`, and `SF-research_and_source_discipline-DISCOVERY`.
+
+## 2026-05-18 Governance Skill-Fit Can Pass Live Rows Without Reaching Promotion Threshold
+
+- **Phenomenon**: Governance targeted live completed `48/48 PASS`, but no governance skill reached alternate/default threshold.
+- **Root Cause**: Delivery and skill mount evidence were clean, but outcome contribution was too low: `nexus-root-cause-probe` reached `5/12`, while other governance candidates reached `1/12` or `0/12`.
+- **Lesson**: A clean live ablation run is not enough for skill-fit promotion. Governance should continue with targeted replay or candidate/taskset redesign instead of opening public benchmark.
+- **Action Taken**: Generated governance targeted catalog, promotion draft, and threshold contract while keeping `flash100_allowed=false` for governance.
+- **Verification**: `NEXUS_SKILL_PROMOTION_THRESHOLD_CONTRACT_GOVERNANCE_AND_TRUST_SF_TARGETED_2026-05-18.json` reports `alternate_candidate_count=0`, `promotion_allowed=false`, and `flash100_allowed=false`.
+
+## 2026-05-18 Research Source-Discipline Needs Spec Candidates Before Live
+
+- **Phenomenon**: Research V3 screening selected `0` live-ready candidates from the existing fair pool, but the external source-discipline specs produced three ablation-eligible metadata candidates.
+- **Root Cause**: Existing research skills were generic or already rejected; source-discipline behavior needed explicit citation-chain, source-conflict, and source-validation receipts before live testing.
+- **Lesson**: Research SF should not spend live quota on generic research wrappers. Use external/spec candidate pool plus ingest guard first, then preflight source-discipline candidates before any live seal.
+- **Action Taken**: Generated `NEXUS_SF_RESEARCH_EXTERNAL_CANDIDATE_POOL_2026-05-18.json`, `NEXUS_SF_RESEARCH_EXTERNAL_PREFLIGHT_MATRIX_2026-05-18.json`, and ran preflight only.
+- **Verification**: Research external preflight completed `24/24 PASS` with `return_count=0`; all three candidates remain `runtime_eligible=false`.
+
+## 2026-05-18 Research External Candidate Provenance Must Point To Current Spec
+
+- **Phenomenon**: Regenerating the 2026-05-18 research external candidate pool initially produced `source_url` values pointing at the older `NEXUS_RESEARCH_SOURCE_DISCIPLINE_SKILL_SPECS_2026-05-17.json` path.
+- **Root Cause**: `build_research_external_candidate_pool` hard-coded the source spec report path instead of deriving it from the source specs contract used by the writer.
+- **Lesson**: Metadata-only candidate pools still need current provenance. Source refs must follow the actual spec file used for generation, or future SF runs may compare stale skill requirements.
+- **Action Taken**: Added a `source_specs_ref` parameter and wired `write_research_external_candidate_pool` to pass the current source spec path.
+- **Verification**: `NEXUS_SF_RESEARCH_EXTERNAL_CANDIDATE_POOL_2026-05-18.json` now points each `source_url` at `NEXUS_SF_RESEARCH_SOURCE_DISCIPLINE_SPECS_2026-05-18.json`; `uv run pytest tests/learning/test_skill_fit_ablation.py -q` covers this behavior.
+
+## 2026-05-18 SF Candidate Assets Must Become Status-Visible Before Live
+
+- **Phenomenon**: Research SF had a clean source-discipline preflight and three generated candidate specs, but no runtime-eligible research skill and no live receipt-backed outcome contribution.
+- **Root Cause**: Candidate supply, preflight eligibility, runtime mount eligibility, and promotion are separate lifecycle states. Treating a materialized `SKILL.md` as a runtime-ready skill would collapse the SF boundary and recreate selected-only false confidence.
+- **Lesson**: SF cannot treat supply-gap closure as completion. Candidate assets must be visible to the skill status layer before live ablation, and public benchmark/runtime promotion must remain blocked until receipt-backed outcome contribution proves the pair.
+- **Action Taken**: Materialized the three research source-discipline candidate assets as candidate-only skills, added `NEXUS_SKILL_STATUS_SF_RESEARCH_2026-05-18.json`, and changed the SF final catalog back to `IN_PROGRESS`.
+- **Verification**: The SF catalog now marks research as `candidate_assets_status_visible`, keeps `sf_catalog_complete=false`, and keeps `public_benchmark_allowed=false`.
+
+## 2026-05-18 Skill Install Audit Should Prefer Source Tree Over Registry Metadata When Registry Hangs
+
+- **Phenomenon**: `npm view codex-complexity-optimizer version dist.tarball dist.integrity scripts --json` hung without output during a third-party skill safety check.
+- **Root Cause**: Registry metadata lookup was an optional corroboration step, but waiting on it would have left a stale background process and delayed source audit/installation.
+- **Lesson**: For GitHub-hosted Codex skills, inspect the GitHub tree, installer, bundled `SKILL.md`, scripts, and references first. If npm registry metadata hangs, stop the lookup, record the gap, and install via the reviewed GitHub path rather than relying on npm postinstall behavior.
+- **Action Taken**: Stopped the hung npm process, verified the GitHub tree was not truncated, reviewed `scripts/install.js`, `complexity-optimizer/SKILL.md`, `scripts/analyze_complexity.py`, `agents/openai.yaml`, and references, then installed with the system `skill-installer` GitHub helper.
+- **Verification**: `/Users/jameschen/.codex/skills/complexity-optimizer` contains only `SKILL.md`, `agents/openai.yaml`, `scripts/analyze_complexity.py`, and two reference markdown files.
+
+## 2026-05-18 External Skill Verification Must Keep Write Targets Inside Writable Roots
+
+- **Phenomenon**: Direct `python3 -m py_compile /Users/jameschen/.codex/skills/complexity-optimizer/scripts/analyze_complexity.py` failed with `Operation not permitted` when Python tried to create `scripts/__pycache__` under `~/.codex/skills`.
+- **Root Cause**: The installed skill directory is readable, but the current workspace sandbox only allows writes in `/Users/jameschen/Workspace/nexus`, `/private/tmp`, and the configured temporary root.
+- **Lesson**: Verification for installed external skills should avoid implicit writes beside the installed files. Compile with an explicit `cfile` under `/private/tmp`, or run behavior checks that do not generate local cache files.
+- **Action Taken**: Re-ran compilation with `py_compile.compile(..., cfile='/private/tmp/analyze_complexity.pyc', doraise=True)` and kept scanner execution report-only.
+- **Verification**: The explicit-`cfile` compile printed `py_compile ok`, and `analyze_complexity.py /Users/jameschen/.codex/skills/complexity-optimizer --format json --max-findings 5` returned JSON findings successfully.
+
+## 2026-05-18 SF Live Must Treat Tokenless Infra-Invalid Rows As RETURN
+
+- **Phenomenon**: Research SF live produced delivery-successful rows, but at least one row carried `infra_invalid_reason=model_call_without_tokens`, `run_eligible=false`, `model_calls=1`, `total_tokens=0`, and `token_measured=false`.
+- **Root Cause**: `run_skill_fit_ablation_matrix.py` accepted delivery `SUCCESS` after ablation gate `PASS`, even though the row was not eligible as public skill-fit evidence. Delivery success, token/accounting eligibility, and skill-mount evidence were not separated early enough.
+- **Lesson**: SF live must fail closed on infra-invalid, run-ineligible, or tokenless model-call rows before interpreting delivery status. A delivery-successful fallback row is diagnostic evidence, not skill-fit outcome-contribution evidence.
+- **Action Taken**: Added a bench-row disqualifier to the SF runner, added `provider_token_ineligible` failure classification, added a regression test, and changed the SF final catalog to block research full live until a bounded token-clean probe or clean targeted replay is run.
+- **Verification**: Existing artifact `research_and_source_discipline::pub-ops-002::capability_only` now reclassifies as `RETURN` with reason `model_call_without_tokens` and action `stop_full_live_and_run_probe_or_clean_replay`; `uv run pytest tests/learning/test_skill_fit_ablation.py -q` reported `70 passed`.
+
+## 2026-05-18 Research SF Probe Must Distinguish Token-Clean Delivery From Skill Effectiveness
+
+- **Phenomenon**: A bounded research probe produced `2/2 PASS` for `research-citation-chain-verifier` and `research-source-validation-auditor`, but the catalog still rejected both candidates with `effective_rows=0`.
+- **Root Cause**: The rows were token-clean and delivery-successful, but candidate-only skill mount did not materialize the selected/injected/used/evidence/outcome contribution chain. The SF runner correctly refused to treat delivery PASS as skill effectiveness.
+- **Lesson**: Research SF should not scale live ablation until it can distinguish three states: unmounted candidate, mounted-but-ineffective candidate, and mounted-with-outcome-contribution candidate. Candidate supply, runtime mount, ablation evidence, and promotion verdict must stay decoupled.
+- **Action Taken**: Ran a one-row replay for `research-source-conflict-resolver` and a two-row token-clean probe for the remaining research candidates, then updated the SF catalog to add `SF-4B` for candidate mount/evidence contract repair.
+- **Verification**: `NEXUS_SF_RESEARCH_STATUS_VISIBLE_REPLAY_CATALOG_2026-05-18.json` returned for the conflict resolver; `NEXUS_SF_RESEARCH_STATUS_VISIBLE_PROBE2_CATALOG_2026-05-18.json` reported `completed_rows=2`, `return_count=0`, but `reject_count=2` and `effective_rows=0`.
+
+## 2026-05-18 Research SF Requires Expected-Capability Tasks And Reference Alias Reconciliation
+
+- **Phenomenon**: Research probes on generic `docs_code_sync` / `ops_research` rows had token-clean delivery, but `skill_mount_contract_status=RETURN` and `effective_rows=0`.
+- **Root Cause**: The matrix builder accepted broad `memory`/docs category tasks for `research_and_source_discipline`, while the rows only produced `research_route=false` or unrelated receipts. Separately, `reference:research_and_source_discipline` did not reconcile against valid `research`, `lancedb`, or `semantic_searcher` receipts in benchmark ablation mode.
+- **Lesson**: SF task selection must be capability-receipt-specific. For research/source-discipline, generic docs tasks with `memory` are not enough; use expected `research`, `lancedb`, or `semantic_searcher` tasks, and keep reference-candidate mounting limited to benchmark ablation mode.
+- **Action Taken**: Removed broad research category/keyword fallback, removed `memory` from the research expected-capability set, normalized `reference:research_and_source_discipline`, allowed reference candidates only under `NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS=1`, and added research receipt aliases.
+- **Verification**: Expected-capability research matrix selected `route-oracle-research-001`, `route-oracle-lancedb-001`, and `route-oracle-semantic-searcher-001`; preflight completed `9/9 PASS`; targeted seal completed `6/6 PASS`; `research-citation-chain-verifier` and `research-source-validation-auditor` each reached `effective_rows=3/3` with `skill_mount_contract_status=PASS`.
+
+## 2026-05-18 SF Matrix CLI Must Not Merge Hidden Default Task Manifests With Explicit Manifests
+
+- **Phenomenon**: A governance expected-capability matrix still selected `docs-lane-public-field-contract-001` even though the caller explicitly passed governance-oriented lane manifests.
+- **Root Cause**: `build_skill_fit_ablation_plan.py` used `action=append` with a non-empty default for `--extra-task-manifest`, so caller-provided manifests were appended to hidden defaults instead of replacing them.
+- **Lesson**: SF capability-local matrices must make task denominators explicit. Hidden default manifests can pollute capability buckets and make a clean-looking run answer the wrong question.
+- **Action Taken**: Added `resolved_extra_task_manifests()` so built-in extras are used only when no explicit manifest list is provided, and added regression tests for explicit replacement and default fallback.
+- **Verification**: Governance expected-capability matrix now selects only `rlm-harder-v2-*` governance/evidence/second-round rows; targeted pytest for the CLI/default behavior and capability-specific matrix tests reported `4 passed`.
+
+## 2026-05-18 Governance SF Needs Mutant Differentiation When Normal Rows Tie
+
+- **Phenomenon**: Governance v3 normal-lane seal completed `24/24 PASS`, but all four candidates stayed at `2/6` effective rows and no normal-lane alternate/default emerged.
+- **Root Cause**: Normal governance/evidence rows were useful for proving mount and delivery cleanliness, but they did not differentiate candidate quality; all candidates were effective on the same evidence rows and returned on the same governance/second-round rows.
+- **Lesson**: When governance candidates tie on normal rows, continue the SF loop with candidate-bound mutant/fail-closed rows instead of opening benchmark or repeatedly rerunning the same denominator.
+- **Action Taken**: Ran a valid candidate-bound mutant subset for `cso`, `acceptance-evidence-failclosed`, `claudeosint-safe-surface-audit`, and `gbrain-soul-audit`; kept invalid old-mutant rows with missing manifests out of the live denominator.
+- **Verification**: Valid mutant subset preflight completed `8/8 PASS`; live completed `8/8 PASS`; `NEXUS_SF_GOVERNANCE_V3_CANDIDATE_MUTANT_VALID_CATALOG_2026-05-18.json` reports all four candidates as `alternate` with `kill=2/2`.
+
+## 2026-05-18 SF Completion Must Separate Skill-Fit Draft From Runtime Promotion
+
+- **Phenomenon**: The final SF catalog contained repair, research, and governance recommendations, but still looked unfinished because the promotion-policy draft did not read final capability sections and `sf_promotion_complete=false` was ambiguous.
+- **Root Cause**: `build_capability_skill_promotion_policy` only consumed row-level `skill_verdicts`, while the SF final artifact is capability-level. Runtime promotion and SF recommendation drafting were also represented by a single overloaded completion flag.
+- **Lesson**: SF completion means capability-skill recommendations and a non-runtime promotion draft are complete. Runtime default updates and public benchmark readiness are separate gates and must remain blocked until explicitly reviewed.
+- **Action Taken**: Added capability-section support to the promotion-policy draft builder, emitted `replace_candidates`, removed duplicate `needs_more_data` for already-promoted candidates, and updated the final SF catalog with `skill_fit_complete=true` plus `sf_runtime_promotion_complete=false`.
+- **Verification**: `NEXUS_SF_CAPABILITY_SKILL_PROMOTION_POLICY_DRAFT_2026-05-18.json` reports `status=PASS`, repair/governance alternates, research replace candidates, `needs_more_data={}`, and `runtime_update_allowed=false`.
+
+## 2026-05-18 SF Needs A Dedicated Completion Gate
+
+- **Phenomenon**: SF still appeared incomplete after catalog and promotion-policy draft generation because completion was inferred from runtime promotion flags.
+- **Root Cause**: There was no machine-readable gate that answered only the SF question: whether every required capability has an actionable skill recommendation and no remaining `needs_more_data`.
+- **Lesson**: SF recommendation completion must be a separate artifact from runtime promotion readiness. A PASS SF completion gate may still keep `runtime_update_allowed=false` and `public_benchmark_allowed=false`.
+- **Action Taken**: Added `build_skill_fit_completion_gate` / `write_skill_fit_completion_gate`, added `scripts/ops/build_sf_completion_gate.py`, and generated `NEXUS_SF_COMPLETION_GATE_2026-05-18.json`.
+- **Verification**: `NEXUS_SF_COMPLETION_GATE_2026-05-18.json` reports `status=PASS`, `actionable_capability_count=3`, `needs_more_data_count=0`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`.
+
+## 2026-05-18 SF Closure Needs Runtime Promotion Dispositions
+
+- **Phenomenon**: SF still looked incomplete after the completion gate passed because the recommended skills had not been assigned runtime-promotion dispositions.
+- **Root Cause**: The SF closeout had recommendation evidence, but no machine-readable review separating repo-local `runtime_review_ready` skills, repo candidate assets requiring runtime metadata, and external/reference alternates that must remain catalog-only.
+- **Lesson**: SF closed loop means every recommended skill has a disposition. It does not mean runtime defaults were written or public benchmarks were unlocked.
+- **Action Taken**: Added `build_skill_fit_runtime_promotion_review` / `write_skill_fit_runtime_promotion_review`, added `scripts/ops/build_sf_runtime_promotion_review.py`, and generated `NEXUS_SF_RUNTIME_PROMOTION_REVIEW_2026-05-18.json`.
+- **Verification**: The runtime review reports `status=PASS`, `sf_closed_loop_complete=true`, `review_item_count=7`, `runtime_review_ready_count=1`, `repo_candidate_runtime_review_required_count=2`, `catalog_alternate_only_count=4`, `undecided_count=0`, and keeps `runtime_update_allowed=false`.
+
+## 2026-05-18 SF-v1 Is Not Full New-Route Skill-Fit Coverage
+
+- **Phenomenon**: SF-v1 passed for three coarse buckets, but it did not answer whether all 1759 skills were classified against the full Nexus route capability space.
+- **Root Cause**: The existing candidate pool only carried coarse hints such as `repair_and_coding`, `governance_and_trust`, and `research_and_source_discipline`; 1075 candidates had no old capability hint, and new-route capabilities like CodeIntel, Nightshift, Autoreason, DDTree, Belief, LanceDB, MemPalace, Artifact, Claim, Swarm, Drone, and S/P/X/D/R/A/C continuity were not first-class SF buckets.
+- **Lesson**: Full SF must have an SF-v2 taxonomy/reclassification layer before per-capability ablation. A passed SF-v1 recommendation gate must not be treated as full new-route skill coverage.
+- **Action Taken**: Added `nexus.learning.skill_route_taxonomy`, added `scripts/ops/build_sf2_skill_route_taxonomy.py`, generated the SF-v2 taxonomy, reclassified all 1759 candidate-pool entries, and generated per-capability candidate shortlists.
+- **Verification**: `NEXUS_SF2_ROUTE_CAPABILITY_TAXONOMY_2026-05-18.json` reports 33 route capabilities; `NEXUS_SF2_SKILL_RECLASSIFICATION_2026-05-18.json` reports `classified_skill_count=1759`; `NEXUS_SF2_CAPABILITY_CANDIDATE_SELECTION_2026-05-18.json` reports `capabilities_with_candidates=32`, `capabilities_with_metadata_repair_candidates=1`, and `candidate_gap_count=0`.
+
+## 2026-05-18 SF-v2 Needs Candidate Quality Screening Before Live Probes
+
+- **Phenomenon**: SF-v2 taxonomy could classify all 1759 skills and produce an ablation matrix for 33/33 route capabilities, but raw keyword selection admitted weak route-fit candidates such as legacy-only or single-token matches.
+- **Root Cause**: Candidate discovery and live-probe readiness were collapsed. A skill could be candidate-visible because of broad legacy hints or one generic keyword, even when it lacked enough route-fit evidence to be a clean per-capability ablation arm.
+- **Lesson**: SF-v2 must separate `classified`, `candidate_selected`, and `clean_live_probe_candidate`. Classification coverage is not enough to start live SF; weak candidates need skill-spec or metadata repair first.
+- **Action Taken**: Added `NEXUS_SF2_METADATA_REPAIR_PLAN_2026-05-18.json`, metadata-repair overlay support for ablation-only planning, and `NEXUS_SF2_CANDIDATE_QUALITY_SCREEN_2026-05-18.json` with clean shortlists plus blocked skill-spec requirements.
+- **Verification**: `NEXUS_SF2_ABLATION_MATRIX_PLAN_2026-05-18.json` reports `ready_capability_count=33`, `planned_row_count=190`, and `runtime_update_allowed=false`; the quality screen reports `capabilities_with_clean_candidates=16`, `capabilities_without_clean_candidates=17`, and `sf2_live_probe_allowed=false`.
+
+## 2026-05-18 SF-v2 Spec Overlay Must Be Prioritized Without Runtime Promotion
+
+- **Phenomenon**: Adding spec-only candidates for blocked route capabilities still left `forecast_pregate` without a clean candidate because legacy runtime-reviewed planning skills crowded the spec candidate out of the top-8 shortlist.
+- **Root Cause**: Selection ranking prioritized existing runtime-reviewed candidates over SF2 gap-repair candidates, even when the existing candidates were legacy-hint matches that failed the route-fit quality screen.
+- **Lesson**: SF2 spec-overlay candidates are not runtime recommendations, but they must be selected first for the capabilities they repair so the next bounded probe tests the intended route behavior instead of stale legacy skills.
+- **Action Taken**: Added `NEXUS_SF2_CANDIDATE_SPEC_OVERLAY_2026-05-18.json`, `NEXUS_SF2_SPEC_REPAIRED_CANDIDATE_POOL_2026-05-18.json`, `NEXUS_SF2_SPEC_REPAIRED_QUALITY_SCREEN_2026-05-18.json`, and `NEXUS_SF2_SPEC_REPAIRED_ABLATION_MATRIX_PLAN_2026-05-18.json`; boosted `sf2_spec_overlay` only inside SF2 selection scoring while keeping `runtime_eligible=false`.
+- **Verification**: The spec-repaired quality screen reports `status=PASS` and `capabilities_without_clean_candidates=0`; the spec-repaired matrix reports `ready_capability_count=33`, `planned_row_count=192`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`.
+
+## 2026-05-18 SF-v2 Needs Mechanical Continuation Past Task Cards
+
+- **Phenomenon**: SF-v2 could reach a clean closure gate with 17 spec-only candidates, but the continuation still risked stopping at a human task-card list instead of producing an executable next artifact.
+- **Root Cause**: The materialization step was represented as one large write operation, while the workspace agent contract caps file touch scope. Without a bounded batch plan, the agent had to choose between over-touching files or stopping.
+- **Lesson**: SF continuation needs machine-readable batch cards. When a step crosses file-touch boundaries, split it into bounded batches and keep runtime/public lanes explicitly blocked.
+- **Action Taken**: Added an SF2 candidate materialization bundle, closure gate, and materialization batch plan. The batch plan splits 17 candidate-only SKILL.md assets into SF2-H1/H2/H3 while preserving `runtime_update_allowed=false` and `public_benchmark_allowed=false`.
+- **Verification**: `uv run pytest tests/learning/test_skill_route_taxonomy.py tests/learning/test_skill_fit_ablation.py -q` reports `95 passed`; `NEXUS_SF2_CLOSURE_GATE_2026-05-18.json` reports `status=PASS` and `bounded_probe_allowed=true`; `NEXUS_SF2_MATERIALIZATION_BATCH_PLAN_2026-05-18.json` reports `asset_count=17` and `batch_count=3`.
+
+## 2026-05-18 SF-v2 Candidate Asset Materialization Must Stay Candidate-Only
+
+- **Phenomenon**: SF2-H materialized 17 route-fit spec assets, but those assets could be mistaken for runtime skills if the lifecycle boundary was not checked after write.
+- **Root Cause**: Asset creation and runtime promotion are adjacent filesystem states under `.agents/skills`, even though SF2 only intended candidate-only ablation inputs.
+- **Lesson**: Every generated SF2 skill asset must carry explicit `runtime_eligible=false`, `public_benchmark_allowed=false`, and candidate-only wording, and SF2 must verify those fields after materialization before any bounded probe.
+- **Action Taken**: Materialized SF2-H1/H2/H3 via `scripts/ops/materialize_sf2_candidate_assets.py`, producing 17 candidate-only `SKILL.md` files under `.agents/skills/sf2`.
+- **Verification**: Field checks found `runtime_eligible: false` and `public_benchmark_allowed: false` across all 17 assets; `uv run pytest tests/learning/test_skill_route_taxonomy.py tests/learning/test_skill_fit_ablation.py -q` reports `95 passed`.
+
+## 2026-05-18 SF-v2 Needs Status-Visible Asset Verification Before Bounded Probe
+
+- **Phenomenon**: Candidate-only assets existed on disk, but SF2 still needed a machine-readable check proving all 17 assets were visible and still blocked from runtime/public use.
+- **Root Cause**: File materialization alone is not a lifecycle gate. Without a status-visible report, bounded probe readiness could be inferred from filesystem presence without checking boundary metadata.
+- **Lesson**: SF2-I must start with an asset-status gate: candidate assets must exist, keep `runtime_eligible=false`, keep `public_benchmark_allowed=false`, and expose candidate-only wording before any bounded probe.
+- **Action Taken**: Added `--verify-only` to `scripts/ops/materialize_sf2_candidate_assets.py`, generated `NEXUS_SF2_CANDIDATE_ASSET_STATUS_2026-05-18.json`, and added regression coverage.
+- **Verification**: The status report shows `asset_count=17`, `status_visible_asset_count=17`, `blocker_count=0`, `bounded_probe_allowed=true`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`; focused pytest reports `96 passed`.
+
+## 2026-05-18 SF-v2 Bounded Probe Needs A Separate Plan Gate From Public Benchmark
+
+- **Phenomenon**: After candidate assets became status-visible, the next SF step could be confused with benchmark execution because both consume matrix-like row plans.
+- **Root Cause**: SF2 bounded probe readiness had no separate artifact combining the spec-repaired ablation matrix with asset-status verification. Without that artifact, `bounded_probe_allowed` could be read from the closure gate alone.
+- **Lesson**: SF2-I needs its own bounded-probe plan gate that consumes both candidate asset status and the ablation matrix, and explicitly keeps runtime/public benchmark blocked.
+- **Action Taken**: Added `build_sf2_bounded_probe_plan`, wired `build_sf2_skill_route_taxonomy.py` to emit `NEXUS_SF2_BOUNDED_PROBE_PLAN_2026-05-18.json`, and added regression coverage.
+- **Verification**: The bounded probe plan reports `status=PASS`, `capability_count=33`, `ready_capability_count=33`, `planned_row_count=192`, `status_visible_asset_count=17`, `bounded_probe_allowed=true`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`; focused pytest reports `97 passed`.
+
+## 2026-05-18 SF-v2 Bounded Probe Must Preflight Before Live Outcome Claims
+
+- **Phenomenon**: SF2 had a 192-row bounded-probe plan, but running it directly would risk mixing row-readiness checks with outcome-contribution claims.
+- **Root Cause**: The SF2 matrix has capability-only, skill-arm, and negative-control rows, but those rows are not outcome evidence until live receipts exist. A separate preflight is needed to prove every row is executable without claiming skill value.
+- **Lesson**: SF2-I2 must first emit a bounded-probe preflight with `outcome_contribution_claimed=false`; only after that gate passes can a live bounded probe generate skill verdict evidence.
+- **Action Taken**: Added `build_sf2_bounded_probe_preflight`, wired `build_sf2_skill_route_taxonomy.py` to emit `NEXUS_SF2_BOUNDED_PROBE_PREFLIGHT_2026-05-18.json`, and added regression coverage.
+- **Verification**: The preflight reports `status=PASS`, `row_count=192`, `pass_count=192`, `blocker_count=0`, `bounded_probe_live_allowed=true`, `runtime_update_allowed=false`, `public_benchmark_allowed=false`, and `outcome_contribution_claimed=false`; focused pytest reports `98 passed`.
+
+## 2026-05-18 SF-v2 Live Probe Needs A Task-Attached Execution Manifest
+
+- **Phenomenon**: The SF2 192-row matrix had capability and arm rows, but no task references, so it was not yet a live-executable bounded probe.
+- **Root Cause**: Route-fit candidate selection and live row execution were separated correctly, but the missing bridge could make agents either stop at a plan or incorrectly reuse public benchmark rows.
+- **Lesson**: SF2 should generate a dedicated bounded-probe task manifest and attach those task refs to each row before any live probe. This preserves the SF denominator and keeps 7R/public benchmark blocked.
+- **Action Taken**: Added `build_sf2_bounded_probe_task_manifest` and `build_sf2_bounded_probe_execution_manifest`, wired the taxonomy builder to emit `NEXUS_SF2_BOUNDED_PROBE_TASK_MANIFEST_2026-05-18.json` and `NEXUS_SF2_BOUNDED_PROBE_EXECUTION_MANIFEST_2026-05-18.json`, and added regression coverage.
+- **Verification**: The builder reports `bounded_probe_task_count=33`, `bounded_probe_execution_row_count=192`, and `bounded_probe_execution_ready=true`; focused pytest reports `99 passed`.
+
+## 2026-05-18 SF-v2 Needs A Dedicated Internal Probe Runner
+
+- **Phenomenon**: Running SF2 chunks through `capability_ab_runner.py --preflight-only` returned on public benchmark manifest fields even though SF2 was an internal skill-fit lane.
+- **Root Cause**: SF2 route-fit tasks and public benchmark tasks have different schemas and claim boundaries. Reusing the public runner preflight made SF stop at benchmark-denominator requirements instead of skill-fit readiness.
+- **Lesson**: SF2 must use a dedicated bounded-probe hook that emits route-skill receipts while keeping `runtime_update_allowed=false` and `public_benchmark_allowed=false`.
+- **Action Taken**: Added `nexus.learning.sf2_bounded_probe`, `scripts/ops/run_sf2_bounded_probe.py`, and `scripts/ops/repair_sf2_static_probe_blockers.py`; generated chunk receipts, repaired five static-fit gaps, and emitted `NEXUS_SF2_FINAL_ROUTE_SKILL_VERDICT_CATALOG_2026-05-18.json`.
+- **Verification**: Focused pytest reports `101 passed`; the final SF2 route-skill verdict catalog reports `capability_count=33`, `capabilities_with_static_fit_candidate=33`, `blocked_capability_count=0`, `sf_discovery_closed=true`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`.
+
+## 2026-05-18 SF-v2 Must Continue From Task Cards To Completion Gate
+
+- **Phenomenon**: SF-v2 could still appear unfinished if the agent stopped after generating the next task cards instead of executing the receipt-validation and disposition steps.
+- **Root Cause**: Discovery closure, receipt validation, and promotion disposition were separate artifacts. Without a final completion gate, a clean candidate catalog still required manual interpretation.
+- **Lesson**: SF-v2 completion must be a machine-readable gate, not a prose milestone. Agents should continue from generated task cards until `sf2_closed_loop_complete=true` or a fail-closed blocker has a new executable repair hook.
+- **Action Taken**: Added `build_sf2_live_receipt_validation`, `build_sf2_promotion_review`, `build_sf2_completion_gate`, and `scripts/ops/build_sf2_completion_review.py`; generated `NEXUS_SF2_LIVE_RECEIPT_VALIDATION_2026-05-18.json`, `NEXUS_SF2_PROMOTION_REVIEW_2026-05-18.json`, and `NEXUS_SF2_COMPLETION_GATE_2026-05-18.json`.
+- **Verification**: Focused pytest reports `102 passed`; the completion gate reports `sf2_closed_loop_complete=true`, `receipt_validation_status=PASS`, `promotion_review_status=PASS`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`.
+
+## 2026-05-18 SF-v3 Must Separate Static Fit From Causal And Combo Evidence
+
+- **Phenomenon**: SF2 closed the route-skill discovery loop, but the judgment still had known blind spots: static metadata bias, no explicit baseline-vs-skill delta, no multi-skill combo attribution, and no overlap-aware best-candidate scoring.
+- **Root Cause**: SF2 optimized classification and candidate disposition. It did not make the live-causality, combo, overlap, metadata-rescue, and best-candidate layers first-class artifacts.
+- **Lesson**: SF3 completion must emit separate gates for live causality, combo contribution, overlap resolution, metadata-bias rescue, best-candidate search, and runtime-review readiness. Runtime updates and public benchmark must stay blocked until manual runtime policy review.
+- **Action Taken**: Added SF3 builders in `nexus.learning.sf2_bounded_probe` and `scripts/ops/build_sf3_completion_review.py`, including `baseline_vs_skill_delta`, `combo_arm`, `multi_skill_mounts`, `overlap_group_id`, `canonical_candidate_id`, `suppressed_by`, and score components.
+- **Verification**: `NEXUS_SF3_RUNTIME_REVIEW_GATE_2026-05-18.json` reports `sf3_closed_loop_complete=true`; focused pytest reports `103 passed`; SF3 keeps `runtime_update_allowed=false` and `public_benchmark_allowed=false`.
+
+## 2026-05-18 SF-v3 Must Close At Promotion-Review-Ready Without Runtime Mutation
+
+- **Phenomenon**: Even after SF3 found a best candidate for every route capability, the loop could still look unfinished because no artifact converted those candidates into a manual runtime-policy review queue.
+- **Root Cause**: Best-candidate selection, candidate-only metadata hardening, and runtime policy approval are different lifecycle states. Without a post-review gate, agents either stopped at task cards or risked treating discovery evidence as runtime permission.
+- **Lesson**: SF closure should be machine-readable as `PROMOTION_REVIEW_READY`: reviewable candidates and hardening batches are complete, while `runtime_update_allowed=false` and `public_benchmark_allowed=false` remain explicit until manual policy approval.
+- **Action Taken**: Added `build_sf3_manual_runtime_policy_review`, `build_sf3_candidate_only_hardening_plan`, `build_sf3_post_review_gate`, and `scripts/ops/build_sf3_runtime_policy_review.py`.
+- **Verification**: `NEXUS_SF3_POST_REVIEW_GATE_2026-05-18.json` reports `sf_closed_loop_complete=true`, `sf_state=PROMOTION_REVIEW_READY`, `runtime_review_ready=true`, `candidate_hardening_batch_count=3`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`; focused pytest reports `104 passed`.
+
+## 2026-05-18 SF-v3 Runtime Apply Must Stay Blocked Until Manual Approval
+
+- **Phenomenon**: After SF reached `PROMOTION_REVIEW_READY`, continuing the loop could still be misread as permission to apply runtime defaults.
+- **Root Cause**: Metadata hardening, approval drafting, and policy application were not represented as separate gates. The local shell also lacks bare `python`, so ad hoc report checks should use `uv run python` or `python3`.
+- **Lesson**: SF should continue past review-ready by producing metadata overlays and an approval draft, but the apply gate must remain fail-closed while any item is `PENDING_MANUAL_APPROVAL`.
+- **Action Taken**: Added candidate metadata overlays, runtime policy approval draft, and runtime policy apply gate outputs to `scripts/ops/build_sf3_runtime_policy_review.py`.
+- **Verification**: `NEXUS_SF3_CANDIDATE_METADATA_OVERLAY_2026-05-18.json` reports `overlay_count=42`; `NEXUS_SF3_RUNTIME_POLICY_APPROVAL_DRAFT_2026-05-18.json` reports `approval_item_count=33` and `pending_manual_approval_count=33`; `NEXUS_SF3_RUNTIME_POLICY_APPLY_GATE_2026-05-18.json` reports `status=BLOCKED`; focused pytest reports `105 passed`.
+
+## 2026-05-18 SF-v3 Needs A Validated Manual Approval Artifact Before Apply
+
+- **Phenomenon**: The SF approval packet was reviewable, but future agents still needed a concrete file format and validator for user decisions.
+- **Root Cause**: A reviewer packet explains choices, but it is not a decision artifact. Without a validator, missing decisions or unsafe candidate-only runtime approvals could leak into the apply stage.
+- **Lesson**: SF must generate a manual approval template and validate every decision before runtime policy patch generation. Candidate-only items may be alternate-approved but cannot skip curated runtime review.
+- **Action Taken**: Added `build_sf3_manual_approval_validation`, emitted `NEXUS_SF3_MANUAL_APPROVAL_TEMPLATE_2026-05-18.json`, and emitted `NEXUS_SF3_MANUAL_APPROVAL_VALIDATION_2026-05-18.json`.
+- **Verification**: The approval template reports `status=PENDING`; approval validation reports `status=BLOCKED`, `decision_count=33`, `valid_decision_count=0`, and `blocker_count=33`; focused pytest reports `106 passed`.
+
+## 2026-05-18 SF-v3 Patch Planning Must Depend On Approval Validation
+
+- **Phenomenon**: After generating the approval template, there was still one more possible accidental leap: producing a runtime patch plan from unresolved `PENDING` decisions.
+- **Root Cause**: Runtime patch planning was not yet tied to approval validation status, so a future agent could interpret SF completion as enough to plan runtime defaults.
+- **Lesson**: The runtime policy patch plan must consume approval validation and remain `BLOCKED` unless every decision is valid. A pending template should produce zero planned changes.
+- **Action Taken**: Added `build_sf3_runtime_policy_patch_plan` and wired `NEXUS_SF3_RUNTIME_POLICY_PATCH_PLAN_2026-05-18.json` into `scripts/ops/build_sf3_runtime_policy_review.py`.
+- **Verification**: The patch plan reports `status=BLOCKED`, `planned_change_count=0`, and `blocker_count=1` while approval validation is blocked; focused pytest reports `106 passed`.
+
+## 2026-05-18 SF-v3 Approval Should Be Evidence-Based, Not User-Prompted
+
+- **Phenomenon**: Asking the user to manually choose every skill contradicted the SF objective: the system should select the best skill per capability from evidence.
+- **Root Cause**: The approval gate treated policy decisions as manual input even though SF3 already had best-candidate, source-disposition, metadata, and risk-boundary evidence.
+- **Lesson**: SF can generate an evidence-based approval artifact: runtime-reviewed candidates may enter runtime review, candidate-only/spec skills remain catalog alternates, and unsafe candidate-only runtime promotion is still blocked.
+- **Action Taken**: Added `build_sf3_evidence_based_approval_artifact`, made `scripts/ops/build_sf3_runtime_policy_review.py` use it by default, and updated the apply gate to consume the validated patch plan.
+- **Verification**: `NEXUS_SF3_EVIDENCE_BASED_APPROVAL_ARTIFACT_2026-05-18.json` reports `runtime_review_decision_count=13` and `alternate_decision_count=20`; approval validation reports `status=PASS` with `valid_decision_count=33`; patch plan reports `status=PASS` with `planned_change_count=33`; apply gate reports `status=PASS`; focused pytest reports `106 passed`.
+
+## 2026-05-18 SF Must Clean Skill Roots Before Pairing Claims
+
+- **Phenomenon**: SF reports were based on a 1759-skill snapshot, but the live local roots contain 4517 `SKILL.md` files with 1832 unique `skill_id` values and 1618 duplicate `skill_id` groups.
+- **Root Cause**: `.agents`, `.codex`, archived, Hermes, audit, and Nexus-local skill roots were mixed without a path/hash identity layer. `skill_id` alone can collapse mirror/cache copies and same-name different-content variants.
+- **Lesson**: SF must build a canonical inventory before capability pairing: identify each skill by `root + relative_path + skill_id + sha256`, exclude byte-identical lower-priority duplicates from canonical buckets, and require manual review for same-id different-content variants.
+- **Action Taken**: Added `nexus.learning.skill_inventory_roots` and `scripts/ops/build_sf_skill_inventory_cleanup.py`; emitted full inventory, identity dedup, canonical capability buckets, and pairing identity recheck reports.
+- **Verification**: `NEXUS_SF_FULL_SKILL_INVENTORY_2026-05-18.json` reports `skill_file_count=4517` and `unique_skill_id_count=1832`; `NEXUS_SF_SKILL_IDENTITY_DEDUP_2026-05-18.json` reports `safe_delete_candidate_count=1764` and `manual_review_required_count=106`; `NEXUS_SF_PAIRING_IDENTITY_RECHECK_2026-05-18.json` reports `status=PASS` with `blocker_count=0`; focused pytest reports `30 passed`.
+
+## 2026-05-18 SF Duplicate Cleanup Needs Per-SHA Canonicalization
+
+- **Phenomenon**: After the first duplicate quarantine pass, lower-priority `.codex` and archived skill mirrors kept reappearing as safe-delete candidates.
+- **Root Cause**: The first dedup classifier selected only one canonical record per `skill_id`, so same-id different-content groups exposed byte-identical mirrors one content variant at a time. Quarantine was also under `.agents/skills`, so the inventory scanner had to explicitly exclude `.duplicates-quarantine`.
+- **Lesson**: Dedup must choose a canonical record per `(skill_id, sha256)` variant, not only per `skill_id`; scanner roots must exclude internal cleanup/index folders; SF2 route-fit specs under `sf2/` are ablation-only and must not be marked runtime eligible.
+- **Action Taken**: Added quarantine apply tooling, moved byte-identical lower-priority duplicates through `.agents/skills/.duplicates-quarantine`, removed the verified duplicate quarantine, excluded cleanup folders from inventory, fixed per-SHA dedup, and added `sf2-policy_capability_gate-route-fit-spec` to close the final empty capability bucket.
+- **Verification**: Final cleanup reports `skill_file_count=316`, `unique_skill_id_count=296`, `safe_delete_candidate_count=0`, `manual_review_required_count=18`, `capabilities_with_candidates=33`, `pairing_blocker_count=0`, and `sf_clean_closed=true`; focused pytest reports `34 passed`.
+
+## 2026-05-18 SF Closure Must Not Require Flash When Current Pairing Is Already Invalid
+
+- **Phenomenon**: The first SF final catalog builder marked five capabilities as `needs_flash_compare` even though each had a current pairing that failed the bounded evidence chain and a canonical/alternate candidate that passed.
+- **Root Cause**: The bounded-probe ranker treated any non-current winner as ambiguous, rather than distinguishing "current pairing invalid, replacement candidate passes" from "two valid candidates are tied".
+- **Lesson**: SF should require Flash only for true evidence ties or live-causality gaps. If current pairing is selected-only/RETURN and a stronger candidate passes capability overlap plus evidence gates, the catalog can choose the stronger candidate and keep `public_benchmark_allowed=false`.
+- **Action Taken**: Added `nexus.learning.skill_fit_closure`, `scripts/ops/build_sf_capability_skill_catalog.py`, and focused closure tests; the matrix now carries candidate score/runtime eligibility and the bounded probe ranks by evidence strength before deciding whether Flash is needed.
+- **Verification**: `NEXUS_SF_FINAL_CAPABILITY_SKILL_CATALOG_V2_2026-05-18.json` reports `capability_count=33`, `capability_with_primary_count=33`, `blocker_count=0`, `flash_compare_required_count=0`, and `public_benchmark_allowed=false`; focused pytest reports `38 passed`.
+
+## 2026-05-18 SF Flash Pair Tasks Need Capability-Specific Fixtures
+
+- **Phenomenon**: `learn_ask::flash_nexus` returned even though delivery was `SUCCESS/VERIFIED`, tokens were measured, and SemanticSearcher receipts were present.
+- **Root Cause**: The SF Flash pair generator used the generic `sf_flash_pair` fixture for `learn_ask`. Gemini participated, but the final delivery source fell back to local (`model_required_local_delivery_blocked`), so model-required SF live evidence was correctly rejected.
+- **Lesson**: SF Flash+Nexus versus Flash+Nexus+skill probes must use capability-specific fixtures when the runner already has one. `learn_ask` should use `rlm_harder_v2_semantic_searcher_refs` so the model must generate a verifiable semantic-ref patch instead of passing through local fallback.
+- **Action Taken**: Added a capability fixture override in `scripts/ops/build_sf_flash_pair_matrix.py` for `learn_ask -> rlm_harder_v2_semantic_searcher_refs`, regenerated the SF Flash pair matrix/task manifest, and replayed only the failed learn_ask pair.
+- **Verification**: `learn_ask` preflight replay reports `2/2 PASS`; live replay reports `completed_rows=2`, `pass_count=2`, `return_count=0`; `NEXUS_SF_FLASH_PAIR_LEARN_ASK_REPLAY_LIVE_REPORT_2026-05-18.json` reports `keep_count=1`, `same_runner_pair_artifact_count=1`, and `session_worker_clean_count=1`.
+
+## 2026-05-18 SF Flash Pair Chunks Must Verify Planned Row Count
+
+- **Phenomenon**: Chunk14 reported `status=PASS`, but `planned_rows=3` because the `repair_loop` skill row filter used `tdd` while the matrix row id used `test-driven-development`.
+- **Root Cause**: A passing runner status only proves every matched row passed; it does not prove the operator selected the complete intended paired denominator.
+- **Lesson**: SF chunk execution must compare `planned_rows` against the expected two rows per capability before producing a chunk report. If a row filter misses one arm, replay the whole affected pair in one summary instead of stitching cross-summary artifacts.
+- **Action Taken**: Replayed the complete `repair_loop` pair with the matrix row id `test-driven-development` and produced a separate clean report; filtered the partial chunk14 summary to report only the complete `research` pair.
+- **Verification**: `repair_loop` replay reports `completed_rows=2`, `pass_count=2`, `return_count=0`; `NEXUS_SF_FLASH_PAIR_REPAIR_LOOP_REPLAY_LIVE_REPORT_2026-05-18.json` and `NEXUS_SF_FLASH_PAIR_CHUNK14_RESEARCH_LIVE_REPORT_2026-05-18.json` both report `keep_count=1`, `same_runner_pair_artifact_count=1`, and `session_worker_clean_count=1`.
+
+## 2026-05-18 SF Sandbox Replay Needs A Capability-Matched Candidate
+
+- **Phenomenon**: `sandbox_replay` delivery passed with `sf2-file_lock_security_gate-route-fit-spec`, but the SF live report returned because the skill arm had no selected/injected/used/evidence/outcome chain.
+- **Root Cause**: The final catalog reused a file-lock/security candidate for sandbox replay. Static route overlap was not enough; the skill identity did not match the sandbox/replay capability that the Flash pair was testing.
+- **Lesson**: SF pairing must prefer capability-matched candidate assets over adjacent governance/security candidates. A delivery-clean row with `skill_mount_contract_status=RETURN` is a candidate mismatch, not a keep.
+- **Action Taken**: Added `sf2-sandbox_replay-route-fit-spec` as an ablation-only candidate and added a sandbox replay primary override in `scripts/ops/build_sf_flash_pair_matrix.py`.
+- **Verification**: `sandbox_replay` preflight replay reports `2/2 PASS`; live replay reports `completed_rows=2`, `pass_count=2`, `return_count=0`; `NEXUS_SF_FLASH_PAIR_SANDBOX_REPLAY_V2_LIVE_REPORT_2026-05-18.json` reports `keep_count=1`, `same_runner_pair_artifact_count=1`, and `session_worker_clean_count=1`.
+
+## 2026-05-18 SF External Challenge Arms Need Report-Compatible Labels
+
+- **Phenomenon**: The mattpocock challenge live run completed `12/12 PASS`, but the first live report returned `comparison_count=0`.
+- **Root Cause**: The challenger matrix used `arm_id=flash_nexus_with_matt_skill`; the existing SF pair report builder only pairs `flash_nexus` with `flash_nexus_with_skill`.
+- **Lesson**: External challenge matrices can keep provenance in source metadata, but the live report seam must use the stable pair arm labels or normalize them before reporting.
+- **Action Taken**: Normalized the mattpocock live summary arm labels for report generation and preserved candidate provenance in the challenge matrix/status reports.
+- **Verification**: `NEXUS_SF_MATTPOCOCK_CHALLENGE_LIVE_REPORT_2026-05-18.json` reports `comparison_count=6`, `keep_count=6`, `same_runner_pair_artifact_count=6`, and `session_worker_clean_count=6`; focused SF pytest reports `39 passed`.
+
+## 2026-05-18 SF External Multi-Capability Skills Need Per-Capability Aliases
+
+- **Phenomenon**: The doggy8088 Karpathy challenge live run completed `10/10 PASS`, but the SF live report returned all five comparisons because `karpathy-guidelines` had `skill_mount_contract_status=RETURN`.
+- **Root Cause**: One external `skill_id` was tested across multiple Nexus capabilities, but `SkillCatalog.get(skill_name)` returns one catalog entry and therefore one `capability_mount`; the row delivery passed, but the requested skill could not be reconciled against each capability's expected receipt.
+- **Lesson**: External challenge matrices must use ablation-only per-capability virtual aliases when one canonical skill is tested against multiple capabilities. The alias should preserve `canonical_skill_id` provenance while binding one `capability_mount` to one expected receipt.
+- **Action Taken**: Generated `NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_SKILL_STATUS_2026-05-18.json` and `NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_TARGETED_REPLAY_MATRIX_2026-05-18.json` with `karpathy-guidelines__<capability>` aliases; runtime update remains disabled.
+- **Verification**: V2 preflight reports `5/5 PASS`; V2 targeted live reports `completed_rows=5`, `pass_count=5`, `return_count=0`; `NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_LIVE_REPORT_2026-05-18.json` reports `comparison_count=5`, `keep_count=5`, `return_count=0`.
+
+## 2026-05-18 SF Report Builders May Need uv Cache Escalation
+
+- **Phenomenon**: Running `uv run python scripts/ops/build_sf_flash_pair_live_report.py` failed with `failed to open file /Users/jameschen/.cache/uv/sdists-v9/.git: Operation not permitted`.
+- **Root Cause**: The report builder itself is repo-local, but `uv` may inspect or mutate cache metadata outside the workspace sandbox before executing it.
+- **Lesson**: If an SF report builder fails only on `uv` cache access, rerun the same command with approved escalation instead of changing report logic or treating it as SF evidence failure.
+- **Action Taken**: Re-ran the same builder command with escalation; no report schema or live evidence was changed.
+- **Verification**: The escalated builder produced `NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_LIVE_REPORT_2026-05-18.json` with `status=PASS`, `comparison_count=5`, and `return_count=0`.
+
+## 2026-05-18 SF External Large Skill Packs Need First-Pass Source Stratification
+
+- **Phenomenon**: `ComposioHQ/awesome-codex-skills` contains 880 `SKILL.md` files, but 832 live under `composio-skills/*-automation` and are app/service automation wrappers.
+- **Root Cause**: Treating every discovered `SKILL.md` as an equal SF challenger would mix documentation-only Codex workflow skills with external app automation skills that require auth, external services, and separate operational safety boundaries.
+- **Lesson**: Large external packs must be stratified before SF live: first screen top-level Codex workflow skills, keep app automation packs in ingest-guard quarantine, then choose a small capability-matched challenger set.
+- **Action Taken**: Generated `NEXUS_SF_EXTERNAL_COMPOSIO_AWESOME_CODEX_CANDIDATE_SCREEN_2026-05-18.json`, selected six top-level challengers, and skipped the 832 app automation skills from first-pass live.
+- **Verification**: Composio challenge preflight reports `12/12 PASS`; live reports `12/12 PASS`; `NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_LIVE_REPORT_2026-05-18.json` reports `comparison_count=6`, `keep_count=6`, and `return_count=0`.
+
+## 2026-05-18 SF Update Records Need Idempotent Report Builders
+
+- **Phenomenon**: While building the external skill update record in the persistent Node REPL, the first generator attempt failed with `Identifier 'fs' has already been declared`.
+- **Root Cause**: The REPL preserves top-level bindings between calls, so ad hoc report generation with repeated `const` declarations can fail even when the underlying SF evidence is clean.
+- **Lesson**: SF report generation snippets should run inside a block scope or use a durable script with isolated local names. REPL binding collisions are tooling failures, not SF evidence failures.
+- **Action Taken**: Re-ran the generator inside a block scope and produced `NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json`, `NEXUS_SF_FINAL_CAPABILITY_SKILL_CATALOG_V3_2026-05-18.json`, and `NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V2_2026-05-18.json`.
+- **Verification**: The generated update record reports `compared_row_count=17`, `catalog_replace_ready_count=2`, `runtime_update_allowed=false`, and `public_benchmark_allowed=false`.
+
+## 2026-05-18 Repo-Local External SF Candidates Must Remain Ablation-Eligible
+
+- **Phenomenon**: `forecast_pregate/create-plan` live delivery completed `2/2 PASS`, but the first seal report returned because the with-skill row had `skill_mount_contract_status=RETURN` and every skill-chain field was false.
+- **Root Cause**: The materialized repo-local external candidate used `skill_status=nexus_repo_local_candidate`, while `SkillCatalog` only treated `external_reference_candidate` and `provider_mirror_reference` as ablation-eligible reference statuses.
+- **Lesson**: Repo-local materialization is not runtime promotion, but it must be ablation-eligible for SF seal validation. `nexus_repo_local_candidate` should remain `mount_allowed=false` while allowing `ablation_allowed=true`.
+- **Action Taken**: Added `nexus_repo_local_candidate` to reference-status policy, added catalog regression coverage, and reran the same 2-row forecast seal.
+- **Verification**: Focused pytest reports `10 passed`; `NEXUS_SF_FORECAST_CREATE_PLAN_SEAL_LIVE_REPORT_V2_2026-05-18.json` reports `status=PASS`, `keep_count=1`, `return_count=0`, selected/injected/used/evidence/gate/outcome all true, token delta `-2224`, and phase wall delta `-3.6484`.
+
+## 2026-05-18 SF Runtime Review Metadata Overlays Must Override Blank Candidate Fields
+
+- **Phenomenon**: The first V5 runtime-promotion review still classified `create-plan` as `repo_candidate_runtime_review_required` when the runtime-review metadata overlay was passed after the older seal-status source.
+- **Root Cause**: Candidate metadata merge used `setdefault`, so earlier blank `source_root`, `source_type`, and `safety_status` fields prevented the later evidence-based overlay from supplying runtime-review metadata.
+- **Lesson**: Runtime-review overlays are explicit lifecycle decisions and must override blank or stale candidate metadata. Otherwise review disposition depends on CLI source order rather than evidence.
+- **Action Taken**: Added `metadata_overlay=true` override semantics to `build_skill_fit_runtime_promotion_review`, marked the V4 overlay candidates accordingly, and rebuilt V5 review.
+- **Verification**: Focused runtime-promotion pytest reports `2 passed`; `NEXUS_SF_RUNTIME_PROMOTION_REVIEW_V5_2026-05-18.json` reports `runtime_review_ready_count=5`, `repo_candidate_runtime_review_required_count=0`, `undecided_count=0`, and `status=PASS`.
+
+## 2026-05-18 SF V5 Runtime Apply Needs Its Own Gate
+
+- **Phenomenon**: SF V5 produced `set_capability_primary_skill_candidate` patch-plan items, but the existing SF3 apply gate only understood the older approval/patch schema and could not safely apply V5 primary candidates.
+- **Root Cause**: Runtime review and patch-plan generation evolved from manual SF3 approval packets to evidence-backed SF V5 review artifacts, while the apply gate remained schema-specific to SF3.
+- **Lesson**: SF apply must validate the exact patch-plan schema it consumes. V5 primary updates should require `runtime_review_ready`, `runtime_eligible=true`, `safety_status=runtime_reviewed`, evidence refs, and a single primary candidate per capability before writing an overlay.
+- **Action Taken**: Added `build_skill_fit_runtime_policy_apply_gate`, `build_skill_fit_runtime_policy_overlay`, and `scripts/ops/build_sf_runtime_policy_apply_gate.py`.
+- **Verification**: Focused SF pytest reports `93 passed`; `NEXUS_SF_RUNTIME_POLICY_APPLY_GATE_V5_2026-05-18.json` reports `status=PASS`, `primary_apply_ready_count=2`, `blocker_count=0`, and `public_benchmark_allowed=false`.
+
+## 2026-05-18 SF Runtime Overlay Must Be Explicit And Not Reclassify Ablation
+
+- **Phenomenon**: After adding SF runtime overlay consumption to `CapabilityPlanner`, the first focused test run failed because ordinary ablation reference skill expectations and overlay-selected skill expectations were mixed.
+- **Root Cause**: The planner-selected bit has two meanings: normal catalog skill requests should reflect selected capability identity, while SF overlay requests are already capability-gated by the overlay alias match.
+- **Lesson**: Runtime overlay consumption must be opt-in and source-coded. Only `source=sf_runtime_policy_overlay` requests may bypass reference-only catalog violations and be marked selected through overlay aliases; ordinary ablation reference mounts must keep their original selected-capability semantics.
+- **Action Taken**: Added explicit overlay request source handling, skipped catalog mount violations only for overlay-approved skill ids, and corrected regression expectations.
+- **Verification**: Focused planner/SF pytest reports `175 passed`; planner smoke with the V5 overlay produces no skill-mount violations for `forecast_pregate/create-plan` or `repair_loop/tdd`.
+
+## 2026-05-18 SF Runtime Receipt Smoke Must Follow The Confirmed Receipt
+
+- **Phenomenon**: The first runtime receipt smoke reported `forecast_pregate/create-plan` as RETURN even though the runtime skill mount contract was emitted and confirmed by a `pregate` receipt.
+- **Root Cause**: The smoke report selected the first alias receipt from the forecast-pregate alias set, which could be `forecast_gate` or `plan_quality_gate` with incomplete smoke evidence, instead of following the exact receipt named by the final skill mount contract.
+- **Lesson**: SF runtime receipt smoke must validate the capability receipt that actually confirmed the skill mount contract. Alias sets are useful for reconciliation, but the final selected/injected/used/evidence/gate/outcome chain belongs to the confirmed receipt.
+- **Action Taken**: Updated `build_sf_runtime_receipt_smoke.py` to prefer `contract["capability"]` and only fall back to alias receipts that already pass gate and outcome checks.
+- **Verification**: `NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json` reports `status=PASS`, `case_count=2`, `pass_count=2`, and `return_count=0`.
+
+## 2026-05-18 SF Governance Curation Cannot Trust Stale External Skill Paths
+
+- **Phenomenon**: Governance alternates in the V5 runtime review pointed at external `.agents` paths that no longer existed locally.
+- **Root Cause**: Earlier SF evidence retained reference-source provenance, but cleanup/dedup moved or removed the source paths before governance promotion review.
+- **Lesson**: Governance alternates that are worth continued SF review must be materialized as repo-local runtime-review candidates with explicit boundaries, not copied from stale external paths at apply time.
+- **Action Taken**: Materialized `acceptance-evidence-failclosed`, `cso`, `claudeosint-safe-surface-audit`, and `gbrain-soul-audit` under repo-local `.agents/skills/` with `runtime_review_candidate` metadata and fail-closed procedures.
+- **Verification**: `NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json` reports `status=PASS`, `research_primary=research-citation-chain-verifier`, and `governance_materialized=4`.
+
+## 2026-05-18 SF Runtime Expansion Needs Executable Capability Aliases
+
+- **Phenomenon**: The first V9 runtime expansion smoke planned 10 of 14 expected primary skills; `direct_master_loop`, `external_productivity`, `file_lock_security_gate`, and `regression_guard` returned because no planned skill mount contract was emitted.
+- **Root Cause**: SF route taxonomy capabilities are broader than `CapabilityPlanner` executable nodes. Overlay selection only triggers when a runtime-selected executable capability intersects the overlay alias set, so taxonomy-only ids need explicit aliases to planner nodes such as `hyper`, `research_route`, `ultra_review`, `mempalace_gate`, `jit_validation`, or `delivery_gate`.
+- **Lesson**: Runtime expansion overlays must carry executable aliases for every taxonomy capability before post-apply smoke. A static-fit capability id is not enough to prove runtime selection.
+- **Action Taken**: Keep the failed V9 smoke as RCA evidence, add executable aliases in the V9 candidate overlay, and rerun post-apply smoke before considering runtime expansion.
+- **Verification**: Initial `NEXUS_SF_RUNTIME_EXPAND_POST_APPLY_SMOKE_V9_CANDIDATE_2026-05-18.json` reported `expected_primary_count=14`, `planned_contract_count=10`, `return_count=4`, and `violation_count=0`, confirming selection mismatch rather than skill mount violation.
+
+## 2026-05-18 SF V10 Retest Queue May Have No Challenger Arm
+
+- **Phenomenon**: The first V10 retest matrix builder returned blockers for `codeintel`, `ddtree`, and `ui_validator` because their `flash_nexus_challenger` arm had `skill_id=null`.
+- **Root Cause**: Some held capabilities only have a current-best candidate and no separate challenger yet. Treating a missing challenger as a missing skill path blocks valid two-arm retests.
+- **Lesson**: V10 queue consumers must distinguish `no challenger available` from `declared challenger path missing`. Missing challenger arms should be skipped or represented as two-arm retests; only non-empty skill ids with missing paths are blockers.
+- **Action Taken**: Rebuild the V10 execution matrix with explicit null-challenger skipping while preserving the no-skill and current-best arms.
+- **Verification**: The failed first builder emitted `codeintel:flash_nexus_challenger::missing_skill_path`, `ddtree:flash_nexus_challenger::missing_skill_path`, and `ui_validator:flash_nexus_challenger::missing_skill_path`, proving the issue was queue-shape handling rather than live SF evidence.
+
+## 2026-05-18 SF V10 Three-Arm Retests Need A Dedicated Rollup
+
+- **Phenomenon**: Reusing `build_sf_flash_pair_live_report.py` on V10 live output returned `comparison_count=0` even after the V10 live matrix completed cleanly.
+- **Root Cause**: The generic Flash pair report builder expects arm ids `flash_nexus` and `flash_nexus_with_skill`, while V10 uses `flash_nexus_no_skill`, `flash_nexus_current_best`, and optional `flash_nexus_challenger`.
+- **Lesson**: Three-arm retests need their own rollup semantics. A report builder arm-name mismatch is a reporting failure, not a live evidence failure.
+- **Action Taken**: Keep the failed generic report as compatibility evidence and generate a V10-specific rollup keyed by no-skill/current-best/challenger arms.
+- **Verification**: `run_skill_fit_ablation_matrix.py` completed V10 live with `planned_rows=18`, `completed_rows=18`, `pass_count=18`, and `return_count=0`; the incompatible generic builder returned `status=RETURN`, `comparison_count=0`.
+
+## 2026-05-18 SF V11 Tokenless External Candidates Must Be Quarantined Before Continuing
+
+- **Phenomenon**: `ultra_review/code-review-and-quality` returned during V11 live retest even though delivery was `SUCCESS`, semantic status was `VERIFIED`, and `skill_mount_contract_status=PASS`.
+- **Root Cause**: The row made a model call but captured no provider/accounting tokens: `model_calls=1`, `total_tokens=0`, `token_measured=false`, `infra_invalid_reason=model_call_without_tokens`. A clean targeted replay reproduced the same tokenless failure.
+- **Lesson**: SF candidate evidence must stay model-cost-accountable. If an external reference candidate repeatedly produces `model_call_without_tokens`, quarantine that candidate for the current SF lane and continue with other candidates; do not count verified delivery as effective skill evidence.
+- **Action Taken**: Stop chunked V11 live at the first RETURN, run a clean targeted replay for the failed row, and mark the candidate for V11 quarantine/hold instead of widening the live run.
+- **Verification**: Chunk08 stopped with `completed_rows=8`, `pass_count=7`, `return_count=1`; targeted replay for `ultra_review::sf-v11-retest-ultra_review-001::candidate::code-review-and-quality` returned the same `model_call_without_tokens` classification.
+
+## 2026-05-18 SF V11 Ultra Review Needs A Capability-Level Token Cleanliness Hold
+
+- **Phenomenon**: After quarantining `ultra_review/code-review-and-quality`, the continuation row for `ultra_review/diagnose` also returned with `model_call_without_tokens`.
+- **Root Cause**: The repeated failure occurred on the same `ultra_review` V11 task family, indicating a capability-lane token cleanliness problem rather than an isolated challenger quality result.
+- **Lesson**: When multiple candidates in one capability lane become token-ineligible, hold the whole capability retest lane and continue independent capabilities. A candidate tie-break is not valid until the capability lane can produce model-cost-accountable receipts.
+- **Action Taken**: Mark `ultra_review` V11 retest as held for token cleanliness and continue with the remaining `xray` rows instead of forcing more ultra-review candidates.
+- **Verification**: `ultra_review/diagnose` returned with `model_calls=1`, `total_tokens=0`, `token_measured=false`, `infra_invalid_reason=model_call_without_tokens`, and `skill_mount_contract_status=RETURN`.
+
+## 2026-05-18 SF V11 Must Stop When Tokenless Failures Spread To Capability Baselines
+
+- **Phenomenon**: After holding the `ultra_review` lane, the independent `xray` no-skill baseline also returned with `model_call_without_tokens`.
+- **Root Cause**: A tokenless failure on a capability-only baseline means the live session is no longer producing model-cost-accountable evidence, independent of any candidate skill.
+- **Lesson**: Once tokenless failures spread from skill arms to no-skill baselines, stop SF live expansion and produce a partial rollup plus resume plan. Continuing would confuse provider/accounting failure with skill quality.
+- **Action Taken**: Stop V11 live after the xray baseline RETURN and preserve the remaining xray skill arms for a token-clean resume pass.
+- **Verification**: `xray::sf-v11-retest-xray-001::flash_nexus_no_skill` returned with `model_calls=1`, `total_tokens=0`, `token_measured=false`, `infra_invalid_reason=model_call_without_tokens`, and `skill_mount_contract_status=EMPTY`.
+
+## 2026-05-19 SF Replay Manifests Must Preserve Public-Preflight Top Fields
+
+- **Phenomenon**: The first SF V12 token-clean preflight returned before live execution with `manifest_missing_top_fields:benchmark_id,description,frozen,version`.
+- **Root Cause**: The replay manifest generator copied task rows but omitted the top-level manifest fields required by the benchmark preflight contract.
+- **Lesson**: Even internal SF replay manifests must preserve the public-preflight top-level contract fields. A focused replay is smaller in row count, not looser in manifest schema.
+- **Action Taken**: Added `version`, `frozen`, `benchmark_id`, and `description` to `NEXUS_SF_V12_TOKEN_CLEAN_TASK_MANIFEST_2026-05-19.json` before rerunning preflight.
+- **Verification**: The failed preflight stopped at row `ultra_review::sf-v12-token-clean-ultra_review-001::flash_nexus_no_skill` and reported only the missing manifest top fields.
+
+## 2026-05-19 SF Runtime Overlay Smoke Must Resolve Materialized SF2 Skill Paths
+
+- **Phenomenon**: The first V12 overlay policy smoke emitted the expected skills for six existing SF2 primaries, but returned because their paths were flat `.agents/skills/sf2-*/SKILL.md` paths.
+- **Root Cause**: Earlier V10 overlay evidence retained pre-materialization path strings, while the actual repo-local SF2 skills live under `.agents/skills/sf2/<skill-id>/SKILL.md`.
+- **Lesson**: Promotion/apply smoke must validate materialized paths against the current repo layout, not stale path strings in older overlay artifacts.
+- **Action Taken**: Normalize V12 overlay applied-primary paths for `sf2-*` skills to `.agents/skills/sf2/<skill-id>/SKILL.md` before rerunning policy smoke.
+- **Verification**: The failed V12 smoke showed expected skill emission for `direct_master_loop`, `external_productivity`, `file_lock_security_gate`, `hyper_sprint`, `nightshift`, and `swarm_multi_agent`; each failure had `path_ok=false`.
+
+## 2026-05-19 SF Targeted Runtime Receipt Smoke Must Not Fail On Unscoped Overlay Violations
+
+- **Phenomenon**: V14 runtime receipt smoke returned with `case_count=2`, `pass_count=1`, and `return_count=1` even though the expected `repair_loop/tdd` runtime-final receipt chain had selected, injected, used, evidence, gate, and outcome all true.
+- **Root Cause**: The V13 runtime overlay contains many primary skills. The repair-loop smoke route selected additional overlay capabilities, and unrelated skills without synthetic receipts were reported as violations. The smoke script treated every overlay violation as blocking even though the case was scoped to one expected skill.
+- **Lesson**: Targeted runtime receipt smoke should separate expected-skill blocking violations from unscoped diagnostic violations. Broad overlay cleanliness belongs to policy smoke; targeted receipt smoke belongs to the expected skill's final receipt chain.
+- **Action Taken**: Updated `build_sf_runtime_receipt_smoke.py` to emit `blocking_skill_mount_violations` and `non_blocking_unscoped_violations`, and to fail only when the expected skill has a blocking violation or an incomplete final receipt chain.
+- **Verification**: Rerunning V14 smoke with `NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_V13_2026-05-19.json` reports `status=PASS`, `case_count=2`, `pass_count=2`, and `return_count=0`.
+
+## 2026-05-19 SF Replay Manifests Must Not Add Unknown Task Fields
+
+- **Phenomenon**: The first V15 held-challenger preflight stopped on row `autonomic_router::sf-v15-held-autonomic_router-001::flash_nexus_no_skill` with `manifest_task_*_unknown:sf_v15_note,task_id,title`.
+- **Root Cause**: The V15 manifest generator added convenience fields copied from planning vocabulary, but the benchmark preflight task schema is intentionally closed.
+- **Lesson**: SF replay manifests may add top-level metadata, but task rows must preserve the closed benchmark schema. Notes and titles belong in a sidecar report, not inside task objects.
+- **Action Taken**: Removed `task_id`, `title`, and `sf_v15_note` from `NEXUS_SF_V15_HELD_CHALLENGER_TASK_MANIFEST_2026-05-19.json` before rerunning preflight.
+- **Verification**: The failed preflight report pointed only to the unknown task fields, confirming a manifest schema issue rather than a runner or skill evidence issue.
+
+## 2026-05-19 SF Workspace Retention Must Not Move Tracked Reports
+
+- **Phenomenon**: Expanding the SF retention tool from `NEXUS_SF_*` to broader skill-fit prefixes archived `docs/reports/NEXUS_RESEARCH_STACK_P30_FLASH_2026-05-05.md`, which appeared as a tracked deletion in `git status`.
+- **Root Cause**: The retention plan classified files only by name prefix and latest-closure references. It did not ask git whether a report was already tracked source history.
+- **Lesson**: Workspace cleanup tools may archive untracked generated evidence, but tracked reports must be kept in place unless a separate migration explicitly handles the git move.
+- **Action Taken**: Restored `NEXUS_RESEARCH_STACK_P30_FLASH_2026-05-05.md` to `docs/reports/` and updated `build_sf_workspace_retention_plan.py` to keep any path returned by `git ls-files docs/reports`.
+- **Verification**: `git status --short` no longer shows that tracked report as deleted, and the retention dry-run reports zero remaining archive candidates.
+
+## 2026-05-19 SF Hold Closure Must Reconcile Receipt Cleanliness From Evidence Bundles
+
+- **Phenomenon**: V16 residual selection held `benchmark_meta_opt` and `policy_capability_gate` even though their candidates had `keep`, `effective_rows=1`, and negative token/wall deltas.
+- **Root Cause**: The residual rollup read `provider_token_measured_rate` only from the compact row summary, where it was `null`, while each row's `evidence_bundle.json` had `route_cost_ledger.arms.with_nexus.provider_token_measured_rate=1.0` and `clean_model_cost_evidence_rate=1.0`.
+- **Lesson**: SF rollups should treat compact row summaries as convenience fields, not as the source of truth for provider-token cleanliness. If the summary field is missing, reconcile from the evidence bundle before holding a candidate.
+- **Action Taken**: Added `build_sf_v17_hold_closure.py` to normalize provider-token cleanliness from the evidence bundle and close final HOLD disposition without rerunning Flash.
+- **Verification**: `NEXUS_SF_FINAL_CLOSURE_V17_2026-05-19.json` reports `residual_held=0`, `v17_promoted_from_hold=2`, and `documented_no_skill_primary=1`; focused tests report 7 passed.
+
+## 2026-05-19 Skill Creator Advanced Validators Are Single-Skill And Frontmatter-Strict
+
+- **Phenomenon**: During SF primary skill description optimization, archived `skill-creator-advanced` validators failed when multiple skill directories were passed at once. `format_check.py` also rejected Nexus-specific top-level frontmatter keys such as `capability`, `runtime_eligible`, and `source_status`.
+- **Root Cause**: The archived validation scripts are designed for one publishable skill directory per invocation and only accept the public skill frontmatter surface. Nexus runtime review metadata is valid for SF governance, but it must not appear as arbitrary top-level skill frontmatter when using those validators.
+- **Lesson**: Run archived skill creator validators one skill at a time. For Nexus skill assets that need both runtime review metadata and public skill validator compatibility, keep custom capability/source/runtime flags inside the allowed `metadata` field and keep receipt-backed SF evidence in catalog/report artifacts.
+- **Action Taken**: Re-ran `format_check.py` and `quick_validate.py` per optimized skill, and moved custom top-level fields for repo-local governance/research/SF2 skills into `metadata`.
+- **Verification**: `quick_validate.py` reports `Skill is valid!` for all six optimized skills; `format_check.py` reports zero errors for those skills, with warning-only trigger-language messages.
+
+## 2026-05-19 SF Skill Optimization Report Reads Must Not Race Writers
+
+- **Phenomenon**: A parallel verification command tried to read `NEXUS_SF_PRIMARY_SKILL_DESCRIPTION_OPTIMIZATION_FULL_RECHECK_2026-05-19.json` before the optimizer writer completed and raised `FileNotFoundError`.
+- **Root Cause**: The read-summary command was launched in parallel with the report-generation command even though it depended on the generated file.
+- **Lesson**: Generated SF reports must be read only after the writer command has exited. Parallel verification is safe for independent tests, compiles, and validators, but not for producer-consumer report steps.
+- **Action Taken**: Re-ran the summary read after the full recheck report was generated.
+- **Verification**: The subsequent recheck report read shows `primary_skill_count=23`, `evaluated_candidate_count=23`, `skipped_no_domain_hint_count=0`, and `improved_candidate_count=0`.
+
+## 2026-05-19 Skill Creator Before/After Eval Must Compare Skill Versions Not No-Skill
+
+- **Phenomenon**: The first SF skill-creator optimization report used a static description score, which did not prove the actual before/after skill usage difference requested by the user.
+- **Root Cause**: The optimizer measured metadata quality but did not run a paired trigger-ranking evaluation using the before and after descriptions of the same primary skills.
+- **Lesson**: Skill-creator replacement decisions must be based on before-skill vs after-skill paired evals. A no-skill baseline answers a different question, and a static description score is only a preflight heuristic.
+- **Action Taken**: Added `evaluate_sf_skill_creator_before_after.py` to compare V17 primary skill descriptions on capability trigger fixtures, paraphrases, mixed zh/en prompts, and near-miss prompts, then reverted any after description without a per-skill improvement.
+- **Verification**: `NEXUS_SF_SKILL_CREATOR_APPLY_OR_REVERT_2026-05-19.json` keeps 17 after descriptions and reverts 6 before descriptions; post-revert validator, runtime receipt smoke, and focused pytest all pass.
+
+## 2026-05-19 Skill Creator Near-Miss Prompts Must Not Contaminate The Target
+
+- **Phenomenon**: The first before/after trigger eval reported increased false positives after optimization.
+- **Root Cause**: The negative fixture text included `Do not route it to <target capability>`, which injected target capability tokens into the negative prompt. It also counted near-miss capabilities as false positives even when both capabilities intentionally shared the same primary skill.
+- **Lesson**: Near-miss trigger evals must describe only the neighboring task and must not mention the target capability. If two neighboring capabilities share the same primary skill in the approved overlay, selecting that shared skill is not a false positive.
+- **Action Taken**: Removed target capability text from negative fixtures and skipped negative fixtures where the neighbor maps to the same primary skill.
+- **Verification**: `NEXUS_SF_SKILL_CREATOR_BEFORE_AFTER_TRIGGER_EVAL_V4_2026-05-19.json` reports `false_positive_delta=0` after the fixture repair.
+
+## 2026-05-19 SF Before/After Tests May Rewrite The Same Temp Skill
+
+- **Phenomenon**: The first regression test for `evaluate_sf_skill_creator_before_after.py` failed with `FileExistsError` while writing the same temporary skill twice.
+- **Root Cause**: The helper created `.agents/skills/tdd` once for the before fixture and once for the after fixture, but used `mkdir(parents=True)` without `exist_ok=True`.
+- **Lesson**: Tests that model before/after skill edits should allow rewriting the same temp skill directory. The before state belongs in the optimization report, while the after state belongs in the current temp skill file.
+- **Action Taken**: Updated the test helper to use `mkdir(parents=True, exist_ok=True)`.
+- **Verification**: The focused before/after eval regression passes after the helper fix.
+
+## 2026-05-19 SF Before/After Regression Fixtures Need A Real Neighbor
+
+- **Phenomenon**: The first before/after regression fixture still returned `REVERT_BEFORE` for `tdd`.
+- **Root Cause**: The fixture paired `repair_loop/tdd` with a weak `xray/diagnose` neighbor, so the before version could win by corpus accident and the near-miss check did not represent the real adjacent capability.
+- **Lesson**: Skill-creator before/after tests must include a meaningful neighboring skill for the near-miss route. For `repair_loop`, `codeintel` is a better adjacent competitor than a generic diagnostic stub.
+- **Action Taken**: Replaced the weak neighbor fixture with a `codeintel` route-fit skill that has code scan, impact, symbol, and dependency graph terms.
+- **Verification**: The regression now validates a true before/after trigger improvement against a plausible neighbor.
+
+## 2026-05-19 Claude Run Eval Cannot Be The SF Gate When Stream JSON Is Empty
+
+- **Phenomenon**: A direct `skill-creator-advanced/scripts/run_eval.py` probe for `tdd-after` returned `trigger_rate=0.0`, `parsed_events=0`, and `raw_lines=0`; a direct `claude -p ... --output-format stream-json --verbose --include-partial-messages` command also exited with no stdout.
+- **Root Cause**: In the current local environment, Claude Code CLI did not emit stream-json events for the trigger probe, so the archived skill-creator trigger runner cannot observe Skill/command activation.
+- **Lesson**: Do not use empty-stream Claude trigger probes as SF replacement evidence. Treat them as environment/tooling RETURN and use a local paired trigger-ranking evaluator unless the CLI stream-json output is fixed.
+- **Action Taken**: Saved `NEXUS_SF_SKILL_CREATOR_CLAUDE_RUN_EVAL_PROBE_2026-05-19.json` as a blocked live-probe artifact and kept the replacement decision on the paired before/after route-fit eval.
+- **Verification**: The probe artifact records `status=RETURN` and `reason=claude_cli_stream_json_emitted_no_stdout`; the paired local eval and post-revert smoke remain PASS.
+
+## 2026-05-19 GitHub Skill Challenger Eval Needs Safety Rewrite Before Materialization
+
+- **Phenomenon**: The `Toolsai/auto-skill` candidate had useful learning and registry-maintenance ideas, but its original skill attempted forced self-selection and global IDE rule mutation.
+- **Root Cause**: External skill repositories can mix reusable principles with unsafe operational behavior; treating the upstream `SKILL.md` as directly materializable would bypass Nexus source and runtime boundaries.
+- **Lesson**: GitHub skill challengers must pass source screening before materialization. If a project has useful principles but unsafe automation, create a generated candidate-only skill that preserves the safe behavior and explicitly rejects the unsafe behavior.
+- **Action Taken**: Materialized `github-auto-skill-safe-learning` as a generated candidate with `runtime_eligible=false` and rejected the original `auto-skill` global-rule mutation behavior.
+- **Verification**: `NEXUS_SF_GITHUB_SKILL_CHALLENGER_EVAL_APPLY_2026-05-19.json` records `auto-skill` as `REJECT_OR_REWRITE`, and focused pytest verifies the generated candidate boundary.
+
+## 2026-05-19 GitHub Challenger Metadata Ranking Is Not Enough For Replacement
+
+- **Phenomenon**: The metadata trigger-ranking eval kept all current best skills, but the bounded Flash+Nexus live smoke showed `github-karpathy-guidelines` and `github-auto-skill-safe-learning` both passed receipt-backed rows with lower token and wall cost than their current-best comparators.
+- **Root Cause**: Description ranking measures route trigger fit, not live route execution cost or receipt-chain behavior. It can understate a challenger that is less keyword-aligned but still useful in a live route.
+- **Lesson**: Use metadata ranking as a safety and candidate-intake screen only. Replacement candidates require bounded Flash+Nexus evidence with runtime receipt chain, token cleanliness, wall time, and trust mismatch checks.
+- **Action Taken**: Added a 4-row Flash+Nexus challenger smoke for `codeintel` and `metabolism_resume`, then wrote the winners into `NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_GITHUB_CHALLENGER_V18_2026-05-19.json` as candidate overlay replacements, not runtime defaults.
+- **Verification**: `NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_ROLLUP_2026-05-19.json` reports `replacement_candidate_count=2`, `return_count=0`, and `runtime_update_allowed=false`.
+
+## 2026-05-19 SF Flash Smoke Manifests Need Public-Lane Top Fields Even When Internal
+
+- **Phenomenon**: The first GitHub challenger Flash smoke preflight stopped after one row with `manifest_missing_top_fields:benchmark_id,description,frozen,version`.
+- **Root Cause**: The smoke manifest was internal and candidate-only, but the benchmark runner still enforces the same top-level manifest identity fields used by public-lane manifests.
+- **Lesson**: Internal SF smoke manifests must include `benchmark_id`, `description`, `frozen`, and `version`; internal scope only changes claim boundary, not manifest schema.
+- **Action Taken**: Added the missing top-level fields to `NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_TASKS_2026-05-19.json` and reran preflight.
+- **Verification**: The repaired preflight completed `4/4 PASS`, then the live smoke completed `4/4 PASS`.
+
+## 2026-05-19 UV Cache Access May Need Escalation For SF Tooling
+
+- **Phenomenon**: Regenerating SF reports with `uv run` failed under sandboxing with `failed to open file /Users/jameschen/.cache/uv/sdists-v9/.git: Operation not permitted`.
+- **Root Cause**: The workspace sandbox permits repo writes but can block reads inside uv's home cache metadata.
+- **Lesson**: When `uv run` fails on local cache access rather than code/test failure, rerun the same command with an explicit escalation request; do not reinterpret it as an SF harness failure.
+- **Action Taken**: Reran the GitHub challenger report generation and focused tests with escalated `uv run`.
+- **Verification**: The escalated commands generated the reports and focused pytest passed.
+
+## 2026-05-19 All-Capability GitHub Challenger Screens Still Need Clean Live Pairs
+
+- **Phenomenon**: The all-capability metadata screen found a `claim_gate` challenger signal, but the live smoke stopped on the current-best arm before reaching the challenger row.
+- **Root Cause**: The generated `claim_gate` neutral fixture did not produce a public-safe expected `claim_gate` receipt; the row returned `receipt_data_contract_violation`, `missing_expected_capability_receipts`, and `semantic_not_verified`.
+- **Lesson**: A metadata challenger signal is not actionable if the current-best paired fixture cannot pass first. For claim-oriented capabilities, build a claim-gate-specific fixture with known claim evidence before comparing challengers.
+- **Action Taken**: Wrote `NEXUS_SF_GITHUB_CHALLENGER_CLAIM_GATE_HOLD_RCA_2026-05-19.json` and excluded `claim_gate` from the V18 replacement overlay.
+- **Verification**: The claim-gate hold RCA records `decision=do_not_replace_from_metadata_screen_without_clean_pair`; the V18 overlay contains only the two clean Flash+Nexus replacement candidates from `codeintel` and `metabolism_resume`.
+## 2026-05-19 - SF GitHub round2 challenger smoke fixture must be known-good before live compare
+
+- Trigger: `NEXUS_SF_GITHUB_ROUND2_FLASH_SMOKE_MATRIX_2026-05-19.json` attempted `repair_loop` current-best `tdd` before challenger evaluation.
+- Failure: live stopped on the current-best row with `receipt_data_contract_violation`, `missing_required_capability_receipts`, `semantic_not_verified`, and `token_telemetry_incomplete`.
+- Lesson: a challenger live compare is only meaningful when the current-best control row is itself receipt-clean. If current-best returns before the challenger row runs, treat the run as fixture invalid, not as evidence against the challenger.
+- Guardrail: SF GitHub challenger smoke should use previously receipt-clean capability fixtures first, then expand to harder capabilities after targeted RCA fixes the fixture.
+
+## 2026-05-19 - SF round2 provider cleanliness gates replacement evidence
+
+- Trigger: `NEXUS_SF_GITHUB_ROUND2_CORRECTED_FLASH_SMOKE_V2_MATRIX_2026-05-19.json` and the prior known-good `NEXUS_SF_GITHUB_CHALLENGER_FLASH_SMOKE_MATRIX_2026-05-19.json` were retried after the first invalid fixture.
+- Failure: the known-good control row and two targeted challenger rows all returned `model_required_model_delivery_failed` with `gateway_error`, `llm_error`, `token_capture_status=estimated`, and `token_measured=false`.
+- Lesson: when a previously PASS control row returns under the same Flash+Nexus harness, the run is provider/session cleanliness blocked. Do not downgrade or upgrade challenger skills from those rows.
+- Guardrail: replacement ledger entries require current-best and challenger rows to be receipt-clean PASS in the same model/session cleanliness window; otherwise write `NO_REPLACEMENT` with provider-blocked RCA.
+
+## 2026-05-19 - skill-creator validation scripts expect skill directories
+
+- Trigger: `quick_validate.py` and `format_check.py` were initially invoked with direct `SKILL.md` file paths for GitHub round2 materialized skills.
+- Failure: `quick_validate.py` returned `SKILL.md not found`, and `format_check.py` rejected multiple file arguments.
+- Lesson: the archived skill-creator validation scripts take a skill directory, not a skill file path or a list of files.
+- Guardrail: validate each materialized skill with `quick_validate.py <skill_dir>` and `format_check.py <skill_dir>` before adding it to any SF challenger matrix.
+
+## 2026-05-19 - retention dry-run archive roots need collision-free destinations
+
+- Trigger: `build_sf_workspace_retention_plan.py` was run for the optimization pre-SF hygiene pass with the default `docs/reports/archive/sf` root.
+- Failure: the dry-run returned `BLOCKED` because `NEXUS_SKILL_FIT_CATALOG_REPAIR_AND_CODING_2026-05-15.json` already existed at the destination.
+- Lesson: retention dry-runs are allowed to fail closed on destination collisions. For planning-only cleanup, use a run-specific archive root so the plan can classify evidence without overwriting older archives.
+- Guardrail: never overwrite archived evidence; rerun with a unique archive root or explicitly inspect duplicate content before any archive mode.
+
+## 2026-05-19 - hidden skill roots may need explicit write permission
+
+- Trigger: GitHub round3 candidate materialization attempted to create `.agents/skills/github-round3-challengers` from the normal workspace sandbox.
+- Failure: Python raised `PermissionError: [Errno 1] Operation not permitted: '.agents/skills/github-round3-challengers'`.
+- Lesson: even when the repo root is writable, hidden skill roots can be blocked by the active sandbox policy. Treat this as an environment permission boundary, not a skill safety or SF harness failure.
+- Guardrail: if external candidate materialization is required, request explicit escalation for the `.agents/skills` write, keep generated candidates prompt-only, and record runtime eligibility as false until apply-gate review.
+
+## 2026-05-19 - SF matrix generators must read wrapped matrix schemas
+
+- Trigger: V21 runtime-reviewed matrix generation initially iterated `NEXUS_SF_GITHUB_ROUND3_MATRIX_2026-05-19.json` as if it were a bare list.
+- Failure: Python raised `AttributeError: 'str' object has no attribute 'get'` because the matrix is a wrapped object with a `rows` field.
+- Lesson: SF matrix tools must be schema-aware and accept the repo's wrapped matrix format before applying row transforms.
+- Guardrail: when generating follow-up matrices, load `rows` from wrapped matrix JSON and preserve the source schema/claim boundary in the derived artifact.
+
+## 2026-05-19 - report retention moves should not use git index operations
+
+- Trigger: restoring `NEXUS_SF_SKILL_FINALIZATION_V21_2026-05-19.md` from the retention archive with `git mv`.
+- Failure: `git mv` failed with `Unable to create '.git/index.lock': Operation not permitted`.
+- Lesson: report-retention cleanup is a filesystem hygiene operation and should avoid git index mutation unless the task explicitly stages or commits files.
+- Guardrail: use ordinary filesystem moves for report archive/restore actions, then inspect `git status --short`; reserve `git add`, `git mv`, and commits for explicit version-control steps.
+
+## 2026-05-19 - SF external repo static screens must serialize plain JSON data
+
+- Trigger: GitHub round4 static screen included local repo metadata after cloning external skill repositories.
+- Failure: Python raised `TypeError: Object of type PosixPath is not JSON serializable`.
+- Lesson: SF report builders must convert filesystem metadata to plain strings before JSON writeback.
+- Guardrail: keep repo metadata as `{url, commit, snapshot_dir}` strings and validate round artifacts with `json.tool` before using them as live matrix inputs.
+
+## 2026-05-19 - workspace cache cleanup needs narrow pathspecs
+
+- Trigger: cleaning ignored test artifacts with `git clean -fdX -- .pytest_cache nexus scripts tests`.
+- Failure: the command removed ignored `scripts/benchmarks/*` generated files in addition to cache directories.
+- Lesson: broad ignored-clean pathspecs can delete useful generated-but-ignored benchmark artifacts. Treat this as a hygiene risk even when no tracked source is affected.
+- Guardrail: prefer explicit cache-only paths such as `.pytest_cache`, `**/__pycache__`, and known temporary roots; avoid broad `scripts` or `docs` pathspecs for automatic cleanup.
+
+## 2026-05-19 - SF coverage must cross-check static selected counts against matrix rows
+
+- Trigger: `NEXUS_SF_GITHUB_ROUND5_STATIC_SCREEN_2026-05-19.json` reported `selected_live_candidate_count=0` while `NEXUS_SF_GITHUB_ROUND5_FLASH_SMOKE_MATRIX_2026-05-19.json` contained four challenger rows.
+- Failure: a coverage audit that trusts only the static summary would incorrectly conclude that round5 selected no live challengers.
+- Lesson: SF coverage closure must reconcile static screen summaries with generated matrix rows before declaring selected/tested counts.
+- Guardrail: when closing SF coverage, emit a correction artifact if static and matrix selected counts disagree; do not mutate historical reports or let the mismatch affect runtime update eligibility.
+
+## 2026-05-19 - SF Round10 task manifests still need public benchmark top-level fields
+
+- Trigger: Round10 coverage-backlog preflight returned on the first row with `manifest_missing_top_fields:description`.
+- Failure: the row was otherwise generated correctly, but the task manifest lacked the top-level `description` field expected by the benchmark preflight contract.
+- Lesson: every derived SF task manifest must preserve the top-level manifest fields used by public-lane preflight, even when the run is internal and not public-claim eligible.
+- Guardrail: validate new SF task manifests against a known PASS round manifest shape before live; include `benchmark_id`, `description`, `frozen`, `schema`, `status`, `summary`, and `tasks`.
+
+## 2026-05-19 - SF backlog closure should run deduped tranches, not claim all-candidate exhaustion
+
+- Trigger: Round10 tested four high-scoring missed candidates from 5197 recovered `SKILL.md` files, then Round11 tested a second deduped tranche.
+- Failure: treating one tranche as exhaustive would overclaim coverage and could miss another high-signal candidate in the remaining top-N backlog.
+- Lesson: SF backlog remediation should state tranche scope explicitly: tested, held, replaced, duplicate-skipped, risk-skipped, or still-backlog.
+- Guardrail: continue in small receipt-backed tranches; update overlay candidates only when challenger and current-best both pass and challenger is effective with lower token and wall cost.
+
+## 2026-05-19 - SF systematic ranking must not reward unrelated load_when text
+
+- Trigger: `build_sf_systematic_skill_tournament.py` initially added a `load_when` completeness bonus even when a compiled skill interface had no capability term or hint match.
+- Failure: the isolated unit test queued an unrelated research capability row from a code-only skill because format completeness alone made the score positive.
+- Lesson: systematic SF tournaments should separate interface quality from capability fit. A candidate needs an explicit capability term or hint match before secondary quality bonuses can affect ranking.
+- Guardrail: keep capability matching fail-closed: no capability evidence, no tournament row, no live queue entry.
+
+## 2026-05-19 - Pure JSON validation should not use uv when cache is sandbox-blocked
+
+- Trigger: validating generated SF JSON artifacts with `uv run python -m json.tool`.
+- Failure: uv attempted to inspect `/Users/jameschen/.cache/uv/sdists-v9/.git` and returned `Operation not permitted`.
+- Lesson: pure JSON validation does not require the project uv environment. Using uv for interpreter-only checks can introduce unrelated cache permission failures.
+- Guardrail: validate generated JSON with `python3 -m json.tool` or `/usr/bin/python3 -m json.tool` unless the check imports project modules.
+
+## 2026-05-19 - SF systematic challenger selection must skip generated current IDs
+
+- Trigger: rebuilding the all-capability matrix after V31 overlay updates made some `current_best` skills use generated `sf-systematic-*` IDs.
+- Failure: challenger selection skipped only the raw source `skill_slug`, so a generated current primary could be selected again as the challenger and create a self-comparison row.
+- Lesson: systematic selection must compare both source slug and generated runtime slice ID against current primary.
+- Guardrail: construct the generated challenger ID before selection and skip candidates whose source slug or generated ID equals the current primary skill.
+
+## 2026-05-20 - SF applied overlay must not be mistaken for the full current overlay
+
+- Trigger: V32 apply-gate overlay contained only the 11 replacement winners, while the SF closure question required all 34 route capabilities to have a current primary skill.
+- Failure: using the delta-only applied overlay as the SSOT would silently drop the 23 held `current_best` skills from runtime overlay selection.
+- Lesson: SF runtime apply artifacts and SF current-state artifacts are different products. The applied overlay records changes; the current overlay must merge replacements with held winners.
+- Guardrail: after any all-capability SF tournament, emit a full `primary_skill_by_capability` current overlay and smoke-test every capability against the status report before declaring SF closed.
+
+## 2026-05-20 - SF current overlay aliases must not double-load sibling capabilities
+
+- Trigger: the first V32 current overlay copied broad mount aliases such as `governance_and_trust -> ultra_review` into runtime overlay selection.
+- Failure: an `ultra_review` smoke case planned both the dedicated `ultra_review` skill and the broad `governance_and_trust` skill even though the expected skill still passed.
+- Lesson: receipt aliases and runtime overlay selection aliases are different. Broad receipt aliases help confirmation, but broad runtime aliases can over-inject skills when every capability already has a direct primary.
+- Guardrail: keep current-overlay aliases narrow and only use them for true route-name synonyms such as `forecast_pregate -> forecast_gate/pregate/plan_quality_gate`.

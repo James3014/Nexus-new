@@ -151,6 +151,57 @@ def test_benchmark_skill_mount_env_feeds_planned_contract(tmp_path: Path, monkey
     ]
 
 
+def test_runtime_skill_overlay_env_feeds_budget(tmp_path: Path, monkeypatch):
+    overlay = tmp_path / "overlay.json"
+    overlay.write_text(json.dumps({"status": "PASS", "primary_skill_by_capability": {}}), encoding="utf-8")
+
+    monkeypatch.setenv("NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY", str(overlay))
+
+    budget = research_flow_service._runtime_capability_budget(tmp_path)
+
+    assert budget["runtime_skill_policy_overlay_path"] == str(overlay)
+    assert research_flow_service._runtime_skill_overlay_requested(budget) is True
+
+
+def test_runtime_skill_mount_contract_confirms_forecast_pregate_alias():
+    result = research_flow_service._build_runtime_skill_mount_contracts(
+        capability_plan_payload={
+            "signal_snapshot": {
+                "planned_skill_mount_contracts": [
+                    {
+                        "skill_id": "create-plan",
+                        "skill_status": "nexus_curated_candidate",
+                        "capability_mount": "forecast_pregate",
+                        "capability": "forecast_pregate",
+                        "load_reason_codes": ["sf_runtime_policy_overlay"],
+                        "evidence_refs": ["skill_catalog:create-plan"],
+                    }
+                ]
+            }
+        },
+        route_decision_payload={"task_id": "route-forecast-001"},
+        capability_receipts=[
+            {
+                "name": "plan_quality_gate",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": False,
+                "evidence_refs": ["plan_quality:verified"],
+            }
+        ],
+    )
+
+    assert result["skill_mount_violations"] == []
+    contract = result["skill_mount_contracts"][0]
+    assert contract["skill_id"] == "create-plan"
+    assert contract["capability_mount"] == "forecast_pregate"
+    assert contract["capability"] == "plan_quality_gate"
+    assert "runtime_capability_receipt_confirmed" in contract["load_reason_codes"]
+
+
 def test_benchmark_skill_mount_env_ignored_when_ablation_disallowed(monkeypatch):
     monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNT_REQUESTS", '["tdd"]')
     monkeypatch.setenv("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "0")

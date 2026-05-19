@@ -1,0 +1,249 @@
+# NEXUS Engineering Hygiene Index - 2026-05-18
+
+## Scope
+- Purpose: classify current dirty workspace before any cleanup or SF continuation.
+- Policy: do not delete live evidence in bulk; prefer canonical index first, then explicit cleanup plan.
+- Touch budget: one hygiene report file; generated `.nexus` state and `packages/core` accidental dirt were restored to repo baseline.
+
+## Summary
+- dirty_entries: 379
+- canonical_or_hygiene_evidence: 14
+- learning_writeback_review_required: 1
+- other_report_evidence: 30
+- other_review_required: 5
+- repo_local_skill_assets_review_required: 9
+- source_or_test_changes_review_required: 58
+- superseded_or_intermediate_sf_evidence: 262
+
+## Canonical SF Evidence To Keep
+- present: `docs/reports/NEXUS_SF_APPLY_GATE_RECHECK_V6_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_AUTO_GOVERNANCE_TARGETED_REPLAY_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_PAIRING_TABLE_V6_2026-05-18.md`
+- present: `docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_CATALOG_V6_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_FULL_SKILL_INVENTORY_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_GOVERNANCE_RUNTIME_REVIEW_SEAL_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_REPLACEMENT_LEDGER_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_SKILL_CLEANUP_APPLY_RESULT_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_SKILL_IDENTITY_DEDUP_2026-05-18.json`
+- present: `docs/reports/NEXUS_SF_SOURCE_REGISTRY_ADAPTER_2026-05-18.json`
+
+## Cleanup Decision
+- KEEP: source/test/module changes, repo-local skill assets, canonical SF evidence, learning writeback.
+- INDEX_ONLY: superseded/intermediate SF evidence; do not delete until canonical reports are verified and user approves removal or archive move.
+- CLEANED: `.nexus/reports/learn/*` generated state restored; `packages/core` nested `.DS_Store` deletions restored; root/wiki `.DS_Store` removed.
+- NEXT: SF-AUTO-8 governance primary tie-break can proceed after hygiene checkpoint.
+
+## canonical_or_hygiene_evidence
+- ??: `docs/reports/NEXUS_ENGINEERING_HYGIENE_INDEX_2026-05-18.md`
+- ??: `docs/reports/NEXUS_SF_APPLY_GATE_RECHECK_V6_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_AUTO_GOVERNANCE_TARGETED_REPLAY_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_PAIRING_TABLE_V6_2026-05-18.md`
+- ??: `docs/reports/NEXUS_SF_EXTERNAL_SKILL_UPDATE_RECORD_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_FINAL_CAPABILITY_SKILL_CATALOG_V6_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_FULL_SKILL_INVENTORY_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_GOVERNANCE_RUNTIME_REVIEW_SEAL_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_REPLACEMENT_LEDGER_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_RESEARCH_TIEBREAK_AND_GOVERNANCE_CURATION_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_RUNTIME_RECEIPT_SMOKE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_SKILL_CLEANUP_APPLY_RESULT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_SKILL_IDENTITY_DEDUP_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_SOURCE_REGISTRY_ADAPTER_2026-05-18.json`
+
+## learning_writeback_review_required
+- M: `nexus_wiki_vault/06_Ops/Ops - Learning Closure Matrix.md`
+
+## other_report_evidence
+- ??: `docs/reports/NEXUS_FAIR_SKILL_CANDIDATE_POOL_2026-05-15.json`
+- ??: `docs/reports/NEXUS_FAIR_SKILL_CANDIDATE_POOL_2026-05-17_SF_REFRESH.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_CANDIDATE_BOUND_MUTANT_CATALOG_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_CANDIDATE_BOUND_MUTANT_CATALOG_SMOKE_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_CANDIDATE_BOUND_MUTANT_MATRIX_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_CANDIDATE_POOL_V2B_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_CANDIDATE_POOL_V2_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_CANDIDATE_V2B_REPORT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_CANDIDATE_V2_REPORT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_MUTANT_LANE_CONTRACT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_MUTANT_LIVE_SEALING_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_MUTANT_MATRIX_PREFLIGHT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_MUTANT_PROMOTION_GATE_2026-05-17.json`
+- ??: `docs/reports/NEXUS_GOVERNANCE_TASKSET_EXPANSION_CONTRACT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_CANDIDATE_POOL_V2_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_CANDIDATE_POOL_V3_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_CANDIDATE_POOL_V3_EXTERNAL_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_CANDIDATE_V2_REPORT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_CANDIDATE_V3_EXTERNAL_REPORT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_CANDIDATE_V3_REPORT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_EXTERNAL_CANDIDATE_POOL_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_EXTERNAL_INGEST_GUARD_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_SKILL_SUPPLY_GAP_CONTRACT_2026-05-17.json`
+- ??: `docs/reports/NEXUS_RESEARCH_SOURCE_DISCIPLINE_SKILL_SPECS_2026-05-17.json`
+- ??: `docs/reports/NEXUS_SKILL_INVENTORY_2026-05-15.json`
+- ??: `docs/reports/NEXUS_SKILL_STATUS_2026-05-15.json`
+- ??: `docs/reports/NEXUS_SKILL_STATUS_2026-05-15.md`
+- ??: `docs/reports/NEXUS_SKILL_STATUS_SF_RESEARCH_2026-05-18.json`
+- ??: `docs/reports/sf2_bounded_probe_chunks_2026-05-18/`
+- ??: `docs/reports/sf2_static_repair_chunks_2026-05-18/`
+
+## other_review_required
+- ??: `docs/plans/NEXUS_AGENT_IMPLEMENTATION_GUIDE.md`
+- ??: `docs/plans/NEXUS_EVOLUTION_MANIFESTO.md`
+- ??: `docs/plans/NEXUS_PUBLIC_PROMOTION_SPEC_KIT_BRIDGE_2026-05-14.md`
+- ??: `docs/plans/NEXUS_SKILL_FIT_MILESTONE_TASK_CARDS_2026-05-16.md`
+- ??: `docs/plans/NEXUS_SKILL_INVENTORY_AND_MOUNT_CONTRACT_2026-05-15.md`
+
+## repo_local_skill_assets_review_required
+- ??: `.agents/skills/acceptance-evidence-failclosed/`
+- ??: `.agents/skills/claudeosint-safe-surface-audit/`
+- ??: `.agents/skills/create-plan/`
+- ??: `.agents/skills/cso/`
+- ??: `.agents/skills/gbrain-soul-audit/`
+- ??: `.agents/skills/research-citation-chain-verifier/`
+- ??: `.agents/skills/research-source-conflict-resolver/`
+- ??: `.agents/skills/research-source-validation-auditor/`
+- ??: `.agents/skills/sf2/`
+
+## source_or_test_changes_review_required
+- M: `nexus/app/research_flow_service.py`
+- M: `nexus/engine/capability_planner.py`
+- ??: `nexus/learning/fair_skill_candidate_pool.py`
+- ??: `nexus/learning/governance_mutants.py`
+- ??: `nexus/learning/sf2_bounded_probe.py`
+- ??: `nexus/learning/skill_catalog.py`
+- ??: `nexus/learning/skill_discovery_lane.py`
+- ??: `nexus/learning/skill_fit_ablation.py`
+- ??: `nexus/learning/skill_fit_ablation_core.py`
+- ??: `nexus/learning/skill_fit_closure.py`
+- ??: `nexus/learning/skill_fit_followup.py`
+- ??: `nexus/learning/skill_fit_promotion.py`
+- ??: `nexus/learning/skill_fit_status.py`
+- ??: `nexus/learning/skill_inventory_roots.py`
+- ??: `nexus/learning/skill_route_taxonomy.py`
+- ??: `nexus/research/candidate_pool_policy.py`
+- ??: `scripts/bench/build_sanitized_runner.py`
+- M: `scripts/bench/capability_ab_runner.py`
+- ??: `scripts/bench/persistent_worker_gap_dashboard.py`
+- ??: `scripts/bench/public_lane_contract.py`
+- ??: `scripts/bench/route_execution_policy.py`
+- ??: `scripts/bench/taskset_contract.py`
+- ??: `scripts/ops/apply_sf_skill_cleanup.py`
+- ??: `scripts/ops/build_capability_skill_promotion_policy.py`
+- ??: `scripts/ops/build_fair_skill_candidate_pool.py`
+- ??: `scripts/ops/build_sf2_completion_review.py`
+- ??: `scripts/ops/build_sf2_skill_route_taxonomy.py`
+- ??: `scripts/ops/build_sf3_completion_review.py`
+- ??: `scripts/ops/build_sf3_runtime_policy_review.py`
+- ??: `scripts/ops/build_sf_capability_skill_catalog.py`
+- ??: `scripts/ops/build_sf_completion_gate.py`
+- ??: `scripts/ops/build_sf_flash_pair_live_report.py`
+- ??: `scripts/ops/build_sf_flash_pair_matrix.py`
+- ??: `scripts/ops/build_sf_flash_pair_rollup.py`
+- ??: `scripts/ops/build_sf_research_tiebreak_and_governance_curation.py`
+- ??: `scripts/ops/build_sf_runtime_policy_apply_gate.py`
+- ??: `scripts/ops/build_sf_runtime_promotion_review.py`
+- ??: `scripts/ops/build_sf_runtime_receipt_smoke.py`
+- ??: `scripts/ops/build_sf_skill_discovery_scheduler.py`
+- ??: `scripts/ops/build_sf_skill_inventory_cleanup.py`
+- ??: `scripts/ops/build_skill_fit_ablation_plan.py`
+- ??: `scripts/ops/build_skill_fit_followup_contracts.py`
+- ??: `scripts/ops/build_skill_fit_status_rollup.py`
+- ??: `scripts/ops/build_skill_promotion_threshold_contract.py`
+- ??: `scripts/ops/check_skill_catalog_policy.py`
+- ??: `scripts/ops/materialize_sf2_candidate_assets.py`
+- ??: `scripts/ops/repair_sf2_static_probe_blockers.py`
+- ??: `scripts/ops/run_sf2_bounded_probe.py`
+- ??: `scripts/ops/run_skill_fit_ablation_matrix.py`
+- M: `tests/app/test_research_flow_service.py`
+- M: `tests/benchmark/test_capability_ab_runner.py`
+- M: `tests/engine/test_capability_planner.py`
+- ??: `tests/learning/test_fair_skill_candidate_pool.py`
+- ??: `tests/learning/test_skill_catalog.py`
+- ??: `tests/learning/test_skill_fit_ablation.py`
+- ??: `tests/learning/test_skill_fit_closure.py`
+- ??: `tests/learning/test_skill_inventory_roots.py`
+- ??: `tests/learning/test_skill_route_taxonomy.py`
+
+## superseded_or_intermediate_sf_evidence
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_GOVERNANCE_AND_TRUST_FULL_LIVE_2026-05-16.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_GOVERNANCE_AND_TRUST_SF_TARGETED_2026-05-18.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_GOVERNANCE_AND_TRUST_TARGETED_REPLAY_2026-05-17.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_GOVERNANCE_AND_TRUST_V2C_FLASH30_LIVE_2026-05-17.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_GOVERNANCE_AND_TRUST_V2_FLASH30_LIVE_2026-05-17.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_REPAIR_AND_CODING_FLASH180_2026-05-16.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_REPAIR_AND_CODING_SF_TDD_SEAL_2026-05-17.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_REPAIR_AND_CODING_TARGETED_REPLAY_2026-05-16.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_RESEARCH_AND_SOURCE_DISCIPLINE_FULL_LIVE_2026-05-16.json`
+- ??: `docs/reports/NEXUS_CAPABILITY_SKILL_PROMOTION_DRAFT_RESEARCH_AND_SOURCE_DISCIPLINE_V2_FULL_LIVE_2026-05-17.json`
+- ??: `docs/reports/NEXUS_SF2_ABLATION_MATRIX_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_BOUNDED_PROBE_CHUNK_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_BOUNDED_PROBE_EXECUTION_MANIFEST_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_BOUNDED_PROBE_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_BOUNDED_PROBE_PREFLIGHT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_BOUNDED_PROBE_TASK_MANIFEST_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_CANDIDATE_ASSET_STATUS_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_CANDIDATE_MATERIALIZATION_BUNDLE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_CANDIDATE_QUALITY_SCREEN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_CANDIDATE_SPEC_OVERLAY_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_CAPABILITY_CANDIDATE_SELECTION_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_CLOSURE_GATE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_COMPLETION_GATE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_FINAL_ROUTE_SKILL_VERDICT_CATALOG_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_LIVE_RECEIPT_VALIDATION_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_MATERIALIZATION_BATCH_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_METADATA_REPAIR_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_PROMOTION_REVIEW_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_ROUTE_CAPABILITY_TAXONOMY_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_ROUTE_SKILL_VERDICT_CATALOG_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_SKILL_RECLASSIFICATION_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_SPEC_REPAIRED_ABLATION_MATRIX_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_SPEC_REPAIRED_CANDIDATE_POOL_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_SPEC_REPAIRED_QUALITY_SCREEN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_STATIC_REPAIR_CHUNK_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_STATIC_REPAIR_EXECUTION_MANIFEST_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_STATIC_REPAIR_TASK_MANIFEST_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF2_STATIC_REPAIR_VERDICT_CATALOG_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_BEST_CANDIDATE_SEARCH_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_CANDIDATE_METADATA_OVERLAY_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_CANDIDATE_ONLY_HARDENING_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_CAPABILITY_OVERLAP_RESOLVER_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_EVIDENCE_BASED_APPROVAL_ARTIFACT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_LIVE_CAUSALITY_PROBE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_MANUAL_APPROVAL_PACKET_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_MANUAL_APPROVAL_TEMPLATE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_MANUAL_APPROVAL_VALIDATION_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_MANUAL_RUNTIME_POLICY_REVIEW_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_METADATA_BIAS_RESCUE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_POST_REVIEW_GATE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_RUNTIME_POLICY_APPLY_GATE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_RUNTIME_POLICY_APPROVAL_DRAFT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_RUNTIME_POLICY_PATCH_PLAN_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_RUNTIME_REVIEW_GATE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF3_SKILL_COMBO_PROBE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_BOUNDED_PROBE_RESULT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_CANONICAL_CAPABILITY_BUCKETS_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_LOCAL_TEST_MATRIX_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_DISCOVERY_SCHEDULER_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_PAIRING_TABLE_2026-05-18.md`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_PAIRING_TABLE_V3_2026-05-18.md`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_PROMOTION_POLICY_DRAFT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_PROMOTION_POLICY_DRAFT_V4_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_STATUS_ROLLUP_2026-05-17.json`
+- ??: `docs/reports/NEXUS_SF_CAPABILITY_SKILL_STATUS_ROLLUP_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_COMPLETION_GATE_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_CATALOG_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_COMPARISON_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_LIVE_REPORT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_MATRIX_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_SKILL_STATUS_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_COMPOSIO_AWESOME_CODEX_CHALLENGE_SUMMARY_2026-05-18.md`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_CATALOG_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_LIVE_REPORT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_MATRIX_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_SKILL_STATUS_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_CATALOG_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_COMPARISON_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_LIVE_REPORT_2026-05-18.json`
+- ??: `docs/reports/NEXUS_SF_DOGGY8088_KARPATHY_CHALLENGE_V2_MERGED_LIVE_SUMMARY_2026-05-18.json`
+- ... 182 more entries omitted from inline list; use `git status --short` for full raw list.

@@ -1,0 +1,215 @@
+{
+  "by_capability": {
+    "artifact_gate": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c",
+      "status": "present"
+    },
+    "autonomic_router": {
+      "skill_dir": ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec",
+      "skill_id": "sf2-autonomic_router-route-fit-spec",
+      "status": "present"
+    },
+    "autoreason": {
+      "skill_dir": ".agents/skills/sf2/sf2-belief-route-fit-spec",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "status": "present"
+    },
+    "belief": {
+      "skill_dir": ".agents/skills/sf2/sf2-belief-route-fit-spec",
+      "skill_id": "sf2-belief-route-fit-spec",
+      "status": "present"
+    },
+    "benchmark_meta_opt": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "skill_id": "sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+      "status": "present"
+    },
+    "claim_gate": {
+      "skill_dir": ".agents/skills/nexus-benchmark-continuous-optimization",
+      "skill_id": "nexus-benchmark-continuous-optimization",
+      "status": "present"
+    },
+    "codeintel": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea",
+      "status": "present"
+    },
+    "ddtree": {
+      "skill_dir": ".agents/skills/nexus-root-cause-probe",
+      "skill_id": "nexus-root-cause-probe",
+      "status": "present"
+    },
+    "direct_master_loop": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-direct_master_loop-build-32802a87",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87",
+      "status": "present"
+    },
+    "drone": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-drone-python-background-jobs-18326a62",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62",
+      "status": "present"
+    },
+    "external_productivity": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-external_productivity-writer-77dc7840",
+      "skill_id": "sf-systematic-external_productivity-writer-77dc7840",
+      "status": "present"
+    },
+    "file_lock_security_gate": {
+      "skill_dir": ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec",
+      "skill_id": "sf2-file_lock_security_gate-route-fit-spec",
+      "status": "present"
+    },
+    "forecast_pregate": {
+      "skill_dir": ".agents/skills/create-plan",
+      "skill_id": "create-plan",
+      "status": "present"
+    },
+    "governance_and_trust": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+      "status": "present"
+    },
+    "hyper_sprint": {
+      "skill_dir": ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec",
+      "skill_id": "sf2-hyper_sprint-route-fit-spec",
+      "status": "present"
+    },
+    "lancedb": {
+      "skill_dir": ".agents/skills/research-source-validation-auditor",
+      "skill_id": "research-source-validation-auditor",
+      "status": "present"
+    },
+    "learn_ask": {
+      "skill_dir": ".agents/skills/github-round8-challengers/github8-skilless-deep-research-learn-ask",
+      "skill_id": "github8-skilless-deep-research-learn-ask",
+      "status": "present"
+    },
+    "learning_closure": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "skill_id": "sf-systematic-learning_closure-memory-lint-8bdb0fca",
+      "status": "present"
+    },
+    "memory": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-memory-project-skill-audit-cc8b7621",
+      "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621",
+      "status": "present"
+    },
+    "mempalace": {
+      "skill_dir": ".agents/skills/sf2/sf2-mempalace-route-fit-spec",
+      "skill_id": "sf2-mempalace-route-fit-spec",
+      "status": "present"
+    },
+    "metabolism_resume": {
+      "skill_dir": ".agents/skills/github-challengers/github-auto-skill-safe-learning",
+      "skill_id": "github-auto-skill-safe-learning",
+      "status": "present"
+    },
+    "nightshift": {
+      "skill_dir": ".agents/skills/sf2/sf2-nightshift-route-fit-spec",
+      "skill_id": "sf2-nightshift-route-fit-spec",
+      "status": "present"
+    },
+    "policy_capability_gate": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+      "status": "present"
+    },
+    "registry_skills_sync": {
+      "skill_dir": ".agents/skills/github-round5-challengers/github5-skill-seekers-safe-registry-builder",
+      "skill_id": "github5-skill-seekers-safe-registry-builder",
+      "status": "present"
+    },
+    "regression_guard": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+      "status": "present"
+    },
+    "repair_loop": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+      "status": "present"
+    },
+    "research": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-research-research-lookup-7e6f92a0",
+      "skill_id": "sf-systematic-research-research-lookup-7e6f92a0",
+      "status": "present"
+    },
+    "research_and_source_discipline": {
+      "skill_dir": ".agents/skills/research-citation-chain-verifier",
+      "skill_id": "research-citation-chain-verifier",
+      "status": "present"
+    },
+    "research_control_plane": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "skill_id": "sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+      "status": "present"
+    },
+    "sandbox_replay": {
+      "skill_dir": ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec",
+      "skill_id": "sf2-sandbox_replay-route-fit-spec",
+      "status": "present"
+    },
+    "swarm_multi_agent": {
+      "skill_dir": ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec",
+      "skill_id": "sf2-swarm_multi_agent-route-fit-spec",
+      "status": "present"
+    },
+    "ui_validator": {
+      "skill_dir": ".agents/skills/sf-systematic-challengers/sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "skill_id": "sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+      "status": "present"
+    },
+    "ultra_review": {
+      "skill_dir": ".agents/skills/github-round11-challengers/github11-vulnerability-scanner-ultra-review",
+      "skill_id": "github11-vulnerability-scanner-ultra-review",
+      "status": "present"
+    },
+    "xray": {
+      "skill_dir": ".agents/skills/diagnose",
+      "skill_id": "diagnose",
+      "status": "present"
+    }
+  },
+  "capability_count": 34,
+  "missing_skill_ids": [],
+  "required_skill_dirs": [
+    ".agents/skills/create-plan",
+    ".agents/skills/diagnose",
+    ".agents/skills/github-challengers/github-auto-skill-safe-learning",
+    ".agents/skills/github-round11-challengers/github11-vulnerability-scanner-ultra-review",
+    ".agents/skills/github-round5-challengers/github5-skill-seekers-safe-registry-builder",
+    ".agents/skills/github-round8-challengers/github8-skilless-deep-research-learn-ask",
+    ".agents/skills/nexus-benchmark-continuous-optimization",
+    ".agents/skills/nexus-root-cause-probe",
+    ".agents/skills/research-citation-chain-verifier",
+    ".agents/skills/research-source-validation-auditor",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-benchmark_meta_opt-hugging-face-trackio-d21c6b90",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-direct_master_loop-build-32802a87",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-drone-python-background-jobs-18326a62",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-external_productivity-writer-77dc7840",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-learning_closure-memory-lint-8bdb0fca",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-memory-project-skill-audit-cc8b7621",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-regression_guard-odoo-automated-tests-dad98433",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-odoo-automated-tests-dad98433",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-research-research-lookup-7e6f92a0",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-research_control_plane-research-lookup-7e6f92a0",
+    ".agents/skills/sf-systematic-challengers/sf-systematic-ui_validator-e2e-testing-d98eb7c3",
+    ".agents/skills/sf2/sf2-autonomic_router-route-fit-spec",
+    ".agents/skills/sf2/sf2-belief-route-fit-spec",
+    ".agents/skills/sf2/sf2-file_lock_security_gate-route-fit-spec",
+    ".agents/skills/sf2/sf2-hyper_sprint-route-fit-spec",
+    ".agents/skills/sf2/sf2-mempalace-route-fit-spec",
+    ".agents/skills/sf2/sf2-nightshift-route-fit-spec",
+    ".agents/skills/sf2/sf2-sandbox_replay-route-fit-spec",
+    ".agents/skills/sf2/sf2-swarm_multi_agent-route-fit-spec"
+  ],
+  "schema": "nexus.sf.refactor_clean_required_skill_manifest.v2",
+  "source_overlay": "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.json",
+  "status": "PASS",
+  "unique_skill_count": 33
+}

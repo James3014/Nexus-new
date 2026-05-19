@@ -1462,9 +1462,22 @@ def _runtime_capability_budget(repo_root: Path) -> dict[str, Any]:
     status_report = os.environ.get("NEXUS_BENCH_SKILL_STATUS_REPORT", "").strip()
     if status_report:
         budget["skill_status_report"] = status_report
+    overlay_path = (
+        os.environ.get("NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY", "").strip()
+        or os.environ.get("NEXUS_RUNTIME_SKILL_POLICY_OVERLAY", "").strip()
+    )
+    if overlay_path:
+        budget["runtime_skill_policy_overlay_path"] = overlay_path
     if os.environ.get("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "").strip().lower() in {"1", "true", "yes", "on"}:
         budget["allow_ablation_skill_mounts"] = True
     return budget
+
+
+def _runtime_skill_overlay_requested(budget: dict[str, Any]) -> bool:
+    return bool(
+        budget.get("runtime_skill_policy_overlay")
+        or str(budget.get("runtime_skill_policy_overlay_path") or "").strip()
+    )
 
 
 def _collect_route_signals(
@@ -2546,10 +2559,12 @@ def _runtime_receipt_plan_payload(
 
 SKILL_MOUNT_CAPABILITY_ALIASES: dict[str, tuple[str, ...]] = {
     "benchmark_and_promotion": ("claim_gate", "artifact_gate", "jit_validation", "harness_preflight_sensor"),
+    "forecast_pregate": ("forecast_gate", "pregate", "plan_quality_gate"),
     "governance_and_trust": ("claim_gate", "pregate", "ultra_review", "mempalace"),
     "notebook_and_knowledge_injection": ("research", "memory", "lancedb", "semantic_searcher"),
     "planning_and_handoff": ("plan_quality_gate", "research", "memory"),
     "repair_and_coding": ("hyper", "codeintel", "jit_validation", "semantic_failure_sensor"),
+    "research_and_source_discipline": ("research", "lancedb", "semantic_searcher"),
 }
 
 
@@ -2678,6 +2693,7 @@ def run_auto_flow(
     phase_wall_sec: dict[str, float] = {}
     timing_breakdown_sec: dict[str, float] = {}
     benchmark_skill_mount_requests = _benchmark_skill_mount_requests_from_env(task_id=task_id)
+    runtime_budget = _runtime_capability_budget(repo_root)
     phase_started_at = time.monotonic()
     route = build_route(
         repo_root=repo_root,
@@ -2689,13 +2705,13 @@ def run_auto_flow(
         target_file=target_file,
         routing_hint=routing_hint,
     )
-    if benchmark_skill_mount_requests:
+    if benchmark_skill_mount_requests or _runtime_skill_overlay_requested(runtime_budget):
         capability_plan, route_decision = _build_capability_plan_and_decision(
             task_desc=task_desc,
             task_type=task_type,
             route=route,
             task_id=task_id,
-            budget=_runtime_capability_budget(repo_root),
+            budget=runtime_budget,
             skills=benchmark_skill_mount_requests,
         )
         route["capability_plan"] = capability_plan.to_dict()
@@ -3637,7 +3653,6 @@ def run_auto_flow(
     nexus_usage_trace["capabilities"]["claim_probe_eligible"] = claim_probe["eligible"]
     nexus_usage_trace["capabilities"]["claim_probe_invoked"] = claim_probe["invoked"]
     nexus_usage_trace["capabilities"]["claim_probe_gate_passed"] = claim_probe["gate_passed"]
-    runtime_budget = _runtime_capability_budget(repo_root)
     capability_plan_payload = route.get("capability_plan") if isinstance(route.get("capability_plan"), dict) else None
     if capability_plan_payload is None:
         capability_plan = CapabilityPlanner().plan(

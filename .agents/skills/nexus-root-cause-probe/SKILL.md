@@ -1,6 +1,6 @@
 ---
 name: nexus-root-cause-probe
-description: 用於診斷 Nexus「看似完成但回報不可信、agent 與 gate 結果不一致、或任務被治理狀態卡住」的問題。當需要直接穿 Nexus 跑真實流程、檢查 evidence/report/gate 的因果鏈、先用 TDD 鎖定缺陷再修最小邊界時使用。
+description: Use when Nexus route capability is ddtree, policy_capability_gate, ui_validator and the task needs Nexus route, policy, gate, report, and runtime receipt root-cause diagnosis; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.
 version: 2026.04.22
 ---
 

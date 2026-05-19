@@ -87,7 +87,7 @@ from nexus.engine.learning_policy_loader import (
 )
 from nexus.engine.route_decision_adapter import build_route_decision
 from nexus.engine.runtime_capability_receipts import emit_harness_runtime_receipts
-from nexus.learning.skill_catalog import SkillCatalog
+from nexus.learning.skill_catalog import SkillCatalog, SkillCatalogEntry
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.services.gemini_cli import (
     build_gemini_cli_invocation,
@@ -3664,6 +3664,21 @@ def _receipt_confirms_skill_mount(receipt: dict[str, Any]) -> bool:
     )
 
 
+def _ablation_skill_mounts_allowed() -> bool:
+    return os.environ.get("NEXUS_BENCH_ALLOW_ABLATION_SKILL_MOUNTS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _skill_entry_allowed_for_benchmark_mount(entry: SkillCatalogEntry) -> bool:
+    return entry.is_runtime_mount_candidate or (_ablation_skill_mounts_allowed() and entry.is_reference_only)
+
+
+def _normalized_skill_capability_mount(entry: SkillCatalogEntry) -> str:
+    capability_mount = entry.capability_mount or "unmapped_skill_capability"
+    if capability_mount.startswith("reference:"):
+        return capability_mount.removeprefix("reference:")
+    return capability_mount
+
+
 def _reconcile_skill_mount_contract_after_receipts(row: dict[str, Any], *, repo_root: Path) -> None:
     if row.get("skill_mount_contract"):
         return
@@ -3689,9 +3704,9 @@ def _reconcile_skill_mount_contract_after_receipts(row: dict[str, Any], *, repo_
     confirmed_skill_names: set[str] = set()
     for skill_name in dict.fromkeys(pending_skill_names):
         entry = catalog.get(skill_name)
-        if entry is None or not entry.is_runtime_mount_candidate:
+        if entry is None or not _skill_entry_allowed_for_benchmark_mount(entry):
             continue
-        capability_mount = entry.capability_mount or "unmapped_skill_capability"
+        capability_mount = _normalized_skill_capability_mount(entry)
         for receipt_name in _skill_mount_receipt_names(capability_mount):
             receipt = receipts.get(receipt_name)
             if not receipt or not _receipt_confirms_skill_mount(receipt):
@@ -3702,17 +3717,20 @@ def _reconcile_skill_mount_contract_after_receipts(row: dict[str, Any], *, repo_
                 *[str(ref) for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()],
                 f"capability_receipt:{receipt_name}",
             ]
+            load_reason_codes = [
+                "capability_planner_skill_signal",
+                f"catalog_status:{entry.skill_status}",
+                "post_receipt_backfill_confirmed",
+            ]
+            if _ablation_skill_mounts_allowed() and entry.is_reference_only:
+                load_reason_codes.append("benchmark_ablation_only_mount")
             contracts.append(
                 {
                     "skill_id": entry.name,
                     "skill_status": entry.skill_status,
                     "capability_mount": capability_mount,
                     "capability": receipt_name,
-                    "load_reason_codes": [
-                        "capability_planner_skill_signal",
-                        f"catalog_status:{entry.skill_status}",
-                        "post_receipt_backfill_confirmed",
-                    ],
+                    "load_reason_codes": load_reason_codes,
                     "evidence_refs": list(dict.fromkeys(evidence_refs)),
                     "outcome_contributed": True,
                 }
@@ -3785,7 +3803,7 @@ def _reconcile_benchmark_skill_mount_contract_from_expected_receipts(
         if skill_name in existing_skill_names:
             continue
         entry = catalog.get(skill_name)
-        if entry is None or not entry.is_runtime_mount_candidate:
+        if entry is None or not _skill_entry_allowed_for_benchmark_mount(entry):
             key = (skill_name, "skill_not_runtime_mount_candidate")
             if key not in violation_keys:
                 violations.append(
@@ -3797,7 +3815,7 @@ def _reconcile_benchmark_skill_mount_contract_from_expected_receipts(
                 )
                 violation_keys.add(key)
             continue
-        capability_mount = entry.capability_mount or "unmapped_skill_capability"
+        capability_mount = _normalized_skill_capability_mount(entry)
         requested_expected_caps = _requested_expected_capabilities_for_skill(task, skill_name)
         receipt_names = set(_skill_mount_receipt_names(capability_mount))
         receipt_names.update(requested_expected_caps)
@@ -3828,17 +3846,20 @@ def _reconcile_benchmark_skill_mount_contract_from_expected_receipts(
             *[str(ref) for ref in (receipt.get("evidence_refs") or []) if str(ref).strip()],
             f"capability_receipt:{receipt_name}",
         ]
+        load_reason_codes = [
+            "benchmark_expected_capability_skill_signal",
+            f"catalog_status:{entry.skill_status}",
+            "final_capability_receipt_confirmed",
+        ]
+        if _ablation_skill_mounts_allowed() and entry.is_reference_only:
+            load_reason_codes.append("benchmark_ablation_only_mount")
         contracts.append(
             {
                 "skill_id": entry.name,
                 "skill_status": entry.skill_status,
                 "capability_mount": capability_mount,
                 "capability": receipt_name,
-                "load_reason_codes": [
-                    "benchmark_expected_capability_skill_signal",
-                    f"catalog_status:{entry.skill_status}",
-                    "final_capability_receipt_confirmed",
-                ],
+                "load_reason_codes": load_reason_codes,
                 "evidence_refs": list(dict.fromkeys(evidence_refs)),
                 "outcome_contributed": True,
             }

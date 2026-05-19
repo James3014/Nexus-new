@@ -1,0 +1,218 @@
+{
+  "claim_boundary": [
+    "Slices are ablation-only compiled interfaces; do not mount as runtime default without apply gate."
+  ],
+  "runtime_slices": [
+    {
+      "capability": "artifact_gate",
+      "interface_id": "sfci-461fbd0c021c86d4",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-artifact_gate-differential-review-461fbd0c/SKILL.md",
+      "skill_id": "sf-systematic-artifact_gate-differential-review-461fbd0c"
+    },
+    {
+      "capability": "autonomic_router",
+      "interface_id": "sfci-1022ec1de47ea1ad",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-autonomic_router-nuxt-1022ec1d/SKILL.md",
+      "skill_id": "sf-systematic-autonomic_router-nuxt-1022ec1d"
+    },
+    {
+      "capability": "autoreason",
+      "interface_id": "sfci-f95019ea58ef8c3b",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-autoreason-first-principles-thinking-f95019ea/SKILL.md",
+      "skill_id": "sf-systematic-autoreason-first-principles-thinking-f95019ea"
+    },
+    {
+      "capability": "belief",
+      "interface_id": "sfci-e75e5687910c3377",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-belief-diffdock-e75e5687/SKILL.md",
+      "skill_id": "sf-systematic-belief-diffdock-e75e5687"
+    },
+    {
+      "capability": "benchmark_meta_opt",
+      "interface_id": "sfci-a3e5c5c22082b69c",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-benchmark_meta_opt-llm-evaluation-a3e5c5c2/SKILL.md",
+      "skill_id": "sf-systematic-benchmark_meta_opt-llm-evaluation-a3e5c5c2"
+    },
+    {
+      "capability": "claim_gate",
+      "interface_id": "sfci-9813e12cdf026889",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-claim_gate-citation-management-9813e12c/SKILL.md",
+      "skill_id": "sf-systematic-claim_gate-citation-management-9813e12c"
+    },
+    {
+      "capability": "codeintel",
+      "interface_id": "sfci-f95019ea58ef8c3b",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-codeintel-first-principles-thinking-f95019ea/SKILL.md",
+      "skill_id": "sf-systematic-codeintel-first-principles-thinking-f95019ea"
+    },
+    {
+      "capability": "ddtree",
+      "interface_id": "sfci-69181602a77a6fe3",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-ddtree-voice-note-ingest-69181602/SKILL.md",
+      "skill_id": "sf-systematic-ddtree-voice-note-ingest-69181602"
+    },
+    {
+      "capability": "direct_master_loop",
+      "interface_id": "sfci-32802a874c52268d",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-direct_master_loop-build-32802a87/SKILL.md",
+      "skill_id": "sf-systematic-direct_master_loop-build-32802a87"
+    },
+    {
+      "capability": "drone",
+      "interface_id": "sfci-18326a62e5af7996",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-drone-python-background-jobs-18326a62/SKILL.md",
+      "skill_id": "sf-systematic-drone-python-background-jobs-18326a62"
+    },
+    {
+      "capability": "external_productivity",
+      "interface_id": "sfci-77dc78401aeacd4f",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-external_productivity-writer-77dc7840/SKILL.md",
+      "skill_id": "sf-systematic-external_productivity-writer-77dc7840"
+    },
+    {
+      "capability": "file_lock_security_gate",
+      "interface_id": "sfci-e933026031a5d96d",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-file_lock_security_gate-azure-diagnostics-e9330260/SKILL.md",
+      "skill_id": "sf-systematic-file_lock_security_gate-azure-diagnostics-e9330260"
+    },
+    {
+      "capability": "forecast_pregate",
+      "interface_id": "sfci-14647d4e8940cf85",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-forecast_pregate-mobile-security-coder-14647d4e/SKILL.md",
+      "skill_id": "sf-systematic-forecast_pregate-mobile-security-coder-14647d4e"
+    },
+    {
+      "capability": "governance_and_trust",
+      "interface_id": "sfci-0aa841e2906ecd3c",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-governance_and_trust-aegisops-ai-0aa841e2/SKILL.md",
+      "skill_id": "sf-systematic-governance_and_trust-aegisops-ai-0aa841e2"
+    },
+    {
+      "capability": "hyper_sprint",
+      "interface_id": "sfci-6b52f067a0e6ecd0",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-hyper_sprint-sql-optimization-patterns-6b52f067/SKILL.md",
+      "skill_id": "sf-systematic-hyper_sprint-sql-optimization-patterns-6b52f067"
+    },
+    {
+      "capability": "lancedb",
+      "interface_id": "sfci-087496c0ebe4d4a7",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-lancedb-rag-implementation-087496c0/SKILL.md",
+      "skill_id": "sf-systematic-lancedb-rag-implementation-087496c0"
+    },
+    {
+      "capability": "learn_ask",
+      "interface_id": "sfci-a1d20baf97eeef1f",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-learn_ask-deno-expert-a1d20baf/SKILL.md",
+      "skill_id": "sf-systematic-learn_ask-deno-expert-a1d20baf"
+    },
+    {
+      "capability": "learning_closure",
+      "interface_id": "sfci-433bb1f78d3401c7",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-learning_closure-esm-433bb1f7/SKILL.md",
+      "skill_id": "sf-systematic-learning_closure-esm-433bb1f7"
+    },
+    {
+      "capability": "memory",
+      "interface_id": "sfci-cc8b7621d231732c",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-memory-project-skill-audit-cc8b7621/SKILL.md",
+      "skill_id": "sf-systematic-memory-project-skill-audit-cc8b7621"
+    },
+    {
+      "capability": "mempalace",
+      "interface_id": "sfci-2e595e690b2578b5",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-mempalace-protect-mcp-governance-2e595e69/SKILL.md",
+      "skill_id": "sf-systematic-mempalace-protect-mcp-governance-2e595e69"
+    },
+    {
+      "capability": "metabolism_resume",
+      "interface_id": "sfci-e28989b32db9c58a",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-metabolism_resume-resume-handoff-e28989b3/SKILL.md",
+      "skill_id": "sf-systematic-metabolism_resume-resume-handoff-e28989b3"
+    },
+    {
+      "capability": "nightshift",
+      "interface_id": "sfci-2539c0078466755c",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-nightshift-debugging-and-error-recovery-2539c007/SKILL.md",
+      "skill_id": "sf-systematic-nightshift-debugging-and-error-recovery-2539c007"
+    },
+    {
+      "capability": "policy_capability_gate",
+      "interface_id": "sfci-0aa841e2906ecd3c",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2/SKILL.md",
+      "skill_id": "sf-systematic-policy_capability_gate-aegisops-ai-0aa841e2"
+    },
+    {
+      "capability": "registry_skills_sync",
+      "interface_id": "sfci-9b87d55add407ed5",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-registry_skills_sync-wiki-architect-9b87d55a/SKILL.md",
+      "skill_id": "sf-systematic-registry_skills_sync-wiki-architect-9b87d55a"
+    },
+    {
+      "capability": "regression_guard",
+      "interface_id": "sfci-dad98433cd770bbe",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-regression_guard-odoo-automated-tests-dad98433/SKILL.md",
+      "skill_id": "sf-systematic-regression_guard-odoo-automated-tests-dad98433"
+    },
+    {
+      "capability": "repair_loop",
+      "interface_id": "sfci-dad98433cd770bbe",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-repair_loop-odoo-automated-tests-dad98433/SKILL.md",
+      "skill_id": "sf-systematic-repair_loop-odoo-automated-tests-dad98433"
+    },
+    {
+      "capability": "research",
+      "interface_id": "sfci-7e6f92a071b833aa",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research-research-lookup-7e6f92a0/SKILL.md",
+      "skill_id": "sf-systematic-research-research-lookup-7e6f92a0"
+    },
+    {
+      "capability": "research_and_source_discipline",
+      "interface_id": "sfci-9813e12cdf026889",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research_and_source_discipline-citation-management-9813e12c/SKILL.md",
+      "skill_id": "sf-systematic-research_and_source_discipline-citation-management-9813e12c"
+    },
+    {
+      "capability": "research_control_plane",
+      "interface_id": "sfci-65f23ee34fd93344",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-research_control_plane-scientific-writing-65f23ee3/SKILL.md",
+      "skill_id": "sf-systematic-research_control_plane-scientific-writing-65f23ee3"
+    },
+    {
+      "capability": "sandbox_replay",
+      "interface_id": "sfci-dad98433cd770bbe",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-sandbox_replay-odoo-automated-tests-dad98433/SKILL.md",
+      "skill_id": "sf-systematic-sandbox_replay-odoo-automated-tests-dad98433"
+    },
+    {
+      "capability": "swarm_multi_agent",
+      "interface_id": "sfci-80970a3ce9baef24",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-swarm_multi_agent-tdd-orchestrator-80970a3c/SKILL.md",
+      "skill_id": "sf-systematic-swarm_multi_agent-tdd-orchestrator-80970a3c"
+    },
+    {
+      "capability": "ui_validator",
+      "interface_id": "sfci-0ffaabcc8e099062",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-ui_validator-playwright-0ffaabcc/SKILL.md",
+      "skill_id": "sf-systematic-ui_validator-playwright-0ffaabcc"
+    },
+    {
+      "capability": "ultra_review",
+      "interface_id": "sfci-14647d4e8940cf85",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-ultra_review-mobile-security-coder-14647d4e/SKILL.md",
+      "skill_id": "sf-systematic-ultra_review-mobile-security-coder-14647d4e"
+    },
+    {
+      "capability": "xray",
+      "interface_id": "sfci-47ccfd5a001849aa",
+      "path": ".agents/skills/sf-systematic-challengers/sf-systematic-xray-varlock-47ccfd5a/SKILL.md",
+      "skill_id": "sf-systematic-xray-varlock-47ccfd5a"
+    }
+  ],
+  "schema": "nexus.sf_systematic_runtime_slices.v1",
+  "status": "PASS",
+  "summary": {
+    "public_benchmark_allowed": false,
+    "runtime_update_allowed": false,
+    "slice_count": 34
+  }
+}

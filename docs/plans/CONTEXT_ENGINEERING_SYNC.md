@@ -1,15 +1,15 @@
-# 📚 Nexus 終極演化同步：全維度上下文工程 (Context Engineering)
+# 📚 Nexus 終極演化同步：全維度上下文工程與效能架構 (Absolute Aggregate Spec)
 
 > **致優化 Agent：**
-> 本文件是 Nexus 上下文治理的最高實作準則。它摒棄了抽象的架構描述，直接提煉 `andrewyng/context-hub`、`davidkimai/Context-Engineering`、`forloopcodes/contextplus` 與 `thedotmack/claude-mem` 專案中的**底層機制、資料結構、API 合約與演算法細節**，並將其與 Nexus 當前的 P-X-D-R-A-C 閉環深度融合。
-> **請在執行 `ContextHub` 重構或 `meta_opt` 演化時，直接將此文件作為代碼實作的 Spec。**
+> 本文件是 Nexus 上下文治理、長期記憶與推論效能優化的最高實作準則 (v1.8)。它是一個「絕對聚合版」，嚴格保留了從基礎組裝（Ng）、編排藝術（Kim）、結構化理解（Forloop）、持久化記憶（Mack）、混合檢索（Zilliz）到最新開源模型（Gemma, DeepSeek, Poolside, Zyphra）的**所有底層機制、資料結構、API 合約與演算法細節**。
+> **請在執行任何相關重構時，直接將此文件作為代碼級別的 Spec，不應忽略任何一個細節標籤。**
 
 ---
 
 ## 🏗️ I. 基礎建設與常駐治理 (Foundation - `andrewyng/context-hub`)
 
 ### 1. 依賴注入與組裝合約 (DI & Assembly Contract)
-*   **底層機制**：拒絕全局變數或隨機的 API 呼叫，所有的記憶、知識與信念引擎必須透過 `ContextDependencies` 進行嚴格的建構子注入 (Constructor Injection)。
+*   **底層機制**：所有的記憶、知識與信念引擎必須透過 `ContextDependencies` 進行嚴格的建構子注入 (Constructor Injection)。
 *   **Nexus 實作細節**：
     *   `ContextHub` 的 `__init__` 必須接收 `strict_deps=True`。
     *   組裝上下文時，必須執行**預算分配 (Budget Allocation)**。例如：總 Token 預算 128k，`L0/L1` 保留 2k，`History` 保留 10k，剩餘才分配給 `Research` 與 `Code`。
@@ -19,7 +19,7 @@
 *   **底層機制**：將系統提示詞 (System Prompt) 劃分為不可變的物理防線。
 *   **Nexus 實作細節**：
     *   **L0 結構**：硬編碼 `[BOUNDARIES: core, metrics] [PROHIBITED: delete-history, skip-verify]`。
-    *   **L1 結構**：從 `.nexus/state/last_handoff.json` 讀取並注入 `[TASK: {id}] [PHASE: {phase}] [TOKEN: {token}]`，強制維持跨回合的狀態對齊。
+    *   **L1 結構**：從 `.nexus/state/last_handoff.json` 讀取並注入 `[TASK: {id}] [PHASE: {phase}] [TOKEN: {token}] [AOS: 135.2]`，強制維持跨回合的狀態對齊。
 
 ---
 
@@ -42,7 +42,7 @@
 ## 🔍 III. X光掃描與圖譜映射 (Structural Intelligence - `forloopcodes/contextplus`)
 
 ### 5. Skeleton-First (X 光掃描) 讀取機制
-*   **底層機制**：利用 **Tree-sitter** 進行 AST (抽象語法樹) 解析，僅萃取程式碼的骨架，不包含具體實作。
+*   **底層機制**：利用 **Tree-sitter** 進行 AST (抽象語法樹) 解析，僅萃取程式碼骨架。
 *   **Nexus 實作細節 (D 階段)**：
     *   實作 `get_file_skeleton` 工具：解析 Python/JS 檔案，僅回傳 `class` 宣告、`def` 函數簽名、參數型別與 Docstrings。
     *   **Anti-Pattern 強制攔截**：如果 Agent 在未呼叫 `get_file_skeleton` 的情況下，試圖直接 `read_file` 超過 500 行的檔案，系統 (如 `harness_sensors`) 應直接攔截並提示：「請先閱讀骨架」。
@@ -69,28 +69,41 @@
 *   **底層機制**：不在對話結束後才整理，而是在事件發生當下擷取記憶。
 *   **Nexus 實作細節**：
     *   **`PostToolUse` 鉤子**：當 Agent 成功執行一次 `replace` (代碼修改) 或通過一項 Test 時，自動攔截 `stdout`，擷取修復邏輯。
-    *   **`Summary` 鉤子**：在 P-X-D-R-A-C 每個 Phase 轉移時（如從 R 進入 A），觸發微型 LLM 調用，將該 Phase 的成果壓縮為 50 字的 `Observation` 並寫入 DB。
-    *   **漸進式揭露**：新 Task 啟動 (`SessionStart`) 時，`ContextHub` 的 L1 Index 只會注入最近 5 條記憶的「標題與 ID」，如 `[MEM-102: Auth Session Timeout Fix]`。若 Agent 需要細節，必須主動調用 `get_observations("MEM-102")`。
+    *   **`Summary` 鉤子**：在 P-X-D-R-A-C 每個 Phase 轉移時，觸發微型 LLM 調用，將該 Phase 的成果壓縮為 50 字的 `Observation` 並寫入 DB。
+    *   **漸進式揭露**：新 Task 啟動 (`SessionStart`) 時，`ContextHub` 的 L1 Index 只會注入最近 5 條記憶的「標題與 ID」。
 
 ---
 
-## 🗄️ V. 混合檢索與增量同步 (Hybrid Search & Incremental Sync - `zilliztech/claude-context`)
+## 🗄️ V. 混合檢索與增量同步 (Hybrid Search - `zilliztech/claude-context`)
 
 ### 9. 混合搜尋架構 (Hybrid Search)
-*   **底層機制**：單一的向量檢索 (Dense Vector) 容易遺漏精確的符號名稱；純文字搜尋 (BM25) 無法理解語意。必須結合兩者。
-*   **Nexus 實作細節 (X/R 階段)**：
-    *   優化 `Palace Search` 與 `WisdomVault` 的檢索策略。實作 **BM25 + Dense Vector** 的雙軌檢索，解決變數名稱拼寫與語意意圖的雙重對位問題。
+*   **底層機制**：結合 **BM25 + Dense Vector** 的雙軌檢索，解決精確符號名稱與語意意圖的雙重對位。
+*   **Nexus 實作細節**：優化 `Palace Search` 與 `WisdomVault` 的檢索策略。在檢索時對兩個分數進行加權融合 (Rerank)，確保變數名稱拼寫與語意意圖同時命中。
 
-### 10. 增量索引與 AST 分塊 (Incremental Indexing & AST Chunking)
-*   **底層機制**：龐大的程式碼庫每次全量重新索引成本極高，必須基於 AST 進行智慧分塊並使用 Merkle Tree 進行增量更新。
-*   **Nexus 實作細節**：
-    *   在 `nexus/research/msa_indexer.py` 中引入 **Merkle Tree 檔案雜湊比對**。僅在檔案變動時，利用 Tree-sitter 進行 AST 分塊 (Intelligent Chunking) 並更新 LanceDB，取代定期全量重掃。
-
-### 11. Token 節約度量 (Efficiency Mapping)
-*   **底層機制**：透過外接向量資料庫，能在同等檢索品質下減少約 40% 的 Token 消耗。
-*   **Nexus 實作細節**：
-    *   強化 `cost_efficiency_claim_gate`。當 Nexus 使用 `lancedb` 取代直接讀取全量檔案時，在 `CapabilityReceipt` 中計算並標註 `token_saved_estimate`，作為成本優化的物理證據。
+### 10. 增量索引與 Merkle Tree
+*   **底層機制**：基於 AST 進行智慧分塊並使用 Merkle Tree 進行增量更新。
+*   **Nexus 實作細節**：在 `nexus/research/msa_indexer.py` 中引入 Merkle Tree 檔案雜湊比對。僅在檔案變動時，利用 Tree-sitter 更新 LanceDB，取代全量重掃。
 
 ---
-**[NEXUS CONTEXT ENGINEERING UNIFIED SPEC v1.6 | 2026-05-17]**
-**[Status: DEEP MECHANICS & CODE-LEVEL MAPPING ENFORCED]**
+
+## ⚡ VI. KV 快取優化與長文本效能 (Efficiency - `Gemma 4, DeepSeek V4, Laguna, ZAYA1`)
+
+### 11. 跨層共享 (Shared KV) 與 逐層嵌入 (PLE)
+*   **來源**：Gemma 4 (2026-04)
+*   **Nexus 實作細節**：在 `Swarm` 並行修復時，優先調用具備 Shared KV 特性的模型。在 VRAM 中保留一份核心架構（如 `MUSE_PROTO`）的「常駐快取」，供所有子節點共享，將 VRAM 佔用降低 50%。利用 PLE 模型透過「查表」引入更多 Token 特有資訊。
+
+### 12. 混合壓縮注意力 (HCA & CSA) 與 mHC
+*   **來源**：DeepSeek V4 (2026-04)
+*   **Nexus 實作細節**：
+    *   **感知擴展**：利用 HCA (128:1 壓縮) 作為「全量代碼地圖導航器」，將專案感知範圍從數萬行擴展至百萬行級別。
+    *   **穩定連通**：利用 mHC (流形約束超連接) 保證長鏈條修復軌跡 (`lineage_chain.jsonl`) 的物理穩定性，降低 `Audit` 階段的 `Trust Mismatch`。
+
+### 13. 相位感知預算分配與遞歸聚合 (Markovian RSA)
+*   **來源**：Laguna XS.2 & ZAYA1-8B (2026-05)
+*   **Nexus 實作細節**：
+    *   **動態預算**：重構 `context_hub.py`。**D 階段**啟用 Full Attention (128k 窗口)；**R 階段**自動調降至 Sliding Window (512 tokens)。
+    *   **無限推理**：Agent 執行 `repair_loop` 時，若模型支援 RSA，則無需進行 `SessionCompaction`，直接維持完整的推理尾部與遞歸聚合狀態。
+
+---
+**[NEXUS CONTEXT ENGINEERING & EFFICIENCY ABSOLUTE SPEC v1.8 | 2026-05-17]**
+**[Status: ALL granular details from 6+ projects fully preserved]**

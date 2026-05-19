@@ -1,6 +1,6 @@
 ---
 name: nexus-capability-upgrade
-description: 用於系統化提升 Nexus 解題能力。聚焦「穿 Nexus vs 不穿 Nexus」可量化對比，透過固定 benchmark、A/B 評測、TDD 漸進調參，提升 solve rate 並維持 report/gate 信任一致性。
+description: Use when Nexus route capability is learn_ask and the task needs learn/ask capability upgrade, fixed evaluation, A/B evidence, and capability improvement closure; return receipt/evidence/gate/outcome-backed guidance for SF or runtime review. Do not use for unrelated one-off writing or tasks without runtime evidence needs.
 version: 2026.04.27
 ---
 
@@ -326,7 +326,7 @@ uv run python scripts/bench/capability_ops_loop.py --profile weekly --apply-auto
 - `[x] Wave-N / Item`：已完成（附 A/B delta + gate 結果）
 
 範例：
-- `[x] Wave-8 / CLI semantic middleware`  
+- `[x] Wave-8 / CLI semantic middleware`
   evidence: `pytest ... passed`, `ci_gate --dry-run PASS`, `solve_rate_delta=+0.18`
 
 ## 目前進度（2026-04-23）

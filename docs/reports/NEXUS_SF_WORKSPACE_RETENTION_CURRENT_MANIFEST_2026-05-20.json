@@ -1,0 +1,25 @@
+{
+  "schema": "nexus.sf_workspace_retention_current_manifest.v1",
+  "status": "PASS",
+  "purpose": "Keep the final SF current-state closure and direct evidence inputs visible in docs/reports.",
+  "keep_artifacts": [
+    "docs/reports/NEXUS_SF_FINAL_CURRENT_STATE_2026-05-20.md",
+    "docs/reports/NEXUS_SF_CAPABILITY_PRIMARY_ORIGINAL_SKILL_MAP_2026-05-20.json",
+    "docs/reports/NEXUS_SF_CAPABILITY_PRIMARY_ORIGINAL_SKILL_MAP_2026-05-20.md",
+    "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.json",
+    "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_2026-05-20.md",
+    "docs/reports/NEXUS_SF_RUNTIME_SKILL_POLICY_OVERLAY_CURRENT_SMOKE_2026-05-20.json",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_FINALIZATION_V32_2026-05-19.json",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_FINALIZATION_V32_2026-05-19.md",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_V32_2026-05-19.json",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_V32_2026-05-19.md",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_SKILL_FIT_CATALOG_V32_2026-05-19.json",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_BATCH_SKILL_STATUS_2026-05-19.json",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_COMPILED_INTERFACES_2026-05-19.json",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_SUCCESSIVE_HALVING_2026-05-19.json",
+    "docs/reports/NEXUS_SF_SYSTEMATIC_RUNTIME_SLICES_2026-05-19.json"
+  ],
+  "claim_boundary": [
+    "This manifest is for workspace retention only; it does not alter SF verdicts."
+  ]
+}

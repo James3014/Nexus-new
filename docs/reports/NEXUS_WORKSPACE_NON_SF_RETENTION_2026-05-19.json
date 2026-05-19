@@ -1,0 +1,20 @@
+{
+  "schema": "nexus.workspace_non_sf_retention.v1",
+  "status": "PASS",
+  "summary": {
+    "moved_count": 2,
+    "blocked_count": 0,
+    "archive_root": "docs/reports/archive/non-sf-retention-2026-05-19"
+  },
+  "moved": [
+    {
+      "source": "docs/reports/NEXUS_OPT_EVIDENCE_RETENTION_DRY_RUN_2026-05-19.json",
+      "destination": "docs/reports/archive/non-sf-retention-2026-05-19/NEXUS_OPT_EVIDENCE_RETENTION_DRY_RUN_2026-05-19.json"
+    },
+    {
+      "source": "docs/reports/NEXUS_OPT_EVIDENCE_RETENTION_DRY_RUN_RESULT_2026-05-19.json",
+      "destination": "docs/reports/archive/non-sf-retention-2026-05-19/NEXUS_OPT_EVIDENCE_RETENTION_DRY_RUN_RESULT_2026-05-19.json"
+    }
+  ],
+  "blocked": []
+}
