@@ -8,11 +8,13 @@ import asyncio
 import aiohttp
 import json
 import hashlib
+import socket
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 
+from nexus.contracts.network_fetch_guard import build_network_fetch_guard_receipt
 from nexus.services.arweave_uploader import download_lessons_from_arweave
 from nexus.services.continuous_learning import load_jsonl, utc_now_iso
 
@@ -42,14 +44,35 @@ async def fetch_remote_lessons(session: aiohttp.ClientSession, source: str) -> L
     if source.startswith("arweave://"):
         tx_id = source.replace("arweave://", "")
         return await download_lessons_from_arweave(tx_id)
+
+    guard = build_network_fetch_guard_receipt(url=source, resolved_ips=_resolve_source_ips(source))
+    if guard["status"] != "PASS":
+        return []
     
     # Tailscale P2P (Assume the locator is the raw URL to the peer's JSONL)
     try:
         async with session.get(source, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            redirect_guard = build_network_fetch_guard_receipt(
+                url=source,
+                resolved_ips=_resolve_source_ips(str(resp.url)),
+                redirect_url=str(resp.url),
+            )
+            if redirect_guard["status"] != "PASS":
+                return []
             if resp.status != 200:
                 return []
             content = await resp.text()
             return [json.loads(line) for line in content.splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
+def _resolve_source_ips(source: str) -> list[str]:
+    try:
+        host = str(aiohttp.client_reqrep.URL(source).host or "")
+        if not host:
+            return []
+        return sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
     except Exception:
         return []
 

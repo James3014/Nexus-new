@@ -681,3 +681,11 @@ Lesson:
 - When extracting a seam from a large module, inspect the exact local import block and method body before applying a wide patch.
 - Treat patch context mismatch as a process failure, not a runtime behavior failure.
 - Prevention rule: keep extraction patches narrow and rerun the focused regression before committing the slice.
+
+### Failure Lesson: Freshness-Sensitive Fixtures
+
+Lesson:
+
+- Tests for freshness-gated learning inputs must not hard-code dates that drift past the production retention window.
+- Treat stale fixture failures as test-data drift, not as a reason to weaken freshness filtering.
+- Prevention rule: use current UTC timestamps for positive freshness fixtures and explicit old timestamps only in rejection tests.

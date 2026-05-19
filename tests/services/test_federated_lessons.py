@@ -1,9 +1,11 @@
 import pytest
 import json
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 from nexus.services.federated_lessons import (
+    fetch_remote_lessons,
     sync_federated_lessons, 
     FederatedPeer, 
     validate_and_filter_lessons,
@@ -19,7 +21,7 @@ def mock_lesson_v1():
         "root_cause": "Test issue",
         "corrective_action": "Fix it",
         "confidence": 0.9,
-        "timestamp_utc": "2026-04-03T12:00:00Z",
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "schema_version": "lesson_event.v1",
         "outcome": "success"
     }
@@ -52,6 +54,16 @@ def test_wrap_envelope_preserves_provenance(mock_lesson_v1):
     assert envelope["trust_tier"] == "peer"
     assert envelope["lesson"]["lesson_id"] == "sha-abc"
     assert "cache_id" in envelope
+
+@pytest.mark.asyncio
+async def test_fetch_remote_lessons_blocks_private_network_source():
+    class Session:
+        async def get(self, *_args, **_kwargs):
+            raise AssertionError("network fetch should be blocked before session.get")
+
+    result = await fetch_remote_lessons(Session(), "http://127.0.0.1/lessons.jsonl")
+
+    assert result == []
 
 @pytest.mark.asyncio
 async def test_sync_federated_lessons_idempotency(tmp_path, mock_lesson_v1):
