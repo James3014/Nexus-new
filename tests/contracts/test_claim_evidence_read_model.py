@@ -88,3 +88,21 @@ def test_validate_rejects_attempted_unlocks_from_read_model_payload() -> None:
         "read_model_must_not_unlock_public_benchmark",
         "read_model_must_not_update_runtime",
     ]
+
+
+def test_read_model_requires_sealed_and_hash_valid_evidence_when_requested() -> None:
+    payload = build_claim_evidence_read_model(
+        claim_class=ClaimClass.RUNTIME_APPLY_REVIEW,
+        records=[
+            _record(
+                evidence_seal_status="RETURN",
+                evidence_hash_status="PASS",
+            )
+        ],
+        evidence_bundle_refs=["docs/reports/evidence.json"],
+        receipt_refs=["docs/reports/receipt.json"],
+        sealed_evidence_required=True,
+    )
+
+    assert payload["status"] == "RETURN"
+    assert payload["blockers"] == ["record_0:evidence_seal_not_pass"]

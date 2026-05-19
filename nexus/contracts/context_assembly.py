@@ -70,8 +70,31 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
     blockers.extend(f"receipt:{item}" for item in validate_context_budget_receipt(receipt))
     if str(receipt.get("status") or "").upper() != "PASS":
         blockers.append("receipt_not_pass")
+    for source in _receipt_sources(receipt):
+        tier = str(source.get("metadata", {}).get("skill_tier") or "").strip().lower()
+        source_id = str(source.get("source_id") or "")
+        if _is_quarantined_skill_source(source_id=source_id, tier=tier):
+            blockers.append(f"quarantined_skill_context:{source_id}")
     if bool(payload.get("runtime_update_allowed", False)):
         blockers.append("context_assembly_must_not_update_runtime")
     if bool(payload.get("public_benchmark_allowed", False)):
         blockers.append("context_assembly_must_not_unlock_public_benchmark")
     return sorted(set(blockers))
+
+
+def _receipt_sources(receipt: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    sources: list[Mapping[str, Any]] = []
+    for key in ("kept_sources", "dropped_sources"):
+        for source in receipt.get(key, []) or []:
+            if isinstance(source, Mapping):
+                sources.append(source)
+    return sources
+
+
+def _is_quarantined_skill_source(*, source_id: str, tier: str) -> bool:
+    lowered = source_id.lower()
+    if tier in {"nexus_curated", "nexuscuratedcandidate", "curated"}:
+        return False
+    if tier in {"candidate_inbox", "generated_candidate", "vendor", "archive", "quarantine", "worktree_copy"}:
+        return True
+    return any(marker in lowered for marker in ("candidate-skill-from-", "auto-gen-", ".codex/worktrees"))

@@ -53,3 +53,35 @@ def test_route_dag_pregate_returns_when_selected_node_is_unknown() -> None:
     assert pregate["claim_verdict"] == "NOT_EVALUATED"
     assert "unknown_capability:missing_capability_node" in pregate["blockers"]
     assert "unknown_capability:missing_required_receipts" in pregate["blockers"]
+
+
+def test_route_dag_pregate_blocks_required_pre_model_rescue_and_serializes_swarm() -> None:
+    pregate = build_route_dag_pregate(
+        capability_plan={
+            "schema_version": "nexus_capability_plan_v1",
+            "planner_mode": "dry_run",
+            "required_capabilities": ["artifact_gate"],
+            "selected_capabilities": ["codeintel"],
+        },
+        capability_nodes={
+            "artifact_gate": {
+                "category": "validation",
+                "default_state": "required",
+                "capability_contract_type": "required",
+                "pre_model_rescue_planned": True,
+                "forced_swarm": True,
+                "parallelizable_with": ["codeintel"],
+                "evidence_outputs": ["artifact_receipt"],
+            },
+            "codeintel": {
+                "category": "discovery",
+                "parallelizable_with": ["artifact_gate"],
+                "evidence_outputs": ["code_scan"],
+            },
+        },
+    )
+
+    assert pregate["status"] == "RETURN"
+    assert "artifact_gate:required_capability_pre_model_rescue_planned" in pregate["blockers"]
+    assert pregate["nodes"][0]["execution_slot"] == "serial_forced_swarm"
+    assert pregate["parallelizable_edges"] == []

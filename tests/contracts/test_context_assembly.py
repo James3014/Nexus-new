@@ -56,3 +56,22 @@ def test_context_assembly_validator_rejects_runtime_or_public_unlock_attempts() 
         "context_assembly_must_not_unlock_public_benchmark",
         "context_assembly_must_not_update_runtime",
     ]
+
+
+def test_context_assembly_blocks_quarantined_skill_sources() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-001",
+        sources=[
+            *_sources(),
+            {
+                "source_id": "candidate-skill-from-external/SKILL.md",
+                "kind": "skill",
+                "estimated_tokens": 10,
+                "metadata": {"skill_tier": "candidate_inbox"},
+            },
+        ],
+        token_budget=800,
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "quarantined_skill_context:candidate-skill-from-external/SKILL.md" in payload["blockers"]

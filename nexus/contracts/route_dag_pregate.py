@@ -75,6 +75,10 @@ def _node_readout(capability: str, state: str, raw_node: Any) -> dict[str, Any]:
         "required_receipts": _strings(node.get("evidence_outputs")),
         "fallback_policy": _fallback_policy(state=state, category=category, default_state=default_state),
         "retry_policy": _retry_policy(state=state, category=category, default_state=default_state),
+        "capability_contract_type": str(node.get("capability_contract_type") or default_state or ""),
+        "pre_model_rescue_planned": bool(node.get("pre_model_rescue_planned", False)),
+        "forced_swarm": bool(node.get("forced_swarm", False)),
+        "execution_slot": "serial_forced_swarm" if bool(node.get("forced_swarm", False)) else "standard",
         "node_present": bool(node),
     }
 
@@ -129,8 +133,11 @@ def _parallelizable_edges(nodes: list[dict[str, Any]]) -> list[dict[str, str]]:
     planned = {node["capability"] for node in nodes}
     pairs: set[tuple[str, str]] = set()
     for node in nodes:
+        if node["forced_swarm"]:
+            continue
         for peer in node["parallelizable_with"]:
-            if peer in planned:
+            peer_node = next((candidate for candidate in nodes if candidate["capability"] == peer), {})
+            if peer in planned and not peer_node.get("forced_swarm", False):
                 pairs.add(tuple(sorted((node["capability"], peer))))
     return [{"a": left, "b": right} for left, right in sorted(pairs)]
 
@@ -167,6 +174,8 @@ def _blockers(nodes: list[dict[str, Any]]) -> list[str]:
             blockers.append(f"{node['capability']}:missing_capability_node")
         if node["state"] in {"required", "selected"} and not node["required_receipts"]:
             blockers.append(f"{node['capability']}:missing_required_receipts")
+        if node["capability_contract_type"] == "required" and node["pre_model_rescue_planned"]:
+            blockers.append(f"{node['capability']}:required_capability_pre_model_rescue_planned")
     return sorted(set(blockers))
 
 

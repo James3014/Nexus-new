@@ -35,7 +35,9 @@ class ClaimEvidenceReadModel:
     evidence_bundle_refs: tuple[str, ...]
     receipt_refs: tuple[str, ...]
     provider_token_cleanliness: ProviderTokenCleanliness
+    source_records: tuple[Mapping[str, Any], ...] = ()
     status: str = "PASS"
+    sealed_evidence_required: bool = False
     schema: str = CLAIM_EVIDENCE_READ_MODEL_SCHEMA
     blockers: tuple[str, ...] = field(default_factory=tuple)
 
@@ -45,8 +47,10 @@ class ClaimEvidenceReadModel:
             "status": self.status,
             "claim_class": self.claim_class.value,
             "provider_token_cleanliness": self.provider_token_cleanliness.value,
+            "sealed_evidence_required": self.sealed_evidence_required,
             "evidence_bundle_refs": list(self.evidence_bundle_refs),
             "receipt_refs": list(self.receipt_refs),
+            "records": [dict(record) for record in self.source_records],
             "gates": [gate.to_dict() for gate in self.gates],
             "runtime_update_allowed": False,
             "public_benchmark_allowed": False,
@@ -67,6 +71,7 @@ def build_claim_evidence_read_model(
     records: list[Mapping[str, Any]],
     evidence_bundle_refs: list[str] | tuple[str, ...] = (),
     receipt_refs: list[str] | tuple[str, ...] = (),
+    sealed_evidence_required: bool = False,
 ) -> dict[str, Any]:
     claim = _claim_class(claim_class)
     gates = _gates_from_records(records)
@@ -77,6 +82,8 @@ def build_claim_evidence_read_model(
         evidence_bundle_refs=tuple(str(item) for item in evidence_bundle_refs if str(item).strip()),
         receipt_refs=tuple(str(item) for item in receipt_refs if str(item).strip()),
         provider_token_cleanliness=provider_cleanliness,
+        source_records=tuple(records),
+        sealed_evidence_required=bool(sealed_evidence_required),
     )
     return model.to_dict()
 
@@ -120,11 +127,29 @@ def validate_claim_evidence_read_model(payload: Mapping[str, Any]) -> list[str]:
         ProviderTokenCleanliness.NOT_APPLICABLE,
     }:
         blockers.append("public_ready_requires_measured_or_not_applicable_tokens")
+    if bool(payload.get("sealed_evidence_required", False)):
+        for gate in _sealed_evidence_gates(payload):
+            blockers.append(gate)
     if bool(payload.get("runtime_update_allowed", False)):
         blockers.append("read_model_must_not_update_runtime")
     if bool(payload.get("public_benchmark_allowed", False)):
         blockers.append("read_model_must_not_unlock_public_benchmark")
     return sorted(set(blockers))
+
+
+def _sealed_evidence_gates(payload: Mapping[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    records = payload.get("records", [])
+    if not isinstance(records, list) or not records:
+        blockers.append("sealed_evidence_requires_records")
+        return blockers
+    for index, record in enumerate(records):
+        record = record if isinstance(record, Mapping) else {}
+        if str(record.get("evidence_seal_status") or "").upper() != "PASS":
+            blockers.append(f"record_{index}:evidence_seal_not_pass")
+        if str(record.get("evidence_hash_status") or "").upper() != "PASS":
+            blockers.append(f"record_{index}:evidence_hash_not_pass")
+    return blockers
 
 
 def _gates_from_records(records: list[Mapping[str, Any]]) -> list[ClaimEvidenceGate]:
