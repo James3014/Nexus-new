@@ -84,3 +84,30 @@ def test_context_hub_context_budget_receipt_returns_when_core_context_exceeds_bu
 
     assert receipt["status"] == "RETURN"
     assert "required_context_over_budget" in receipt["blockers"]
+
+
+def test_context_hub_builds_context_assembly_contract(tmp_path):
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+
+    contract = hub.build_context_assembly_contract(
+        task_id="ctx-contract",
+        token_budget=120,
+        extra_sources=[
+            {"source_id": "research:expensive", "kind": "research", "estimated_tokens": 500, "priority": 10}
+        ],
+    )
+
+    assert contract["status"] == "PASS"
+    assert contract["task_id"] == "ctx-contract"
+    assert contract["preserved_L0_L1"] is True
+    assert contract["receipt"]["dropped_sources"][0]["drop_reason_code"] == "budget_exhausted"
+    assert contract["claim_boundary"][0] == "Context assembly contracts select context under budget only."
+
+
+def test_context_hub_context_assembly_contract_returns_when_core_context_exceeds_budget(tmp_path):
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+
+    contract = hub.build_context_assembly_contract(task_id="ctx-contract", token_budget=1)
+
+    assert contract["status"] == "RETURN"
+    assert "receipt_not_pass" in contract["blockers"]

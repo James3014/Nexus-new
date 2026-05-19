@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from dataclasses import dataclass
+from nexus.contracts.context_assembly import build_context_assembly_contract
 from nexus.contracts.context_budget import ContextBudgetSource, build_context_budget_receipt
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
@@ -308,6 +309,35 @@ class ContextHub:
     ) -> Dict[str, Any]:
         """Build a read-only budget receipt for context assembly."""
 
+        sources = self._context_budget_sources(state_view=state_view, extra_sources=extra_sources)
+        receipt = build_context_budget_receipt(sources, token_budget=token_budget)
+        payload = receipt.to_dict()
+        payload["task_id"] = task_id
+        return payload
+
+    def build_context_assembly_contract(
+        self,
+        *,
+        task_id: str,
+        token_budget: int = 4000,
+        state_view: StateView | NexusState | None = None,
+        extra_sources: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Build the audited context assembly contract used before deeper ContextHub rewrites."""
+
+        sources = self._context_budget_sources(state_view=state_view, extra_sources=extra_sources)
+        return build_context_assembly_contract(
+            task_id=task_id,
+            sources=[source.to_dict() if isinstance(source, ContextBudgetSource) else source for source in sources],
+            token_budget=token_budget,
+        )
+
+    def _context_budget_sources(
+        self,
+        *,
+        state_view: StateView | NexusState | None = None,
+        extra_sources: List[Dict[str, Any]] | None = None,
+    ) -> list[ContextBudgetSource | Dict[str, Any]]:
         state = state_view or self.state_io.load_global_state()
         l0 = self._get_l0_rules()
         l1 = self._get_l1_index()
@@ -326,10 +356,7 @@ class ContextHub:
                 )
             )
         sources.extend(extra_sources or [])
-        receipt = build_context_budget_receipt(sources, token_budget=token_budget)
-        payload = receipt.to_dict()
-        payload["task_id"] = task_id
-        return payload
+        return sources
 
     def _estimate_context_tokens(self, value: Any) -> int:
         return max(1, int(len(str(value)) / 3.8))
