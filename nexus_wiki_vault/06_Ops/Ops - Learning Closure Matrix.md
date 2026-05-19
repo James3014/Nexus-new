@@ -51,6 +51,8 @@ version_scope:
 | Truth command policy regressions | unsafe command 或誤傷 | 指令白名單 + 詞邊界檢查 | `wiki_truth_claims_check.py` |
 | Legacy compatibility regression in mixed v9/v22 stack | 新治理/新接口上線後，舊測試依賴的 `NexusCLI`、`run_clean`、`route`、`sync_all` 等入口缺失或語義漂移 | 每次重構後執行「兼容契約測試批次」並保留 shim 層；新功能不能直接移除舊入口 | `pytest tests/test_task_runner_phase_task.py tests/test_v9_regression_p1.py tests/test_skills_router_builtin.py tests/test_wisdom_synthesis.py` |
 | X-Ray observer scan stall on legacy input | `XRayObserver("path")` 以字串傳入時被逐字元掃描，導致測試/巡檢看似卡死 | Observer 入口必須接受 `str | list[str]` 並在單路徑模式保持舊版 source 格式，避免破壞舊契約 | `pytest tests/test_xray_integration.py -vv` |
+| Reference project layout assumption | 參考專案不是標準 `src/`、`dist/` 或 root `README.md` 形狀，固定路徑掃描產生假陰性或 noisy dependency 掃描 | 先做 layout probe，再只掃實際 implementation root；package-only 參考需避開 `node_modules` 泛掃並錨定 exported library files | `rg --files <reference-root>` before focused scan |
+| Evidence auto-merge poisoning | 多 Agent 並行時 evidence ledger/graph 自動合併可能吞掉 corrupt input 或超大 artifact | 只對 append-only/commutative evidence formats 啟用 union-merge，並要求 parse/schema validation、size cap、node/record cap 皆 PASS | `pytest tests/contracts/test_hard_gate_compatibility.py` |
 
 ## Upstream
 - `06_Ops/Ops - Wiki Drift Audit.md`: 漂移訊號來源。 [Source: 06_Ops/Ops - Wiki Drift Audit.md]
