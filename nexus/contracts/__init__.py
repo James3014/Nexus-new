@@ -29,6 +29,12 @@ from nexus.contracts.context_budget import (
     build_context_budget_receipt,
     validate_context_budget_receipt,
 )
+from nexus.contracts.context_assembly import (
+    CONTEXT_ASSEMBLY_CONTRACT_SCHEMA,
+    ContextAssemblyContract,
+    build_context_assembly_contract,
+    validate_context_assembly_contract,
+)
 from nexus.contracts.evidence_retention import (
     EVIDENCE_RETENTION_DRY_RUN_SCHEMA,
     EvidenceRetentionItem,
@@ -78,6 +84,7 @@ __all__ = [
     "RuleLifecycleEvidence",
     "RuleLifecycleState",
     "CONTEXT_BUDGET_RECEIPT_SCHEMA",
+    "CONTEXT_ASSEMBLY_CONTRACT_SCHEMA",
     "CLAIM_EVIDENCE_READ_MODEL_SCHEMA",
     "EVIDENCE_DATASET_MANIFEST_SCHEMA",
     "EVIDENCE_DATASET_RECORD_SCHEMA",
@@ -89,6 +96,7 @@ __all__ = [
     "EvidenceDatasetRecord",
     "ContextBudgetReceipt",
     "ContextBudgetSource",
+    "ContextAssemblyContract",
     "ClaimEvidenceGate",
     "ClaimEvidenceReadModel",
     "EvidenceRetentionItem",
@@ -102,6 +110,7 @@ __all__ = [
     "RetentionClass",
     "build_evidence_dataset_manifest",
     "build_context_budget_receipt",
+    "build_context_assembly_contract",
     "build_claim_evidence_read_model",
     "build_evidence_retention_dry_run",
     "build_optimization_report_contract",
@@ -118,6 +127,7 @@ __all__ = [
     "recommend_rule_state",
     "validate_evidence_dataset_record",
     "validate_context_budget_receipt",
+    "validate_context_assembly_contract",
     "validate_claim_evidence_read_model",
     "validate_optimization_report_contract",
     "validate_retrieval_receipt",
