@@ -4,7 +4,7 @@ import json
 
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
-from nexus.engine.rlm_controller import RlmBudget, RlmController
+from nexus.engine.rlm_controller import RlmBudget, RlmController, build_nightshift_handoff_receipt, build_rlm_decision_receipt
 from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
 
 
@@ -22,6 +22,44 @@ def test_rlm_controller_stops_x_loop_on_iteration_budget() -> None:
 
     assert rlm.should_continue_x(belief_confidence=0.1) is False
     assert rlm.terminal_reason(gate_passed=False, belief_confidence=0.1) == "x_iteration_budget_exhausted"
+
+
+def test_rlm_budget_exhaustion_builds_nightshift_handoff_receipt() -> None:
+    decision = build_rlm_decision_receipt(
+        loop_phase="R",
+        gate_passed=False,
+        belief_confidence=0.2,
+        current_tokens=1000,
+        max_tokens=1000,
+    )
+
+    handoff = build_nightshift_handoff_receipt(
+        decision_receipt=decision,
+        artifact_gate_passed=False,
+    )
+
+    assert decision["terminal_reason"] == "token_budget_exhausted"
+    assert handoff["status"] == "PASS"
+    assert handoff["recommended"] is True
+    assert handoff["runtime_update_allowed"] is False
+    assert handoff["public_benchmark_allowed"] is False
+
+
+def test_rlm_no_handoff_when_artifact_gate_passed() -> None:
+    decision = build_rlm_decision_receipt(
+        loop_phase="R",
+        gate_passed=True,
+        belief_confidence=0.9,
+    )
+
+    handoff = build_nightshift_handoff_receipt(
+        decision_receipt=decision,
+        artifact_gate_passed=True,
+    )
+
+    assert handoff["status"] == "NOT_APPLICABLE"
+    assert handoff["recommended"] is False
+    assert "artifact_gate_passed_no_handoff" in handoff["blockers"]
 
 
 def test_outcome_memory_writes_learning_policy(tmp_path, monkeypatch) -> None:
@@ -81,6 +119,40 @@ def test_outcome_memory_penalizes_selected_without_invocation(tmp_path, monkeypa
     assert policy["promoted_capabilities"] == []
     assert policy["penalized_capabilities"] == ["swarm"]
     assert policy["capability_scores"]["swarm"] == -1.0
+
+
+def test_outcome_memory_excludes_trust_mismatch_from_policy_scores(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(OutcomeMemoryManager, "STORAGE_PATH", tmp_path / "history.jsonl")
+    monkeypatch.setattr(OutcomeMemoryManager, "POLICY_PATH", tmp_path / "policy.json")
+
+    poisoned = EpisodeOutcomeRecord.from_task(
+        task_id="trust-mismatch",
+        task_type="bug",
+        task_desc="Trust mismatch should not tune route policy",
+        solved=True,
+        wall_duration_sec=1.0,
+        total_tokens_used=100,
+        trust_mismatch=True,
+        receipts=[
+            {
+                "name": "hyper",
+                "selected": True,
+                "invoked": True,
+                "evidence_present": True,
+                "gate_passed": True,
+                "outcome_contributed": True,
+                "public_claim_safe": True,
+            }
+        ],
+    )
+
+    OutcomeMemoryManager.save_episode_and_tune_sync(poisoned)
+    policy = json.loads((tmp_path / "policy.json").read_text(encoding="utf-8"))
+
+    assert policy["source_experiences_count"] == 1
+    assert policy["eligible_experiences_count"] == 0
+    assert policy["promoted_capabilities"] == []
+    assert policy["excluded_experiences"] == [{"task_id": "trust-mismatch", "reason": "trust_mismatch"}]
 
 
 def test_outcome_memory_recency_aging_resolves_newer_signal(tmp_path, monkeypatch) -> None:

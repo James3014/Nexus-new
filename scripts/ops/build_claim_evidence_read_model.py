@@ -42,6 +42,7 @@ def build_read_model_from_evidence_manifest(
     )
     _attach_manifest_schema_gate(model, manifest)
     _attach_completion_gate(model, manifest)
+    _attach_mutation_assurance_gate(model, manifest)
     if not dry_run:
         _write(output_path, model)
     return _summary(model, input_path=input_path, output_path=output_path, dry_run=dry_run)
@@ -93,6 +94,19 @@ def _attach_completion_gate(model: dict[str, Any], manifest: dict[str, Any]) -> 
             model["status"] = "RETURN"
 
 
+def _attach_mutation_assurance_gate(model: dict[str, Any], manifest: dict[str, Any]) -> None:
+    required = bool(manifest.get("mutation_assurance_required", False))
+    status = str(manifest.get("mutation_assurance_status") or "NOT_APPLICABLE").upper()
+    model["mutation_assurance_required"] = required
+    model["mutation_assurance_status"] = status
+    if required and model.get("claim_class") in {ClaimClass.RUNTIME_APPLY_REVIEW.value, ClaimClass.PUBLIC_READY.value}:
+        if status != "PASS":
+            blockers = list(model.get("blockers", []) or [])
+            blockers.append("mutation_assurance_not_pass")
+            model["blockers"] = sorted(set(blockers))
+            model["status"] = "RETURN"
+
+
 def _summary(model: dict[str, Any], *, input_path: Path, output_path: Path, dry_run: bool) -> dict[str, Any]:
     return {
         "schema": "nexus_claim_evidence_read_model_export.v1",
@@ -104,6 +118,7 @@ def _summary(model: dict[str, Any], *, input_path: Path, output_path: Path, dry_
         "source_manifest_status": str(model.get("source_manifest_status") or ""),
         "completion_status": str(model.get("completion_status") or ""),
         "completion_envelope_ref": str(model.get("completion_envelope_ref") or ""),
+        "mutation_assurance_status": str(model.get("mutation_assurance_status") or ""),
         "claim_class": str(model.get("claim_class") or ""),
         "gate_count": len(model.get("gates", []) or []),
         "blocker_count": len(model.get("blockers", []) or []),

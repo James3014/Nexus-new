@@ -781,3 +781,11 @@ Lesson:
 - `--wiki-eval-enforce-level warn` must emit quality debt without blocking the full CI release gate.
 - Treat eval pass-rate misses under the default warn mode as governance follow-up debt, not as an immediate release blocker.
 - Prevention rule: keep `strict` as the only blocking wiki eval enforcement mode; default CI should surface the warning while preserving deterministic downstream regression checks.
+
+### Failure Lesson: Contract Default Normalization Drift
+
+Lesson:
+
+- Contract validators must distinguish a missing optional field from an explicitly blank malformed field before applying defaults.
+- Treat a test that mutates a serialized contract payload to `""` as a validator-hardening signal, not as proof the runtime object constructor is wrong.
+- Prevention rule: apply defaults at construction boundaries, but validate serialized payloads from their raw keys when a field is intended to be fail-closed.

@@ -109,10 +109,11 @@ class OutcomeMemoryManager:
     @classmethod
     def run_dynamic_autotune_sync(cls, *, project_root: Path | None = None) -> dict[str, Any]:
         records = cls.load_recent_records(project_root=project_root, limit=cls.RECENT_LIMIT)
+        eligible_records = [record for record in records if not bool(record.get("trust_mismatch", False))]
         promoted_scores: dict[str, float] = {}
         penalized_scores: dict[str, float] = {}
-        weights = _recency_weights(len(records), minimum=cls.MIN_RECENCY_WEIGHT)
-        for record, weight in zip(records, weights, strict=False):
+        weights = _recency_weights(len(eligible_records), minimum=cls.MIN_RECENCY_WEIGHT)
+        for record, weight in zip(eligible_records, weights, strict=False):
             solved = bool(record.get("solved", False))
             for receipt in record.get("receipts", []) or []:
                 if not isinstance(receipt, Mapping):
@@ -134,11 +135,20 @@ class OutcomeMemoryManager:
             "schema_version": DYNAMIC_LEARNING_POLICY_SCHEMA,
             "status": "PASS",
             "source_experiences_count": len(records),
+            "eligible_experiences_count": len(eligible_records),
             "source_experiences": [str(record.get("task_id") or "") for record in records if record.get("task_id")],
+            "excluded_experiences": [
+                {
+                    "task_id": str(record.get("task_id") or ""),
+                    "reason": "trust_mismatch",
+                }
+                for record in records
+                if bool(record.get("trust_mismatch", False))
+            ],
             "aging_window": {
                 "recent_limit": cls.RECENT_LIMIT,
                 "minimum_weight": cls.MIN_RECENCY_WEIGHT,
-                "records_used": len(records),
+                "records_used": len(eligible_records),
             },
             "capability_scores": capability_scores,
             "promoted_capabilities": resolved_promoted,

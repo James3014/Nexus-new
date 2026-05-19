@@ -17,6 +17,8 @@ class RouteRuntimeDispatcher:
             "schema": "nexus.route_runtime_dispatch_preparation.v1",
             "status": "PASS" if not blockers else "RETURN",
             "dispatch_ready": not blockers,
+            "plan_consumed": True,
+            "plan_schema": str(runtime_plan.get("schema") or ""),
             "dispatch_executed": False,
             "runtime_dispatch_changed": False,
             "claim_verdict": "NOT_EVALUATED",
@@ -35,6 +37,8 @@ class RouteRuntimeDispatcher:
 
 def _blockers(runtime_plan: Mapping[str, Any]) -> list[str]:
     blockers = list(runtime_plan.get("blockers", []) or [])
+    if runtime_plan.get("schema") != "nexus.route_runtime_plan.v1":
+        blockers.append("invalid_or_missing_route_runtime_plan_schema")
     if runtime_plan.get("status") != "PASS":
         blockers.append("route_runtime_plan_not_pass")
     if bool(runtime_plan.get("runtime_dispatch_changed", False)):

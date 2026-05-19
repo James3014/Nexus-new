@@ -135,3 +135,24 @@ def test_build_read_model_returns_when_completion_envelope_fails(tmp_path):
     assert summary["completion_status"] == "RETURN"
     assert summary["completion_envelope_ref"] == "docs/reports/completion.json"
     assert "completion_envelope_not_pass" in payload["blockers"]
+
+
+def test_build_read_model_returns_when_mutation_assurance_fails(tmp_path):
+    source = tmp_path / "evidence_manifest.json"
+    output = tmp_path / "read_model.json"
+    source.write_text(
+        json.dumps(
+            _manifest(
+                mutation_assurance_required=True,
+                mutation_assurance_status="RETURN",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    summary = build_read_model_from_evidence_manifest(input_path=source, output_path=output)
+    payload = json.loads(output.read_text(encoding="utf-8"))
+
+    assert summary["status"] == "RETURN"
+    assert summary["mutation_assurance_status"] == "RETURN"
+    assert "mutation_assurance_not_pass" in payload["blockers"]

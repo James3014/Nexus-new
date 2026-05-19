@@ -5,6 +5,7 @@ from typing import Any
 
 
 RLM_RUNTIME_DECISION_RECEIPT_SCHEMA = "nexus_rlm_runtime_decision_receipt.v1"
+RLM_NIGHTSHIFT_HANDOFF_RECEIPT_SCHEMA = "nexus_rlm_nightshift_handoff_receipt.v1"
 
 
 @dataclass
@@ -110,4 +111,38 @@ def build_rlm_decision_receipt(
         },
         "runtime_update_allowed": False,
         "claim_boundary": "runtime_receipt_only_not_public_claim",
+    }
+
+
+def build_nightshift_handoff_receipt(
+    *,
+    decision_receipt: dict[str, Any],
+    artifact_gate_passed: bool,
+    source: str = "research_flow_service",
+) -> dict[str, Any]:
+    budget = dict(decision_receipt.get("budget") or {})
+    terminal_reason = str(decision_receipt.get("terminal_reason") or "")
+    budget_exhausted = terminal_reason in {
+        "token_budget_exhausted",
+        "x_iteration_budget_exhausted",
+        "r_iteration_budget_exhausted",
+    }
+    should_handoff = bool(not artifact_gate_passed and budget_exhausted)
+    blockers: list[str] = []
+    if artifact_gate_passed:
+        blockers.append("artifact_gate_passed_no_handoff")
+    if not budget_exhausted:
+        blockers.append("rlm_budget_not_exhausted")
+    return {
+        "schema_version": RLM_NIGHTSHIFT_HANDOFF_RECEIPT_SCHEMA,
+        "status": "PASS" if should_handoff else "NOT_APPLICABLE",
+        "source": source,
+        "recommended": should_handoff,
+        "artifact_gate_passed": bool(artifact_gate_passed),
+        "terminal_reason": terminal_reason or "unknown",
+        "budget": budget,
+        "blockers": blockers,
+        "runtime_update_allowed": False,
+        "public_benchmark_allowed": False,
+        "claim_boundary": "handoff_receipt_only_not_runtime_or_public_claim",
     }
