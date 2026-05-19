@@ -27,6 +27,27 @@ def _clean_row(**overrides):
     return row
 
 
+def _clean_read_model(**overrides):
+    payload = {
+        "status": "PASS",
+        "claim_class": "RUNTIME_APPLY_REVIEW",
+        "provider_token_cleanliness": "not_applicable",
+        "evidence_bundle_refs": ["docs/reports/evidence.json"],
+        "receipt_refs": ["docs/reports/receipt.json"],
+        "runtime_update_allowed": False,
+        "public_benchmark_allowed": False,
+        "gates": [
+            {"name": "delivery", "status": "PASS"},
+            {"name": "trust", "status": "PASS"},
+            {"name": "artifact", "status": "PASS"},
+            {"name": "receipt", "status": "PASS"},
+            {"name": "claim", "status": "PASS"},
+        ],
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_replacement_gate_approves_clean_better_challenger() -> None:
     decision = build_sf_replacement_cleanliness_gate(_clean_row())
 
@@ -34,6 +55,13 @@ def test_replacement_gate_approves_clean_better_challenger() -> None:
     assert decision["decision"] == "REPLACE"
     assert decision["runtime_update_allowed"] is True
     assert decision["public_benchmark_allowed"] is False
+    assert decision["blockers"] == []
+
+
+def test_replacement_gate_accepts_clean_read_model() -> None:
+    decision = build_sf_replacement_cleanliness_gate(_clean_row(read_model=_clean_read_model()))
+
+    assert decision["decision"] == "REPLACE"
     assert decision["blockers"] == []
 
 
@@ -70,6 +98,26 @@ def test_replacement_gate_requires_runtime_receipt() -> None:
     assert decision["decision"] == "HOLD"
     assert decision["reason"] == "challenger_runtime_receipt_incomplete"
     assert "challenger_runtime_receipt_incomplete" in decision["blockers"]
+
+
+def test_replacement_gate_blocks_failed_read_model() -> None:
+    decision = build_sf_replacement_cleanliness_gate(
+        _clean_row(read_model=_clean_read_model(status="RETURN", gates=[{"name": "claim", "status": "RETURN"}]))
+    )
+
+    assert decision["decision"] == "HOLD"
+    assert decision["reason"] == "read_model:claim:gate_not_pass"
+    assert "read_model_not_pass" in decision["blockers"]
+    assert "read_model:claim:gate_not_pass" in decision["blockers"]
+
+
+def test_replacement_gate_blocks_read_model_unlock_attempt() -> None:
+    decision = build_sf_replacement_cleanliness_gate(
+        _clean_row(read_model=_clean_read_model(runtime_update_allowed=True))
+    )
+
+    assert decision["decision"] == "HOLD"
+    assert "read_model_runtime_update_attempt" in decision["blockers"]
 
 
 def test_replacement_manifest_counts_decisions() -> None:

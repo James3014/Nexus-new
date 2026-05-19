@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from nexus.contracts.claim_evidence_read_model import validate_claim_evidence_read_model
 from nexus.contracts.optimization_report import ProviderTokenCleanliness
 
 
@@ -108,6 +109,7 @@ def _replacement_blockers(
         blockers.append("challenger_runtime_receipt_incomplete")
     if not bool(row.get("challenger_effective", True)):
         blockers.append("challenger_not_effective")
+    blockers.extend(_read_model_blockers(row.get("read_model")))
     if require_same_provider_cleanliness_window and not bool(row.get("same_provider_cleanliness_window", True)):
         blockers.append("blocked_by_cleanliness_window")
     current_clean = _provider_cleanliness(row.get("current_provider_token_cleanliness", ProviderTokenCleanliness.MEASURED.value))
@@ -123,6 +125,21 @@ def _replacement_blockers(
     if _float_or_none(row.get("wall_delta_sec")) is None:
         blockers.append("missing_wall_delta_sec")
     return sorted(set(blockers))
+
+
+def _read_model_blockers(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, Mapping):
+        return ["read_model_invalid"]
+    blockers = [f"read_model:{item}" for item in validate_claim_evidence_read_model(raw)]
+    if str(raw.get("status") or "RETURN") != "PASS":
+        blockers.append("read_model_not_pass")
+    if bool(raw.get("runtime_update_allowed", False)):
+        blockers.append("read_model_runtime_update_attempt")
+    if bool(raw.get("public_benchmark_allowed", False)):
+        blockers.append("read_model_public_benchmark_attempt")
+    return blockers
 
 
 def _primary_blocker_reason(blockers: list[str]) -> str:
