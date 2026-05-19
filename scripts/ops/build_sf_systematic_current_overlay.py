@@ -3,9 +3,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from nexus.contracts.sf_replacement import build_sf_replacement_cleanliness_gate
+from scripts.ops.build_sf_replacement_cleanliness_manifest import rollup_row_to_replacement_gate_row
 
 
 DEFAULT_ROLLUP = Path("docs/reports/NEXUS_SF_SYSTEMATIC_ALL_CAPABILITY_LIVE_ROLLUP_V32_2026-05-19.json")
@@ -21,13 +29,15 @@ def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _winner_for_row(row: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
-    verdict = str(row.get("verdict") or "")
+def _winner_for_row(row: dict[str, Any]) -> tuple[str, dict[str, Any], str, dict[str, Any]]:
+    decision = build_sf_replacement_cleanliness_gate(rollup_row_to_replacement_gate_row(row))
     challenger = row.get("challenger") if isinstance(row.get("challenger"), dict) else {}
     current = row.get("current_best") if isinstance(row.get("current_best"), dict) else {}
-    if verdict == "replace_candidate":
-        return "replace_candidate", challenger, str(challenger.get("skill_id") or "")
-    return "keep_current_best", current, str(current.get("skill_id") or "")
+    if decision["decision"] == "REPLACE":
+        return "replace_candidate", challenger, str(challenger.get("skill_id") or ""), decision
+    if decision["decision"] == "HOLD":
+        return "hold", current, str(current.get("skill_id") or ""), decision
+    return "keep_current_best", current, str(current.get("skill_id") or ""), decision
 
 
 def build_current_overlay(rollup: dict[str, Any]) -> dict[str, Any]:
@@ -37,13 +47,16 @@ def build_current_overlay(rollup: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
     replace_count = 0
     keep_count = 0
+    hold_count = 0
 
     for row in rows:
         capability = str(row.get("capability") or "").strip()
-        action, winner, skill_id = _winner_for_row(row)
+        action, winner, skill_id, replacement_decision = _winner_for_row(row)
         if not capability:
             blockers.append("missing_capability")
             continue
+        for blocker in replacement_decision.get("blockers", []):
+            blockers.append(f"{capability}:replacement_gate:{blocker}")
         if not skill_id:
             blockers.append(f"{capability}:missing_skill_id")
             continue
@@ -64,6 +77,8 @@ def build_current_overlay(rollup: dict[str, Any]) -> dict[str, Any]:
         primary[capability] = skill_id
         if action == "replace_candidate":
             replace_count += 1
+        elif action == "hold":
+            hold_count += 1
         else:
             keep_count += 1
         selected_rows.append(
@@ -73,6 +88,9 @@ def build_current_overlay(rollup: dict[str, Any]) -> dict[str, Any]:
                 "decision": action,
                 "evidence_refs": evidence_refs,
                 "receipt_path": str(winner.get("receipt_path") or ""),
+                "replacement_blockers": list(replacement_decision.get("blockers") or []),
+                "replacement_decision": str(replacement_decision.get("decision") or ""),
+                "replacement_reason": str(replacement_decision.get("reason") or ""),
                 "token_delta_challenger_minus_current": row.get("token_delta_challenger_minus_current"),
                 "wall_delta_challenger_minus_current": row.get("wall_delta_challenger_minus_current"),
             }
@@ -103,6 +121,7 @@ def build_current_overlay(rollup: dict[str, Any]) -> dict[str, Any]:
             "capability_count": len(primary),
             "replace_candidate_count": replace_count,
             "keep_current_best_count": keep_count,
+            "replacement_hold_count": hold_count,
             "blocker_count": len(blockers),
             "runtime_update_allowed": status == "PASS",
             "public_benchmark_allowed": False,
@@ -125,6 +144,7 @@ def write_markdown(overlay: dict[str, Any], output: Path) -> None:
         f"- capability_count: `{overlay['summary']['capability_count']}`",
         f"- replace_candidate_count: `{overlay['summary']['replace_candidate_count']}`",
         f"- keep_current_best_count: `{overlay['summary']['keep_current_best_count']}`",
+        f"- replacement_hold_count: `{overlay['summary']['replacement_hold_count']}`",
         f"- runtime_update_allowed: `{overlay['runtime_update_allowed']}`",
         f"- public_benchmark_allowed: `{overlay['public_benchmark_allowed']}`",
         "",

@@ -158,8 +158,15 @@ version_scope:
 ## 2026-04-20: Deep Architectural Debt Discovery (Stage 2 Audit)
 - **Phenomenon**: Found duplicated `DomainFirewall` implementation inside `router.py` and hardcoded `time.sleep` in core evolutionary components.
 - **Root Cause**: Rapid integration of siloed features without central refactoring and persistence of legacy mock snippets.
+
 - **Decision**: Logged as Sev-1 debts in the Evolution Spec. Mandated DRY refactoring for the Firewall and conversion of mocks to event-driven logic.
 - **Prevention**: Pre-promotion "Structural Linting" to detect class duplication and hardcoded delays in core paths.
+
+## 2026-05-20: SF Overlay Fixture Verdict Drift
+- **Phenomenon**: `tests/ops/test_build_sf_systematic_current_overlay.py` expected a keep-current row while its token and wall deltas both favored the challenger, causing the new canonical replacement gate to select replacement.
+- **Root Cause**: The legacy overlay path treated rollup `verdict` as authoritative, while the cleaned contract derives replacement from receipt cleanliness plus token/wall deltas.
+- **Decision**: Route overlay selection through `SFReplacementDecision` and update fixtures so keep-current examples carry an explicit cost or wall tradeoff.
+- **Prevention**: SF overlay tests must encode the same replacement inputs consumed by the cleanliness gate; raw `verdict` strings are diagnostic context, not the replacement source of truth.
 
 ## 2026-04-20: Deep Purification and Intent Decomposition Hardening (Stage 4)
 - **Phenomenon**: Intent decomposition in `campaign_general.py` was fragile due to regex heuristics, and `context_hub.py` was becoming a monolithic bottleneck.

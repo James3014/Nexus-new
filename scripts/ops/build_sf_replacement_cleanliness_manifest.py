@@ -25,7 +25,7 @@ def build_manifest_from_sf_rollup(
     rows = rollup.get("rows", []) or []
     if not isinstance(rows, list):
         raise ValueError("invalid_sf_rollup_rows")
-    normalized = [_rollup_row_to_gate_row(row) for row in rows if isinstance(row, Mapping)]
+    normalized = [rollup_row_to_replacement_gate_row(row) for row in rows if isinstance(row, Mapping)]
     manifest = build_sf_replacement_cleanliness_manifest(normalized)
     manifest["source_path"] = str(rollup_path)
     manifest["source_schema"] = str(rollup.get("schema") or "")
@@ -35,7 +35,7 @@ def build_manifest_from_sf_rollup(
     return _summary(manifest, output_path=output_path, dry_run=dry_run)
 
 
-def _rollup_row_to_gate_row(row: Mapping[str, Any]) -> dict[str, Any]:
+def rollup_row_to_replacement_gate_row(row: Mapping[str, Any]) -> dict[str, Any]:
     current = row.get("current_best", {})
     challenger = row.get("challenger", {})
     current = current if isinstance(current, Mapping) else {}
