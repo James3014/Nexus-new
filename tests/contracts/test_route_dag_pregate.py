@@ -30,6 +30,8 @@ def test_route_dag_pregate_exposes_dependencies_receipts_and_fallbacks() -> None
     assert pregate["claim_boundary"][0] == "Route DAG pregate is a read-only planning artifact."
     assert pregate["required_receipts"]["codeintel"] == ["code_scan", "code_impact", "related_tests"]
     assert pregate["fallback_policy_by_capability"]["artifact_gate"] == "fail_closed"
+    assert pregate["retry_policy_by_capability"]["artifact_gate"] == "no_retry_fail_closed"
+    assert pregate["retry_policy_by_capability"]["codeintel"] == "bounded_retry_once"
     assert {"from": "artifact_gate", "to": "codeintel", "dependency_planned": "true"} in pregate["dependency_edges"]
     assert {"a": "codeintel", "b": "research"} in pregate["parallelizable_edges"]
 

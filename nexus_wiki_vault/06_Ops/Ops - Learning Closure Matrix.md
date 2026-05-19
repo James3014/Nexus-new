@@ -2683,3 +2683,10 @@ version_scope:
 - Failure: the contract correctly skipped the too-large high-priority source and kept the next source that fit, while the test expected the impossible selection.
 - Lesson: budget-contract tests should use arithmetic that directly supports the behavior being asserted.
 - Guardrail: when asserting priority ordering, set the total budget high enough for the preferred source and low enough to drop only the intended lower-priority source.
+
+## 2026-05-20 - required route DAG nodes should not promise replay retries
+
+- Trigger: route DAG pregate tests expected `artifact_gate` to use `single_targeted_replay_then_return`.
+- Failure: `artifact_gate` was required in the capability plan, so the contract correctly emitted `no_retry_fail_closed` to avoid masking missing required evidence with retry language.
+- Lesson: retry policy tests must respect state precedence: required nodes fail closed before category-specific retry policies apply.
+- Guardrail: keep route DAG retry expectations aligned with `required > governance/validation > conditional > optional` precedence.

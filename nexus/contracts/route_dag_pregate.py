@@ -30,11 +30,15 @@ def build_route_dag_pregate(
             node["capability"]: node["fallback_policy"]
             for node in nodes
         },
+        "retry_policy_by_capability": {
+            node["capability"]: node["retry_policy"]
+            for node in nodes
+        },
         "nodes": nodes,
         "blockers": blockers,
         "claim_boundary": [
             "Route DAG pregate is a read-only planning artifact.",
-            "It exposes dependencies, parallelizable work, required receipts, and fallback policy.",
+            "It exposes dependencies, parallelizable work, required receipts, fallback policy, and retry policy.",
             "It must not decide delivery, promotion, public readiness, or runtime dispatch by itself.",
         ],
     }
@@ -68,6 +72,7 @@ def _node_readout(capability: str, state: str, raw_node: Any) -> dict[str, Any]:
         "parallelizable_with": _strings(node.get("parallelizable_with")),
         "required_receipts": _strings(node.get("evidence_outputs")),
         "fallback_policy": _fallback_policy(state=state, category=category, default_state=default_state),
+        "retry_policy": _retry_policy(state=state, category=category, default_state=default_state),
         "node_present": bool(node),
     }
 
@@ -91,6 +96,16 @@ def _fallback_policy(*, state: str, category: str, default_state: str) -> str:
     if state in {"conditional", "pending"}:
         return "defer_or_degrade_to_baseline"
     return "degrade_to_baseline"
+
+
+def _retry_policy(*, state: str, category: str, default_state: str) -> str:
+    if state == "required" or default_state == "required":
+        return "no_retry_fail_closed"
+    if category in {"governance", "validation"}:
+        return "single_targeted_replay_then_return"
+    if state in {"conditional", "pending"}:
+        return "defer_without_retry"
+    return "bounded_retry_once"
 
 
 def _dependency_edges(nodes: list[dict[str, Any]]) -> list[dict[str, str]]:
