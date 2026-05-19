@@ -50,3 +50,22 @@ def test_route_dag_pregate_cli_can_write_to_output_dir(tmp_path, capsys) -> None
     assert rc == 0
     assert captured["output"].startswith(str(output_dir))
     assert (output_dir / "NEXUS_OPT_ROUTE_DAG_PREGATE_2026-05-20.json").exists()
+
+
+def test_route_dag_pregate_manifest_can_include_skeleton_lookup(tmp_path) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "core.py").write_text("def target(value):\n    return value\n", encoding="utf-8")
+
+    manifest = build_route_dag_pregate_manifest(
+        task_desc="Fix target with skeleton-first context",
+        task_type="bug",
+        project_root=tmp_path,
+        symbols=["target"],
+    )
+
+    assert manifest["runtime_dispatch_changed"] is False
+    assert len(manifest["code_skeleton_lookup"]) == 1
+    assert manifest["code_skeleton_lookup"][0]["found"] is True
+    assert manifest["code_skeleton_lookup"][0]["matches"][0]["file_path"] == "pkg/core.py"

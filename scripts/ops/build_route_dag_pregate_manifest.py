@@ -8,6 +8,7 @@ from typing import Any
 
 from nexus.contracts.route_dag_pregate import build_route_dag_pregate
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
+from nexus.services.codeintel.skeleton_provider import lookup_implementation
 from scripts.ops.report_output import resolve_report_output
 
 
@@ -22,14 +23,16 @@ def build_route_dag_pregate_manifest(
     pillars: dict[str, Any] | None = None,
     codeintel: dict[str, Any] | None = None,
     phase_trace: dict[str, Any] | None = None,
+    project_root: str | Path = ".",
+    symbols: list[str] | None = None,
 ) -> dict[str, Any]:
     plan = CapabilityPlanner().plan(
         task_desc=task_desc,
         task_type=task_type,
-        route=route,
-        pillars=pillars,
-        codeintel=codeintel,
-        phase_trace=phase_trace,
+        route=route or {},
+        pillars=pillars or {},
+        codeintel=codeintel or {},
+        phase_trace=phase_trace or {},
     ).to_dict()
     pregate = build_route_dag_pregate(
         capability_plan=plan,
@@ -38,6 +41,11 @@ def build_route_dag_pregate_manifest(
     pregate["task_desc"] = task_desc
     pregate["task_type"] = task_type
     pregate["source"] = "capability_planner_dry_run"
+    pregate["code_skeleton_lookup"] = [
+        lookup_implementation(project_root, symbol).to_dict()
+        for symbol in (symbols or [])
+        if symbol.strip()
+    ]
     pregate["runtime_dispatch_changed"] = False
     return pregate
 
@@ -64,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pillars-json", default="")
     parser.add_argument("--codeintel-json", default="")
     parser.add_argument("--phase-trace-json", default="")
+    parser.add_argument("--project-root", default=".")
+    parser.add_argument("--symbol", action="append", default=[])
     parser.add_argument("--output", default="", type=Path)
     parser.add_argument("--output-dir", default="", type=Path)
     parser.add_argument("--dry-run", action="store_true")
@@ -76,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         pillars=_json_arg(args.pillars_json, name="pillars"),
         codeintel=_json_arg(args.codeintel_json, name="codeintel"),
         phase_trace=_json_arg(args.phase_trace_json, name="phase_trace"),
+        project_root=args.project_root,
+        symbols=list(args.symbol),
     )
     output_arg = str(args.output)
     output_dir_arg = str(args.output_dir)
@@ -96,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                 "blocker_count": len(manifest["blockers"]),
                 "output": str(output),
                 "runtime_dispatch_changed": manifest["runtime_dispatch_changed"],
+                "skeleton_lookup_count": len(manifest["code_skeleton_lookup"]),
             },
             ensure_ascii=False,
             sort_keys=True,

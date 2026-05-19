@@ -2690,3 +2690,10 @@ version_scope:
 - Failure: `artifact_gate` was required in the capability plan, so the contract correctly emitted `no_retry_fail_closed` to avoid masking missing required evidence with retry language.
 - Lesson: retry policy tests must respect state precedence: required nodes fail closed before category-specific retry policies apply.
 - Guardrail: keep route DAG retry expectations aligned with `required > governance/validation > conditional > optional` precedence.
+
+## 2026-05-20 - route pregate adapters must normalize optional dict inputs
+
+- Trigger: `build_route_dag_pregate_manifest()` was called with no route payload while adding skeleton lookup readout.
+- Failure: `CapabilityPlanner.plan()` currently expects a dict-like route and accessed `route.get`, so the adapter raised `AttributeError`.
+- Lesson: ops adapters should normalize optional JSON object inputs at the boundary instead of relying on deeper planners to accept `None`.
+- Guardrail: pass `{}` for missing route, pillars, codeintel, and phase trace payloads in read-only exporter seams.
