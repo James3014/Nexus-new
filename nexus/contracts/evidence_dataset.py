@@ -32,6 +32,9 @@ class EvidenceDatasetRecord:
     phase_wall_sec: Mapping[str, float | None] = field(default_factory=dict)
     token_counts: Mapping[str, int | None] = field(default_factory=dict)
     gate_status: Mapping[str, str] = field(default_factory=dict)
+    evidence_seal_status: str = "NOT_APPLICABLE"
+    evidence_hash_status: str = "NOT_APPLICABLE"
+    partial_telemetry_detected: bool = False
     blockers: tuple[str, ...] = ()
     schema: str = EVIDENCE_DATASET_RECORD_SCHEMA
 
@@ -73,6 +76,9 @@ class EvidenceDatasetRecord:
             "phase_wall_sec": dict(self.phase_wall_sec),
             "token_counts": dict(self.token_counts),
             "gate_status": dict(self.gate_status),
+            "evidence_seal_status": self.evidence_seal_status,
+            "evidence_hash_status": self.evidence_hash_status,
+            "partial_telemetry_detected": self.partial_telemetry_detected,
             "blockers": list(self.blockers),
         }
 
@@ -99,6 +105,10 @@ def evidence_record_from_sf_smoke_case(
     skill_effect_status = "receipt_confirmed" if chain_complete and status == "PASS" else "not_confirmed"
     refs = [source_path]
     receipt_refs = [f"runtime_final_receipt_chain:{capability}:{skill_id}"]
+    evidence_seal_status = str(case.get("evidence_seal_status") or "NOT_APPLICABLE").upper()
+    evidence_hash_status = str(case.get("evidence_hash_status") or "NOT_APPLICABLE").upper()
+    if bool(case.get("partial_telemetry_detected", False)):
+        blockers.append("partial_telemetry_detected")
     return EvidenceDatasetRecord(
         record_id=_stable_record_id(source_path, capability, skill_id, status),
         source_path=source_path,
@@ -123,6 +133,9 @@ def evidence_record_from_sf_smoke_case(
             "gate_passed": _pass_return(chain.get("gate_passed")),
             "outcome_contributed": _pass_return(chain.get("outcome_contributed")),
         },
+        evidence_seal_status=evidence_seal_status,
+        evidence_hash_status=evidence_hash_status,
+        partial_telemetry_detected=bool(case.get("partial_telemetry_detected", False)),
         blockers=tuple(sorted(set(blockers))),
     )
 
@@ -141,6 +154,10 @@ def evidence_record_from_benchmark_row(
     receipt_refs = _refs(row, ("receipt_file", "runtime_receipt_file", "route_receipt_file"))
     blockers = [str(item) for item in row.get("data_contract_violation_reasons", []) or []]
     blockers.extend(str(item) for item in row.get("blockers", []) or [])
+    evidence_seal_status = str(row.get("evidence_seal_status") or "NOT_APPLICABLE").upper()
+    evidence_hash_status = str(row.get("evidence_hash_status") or "NOT_APPLICABLE").upper()
+    if bool(row.get("partial_telemetry_detected", False)):
+        blockers.append("partial_telemetry_detected")
     status = str(row.get("status") or row.get("rubric_status") or "UNKNOWN").upper()
     delivery_status = status
     trust_status = "RETURN" if bool(row.get("trust_mismatch", False)) else "PASS"
@@ -173,7 +190,12 @@ def evidence_record_from_benchmark_row(
             "delivery": delivery_status,
             "trust": trust_status,
             "provider_token": provider_cleanliness.value,
+            "evidence_seal": evidence_seal_status,
+            "evidence_hash": evidence_hash_status,
         },
+        evidence_seal_status=evidence_seal_status,
+        evidence_hash_status=evidence_hash_status,
+        partial_telemetry_detected=bool(row.get("partial_telemetry_detected", False)),
         blockers=tuple(sorted(set(item for item in blockers if item))),
     )
 
@@ -216,6 +238,13 @@ def validate_evidence_dataset_record(payload: Mapping[str, Any]) -> list[str]:
         blockers.append("invalid_provider_token_cleanliness")
     if payload.get("claim_class") == ClaimClass.PUBLIC_READY.value and not payload.get("evidence_refs"):
         blockers.append("public_ready_requires_evidence_refs")
+    if bool(payload.get("partial_telemetry_detected", False)):
+        blockers.append("partial_telemetry_detected")
+    if payload.get("claim_class") == ClaimClass.PUBLIC_READY.value:
+        if str(payload.get("evidence_seal_status") or "").upper() != "PASS":
+            blockers.append("public_ready_requires_evidence_seal")
+        if str(payload.get("evidence_hash_status") or "").upper() != "PASS":
+            blockers.append("public_ready_requires_evidence_hash")
     return sorted(set(blockers))
 
 

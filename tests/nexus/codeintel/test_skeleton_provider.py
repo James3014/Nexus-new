@@ -122,3 +122,19 @@ def test_lookup_implementation_uses_last_known_good_on_syntax_noise(tmp_path: Pa
     assert clean.found is True
     assert fallback.found is True
     assert fallback.matches[0].ast_status == "LAST_KNOWN_GOOD"
+
+
+def test_lookup_implementation_can_restore_last_known_good_snapshot(tmp_path: Path) -> None:
+    target = tmp_path / "mod.py"
+    target.write_text("def target(value):\n    return value\n", encoding="utf-8")
+    provider = PythonCodeSkeletonProvider(tmp_path)
+    assert provider.lookup_implementation("target").found is True
+    snapshot = provider.export_symbol_snapshot()
+
+    target.write_text("def target(value):\n    return value +\n", encoding="utf-8")
+    restored = PythonCodeSkeletonProvider(tmp_path)
+    restored.load_symbol_snapshot(snapshot)
+    result = restored.lookup_implementation("target")
+
+    assert result.found is True
+    assert result.matches[0].ast_status == "LAST_KNOWN_GOOD"

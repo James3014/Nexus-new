@@ -129,7 +129,33 @@ def test_public_ready_record_requires_evidence_refs() -> None:
         }
     )
 
-    assert blockers == ["public_ready_requires_evidence_refs"]
+    assert blockers == [
+        "public_ready_requires_evidence_hash",
+        "public_ready_requires_evidence_refs",
+        "public_ready_requires_evidence_seal",
+    ]
+
+
+def test_public_ready_record_requires_sealed_hash_valid_evidence() -> None:
+    blockers = validate_evidence_dataset_record(
+        {
+            "record_id": "evidence:test",
+            "source_path": "docs/reports/public.json",
+            "task_id": "task-001",
+            "capability": "research_control_plane",
+            "claim_class": ClaimClass.PUBLIC_READY.value,
+            "provider_token_cleanliness": ProviderTokenCleanliness.MEASURED.value,
+            "evidence_refs": ["docs/reports/public.json"],
+            "evidence_seal_status": "RETURN",
+            "evidence_hash_status": "PASS",
+            "partial_telemetry_detected": True,
+        }
+    )
+
+    assert blockers == [
+        "partial_telemetry_detected",
+        "public_ready_requires_evidence_seal",
+    ]
 
 
 def test_enum_inputs_are_accepted() -> None:

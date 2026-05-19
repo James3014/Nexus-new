@@ -58,6 +58,20 @@ def test_registry_upsert_and_stats():
         assert res[0]["trust_level"] == "production" # Ordered by trust
 
 
+def test_registry_write_guard_receipt_uses_wal_and_blocks_unqueued_concurrency():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        registry = SkillRegistry(Path(tmpdir) / "shared_skills.db")
+
+        clean = registry.build_write_guard_receipt()
+        concurrent = registry.build_write_guard_receipt(concurrent_writer_count=3)
+
+        assert clean["status"] == "PASS"
+        assert clean["wal_status"] == "PASS"
+        assert concurrent["status"] == "RETURN"
+        assert "write_queue_not_pass" in concurrent["blockers"]
+        assert "backoff_not_pass" in concurrent["blockers"]
+
+
 def test_exchange_trust_demotion():
     """Verify remote skills are capped at 'reviewed'."""
     with tempfile.TemporaryDirectory() as tmpdir:

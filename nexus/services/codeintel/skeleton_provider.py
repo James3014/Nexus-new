@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 from pathlib import Path
 from typing import Iterable
 
@@ -26,6 +28,30 @@ class PythonCodeSkeletonProvider:
         if not matches:
             return CodeSkeletonLookupResult(symbol=target, found=False, reason="symbol_not_found")
         return CodeSkeletonLookupResult(symbol=target, found=True, matches=matches)
+
+    def export_symbol_snapshot(self) -> dict[str, object]:
+        symbols = [symbol.to_dict() for cached in self._symbol_cache.values() for symbol in cached]
+        return {
+            "schema": "nexus.code_skeleton_snapshot.v1",
+            "root": str(self.root),
+            "symbol_count": len(symbols),
+            "snapshot_hash": _snapshot_hash(symbols),
+            "symbols": symbols,
+        }
+
+    def load_symbol_snapshot(self, payload: dict[str, object]) -> None:
+        if payload.get("schema") != "nexus.code_skeleton_snapshot.v1":
+            raise ValueError("invalid_code_skeleton_snapshot_schema")
+        raw_symbols = payload.get("symbols", [])
+        if not isinstance(raw_symbols, list):
+            raise ValueError("invalid_code_skeleton_snapshot_symbols")
+        symbols = [_symbol_from_dict(item) for item in raw_symbols if isinstance(item, dict)]
+        if _snapshot_hash([symbol.to_dict() for symbol in symbols]) != payload.get("snapshot_hash"):
+            raise ValueError("code_skeleton_snapshot_hash_mismatch")
+        self._symbol_cache = {}
+        for symbol in symbols:
+            path = self.root / symbol.file_path
+            self._symbol_cache.setdefault(path, []).append(symbol)
 
     def _python_files(self) -> Iterable[Path]:
         roots = self.search_paths or (Path("."),)
@@ -174,3 +200,22 @@ def _with_ast_status(symbol: CodeSkeletonSymbol, ast_status: str) -> CodeSkeleto
         rationale_context=symbol.rationale_context,
         ast_status=ast_status,
     )
+
+
+def _symbol_from_dict(payload: dict[str, object]) -> CodeSkeletonSymbol:
+    return CodeSkeletonSymbol(
+        symbol=str(payload.get("symbol") or ""),
+        file_path=str(payload.get("file_path") or ""),
+        start_line=int(payload.get("start_line") or 0),
+        end_line=int(payload.get("end_line") or 0),
+        kind=str(payload.get("kind") or ""),
+        signature=str(payload.get("signature") or ""),
+        docstring_present=bool(payload.get("docstring_present", False)),
+        rationale_context=tuple(str(item) for item in payload.get("rationale_context", []) or []),
+        ast_status=str(payload.get("ast_status") or "PARSED"),
+    )
+
+
+def _snapshot_hash(symbols: list[dict[str, object]]) -> str:
+    payload = json.dumps(symbols, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
