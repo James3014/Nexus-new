@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from nexus.contracts.route_runtime_plan import build_route_runtime_plan_from_pregate
 from scripts.ops.build_route_dag_pregate_manifest import build_route_dag_pregate_manifest, main
 
 
@@ -28,6 +29,12 @@ def test_build_route_dag_pregate_manifest_is_read_only_and_exposes_retry_policy(
     assert manifest["evidence_hash_status"] == "PASS"
     assert manifest["partial_telemetry_detected"] is False
     assert manifest["evidence_refs"][0].startswith("route_dag_pregate:content_hash:")
+    assert manifest["runtime_plan"]["schema"] == "nexus.route_runtime_plan.v1"
+    assert manifest["runtime_plan"]["status"] == "PASS"
+    assert manifest["runtime_plan"]["dispatch_mode"] == "read_only_plan"
+    assert manifest["runtime_plan"]["runtime_dispatch_changed"] is False
+    assert manifest["runtime_plan"]["claim_verdict"] == "NOT_EVALUATED"
+    assert manifest["runtime_plan"]["public_benchmark_allowed"] is False
     assert "artifact_gate" in manifest["fallback_policy_by_capability"]
     assert manifest["retry_policy_by_capability"]["artifact_gate"] == "no_retry_fail_closed"
     assert any(edge["to"] == "codeintel" for edge in manifest["dependency_edges"])
@@ -74,3 +81,32 @@ def test_route_dag_pregate_manifest_can_include_skeleton_lookup(tmp_path) -> Non
     assert len(manifest["code_skeleton_lookup"]) == 1
     assert manifest["code_skeleton_lookup"][0]["found"] is True
     assert manifest["code_skeleton_lookup"][0]["matches"][0]["file_path"] == "pkg/core.py"
+
+
+def test_route_runtime_plan_returns_when_pregate_attempts_dispatch_or_claim() -> None:
+    runtime_plan = build_route_runtime_plan_from_pregate(
+        {
+            "schema": "nexus.route_dag_pregate.v1",
+            "status": "PASS",
+            "runtime_dispatch_changed": True,
+            "claim_verdict": "PASS",
+            "public_benchmark_allowed": True,
+            "nodes": [
+                {
+                    "capability": "swarm",
+                    "state": "required",
+                    "execution_slot": "serial_forced_swarm",
+                    "required_receipts": ["swarm_receipt"],
+                }
+            ],
+        }
+    )
+
+    assert runtime_plan["status"] == "RETURN"
+    assert runtime_plan["runtime_dispatch_changed"] is False
+    assert runtime_plan["claim_verdict"] == "NOT_EVALUATED"
+    assert runtime_plan["public_benchmark_allowed"] is False
+    assert runtime_plan["isolated_serial_capabilities"] == ["swarm"]
+    assert "runtime_dispatch_changed" in runtime_plan["blockers"]
+    assert "claim_verdict_evaluated_in_pregate" in runtime_plan["blockers"]
+    assert "public_benchmark_allowed_in_pregate" in runtime_plan["blockers"]

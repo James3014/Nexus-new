@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.contracts.route_dag_pregate import build_route_dag_pregate
+from nexus.contracts.route_runtime_plan import build_route_runtime_plan_from_pregate
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.services.codeintel.skeleton_provider import lookup_implementation
 from scripts.ops.report_output import resolve_report_output
@@ -54,6 +55,7 @@ def build_route_dag_pregate_manifest(
     pregate["evidence_seal_status"] = "PASS"
     pregate["evidence_hash_status"] = "PASS"
     pregate["partial_telemetry_detected"] = False
+    pregate["runtime_plan"] = build_route_runtime_plan_from_pregate(pregate)
     return pregate
 
 
