@@ -10,6 +10,7 @@ from nexus.services.codeintel.models import (
     CodeSkeletonLookupResult,
     CodeSkeletonSymbol,
 )
+from nexus.services.codeintel.read_warning import build_large_read_warning_receipt
 from nexus.services.codeintel.skeleton_provider import PythonCodeSkeletonProvider, lookup_implementation
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "CodeSkeletonSymbol",
     "PythonCodeSkeletonProvider",
     "analyze_impact",
+    "build_large_read_warning_receipt",
     "context_for_symbol",
     "lookup_implementation",
     "scan_codebase",
