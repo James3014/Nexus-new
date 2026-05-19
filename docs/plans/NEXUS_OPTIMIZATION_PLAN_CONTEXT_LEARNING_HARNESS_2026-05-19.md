@@ -693,3 +693,11 @@ Lesson:
 - Tests for freshness-gated learning inputs must not hard-code dates that drift past the production retention window.
 - Treat stale fixture failures as test-data drift, not as a reason to weaken freshness filtering.
 - Prevention rule: use current UTC timestamps for positive freshness fixtures and explicit old timestamps only in rejection tests.
+
+### Failure Lesson: Benchmark Test Path Drift
+
+Lesson:
+
+- Public benchmark regression tests live under `tests/benchmark/`, not `tests/bench/`.
+- Treat a missing test path as command drift, not as evidence about benchmark readiness.
+- Prevention rule: locate benchmark test modules with `rg` before composing aggregate regression commands.
