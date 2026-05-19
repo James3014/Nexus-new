@@ -2648,3 +2648,10 @@ version_scope:
 - Failure: the builder converted enum instances with `str(enum)`, producing strings like `ClaimClass.RUNTIME_APPLY_REVIEW` instead of the serialized value expected by the enum constructor.
 - Lesson: contract builders should accept both raw JSON strings and typed enum instances without changing their serialized meaning.
 - Guardrail: normalize enum inputs through a shared helper before validation, and keep builder tests covering both enum and string inputs.
+
+## 2026-05-20 - evidence dataset contracts should expose invalid enum inputs as blockers
+
+- Trigger: `EvidenceDatasetRecord` was instantiated with an invalid `claim_class` in a focused contract regression.
+- Failure: enum coercion raised the raw Python enum error before the contract could return the stable `invalid_claim_class` blocker.
+- Lesson: dataclass contract entrypoints should preserve their own blocker vocabulary even when normalization fails early.
+- Guardrail: wrap enum normalization failures at the contract boundary so tests and downstream gates see stable fail-closed reason codes.
