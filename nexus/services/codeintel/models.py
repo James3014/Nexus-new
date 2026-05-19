@@ -58,6 +58,8 @@ class CodeSkeletonSymbol:
     kind: str
     signature: str
     docstring_present: bool = False
+    rationale_context: tuple[str, ...] = ()
+    ast_status: str = "PARSED"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

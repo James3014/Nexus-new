@@ -66,6 +66,12 @@ from nexus.contracts.route_context_seam_freeze import (
     build_route_context_seam_freeze,
     validate_route_context_seam_freeze,
 )
+from nexus.contracts.sqlite_write_guard import (
+    SQLITE_WRITE_GUARD_SCHEMA,
+    SQLiteWriteGuardReceipt,
+    build_sqlite_write_guard_receipt,
+    validate_sqlite_write_guard,
+)
 from nexus.contracts.optimization_report import (
     ClaimClass,
     OptimizationReportContract,
@@ -92,6 +98,7 @@ __all__ = [
     "ROUTE_DAG_PREGATE_SCHEMA",
     "RETRIEVAL_RECEIPT_SCHEMA",
     "ROUTE_CONTEXT_SEAM_FREEZE_SCHEMA",
+    "SQLITE_WRITE_GUARD_SCHEMA",
     "SF_REPLACEMENT_CLEANLINESS_GATE_SCHEMA",
     "EvidenceDatasetRecord",
     "ContextBudgetReceipt",
@@ -103,6 +110,7 @@ __all__ = [
     "RetrievalReceipt",
     "RetrievalResultReceipt",
     "RouteContextSeamFreeze",
+    "SQLiteWriteGuardReceipt",
     "SFReplacementDecision",
     "ClaimClass",
     "OptimizationReportContract",
@@ -117,6 +125,7 @@ __all__ = [
     "build_route_dag_pregate",
     "build_retrieval_receipt",
     "build_route_context_seam_freeze",
+    "build_sqlite_write_guard_receipt",
     "build_sf_replacement_cleanliness_gate",
     "build_sf_replacement_cleanliness_manifest",
     "classify_evidence_retention_path",
@@ -132,4 +141,5 @@ __all__ = [
     "validate_optimization_report_contract",
     "validate_retrieval_receipt",
     "validate_route_context_seam_freeze",
+    "validate_sqlite_write_guard",
 ]
