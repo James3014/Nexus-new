@@ -332,6 +332,39 @@ class ContextHub:
             token_budget=token_budget,
         )
 
+    def build_runtime_context_adapter_receipt(
+        self,
+        *,
+        task_id: str,
+        token_budget: int = 4000,
+        state_view: StateView | NexusState | None = None,
+        extra_sources: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Read-only preflight receipt before wiring ContextHub runtime behavior."""
+
+        contract = self.build_context_assembly_contract(
+            task_id=task_id,
+            token_budget=token_budget,
+            state_view=state_view,
+            extra_sources=extra_sources,
+        )
+        blockers = list(contract.get("blockers", []) or [])
+        return {
+            "schema": "nexus.runtime_context_adapter_receipt.v1",
+            "status": "PASS" if not blockers else "RETURN",
+            "task_id": task_id,
+            "context_assembly_status": contract.get("status"),
+            "runtime_dispatch_changed": False,
+            "public_benchmark_allowed": False,
+            "runtime_update_allowed": False,
+            "contract": contract,
+            "blockers": blockers,
+            "claim_boundary": [
+                "Runtime context adapter receipts preflight context assembly only.",
+                "They do not change ContextHub assembly, route dispatch, or public benchmark readiness.",
+            ],
+        }
+
     def _context_budget_sources(
         self,
         *,

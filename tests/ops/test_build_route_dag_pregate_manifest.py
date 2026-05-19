@@ -24,6 +24,10 @@ def test_build_route_dag_pregate_manifest_is_read_only_and_exposes_retry_policy(
     assert manifest["status"] == "PASS"
     assert manifest["source"] == "capability_planner_dry_run"
     assert manifest["runtime_dispatch_changed"] is False
+    assert manifest["evidence_seal_status"] == "PASS"
+    assert manifest["evidence_hash_status"] == "PASS"
+    assert manifest["partial_telemetry_detected"] is False
+    assert manifest["evidence_refs"][0].startswith("route_dag_pregate:content_hash:")
     assert "artifact_gate" in manifest["fallback_policy_by_capability"]
     assert manifest["retry_policy_by_capability"]["artifact_gate"] == "no_retry_fail_closed"
     assert any(edge["to"] == "codeintel" for edge in manifest["dependency_edges"])

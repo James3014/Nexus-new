@@ -111,3 +111,16 @@ def test_context_hub_context_assembly_contract_returns_when_core_context_exceeds
 
     assert contract["status"] == "RETURN"
     assert "receipt_not_pass" in contract["blockers"]
+
+
+def test_context_hub_runtime_context_adapter_receipt_is_read_only(tmp_path):
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+
+    receipt = hub.build_runtime_context_adapter_receipt(task_id="ctx-runtime", token_budget=120)
+
+    assert receipt["schema"] == "nexus.runtime_context_adapter_receipt.v1"
+    assert receipt["status"] == "PASS"
+    assert receipt["runtime_dispatch_changed"] is False
+    assert receipt["runtime_update_allowed"] is False
+    assert receipt["public_benchmark_allowed"] is False
+    assert receipt["contract"]["task_id"] == "ctx-runtime"
