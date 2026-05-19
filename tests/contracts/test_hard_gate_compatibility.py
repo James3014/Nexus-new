@@ -88,3 +88,29 @@ def test_hard_gate_compatibility_validator_rejects_unlock_attempts() -> None:
         "compatibility_contract_must_not_unlock_public_benchmark",
         "compatibility_contract_must_not_update_runtime",
     ]
+
+
+def test_hard_gate_compatibility_blocks_execution_hygiene_gaps() -> None:
+    payload = build_hard_gate_compatibility(
+        jit_symbol_drift_detected=True,
+        ast_graph_freshness_status="RETURN",
+        phase_token_sentinel_status="RETURN",
+        retry_pollution_detected=True,
+        retry_pollution_isolated=False,
+        memory_sanitizer_status="RETURN",
+        private_leak_detected=True,
+        dirty_worktree=True,
+        spec_kit_init_requested=True,
+        transient_output_root_status="RETURN",
+    )
+
+    assert payload["status"] == "RETURN"
+    assert payload["blockers"] == [
+        "ast_graph_not_fresh",
+        "dirty_worktree_blocks_spec_kit",
+        "memory_sanitizer_not_pass",
+        "phase_token_sentinel_not_pass",
+        "private_leak_detected",
+        "retry_pollution_not_isolated",
+        "transient_output_root_not_pass",
+    ]

@@ -97,6 +97,10 @@ Task cards:
 - `OPT-G0-G`: add a skill-tier quarantine guard before context assembly or runtime/public route tests can consume skill content.
 - `OPT-G0-H`: add a research supply gap guard that blocks live benchmark escalation unless using diagnostic-only local mock receipts.
 - `OPT-G0-I`: add an AutonomicRouter-forward DAG guard that serializes forced-swarm nodes before static parallel planning.
+- `OPT-G0-J`: add an AST freshness guard so skeleton-first blast-radius edges cannot be consumed after symbol drift.
+- `OPT-G0-K`: add a retry pollution guard that separates happy-path phase tokens from failed retry tokens before PRM export.
+- `OPT-G0-L`: add a memory sanitizer guard for SQLite/markdown observations before any memory writeback.
+- `OPT-G0-M`: add a worktree/spec-kit hygiene guard that blocks Spec Kit init or broad report generation in dirty worktrees unless outputs are isolated.
 
 Exit:
 
@@ -118,6 +122,10 @@ Stop conditions:
 - quarantined or uncurated skills enter prompt/runtime/public context;
 - live 7R-style benchmark is requested while research supply gap is unresolved;
 - static DAG parallelism ignores an AutonomicRouter forced-swarm pre-route.
+- skeleton-first blast-radius edges are consumed after code edits without a fresh AST graph receipt;
+- PRM/evidence export mixes successful phase tokens with polluted retry tokens;
+- memory writeback stores `<private>` or credential-like text;
+- Spec Kit init or broad evidence generation proceeds in a dirty worktree without a transient output root.
 
 ### M1: Context Assembly Contract
 
@@ -157,6 +165,7 @@ Task cards:
 - `OPT-M2-B`: add `lookup_implementation(symbol_name)` with exact line-span output.
 - `OPT-M2-C`: add a harness sensor warning for large direct file reads without prior skeleton read.
 - `OPT-M2-D`: record blast-radius candidates as `depends_on` / `implements` / `relates_to` edges.
+- `OPT-M2-E`: emit AST graph freshness receipts after code edits and block stale blast-radius edges.
 
 Exit:
 
@@ -171,6 +180,7 @@ Stop conditions:
 
 - blocking normal small-file reads;
 - introducing regex-only parsing as the primary implementation.
+- using session-start skeleton edges after PostToolUse code mutations without a freshness receipt.
 
 ### M3: Incremental Hybrid Retrieval
 
@@ -182,6 +192,7 @@ Task cards:
 - `OPT-M3-B`: add Merkle-style file/chunk hash tracking around the current index update path.
 - `OPT-M3-C`: record retrieval receipts: query, source, score components, selected/not-selected reason.
 - `OPT-M3-D`: add semantic dedup metrics for learning and research source refresh.
+- `OPT-M3-E`: sanitize memory/findings writeback for `<private>` tags and credential-like values before SQLite or markdown persistence.
 
 Exit:
 
@@ -197,6 +208,7 @@ Stop conditions:
 
 - full-index rebuild on every refresh;
 - hidden reranking rules without score receipts.
+- memory writeback without sanitizer status in evidence records.
 
 ### M4: Learning Data Flywheel
 
@@ -208,6 +220,7 @@ Task cards:
 - `OPT-M4-B`: export benchmark / SF / delivery receipts into a stable data manifest.
 - `OPT-M4-C`: add PRM-style phase metrics for S/P/X/D/R/A/C cost and failure causes.
 - `OPT-M4-D`: separate data quality gates from model/provider performance gates.
+- `OPT-M4-E`: attach phase token sentinel fields and isolate polluted retry ledgers from happy-path PRM records.
 
 Exit:
 
@@ -222,6 +235,7 @@ Stop conditions:
 
 - training or promotion wording from incomplete evidence;
 - mixing provider-token failure with skill-effect failure.
+- exporting retry-contaminated traces as successful process-reward examples.
 
 ### M5: Harness Route DAG
 
@@ -321,6 +335,7 @@ Task cards:
 - `OPT-M8-B`: keep tracked reports in place; archive only untracked generated evidence.
 - `OPT-M8-C`: add a cleanup dry-run that prints deletions/moves before applying.
 - `OPT-M8-D`: teach SF/benchmark scripts to emit reports into per-run subdirectories when possible.
+- `OPT-M8-E`: block Spec Kit init and broad report generation in dirty worktrees unless outputs are explicitly routed to a transient receipt root.
 
 Exit:
 
@@ -335,6 +350,7 @@ Stop conditions:
 
 - deleting tracked report history;
 - moving evidence that is referenced by a current catalog or ledger.
+- generating broad artifacts into `docs/` while code changes are still uncommitted.
 
 ## 4. Recommended Execution Order
 
@@ -488,6 +504,42 @@ Exit:
 
 - route DAG builder records pre-route mode;
 - forced-swarm nodes are serialized and cannot be scheduled as parallel standard nodes.
+
+### OPT-G0-J: AST Freshness Guard
+
+Goal: prevent skeleton-first CodeIntel from using stale call graph edges after code edits.
+
+Exit:
+
+- changed-symbol tasks carry an AST freshness receipt;
+- stale or missing graph freshness blocks blast-radius edge consumption.
+
+### OPT-G0-K: Retry Pollution Guard
+
+Goal: prevent PRM/evidence records from rewarding failed retry trajectories.
+
+Exit:
+
+- phase token sentinel status is PASS or NOT_APPLICABLE;
+- retry-polluted tokens are isolated from happy-path process records.
+
+### OPT-G0-L: Memory Sanitizer Guard
+
+Goal: prevent private or credential-like text from entering SQLite/markdown memory seams.
+
+Exit:
+
+- memory sanitizer status is PASS or NOT_APPLICABLE;
+- private leak detection blocks memory/evidence export.
+
+### OPT-G0-M: Worktree/SpecKit Hygiene Guard
+
+Goal: prevent dirty worktree state from mixing code changes, Spec Kit init, and broad report sprawl.
+
+Exit:
+
+- Spec Kit init is blocked in dirty worktrees;
+- broad generated-output runs must declare a transient output root.
 
 ### OPT-NEXT-2: Evidence Dataset Contract
 

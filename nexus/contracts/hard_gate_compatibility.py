@@ -30,6 +30,16 @@ class HardGateCompatibility:
     live_benchmark_requested: bool = False
     forced_swarm: bool = False
     parallel_slot_planned: bool = False
+    jit_symbol_drift_detected: bool = False
+    ast_graph_freshness_status: str = "NOT_APPLICABLE"
+    phase_token_sentinel_status: str = "NOT_APPLICABLE"
+    retry_pollution_detected: bool = False
+    retry_pollution_isolated: bool = True
+    memory_sanitizer_status: str = "NOT_APPLICABLE"
+    private_leak_detected: bool = False
+    dirty_worktree: bool = False
+    spec_kit_init_requested: bool = False
+    transient_output_root_status: str = "NOT_APPLICABLE"
     runtime_update_allowed: bool = False
     public_benchmark_allowed: bool = False
     evidence_refs: tuple[str, ...] = ()
@@ -58,6 +68,16 @@ class HardGateCompatibility:
             "live_benchmark_requested": self.live_benchmark_requested,
             "forced_swarm": self.forced_swarm,
             "parallel_slot_planned": self.parallel_slot_planned,
+            "jit_symbol_drift_detected": self.jit_symbol_drift_detected,
+            "ast_graph_freshness_status": _status(self.ast_graph_freshness_status),
+            "phase_token_sentinel_status": _status(self.phase_token_sentinel_status),
+            "retry_pollution_detected": self.retry_pollution_detected,
+            "retry_pollution_isolated": self.retry_pollution_isolated,
+            "memory_sanitizer_status": _status(self.memory_sanitizer_status),
+            "private_leak_detected": self.private_leak_detected,
+            "dirty_worktree": self.dirty_worktree,
+            "spec_kit_init_requested": self.spec_kit_init_requested,
+            "transient_output_root_status": _status(self.transient_output_root_status),
             "runtime_update_allowed": self.runtime_update_allowed,
             "public_benchmark_allowed": self.public_benchmark_allowed,
             "evidence_refs": list(self.evidence_refs),
@@ -93,6 +113,16 @@ def build_hard_gate_compatibility(
     live_benchmark_requested: bool = False,
     forced_swarm: bool = False,
     parallel_slot_planned: bool = False,
+    jit_symbol_drift_detected: bool = False,
+    ast_graph_freshness_status: str = "NOT_APPLICABLE",
+    phase_token_sentinel_status: str = "NOT_APPLICABLE",
+    retry_pollution_detected: bool = False,
+    retry_pollution_isolated: bool = True,
+    memory_sanitizer_status: str = "NOT_APPLICABLE",
+    private_leak_detected: bool = False,
+    dirty_worktree: bool = False,
+    spec_kit_init_requested: bool = False,
+    transient_output_root_status: str = "NOT_APPLICABLE",
     runtime_update_allowed: bool = False,
     public_benchmark_allowed: bool = False,
     evidence_refs: list[str] | tuple[str, ...] = (),
@@ -118,6 +148,16 @@ def build_hard_gate_compatibility(
         live_benchmark_requested=bool(live_benchmark_requested),
         forced_swarm=bool(forced_swarm),
         parallel_slot_planned=bool(parallel_slot_planned),
+        jit_symbol_drift_detected=bool(jit_symbol_drift_detected),
+        ast_graph_freshness_status=ast_graph_freshness_status,
+        phase_token_sentinel_status=phase_token_sentinel_status,
+        retry_pollution_detected=bool(retry_pollution_detected),
+        retry_pollution_isolated=bool(retry_pollution_isolated),
+        memory_sanitizer_status=memory_sanitizer_status,
+        private_leak_detected=bool(private_leak_detected),
+        dirty_worktree=bool(dirty_worktree),
+        spec_kit_init_requested=bool(spec_kit_init_requested),
+        transient_output_root_status=transient_output_root_status,
         runtime_update_allowed=bool(runtime_update_allowed),
         public_benchmark_allowed=bool(public_benchmark_allowed),
         evidence_refs=tuple(str(item) for item in evidence_refs if str(item).strip()),
@@ -159,6 +199,21 @@ def validate_hard_gate_compatibility(payload: Mapping[str, Any]) -> list[str]:
         blockers.append("research_supply_gap_blocks_live_benchmark")
     if bool(payload.get("forced_swarm", False)) and bool(payload.get("parallel_slot_planned", False)):
         blockers.append("forced_swarm_must_be_serialized")
+    if bool(payload.get("jit_symbol_drift_detected", False)):
+        if _status(payload.get("ast_graph_freshness_status")) != "PASS":
+            blockers.append("ast_graph_not_fresh")
+    if _status(payload.get("phase_token_sentinel_status")) not in PASS_LIKE:
+        blockers.append("phase_token_sentinel_not_pass")
+    if bool(payload.get("retry_pollution_detected", False)) and not bool(payload.get("retry_pollution_isolated", False)):
+        blockers.append("retry_pollution_not_isolated")
+    if bool(payload.get("private_leak_detected", False)):
+        blockers.append("private_leak_detected")
+    if _status(payload.get("memory_sanitizer_status")) not in PASS_LIKE:
+        blockers.append("memory_sanitizer_not_pass")
+    if bool(payload.get("dirty_worktree", False)) and bool(payload.get("spec_kit_init_requested", False)):
+        blockers.append("dirty_worktree_blocks_spec_kit")
+    if _status(payload.get("transient_output_root_status")) not in PASS_LIKE:
+        blockers.append("transient_output_root_not_pass")
     return sorted(set(blockers))
 
 

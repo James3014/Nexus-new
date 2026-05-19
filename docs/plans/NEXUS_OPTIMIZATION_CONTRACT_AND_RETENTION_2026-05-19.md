@@ -77,6 +77,10 @@ Before route/context/harness optimization changes:
 - context assembly validates skill source/tier before any skill content can enter prompt context;
 - research supply gaps block live benchmark escalation unless a local mock receipt seam is explicitly marked diagnostic-only;
 - forced-swarm AutonomicRouter outcomes are serialized in DAG execution and never parallelized as standard nodes.
+- skeleton/codeintel optimization proves AST graph freshness after code edits before using blast-radius edges;
+- PRM/evidence exports separate happy-path phase tokens from polluted retry tokens;
+- memory and findings writeback passes a sanitizer for `<private>` and credential-like values;
+- Spec Kit or large generated-output runs are blocked while the worktree is dirty unless outputs are isolated under a transient root.
 
 ## 4. Artifact Naming Rule
 
@@ -131,6 +135,10 @@ The optimization plan must run through this `G0` compatibility layer before deep
 | `G0-G Skill Tier Quarantine Guard` | skill tier/status validation before context assembly | candidate/quarantine/vendor/worktree skills entering public or runtime context |
 | `G0-H Research Supply Gap Guard` | research candidate readiness or diagnostic-only mock receipt | live benchmark escalation while research alternate/default is absent |
 | `G0-I AutonomicRouter-Forward DAG Guard` | pre-route mode and forced-swarm serialization status | static parallel DAG topology that conflicts with runtime swarm escalation |
+| `G0-J AST Freshness Guard` | changed-symbol graph freshness receipt | skeleton-first blast-radius reads from stale call graph |
+| `G0-K Retry Pollution Guard` | phase token sentinel and polluted retry isolation | PRM/evidence records that reward failed retry trajectories |
+| `G0-L Memory Sanitizer Guard` | sanitizer status and private leak scan result | SQLite/markdown memory writeback containing private or credential-like text |
+| `G0-M Worktree/SpecKit Hygiene Guard` | clean worktree or isolated transient output root | Spec Kit init or report-sprawl operations in a dirty worktree |
 
 These gates do not approve runtime updates or public benchmark claims. They only prove that optimization artifacts remain compatible with existing Nexus hard gates.
 
