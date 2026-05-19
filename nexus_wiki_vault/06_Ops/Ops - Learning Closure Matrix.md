@@ -2697,3 +2697,10 @@ version_scope:
 - Failure: `CapabilityPlanner.plan()` currently expects a dict-like route and accessed `route.get`, so the adapter raised `AttributeError`.
 - Lesson: ops adapters should normalize optional JSON object inputs at the boundary instead of relying on deeper planners to accept `None`.
 - Guardrail: pass `{}` for missing route, pillars, codeintel, and phase trace payloads in read-only exporter seams.
+
+## 2026-05-20 - Path default arguments need explicit dot handling
+
+- Trigger: `build_optimization_artifact_index.py` used `argparse` with `type=Path` and `default=""` for `--output-dir`.
+- Failure: `Path("")` became `.`, so the default path resolver wrote `NEXUS_OPTIMIZATION_ARTIFACT_INDEX_2026-05-20.md` into the repo root instead of `docs/reports`.
+- Lesson: CLI adapters that combine optional `Path` args with output-dir helpers must treat both empty string and `.` as unset.
+- Guardrail: normalize optional `Path` CLI arguments with `str(path) not in {"", "."}` before calling shared output resolution.
