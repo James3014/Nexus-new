@@ -157,4 +157,12 @@ After this contract:
 2. inspect keep/archive counts;
 3. run `G0` compatibility checks before any route/context/harness runtime change;
 4. continue SF skill adjustment only after current evidence roots are classified;
-5. defer M1-M7 runtime architecture changes until SF evidence and G0 compatibility are cleaner.
+5. defer broad M1-M7 runtime rewrites until the narrow contracts are green.
+
+## 9. Implementation Status 2026-05-20
+
+- `M2 Skeleton-First CodeIntel`: implemented as a bounded adapter over exact symbol lookup, rationale preservation, generated-file filtering, and last-known-good AST fallback.
+- `M3 Hybrid Retrieval`: implemented as a retrieval receipt plus BM25/dense fusion contract with snapshot and chunk-hash blockers.
+- `M7 SF Replacement`: implemented as a two-step cleanliness gate plus explicit apply plan; runtime apply still requires authorization and post-apply smoke.
+- `M8 Workspace Hygiene`: implemented as retention dry-run classification plus per-run report output routing.
+- Public benchmark and publication claims remain separate gates and are not unlocked by these contracts.

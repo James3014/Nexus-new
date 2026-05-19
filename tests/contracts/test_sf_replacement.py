@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from nexus.contracts.optimization_report import ProviderTokenCleanliness
 from nexus.contracts.sf_replacement import (
+    SF_REPLACEMENT_APPLY_PLAN_SCHEMA,
     SF_REPLACEMENT_CLEANLINESS_GATE_SCHEMA,
     build_sf_replacement_cleanliness_gate,
     build_sf_replacement_cleanliness_manifest,
+    build_sf_replacement_apply_plan,
 )
 
 
@@ -135,3 +137,33 @@ def test_replacement_manifest_counts_decisions() -> None:
     assert manifest["summary"]["hold_count"] == 1
     assert manifest["summary"]["runtime_update_allowed"] is False
     assert manifest["summary"]["public_benchmark_allowed"] is False
+
+
+def test_apply_plan_requires_explicit_runtime_authorization() -> None:
+    manifest = build_sf_replacement_cleanliness_manifest([_clean_row()])
+
+    plan = build_sf_replacement_apply_plan(manifest)
+
+    assert plan["schema"] == SF_REPLACEMENT_APPLY_PLAN_SCHEMA
+    assert plan["status"] == "RETURN"
+    assert plan["apply_allowed"] is False
+    assert plan["runtime_update_allowed"] is False
+    assert plan["items"][0]["action"] == "REVIEW_REPLACEMENT"
+    assert "runtime_apply_not_authorized" in plan["blockers"]
+
+
+def test_apply_plan_can_authorize_clean_replacements_but_not_public_benchmark() -> None:
+    manifest = build_sf_replacement_cleanliness_manifest(
+        [_clean_row(), _clean_row(capability="forecast_pregate", wall_delta_sec=3.2)]
+    )
+
+    plan = build_sf_replacement_apply_plan(manifest, allow_runtime_apply=True)
+
+    assert plan["status"] == "PASS"
+    assert plan["apply_allowed"] is True
+    assert plan["runtime_update_allowed"] is True
+    assert plan["public_benchmark_allowed"] is False
+    assert plan["replacement_count"] == 1
+    assert plan["no_replacement_count"] == 1
+    assert plan["items"][0]["action"] == "APPLY_REPLACEMENT"
+    assert plan["items"][1]["action"] == "KEEP_CURRENT"

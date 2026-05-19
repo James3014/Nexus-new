@@ -8,6 +8,7 @@ from nexus.contracts.optimization_report import ProviderTokenCleanliness
 
 
 SF_REPLACEMENT_CLEANLINESS_GATE_SCHEMA = "nexus_sf_replacement_cleanliness_gate.v1"
+SF_REPLACEMENT_APPLY_PLAN_SCHEMA = "nexus_sf_replacement_apply_plan.v1"
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,41 @@ def build_sf_replacement_cleanliness_manifest(rows: list[Mapping[str, Any]]) -> 
     }
 
 
+def build_sf_replacement_apply_plan(
+    cleanliness_manifest: Mapping[str, Any],
+    *,
+    allow_runtime_apply: bool = False,
+) -> dict[str, Any]:
+    decisions = list(cleanliness_manifest.get("decisions", []) or [])
+    items = [_apply_item(item, allow_runtime_apply=allow_runtime_apply) for item in decisions if isinstance(item, Mapping)]
+    blockers = sorted(
+        {
+            blocker
+            for item in items
+            for blocker in item["blockers"]
+        }
+    )
+    if str(cleanliness_manifest.get("status") or "RETURN") != "PASS":
+        blockers.append("cleanliness_manifest_not_pass")
+    return {
+        "schema": SF_REPLACEMENT_APPLY_PLAN_SCHEMA,
+        "status": "PASS" if not blockers else "RETURN",
+        "allow_runtime_apply": bool(allow_runtime_apply),
+        "apply_allowed": bool(allow_runtime_apply) and not blockers,
+        "replacement_count": sum(1 for item in items if item["action"] == "APPLY_REPLACEMENT"),
+        "hold_count": sum(1 for item in items if item["action"] == "HOLD"),
+        "no_replacement_count": sum(1 for item in items if item["action"] == "KEEP_CURRENT"),
+        "items": items,
+        "blockers": sorted(set(blockers)),
+        "runtime_update_allowed": bool(allow_runtime_apply) and not blockers,
+        "public_benchmark_allowed": False,
+        "claim_boundary": [
+            "SF apply plans are runtime-apply review artifacts only.",
+            "They do not unlock public benchmark claims or bypass post-apply smoke.",
+        ],
+    }
+
+
 def _replacement_blockers(
     row: Mapping[str, Any],
     *,
@@ -125,6 +161,29 @@ def _replacement_blockers(
     if _float_or_none(row.get("wall_delta_sec")) is None:
         blockers.append("missing_wall_delta_sec")
     return sorted(set(blockers))
+
+
+def _apply_item(decision: Mapping[str, Any], *, allow_runtime_apply: bool) -> dict[str, Any]:
+    blockers = [str(item) for item in decision.get("blockers", []) or []]
+    action = "HOLD"
+    if blockers:
+        action = "HOLD"
+    elif decision.get("decision") == "REPLACE":
+        action = "APPLY_REPLACEMENT" if allow_runtime_apply else "REVIEW_REPLACEMENT"
+        if not allow_runtime_apply:
+            blockers.append("runtime_apply_not_authorized")
+    elif decision.get("decision") == "NO_REPLACEMENT":
+        action = "KEEP_CURRENT"
+    else:
+        blockers.append("decision_not_apply_ready")
+    return {
+        "capability": str(decision.get("capability") or ""),
+        "current_skill": str(decision.get("current_skill") or ""),
+        "challenger_skill": str(decision.get("challenger_skill") or ""),
+        "decision": str(decision.get("decision") or ""),
+        "action": action,
+        "blockers": sorted(set(blockers)),
+    }
 
 
 def _read_model_blockers(raw: Any) -> list[str]:
