@@ -701,3 +701,11 @@ Lesson:
 - Public benchmark regression tests live under `tests/benchmark/`, not `tests/bench/`.
 - Treat a missing test path as command drift, not as evidence about benchmark readiness.
 - Prevention rule: locate benchmark test modules with `rg` before composing aggregate regression commands.
+
+### Failure Lesson: Public Ready Seal Ordering
+
+Lesson:
+
+- `PUBLIC_READY` evidence records validate seal and hash status during record construction, before manifest-level sealing can run.
+- Treat `public_ready_requires_evidence_hash` or `public_ready_requires_evidence_seal` from benchmark JSONL export as evidence-pipeline ordering drift, not as benchmark delivery failure.
+- Prevention rule: pre-seal benchmark rows before creating `EvidenceDatasetRecord` whenever the export claim class is `PUBLIC_READY`.

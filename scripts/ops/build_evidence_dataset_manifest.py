@@ -49,9 +49,14 @@ def build_manifest_from_benchmark_jsonl(
     read_model_output_path: Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    rows = _load_jsonl(input_path)
     records = [
-        evidence_record_from_benchmark_row(row, source_path=str(input_path), claim_class=claim_class)
-        for row in _load_jsonl(input_path)
+        evidence_record_from_benchmark_row(
+            _prepare_benchmark_row_for_claim(row, claim_class=claim_class, index=index),
+            source_path=str(input_path),
+            claim_class=claim_class,
+        )
+        for index, row in enumerate(rows)
     ]
     manifest = _seal_manifest_rows(
         build_evidence_dataset_manifest(records, source_path=str(input_path), claim_class=claim_class)
@@ -107,6 +112,28 @@ def build_manifest_from_sf_smoke_json(
     )
 
 
+def _prepare_benchmark_row_for_claim(
+    row: dict[str, Any],
+    *,
+    claim_class: ClaimClass | str,
+    index: int,
+) -> dict[str, Any]:
+    prepared = dict(row)
+    if _claim_class(claim_class) != ClaimClass.PUBLIC_READY:
+        return prepared
+    if str(prepared.get("evidence_seal_status") or "").upper() == "PASS" and str(
+        prepared.get("evidence_hash_status") or ""
+    ).upper() == "PASS":
+        return prepared
+    evidence_id = str(prepared.get("task_id") or prepared.get("benchmark_id") or f"benchmark-row-{index}")
+    seal = seal_evidence(prepared, evidence_id=evidence_id)
+    prepared["evidence_seal_status"] = seal["evidence_seal_status"]
+    prepared["evidence_hash_status"] = seal["evidence_hash_status"]
+    prepared["evidence_sha256"] = seal["sha256"]
+    prepared["evidence_seal_ref"] = f"sha256:{seal['sha256']}"
+    return prepared
+
+
 def _summary(
     manifest: dict[str, Any],
     *,
@@ -146,6 +173,12 @@ def _seal_manifest_rows(manifest: dict[str, Any]) -> dict[str, Any]:
         1 for row in sealed_rows if str(row.get("evidence_seal_status") or "").upper() == "PASS"
     )
     return manifest
+
+
+def _claim_class(value: ClaimClass | str) -> ClaimClass:
+    if isinstance(value, ClaimClass):
+        return value
+    return ClaimClass(str(value))
 
 
 def _optional_read_model(

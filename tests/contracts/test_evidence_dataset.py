@@ -90,6 +90,33 @@ def test_benchmark_row_keeps_token_cleanliness_separate_from_outcome() -> None:
     assert payload["gate_status"]["provider_token"] == ProviderTokenCleanliness.MISSING.value
 
 
+def test_benchmark_row_uses_capability_receipts_as_receipt_ref() -> None:
+    record = evidence_record_from_benchmark_row(
+        {
+            "task_id": "flash-001",
+            "capability": "claim_gate",
+            "status": "SUCCESS",
+            "trust_mismatch": False,
+            "modelcalls": 0,
+            "evidence_record_file": "artifacts/evidence.json",
+            "capability_receipts": [
+                {
+                    "name": "claim_gate",
+                    "selected": True,
+                    "invoked": True,
+                    "evidence_present": True,
+                    "gate_passed": True,
+                    "outcome_contributed": True,
+                }
+            ],
+        },
+        source_path="docs/reports/flash.json",
+        claim_class=ClaimClass.INTERNAL_DIAGNOSTIC,
+    )
+
+    assert record.to_dict()["receipt_refs"] == ["capability_receipts:flash-001"]
+
+
 def test_manifest_counts_and_runtime_update_gate() -> None:
     record = evidence_record_from_sf_smoke_case(
         {

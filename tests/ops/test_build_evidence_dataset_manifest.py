@@ -82,6 +82,45 @@ def test_build_manifest_from_benchmark_jsonl_can_write_read_model(tmp_path):
     assert {gate["name"]: gate["status"] for gate in payload["gates"]}["claim"] == "PASS"
 
 
+def test_build_manifest_from_benchmark_jsonl_can_write_public_ready_read_model(tmp_path):
+    source = tmp_path / "benchmark.jsonl"
+    output = tmp_path / "evidence_manifest.json"
+    read_model = tmp_path / "read_model.json"
+    _write_jsonl(
+        source,
+        [
+            {
+                "task_id": "flash-public-001",
+                "capability": "repair_loop",
+                "skill_id": "tdd",
+                "status": "SUCCESS",
+                "modelcalls": 1,
+                "provider_token_measured": True,
+                "totaltokens": 1234,
+                "evidence_bundle_file": "evidence.json",
+                "receipt_file": "receipt.json",
+            }
+        ],
+    )
+
+    summary = build_manifest_from_benchmark_jsonl(
+        input_path=source,
+        output_path=output,
+        claim_class="PUBLIC_READY",
+        read_model_output_path=read_model,
+    )
+    manifest = json.loads(output.read_text(encoding="utf-8"))
+    read_payload = json.loads(read_model.read_text(encoding="utf-8"))
+
+    assert summary["status"] == "PASS"
+    assert summary["read_model"]["status"] == "PASS"
+    assert manifest["claim_class"] == "PUBLIC_READY"
+    assert manifest["rows"][0]["evidence_seal_status"] == "PASS"
+    assert manifest["rows"][0]["evidence_hash_status"] == "PASS"
+    assert read_payload["claim_class"] == "PUBLIC_READY"
+    assert read_payload["status"] == "PASS"
+
+
 def test_build_manifest_from_benchmark_jsonl_dry_run_does_not_write(tmp_path):
     source = tmp_path / "benchmark.jsonl"
     output = tmp_path / "evidence_manifest.json"

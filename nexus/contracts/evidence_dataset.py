@@ -152,6 +152,8 @@ def evidence_record_from_benchmark_row(
     provider_cleanliness = _provider_token_cleanliness(row)
     evidence_refs = _refs(row, ("evidence_record_file", "evidence_bundle_file", "report_file"), fallback=source_path)
     receipt_refs = _refs(row, ("receipt_file", "runtime_receipt_file", "route_receipt_file"))
+    if not receipt_refs and (row.get("capability_receipts") or row.get("capability_receipts_json")):
+        receipt_refs.append(f"capability_receipts:{task_id}")
     blockers = [str(item) for item in row.get("data_contract_violation_reasons", []) or []]
     blockers.extend(str(item) for item in row.get("blockers", []) or [])
     evidence_seal_status = str(row.get("evidence_seal_status") or "NOT_APPLICABLE").upper()
