@@ -717,3 +717,11 @@ Lesson:
 - Public benchmark preflight depends on explicit model and hidden-verifier environment variables, even when the CLI flags are otherwise unchanged.
 - Treat `nexus_model_env_missing`, `direct_model_env_missing`, or `sentinel_hidden_verifier_disabled` as command environment drift, not route or taskset readiness failure.
 - Prevention rule: keep public benchmark smoke, preflight, and full-run commands in one reusable invocation template that always exports `NEXUS_VALUE_HIDDEN_VERIFIER`, `NEXUS_GEMINI_MODEL_NAME`, and `NEXUS_DIRECT_GEMINI_MODEL`.
+
+### Failure Lesson: Focused Test Node Drift
+
+Lesson:
+
+- Long-lived test modules can rename focused test nodes while preserving the same assertion block.
+- Treat `not found: ...::test_name` as focused command drift, not as evidence that the behavior lacks coverage.
+- Prevention rule: locate the current focused node with `rg` before adding it to a multi-target regression command.

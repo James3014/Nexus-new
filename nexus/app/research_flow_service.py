@@ -45,6 +45,7 @@ from nexus.engine.learning_policy_loader import (
     merge_runtime_learning_policy,
     route_cost_controls_from_env,
 )
+from nexus.learning.outcome_memory import EpisodeOutcomeRecord, OutcomeMemoryManager
 from nexus.research.architecture_scout import DistantScoutPlanner
 from nexus.research.doc_scout_adapter import DocScoutAdapter, build_external_scout_providers_from_env
 from nexus.research.formal_report_service import FormalReportService
@@ -3837,6 +3838,27 @@ def run_auto_flow(
             "path": str(training_export_path),
             **training_export["summary"],
         }
+    try:
+        outcome_memory = OutcomeMemoryManager.save_episode_and_tune_sync(
+            EpisodeOutcomeRecord.from_task(
+                task_id=task_id or receipt_slug,
+                task_type=task_type,
+                task_desc=task_desc,
+                solved=learning_experience.outcome == "verified_success",
+                wall_duration_sec=float(result.get("elapsed_sec", 0.0) or 0.0),
+                total_tokens_used=int(result_report.get("total_tokens", 0) or 0),
+                trust_mismatch=bool(nexus_usage_trace.get("trust_mismatch", False)),
+                receipts=nexus_usage_trace["capability_receipts"],
+            ),
+            project_root=repo_root,
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        outcome_memory = {
+            "schema_version": "nexus_outcome_memory_write.v1",
+            "status": "RETURN",
+            "reason": str(exc),
+        }
+    nexus_usage_trace["learning_projection"]["outcome_memory"] = outcome_memory
 
     payload = {
         "schema_version": "1.0",

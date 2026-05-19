@@ -9,6 +9,7 @@ from typing import Any
 from nexus.contracts.learning_experience import load_promoted_learning_policy
 
 DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
+DEFAULT_DYNAMIC_LEARNING_POLICY_PATH = Path(".nexus") / "memory" / "dynamic_learning_policy.json"
 DEFAULT_ROUTE_COST_POLICY_PATH = Path(".nexus") / "policy" / "promoted_route_cost_policy.json"
 DEFAULT_S2T_POLICY_DRAFT_PATH = Path(".nexus") / "policy" / "promoted_s2t_policy_draft.json"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -78,11 +79,57 @@ def load_learning_policy_budget(path: Path) -> dict[str, Any]:
     }
 
 
+def load_dynamic_learning_policy_budget(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    if policy.get("schema_version") != "nexus_dynamic_learning_policy.v1":
+        return {}
+    if policy.get("status") != "PASS":
+        return {}
+    promoted = [str(item) for item in policy.get("promoted_capabilities", []) or [] if str(item).strip()]
+    penalized = [str(item) for item in policy.get("penalized_capabilities", []) or [] if str(item).strip()]
+    if not promoted and not penalized:
+        return {}
+    return {
+        "learning_policy": {
+            "source_experiences": [str(item) for item in policy.get("source_experiences", []) or []],
+            "promoted_capabilities": promoted,
+            "penalized_capabilities": penalized,
+            "enforce_penalties": bool(policy.get("enforce_penalties", False)),
+            "source": str(path),
+            "source_schema": "nexus_dynamic_learning_policy.v1",
+        }
+    }
+
+
 def merge_runtime_learning_policy(project_root: Path, budget: dict[str, Any] | None = None) -> dict[str, Any]:
     merged = dict(budget or {})
     if isinstance(merged.get("learning_policy"), dict):
         return merge_runtime_s2t_policy_draft(project_root, merge_runtime_route_cost_policy(project_root, merged))
     runtime_budget = load_learning_policy_budget(project_root / DEFAULT_PROMOTED_POLICY_PATH)
+    dynamic_budget = load_dynamic_learning_policy_budget(project_root / DEFAULT_DYNAMIC_LEARNING_POLICY_PATH)
+    if runtime_budget and dynamic_budget:
+        runtime_policy = runtime_budget["learning_policy"]
+        dynamic_policy = dynamic_budget["learning_policy"]
+        runtime_budget["learning_policy"] = {
+            **runtime_policy,
+            "source_experiences": sorted(
+                set((runtime_policy.get("source_experiences", []) or []) + (dynamic_policy.get("source_experiences", []) or []))
+            ),
+            "promoted_capabilities": sorted(
+                set((runtime_policy.get("promoted_capabilities", []) or []) + (dynamic_policy.get("promoted_capabilities", []) or []))
+            ),
+            "penalized_capabilities": sorted(
+                set((runtime_policy.get("penalized_capabilities", []) or []) + (dynamic_policy.get("penalized_capabilities", []) or []))
+            ),
+            "dynamic_policy_source": dynamic_policy.get("source"),
+        }
+    elif dynamic_budget:
+        runtime_budget = dynamic_budget
     if not runtime_budget:
         return merge_runtime_s2t_policy_draft(project_root, merge_runtime_route_cost_policy(project_root, merged))
     merged.update(runtime_budget)

@@ -3130,6 +3130,11 @@ def test_run_auto_flow_populates_autoreason_from_candidate_summaries(tmp_path: P
     assert "promoted_policy_path" in projection
     promoted_policy = tmp_path / projection["promoted_policy_path"]
     assert promoted_policy.exists()
+    assert projection["outcome_memory"]["status"] == "PASS"
+    outcome_history = tmp_path / projection["outcome_memory"]["storage_path"]
+    outcome_policy = tmp_path / projection["outcome_memory"]["policy_path"]
+    assert outcome_history.exists()
+    assert outcome_policy.exists()
 
 
 def test_auto_flow_writes_semantic_research_runtime_receipts(tmp_path: Path, monkeypatch):
