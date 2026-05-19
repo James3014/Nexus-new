@@ -2655,3 +2655,17 @@ version_scope:
 - Failure: enum coercion raised the raw Python enum error before the contract could return the stable `invalid_claim_class` blocker.
 - Lesson: dataclass contract entrypoints should preserve their own blocker vocabulary even when normalization fails early.
 - Guardrail: wrap enum normalization failures at the contract boundary so tests and downstream gates see stable fail-closed reason codes.
+
+## 2026-05-20 - retention path normalization must preserve hidden roots
+
+- Trigger: retention dry-run tests classified `.nexus/receipts/run-001.json` as ordinary kept evidence instead of a transient receipt root.
+- Failure: `_normalize_path` used character-level `lstrip("./")`, which removed the leading dot and changed `.nexus` into `nexus`.
+- Lesson: retention and cleanup tools must normalize paths structurally, not by stripping arbitrary path characters.
+- Guardrail: only remove an explicit `./` prefix and keep hidden-root tests for `.nexus/` and `/private/tmp/`.
+
+## 2026-05-20 - retention CLI should resolve relative roots before computing repo-relative paths
+
+- Trigger: the retention dry-run CLI scanned the default relative `docs/reports` root.
+- Failure: `Path.relative_to(PROJECT_ROOT)` failed because iterated paths were relative while `PROJECT_ROOT` was absolute.
+- Lesson: CLI filesystem adapters should resolve collection roots at the boundary and pass repo-relative strings into contract code.
+- Guardrail: convert relative roots to `PROJECT_ROOT / root` before iterating, and keep pure contract classifiers independent of cwd.
