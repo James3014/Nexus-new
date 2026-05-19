@@ -52,6 +52,45 @@ class ProjectMemoryManager:
                 (topic, content, insight_type)
             )
 
+    def add_insight_guarded(
+        self,
+        topic: str,
+        content: str,
+        insight_type: str = "RCA",
+        *,
+        concurrent_writer_count: int = 1,
+    ):
+        """Write an insight only after the SQLite write guard passes."""
+
+        receipt = self.build_write_guard_receipt(concurrent_writer_count=concurrent_writer_count)
+        if receipt.get("status") != "PASS":
+            return {
+                "schema": "nexus.memory_write_result.v1",
+                "status": "RETURN",
+                "written": False,
+                "topic": topic,
+                "write_guard_receipt": receipt,
+                "blockers": list(receipt.get("blockers", []) or ["sqlite_write_guard_not_pass"]),
+                "claim_boundary": [
+                    "Guarded memory writes only confirm local SQLite write safety.",
+                    "They do not imply retrieval quality, learning closure success, or public readiness.",
+                ],
+            }
+
+        self.add_insight(topic, content, insight_type)
+        return {
+            "schema": "nexus.memory_write_result.v1",
+            "status": "PASS",
+            "written": True,
+            "topic": topic,
+            "write_guard_receipt": receipt,
+            "blockers": [],
+            "claim_boundary": [
+                "Guarded memory writes only confirm local SQLite write safety.",
+                "They do not imply retrieval quality, learning closure success, or public readiness.",
+            ],
+        }
+
     def search(self, query: str):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
