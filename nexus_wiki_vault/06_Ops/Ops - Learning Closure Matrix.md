@@ -2669,3 +2669,10 @@ version_scope:
 - Failure: `Path.relative_to(PROJECT_ROOT)` failed because iterated paths were relative while `PROJECT_ROOT` was absolute.
 - Lesson: CLI filesystem adapters should resolve collection roots at the boundary and pass repo-relative strings into contract code.
 - Guardrail: convert relative roots to `PROJECT_ROOT / root` before iterating, and keep pure contract classifiers independent of cwd.
+
+## 2026-05-20 - context budget tests must make capacity claims numerically true
+
+- Trigger: the first context-budget priority test expected a 600-token research source to fit after 220 required tokens under a 700-token budget.
+- Failure: the contract correctly skipped the too-large high-priority source and kept the next source that fit, while the test expected the impossible selection.
+- Lesson: budget-contract tests should use arithmetic that directly supports the behavior being asserted.
+- Guardrail: when asserting priority ordering, set the total budget high enough for the preferred source and low enough to drop only the intended lower-priority source.
