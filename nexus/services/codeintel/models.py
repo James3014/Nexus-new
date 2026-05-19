@@ -47,3 +47,31 @@ class CodeContextResult:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class CodeSkeletonSymbol:
+    symbol: str
+    file_path: str
+    start_line: int
+    end_line: int
+    kind: str
+    signature: str
+    docstring_present: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class CodeSkeletonLookupResult:
+    symbol: str
+    found: bool
+    matches: list[CodeSkeletonSymbol] = field(default_factory=list)
+    reason: str = ""
+    schema_version: str = CODEINTEL_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["matches"] = [match.to_dict() for match in self.matches]
+        return payload
