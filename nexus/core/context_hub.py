@@ -365,6 +365,69 @@ class ContextHub:
             ],
         }
 
+    def assemble_context_with_runtime_contract(
+        self,
+        task_id: str,
+        layers: List[int],
+        *,
+        budget: int = 4000,
+        bayesian_params: Optional[Dict[str, Any]] = None,
+        state_view: StateView | NexusState | None = None,
+        extra_sources: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Assemble runtime context only after the adapter receipt passes.
+
+        This is the first runtime seam for the ContextHub refactor: callers can
+        consume a typed payload without letting budget/contract failures fall
+        through into ordinary context assembly.
+        """
+
+        receipt = self.build_runtime_context_adapter_receipt(
+            task_id=task_id,
+            token_budget=budget,
+            state_view=state_view,
+            extra_sources=extra_sources,
+        )
+        blockers = list(receipt.get("blockers", []) or [])
+        if receipt.get("status") != "PASS":
+            return {
+                "schema": "nexus.runtime_context_payload.v1",
+                "status": "RETURN",
+                "task_id": task_id,
+                "context": "",
+                "adapter_receipt": receipt,
+                "runtime_dispatch_changed": False,
+                "public_benchmark_allowed": False,
+                "runtime_update_allowed": False,
+                "blockers": blockers or ["runtime_context_adapter_not_pass"],
+                "claim_boundary": [
+                    "Runtime context payloads may assemble context after adapter PASS only.",
+                    "They do not change route dispatch, runtime policy, or public benchmark readiness.",
+                ],
+            }
+
+        context = self.assemble_context(
+            task_id=task_id,
+            layers=layers,
+            budget=budget,
+            bayesian_params=bayesian_params,
+        )
+        return {
+            "schema": "nexus.runtime_context_payload.v1",
+            "status": "PASS",
+            "task_id": task_id,
+            "context": context,
+            "adapter_receipt": receipt,
+            "runtime_dispatch_changed": False,
+            "public_benchmark_allowed": False,
+            "runtime_update_allowed": False,
+            "blockers": [],
+            "claim_boundary": [
+                "Runtime context payloads may assemble context after adapter PASS only.",
+                "They do not change route dispatch, runtime policy, or public benchmark readiness.",
+            ],
+        }
+
     def _context_budget_sources(
         self,
         *,

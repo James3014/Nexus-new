@@ -124,3 +124,48 @@ def test_context_hub_runtime_context_adapter_receipt_is_read_only(tmp_path):
     assert receipt["runtime_update_allowed"] is False
     assert receipt["public_benchmark_allowed"] is False
     assert receipt["contract"]["task_id"] == "ctx-runtime"
+
+
+def test_context_hub_runtime_context_payload_assembles_only_after_receipt_pass(tmp_path, monkeypatch):
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+    called = {"assemble": False}
+
+    def fake_assemble_context(*, task_id, layers, budget=4000, bayesian_params=None):
+        called["assemble"] = True
+        assert task_id == "ctx-runtime"
+        assert layers == [0, 1]
+        assert budget == 120
+        return "assembled context"
+
+    monkeypatch.setattr(hub, "assemble_context", fake_assemble_context)
+
+    payload = hub.assemble_context_with_runtime_contract("ctx-runtime", [0, 1], budget=120)
+
+    assert called["assemble"] is True
+    assert payload["schema"] == "nexus.runtime_context_payload.v1"
+    assert payload["status"] == "PASS"
+    assert payload["context"] == "assembled context"
+    assert payload["adapter_receipt"]["status"] == "PASS"
+    assert payload["runtime_dispatch_changed"] is False
+    assert payload["runtime_update_allowed"] is False
+    assert payload["public_benchmark_allowed"] is False
+
+
+def test_context_hub_runtime_context_payload_returns_before_assembly_when_receipt_fails(tmp_path, monkeypatch):
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("assemble_context should not run after receipt RETURN")
+
+    monkeypatch.setattr(hub, "assemble_context", fail_if_called)
+
+    payload = hub.assemble_context_with_runtime_contract("ctx-runtime", [0, 1], budget=1)
+
+    assert payload["schema"] == "nexus.runtime_context_payload.v1"
+    assert payload["status"] == "RETURN"
+    assert payload["context"] == ""
+    assert payload["adapter_receipt"]["status"] == "RETURN"
+    assert "receipt_not_pass" in payload["blockers"]
+    assert payload["runtime_dispatch_changed"] is False
+    assert payload["runtime_update_allowed"] is False
+    assert payload["public_benchmark_allowed"] is False
